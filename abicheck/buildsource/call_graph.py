@@ -36,9 +36,12 @@ This module is split so the hard part stays testable:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
+import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -467,6 +470,22 @@ def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str
     return [*flags, "--", cu.source]
 
 
+def _call_graph_jobs(n_units: int) -> int:
+    """Bounded worker count for the best-effort L5 clang call-graph pass."""
+    if n_units <= 1:
+        return max(0, n_units)
+    cpu = os.cpu_count() or 1
+    cap = max(8, cpu * 2)
+    raw = os.environ.get("ABICHECK_CALL_GRAPH_JOBS", "").strip()
+    if raw:
+        try:
+            requested = int(raw)
+        except ValueError:
+            return 1
+        return max(1, min(n_units, requested, cap))
+    return max(1, min(n_units, cpu, 8))
+
+
 # ── live clang extraction (integration only) ────────────────────────────────
 
 
@@ -482,6 +501,8 @@ class ClangCallGraphExtractor:
 
     clang_bin: str = "clang++"
     diagnostics: list[str] = field(default_factory=list)
+    last_jobs: int = 0
+    last_elapsed_s: float = 0.0
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -528,15 +549,38 @@ class ClangCallGraphExtractor:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
 
+    def _extract_from_compile_unit(
+        self, cu: BuildEvidenceCompileUnit
+    ) -> list[CallEdge]:
+        argv = _safe_clang_args_from_compile_unit(cu)
+        return self._extract_from_safe_args(argv, cwd=cu.directory or None)
+
     def extract_from_build(self, build: BuildEvidence) -> list[CallEdge]:
         """Extract call edges across every compile unit in *build* (best effort)."""
+        start = time.monotonic()
+        units = [cu for cu in build.compile_units if cu.source]
+        self.last_jobs = _call_graph_jobs(len(units))
+        if not units:
+            self.last_elapsed_s = 0.0
+            return []
+        if not self.available():
+            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
+            self.last_elapsed_s = time.monotonic() - start
+            return []
+
+        try:
+            if self.last_jobs > 1 and len(units) > 1:
+                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
+                    batches = list(pool.map(self._extract_from_compile_unit, units))
+            else:
+                batches = [self._extract_from_compile_unit(cu) for cu in units]
+        finally:
+            self.last_elapsed_s = time.monotonic() - start
+
         all_edges: list[CallEdge] = []
         seen: set[tuple[str, str, str]] = set()
-        for cu in build.compile_units:
-            if not cu.source:
-                continue
-            argv = _safe_clang_args_from_compile_unit(cu)
-            for e in self._extract_from_safe_args(argv, cwd=cu.directory or None):
+        for edges in batches:
+            for e in edges:
                 key = (e.caller, e.callee, e.call_kind)
                 if key not in seen:
                     seen.add(key)

@@ -1527,13 +1527,18 @@ def _fold_call_graph(
     added = augment_graph_with_calls(graph, edges, project_files or None)
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
     rows.append(
         ExtractorRecord(
             name="call_graph:clang",
             status="ok" if added else "partial",
             detail=(
                 f"{added} call edges from {len(target.compile_units)} compile "
-                f"unit(s){scoped_note}"
+                f"unit(s){scoped_note}{timing}"
             ),
         )
     )
