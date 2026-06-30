@@ -698,9 +698,10 @@ def _audit_exit_code(
     "--allow-build-query",
     is_flag=True,
     default=False,
-    hidden=True,  # deprecated no-op: build query runs automatically with --sources
-    help="Deprecated and ignored. With --sources, abicheck infers and runs the "
-    "build-system query (cmake/make/bazel) itself; no flag is needed.",
+    help="Allow abicheck to execute build-system queries for source evidence. "
+    "This can run project-controlled build files (for example CMakeLists.txt), "
+    "so leave it off for untrusted source trees and prefer --build-info or "
+    "--compile-db.",
 )
 @click.option(
     "--format",

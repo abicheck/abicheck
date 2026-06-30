@@ -860,10 +860,10 @@ def build_source_dump_options(func: F) -> F:
         "allow_build_query",
         is_flag=True,
         default=False,
-        hidden=True,  # deprecated no-op (ADR-032 amended): build query is now automatic
-        help="Deprecated and ignored. Build-system queries now run automatically "
-        "when --sources is given (abicheck infers and runs cmake/make/bazel "
-        "itself); no flag is needed. Kept as a no-op for backward compatibility.",
+        help="Allow abicheck to execute build-system queries for source evidence. "
+        "This can run project-controlled build files (for example CMakeLists.txt), "
+        "so leave it off for untrusted source trees and prefer --build-info or "
+        "--compile-db.",
     )(func)
     func = click.option(
         "--config",
@@ -890,12 +890,10 @@ def build_source_dump_options(func: F) -> F:
         "build_query",
         default=None,
         metavar="CMD",
-        help="Override the inferred build-system query command that emits a "
-        "compile DB without a full build (e.g. 'cmake -S . -B build "
+        help="Override the build-system query command that emits a compile DB "
+        "without a full build (e.g. 'cmake -S . -B build "
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). CLI equivalent of `.abicheck.yml` "
-        "build.query — runs automatically as trusted operator input. Usually "
-        "unnecessary: with just --sources, abicheck infers and runs the query "
-        "itself.",
+        "build.query; requires --allow-build-query to execute.",
     )(func)
     func = click.option(
         "--sources",

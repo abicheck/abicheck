@@ -396,7 +396,9 @@ def test_no_inferred_query_after_trusted_query_fails(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
     merged, ext = BuildEvidence(), []
-    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    out = _resolve_compile_db(
+        None, tmp_path, cfg, True, merged, ext, allow_build_query=True
+    )
     assert out is None
     assert called["infer"] is False  # explicit failure not masked by inferred query
 
@@ -413,7 +415,9 @@ def test_no_db_fallback_after_trusted_query_fails(tmp_path: Path, monkeypatch):
     cfg = BuildConfig(query="my-configure --custom-flags")
     monkeypatch.setattr(_inline, "_run_build_query", lambda *a, **k: None)  # fails
     merged, ext = BuildEvidence(), []
-    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    out = _resolve_compile_db(
+        None, tmp_path, cfg, True, merged, ext, allow_build_query=True
+    )
     assert out is None
 
 
@@ -452,11 +456,11 @@ def test_trusted_query_without_configured_db_autodiscovers(tmp_path: Path, monke
     assert ext[-1].status == "ok"
 
 
-def test_inferred_query_runs_when_no_trusted_query_configured(
+def test_inferred_query_requires_allow_build_query(
     tmp_path: Path, monkeypatch
 ):
-    # Contrast: with no build.query configured, the zero-config inferred query
-    # still runs (the fallback is only skipped after a trusted query *attempt*).
+    # Plain --sources must not execute inferred build-system queries. CMake/Bazel
+    # evaluate project-controlled build files, so they require explicit opt-in.
     from abicheck.buildsource import build_query as _bqmod
     from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
 
@@ -471,6 +475,11 @@ def test_inferred_query_runs_when_no_trusted_query_configured(
     monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
     merged, ext = BuildEvidence(), []
     _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    assert called["infer"] is False
+
+    _resolve_compile_db(
+        None, tmp_path, cfg, True, merged, ext, allow_build_query=True
+    )
     assert called["infer"] is True
 
 
@@ -512,7 +521,9 @@ def test_no_inferred_query_after_build_info_miss(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
     merged, ext = BuildEvidence(), []
-    out = _resolve_compile_db(empty_bi, tmp_path, BuildConfig(), True, merged, ext)
+    out = _resolve_compile_db(
+        empty_bi, tmp_path, BuildConfig(), True, merged, ext, allow_build_query=True
+    )
     assert out is None
     assert called["infer"] is False
 
@@ -541,7 +552,14 @@ def test_no_inferred_query_after_explicit_compile_db_miss(tmp_path: Path, monkey
     cfg = BuildConfig(compile_db="build/compile_commands.json")  # matches nothing
     merged, ext = BuildEvidence(), []
     out = _resolve_compile_db(
-        None, tmp_path, cfg, True, merged, ext, compile_db_explicit=True
+        None,
+        tmp_path,
+        cfg,
+        True,
+        merged,
+        ext,
+        compile_db_explicit=True,
+        allow_build_query=True,
     )
     assert out is None  # explicit miss surfaces
     assert called["infer"] is False  # not masked by inferred query
@@ -570,6 +588,11 @@ def test_inferred_query_runs_after_untrusted_compile_db_miss(
     merged, ext = BuildEvidence(), []
     # build_config_trusted_for_query=False → auto-discovered config, not explicit.
     _resolve_compile_db(None, tmp_path, cfg, False, merged, ext)
+    assert called["infer"] is False
+
+    _resolve_compile_db(
+        None, tmp_path, cfg, False, merged, ext, allow_build_query=True
+    )
     assert called["infer"] is True
 
 

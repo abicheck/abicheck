@@ -543,12 +543,10 @@ def collect_inline_pack(
     ``build_config_trusted_for_query`` must be true before a tree-local
     ``build.query`` command can run. CLI auto-discovered ``.abicheck.yml`` files
     live inside the supplied source tree and may be attacker-controlled, so they
-    are not trusted for subprocess execution. (The abicheck-authored *inferred*
-    cmake/bazel query is separate — it runs whenever ``--sources`` needs L3, since
-    pointing abicheck at a source tree is itself the request to analyse it; see
-    :func:`_resolve_compile_db`.) ``allow_build_query`` is accepted only for
-    backward compatibility and is ignored — ``--allow-build-query`` is a
-    deprecated no-op.
+    are not trusted for subprocess execution. ``allow_build_query`` must also be
+    true before any build-system query runs, including abicheck's inferred
+    cmake/bazel query, because even fixed argv commands evaluate
+    project-controlled build files.
 
     ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
     ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
@@ -584,6 +582,7 @@ def collect_inline_pack(
             extractors,
             cleanup=query_build_cleanups,
             compile_db_explicit=compile_db_explicit,
+            allow_build_query=allow_build_query,
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -707,17 +706,17 @@ def _resolve_compile_db(
     extractors: list[ExtractorRecord],
     cleanup: list[Callable[[], None]] | None = None,
     compile_db_explicit: bool = False,
+    allow_build_query: bool = False,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
-    Order: an explicit ``--build-info`` path (file or dir) → a trusted
-    ``--config`` ``build.query`` command result → ``build.compile_db`` in the
-    source tree → an auto-discovered ``compile_commands.json`` → the **inferred,
-    abicheck-authored** build-system query (cmake/make/bazel). No
-    ``--allow-build-query`` flag is required: providing ``--sources`` is the
-    request to collect build evidence. The only command never auto-run is an
-    arbitrary ``build.query`` string from an auto-discovered (untrusted)
-    ``.abicheck.yml`` — that still needs an explicit ``--config``.
+    Order: an explicit ``--build-info`` path (file or dir) → a trusted and
+    explicitly allowed ``--config`` ``build.query`` command result →
+    ``build.compile_db`` in the source tree → an auto-discovered
+    ``compile_commands.json`` →, only when ``allow_build_query`` is true, the
+    **inferred, abicheck-authored** build-system query (cmake/make/bazel).
+    Running build-system tools evaluates project-controlled build files, so it
+    requires an explicit opt-in instead of happening for plain ``--sources``.
     """
     # Track whether the operator gave an EXPLICIT L3 input (--build-info or a
     # build.compile_db path) that yielded nothing. If so, the default inferred
@@ -735,9 +734,9 @@ def _resolve_compile_db(
 
     # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
     # EMITS a compile DB / exports without a full build. Runs only when the config
-    # came from an explicit operator-supplied path (build_config_trusted_for_query);
-    # an auto-discovered .abicheck.yml is never trusted to execute. No
-    # --allow-build-query flag is involved any more (it is a deprecated no-op).
+    # came from an explicit operator-supplied path (build_config_trusted_for_query)
+    # AND the operator opted into executing build-system commands. An
+    # auto-discovered .abicheck.yml is never trusted to execute.
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(
@@ -752,10 +751,22 @@ def _resolve_compile_db(
             )
             # Untrusted query is never run — fall through to compile_db /
             # auto-discovery / the abicheck-authored inferred query below.
+        elif not allow_build_query:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query",
+                    status="skipped",
+                    detail=(
+                        "build.query requires --allow-build-query because it "
+                        "executes project build commands"
+                    ),
+                )
+            )
+            # The query itself is skipped, but non-executing compile_db settings
+            # from the trusted config can still be used below.
         else:
-            # Trusted operator config (--config): run its query automatically. No
-            # --allow-build-query flag is required any more — pointing abicheck at
-            # sources *is* the request to collect build evidence (ADR-032 amended).
+            # Trusted operator config (--config) plus explicit opt-in: run the
+            # query.
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
@@ -794,12 +805,15 @@ def _resolve_compile_db(
     if discovered is not None:
         return discovered
 
-    # Zero-config fallback: no compile DB exists and no explicit L3 input was
-    # given, but a --sources tree is present. Detect the build system and run
-    # abicheck's OWN fixed query (cmake configure / bazel aquery) to produce L3 —
-    # so "just provide sources" works with no flag and no manual build step. Only
-    # an abicheck-authored command runs here; an arbitrary tree-local
-    # .abicheck.yml `build.query` string is never auto-executed.
+    if not allow_build_query:
+        return None
+
+    # Opt-in fallback: no compile DB exists and no explicit L3 input was given,
+    # but a --sources tree is present and the operator explicitly allowed build
+    # queries. Detect the build system and run abicheck's fixed query (cmake
+    # configure / bazel aquery) to produce L3. Although the argv is fixed and
+    # shell=False, the invoked build tool evaluates project-controlled build
+    # language, so this is never run for plain --sources.
     from .build_query import run_inferred_build_query
 
     return run_inferred_build_query(sources, merged, extractors, cleanup=cleanup)

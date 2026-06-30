@@ -833,8 +833,9 @@ def embed_build_source(
         # explicit --config file or an explicit --build-query command on the CLI.
         # Auto-discovered source-tree configs may be attacker-controlled; their
         # non-executable settings are still honored, but their query never runs.
-        # (Inferred build queries — cmake/make/bazel that abicheck constructs
-        # itself — always run regardless; see buildsource.build_query.)
+        # Inferred build queries (cmake/bazel that abicheck constructs itself)
+        # also require --allow-build-query because build tools evaluate
+        # project-controlled build files; see buildsource.build_query.
         cfg_trusted_for_query = build_config is not None or build_query is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
