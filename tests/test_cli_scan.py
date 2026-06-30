@@ -687,6 +687,8 @@ def test_unseeded_s5_with_sources_emits_headers_only_advisory(
     assert res.exit_code == 0, res.output
     payload = _payload(res)
     assert any("--since" in a for a in payload["advisories"])
+    assert payload["stage_timings"]["pattern_scan"] >= 0.0
+    assert payload["stage_timings"]["candidate_snapshot"] >= 0.0
 
 
 def test_unseeded_s5_advisory_rendered_in_text_output(

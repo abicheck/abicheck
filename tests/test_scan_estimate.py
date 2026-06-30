@@ -336,6 +336,25 @@ def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) ->
     assert l4.tus == 5
 
 
+def test_estimate_l4_uses_cold_realworld_anchor(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": f"f{i}.cpp", "command": "c++", "directory": "."}
+                for i in range(4)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
+    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    assert l4.tus == 4
+    assert l4.est_seconds == pytest.approx(30.0)
+
+
 # ── CLI: scan --estimate / --audit ───────────────────────────────────────────
 
 

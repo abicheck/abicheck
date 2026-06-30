@@ -780,6 +780,8 @@ def embed_build_source(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     extractor: str = "auto",
+    public_headers: tuple[str, ...] = (),
+    public_header_dirs: tuple[str, ...] = (),
     defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
@@ -880,6 +882,9 @@ def embed_build_source(
             layers=layers,
             exported_symbols=exported,
             changed_paths=changed_paths,
+            public_header_roots=tuple(
+                dict.fromkeys((*public_headers, *public_header_dirs))
+            ),
             defer_cleanup=defer_cleanup,
         )
         # P09: don't fail *silently* when a source/build tree yields no compile DB.

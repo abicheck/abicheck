@@ -214,6 +214,7 @@ class ScanOutcome:
     crosscheck_severities: dict[str, str] = field(default_factory=dict)
     poi: dict[str, Any] = field(default_factory=dict)
     advisories: list[str] = field(default_factory=list)
+    stage_timings: dict[str, float] = field(default_factory=dict)
     audit: bool = False
     diff_summary: dict[str, Any] | None = None
     verdict: str = "COMPATIBLE"
@@ -242,6 +243,9 @@ class ScanOutcome:
             "crosscheck_severities": dict(self.crosscheck_severities),
             "poi": self.poi,
             "advisories": list(self.advisories),
+            "stage_timings": {
+                k: round(v, 3) for k, v in sorted(self.stage_timings.items())
+            },
             "diff": self.diff_summary,
             "verdict": self.verdict,
             "exit_code": self.exit_code,
@@ -283,6 +287,14 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
         }
     )
     return rows
+
+
+def _source_abi_coverage(snap: Any) -> dict[str, Any]:
+    """Return the embedded L4 coverage dict, if present."""
+    pack = getattr(snap, "build_source", None)
+    surface = getattr(pack, "source_abi", None) if pack is not None else None
+    cov = getattr(surface, "coverage", None) if surface is not None else None
+    return dict(cov or {})
 
 
 def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
@@ -373,6 +385,12 @@ def _render_text(out: ScanOutcome) -> str:
     )
     for note in out.advisories:
         lines.append(f"  note: {note}")
+    if out.stage_timings:
+        timing = ", ".join(
+            f"{name}={seconds:.2f}s"
+            for name, seconds in sorted(out.stage_timings.items())
+        )
+        lines.append(f"  timings: {timing}")
 
     poi_counts = out.poi.get("counts_by_reason") or {}
     if poi_counts:
@@ -502,6 +520,12 @@ def _build_new_snapshot(
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             changed_paths=changed_paths,
+            public_headers=tuple(
+                str(p) for p in _expand_public_headers(
+                    [*list(public_headers or ()), *list(public_header_dirs or ())]
+                )
+            ),
+            public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
             defer_cleanup=defer_cleanup,
         )
     return snap
@@ -1147,6 +1171,11 @@ def run_scan_core(
     overflow (the CLI maps it to exit 5). This is the one body the CLI,
     ``service.run_scan``, and the MCP scan tool share (ADR-035 D10).
     """
+    stage_timings: dict[str, float] = {}
+
+    def _record_stage(name: str, started: float) -> None:
+        stage_timings[name] = time.monotonic() - started
+
     # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
     # Runs *before* the snapshot build so its escalation triggers feed the D7
     # points-of-interest work-list that focuses the (expensive) source replay.
@@ -1160,7 +1189,9 @@ def run_scan_core(
         EvidenceDepth.HEADERS,
     }:
         pattern_roots.append(sources)
+    _stage = time.monotonic()
     pattern = scan_files(pattern_roots, changed if seeded else None)
+    _record_stage("pattern_scan", _stage)
 
     # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
     # Floor = the directly-changed paths (always included); the pattern triggers,
@@ -1176,6 +1207,7 @@ def run_scan_core(
         and seeded
         and collect_mode in {"source-changed", "graph-full"}
     )
+    _stage = time.monotonic()
     poi_baseline = _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
     poi_candidate = (
         _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
@@ -1187,6 +1219,7 @@ def run_scan_core(
         baseline=poi_baseline,
         candidate=poi_candidate,
     )
+    _record_stage("poi", _stage)
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
@@ -1256,6 +1289,7 @@ def run_scan_core(
                 "explicitly to silence this note."
             )
 
+    _stage = time.monotonic()
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -1274,6 +1308,32 @@ def run_scan_core(
         symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
         debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
     )
+    _record_stage("candidate_snapshot", _stage)
+    l4_cov = _source_abi_coverage(new_snap)
+    if l4_cov.get("scope_widened_to_full"):
+        advisories.append(
+            "headers-only source replay widened to all compile units because no "
+            "include graph/public-header target ownership could narrow it. Provide "
+            "depfile/include graph evidence or seed with --since/--changed-path to "
+            "avoid full fanout."
+        )
+    uncovered = int(l4_cov.get("public_headers_uncovered", 0) or 0)
+    if uncovered:
+        advisories.append(
+            f"headers-only source replay used the include graph and skipped full "
+            f"fanout, but {uncovered} public header(s) were not reached by any "
+            "selected TU; source-only coverage is partial for those headers."
+        )
+    exported = int(l4_cov.get("exported_symbols", 0) or 0)
+    matched = int(l4_cov.get("matched_symbols", 0) or 0)
+    parsed = int(l4_cov.get("compile_units_parsed", 0) or 0)
+    if exported and parsed and matched == 0:
+        advisories.append(
+            f"L4 source replay parsed {parsed} TU(s) but matched 0/{exported} "
+            "exported symbol(s); source-link evidence is degraded. Check mangled "
+            "symbol matching/public-header roots before relying on source-only "
+            "findings."
+        )
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
     # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
@@ -1324,7 +1384,9 @@ def run_scan_core(
         if new_snap.build_source is not None
         else None
     )
+    _stage = time.monotonic()
     preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
+    _record_stage("preprocessor_scan", _stage)
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
     # The resolved changed-path set is handed to the engine so
@@ -1335,6 +1397,7 @@ def run_scan_core(
     # export-delta walk resolved (symbol_tus), so ``public_to_internal_dependency``
     # elevates a finding whose internal target sits in a TU this revision touched
     # *via a changed export* — not only the literally git-changed files.
+    _stage = time.monotonic()
     cc = run_crosschecks(
         new_snap,
         CrosscheckConfig(
@@ -1342,10 +1405,12 @@ def run_scan_core(
             changed_paths=frozenset(changed) | set(symbol_tus),
         ),
     )
+    _record_stage("crosschecks", _stage)
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
+        _stage = time.monotonic()
         verdict, exit_code, diff_summary = _run_baseline_compare(
             baseline,
             new_snap,
@@ -1373,6 +1438,7 @@ def run_scan_core(
             # BREAKING/API_BREAK from the artifact diff.
             if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
                 verdict = "API_BREAK"
+        _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:
             click.echo(
@@ -1413,6 +1479,7 @@ def run_scan_core(
         crosscheck_severities=severities,
         poi=poi.to_dict(),
         advisories=advisories,
+        stage_timings=stage_timings,
         audit=scan_mode is ScanMode.AUDIT,
         diff_summary=diff_summary,
         verdict=verdict,
