@@ -254,6 +254,18 @@ def _maxrss_to_mb(maxrss: int) -> float:
     ``ru_maxrss`` is KiB on Linux but **bytes** on macOS/BSD, so a fixed ``/1024``
     would be off by ~1024× off-Linux; divide by the right unit so the sweep stays
     comparable across POSIX hosts.
+
+    **Scope.** ``wait4`` reports the peak RSS of the *direct* child (the
+    ``python -m abicheck`` process), not the summed high-water mark of the whole
+    process tree. Under the harness's default L4 executor (**threads**) the
+    dominant consumer — the multi-GiB in-process JSON-AST parse — runs *inside*
+    that child across thread-pool threads, so it is captured; the separate
+    ``clang -ast-dump=json`` subprocesses stream their output to a temp file
+    (bounded RSS) and are not summed, and the opt-in ``ABICHECK_L4_EXECUTOR=process``
+    grandchildren would not be captured at all. So this column tracks the dominant
+    in-process driver (which is what the memory clamp governs) but is a **lower
+    bound** on absolute host peak — for the true host high-water mark use a
+    cgroup ``memory.peak`` / process-tree monitor.
     """
     if sys.platform == "darwin" or "bsd" in sys.platform:
         return round(maxrss / (1024 * 1024), 1)  # bytes -> MiB

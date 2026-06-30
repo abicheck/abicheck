@@ -41,6 +41,15 @@ per-TU clang AST, and `jobs` is capped (here 4), not the total TU count. That is
 exactly the quantity the memory clamp (Gap 2) governs: on a host with a tighter
 RAM budget, fewer workers run, so peak RSS drops — at the cost of wall time.
 
+> **What the RSS column measures.** It is `wait4`'s `ru_maxrss` for the direct
+> `python -m abicheck` child. Under the default L4 *thread* executor the dominant
+> consumer (the multi-GiB in-process JSON-AST parse) runs inside that child, so it
+> is captured — which is why the clamp's effect is visible here. But the separate
+> `clang -ast-dump=json` subprocesses (which stream to a temp file) and any
+> `ABICHECK_L4_EXECUTOR=process` grandchildren are **not** summed in, so the column
+> is a *lower bound* on absolute host peak; for the true host high-water mark use a
+> cgroup `memory.peak` / process-tree monitor.
+
 ## Conclusions
 
 The truly cheap tier (`binary`/`headers`/`build`) is **flat in TU count** — it is
