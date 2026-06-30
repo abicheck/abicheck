@@ -30,6 +30,7 @@ from abicheck.buildsource.call_graph import (
     RESOLUTION_UNKNOWN,
     CallEdge,
     ClangCallGraphExtractor,
+    _call_graph_jobs,
     augment_graph_with_calls,
     parse_clang_ast_calls,
 )
@@ -522,6 +523,47 @@ def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
     assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
 
 
+def test_call_graph_jobs_env_override_is_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    assert _call_graph_jobs(120) == 2
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "9999")
+    assert 1 <= _call_graph_jobs(120) <= 120
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "nope")
+    assert _call_graph_jobs(120) == 1
+
+
+def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
+    import abicheck.buildsource.call_graph as cg
+
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_sources: list[str] = []
+
+    def fake_extract(self, argv, cwd=None):
+        del self, cwd
+        seen_sources.append(argv[-1])
+        return [CallEdge("caller", "callee")]
+
+    monkeypatch.setattr(
+        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
+    )
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+            CompileUnit(id="cu://c", source="c.cpp"),
+        ]
+    )
+
+    ext = ClangCallGraphExtractor()
+    edges = ext.extract_from_build(build)
+
+    assert ext.last_jobs == 2
+    assert ext.last_elapsed_s >= 0.0
+    assert sorted(seen_sources) == ["a.cpp", "b.cpp", "c.cpp"]
+    assert edges == [CallEdge("caller", "callee")]
+
+
 # ── collect --call-graph wiring (_collect_call_graph) ───────────────
 
 
@@ -539,6 +581,8 @@ class _FakeExtractor:
         self._available = available
         self._edges = edges or []
         self.diagnostics: list[str] = []
+        self.last_jobs = 1
+        self.last_elapsed_s = 0.0
 
     def available(self) -> bool:
         return self._available
