@@ -225,9 +225,29 @@ def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None
     cfg.write_text("compile:\n  std: c++20\n  defines: [A, B=2]\n  frontend: clang\n")
     merged, _ = _merge_compile_config(CompileContext(), (), cfg)
     assert merged.frontend == "clang"
-    # std + defines synthesized into gcc_options when the user gave none.
-    assert merged.gcc_options == "-std=c++20 -DA -DB=2"
+    # std + defines are synthesized as literal argv tokens when the user gave no
+    # --gcc-options, so config values cannot inject extra compiler options.
+    assert merged.gcc_options is None
+    assert merged.gcc_option_tokens == ("-std=c++20", "-DA", "-DB=2")
 
+
+def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "compile:\n"
+        "  std: 'c++20 -Xclang'\n"
+        "  defines:\n"
+        "    - 'DUMMY -Xclang -load -Xclang ./evil.so'\n",
+        encoding="utf-8",
+    )
+    merged, _ = _merge_compile_config(CompileContext(), (), cfg)
+    assert merged.gcc_options is None
+    assert merged.gcc_option_tokens == (
+        "-std=c++20 -Xclang",
+        "-DDUMMY -Xclang -load -Xclang ./evil.so",
+    )
 
 def test_merge_compile_config_noop_without_path() -> None:
     from abicheck.cli_scan import _merge_compile_config
@@ -249,7 +269,8 @@ def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None
     from abicheck.cli_scan import _merge_compile_config
 
     merged, includes = _merge_compile_config(CompileContext(), (), None, sources=src)
-    assert merged.gcc_options == "-std=c++20"
+    assert merged.gcc_options is None
+    assert merged.gcc_option_tokens == ("-std=c++20",)
     assert includes == (src / "include",)
 
 
@@ -264,7 +285,8 @@ def test_merge_compile_config_explicit_config_beats_autodiscovery(
     from abicheck.cli_scan import _merge_compile_config
 
     merged, _ = _merge_compile_config(CompileContext(), (), explicit, sources=src)
-    assert merged.gcc_options == "-std=c++23"  # explicit --config wins
+    assert merged.gcc_options is None
+    assert merged.gcc_option_tokens == ("-std=c++23",)  # explicit --config wins
 
 
 def test_probe_gnu_system_includes_mocked(monkeypatch, tmp_path: Path) -> None:
@@ -574,12 +596,13 @@ def test_compare_reads_compile_block_from_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """compare folds the project .abicheck.yml compile: block into its L2 context
-    (CLI > config) — std/defines synthesize gcc_options for both sides."""
+    (CLI > config) — std/defines synthesize literal argv tokens for both sides."""
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  std: c++20\n  defines: [FOO=1]\n", encoding="utf-8")
     calls = _compare_capturing_dump(monkeypatch, tmp_path, ["--config", str(cfg)])
     for c in calls:
-        assert c["gcc_options"] == "-std=c++20 -DFOO=1"
+        assert c["gcc_options"] is None
+        assert c["gcc_option_tokens"] == ("-std=c++20", "-DFOO=1")
 
 
 def test_dump_reads_compile_block_from_config(
@@ -588,7 +611,7 @@ def test_dump_reads_compile_block_from_config(
     """dump's ELF path folds the compile: block in via the same shared resolver.
 
     Patches ``perform_elf_dump`` (so the fake-ELF bytes are never parsed for real)
-    and asserts the synthesized ``-std`` reaches its ``effective_gcc_options``.
+    and asserts the synthesized ``-std`` reaches its literal gcc option tokens.
     """
     import abicheck.cli as cli_mod
 
@@ -609,7 +632,8 @@ def test_dump_reads_compile_block_from_config(
         main, ["dump", str(so), "-H", str(header), "--config", str(cfg)]
     )
     assert result.exit_code == 0, result.output
-    assert "-std=c++17" in str(captured["effective_gcc_options"])
+    assert captured["effective_gcc_options"] is None
+    assert captured["gcc_option_tokens"] == ("-std=c++17",)
 
 
 def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
@@ -752,7 +776,8 @@ def test_dump_pe_threads_compile_context(
     cc = captured["compile_context"]
     assert cc is not None
     assert getattr(cc, "frontend") == "clang"
-    assert getattr(cc, "gcc_options") == "-std=c++20"
+    assert getattr(cc, "gcc_options") is None
+    assert getattr(cc, "gcc_option_tokens") == ("-std=c++20",)
     assert captured["header_backend"] == "clang"
     # ...and the old "gcc-options ignored on the native path" warning is gone.
     assert "will be ignored" not in result.output
