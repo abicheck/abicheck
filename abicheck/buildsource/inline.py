@@ -1358,24 +1358,13 @@ def _include_map_for_replay(
     """Best-effort include map for narrowing L4 replay.
 
     ``headers-only`` can shrink from all TUs to the TUs that include public
-    headers, but only when it has an include graph. Prefer recorded action inputs
-    (free, Bazel-style); otherwise run a cheap depfile pass. Failure keeps the old
-    fail-open selector, never drops evidence.
+    headers, but only when it has an exact textual include graph. Recorded action
+    inputs are an over-approximation, so headers-only replay uses a cheap depfile
+    pass instead. Failure keeps the old fail-open selector, never drops evidence.
     """
     if scope != "headers-only" or not roots or not build.compile_units:
         return {}
-    from .include_graph import ClangIncludeExtractor, include_map_from_recorded_inputs
-
-    recorded = include_map_from_recorded_inputs(build)
-    if recorded:
-        extractors.append(
-            ExtractorRecord(
-                name="include_graph:recorded_inputs",
-                status="ok",
-                detail=f"{len(recorded)}/{len(build.compile_units)} compile units",
-            )
-        )
-        return recorded
+    from .include_graph import ClangIncludeExtractor
 
     extractor = ClangIncludeExtractor(
         clang_bin=clang_bin if clang_bin != "clang" else "clang++"

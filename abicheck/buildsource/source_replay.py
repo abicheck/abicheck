@@ -431,12 +431,12 @@ def _headers_only_set_cover(
             break
         chosen.append(best)
         need -= coverage[best]
-    # A *partial* include graph may not reach every public header. Returning the
-    # cover for only the reachable ones would silently drop a public header no
-    # recorded TU includes — its source-only changes would never be parsed. Defer
-    # to the representative-per-target heuristic (which covers every public-header
-    # target) whenever the cover cannot satisfy all public headers (Codex review).
-    if need and not public_header_roots:
+    # A *partial* include graph may not reach every build-declared public header.
+    # Returning the cover for only the reachable ones would silently drop a public
+    # target whose source-only changes would never be parsed. External CLI roots
+    # have no representative target, so those are reported as uncovered instead of
+    # widening back to every TU.
+    if need and any(header_owners.get(ph) for ph in need):
         return None
     return [by_id[c] for c in chosen]
 
@@ -483,10 +483,13 @@ def _included(
     (``include/foo.h``).
     """
     public_norm = _norm(public_header)
+    public_dir_suffixes = {s for s in public_suffixes if "/" in s.strip("/")}
+    include_dir_suffixes = {s for s in include_suffixes if "/" in s.strip("/")}
     return (
-        public_norm in include_suffixes
-        or bool(public_suffixes & include_norms)
-        or bool(public_suffixes & include_suffixes)
+        public_norm in include_norms
+        or ("/" in public_norm.strip("/") and public_norm in include_suffixes)
+        or bool(public_dir_suffixes & include_norms)
+        or bool(public_dir_suffixes & include_dir_suffixes)
     )
 
 

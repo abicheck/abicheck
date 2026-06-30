@@ -362,6 +362,39 @@ def test_headers_only_external_roots_do_not_full_fanout_for_uncovered_header() -
     assert {u.id for u in units} == {"cu://a"}
 
 
+def test_headers_only_external_roots_do_not_hide_uncovered_owned_header() -> None:
+    build = _build()
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://b": ["include/foo.h"],
+            "cu://d": ["external/pvxs/log.h"],
+        },
+        public_header_roots=["external/pvxs/log.h"],
+    )
+    assert {u.id for u in units} == {"cu://a", "cu://c"}
+
+
+def test_headers_only_suffix_match_requires_directory_context() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://private", "private.cpp"),
+            _cu("cu://public", "public.cpp"),
+        ]
+    )
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://private": ["src/foo.h"],
+            "cu://public": ["../pvxs/foo.h"],
+        },
+        public_header_roots=["/work/pvxs/include/pvxs/foo.h"],
+    )
+    assert {u.id for u in units} == {"cu://public"}
+
+
 def test_source_replay_reports_uncovered_external_public_roots() -> None:
     build = BuildEvidence(
         compile_units=[
