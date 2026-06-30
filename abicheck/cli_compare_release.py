@@ -974,6 +974,7 @@ def compare_release_cmd(
     severity_potential_breaking: str | None,
     severity_quality_issues: str | None,
     severity_addition: str | None,
+    release_exit_code_scheme: str | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1132,8 +1133,8 @@ def compare_release_cmd(
 
         # Compute the severity-aware exit code while per-library DiffResults
         # are still stashed (before _strip_diff_results_and_adjust_verdict).
-        # Returns None when no --severity-* option was supplied, in which case
-        # the legacy verdict-based exit is used downstream.
+        # Returns None when no --severity-* option was supplied, or when
+        # compare's resolved config pins the legacy scheme for set inputs.
         severity_config = _resolve_release_severity_config(
             severity_preset,
             severity_abi_breaking,
@@ -1141,14 +1142,20 @@ def compare_release_cmd(
             severity_quality_issues,
             severity_addition,
         )
-        severity_exit_code = _compute_release_severity_exit_code(
-            library_results,
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
+        severity_exit_code = (
+            None
+            if release_exit_code_scheme == "legacy"
+            else _compute_release_severity_exit_code(
+                library_results,
+                severity_preset,
+                severity_abi_breaking,
+                severity_potential_breaking,
+                severity_quality_issues,
+                severity_addition,
+            )
         )
+        if release_exit_code_scheme == "legacy":
+            severity_config = None
 
         bundle_result: BundleDiffResult | None = None
         if not no_bundle_analysis:

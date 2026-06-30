@@ -1355,10 +1355,10 @@ def compare_cmd(
     if old_kind == "app" or new_kind == "app":
         _reject_application_operand(old_input, new_input, old_kind, new_kind)
     if {old_kind, new_kind} & {"directory", "package"}:
-        # The per-library fan-out (`compare-release` backend) uses its own
-        # exit-code logic (legacy verdict, or severity-aware when severity is
-        # configured); it does not consume an explicit --exit-code-scheme. Reject
-        # it loudly rather than silently ignore it (ADR-037 D12).
+        # The per-library fan-out (`compare-release` backend) consumes the
+        # resolved scheme from config, but still has no public CLI support for
+        # an explicit --exit-code-scheme on set inputs. Reject the CLI flag
+        # loudly rather than silently ignore it (ADR-037 D12).
         if exit_code_scheme is not None:
             raise click.UsageError(
                 "--exit-code-scheme is not supported for directory/package "
@@ -1385,6 +1385,7 @@ def compare_cmd(
             severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,
             severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
             severity_addition=resolved_cfg.merged_severity_addition,
+            release_exit_code_scheme=resolved_cfg.exit_code_scheme,
             probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
             annotate=annotate, annotate_additions=annotate_additions,
             verbose=verbose,

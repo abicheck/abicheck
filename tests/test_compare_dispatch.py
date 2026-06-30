@@ -213,6 +213,32 @@ class TestCompareDispatch:
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
 
+    def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
+        # A project config may demote ABI-breaking findings to warnings for
+        # reporting, while still pinning the process exit to the legacy verdict
+        # scheme. Directory/package compare must preserve that CI gate.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "exit_code_scheme: legacy\n"
+            "severity:\n"
+            "  abi_breaking: warning\n",
+            encoding="utf-8",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+
+        code, out, _ = _invoke(
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
+        )
+
+        assert code == 4
+        assert json.loads(out)["verdict"] == "BREAKING"
+
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")
         new = _write_snap(tmp_path / "new.json", _snap())
