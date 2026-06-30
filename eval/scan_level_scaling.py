@@ -275,7 +275,13 @@ class Point:
 
 def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
     seed = "src/tu0.cpp"
+    # Invoke the in-tree CLI via ``-m abicheck`` (not the ``abicheck`` console
+    # script): the documented entry point is ``python eval/scan_level_scaling.py``
+    # from a checkout, which is importable even without an editable install — so
+    # the sweep must not depend on the console script being on PATH.
     argv = [
+        sys.executable,
+        "-m",
         "abicheck",
         "scan",
         "--binary",
@@ -292,7 +298,13 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         "text",
         *_level_args(level, seed),
     ]
-    env = dict(os.environ, ABICHECK_L4_JOBS=str(jobs))
+    # ``jobs <= 0`` means "leave ABICHECK_L4_JOBS unset" so the sweep measures
+    # abicheck's normal auto scheduling (min(TUs, cpu, 8) + the RAM clamp). Forcing
+    # an explicit count would, on a >8-CPU host, run more L4 workers than the
+    # production auto path and skew/OOM the curves.
+    env = dict(os.environ)
+    if jobs > 0:
+        env["ABICHECK_L4_JOBS"] = str(jobs)
     t0 = time.monotonic()
     proc = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True
@@ -432,7 +444,9 @@ def main() -> int:
 
     sizes = [int(s) for s in args.sizes.split(",") if s.strip()]
     levels = [lv for lv in args.levels.split(",") if lv.strip()]
-    jobs = args.jobs or (os.cpu_count() or 4)
+    # Pass --jobs through verbatim: 0 (the default) keeps ABICHECK_L4_JOBS unset so
+    # the sweep measures abicheck's own auto scheduling rather than an override.
+    jobs = args.jobs
     workdir = (
         Path(args.workdir)
         if args.workdir
