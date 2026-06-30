@@ -100,7 +100,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
+  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
   add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
@@ -123,8 +123,8 @@ if [[ "$MODE" == "dump" ]]; then
   # compile_commands.json. (See action input `build-info`.)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--build-config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--collect-mode" "${INPUT_COLLECT_MODE:-}"
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_single_flag "--depth" "${INPUT_DEPTH:-}"
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
   fi
@@ -148,7 +148,7 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
   add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
+  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
 
   # Format — for SARIF, always write to a file so upload-sarif can find it
   FORMAT="${INPUT_FORMAT:-markdown}"
@@ -232,8 +232,11 @@ elif [[ "$MODE" == "appcompat" ]]; then
   fi
 
 elif [[ "$MODE" == "compare-release" ]]; then
-  # ── Compare-release mode (package-level comparison) ──────────────────────
-  CMD+=(compare-release)
+  # ── Compare-release mode (package-level comparison) → `compare` dirs/pkgs ──
+  # The standalone compare-release command was removed (ADR-037 D7); `compare`
+  # accepts directories/packages and fans out to the same per-library engine.
+  # The Action mode name is kept for back-compat.
+  CMD+=(compare)
   CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for compare-release mode}")
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
 
@@ -284,7 +287,7 @@ elif [[ "$MODE" == "compare-release" ]]; then
 
 elif [[ "$MODE" == "deps" ]]; then
   # ── Deps mode (Linux ELF) ───────────────────────────────────────────────
-  CMD+=(deps)
+  CMD+=(deps tree)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps mode}")
 
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
@@ -305,8 +308,8 @@ elif [[ "$MODE" == "deps" ]]; then
   fi
 
 elif [[ "$MODE" == "stack-check" ]]; then
-  # ── Stack-check mode (Linux ELF) ────────────────────────────────────────
-  CMD+=(stack-check)
+  # ── Stack-check mode (Linux ELF) → `deps compare` ───────────────────────
+  CMD+=(deps compare)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for stack-check mode}")
   CMD+=(--baseline "${INPUT_BASELINE:?baseline is required for stack-check mode}")
   CMD+=(--candidate "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")

@@ -145,7 +145,9 @@ def test_run_validation_max_pairs_reports_only_attempted(
     # reported as UNCOMPARABLE (which would make a smoke run look broken).
     mod = _load_module()
     monkeypatch.setattr(mod, "PARITY_DIR", tmp_path)
-    monkeypatch.setattr(mod, "query_conda", lambda pkg: {"files": []})
+    monkeypatch.setattr(
+        mod, "query_conda", lambda pkg, channel="conda-forge": {"files": []}
+    )
     monkeypatch.setattr(
         mod,
         "evaluate_pair",

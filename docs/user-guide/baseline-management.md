@@ -326,3 +326,21 @@ abicheck compare old-baseline.json new-baseline.json
 
 Snapshots are self-contained — they include all type, function, variable, and enum
 information. Comparing two snapshots requires no headers, compilers, or debug info.
+
+### `scan --baseline` against a native library
+
+`abicheck scan` takes a single `-H` (built for the *new* binary). When the
+`--baseline` is a **native library** (not a snapshot) and its public headers
+differ from the new version, parse the old side with **its own** headers:
+
+```bash
+abicheck scan --binary new/libfoo.so -H new/include \
+  --baseline old/libfoo.so --baseline-header old/include
+```
+
+- `--baseline-header` / `--baseline-include` — the old side's public headers and
+  include roots. Without them, a native baseline is parsed with the *new* `-H`
+  (correct only when the headers didn't change), and `scan` prints a warning.
+- A **JSON-snapshot baseline** already has its headers baked in, so these flags
+  are unnecessary there. Prefer a pre-dumped snapshot baseline when you can —
+  it's unambiguous and needs no toolchain at compare time.

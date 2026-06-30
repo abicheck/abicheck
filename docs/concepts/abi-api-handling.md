@@ -251,7 +251,7 @@ abicheck compare libfoo_v1.so libfoo_v2.so \
 
 - **`.so` + DWARF (`-g` / `/Zi`)** gives the ground-truth *emitted* ABI — struct
   layout, field offsets, alignment/packing, enum values, calling convention.
-- **public headers (castxml or clang, `--header-backend`)** add the source-level API surface the binary cannot
+- **public headers (castxml or clang, `--ast-frontend`)** add the source-level API surface the binary cannot
   carry — `final`, access, ref-qualifiers, `noexcept`/`explicit`, default-argument
   values, and `const`/`constexpr` constant values (the last two have *no symbol*,
   so only header analysis can reach them).

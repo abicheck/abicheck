@@ -1786,7 +1786,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--format", "json"],
+            ["compare", str(old), str(new), "--format", "json"],
         )
         # Bundle BREAKING → exit 4.
         assert result.exit_code == 4, result.output
@@ -1824,7 +1824,7 @@ class TestCompareReleaseBundleE2E:
         result = CliRunner().invoke(
             main,
             [
-                "compare-release",
+                "compare",
                 str(old),
                 str(new),
                 "--no-bundle-analysis",
@@ -1872,7 +1872,7 @@ class TestCompareReleaseBundleE2E:
         result = CliRunner().invoke(
             main,
             [
-                "compare-release",
+                "compare",
                 str(old),
                 str(new),
                 "--manifest",
@@ -1946,7 +1946,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--bundle-cohort", "lib"],
+            ["compare", str(old), str(new), "--bundle-cohort", "lib"],
         )
         assert "Bundle (Cross-Library) Findings" in result.stdout
         assert "bundle_intra_dep_removed" in result.stdout
@@ -2024,7 +2024,7 @@ class TestCompareReleaseBundleE2E:
         result = CliRunner().invoke(
             main,
             [
-                "compare-release",
+                "compare",
                 str(old),
                 str(new),
                 "--format",
@@ -2077,7 +2077,7 @@ class TestCompareReleaseBundleE2E:
         result = CliRunner().invoke(
             main,
             [
-                "compare-release",
+                "compare",
                 str(old),
                 str(new),
                 "--format",
@@ -2117,7 +2117,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--format", "json"],
+            ["compare", str(old), str(new), "--format", "json"],
         )
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data.get("bundle_findings", [])}

@@ -425,7 +425,7 @@ def test_collect_evidence_ninja_compdb(tmp_path):
     compdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--ninja-compdb", str(compdb), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--from", f"ninja-compdb={compdb}", "-o", str(out)])
     assert result.exit_code == 0, result.output
     pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None

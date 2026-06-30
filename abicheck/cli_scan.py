@@ -50,15 +50,16 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from .buildsource.crosscheck import ALL_CHECKS, CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
-from .buildsource.poi import build_points_of_interest
+from .buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskRules, RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
@@ -70,7 +71,22 @@ from .buildsource.scan_levels import (
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import (
+    compile_context_options,
+    lang_option,
+    merge_compile_config,
+    resolve_compile_context,
+    verbose_option,
+)
 from .cli_params import DEPTH_PARAM
+
+if TYPE_CHECKING:
+    from .service_scan import CompileContext
+
+#: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
+#: resolver shared by compare/dump/scan). Kept importable from here for existing
+#: callers and ``tests/test_compile_context_parity.py``.
+_merge_compile_config = merge_compile_config
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
@@ -197,6 +213,8 @@ class ScanOutcome:
     crosscheck: dict[str, Any] = field(default_factory=dict)
     crosscheck_severities: dict[str, str] = field(default_factory=dict)
     poi: dict[str, Any] = field(default_factory=dict)
+    advisories: list[str] = field(default_factory=list)
+    stage_timings: dict[str, float] = field(default_factory=dict)
     audit: bool = False
     diff_summary: dict[str, Any] | None = None
     verdict: str = "COMPATIBLE"
@@ -224,6 +242,10 @@ class ScanOutcome:
             "crosscheck": self.crosscheck,
             "crosscheck_severities": dict(self.crosscheck_severities),
             "poi": self.poi,
+            "advisories": list(self.advisories),
+            "stage_timings": {
+                k: round(v, 3) for k, v in sorted(self.stage_timings.items())
+            },
             "diff": self.diff_summary,
             "verdict": self.verdict,
             "exit_code": self.exit_code,
@@ -246,7 +268,8 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             else "no binary export table (snapshot-only input)",
         }
     )
-    has_debug = snap.dwarf is not None
+    dwarf = getattr(snap, "dwarf", None)
+    has_debug = bool(getattr(dwarf, "has_dwarf", False)) if dwarf is not None else False
     rows.append(
         {
             "layer": "L1_debug",
@@ -260,10 +283,18 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             "status": "present" if snap.from_headers else "skipped",
             "detail": f"{len(snap.types)} type(s) from public headers"
             if snap.from_headers
-            else "no public-header AST (pass --headers; needs castxml)",
+            else "no public-header AST (pass --headers; needs castxml or clang)",
         }
     )
     return rows
+
+
+def _source_abi_coverage(snap: Any) -> dict[str, Any]:
+    """Return the embedded L4 coverage dict, if present."""
+    pack = getattr(snap, "build_source", None)
+    surface = getattr(pack, "source_abi", None) if pack is not None else None
+    cov = getattr(surface, "coverage", None) if surface is not None else None
+    return dict(cov or {})
 
 
 def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
@@ -280,6 +311,57 @@ def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
             for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
         ]
     return [c.to_dict() for c in pack.manifest.coverage]
+
+
+def _l3_collected(snap: Any) -> bool:
+    """True when the snapshot carries a non-empty L3 build-evidence layer.
+
+    Used to decide whether a deep ``--source-method`` actually reached L3: a
+    ``not_collected`` (or absent pack) L3 means the requested L3/L4/L5 layers were
+    skipped for want of a compile database, which warrants a pointed advisory.
+    ``partial`` counts as collected — it ran and produced something.
+    """
+    pack = getattr(snap, "build_source", None)
+    if pack is None:
+        return False
+    for cov in pack.manifest.coverage:
+        row = cov.to_dict() if hasattr(cov, "to_dict") else cov
+        if row.get("layer") == "L3_build":
+            return row.get("status") != "not_collected"
+    return False
+
+
+def _uses_fast_binary_surface(depth: EvidenceDepth) -> bool:
+    """True when the scan depth needs only ELF exports plus cheap debug presence.
+
+    The deeper DWARF DIE walk is source/type evidence. ``headers`` gets its type
+    evidence from L2 AST, and ``build`` adds L3 compile context; neither needs the
+    expensive DWARF expansion on the binary side.
+    """
+    return depth in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+        EvidenceDepth.BUILD,
+    }
+
+
+def _uses_debug_presence_only(depth: EvidenceDepth) -> bool:
+    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap."""
+    return depth in {EvidenceDepth.HEADERS, EvidenceDepth.BUILD}
+
+
+def _normalize_depth_inputs(
+    depth: EvidenceDepth,
+    headers: tuple[Path, ...],
+    baseline_header: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    compile_db: Path | None,
+) -> tuple[tuple[Path, ...], tuple[Path, ...], Path | None, Path | None, Path | None]:
+    """Prune inputs that would collect evidence above the effective scan depth."""
+    if depth is not EvidenceDepth.BINARY:
+        return headers, baseline_header, sources, build_info, compile_db
+    return (), (), None, None, None
 
 
 def _render_text(out: ScanOutcome) -> str:
@@ -301,6 +383,14 @@ def _render_text(out: ScanOutcome) -> str:
     lines.append(
         f"  changed paths: {out.changed_path_count} ({out.changed_path_source})"
     )
+    for note in out.advisories:
+        lines.append(f"  note: {note}")
+    if out.stage_timings:
+        timing = ", ".join(
+            f"{name}={seconds:.2f}s"
+            for name, seconds in sorted(out.stage_timings.items())
+        )
+        lines.append(f"  timings: {timing}")
 
     poi_counts = out.poi.get("counts_by_reason") or {}
     if poi_counts:
@@ -381,6 +471,10 @@ def _build_new_snapshot(
     build_config: Path | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    compile_context: CompileContext | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -407,6 +501,9 @@ def _build_new_snapshot(
             lang=lang,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            compile=compile_context,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -423,8 +520,37 @@ def _build_new_snapshot(
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             changed_paths=changed_paths,
+            public_headers=tuple(
+                str(p) for p in _expand_public_headers(
+                    [*list(public_headers or ()), *list(public_header_dirs or ())]
+                )
+            ),
+            public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
+            defer_cleanup=defer_cleanup,
         )
     return snap
+
+
+def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
+    """Best-effort cheap load for the D7 export-delta POI walk (ADR-035 D7).
+
+    Loads *path* **header-free** — so no castxml/L2 and no L3-L5 collection, just
+    the L0 export tables (and, for a JSON baseline, its embedded L5 graph). The
+    export-delta walk in ``build_points_of_interest`` needs both sides' export
+    tables *before* the expensive collection runs; this is how it gets the
+    candidate's. Returns ``None`` on any failure (a registry-ref baseline, a load
+    error, …) so POI focusing simply degrades to changed-paths/triggers/risk —
+    it must never break the scan. This is an L0/L1-only read (well below the L4
+    cost cliff); the one expensive collection still runs once, below.
+    """
+    if path is None:
+        return None
+    from .service import resolve_input
+
+    try:
+        return resolve_input(path, [], [], version="", lang=lang, symbols_only=True)
+    except Exception:  # noqa: BLE001 - best-effort focusing input, never fatal
+        return None
 
 
 def _crosscheck_severity_exit(findings: list[Any], severities: dict[str, str]) -> int:
@@ -523,11 +649,12 @@ def _audit_exit_code(
     help="Explicit compile_commands.json (use when not under --sources).",
 )
 @click.option(
-    "--build-config",
+    "--config",
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Trusted .abicheck.yml (enables build.query with --allow-build-query).",
+    help="Trusted project .abicheck.yml (enables build.query with "
+    "--allow-build-query).",
 )
 @click.option(
     "--baseline",
@@ -536,26 +663,55 @@ def _audit_exit_code(
     help="Previous build's dump/library to compare against.",
 )
 @click.option(
+    "--baseline-header",
+    "--baseline-headers",
+    "baseline_header",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Public header(s)/dir for the --baseline side when it is a native "
+    "library whose headers differ from the new build's -H. Without this, a "
+    "native baseline is parsed with the new -H (correct only when the headers "
+    "did not change). Ignored for a JSON-snapshot baseline (headers already "
+    "baked in).",
+)
+@click.option(
+    "--baseline-include",
+    "baseline_include",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Include root(s) for parsing --baseline-header (the old side's -I). "
+    "Defaults to the new build's -I when unset.",
+)
+@click.option(
     "--mode",
     "mode",
     type=click.Choice([m.value for m in ScanMode]),
     default=ScanMode.PR.value,
-    show_default=True,
-    help="Fixed (L,S) preset selecting how deep the scan runs.",
+    show_default=False,
+    hidden=True,
+    help="DEPRECATED (ADR-037 D5 G22 Phase 6): fixed (L,S) preset. Use --depth; "
+    "kept as a warned alias for one release. (--audit is the standalone "
+    "no-baseline lint switch.)",
 )
 @click.option(
     "--source-method",
     "source_method",
     type=click.Choice([m.value for m in SourceMethod]),
     default=None,
-    help="Precise S-axis level to reach; deterministic. 'auto' = risk-driven (opt-in).",
+    hidden=True,
+    help="DEPRECATED (ADR-037 D5 G22 Phase 6): precise S-axis technique. Use "
+    "--depth; kept as a warned alias for one release.",
 )
 @click.option(
     "--depth",
     "depth",
     type=DEPTH_PARAM,
     default=None,
-    help="Coarse L-axis selector (unified dial; --source-method wins if both).",
+    help="Evidence depth to collect — the single dial, named by what you get: "
+    "binary (L0/L1 symbols only), headers (+L2 AST), build (+L3 build context), "
+    "source (+L4 replay & the L5 graph), full (deepest). Omit for 'auto' "
+    "(risk-driven when a --since/--changed-path seed is present, else a sensible "
+    "default). --audit is orthogonal (no-baseline lint).",
 )
 @click.option(
     "--since",
@@ -602,14 +758,14 @@ def _audit_exit_code(
     default=None,
     help="Override the risk_rules profile (YAML).",
 )
-@click.option(
-    "--lang", type=click.Choice(["c", "c++"]), default="c++", show_default=True
-)
+@lang_option
 @click.option(
     "--allow-build-query",
     is_flag=True,
     default=False,
-    help="Permit a trusted build.query subprocess to emit a compile DB.",
+    hidden=True,  # deprecated no-op: build query runs automatically with --sources
+    help="Deprecated and ignored. With --sources, abicheck infers and runs the "
+    "build-system query (cmake/make/bazel) itself; no flag is needed.",
 )
 @click.option(
     "--format",
@@ -617,9 +773,12 @@ def _audit_exit_code(
     type=click.Choice(["text", "json"]),
     default="text",
     show_default=True,
+    help="Output format.",
 )
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
+@compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     binaries: tuple[Path, ...],
     headers: tuple[Path, ...],
@@ -630,6 +789,8 @@ def scan_cmd(
     compile_db: Path | None,
     build_config: Path | None,
     baseline: Path | None,
+    baseline_header: tuple[Path, ...],
+    baseline_include: tuple[Path, ...],
     mode: str,
     source_method: str | None,
     depth: str | None,
@@ -645,6 +806,13 @@ def scan_cmd(
     fmt: str,
     output: Path | None,
     verbose: bool,
+    header_backend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
 ) -> None:
     """Deterministic source-intelligence scan (classify → always-on tier → level).
 
@@ -670,6 +838,25 @@ def scan_cmd(
     """
     _setup_verbosity(verbose)
     start = time.monotonic()
+
+    # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
+    # shared resolver bundles the cross-toolchain + frontend flags and folds the
+    # project's `.abicheck.yml` compile: block in (CLI > config; the config is
+    # --config or the one auto-discovered at the --sources root).
+    compile_context, includes_tuple = resolve_compile_context(
+        click.get_current_context(),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=tuple(includes),
+        build_config=build_config,
+        sources=sources,
+    )
+    includes = includes_tuple
 
     if len(binaries) != 1:
         raise click.UsageError(
@@ -707,6 +894,30 @@ def scan_cmd(
     risk_rules = _load_risk_rules(risk_rules_path)
     risk = score_changed_paths(changed, risk_rules)
 
+    # ADR-037 D5 G22 Phase 6: --depth is the single visible dial; --mode and
+    # --source-method are hidden, deprecated warned aliases for one release.
+    _ctx = click.get_current_context()
+    _mode_explicit = (
+        _ctx.get_parameter_source("mode") == click.core.ParameterSource.COMMANDLINE
+    )
+    _sm_explicit = (
+        _ctx.get_parameter_source("source_method")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if _mode_explicit or _sm_explicit:
+        _dep = [
+            f
+            for f, e in (("--mode", _mode_explicit), ("--source-method", _sm_explicit))
+            if e
+        ]
+        click.echo(
+            f"warning: {', '.join(_dep)} {'is' if len(_dep) == 1 else 'are'} "
+            "deprecated (ADR-037 D5); use --depth "
+            "(binary|headers|build|source|full), or omit it for auto. --audit is "
+            "the no-baseline lint switch.",
+            err=True,
+        )
+
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
     sm = SourceMethod(source_method) if source_method else None
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
@@ -715,6 +926,12 @@ def scan_cmd(
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
+    # The unset dial means 'auto' (ADR-037 D5): opt into the risk-driven S-method
+    # so a seeded PR scan escalates by risk and an unseeded one falls back to the
+    # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
+    # explicit --mode) — a pinned rung stays deterministic.
+    if sm is None and dp is None and not _mode_explicit:
+        sm = SourceMethod.AUTO
     is_auto = sm is SourceMethod.AUTO
     # auto uses the risk score ONLY when a valid diff seed was produced. A seeded
     # empty diff (no-op PR) correctly yields s0 (skip the scan); a missing/failed
@@ -731,6 +948,17 @@ def scan_cmd(
     # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
     # --source-method reports its own depth, not the mode preset (Codex review).
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
+    # Keyed on the *resolved* effective depth, not the raw --depth:
+    # --source-method wins over --depth, so `--source-method s5 --depth binary`
+    # still keeps the inputs needed for a source scan.
+    headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
+        eff_depth_enum,
+        headers,
+        baseline_header,
+        sources,
+        build_info,
+        compile_db,
+    )
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
@@ -742,8 +970,13 @@ def scan_cmd(
             sources=sources,
             build_info=effective_build_info,
             mode=scan_mode.value,
-            source_method=source_method,
-            depth=depth,
+            # Thread the *resolved* concrete level (not the raw flags) so the
+            # estimate matches what the real scan would run — e.g. the auto
+            # default resolving a seeded empty diff to s0/off, not the pr preset,
+            # and pr-deep keeping its (s5, graph) depth rather than collapsing to
+            # source under the source-method>depth precedence (Codex review).
+            resolved_method=resolved,
+            eff_depth=eff_depth_enum,
             changed=changed,
             seeded=seeded,
             budget_s=budget_s,
@@ -757,9 +990,28 @@ def scan_cmd(
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
     # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
     # argv, renders, and maps the budget-overflow signal onto an exit code.
+    # Two distinct notions of "explicit", deliberately not the same boolean:
+    #  • _level_explicit — consent to auto-run build.query (level-implies-query):
+    #    a non-auto --source-method, or --depth ONLY when no --source-method is
+    #    given (--source-method auto wins in resolution and must NOT grant query
+    #    consent). Conservative.
+    #  • _pinned_explicit — the auto-strict evidence contract: an explicit --depth
+    #    *always* pins (regardless of --source-method auto, which only picks the
+    #    method, not whether the user demanded source depth), or a non-auto
+    #    --source-method (CodeRabbit review). --mode is a deprecated preset, never
+    #    a pin.
+    _sm_pin = source_method is not None and source_method != SourceMethod.AUTO.value
+    _level_explicit = _sm_pin or (source_method is None and depth is not None)
+    _pinned_explicit = (depth is not None) or _sm_pin
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )
+    # Cleanup thunks for any out-of-tree inferred cmake build dir, owned here so the
+    # dir outlives every scan phase that re-uses a compile unit's `directory` as a
+    # cwd — the S2 preprocessor scan runs `clang -E` there. collect_inline_pack
+    # would otherwise delete it as soon as L4 finished, before that scan ran (and
+    # before any post-snapshot raise). Run in the finally below, on every exit path.
+    build_dir_cleanups: list[Callable[[], None]] = []
     try:
         core = run_scan_core(
             start=start,
@@ -772,6 +1024,8 @@ def scan_cmd(
             effective_build_info=effective_build_info,
             build_config=build_config,
             baseline=baseline,
+            baseline_headers=list(baseline_header),
+            baseline_includes=list(baseline_include),
             lang=lang,
             allow_build_query=allow_build_query,
             scan_mode=scan_mode,
@@ -787,10 +1041,39 @@ def scan_cmd(
             severities=severities,
             budget=budget,
             budget_s=budget_s,
+            # A concrete explicit level is what consents to level-implies-query
+            # auto-running build.query: a non-auto --source-method, or --depth ONLY
+            # when no --source-method is given (resolve_level gives --source-method
+            # precedence and ignores --depth otherwise, so `auto`+`--depth` resolves
+            # via auto/the preset, not the depth — it must not count as consent;
+            # Codex review). An explicit --mode is deliberately NOT consent here.
+            level_explicit=_level_explicit,
+            # The pinned-depth contract (auto-strict) gates on the *deliberate* new
+            # surface only — an explicit --depth (even alongside --source-method
+            # auto) or a non-auto --source-method. An explicit --mode is NOT a pin:
+            # it is a deprecated *preset* alias (pr/pr-deep/baseline/audit, all deep
+            # by collect-mode) that the GitHub Action passes by default (`--mode pr`)
+            # and that `--mode audit` uses for a binary-only lint — treating it as a
+            # pin would break those best-effort paths (Codex review).
+            pinned_explicit=_pinned_explicit,
+            compile_context=None if compile_context.is_default else compile_context,
+            defer_cleanup=build_dir_cleanups,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
         sys.exit(_EXIT_BUDGET_OVERFLOW)
+    except _EvidenceContractError as ce:
+        # A pinned depth that can't collect its evidence is a usage contract
+        # violation → a clean CLI error (exit 1), distinct from the verdict codes
+        # (2/4) and the budget code (5).
+        raise click.ClickException(ce.message) from ce
+    finally:
+        # Remove the inferred cmake build dir(s) now that every build-dir-dependent
+        # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
+        # so a removal/unlock error never aborts the rest nor masks the real outcome.
+        from .buildsource.build_query import drain_build_dir_cleanups
+
+        drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
     text = (
@@ -813,6 +1096,22 @@ class _BudgetOverflow(Exception):
 
     A scan-engine signal (not a click concern): the budget is a *failure guard*
     that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class _EvidenceContractError(Exception):
+    """Raised by ``run_scan_core`` when a *pinned* depth can't collect its evidence.
+
+    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method``
+    is a contract — if the requested source/build evidence is unavailable the scan
+    fails loudly rather than silently degrading to a shallower one. Like
+    :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error
+    exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a
+    failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
     """
 
     def __init__(self, message: str) -> None:
@@ -845,6 +1144,8 @@ def run_scan_core(
     baseline: Path | None,
     lang: str,
     allow_build_query: bool,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
     scan_mode: ScanMode,
     resolved: SourceMethod,
     eff_depth_enum: EvidenceDepth,
@@ -858,6 +1159,10 @@ def run_scan_core(
     severities: dict[str, str],
     budget: str | None,
     budget_s: float | None,
+    level_explicit: bool = False,
+    pinned_explicit: bool = False,
+    compile_context: CompileContext | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -866,6 +1171,11 @@ def run_scan_core(
     overflow (the CLI maps it to exit 5). This is the one body the CLI,
     ``service.run_scan``, and the MCP scan tool share (ADR-035 D10).
     """
+    stage_timings: dict[str, float] = {}
+
+    def _record_stage(name: str, started: float) -> None:
+        stage_timings[name] = time.monotonic() - started
+
     # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
     # Runs *before* the snapshot build so its escalation triggers feed the D7
     # points-of-interest work-list that focuses the (expensive) source replay.
@@ -874,18 +1184,42 @@ def run_scan_core(
     # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
     # back to the whole-tree scan (Codex review).
     pattern_roots: list[Path] = [*headers]
-    if sources is not None:
+    if sources is not None and eff_depth_enum not in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+    }:
         pattern_roots.append(sources)
+    _stage = time.monotonic()
     pattern = scan_files(pattern_roots, changed if seeded else None)
+    _record_stage("pattern_scan", _stage)
 
     # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
-    # Floor = the directly-changed paths (always included); the pattern triggers
-    # and risk score only *add* candidates, never drop a changed TU (ADR-035 D7).
+    # Floor = the directly-changed paths (always included); the pattern triggers,
+    # risk score, and the L0↔L2 export deltas only *add* candidates, never drop a
+    # changed TU (ADR-035 D7). The export-delta walk needs both sides' export
+    # tables up front, so read a cheap, header-free L0 view of the candidate and
+    # baseline here (no castxml/L3-L5); the one expensive collection still runs
+    # once, below, with the resulting focus seed. The candidate view is only
+    # loaded when there is a baseline to diff it against — the delta walk consumes
+    # the two together, so loading it baseline-less would be a wasted L0/L1 parse.
+    needs_export_delta_poi = (
+        baseline is not None
+        and seeded
+        and collect_mode in {"source-changed", "graph-full"}
+    )
+    _stage = time.monotonic()
+    poi_baseline = _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
+    poi_candidate = (
+        _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
+    )
     poi = build_points_of_interest(
         changed_paths=changed,
         risk=risk,
         pattern_triggers=pattern.escalation_triggers,
+        baseline=poi_baseline,
+        candidate=poi_candidate,
     )
+    _record_stage("poi", _stage)
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
@@ -894,9 +1228,68 @@ def run_scan_core(
     # (``seeded``). Without --since/--changed-path the scan is broad by contract
     # (the report says so), so passing pattern-trigger POIs as the changed set
     # would wrongly narrow PR-mode replay to a single pattern-flagged TU and skip
-    # source-only checks elsewhere (Codex review). When seeded, the POI set (floor
-    # + pattern/risk additions) is the focusing work-list.
-    replay_seed = tuple(poi.changed_paths()) if seeded else ()
+    # source-only checks elsewhere (Codex review). When seeded, the focusing
+    # work-list is the changed-path floor *plus* the TUs resolved from changed
+    # exports via the baseline's L5 graph (resolve_symbol_tus) — so a changed
+    # export with an unchanged header still points the replay at the one TU that
+    # emits it (ADR-035 D7, the focusing half).
+    symbol_tus = resolve_symbol_tus(poi, poi_baseline) if seeded else ()
+    replay_seed = (
+        tuple(dict.fromkeys((*poi.changed_paths(), *symbol_tus))) if seeded else ()
+    )
+    # ADR-035 P3: an unseeded s5/pr run cannot narrow 'source-changed' to a diff,
+    # so the L4 replay falls back to the public-API 'headers-only' surface
+    # (inline.collect_inline_pack). Record an advisory naming the cost + the knob
+    # that focuses it, rather than silently paying a broad replay (validation P3
+    # "no auto-warn"). Carried on the result (text + JSON) so it never pollutes a
+    # structured-format stdout.
+    advisories: list[str] = []
+    # Only when L4 replay can actually run (a --sources tree is present —
+    # `_run_inline_source_abi` returns early without one, and `--build-info`
+    # alone yields L3 but no replay) does the headers-only fallback apply; firing
+    # the advisory otherwise would report a replay that never happened
+    # (CodeRabbit review).
+    if not seeded and collect_mode == "source-changed" and sources is not None:
+        advisories.append(
+            "no --since/--changed-path seed; the source replay covers the "
+            "public-API surface (headers-only) instead of a focused diff. Pass "
+            "--since <ref> or --changed-path to scope it to the change."
+        )
+    # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
+    # defines a build.query, together with an *explicitly pinned* deep level
+    # (--source-method/--depth, level_explicit), is itself consent to run that
+    # query — making the user pass --allow-build-query as well for a level they
+    # explicitly asked for is needless friction. Trusted = an explicit --config
+    # path (build_config is not None here; an auto-discovered source-tree config
+    # is resolved later in embed_build_source and never reaches this gate), so
+    # this never runs an attacker-controlled command. Crucially it does NOT fire
+    # for the default mode preset (a plain `scan`/`--audit` with `--sources` whose
+    # collect_mode is already non-off) — only an explicit deep level counts, so a
+    # --config passed purely for project settings never silently runs a subprocess
+    # (Codex review). No-op when the config defines no query.
+    effective_allow_query = allow_build_query
+    if (
+        not allow_build_query
+        and build_config is not None
+        and collect_mode != "off"
+        and level_explicit
+    ):
+        from .buildsource.inline import load_build_config
+
+        try:
+            _cfg = load_build_config(build_config)
+        except Exception:  # malformed config surfaces later in the real load
+            _cfg = None
+        if _cfg is not None and _cfg.query:
+            effective_allow_query = True
+            advisories.append(
+                f"level {resolved.value} with a trusted --config defining "
+                "build.query: auto-enabled the query to collect L3+ evidence "
+                "(equivalent to --allow-build-query). Pass --allow-build-query "
+                "explicitly to silence this note."
+            )
+
+    _stage = time.monotonic()
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -904,13 +1297,80 @@ def run_scan_core(
         sources,
         collect_mode,
         lang,
-        allow_build_query,
+        effective_allow_query,
         changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
+        compile_context=compile_context,
+        defer_cleanup=defer_cleanup,
+        symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+        debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
     )
+    _record_stage("candidate_snapshot", _stage)
+    l4_cov = _source_abi_coverage(new_snap)
+    if l4_cov.get("scope_widened_to_full"):
+        advisories.append(
+            "headers-only source replay widened to all compile units because no "
+            "include graph/public-header target ownership could narrow it. Provide "
+            "depfile/include graph evidence or seed with --since/--changed-path to "
+            "avoid full fanout."
+        )
+    uncovered = int(l4_cov.get("public_headers_uncovered", 0) or 0)
+    if uncovered:
+        advisories.append(
+            f"headers-only source replay used the include graph and skipped full "
+            f"fanout, but {uncovered} public header(s) were not reached by any "
+            "selected TU; source-only coverage is partial for those headers."
+        )
+    exported = int(l4_cov.get("exported_symbols", 0) or 0)
+    matched = int(l4_cov.get("matched_symbols", 0) or 0)
+    parsed = int(l4_cov.get("compile_units_parsed", 0) or 0)
+    if exported and parsed and matched == 0:
+        advisories.append(
+            f"L4 source replay parsed {parsed} TU(s) but matched 0/{exported} "
+            "exported symbol(s); source-link evidence is degraded. Check mangled "
+            "symbol matching/public-header roots before relying on source-only "
+            "findings."
+        )
+
+    # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
+    # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
+    # database; without one the L3/L4/L5 layers cannot be collected.
+    #
+    # ADR-037 D5 (#2 auto-strict): a depth the user *explicitly pinned* is a
+    # contract. If it was pinned with **no source evidence at all** — no
+    # --sources / --build-info, and the trusted --config build.query flow didn't
+    # produce L3 either — there is nothing to collect from, so we ERROR with the
+    # remedy rather than silently produce a shallow binary-only scan. When a
+    # source input *was* supplied (or L3 was actually collected via the config
+    # query) but L3 still came back empty, that stays a pointed *advisory* naming
+    # the remedy, not a hard error. The implicit 'auto' default never errors here.
+    gave_source_input = sources is not None or effective_build_info is not None
+    needs_source = collect_mode != "off"
+    if (
+        needs_source
+        and pinned_explicit
+        and not gave_source_input
+        and not _l3_collected(new_snap)
+    ):
+        raise _EvidenceContractError(
+            f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
+            "needs source evidence, but no --sources/--build-info was given — there "
+            "is nothing to collect L3/L4/L5 from. Pass --sources <tree> or "
+            "--build-info <dir|compile_commands.json> (or a trusted --config plus "
+            "--allow-build-query), or drop the pin / use the default 'auto' for a "
+            "best-effort binary scan. (Pinned depths are a contract.)"
+        )
+    if needs_source and gave_source_input and not _l3_collected(new_snap):
+        advisories.append(
+            f"requested depth '{eff_depth_enum.value}' (source-method "
+            f"{resolved.value}) needs an L3 compile database, but none was found — "
+            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
+            "compile_commands.json or build dir), or a trusted --config plus "
+            "--allow-build-query to generate it."
+        )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
     # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;
@@ -924,24 +1384,33 @@ def run_scan_core(
         if new_snap.build_source is not None
         else None
     )
+    _stage = time.monotonic()
     preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
+    _record_stage("preprocessor_scan", _stage)
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
     # The resolved changed-path set is handed to the engine so
     # ``public_to_internal_dependency`` can elevate a finding whose internal
     # target was touched this revision (ADR-035 D4 "L5 reachability ↔ PR
     # changed files").
+    # The changed-path set handed to the engine also carries the TUs the D7
+    # export-delta walk resolved (symbol_tus), so ``public_to_internal_dependency``
+    # elevates a finding whose internal target sits in a TU this revision touched
+    # *via a changed export* — not only the literally git-changed files.
+    _stage = time.monotonic()
     cc = run_crosschecks(
         new_snap,
         CrosscheckConfig(
             enabled=frozenset(enabled_checks),
-            changed_paths=frozenset(changed),
+            changed_paths=frozenset(changed) | set(symbol_tus),
         ),
     )
+    _record_stage("crosschecks", _stage)
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
+        _stage = time.monotonic()
         verdict, exit_code, diff_summary = _run_baseline_compare(
             baseline,
             new_snap,
@@ -952,6 +1421,11 @@ def run_scan_core(
             list(includes),
             list(public_headers),
             list(public_header_dirs),
+            compile_context=compile_context,
+            baseline_headers=baseline_headers,
+            baseline_includes=baseline_includes,
+            symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+            debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -964,6 +1438,7 @@ def run_scan_core(
             # BREAKING/API_BREAK from the artifact diff.
             if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
                 verdict = "API_BREAK"
+        _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:
             click.echo(
@@ -1003,6 +1478,8 @@ def run_scan_core(
         crosscheck=cc.to_dict(),
         crosscheck_severities=severities,
         poi=poi.to_dict(),
+        advisories=advisories,
+        stage_timings=stage_timings,
         audit=scan_mode is ScanMode.AUDIT,
         diff_summary=diff_summary,
         verdict=verdict,
@@ -1067,8 +1544,8 @@ def _emit_estimate(
     sources: Path | None,
     build_info: Path | None,
     mode: str,
-    source_method: str | None,
-    depth: str | None,
+    resolved_method: SourceMethod,
+    eff_depth: EvidenceDepth,
     changed: list[str],
     seeded: bool,
     budget_s: float | None,
@@ -1092,14 +1569,18 @@ def _emit_estimate(
         sources=sources,
         build_info=build_info,
         mode=mode,
-        source_method=source_method,
-        depth=depth,
+        source_method=resolved_method.value,
+        depth=eff_depth.value,
         changed_paths=list(changed),
         seeded=seeded,
         budget=Budget(total_timeout=budget_s),
         lang=lang,
     )
-    estimates = estimate_scan(req)
+    # Pass the *already-resolved* level so the estimate mirrors the real scan
+    # exactly — re-resolving from the round-tripped flags would re-apply the
+    # source-method > depth precedence and lose a mode preset's deeper depth
+    # (pr-deep = (s5, graph)); Codex review.
+    estimates = estimate_scan(req, resolved_level=(resolved_method, eff_depth))
     total = sum(e.est_seconds for e in estimates)
 
     if fmt == "json":
@@ -1150,6 +1631,31 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
     return RiskRules.from_dict(block if isinstance(block, dict) else raw)
 
 
+def _baseline_is_native_library(path: Path) -> bool:
+    """True if *path* is a native binary, not a JSON / ABICC-dump snapshot.
+
+    A snapshot baseline already has its headers baked in, so the candidate-`-H`
+    reuse is harmless there; only a native binary is re-parsed (and thus at risk
+    of being read through the wrong headers).
+
+    Detection is content-first to match `resolve_input`'s own native dispatch:
+    magic-byte sniffing (`detect_binary_format`) catches the cases a suffix scan
+    misses — an extensionless ELF (`build/foo`), a Mach-O framework binary, a
+    `.pyd`/`.node` shared object (Codex review). The filename heuristic is only a
+    fallback for paths that cannot be sniffed (e.g. a not-yet-existing file in a
+    unit test), and the snapshot suffixes short-circuit first so a real `.json`
+    on disk is never mis-sniffed.
+    """
+    name = path.name.lower()
+    if name.endswith((".json", ".dump", ".tar.gz", ".tgz", ".xml")):
+        return False
+    from .binary_utils import detect_binary_format
+
+    if detect_binary_format(path) is not None:
+        return True
+    return ".so" in name or name.endswith((".dll", ".dylib"))
+
+
 def _run_baseline_compare(
     baseline: Path,
     new_snap: Any,
@@ -1160,6 +1666,11 @@ def _run_baseline_compare(
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    compile_context: CompileContext | None = None,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1184,15 +1695,45 @@ def _run_baseline_compare(
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
 
+    # Each side is parsed with its *own* headers. `scan` has a single -H (built for
+    # the candidate); for a native --baseline library whose public headers differ,
+    # --baseline-header/-include select the old side's headers. Without them we
+    # reuse the candidate -H/-I — correct only when the headers did not change — so
+    # warn rather than silently read the old side through the new headers (Codex).
+    if baseline_headers:
+        bl_headers = list(baseline_headers)
+        bl_includes = list(baseline_includes) if baseline_includes else includes
+        bl_public_headers = bl_headers
+        # The old-side public boundary comes ONLY from --baseline-header: dirs in
+        # it are public-header dirs, files opt in just themselves. Do NOT fall back
+        # to the new side's public dirs — a relative dir like `include/` would
+        # (segment-based provenance) re-mark old private headers as PUBLIC and skew
+        # the public-surface scoping (Codex review).
+        bl_public_dirs = [p for p in bl_headers if p.is_dir()]
+    else:
+        bl_headers, bl_includes = headers, includes
+        bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
+        if headers and _baseline_is_native_library(baseline):
+            click.echo(
+                f"warning: --baseline {baseline.name} is a native library parsed "
+                f"with the new build's headers (-H); if its public headers differ "
+                f"from the new version, pass --baseline-header (else the old side is "
+                f"read through the new headers and the diff may be wrong/noisy).",
+                err=True,
+            )
+
     try:
         old_snap = resolve_input(
             baseline,
-            headers,
-            includes,
+            bl_headers,
+            bl_includes,
             version="",
             lang=lang,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
+            public_headers=bl_public_headers,
+            public_header_dirs=bl_public_dirs,
+            compile=compile_context,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(

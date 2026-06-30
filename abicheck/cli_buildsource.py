@@ -26,8 +26,9 @@ explicit opt-in not implemented here.
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -62,7 +63,6 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _intrinsic_coverage as _intrinsic_coverage,
     _layer_presence as _layer_presence,
     _load_pack_or_raise as _load_pack_or_raise,
-    _load_source_graph as _load_source_graph,
     _merge_attach_combined as _merge_attach_combined,
     _merge_fold_packs as _merge_fold_packs,
     _merge_handle_conflicts as _merge_handle_conflicts,
@@ -72,13 +72,14 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _optional_coverage as _optional_coverage,
     _purge_external_outputs as _purge_external_outputs,
     _resolve_side_pack as _resolve_side_pack,
-    _resolve_symbol_from_report as _resolve_symbol_from_report,
     _run_adapters as _run_adapters,
     _run_external_extractors as _run_external_extractors,
     attach_evidence_metrics as attach_evidence_metrics,
     diff_embedded_build_source as diff_embedded_build_source,
+    parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
 )
+from .cli_options import verbose_option
 
 if TYPE_CHECKING:
     from .buildsource.source_abi import SourceAbiSurface
@@ -95,13 +96,14 @@ if TYPE_CHECKING:
 )
 @click.option(
     "-H",
-    "--headers",
     "--header",
+    "--headers",
     "headers",
     multiple=True,
     type=click.Path(path_type=Path),
     help="Public header file or directory (recorded as provenance; repeat). "
-    "`--header` is an alias for cross-command consistency with dump/compare.",
+    "`--header` is the canonical spelling (shared with dump/compare); "
+    "`--headers` is accepted as a back-compat alias.",
 )
 @click.option(
     "--build-dir",
@@ -125,47 +127,15 @@ if TYPE_CHECKING:
     help="Alias for --compile-db (build dir or file).",
 )
 @click.option(
-    "--cmake",
-    "--cmake-file-api",
-    "cmake",
-    is_flag=True,
-    default=False,
-    help="Collect CMake File API facts from --build-dir (reads the reply directory; no build).",
-)
-@click.option(
-    "--ninja",
-    "ninja",
-    is_flag=True,
-    default=False,
-    help="Collect Ninja compile/graph facts from --build-dir via `ninja -t` queries.",
-)
-@click.option(
-    "--ninja-compdb",
-    "ninja_compdb",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `ninja -t compdb` output (for hermetic CI / no live ninja).",
-)
-@click.option(
-    "--bazel-cquery",
-    "bazel_cquery",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `bazel cquery --output=jsonproto` output (configured target graph).",
-)
-@click.option(
-    "--bazel-aquery",
-    "bazel_aquery",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `bazel aquery --output=jsonproto` output (compile/link action graph).",
-)
-@click.option(
-    "--make-dry-run",
-    "make_dry_run",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `make -n`/`--trace` transcript (reduced-confidence compile units).",
+    "--from",
+    "from_adapters",
+    multiple=True,
+    metavar="ADAPTER[=PATH]",
+    help="Build-evidence adapter to run (repeatable). Live (read --build-dir, no "
+    "build): `cmake` (CMake File API reply), `ninja` (`ninja -t` queries). "
+    "Pre-captured (require a path): `ninja-compdb=<file>`, `bazel-cquery=<file>`, "
+    "`bazel-aquery=<file>`, `make=<transcript>`. "
+    "E.g. `--from cmake --from bazel-aquery=aquery.json`.",
 )
 @click.option(
     "--read-compiler-record",
@@ -337,19 +307,14 @@ if TYPE_CHECKING:
     required=True,
     help="Output build-source pack directory.",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def collect_cmd(
     binary: Path | None,
     headers: tuple[Path, ...],
     build_dir: Path | None,
     compile_db: Path | None,
     compile_db_p: Path | None,
-    cmake: bool,
-    ninja: bool,
-    ninja_compdb: Path | None,
-    bazel_cquery: Path | None,
-    bazel_aquery: Path | None,
-    make_dry_run: Path | None,
+    from_adapters: tuple[str, ...],
     read_compiler_record: bool,
     build_system: str,
     source_abi: bool,
@@ -378,7 +343,8 @@ def collect_cmd(
     Examples:
       abicheck collect --compile-db build/compile_commands.json -o libfoo.evidence/
       abicheck collect -p build/ --headers include/ -o libfoo.evidence/
-      abicheck collect --build-dir build --cmake --ninja -o libfoo.evidence/
+      abicheck collect --build-dir build --from cmake --from ninja -o libfoo.evidence/
+      abicheck collect --from bazel-aquery=aquery.json -o libfoo.evidence/
 
     The resulting directory attaches to a snapshot with `abicheck dump --build-info`/`--sources`.
     """
@@ -389,18 +355,21 @@ def collect_cmd(
         source_abi
         and _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
+    # Collapse the unified `--from adapter[=path]` specs into the per-adapter
+    # kwargs the engine still takes (ADR-037 CLI consolidation).
+    adapters = parse_from_specs(from_adapters)
 
     _run_adapters(
         merged,
         extractors,
         compile_db=effective_compile_db,
         build_dir=build_dir,
-        cmake=cmake,
-        ninja=ninja,
-        ninja_compdb=ninja_compdb,
-        bazel_cquery=bazel_cquery,
-        bazel_aquery=bazel_aquery,
-        make_dry_run=make_dry_run,
+        cmake=bool(adapters["cmake"]),
+        ninja=bool(adapters["ninja"]),
+        ninja_compdb=adapters["ninja_compdb"],  # type: ignore[arg-type]
+        bazel_cquery=adapters["bazel_cquery"],  # type: ignore[arg-type]
+        bazel_aquery=adapters["bazel_aquery"],  # type: ignore[arg-type]
+        make_dry_run=adapters["make_dry_run"],  # type: ignore[arg-type]
         binary=binary,
         read_compiler_record=read_compiler_record,
         build_system=build_system,
@@ -810,6 +779,10 @@ def embed_build_source(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
+    extractor: str = "auto",
+    public_headers: tuple[str, ...] = (),
+    public_header_dirs: tuple[str, ...] = (),
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -860,10 +833,13 @@ def embed_build_source(
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
-        # Only an explicit --build-config is operator-supplied/trusted for
-        # subprocess execution. Auto-discovered source-tree configs may be
-        # attacker-controlled; their non-executable settings are still honored.
-        cfg_trusted_for_query = build_config is not None
+        # Only operator-supplied input is trusted for subprocess execution: an
+        # explicit --config file or an explicit --build-query command on the CLI.
+        # Auto-discovered source-tree configs may be attacker-controlled; their
+        # non-executable settings are still honored, but their query never runs.
+        # (Inferred build queries — cmake/make/bazel that abicheck constructs
+        # itself — always run regardless; see buildsource.build_query.)
+        cfg_trusted_for_query = build_config is not None or build_query is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
@@ -894,12 +870,22 @@ def embed_build_source(
             build_config=cfg,
             allow_build_query=allow_build_query,
             build_config_trusted_for_query=cfg_trusted_for_query,
+            # A build.compile_db is an *explicit* L3 input (its miss must surface,
+            # not fall through to inference) when it came from the CLI
+            # --build-compile-db or an operator --config — never from an
+            # auto-discovered .abicheck.yml (review).
+            compile_db_explicit=build_compile_db is not None or build_config is not None,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
+            extractor=extractor,
             scope=scope,
             layers=layers,
             exported_symbols=exported,
             changed_paths=changed_paths,
+            public_header_roots=tuple(
+                dict.fromkeys((*public_headers, *public_header_dirs))
+            ),
+            defer_cleanup=defer_cleanup,
         )
         # P09: don't fail *silently* when a source/build tree yields no compile DB.
         # Autotools `configure` (and a bare checkout) emit no compile_commands.json,
@@ -908,14 +894,20 @@ def embed_build_source(
         _ev = inline_pack.build_evidence if inline_pack is not None else None
         _has_l3 = _ev is not None and bool(_ev.compile_units)
         _has_query_note = inline_pack is not None and any(
-            e.name == "build_query" for e in inline_pack.manifest.extractors
+            # Both the trusted `build.query` and the zero-config inferred query
+            # ("build_query_auto") record a diagnostic that already explains the
+            # missing L3 — don't also emit the generic "run cmake …" hint, which
+            # would contradict an inferred query abicheck just attempted.
+            e.name in ("build_query", "build_query_auto")
+            for e in inline_pack.manifest.extractors
         )
         if not _has_l3 and bi_pack is None and not _has_query_note:
             _tree = raw_sources if raw_sources is not None else raw_build_info
             _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
             click.echo(
                 f"warning: no compile_commands.json found under {_tree} "
-                "(looked in: ., build, builddir, out, _build, cmake-build-debug); "
+                "(looked in: ., build, builddir, out, _build, cmake-build-debug, "
+                "and any immediate subdirectory); "
                 f"L3{_deeper} not collected. Generate one — CMake: configure with "
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON; Meson: emitted by `meson setup`; "
                 "Autotools/Make: run `bear -- make` — or pass "
@@ -951,6 +943,7 @@ def dump_source_only(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    extractor: str = "auto",
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -983,6 +976,7 @@ def dump_source_only(
         collect_mode,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        extractor=extractor,
     )
 
 
@@ -1011,7 +1005,7 @@ def dump_source_only(
     "with DIFFERING facts: `warn` keeps first-wins and records a "
     "diagnostic; `error` exits non-zero (good for baseline generation).",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def merge_cmd(
     inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose: bool
 ) -> None:
@@ -1065,156 +1059,23 @@ def merge_cmd(
     _merge_print_summary(base_path, contributors, len(snaps), combined, output)
 
 
-@main.command("compare-graph")
-@click.argument("old", type=click.Path(path_type=Path))
-@click.argument("new", type=click.Path(path_type=Path))
-@click.option(
-    "--format",
-    "fmt",
-    default="text",
-    show_default=True,
-    type=click.Choice(["text", "json"], case_sensitive=False),
-    help="Output format for the structural graph diff.",
-)
-def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
-    """Compare two L5 source graph summaries (ADR-031 D6, D8).
-
-    \b
-    OLD and NEW may each be a `graph/source_graph_summary.json` file or an
-    evidence-pack directory produced by `collect --source-graph summary`.
-
-    The diff is structural — which nodes/edges entered or left the graph. Per
-    ADR-028 D3 / ADR-031 D6 it *explains and prioritizes* impact; it never, on
-    its own, decides or suppresses an artifact-proven ABI break.
-    """
-    import json as _json
-
-    from .buildsource.source_graph import diff_source_graph, diff_source_graph_findings
-
-    old_graph = _load_source_graph(old)
-    new_graph = _load_source_graph(new)
-    delta = diff_source_graph(old_graph, new_graph)
-    findings = diff_source_graph_findings(old_graph, new_graph)
-
-    if fmt == "json":
-        payload = delta.to_dict()
-        payload["findings"] = [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-                "old_value": c.old_value,
-                "new_value": c.new_value,
-            }
-            for c in findings
-        ]
-        click.echo(_json.dumps(payload, indent=2, sort_keys=True))
-        return
-
-    if not delta.changed:
-        click.echo("Source graphs are structurally identical.")
-        click.echo(f"  graph_id: {old_graph.graph_id or old_graph.compute_graph_id()}")
-        return
-
-    click.echo("Source graph structural diff:")
-    click.echo(
-        f"  nodes: +{len(delta.added_nodes)} / -{len(delta.removed_nodes)}    "
-        f"edges: +{len(delta.added_edges)} / -{len(delta.removed_edges)}"
-    )
-    for node in delta.added_nodes:
-        click.echo(f"  + node [{node.kind}] {node.label or node.id}")
-    for node in delta.removed_nodes:
-        click.echo(f"  - node [{node.kind}] {node.label or node.id}")
-    for edge in delta.added_edges:
-        click.echo(f"  + edge {edge.kind}: {edge.src} -> {edge.dst}")
-    for edge in delta.removed_edges:
-        click.echo(f"  - edge {edge.kind}: {edge.src} -> {edge.dst}")
-
-    if findings:
-        # Graph-derived RISK findings (ADR-031 D6): explanation/prioritization,
-        # never a standalone ABI-break verdict (ADR-028 D3).
-        click.echo(f"\nGraph-derived risk findings ({len(findings)}):")
-        for c in findings:
-            click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
+# (re-exported from `cli_buildsource_helpers`, like the block above). They moved
+# to `cli_graph` when the `graph` command group was extracted. A *static*
+# `from .cli_graph import ...` would form a `cli_buildsource → cli_graph → cli →
+# … → cli_buildsource` import cycle (the AI-readiness gate rejects it), so this
+# module-level `__getattr__` (PEP 562) resolves them lazily via
+# `importlib.import_module` — a runtime call, not a static import edge. It
+# preserves the historical path `from abicheck.cli_buildsource import
+# _load_source_graph` without coupling the two modules. New code should import
+# from `cli_graph` directly.
+_GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
 
 
-@main.command("explain-finding")
-@click.option(
-    "--sources",
-    "sources",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Source/graph pack directory (or a source_graph_summary.json) to explain through.",
-)
-@click.option(
-    "--symbol",
-    "symbol",
-    default="",
-    help="Exported (mangled) binary symbol to localize.",
-)
-@click.option(
-    "--report",
-    "report",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="A `compare --format json` report; with --finding-id, resolves the symbol from it.",
-)
-@click.option(
-    "--finding-id",
-    "finding_id",
-    default="",
-    help="Index (or symbol) of a finding in --report to localize.",
-)
-@click.option(
-    "--format",
-    "fmt",
-    default="text",
-    show_default=True,
-    type=click.Choice(["text", "json"], case_sensitive=False),
-)
-def explain_finding_cmd(
-    sources: Path,
-    symbol: str,
-    report: Path | None,
-    finding_id: str,
-    fmt: str,
-) -> None:
-    """Localize a finding through L5 source-graph evidence (ADR-031 D8).
+def __getattr__(name: str) -> Any:
+    if name in _GRAPH_REEXPORTS:
+        import importlib
 
-    Given an exported symbol (directly via --symbol, or resolved from a
-    `--report` finding via --finding-id), walks the graph to show what produced
-    and reaches it: exporting target, source declaration(s), declaring public
-    header(s), ABI-relevant build option(s), and static callees. This explains
-    and prioritizes; it is never an ABI verdict (ADR-031 D6).
-    """
-    import json as _json
-
-    from .buildsource.source_graph import localize_symbol
-
-    graph = _load_source_graph(sources)
-    if not symbol and report is not None:
-        symbol = _resolve_symbol_from_report(report, finding_id)
-    if not symbol:
-        raise click.ClickException(
-            "No symbol to explain: pass --symbol, or --report with --finding-id."
-        )
-
-    result = localize_symbol(graph, symbol)
-    if fmt == "json":
-        click.echo(_json.dumps(result, indent=2, sort_keys=True))
-        return
-
-    click.echo(f"Explaining symbol: {symbol}")
-    if not result["found"]:
-        click.echo(
-            "  (symbol not present in the source graph — no localization available)"
-        )
-    rows = [
-        ("exported by target(s)", result["exported_by_targets"]),
-        ("source declaration(s)", result["source_declarations"]),
-        ("declared in header(s)", result["declared_in_headers"]),
-        ("reached by build option(s)", result["reached_by_build_options"]),
-        ("static callee(s)", result["static_callees"]),
-    ]
-    for label, values in rows:
-        click.echo(f"  {label}: {', '.join(values) if values else '(none in graph)'}")
+        return getattr(importlib.import_module("abicheck.cli_graph"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

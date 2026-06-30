@@ -132,10 +132,11 @@ def diff_embedded_build_source(
     if old_pack is None and new_pack is None:
         if collect_mode != "off":
             click.echo(
-                f"Note: --collect-mode {collect_mode} requested but no build-info/"
-                "source facts were embedded or supplied; inline collection for "
-                "this mode is not yet available. Use `abicheck collect` then embed "
-                "with `dump --build-info/--sources` (or pass --old/new pack dirs).",
+                f"Note: --depth collected evidence mode '{collect_mode}' was "
+                "requested but no build-info/source facts were embedded or "
+                "supplied; inline collection for this mode is not yet available. "
+                "Use `abicheck collect` then embed with `dump --build-info/"
+                "--sources` (or pass --old/new pack dirs).",
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer
@@ -556,82 +557,6 @@ def _echo_capabilities(
             click.echo(f"  [off] {label} — {why_off}", err=True)
 
 
-# ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
-
-
-def _load_source_graph(path: Path) -> SourceGraphSummary:
-    """Load a source graph summary from a JSON file or an evidence-pack dir.
-
-    Accepts either ``…/graph/source_graph_summary.json`` directly or a pack
-    directory (the graph is read from its manifest layout). Raises a Click error
-    when neither yields a graph so the failure is actionable.
-    """
-    import json as _json
-
-    from .buildsource.source_graph import SourceGraphSummary
-
-    if path.is_dir():
-        pack = _load_pack_or_raise(path)
-        if pack.source_graph is None:
-            raise click.ClickException(
-                f"Evidence pack at {path} has no L5 source graph "
-                "(collect it with `collect --source-graph summary`)."
-            )
-        return pack.source_graph
-    if not path.is_file():
-        raise click.ClickException(f"No source graph summary at {path}.")
-    try:
-        data = _json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise click.ClickException(
-            f"Cannot read source graph at {path}: {exc}"
-        ) from exc
-    if not isinstance(data, dict):
-        raise click.ClickException(f"{path} must contain a JSON object.")
-    # SourceGraphSummary.from_dict is intentionally forgiving (it defaults a
-    # missing nodes/edges to empty), so guard here: an unrelated JSON file (e.g.
-    # a pack manifest) would otherwise load as an empty graph and report a bogus
-    # diff instead of an actionable error.
-    if not isinstance(data.get("nodes"), list) or not isinstance(
-        data.get("edges"), list
-    ):
-        raise click.ClickException(
-            f"{path} is not a source graph summary "
-            "(expected top-level 'nodes' and 'edges' lists)."
-        )
-    return SourceGraphSummary.from_dict(data)
-
-
-def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
-    """Resolve a symbol from a `compare --format json` report finding.
-
-    ``finding_id`` may be a 0-based index into the report's changes, or a symbol
-    substring to match. Returns the matched change's ``symbol`` (or "").
-    """
-    import json as _json
-
-    try:
-        data = _json.loads(Path(report).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise click.ClickException(f"Cannot read report {report}: {exc}") from exc
-    changes = data.get("changes") or data.get("findings") or []
-    if not isinstance(changes, list):
-        return ""
-    if finding_id.isdigit():
-        idx = int(finding_id)
-        if 0 <= idx < len(changes) and isinstance(changes[idx], dict):
-            return str(changes[idx].get("symbol", ""))
-        return ""
-    for change in changes:
-        if (
-            isinstance(change, dict)
-            and finding_id
-            and finding_id in str(change.get("symbol", ""))
-        ):
-            return str(change.get("symbol", ""))
-    return ""
-
-
 def _build_coverage(
     merged: BuildEvidence,
     has_build: bool,
@@ -853,6 +778,71 @@ def _echo_collection_summary(
         click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
+
+
+#: ``collect --from`` adapter specs (ADR-037 CLI consolidation). The six former
+#: per-adapter flags (``--cmake``/``--ninja`` live toggles + ``--ninja-compdb``/
+#: ``--bazel-cquery``/``--bazel-aquery``/``--make-dry-run`` pre-captured paths)
+#: collapse onto one repeatable ``--from adapter[=path]``. Live adapters take no
+#: ``=path`` (they read ``--build-dir``); pre-captured ones require one.
+_FROM_LIVE_ADAPTERS: frozenset[str] = frozenset({"cmake", "ninja"})
+#: pre-captured adapter name → the ``_run_adapters`` kwarg it feeds.
+_FROM_PATH_ADAPTERS: dict[str, str] = {
+    "ninja-compdb": "ninja_compdb",
+    "bazel-cquery": "bazel_cquery",
+    "bazel-aquery": "bazel_aquery",
+    "make": "make_dry_run",
+}
+
+
+def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
+    """Parse ``collect --from adapter[=path]`` specs into ``_run_adapters`` kwargs.
+
+    Returns a dict with ``cmake``/``ninja`` bools and ``ninja_compdb``/
+    ``bazel_cquery``/``bazel_aquery``/``make_dry_run`` paths (None when unset).
+    Raises :class:`click.UsageError` on an unknown adapter, a live adapter given
+    a ``=path``, a pre-captured adapter given no path, or the same adapter passed
+    twice (so a repeated ``--from`` never silently last-wins). Pure (no I/O) so it
+    is unit-tested directly.
+    """
+    out: dict[str, object] = {
+        "cmake": False,
+        "ninja": False,
+        "ninja_compdb": None,
+        "bazel_cquery": None,
+        "bazel_aquery": None,
+        "make_dry_run": None,
+    }
+    valid = sorted(_FROM_LIVE_ADAPTERS | set(_FROM_PATH_ADAPTERS))
+    seen: set[str] = set()
+    for spec in specs:
+        name, sep, value = spec.partition("=")
+        name = name.strip()
+        if name in seen:
+            raise click.UsageError(
+                f"--from {name} was given more than once; pass each adapter "
+                "at most once."
+            )
+        if name in _FROM_LIVE_ADAPTERS:
+            if sep:
+                raise click.UsageError(
+                    f"--from {name} is a live adapter and takes no '=path' "
+                    "(it reads --build-dir)."
+                )
+            out[name] = True
+        elif name in _FROM_PATH_ADAPTERS:
+            if not value:
+                raise click.UsageError(
+                    f"--from {name} requires a pre-captured path "
+                    f"(e.g. --from {name}=path)."
+                )
+            out[_FROM_PATH_ADAPTERS[name]] = Path(value)
+        else:
+            raise click.UsageError(
+                f"--from: unknown adapter {name!r}; expected one of {valid}."
+            )
+        seen.add(name)
+    return out
 
 
 def _run_adapters(
@@ -1211,11 +1201,19 @@ def _collect_call_graph(
     graph.finalize()
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
     extractors.append(
         ExtractorRecord(
             name="call_graph:clang",
             status="ok" if added else "partial",
-            detail=f"{added} call edges from {len(merged.compile_units)} compile units",
+            detail=(
+                f"{added} call edges from {len(merged.compile_units)} compile "
+                f"units{timing}"
+            ),
         )
     )
 

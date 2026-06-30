@@ -41,7 +41,6 @@ from .cli import (
     _setup_verbosity,
     _write_or_echo,
     _write_release_step_summary,
-    main,
 )
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
@@ -68,11 +67,13 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _run_bundle_analysis,
 )
 from .cli_options import (
+    lang_option,
     output_options,
     policy_options,
     scope_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 from .model import AbiSnapshot
@@ -82,14 +83,8 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
 
 # ---------------------------------------------------------------------------
-# compare-release helpers
+# release-comparison engine helpers
 # ---------------------------------------------------------------------------
-
-#: Set True by `compare`'s directory/package dispatch (ADR-037 D7) so the
-#: deprecation note below is not printed when `compare-release` runs as the
-#: fan-out backend for `abicheck compare <dir> <dir>`. Toggled around the
-#: `ctx.invoke` in `cli._dispatch_release_compare`.
-_SILENCE_DEPRECATION = False
 
 
 def _run_compare_pair(
@@ -766,17 +761,15 @@ def _strip_diff_results_and_adjust_verdict(
     return worst_verdict
 
 
-@main.command("compare-release")
+# NOTE: not registered on `main` — the user-facing `compare-release` command was
+# removed (ADR-037 D7 clean removal). This stays a standalone Click command so
+# `compare`'s directory/package dispatch can `ctx.invoke` it as the fan-out engine.
+@click.command("compare-release")
 @click.argument("old_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
 # Two-sided header/include/version family (ADR-037 D3); --lang stays inline.
 @two_sided_input_options
-@click.option(
-    "--lang",
-    default="c++",
-    show_default=True,
-    type=click.Choice(["c++", "c"], case_sensitive=False),
-)
+@lang_option
 @output_options(
     ["json", "markdown", "junit"],
     output_help="Output file for summary report (default: stdout).",
@@ -864,7 +857,7 @@ def _strip_diff_results_and_adjust_verdict(
     help="Include additions/compatible changes as ::notice annotations "
     "(requires --annotate).",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 @click.option(
     "-j",
     "--jobs",
@@ -1021,17 +1014,6 @@ def compare_release_cmd(
     )
 
     _setup_verbosity(verbose)
-
-    # Suppressed when running as `compare`'s fan-out backend, and for machine
-    # formats whose consumers may capture stderr alongside stdout (mirrors the
-    # `_announce_exit_scheme` banner discipline).
-    if not _SILENCE_DEPRECATION and fmt not in {"json", "junit"}:
-        click.echo(
-            "Note: 'compare-release' is deprecated (ADR-037 D7); "
-            "'abicheck compare <old> <new>' now accepts directories and packages "
-            "and fans out to the same per-library comparison.",
-            err=True,
-        )
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")

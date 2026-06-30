@@ -40,12 +40,16 @@ the artifact tiers (L0/L1/L2) stay authoritative.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import shlex
 import subprocess
+import time
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from .build_evidence import BuildEvidence
 from .model import (
@@ -77,6 +81,12 @@ _QUERY_TIMEOUT_S = 300
 # skipped (not allowed), failed (errored/unparseable), partial (ran, no compile
 # DB produced). "ok" means a DB was produced, so it needs no special handling.
 _BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
+
+# Extractor names that carry a build-query no-facts diagnostic: the explicit
+# trusted `build.query` ("build_query") and the zero-config inferred query
+# ("build_query_auto"). Both must be treated alike in the pack-survival gate and
+# the L3 coverage row so an inferred-query-only run keeps its explanation.
+_BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
 
 
 #: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
@@ -136,14 +146,99 @@ class BuildConfig:
     suppression_require_justification: bool | None = None
     #: ``source:`` — precise S-axis for power users (``s0``..``s6``/``auto``).
     source_method: str | None = None
+    #: ``compile:`` — the stable half of the L2 header compile context (ADR-035
+    #: D6.1 / ADR-037 D4). The project's reviewed include roots / dialect / feature
+    #: macros / frontend; per-invocation cross-compile flags stay CLI overrides
+    #: (CLI > config). ``None``/empty = unset, so the CLI flag wins unambiguously.
+    compile_frontend: str | None = None
+    compile_std: str | None = None
+    compile_include_dirs: list[str] = field(default_factory=list)
+    compile_defines: list[str] = field(default_factory=list)
+    compile_sysroot: str | None = None
+    compile_nostdinc: bool | None = None
     #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
     exit_code_scheme: str = "auto"
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
 
+    #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
+    #: ``version:`` makes the config forward-compatible — an *unknown* key (a
+    #: newer schema read by an older abicheck) **warns**, never errors, so a
+    #: project can adopt a future key without breaking older installs. Keys parsed
+    #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
+    #: ``crosscheck.py``) are listed so they don't trip the warning.
+    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "build",
+            "sources",
+            "severity",
+            "scope",
+            "suppression",
+            "source",
+            "compile",
+            "exit_code_scheme",
+            "version",
+            "risk_rules",
+            "crosschecks",
+        }
+    )
+    _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
+        "build": frozenset({"system", "query", "compile_db"}),
+        "sources": frozenset({"public_headers", "exclude", "graph"}),
+        "severity": frozenset(
+            {
+                "preset",
+                "abi_breaking",
+                "potential_breaking",
+                "quality_issues",
+                "addition",
+            }
+        ),
+        "scope": frozenset({"public", "collapse_versioned_symbols", "public_symbols"}),
+        "suppression": frozenset({"strict", "require_justification"}),
+        "source": frozenset({"method", "graph"}),
+        "compile": frozenset(
+            {
+                "frontend",
+                "std",
+                "include_dirs",
+                "defines",
+                "sysroot",
+                "nostdinc",
+            }
+        ),
+    }
+
+    @classmethod
+    def _warn_unknown_keys(cls, data: dict[str, object]) -> None:
+        """Warn (never error) on unrecognized keys — config forward-compat (D-§BC)."""
+        for key in data:
+            if key not in cls._KNOWN_TOP_KEYS:
+                warnings.warn(
+                    f"unknown .abicheck.yml key {key!r} ignored (forward-compat; "
+                    "ADR-037 §Backward compatibility). Check the spelling, or bump "
+                    "'version:' once the schema for this key ships.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                continue
+            block = data.get(key)
+            known = cls._KNOWN_BLOCK_KEYS.get(key)
+            if known is not None and isinstance(block, dict):
+                for sub in block:
+                    if sub not in known:
+                        warnings.warn(
+                            f"unknown .abicheck.yml key {key}.{sub!r} ignored "
+                            "(forward-compat; ADR-037 §Backward compatibility).",
+                            UserWarning,
+                            stacklevel=3,
+                        )
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
+        if isinstance(data, dict):
+            cls._warn_unknown_keys(data)
         build = data.get("build") if isinstance(data, dict) else None
         build = build if isinstance(build, dict) else {}
         sources = data.get("sources") if isinstance(data, dict) else None
@@ -156,6 +251,8 @@ class BuildConfig:
         suppression = suppression if isinstance(suppression, dict) else {}
         source = data.get("source") if isinstance(data, dict) else None
         source = source if isinstance(source, dict) else {}
+        compile_blk = data.get("compile") if isinstance(data, dict) else None
+        compile_blk = compile_blk if isinstance(compile_blk, dict) else {}
 
         def _str(d: dict[str, object], key: str, default: str = "") -> str:
             v = d.get(key)
@@ -197,14 +294,36 @@ class BuildConfig:
                 f"severity.preset must be one of {_SEVERITY_PRESETS}, got {preset!r}"
             )
 
-        scheme = _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto") or "auto"
+        scheme = (
+            _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto")
+            or "auto"
+        )
         if scheme not in _EXIT_CODE_SCHEMES:
             raise ValueError(
                 f"exit_code_scheme must be one of {_EXIT_CODE_SCHEMES}, got {scheme!r}"
             )
 
         version_raw = data.get("version") if isinstance(data, dict) else None
-        version = version_raw if isinstance(version_raw, int) and not isinstance(version_raw, bool) else 0
+        version = (
+            version_raw
+            if isinstance(version_raw, int) and not isinstance(version_raw, bool)
+            else 0
+        )
+
+        compile_frontend = _opt_str(compile_blk, "frontend")
+        if compile_frontend is not None:
+            # The CLI accepts the frontend case-insensitively (Click Choice
+            # case_sensitive=False); normalize the config value to match.
+            compile_frontend = compile_frontend.lower()
+        if compile_frontend is not None and compile_frontend not in (
+            "auto",
+            "castxml",
+            "clang",
+        ):
+            raise ValueError(
+                "compile.frontend must be one of ('auto', 'castxml', 'clang'), "
+                f"got {compile_frontend!r}"
+            )
 
         return cls(
             system=_str(build, "system", "auto") or "auto",
@@ -222,8 +341,16 @@ class BuildConfig:
             collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
             public_symbols=_strs(scope, "public_symbols"),
             suppression_strict=_opt_bool(suppression, "strict"),
-            suppression_require_justification=_opt_bool(suppression, "require_justification"),
+            suppression_require_justification=_opt_bool(
+                suppression, "require_justification"
+            ),
             source_method=_opt_str(source, "method"),
+            compile_frontend=compile_frontend,
+            compile_std=_opt_str(compile_blk, "std"),
+            compile_include_dirs=_strs(compile_blk, "include_dirs"),
+            compile_defines=_strs(compile_blk, "defines"),
+            compile_sysroot=_opt_str(compile_blk, "sysroot"),
+            compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
             exit_code_scheme=scheme,
             version=version,
         )
@@ -280,12 +407,30 @@ class BuildConfig:
         if self.suppression_strict is not None:
             suppression["strict"] = self.suppression_strict
         if self.suppression_require_justification is not None:
-            suppression["require_justification"] = self.suppression_require_justification
+            suppression["require_justification"] = (
+                self.suppression_require_justification
+            )
         if suppression:
             out["suppression"] = suppression
 
         if self.source_method is not None:
             out["source"] = {"method": self.source_method}
+
+        compile_blk: dict[str, Any] = {}
+        if self.compile_frontend is not None:
+            compile_blk["frontend"] = self.compile_frontend
+        if self.compile_std is not None:
+            compile_blk["std"] = self.compile_std
+        if self.compile_include_dirs:
+            compile_blk["include_dirs"] = list(self.compile_include_dirs)
+        if self.compile_defines:
+            compile_blk["defines"] = list(self.compile_defines)
+        if self.compile_sysroot is not None:
+            compile_blk["sysroot"] = self.compile_sysroot
+        if self.compile_nostdinc is not None:
+            compile_blk["nostdinc"] = self.compile_nostdinc
+        if compile_blk:
+            out["compile"] = compile_blk
 
         if self.exit_code_scheme and self.exit_code_scheme != "auto":
             out["exit_code_scheme"] = self.exit_code_scheme
@@ -321,8 +466,38 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
 
 
 def is_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a pack directory produced by ``abicheck collect``."""
-    return path is not None and path.is_dir() and (path / "manifest.json").is_file()
+    """True when *path* is a real ``BuildSourcePack`` directory (``abicheck collect``).
+
+    Validates the manifest *content*, not just its presence: a raw source checkout
+    or build dir that merely contains a top-level ``manifest.json`` must not be
+    mistaken for a pack — ``BuildSourcePack.load`` would otherwise accept it with
+    sparse defaults and silently drop the real L3-L5 evidence the caller meant to
+    collect. Requires the BuildSourcePack version marker
+    (``build_source_pack_version`` / legacy ``evidence_pack_version``).
+    """
+    if path is None or not path.is_dir():
+        return False
+    manifest = path / "manifest.json"
+    if not manifest.is_file():
+        return False
+    import json
+
+    try:
+        with manifest.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+    except OSError:
+        return False
+    except ValueError:
+        # Present but unparseable: keep treating it as a (corrupt) pack so the
+        # downstream load raises a loud error rather than silently collecting —
+        # a corrupt `collect` output must never be ignored.
+        return True
+    # Valid JSON *without* the BuildSourcePack marker is a non-pack file (e.g. a
+    # stray project manifest.json in a raw checkout) — collect from the tree, do
+    # not mis-load it as an empty pack.
+    return isinstance(data, dict) and (
+        "build_source_pack_version" in data or "evidence_pack_version" in data
+    )
 
 
 def effective_graph_scope(graph_detail: str, scope: str) -> str:
@@ -344,6 +519,7 @@ def collect_inline_pack(
     build_config: BuildConfig | None = None,
     allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
+    compile_db_explicit: bool = False,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -353,6 +529,8 @@ def collect_inline_pack(
     source_abi_cache_dir: Path | None = None,
     exported_symbols: tuple[str, ...] = (),
     changed_paths: tuple[str, ...] = (),
+    public_header_roots: tuple[str, ...] = (),
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -365,10 +543,15 @@ def collect_inline_pack(
     explicit ``--build-info`` pack directory) so a raw ``--sources`` tree can
     replay L4 against it without re-resolving a compile DB.
 
-    ``build_config_trusted_for_query`` must be true before ``build.query`` can
-    run. CLI auto-discovered ``.abicheck.yml`` files live inside the supplied
-    source tree and may be attacker-controlled, so they are not trusted for
-    subprocess execution even when ``--allow-build-query`` is set.
+    ``build_config_trusted_for_query`` must be true before a tree-local
+    ``build.query`` command can run. CLI auto-discovered ``.abicheck.yml`` files
+    live inside the supplied source tree and may be attacker-controlled, so they
+    are not trusted for subprocess execution. (The abicheck-authored *inferred*
+    cmake/bazel query is separate — it runs whenever ``--sources`` needs L3, since
+    pointing abicheck at a source tree is itself the request to analyse it; see
+    :func:`_resolve_compile_db`.) ``allow_build_query`` is accepted only for
+    backward compatibility and is ignored — ``--allow-build-query`` is a
+    deprecated no-op.
 
     ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
     ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
@@ -378,76 +561,110 @@ def collect_inline_pack(
     scope = effective_graph_scope(cfg.graph_detail, scope)
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
+    # Cleanup thunks for temp build dirs (out-of-tree inferred cmake) that must
+    # outlive L4 replay — clang runs with each compile unit's `directory` (the cmake
+    # build dir) as cwd, so the dir can't be removed (nor its lock released) until
+    # after replay. Invoked below once L3/L4/L5 are collected into in-memory
+    # evidence. Each thunk removes its dir and releases the dir's exclusive lock.
+    query_build_cleanups: list[Callable[[], None]] = []
 
-    if base_build is not None:
-        merged.merge(base_build)
+    try:
+        if base_build is not None:
+            merged.merge(base_build)
 
-    if merged.compile_units:
-        compile_db = None  # already seeded from a build-info pack
-    else:
-        compile_db = _resolve_compile_db(
-            build_info,
-            sources,
-            cfg,
-            allow_build_query,
-            build_config_trusted_for_query,
-            merged,
-            extractors,
+        if merged.compile_units:
+            compile_db = None  # already seeded from a build-info pack
+        elif _maybe_collect_bazel_build_info(build_info, merged, extractors):
+            # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
+            # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
+            compile_db = None
+        else:
+            compile_db = _resolve_compile_db(
+                build_info,
+                sources,
+                cfg,
+                build_config_trusted_for_query,
+                merged,
+                extractors,
+                cleanup=query_build_cleanups,
+                compile_db_explicit=compile_db_explicit,
+            )
+        if compile_db is not None:
+            _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
+
+        # A4: with both a --sources tree and L3 compile units, flag when the build
+        # metadata describes a different checkout than the source tree (decoupled
+        # inputs assembled from different trees). Collection-time diagnostic, not a
+        # ChangeKind — collection has no findings list (cf. A2).
+        _check_build_info_source_mismatch(merged, sources, extractors)
+
+        surface = None
+        if "L4" in layers:
+            # A 'changed' scope with no PR diff would select zero TUs and embed an
+            # empty L4 surface (Codex review), so fall back to a non-empty scope that
+            # still enables the source-only checks. But when the caller *did* thread an
+            # explicit changed-path set (PR replay, ADR-035 D7 POI focusing), honour
+            # 'changed' so the scan narrows to the affected TUs.
+            #
+            # The unseeded fallback is 'headers-only' (the public-API-covering TU
+            # subset), NOT 'target' (the whole target): an unseeded s5/pr run otherwise
+            # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
+            # (validation/uxl-scan-levels-timing-2026-06.md). 'headers-only' keeps a
+            # non-empty public surface for the cross-checks at a fraction of the cost;
+            # the caller (cli_scan) emits the advisory naming --since to focus further.
+            replay_scope = (
+                "headers-only" if (scope == "changed" and not changed_paths) else scope
+            )
+            # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
+            # env (the CI-friendly knob — point it at a restored cache directory).
+            l4_cache_dir = source_abi_cache_dir
+            if l4_cache_dir is None:
+                env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
+                l4_cache_dir = Path(env_dir) if env_dir else None
+            surface = _run_inline_source_abi(
+                sources,
+                merged,
+                extractors,
+                extractor=extractor,
+                scope=replay_scope,
+                clang_bin=clang_bin,
+                exported_symbols=exported_symbols,
+                source_abi_cache_dir=l4_cache_dir,
+                changed_paths=changed_paths,
+                public_header_roots=public_header_roots,
+            )
+        # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
+        # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
+        # the structural-only graph-build (L3+L5, no L4). This is what makes the
+        # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
+        # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
+        # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
+        with_call_graph = "L5" in layers and "L4" in layers
+        graph = (
+            _build_inline_graph(
+                merged,
+                surface,
+                with_call_graph=with_call_graph,
+                clang_bin=clang_bin,
+                extractors=extractors,
+                changed_paths=changed_paths,
+            )
+            if "L5" in layers
+            else None
         )
-    if compile_db is not None:
-        _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
 
-    # A4: with both a --sources tree and L3 compile units, flag when the build
-    # metadata describes a different checkout than the source tree (decoupled
-    # inputs assembled from different trees). Collection-time diagnostic, not a
-    # ChangeKind — collection has no findings list (cf. A2).
-    _check_build_info_source_mismatch(merged, sources, extractors)
+    # Always hand off (or drain) the inferred-build-dir cleanup thunks — even if
+    # _resolve_compile_db / _run_compile_db / L4 replay / L5 fold raised — so the
+    # build dir and its lock never leak. With `defer_cleanup`, the caller's finally
+    # owns them (it runs after the scan's later phases, e.g. S2 `clang -E`); without
+    # it (e.g. `dump --sources`), drain immediately (CodeRabbit).
+    finally:
+        if defer_cleanup is not None:
+            defer_cleanup.extend(query_build_cleanups)
+        else:
+            from .build_query import drain_build_dir_cleanups
 
-    surface = None
-    if "L4" in layers:
-        # A 'changed' scope with no PR diff would select zero TUs and embed an
-        # empty L4 surface (Codex review), so fall back to 'target' — the
-        # non-empty choice that still enables the source-only checks. But when the
-        # caller *did* thread an explicit changed-path set (PR replay, ADR-035 D7
-        # POI focusing), honour 'changed' so the scan narrows to the affected TUs
-        # instead of replaying the whole target.
-        replay_scope = "target" if (scope == "changed" and not changed_paths) else scope
-        # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
-        # env (the CI-friendly knob — point it at a restored cache directory).
-        l4_cache_dir = source_abi_cache_dir
-        if l4_cache_dir is None:
-            env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
-            l4_cache_dir = Path(env_dir) if env_dir else None
-        surface = _run_inline_source_abi(
-            sources,
-            merged,
-            extractors,
-            extractor=extractor,
-            scope=replay_scope,
-            clang_bin=clang_bin,
-            exported_symbols=exported_symbols,
-            source_abi_cache_dir=l4_cache_dir,
-            changed_paths=changed_paths,
-        )
-    # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
-    # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
-    # the structural-only graph-build (L3+L5, no L4). This is what makes the
-    # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
-    # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
-    # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
-    with_call_graph = "L5" in layers and "L4" in layers
-    graph = (
-        _build_inline_graph(
-            merged,
-            surface,
-            with_call_graph=with_call_graph,
-            clang_bin=clang_bin,
-            extractors=extractors,
-            changed_paths=changed_paths,
-        )
-        if "L5" in layers
-        else None
-    )
+            drain_build_dir_cleanups(query_build_cleanups)
 
     has_build = bool(
         merged.compile_units
@@ -461,7 +678,7 @@ def collect_inline_pack(
     # the build_query diagnostic reach `compare`, rather than dropping it as if
     # nothing was attempted (Codex).
     has_query_diag = any(
-        e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+        e.name in _BUILD_QUERY_DIAG_NAMES and e.status in _BUILD_QUERY_DIAG_STATUSES
         for e in extractors
     )
     if not (has_build or surface is not None or graph is not None or has_query_diag):
@@ -497,18 +714,28 @@ def _resolve_compile_db(
     build_info: Path | None,
     sources: Path | None,
     cfg: BuildConfig,
-    allow_build_query: bool,
     build_config_trusted_for_query: bool,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
+    cleanup: list[Callable[[], None]] | None = None,
+    compile_db_explicit: bool = False,
 ) -> Path | None:
-    """Resolve the compile DB to feed L3, honouring the action ceiling (D5).
+    """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
-    Order: an explicit ``--build-info`` path (file or dir) → a ``build.query``
-    command result (only with ``--allow-build-query`` and trusted config) →
-    ``build.compile_db`` in the source tree → an auto-discovered
-    ``compile_commands.json`` in the tree.
+    Order: an explicit ``--build-info`` path (file or dir) → a trusted
+    ``--config`` ``build.query`` command result → ``build.compile_db`` in the
+    source tree → an auto-discovered ``compile_commands.json`` → the **inferred,
+    abicheck-authored** build-system query (cmake/make/bazel). No
+    ``--allow-build-query`` flag is required: providing ``--sources`` is the
+    request to collect build evidence. The only command never auto-run is an
+    arbitrary ``build.query`` string from an auto-discovered (untrusted)
+    ``.abicheck.yml`` — that still needs an explicit ``--config``.
     """
+    # Track whether the operator gave an EXPLICIT L3 input (--build-info or a
+    # build.compile_db path) that yielded nothing. If so, the default inferred
+    # query must not run: a cleaned/mistyped build-info path should surface, not
+    # be masked by a fresh `cmake`/`bazel` query under different flags (review).
+    explicit_input_missed = False
     if build_info is not None:
         found = _compile_db_at(build_info)
         if found is not None:
@@ -516,10 +743,13 @@ def _resolve_compile_db(
         merged.diagnostics.append(
             f"build-info {build_info}: no {_COMPILE_DB_NAME} found"
         )
+        explicit_input_missed = True
 
-    # build.query (ADR-032 D5 query_build_system): opt-in command that EMITS a
-    # compile DB / exports without a full build. Off unless --allow-build-query
-    # is set *and* the config came from an explicit operator-supplied path.
+    # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
+    # EMITS a compile DB / exports without a full build. Runs only when the config
+    # came from an explicit operator-supplied path (build_config_trusted_for_query);
+    # an auto-discovered .abicheck.yml is never trusted to execute. No
+    # --allow-build-query flag is involved any more (it is a deprecated no-op).
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(
@@ -528,61 +758,229 @@ def _resolve_compile_db(
                     status="skipped",
                     detail=(
                         "build.query ignored from auto-discovered .abicheck.yml; "
-                        "pass a trusted config with --build-config to permit queries"
+                        "pass a trusted config with --config to permit queries"
                     ),
                 )
             )
-        elif allow_build_query:
+            # Untrusted query is never run — fall through to compile_db /
+            # auto-discovery / the abicheck-authored inferred query below.
+        else:
+            # Trusted operator config (--config): run its query automatically. No
+            # --allow-build-query flag is required any more — pointing abicheck at
+            # sources *is* the request to collect build evidence (ADR-032 amended).
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
-        else:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query",
-                    status="skipped",
-                    detail=(
-                        "build.query configured but --allow-build-query not set; "
-                        "only existing build outputs were inspected (ADR-032 D5)"
-                    ),
-                )
-            )
+            # The operator supplied an explicit query and it failed / produced no
+            # compile DB. Surface that — do NOT mask it by falling back to a
+            # compile_db glob, a stale auto-discovered DB from a prior/default
+            # configure, or abicheck's default inferred query, which would collect
+            # L3 with the wrong flags the custom query existed to avoid (review).
+            # The build_query diagnostic _run_build_query recorded explains the miss.
+            return None
 
     if cfg.compile_db and sources is not None:
+        # Only an *operator-supplied* build.compile_db (a CLI --build-compile-db or
+        # an explicit --config path) counts as an explicit input whose miss should
+        # suppress fallback — tracked by `compile_db_explicit`, which is distinct
+        # from query-execution trust (review): --build-compile-db makes the DB
+        # explicit without trusting a query, and --build-query trusts a query
+        # without making a DB explicit. A build.compile_db from an auto-discovered
+        # .abicheck.yml is not something the user chose, so a stale/cleaned path
+        # there still falls through to the zero-config inferred query.
+        if compile_db_explicit:
+            explicit_input_missed = True
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 return match
 
-    return _autodiscover_compile_db(sources)
+    if explicit_input_missed:
+        # An explicit --build-info / --build-compile-db / --config compile-DB input
+        # was given but resolved to nothing. Surface that miss rather than masking
+        # it with a stale auto-discovered DB OR abicheck's default inferred query
+        # under different flags — checked BEFORE auto-discovery so a stray
+        # build/compile_commands.json can't silently stand in (review).
+        return None
+
+    discovered = _autodiscover_compile_db(sources)
+    if discovered is not None:
+        return discovered
+
+    # Zero-config fallback: no compile DB exists and no explicit L3 input was
+    # given, but a --sources tree is present. Detect the build system and run
+    # abicheck's OWN fixed query (cmake configure / bazel aquery / make dry-run)
+    # to produce L3 —
+    # so "just provide sources" works with no flag and no manual build step. Only
+    # an abicheck-authored command runs here; an arbitrary tree-local
+    # .abicheck.yml `build.query` string is never auto-executed.
+    from .build_query import run_inferred_build_query
+
+    return run_inferred_build_query(sources, merged, extractors, cleanup=cleanup)
 
 
 def _compile_db_at(path: Path) -> Path | None:
-    """Resolve a build-info input to a concrete ``compile_commands.json``."""
+    """Resolve a build-info input to a concrete ``compile_commands.json``.
+
+    A directory is searched with the shared P4 strategy (hint dirs + any
+    immediate subdirectory) so ``--build-info <dir>`` honours the same contract
+    as ``--sources`` auto-discovery (Codex review).
+    """
     if path.is_file():
-        return path if path.name == _COMPILE_DB_NAME else path
+        # An explicit --build-info file is honoured as the compile DB whatever
+        # its name (the user pointed straight at it).
+        return path
     if path.is_dir():
-        for hint in _COMPILE_DB_HINTS:
-            candidate = (
-                (path / hint / _COMPILE_DB_NAME) if hint else (path / _COMPILE_DB_NAME)
-            )
-            if candidate.is_file():
-                return candidate
+        return _find_compile_db_in_dir(path)
     return None
 
 
-def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
-    """Best-effort search for a ``compile_commands.json`` inside a source tree."""
-    if source_tree is None or not source_tree.is_dir():
-        return None
+#: How many bytes to sniff from the head of a ``--build-info`` file when
+#: classifying its format (ADR-037 D5 #5). Enough to see the top-level JSON
+#: shape + the first discriminating key without reading a huge aquery dump.
+_BUILD_INFO_SNIFF_BYTES = 65536
+
+
+def sniff_build_info_format(path: Path) -> str:
+    """Classify a ``--build-info`` path by content (ADR-037 D5 #5).
+
+    Returns one of ``"pack"`` (a ``collect`` pack dir), ``"build_dir"`` (a
+    directory to search for ``compile_commands.json``), ``"compile_db"`` (a
+    Clang/CMake ``compile_commands.json`` — a JSON *array*), ``"bazel_aquery"`` /
+    ``"bazel_cquery"`` (Bazel ``--output=jsonproto`` — a JSON *object* keyed by
+    ``actions`` / ``results``), or ``"unknown"``. Lets a Bazel query result and a
+    pack "just work" when passed to ``--build-info`` instead of being mis-parsed
+    as a compile DB. The top-level shape is read from a bounded head (``[`` = a
+    compile-DB array); a ``{`` object is fully parsed so a large aquery preamble
+    can't hide the discriminating key (Codex review). Never executes anything.
+    """
+    if path.is_dir():
+        return "pack" if is_pack_dir(path) else "build_dir"
+    try:
+        with open(path, "rb") as f:
+            head = f.read(_BUILD_INFO_SNIFF_BYTES)
+    except OSError:
+        return "unknown"
+    text = head.decode("utf-8", "replace").lstrip()
+    if not text:
+        return "unknown"
+    if text[0] == "[":
+        return "compile_db"  # compile_commands.json is a top-level JSON array
+    if text[0] != "{":
+        return "unknown"
+    # A JSON object: a Bazel jsonproto (aquery→"actions", cquery→"results") or an
+    # object-wrapped compile DB. The discriminating key can sit far past the sniff
+    # window in a large aquery dump (long artifacts/pathFragments preamble), so
+    # parse the whole object to classify by key, not a bounded prefix (Codex).
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        # Truncated / not-quite-JSON: fall back to the bounded-prefix heuristic.
+        if '"actions"' in text:
+            return "bazel_aquery"
+        if '"results"' in text:
+            return "bazel_cquery"
+        return "unknown"
+    if isinstance(data, dict):
+        if "actions" in data:
+            return "bazel_aquery"
+        if "results" in data:
+            return "bazel_cquery"
+        if any(k in data for k in ("file", "command", "arguments")):
+            return "compile_db"
+    return "unknown"
+
+
+def _maybe_collect_bazel_build_info(
+    build_info: Path | None,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+) -> bool:
+    """Route a pre-captured Bazel aquery/cquery ``--build-info`` to the adapter.
+
+    Returns ``True`` (and merges the normalized :class:`BuildEvidence` into
+    *merged*) when *build_info* is a Bazel jsonproto file, else ``False`` so the
+    caller falls back to compile-DB resolution. Pre-captured only — the adapter is
+    constructed with ``allow_query=False`` so no ``bazel`` subprocess ever runs.
+    """
+    if build_info is None or not build_info.is_file():
+        return False
+    fmt = sniff_build_info_format(build_info)
+    if fmt not in ("bazel_aquery", "bazel_cquery"):
+        return False
+    from .adapters.bazel import BazelAdapter
+
+    if fmt == "bazel_aquery":
+        kind = "aquery"
+        adapter = BazelAdapter(aquery=build_info, allow_query=False)
+    else:
+        kind = "cquery"
+        adapter = BazelAdapter(cquery=build_info, allow_query=False)
+    ev = adapter.collect()
+    merged.merge(ev)
+    extractors.append(
+        ExtractorRecord(
+            name="bazel",
+            status="present" if ev.compile_units else "partial",
+            detail=(
+                f"pre-captured {kind} jsonproto from --build-info, "
+                f"{len(ev.compile_units)} compile unit(s)"
+            ),
+        )
+    )
+    return True
+
+
+def _find_compile_db_in_dir(
+    directory: Path, skip_segments: frozenset[str] = frozenset()
+) -> Path | None:
+    """Locate a ``compile_commands.json`` under *directory* (the P4 strategy).
+
+    Conventional build-dir hints first (fast, deterministic), then a fallback to
+    *any* immediate subdirectory holding a compile DB — so a non-standard but
+    common out-of-tree dir (``cmake-build-debug-gcc``, ``build-release``, an
+    IDE/preset dir, …) is still found instead of silently yielding no L3
+    evidence. The fallback stays at depth 1 to remain cheap and is deterministic
+    (sorted). Shared by ``--sources`` auto-discovery and ``--build-info <dir>``
+    resolution so both honour the same "any immediate subdirectory" contract.
+
+    *skip_segments* names immediate subdirectories to ignore — used by
+    auto-discovery to skip a stale ``.abicheck-build`` left by an older in-tree
+    inferred-CMake run, so it can't short-circuit a fresh out-of-tree query with
+    stale flags (Codex P2).
+    """
     for hint in _COMPILE_DB_HINTS:
+        if hint in skip_segments:
+            continue
         candidate = (
-            (source_tree / hint / _COMPILE_DB_NAME)
+            (directory / hint / _COMPILE_DB_NAME)
             if hint
-            else (source_tree / _COMPILE_DB_NAME)
+            else (directory / _COMPILE_DB_NAME)
         )
         if candidate.is_file():
             return candidate
-    return None
+    fallback = sorted(
+        p
+        for p in directory.glob("*/" + _COMPILE_DB_NAME)
+        if p.is_file() and p.parent.name not in skip_segments
+    )
+    return fallback[0] if fallback else None
+
+
+def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
+    """Best-effort search for a ``compile_commands.json`` inside a source tree.
+
+    Skips a stale ``.abicheck-build/compile_commands.json`` (an older in-tree
+    inferred-CMake artifact) so a zero-config ``--sources`` run refreshes the build
+    query instead of replaying with stale flags/include paths (Codex P2).
+    """
+    if source_tree is None or not source_tree.is_dir():
+        return None
+    from .build_query import ABICHECK_BUILD_DIR
+
+    return _find_compile_db_in_dir(
+        source_tree, skip_segments=frozenset({ABICHECK_BUILD_DIR})
+    )
 
 
 def _run_compile_db(
@@ -706,11 +1104,18 @@ def _run_build_query(
     # The query is expected to have written/refreshed the configured compile DB.
     db: Path | None = None
     if cfg.compile_db and sources is not None:
+        # The operator told us exactly where this query writes its DB. Use only
+        # that path: if the query exited 0 but didn't actually produce it, do NOT
+        # fall back to an auto-discovered stale compile_commands.json — that would
+        # collect L3 with the wrong (default) flags the custom query existed to
+        # set, while reporting success (Codex P2). Surface the miss as partial.
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 db = match
                 break
-    if db is None:
+    else:
+        # No explicit path configured: discover the conventional compile DB the
+        # query is expected to have refreshed.
         db = _autodiscover_compile_db(sources)
     extractors.append(
         ExtractorRecord(
@@ -837,6 +1242,7 @@ def _run_inline_source_abi(
     exported_symbols: tuple[str, ...] = (),
     source_abi_cache_dir: Path | None = None,
     changed_paths: tuple[str, ...] = (),
+    public_header_roots: tuple[str, ...] = (),
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -881,12 +1287,20 @@ def _run_inline_source_abi(
         )
         return SourceAbiSurface()
 
-    roots = public_header_roots_for(merged)
+    roots = sorted(set(public_header_roots_for(merged)) | set(public_header_roots))
+    include_map = _include_map_for_replay(
+        merged,
+        scope=scope,
+        roots=tuple(roots),
+        clang_bin=clang_bin,
+        extractors=extractors,
+    )
     # D8 per-TU cache: re-extracting every TU on every `dump --sources` is the
     # cold-start cost (eval E4: zstd 48.6 s cold → 3.4 s warm). Wire the cache
     # when a dir is given (CLI/env), so a persisted dir restored across CI runs
     # makes each run start warm. Absent a dir, behaviour is unchanged (no cache).
     cache = SourceAbiCache(source_abi_cache_dir) if source_abi_cache_dir else None
+    started = time.monotonic()
     surface, diagnostics = run_source_replay(
         merged,
         impl,
@@ -895,7 +1309,11 @@ def _run_inline_source_abi(
         public_header_roots=roots,
         exported_symbols=exported_symbols,
         cache=cache,
+        include_map=include_map,
     )
+    elapsed = time.monotonic() - started
+    if surface is not None:
+        surface.coverage.setdefault("elapsed_s", round(elapsed, 3))
     if cache is not None:
         rate = cache.hit_rate
         if rate is not None:
@@ -903,18 +1321,64 @@ def _run_inline_source_abi(
                 f"source_abi: L4 cache hit rate {rate:.0%} "
                 f"({cache.hits}/{cache.hits + cache.misses})"
             )
+        # Thread the cache stats into the surface so the live L4 coverage row can
+        # report them too (ADR-035 P5) — not only `scan --estimate` (which probes
+        # the cache up front). `build_inline_coverage` reads these keys.
+        if surface is not None:
+            surface.coverage["cache_hits"] = cache.hits
+            surface.coverage["cache_misses"] = cache.misses
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
     selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
+    extra = f", {elapsed:.2f}s"
+    if surface.coverage.get("scope_widened_to_full"):
+        extra += ", widened-to-full"
     extractors.append(
         ExtractorRecord(
             name=f"source_abi:{extractor}",
             status="ok" if parsed else "partial",
-            detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
+            detail=(
+                f"scope={scope}, {parsed}/{selected} TUs parsed, "
+                f"{len(diagnostics)} failures{extra}"
+            ),
         )
     )
     return surface
+
+
+def _include_map_for_replay(
+    build: BuildEvidence,
+    *,
+    scope: str,
+    roots: tuple[str, ...],
+    clang_bin: str,
+    extractors: list[ExtractorRecord],
+) -> dict[str, list[str]]:
+    """Best-effort include map for narrowing L4 replay.
+
+    ``headers-only`` can shrink from all TUs to the TUs that include public
+    headers, but only when it has an exact textual include graph. Recorded action
+    inputs are an over-approximation, so headers-only replay uses a cheap depfile
+    pass instead. Failure keeps the old fail-open selector, never drops evidence.
+    """
+    if scope != "headers-only" or not roots or not build.compile_units:
+        return {}
+    from .include_graph import ClangIncludeExtractor
+
+    extractor = ClangIncludeExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    include_map = extractor.extract_from_build(build)
+    status = "ok" if include_map else "skipped"
+    detail = f"{len(include_map)}/{len(build.compile_units)} compile units"
+    if extractor.diagnostics:
+        status = "partial" if include_map else "failed"
+        detail += "; " + "; ".join(extractor.diagnostics[:3])
+    extractors.append(
+        ExtractorRecord(name="include_graph:clang", status=status, detail=detail)
+    )
+    return include_map
 
 
 def _make_source_extractor(
@@ -1063,19 +1527,64 @@ def _fold_call_graph(
     added = augment_graph_with_calls(graph, edges, project_files or None)
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
     rows.append(
         ExtractorRecord(
             name="call_graph:clang",
             status="ok" if added else "partial",
             detail=(
                 f"{added} call edges from {len(target.compile_units)} compile "
-                f"unit(s){scoped_note}"
+                f"unit(s){scoped_note}{timing}"
             ),
         )
     )
 
 
 # ── coverage rows ─────────────────────────────────────────────────────────────
+
+
+def _l4_coverage_detail(surface: SourceAbiSurface) -> str:
+    """A human L4 coverage detail from the surface's recorded counts (ADR-035 P5).
+
+    The live row was previously blank — only ``scan --estimate`` reported TU
+    counts. Mirror that here: replay scope, parsed/selected TUs, matched/exported
+    symbols, and (when an L4 cache ran) its hit/miss tally.
+    """
+    cov = surface.coverage
+    scope = cov.get("replay_scope")
+    parts: list[str] = []
+    if scope:
+        parts.append(f"scope={scope}")
+    selected = cov.get("compile_units_selected")
+    parsed = cov.get("compile_units_parsed")
+    if selected is not None or parsed is not None:
+        parts.append(f"{int(parsed or 0)}/{int(selected or 0)} TUs parsed")
+    matched = cov.get("matched_symbols")
+    exported = cov.get("exported_symbols")
+    if matched is not None or exported is not None:
+        parts.append(f"{int(matched or 0)}/{int(exported or 0)} symbols matched")
+    if "cache_hits" in cov or "cache_misses" in cov:
+        hits = int(cov.get("cache_hits", 0) or 0)
+        misses = int(cov.get("cache_misses", 0) or 0)
+        total = hits + misses
+        if total:
+            parts.append(f"cache {hits}/{total} hit ({hits / total:.0%})")
+    if cov.get("scope_widened_to_full"):
+        parts.append("headers-only widened to full")
+    uncovered = int(cov.get("public_headers_uncovered", 0) or 0)
+    if uncovered:
+        parts.append(f"{uncovered} public header(s) not reached by include graph")
+    elapsed = cov.get("elapsed_s")
+    if elapsed is not None:
+        parts.append(f"{float(elapsed):.2f}s")
+    failures = int(cov.get("extractor_failures", 0) or 0)
+    if failures:
+        parts.append(f"{failures} extractor failures")
+    return ", ".join(parts)
 
 
 def build_inline_coverage(
@@ -1108,7 +1617,8 @@ def build_inline_coverage(
             (
                 e
                 for e in extractors
-                if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+                if e.name in _BUILD_QUERY_DIAG_NAMES
+                and e.status in _BUILD_QUERY_DIAG_STATUSES
             ),
             None,
         )
@@ -1132,12 +1642,20 @@ def build_inline_coverage(
             or surface.reachable_templates
             or surface.reachable_inline_bodies
         )
+        cov = surface.coverage or {}
+        exported = int(cov.get("exported_symbols", 0) or 0)
+        matched = int(cov.get("matched_symbols", 0) or 0)
+        zero_match_degraded = exported > 0 and matched == 0
         l4 = LayerCoverage(
             layer=DataLayer.L4_SOURCE_ABI.value,
-            status=CoverageStatus.PRESENT if any_entities else CoverageStatus.PARTIAL,
+            status=CoverageStatus.PRESENT
+            if any_entities and not zero_match_degraded
+            else CoverageStatus.PARTIAL,
             confidence=LayerConfidence.HIGH
-            if any_entities
+            if any_entities and not zero_match_degraded
             else LayerConfidence.REDUCED,
+            detail=_l4_coverage_detail(surface),
+            elapsed_s=float(cov.get("elapsed_s", 0.0) or 0.0),
         )
     else:
         l4 = LayerCoverage(

@@ -44,6 +44,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
@@ -268,6 +269,7 @@ def select_compile_units(
     changed_paths: Iterable[str] = (),
     target_id: str = "",
     include_map: Mapping[str, Iterable[str]] | None = None,
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit]:
     """Select which compile units to replay for an ADR-030 D7 ``scope``.
 
@@ -308,19 +310,25 @@ def select_compile_units(
         return list(units)
     inc = _norm_include_map(include_map)
     if scope == "headers-only":
-        return _select_headers_only(build, inc)
+        return _select_headers_only(build, inc, public_header_roots)
     if scope == "target":
         return _select_target(build, target_id)
     return _select_changed(build, frozenset(changed_paths), inc)
 
 
 def _select_headers_only(
-    build: BuildEvidence, include_map: dict[str, list[str]]
+    build: BuildEvidence,
+    include_map: dict[str, list[str]],
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit]:
     if include_map:
-        picked = _headers_only_set_cover(build, include_map)
+        picked = _headers_only_set_cover(build, include_map, public_header_roots)
         if picked is not None:
             return picked
+    return _select_headers_only_heuristic(build)
+
+
+def _select_headers_only_heuristic(build: BuildEvidence) -> list[CompileUnit]:
     by_target: dict[str, list[CompileUnit]] = {}
     for cu in build.compile_units:
         by_target.setdefault(cu.target_id, []).append(cu)
@@ -352,7 +360,9 @@ def _public_header_compile_owner_ids(build: BuildEvidence) -> set[str]:
 
 
 def _headers_only_set_cover(
-    build: BuildEvidence, include_map: dict[str, list[str]]
+    build: BuildEvidence,
+    include_map: dict[str, list[str]],
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit] | None:
     """Minimal TU set whose includes cover every public header (greedy set cover).
 
@@ -362,7 +372,7 @@ def _headers_only_set_cover(
     public header no recorded TU includes is left to the heuristic by returning
     ``None`` only when the graph covers nothing at all.
     """
-    public = public_header_roots_for(build)
+    public = sorted(set(public_header_roots_for(build)) | set(public_header_roots or ()))
     if not public:
         return None
     by_id = {cu.id: cu for cu in build.compile_units}
@@ -402,7 +412,10 @@ def _headers_only_set_cover(
             ph
             for ph in public
             if _included(ph, inc_norms, inc_suffixes, public_suffixes[ph])
-            and cu.target_id in header_owners.get(ph, set())
+            and (
+                not header_owners.get(ph)
+                or cu.target_id in header_owners.get(ph, set())
+            )
         }
         if covered:
             coverage[cu_id] = covered
@@ -422,14 +435,46 @@ def _headers_only_set_cover(
             break
         chosen.append(best)
         need -= coverage[best]
-    # A *partial* include graph may not reach every public header. Returning the
-    # cover for only the reachable ones would silently drop a public header no
-    # recorded TU includes — its source-only changes would never be parsed. Defer
-    # to the representative-per-target heuristic (which covers every public-header
-    # target) whenever the cover cannot satisfy all public headers (Codex review).
-    if need:
-        return None
+    # A *partial* include graph may not reach every build-declared public header.
+    # Returning the cover for only the reachable ones would silently drop a public
+    # target whose source-only changes would never be parsed. Fall back to the
+    # representative target heuristic for build-owned headers, but keep selected
+    # external CLI-root TUs because those roots have no representative target.
+    if need and any(header_owners.get(ph) for ph in need):
+        picked = _select_headers_only_heuristic(build)
+        picked_ids = {cu.id for cu in picked}
+        for cu_id in chosen:
+            if any(not header_owners.get(ph) for ph in coverage.get(cu_id, ())):
+                cu = by_id[cu_id]
+                if cu.id not in picked_ids:
+                    picked.append(cu)
+                    picked_ids.add(cu.id)
+        return picked
     return [by_id[c] for c in chosen]
+
+
+def _uncovered_public_headers(
+    roots: Sequence[str], units: Sequence[CompileUnit], include_map: dict[str, list[str]]
+) -> list[str]:
+    """Public roots not reached by the selected units' include graph."""
+    if not roots or not include_map:
+        return []
+    inc_norms: set[str] = set()
+    inc_suffixes: set[str] = set()
+    selected = {cu.id for cu in units}
+    for cu_id, incs in include_map.items():
+        if cu_id not in selected:
+            continue
+        for inc in incs:
+            norm = _norm(inc)
+            inc_norms.add(norm)
+            inc_suffixes.update(_suffixes(norm))
+    out: list[str] = []
+    for root in roots:
+        suffixes = _suffixes(_norm(root))
+        if not _included(root, inc_norms, inc_suffixes, suffixes):
+            out.append(root)
+    return out
 
 
 def _suffixes(path: str) -> set[str]:
@@ -450,7 +495,14 @@ def _included(
     (``include/foo.h``).
     """
     public_norm = _norm(public_header)
-    return public_norm in include_suffixes or bool(public_suffixes & include_norms)
+    public_dir_suffixes = {s for s in public_suffixes if "/" in s.strip("/")}
+    include_dir_suffixes = {s for s in include_suffixes if "/" in s.strip("/")}
+    return (
+        public_norm in include_norms
+        or ("/" in public_norm.strip("/") and public_norm in include_suffixes)
+        or bool(public_dir_suffixes & include_norms)
+        or bool(public_dir_suffixes & include_dir_suffixes)
+    )
 
 
 def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
@@ -764,13 +816,17 @@ class SourceAbiCache:
             if digest is not None:
                 deps[dep_path] = digest
         entry = {"tu": tu.to_dict(), "deps": deps}
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = self._path(key).with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        # Atomic publish so a concurrent reader never sees a partial file.
-        tmp.replace(self._path(key))
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(
+                json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            # Atomic publish so a concurrent reader never sees a partial file.
+            tmp.replace(self._path(key))
+        except OSError:
+            # Cache writes are best-effort; replay already produced the facts.
+            tmp.unlink(missing_ok=True)
 
 
 def _dep_digest(path: str, memo: dict[str, str | None] | None = None) -> str | None:
@@ -830,12 +886,20 @@ def run_source_replay(
         if public_header_roots is not None
         else public_header_roots_for(build, target_id)
     )
+    total_started = time.monotonic()
     units = select_compile_units(
         build,
         scope=scope,
         changed_paths=changed_paths,
         target_id=target_id,
         include_map=include_map,
+        public_header_roots=roots,
+    )
+    scope_widened = (
+        scope == "headers-only"
+        and not _norm_include_map(include_map)
+        and len(units) == len(build.compile_units)
+        and len(units) > 1
     )
     # Fresh per-pass dep-digest memo so a shared header is hashed once across all
     # TUs' cache validation (scoped to this call — a file may change before the
@@ -847,6 +911,7 @@ def run_source_replay(
     # in unit order, so the linked surface and diagnostics are byte-for-byte
     # identical to the serial run regardless of worker count.
     # Phase 1 (serial): cache lookups, split hits from misses keeping order.
+    cache_started = time.monotonic()
     keys: list[str | None] = []
     results: list[SourceAbiTu | None] = [None] * len(units)
     misses: list[int] = []
@@ -866,6 +931,7 @@ def run_source_replay(
             results[i] = cached
         else:
             misses.append(i)
+    cache_elapsed = time.monotonic() - cache_started
 
     # Phase 2 (parallel): extract the cache misses. Stateless per TU, so the
     # worker is a module-level function (picklable for the process pool) fed the
@@ -875,6 +941,7 @@ def run_source_replay(
     jobs = _l4_jobs(len(misses))
     miss_units = [units[i] for i in misses]
     worker = partial(_extract_one, extractor, list(roots or []), target_id)
+    extract_started = time.monotonic()
     if jobs > 1 and len(misses) > 1:
         # Process pool parallelizes the GIL-bound AST post-processing too, not
         # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
@@ -898,6 +965,7 @@ def run_source_replay(
                 raise
     else:
         extracted = [worker(u) for u in miss_units]
+    extract_elapsed = time.monotonic() - extract_started
     for i, (tu, err) in zip(misses, extracted):
         if err is None:
             results[i] = tu
@@ -917,6 +985,7 @@ def run_source_replay(
         elif i in diags:
             diagnostics.append(diags[i])
 
+    link_started = time.monotonic()
     surface = link_source_abi(
         tus,
         exported_symbols=exported_symbols,
@@ -924,11 +993,28 @@ def run_source_replay(
         target_id=target_id,
         forced_public=forced_public,
     )
+    link_elapsed = time.monotonic() - link_started
     surface.coverage["replay_scope"] = scope
     surface.coverage["include_graph_used"] = bool(_norm_include_map(include_map))
     surface.coverage["compile_units_selected"] = len(units)
     surface.coverage["compile_units_parsed"] = len(tus)
     surface.coverage["extractor_failures"] = len(diagnostics)
+    uncovered = _uncovered_public_headers(roots, units, _norm_include_map(include_map))
+    if uncovered:
+        surface.coverage["public_headers_uncovered"] = len(uncovered)
+        surface.coverage["public_headers_uncovered_examples"] = uncovered[:10]
+    surface.coverage["cache_lookup_s"] = round(cache_elapsed, 3)
+    surface.coverage["extract_s"] = round(extract_elapsed, 3)
+    surface.coverage["link_s"] = round(link_elapsed, 3)
+    surface.coverage["elapsed_s"] = round(time.monotonic() - total_started, 3)
+    surface.coverage["extractor_jobs"] = jobs
+    surface.coverage["cache_misses"] = len(misses)
+    if scope_widened:
+        surface.coverage["scope_widened_to_full"] = True
+        surface.coverage["scope_widened_reason"] = (
+            "headers-only had no include graph/public-header target ownership; "
+            "selected every compile unit"
+        )
     return surface, diagnostics
 
 
@@ -942,16 +1028,199 @@ def _l4_jobs_ceiling() -> int:
     return max(8, 2 * (os.cpu_count() or 1))
 
 
+#: Rough peak resident memory budget per concurrent L4 worker (GiB). A heavily
+#: templated C++ TU's ``clang -ast-dump=json`` output — and its in-Python parse —
+#: can reach several GiB, so the *default* worker count is sized to available RAM
+#: as well as CPU count: a low-memory host oversubscribing giant ASTs into one
+#: process is how the UXL oneTBB/oneDNN ``s5``/``s6`` replay got OOM-killed (the
+#: kernel SIGKILLs the whole replay → ``exit -9``, all L4 work lost). Tunable via
+#: ``ABICHECK_L4_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
+_L4_JOB_MEM_BUDGET_GIB = 3.0
+
+_KIB = 1024.0
+_GIB = 1024.0 * 1024.0 * 1024.0
+
+#: cgroup memory accounting. In a container the process is confined to a cgroup
+#: whose limit is usually *below* the host RAM that ``/proc/meminfo`` reports, so
+#: the OOM guard must read it too (Codex review on #458): a 4 GiB-limited pod on a
+#: 64 GiB host would otherwise keep the host-sized cap and still get SIGKILLed.
+#: The *effective* limit lives at the process's own cgroup path (from
+#: ``/proc/self/cgroup``), not the controller root — under a nested cgroup
+#: (k8s pod / systemd slice / CI runner) the root is often unbounded while a
+#: parent slice imposes the real cap — so we walk leaf→root and take the tightest
+#: bounded limit. Roots are module constants so tests can repoint them.
+_PROC_SELF_CGROUP = "/proc/self/cgroup"
+_CGROUP_V2_ROOT = "/sys/fs/cgroup"  # unified-hierarchy mount
+_CGROUP_V1_ROOT = "/sys/fs/cgroup/memory"  # v1 memory-controller mount
+#: cgroup v1 reports "unlimited" as a near-INT64_MAX sentinel rather than a
+#: keyword; anything at/above this is treated as no limit.
+_CGROUP_V1_UNLIMITED = 1 << 62
+
+
+def _read_int_file(path: str) -> int | None:
+    """Read a single integer from ``path`` (cgroup files), or ``None``.
+
+    Returns ``None`` for a missing/unreadable file or a non-integer body such as
+    cgroup v2's literal ``max`` (= unbounded), which the callers treat as
+    "no cgroup limit".
+    """
+    try:
+        with open(path, encoding="ascii") as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_rel_paths() -> tuple[str | None, str | None]:
+    """``(v2_rel, v1_memory_rel)`` cgroup paths from ``/proc/self/cgroup``.
+
+    Each is ``None`` when that hierarchy isn't listed (e.g. a pure-v2 host has no
+    v1 memory line). The v2 line is ``0::/rel``; the v1 memory line is
+    ``N:…,memory,…:/rel``.
+    """
+    v2 = v1 = None
+    try:
+        # ``errors="replace"`` (and the ValueError guard) keeps a non-ASCII
+        # systemd slice / container name in the cgroup path from raising
+        # UnicodeDecodeError mid-iteration and aborting the L4 run — this probe is
+        # best-effort and must degrade to ``None`` (CodeRabbit review on #458).
+        with open(_PROC_SELF_CGROUP, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split(":", 2)
+                if len(parts) != 3:
+                    continue
+                hid, controllers, path = parts
+                if hid == "0":
+                    v2 = path
+                elif "memory" in controllers.split(","):
+                    v1 = path
+    except (OSError, ValueError):
+        pass
+    return v2, v1
+
+
+def _cgroup_chain(root: str, rel: str | None) -> list[Path]:
+    """Cgroup dirs from the leaf (``root``/``rel``) up to ``root``, leaf first."""
+    base = Path(root)
+    chain = [base]
+    cur = base
+    for part in (rel or "").strip("/").split("/"):
+        if part:
+            cur = cur / part
+            chain.append(cur)
+    chain.reverse()
+    return chain
+
+
+def _cgroup_headroom_gib(
+    root: str, rel: str | None, max_name: str, cur_name: str, unlimited: int | None
+) -> float | None:
+    """Tightest memory headroom (GiB) along the leaf→root cgroup chain, or ``None``.
+
+    A bounded ancestor can cap a process more tightly than its own leaf cgroup, so
+    the effective headroom is the *minimum* across the chain. ``None`` when no
+    level is bounded.
+    """
+    best: float | None = None
+    for d in _cgroup_chain(root, rel):
+        limit = _read_int_file(str(d / max_name))
+        if limit is None or (unlimited is not None and limit >= unlimited):
+            continue
+        used = _read_int_file(str(d / cur_name)) or 0
+        headroom = max(0.0, (limit - used) / _GIB)
+        best = headroom if best is None else min(best, headroom)
+    return best
+
+
+def _cgroup_available_mem_gib() -> float | None:
+    """Container memory headroom in GiB from cgroup limits, or ``None``.
+
+    Resolves the process's own cgroup (``/proc/self/cgroup``) and walks leaf→root
+    for the tightest bounded limit — cgroup v2 (``memory.max`` − ``memory.current``)
+    then v1 (``memory.limit_in_bytes`` − ``memory.usage_in_bytes``). ``None`` when
+    nothing is bounded (the common bare-metal/host case).
+    """
+    v2_rel, v1_rel = _cgroup_rel_paths()
+    headroom = _cgroup_headroom_gib(
+        _CGROUP_V2_ROOT, v2_rel, "memory.max", "memory.current", None
+    )
+    if headroom is not None:
+        return headroom
+    return _cgroup_headroom_gib(
+        _CGROUP_V1_ROOT,
+        v1_rel,
+        "memory.limit_in_bytes",
+        "memory.usage_in_bytes",
+        _CGROUP_V1_UNLIMITED,
+    )
+
+
+def _meminfo_available_gib(path: str = "/proc/meminfo") -> float | None:
+    """Host ``MemAvailable`` in GiB (Linux ``/proc/meminfo``), or ``None``."""
+    try:
+        with open(path, encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * _KIB / _GIB  # kB -> GiB
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _l4_available_mem_gib() -> float | None:
+    """Best-effort available RAM in GiB, honouring cgroup limits in containers.
+
+    Returns the *smaller* of host ``MemAvailable`` and the cgroup memory headroom
+    so a process confined to a small cgroup on a large host still sizes its L4
+    worker count to what it is actually allowed to use. ``None`` when neither
+    source is readable (non-Linux / sandbox), which skips the memory clamp.
+    """
+    candidates = [
+        v
+        for v in (_meminfo_available_gib(), _cgroup_available_mem_gib())
+        if v is not None
+    ]
+    return min(candidates) if candidates else None
+
+
+def _l4_job_mem_budget_gib() -> float:
+    """Per-worker RAM budget (GiB) for the L4 memory cap.
+
+    ``ABICHECK_L4_JOB_MEM_GIB`` overrides the :data:`_L4_JOB_MEM_BUDGET_GIB`
+    default (floored at 0.25 GiB); an unparsable value falls back to the default.
+    """
+    try:
+        return max(
+            0.25,
+            float(os.environ.get("ABICHECK_L4_JOB_MEM_GIB") or _L4_JOB_MEM_BUDGET_GIB),
+        )
+    except ValueError:
+        return _L4_JOB_MEM_BUDGET_GIB
+
+
+def _l4_mem_cap() -> int | None:
+    """Max L4 workers that fit in available RAM, or ``None`` when RAM can't be read."""
+    avail = _l4_available_mem_gib()
+    if avail is None:
+        return None
+    return max(1, int(avail / _l4_job_mem_budget_gib()))
+
+
 def _l4_jobs(n_units: int) -> int:
     """Worker count for parallel L4 extraction (P06).
 
     ``ABICHECK_L4_JOBS`` overrides (set ``1`` to force serial — used by tests to
     prove determinism). Otherwise auto: one worker per cache-miss TU, capped at
-    the CPU count and 8 (clang is heavy; more workers mostly add contention). An
-    explicit override is still clamped to ``_l4_jobs_ceiling()`` to avoid
-    oversubscription thrash (a host can't usefully run 64 concurrent clang
-    processes); the clamp is logged so the requested value is not silently lost.
+    the CPU count and 8 (clang is heavy; more workers mostly add contention).
+
+    Both the auto default and an explicit override are additionally capped by
+    *available memory* (``_l4_mem_cap``): a single template-heavy TU's clang JSON
+    AST can be multiple GiB, so N concurrent workers in one process can exhaust a
+    low-memory host and get the whole replay OOM-killed. The memory clamp prevents
+    that (set ``ABICHECK_L4_JOB_MEM_GIB`` to tune, or seed/scope the scan to fewer
+    TUs); like the oversubscription ceiling, a clamp is logged, never silent.
     """
+    mem_cap = _l4_mem_cap()
     env = os.environ.get("ABICHECK_L4_JOBS")
     if env:
         try:
@@ -968,9 +1237,31 @@ def _l4_jobs(n_units: int) -> int:
                 os.cpu_count() or 1,
                 ceiling,
             )
-            return ceiling
+            requested = ceiling
+        if mem_cap is not None and requested > mem_cap:
+            _log.warning(
+                "ABICHECK_L4_JOBS=%d may not fit in available memory (~%.1f GiB at "
+                "~%.1f GiB/worker); clamping to %d to avoid an OOM-killed L4 replay. "
+                "Tune ABICHECK_L4_JOB_MEM_GIB, or seed/scope the scan to fewer TUs.",
+                requested,
+                _l4_available_mem_gib() or 0.0,
+                _l4_job_mem_budget_gib(),
+                mem_cap,
+            )
+            return mem_cap
         return requested
-    return max(1, min(n_units, os.cpu_count() or 1, 8))
+    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
+    if mem_cap is not None and mem_cap < auto:
+        _log.info(
+            "L4 workers reduced %d -> %d to fit available memory (~%.1f GiB at "
+            "~%.1f GiB/worker); set ABICHECK_L4_JOBS / ABICHECK_L4_JOB_MEM_GIB to override.",
+            auto,
+            mem_cap,
+            _l4_available_mem_gib() or 0.0,
+            _l4_job_mem_budget_gib(),
+        )
+        return mem_cap
+    return auto
 
 
 def _l4_use_process_pool() -> bool:

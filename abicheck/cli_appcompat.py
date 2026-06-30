@@ -36,11 +36,13 @@ from .cli import (
     main,
 )
 from .cli_options import (
+    lang_option,
     output_options,
     policy_options,
     scope_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 
@@ -155,9 +157,7 @@ def _handle_list_required_symbols(
 # ── Dump options (shared families, ADR-037 D3) ────────────────────────────────
 # Two-sided header/include/version family; --lang stays inline.
 @two_sided_input_options
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for castxml.")
+@lang_option(help="Language mode for castxml.")
 # ── Output options ────────────────────────────────────────────────────────────
 @output_options(["json", "markdown", "html"])
 @click.option("--show-irrelevant", is_flag=True, default=False,
@@ -169,7 +169,7 @@ def _handle_list_required_symbols(
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 # ── Severity (shared family; mirrors `compare`) ───────────────────────────────
 @severity_options
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def appcompat_cmd(
     app_path: Path,
     old_lib: Path | None,

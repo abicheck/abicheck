@@ -40,5 +40,5 @@
 | [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
 | [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Accepted — implemented (G19, D1–D10) |
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
-| [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Proposed |
-| [Gap Analysis](adr-gap-analysis.md) | Decisions Needing Formal ADRs | Reference |
+| [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Accepted — implemented (G22) |
+| [Gap Analysis](../archive/adr-gap-analysis.md) | Decisions Needing Formal ADRs (historical snapshot, archived) | Reference |

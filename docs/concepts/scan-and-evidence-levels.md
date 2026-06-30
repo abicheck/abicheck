@@ -97,8 +97,8 @@ produces the same scan for the same inputs.
 ## 3. How S maps onto L
 
 `scan` is a front-end over `dump`/`compare`: the resolved S-method selects an
-internal **collection mode** (the ADR-033 CI evidence mode that
-`dump --collect-mode` also uses), which decides which L-layers get collected and
+internal **collection mode** (the ADR-033 CI evidence mode that the unified
+`--depth` dial also resolves to), which decides which L-layers get collected and
 at what replay scope. abicheck also reports the **representative L-depth** each
 method actually reached, so the coverage block states the depth of what *ran*,
 not what you *requested*:

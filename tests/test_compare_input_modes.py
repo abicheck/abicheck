@@ -460,8 +460,12 @@ class TestCompareSoSo:
         ])
         assert result.exit_code == 0, result.output
         assert len(recorded_includes) == 2
-        assert recorded_includes[0] == [inc_dir]
-        assert recorded_includes[1] == [inc_dir]
+        # The user's -I is passed and takes precedence (listed first); the -H
+        # header's own directory is then auto-added so its relative includes
+        # resolve without a separate -I (P3).
+        for recorded in recorded_includes:
+            assert recorded[0] == inc_dir
+            assert tmp_path in recorded
 
 
 # ── compare mixed mode: .json + .so ─────────────────────────────────────

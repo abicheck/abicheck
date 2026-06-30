@@ -61,15 +61,20 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 )
 from .cli_options import (
     adr027_compare_options,
-    build_source_compare_options,
     build_source_dump_options,
+    compile_context_options,
     debug_resolution_options,
+    evidence_options,
+    lang_option,
     output_options,
     policy_options,
+    release_options,
+    resolve_compile_context,
     scope_options,
     set_input_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
@@ -82,6 +87,8 @@ from .cli_resolve import (
     _maybe_follow_linker_script,
     _normalize_binary_input,
     _populate_dependency_info,
+    _reject_compile_context_for_set_inputs,
+    _reject_evidence_flags_for_set_inputs,
     _resolve_compare_snapshots,
     _resolve_input,
     _resolve_linker_script,
@@ -96,6 +103,7 @@ if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .checker_types import Change, DiffResult
     from .debug_resolver import DebugArtifact
+    from .service_scan import CompileContext
     from .severity import SeverityConfig
 
 from . import __version__ as _abicheck_version
@@ -249,6 +257,7 @@ def _write_snapshot_output(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    extractor: str = "auto",
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -259,7 +268,9 @@ def _write_snapshot_output(
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
     *build_query* / *build_compile_db* are the CLI equivalents of the
-    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys.
+    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys. *extractor* is
+    the L4 source-ABI frontend — the same ``--ast-frontend`` knob that drives the
+    L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -268,6 +279,7 @@ def _write_snapshot_output(
             build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
+            extractor=extractor,
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
         # prominently instead of leaving it buried in the coverage rows. Permissive
@@ -384,36 +396,13 @@ def main() -> None:
                    "classification (repeat for multiple).")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for the header backend.")
-@click.option("--header-backend", "header_backend", default="auto", show_default=True,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend: castxml (default schema reference) or "
-                   "clang (-ast-dump=json; for hosts where castxml is absent or its "
-                   "bundled frontend chokes). auto = castxml if present, else clang, "
-                   "and auto-falls back to clang when castxml hits a toolchain-version "
-                   "error. Env: ABICHECK_HEADER_BACKEND.")
+@lang_option
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
-# ── Cross-compilation flags ───────────────────────────────────────────────────
-@click.option("--gcc-path", default=None,
-              help="Path to GCC/G++ cross-compiler binary.")
-@click.option("--gcc-prefix", default=None,
-              help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).")
-@click.option("--gcc-options", default=None,
-              help="Extra compiler flags passed through to castxml (split on "
-                   "whitespace). For a flag whose value contains spaces, use the "
-                   "repeatable --gcc-option instead.")
-@click.option("--gcc-option", "gcc_option_tokens", multiple=True,
-              help="A single extra compiler flag passed through to castxml "
-                   "verbatim (repeatable; not whitespace-split). Use two flags for "
-                   "a flag + spaced value, e.g. --gcc-option=-include "
-                   "--gcc-option='some header.h'.")
-@click.option("--sysroot", type=click.Path(path_type=Path), default=None,
-              help="Alternative system root directory.")
-@click.option("--nostdinc", is_flag=True, default=False,
-              help="Do not search standard system include paths.")
+# ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
+# --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
+# --sysroot / --nostdinc are defined once in cli_options.compile_context_options
+# so `dump` and `scan` never drift; applied as a decorator below.
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
               help="Explicit path to PDB file for Windows PE debug info. "
                    "Overrides automatic PDB discovery from the PE debug directory.")
@@ -465,8 +454,7 @@ def main() -> None:
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
               help="Git tag to embed in the snapshot (e.g. v2.0.0).")
@@ -475,6 +463,7 @@ def main() -> None:
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
+@compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, header_backend: str, output: Path | None,
@@ -494,8 +483,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             collect_mode: str = "source-target",
-             depth: str | None = None, max_depth: bool = False) -> None:
+             depth: str | None = None, max_depth: bool = False,
+             _resolved_compile_context: CompileContext | None = None,
+             _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -505,35 +495,38 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     """
     _setup_verbosity(verbose)
 
-    # Resolve the --depth/--max preset into the underlying --collect-mode before
-    # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
-    # the same evidence depth (G21.1).
-    collect_mode_explicit = (
-        click.get_current_context().get_parameter_source("collect_mode")
-        == click.core.ParameterSource.COMMANDLINE
-    )
-    if collect_mode_explicit:
-        click.echo(
-            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
-            err=True,
-        )
-    collect_mode = resolve_dump_depth(
-        depth, max_depth, collect_mode, collect_mode_explicit,
-    )
-    # --depth symbols suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
-    if depth == "symbols":
+    # Resolve the --depth/--max preset into the internal collect mode before any
+    # dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the
+    # same evidence depth (G21.1). With no preset, dump embeds at "source-target".
+    # ``compare``'s inline source-tree embed already resolved the mode (possibly
+    # from a config source.method, where --depth is None) and hands it over via
+    # the private _resolved_collect_mode hook so we don't re-derive a different
+    # default here (Codex review).
+    if _resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
+        collect_mode = _resolved_collect_mode
+    else:
+        collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
+    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
+    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
+    # only feeds the header parse, so discard it with the headers — otherwise
+    # resolve_dump_compile_db would reject the now-headerless invocation even though
+    # the user did supply headers, blocking the switch to the fast binary rung
+    # (Codex review).
+    if depth == "binary":
         headers = ()
+        compile_db_path = None
+        compile_db_path_alt = None
 
-    # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
-    # --collect-mode) collects nothing without a source tree / build context:
-    # _write_snapshot_output only embeds when --sources/--build-info is given.
-    # Warn loudly rather than silently writing an L0-L2 snapshot for an
-    # explicitly-requested deep depth (Codex review). The bare default
-    # (collect_mode "source-target" with no flag) stays silent — embedding is a
-    # no-op there by design. G21.7-style fail-loud (a warning, not an error).
+    # An *explicitly* requested deep evidence depth (--depth/--max) collects
+    # nothing without a source tree / build context: _write_snapshot_output only
+    # embeds when --sources/--build-info is given. Warn loudly rather than
+    # silently writing an L0-L2 snapshot for an explicitly-requested deep depth
+    # (Codex review). The bare default (collect_mode "source-target" with no
+    # flag) stays silent — embedding is a no-op there by design. G21.7-style
+    # fail-loud (a warning, not an error).
     depth_requested = depth is not None or max_depth
     if (
-        (depth_requested or collect_mode_explicit)
+        depth_requested
         and collect_mode != "off"
         and sources is None and build_info is None
     ):
@@ -553,7 +546,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 "produce binary data-source diagnostics."
             )
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
@@ -577,19 +570,42 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         raise click.BadParameter(
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
+
+    # Fold the project's .abicheck.yml compile: block into the L2 compile context
+    # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
+    # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
+    # for its header AST the way scan does. CLI > config; an explicit --config or
+    # the .abicheck.yml auto-discovered at the --sources root. Resolved *before*
+    # the format dispatch so the PE/Mach-O header-scoping path gets the same
+    # context as ELF (Codex review) — `_try_header_scoped_dump` consumes it.
+    if _resolved_compile_context is not None:
+        # Caller (compare's inline source-tree embed) already resolved the compile
+        # context with CLI-over-config explicitness honored; use it verbatim and do
+        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
+        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
+        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
+        # auto on the source-tree path only (Codex review).
+        _cc = _resolved_compile_context
+    else:
+        _cc, includes = resolve_compile_context(
+            click.get_current_context(),
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+            header_backend=header_backend, includes=includes,
+            build_config=build_config, sources=sources,
+        )
+    gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
+    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
+    header_backend = _cc.frontend
+
     if binary_fmt in ("pe", "macho"):
-        if gcc_option_tokens or gcc_options:
-            click.echo(
-                "Warning: --gcc-option/--gcc-options are not applied on the "
-                f"native {binary_fmt.upper()} dump path and will be ignored.",
-                err=True,
-            )
         _handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output, public_headers,
             public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend,
+            compile_context=_cc,
         )
         return
 
@@ -668,6 +684,7 @@ def _handle_non_elf_dump(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     header_backend: str = "auto",
+    compile_context: CompileContext | None = None,
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -679,6 +696,7 @@ def _handle_non_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
+            compile=compile_context,
         )
     except click.ClickException:
         raise
@@ -688,6 +706,7 @@ def _handle_non_elf_dump(
     _write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend,
     )
 
 
@@ -1022,12 +1041,12 @@ def _warn_unused_set_flags(
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
-    Routes through the same `compare-release` implementation (which already
-    fans out per library through the single Tier-2 `service.run_compare`
-    chokepoint and writes the two-level summary/per-library output), so a
-    library compared here gets the identical verdict it would from a single-pair
-    `compare` (ADR-037 D1/D7). The deprecation note that command prints for its
-    own users is silenced while it runs as `compare`'s backend.
+    Routes through the same release engine (the unregistered `compare_release_cmd`,
+    which fans out per library through the single Tier-2 `service.run_compare`
+    chokepoint and writes the two-level summary/per-library output), so a library
+    compared here gets the identical verdict it would from a single-pair `compare`
+    (ADR-037 D1/D7). The standalone `compare-release` command was removed; this is
+    now its only entry point.
     """
     fmt = kwargs.get("fmt", "markdown")
     if fmt not in _RELEASE_FORMATS:
@@ -1035,14 +1054,163 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
             f"--format {fmt} is not available when comparing directories or "
             f"packages; choose one of: {', '.join(sorted(_RELEASE_FORMATS))}."
         )
-    from . import cli_compare_release as _crmod
     from .cli_compare_release import compare_release_cmd
 
-    _crmod._SILENCE_DEPRECATION = True
-    try:
-        ctx.invoke(compare_release_cmd, **kwargs)
-    finally:
-        _crmod._SILENCE_DEPRECATION = False
+    ctx.invoke(compare_release_cmd, **kwargs)
+
+
+def _source_is_pack(path: Path) -> bool:
+    """True if *path* is a real ``collect``-produced evidence pack rather than a
+    raw source checkout — lets ``compare``'s --old/new-sources accept either.
+
+    Validates the manifest *content*, not just its presence: a raw checkout that
+    happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
+    would otherwise accept with sparse defaults) must still be collected from, so
+    we require the ``BuildSourcePack`` marker (``build_source_pack_version`` /
+    legacy ``evidence_pack_version``). A Flow-2 ``kind: abicheck_inputs`` pack is
+    deliberately **not** treated as a pack here: the compare evidence path loads
+    only ``BuildSourcePack`` (via ``_resolve_side_pack``), not inputs packs, so
+    classifying one as a pack would route it to the wrong loader and silently drop
+    its facts — feed those through ``merge`` instead.
+    """
+    # Single source of truth: the dump/collect side validates the same way via
+    # inline.is_pack_dir (content, not filename), so the two never disagree.
+    from .buildsource.inline import is_pack_dir
+
+    return is_pack_dir(path)
+
+
+def _embed_inline_source_side(
+    ctx: click.Context,
+    *,
+    input_path: Path,
+    sources: Path | None,
+    headers: tuple[Path, ...] | list[Path],
+    includes: tuple[Path, ...] | list[Path],
+    version: str,
+    lang: str,
+    header_backend: str,
+    compile_context: object,
+    frontend_explicit: bool,
+    nostdinc_explicit: bool,
+    build_info: Path | None,
+    follow_deps: bool,
+    search_paths: tuple[Path, ...],
+    ld_library_path: str,
+    dwarf_only: bool,
+    debug_format: str | None,
+    pdb_path: Path | None,
+    collect_mode: str,
+    out_dir: Path,
+    label: str,
+) -> tuple[Path, Path | None, Path | None]:
+    """Resolve one side's ``--sources`` into the input ``compare`` should read.
+
+    A raw source *tree* (no manifest.json) on a native-binary side is dumped
+    inline at *collect_mode* (the deep-compare workflow, folded into ``compare``)
+    so the L3-L5 facts ride embedded in the snapshot. Returns
+    ``(input_to_read, sources_to_keep, build_info_to_keep)``: a pre-built
+    ``collect`` pack passes through untouched; an embedded tree consumes both its
+    sources and ``--build-info`` (-> ``None``, so the later
+    ``prepare_embedded_build_source`` won't re-process them); a snapshot input
+    can't be re-dumped, so a tree on it is reported ignored.
+
+    *compile_context* is compare's already-resolved
+    :class:`~abicheck.service_scan.CompileContext` (the merged per-side context).
+    The caller passes the *resolved* values plus the toolchain/dependency/native
+    knobs (``follow_deps``/``--gcc-*``/``--dwarf-only``/…) so the inline dump
+    parses this side exactly as a native ``compare``/``dump`` would.
+    """
+    sources_raw = sources is not None and not _source_is_pack(sources)
+    build_info_raw = build_info is not None and not _source_is_pack(build_info)
+    if not sources_raw and not build_info_raw:
+        # Nothing raw to collect inline; any pack-shaped sources/build-info fall
+        # through to prepare_embedded_build_source unchanged.
+        return input_path, sources, build_info
+    # A *raw* --build-info (build dir / compile_commands.json) is collected by the
+    # inline dump below — it must never reach prepare_embedded_build_source, which
+    # treats a leftover --build-info as an out-of-band *pack* (_resolve_side_pack →
+    # _load_pack_or_raise) and aborts with "Invalid evidence pack". A pack-shaped
+    # one passes through for that out-of-band path. Likewise raw sources are
+    # consumed here; pack sources pass through (Codex review).
+    kept_build_info = None if build_info_raw else build_info
+    kept_sources = None if sources_raw else sources
+    norm, fmt = _normalize_binary_input(input_path)
+    if fmt is None:
+        ignored = []
+        if sources_raw:
+            ignored.append(f"--{label}-sources source tree")
+        if build_info_raw:
+            ignored.append(f"raw --{label}-build-info")
+        click.echo(
+            f"Warning: {label} input {input_path} is a snapshot, not a native "
+            f"binary; the {' and '.join(ignored)} is ignored (dump the binary "
+            "from its tree to embed deeper evidence).",
+            err=True,
+        )
+        return input_path, kept_sources, kept_build_info
+    # The --depth dial governs how deep to collect. When it resolves to "off"
+    # (--depth binary/headers) there is no source collection to do, so a raw tree
+    # / build-info can't contribute at this depth — ignore it with a note rather
+    # than silently deepening the run (matches the old deep-compare, which never
+    # auto-bumped the depth).
+    if collect_mode == "off":
+        click.echo(
+            f"Warning: --{label}-sources/--{label}-build-info was given but the "
+            "selected --depth collects no evidence; ignoring it. Use --depth "
+            "build/source/full (or --max) to collect from it.",
+            err=True,
+        )
+        return input_path, kept_sources, kept_build_info
+    # Only the raw inputs are consumed by the inline dump; pack-shaped sources /
+    # build-info ride through to the out-of-band path.
+    dump_sources = sources if sources_raw else None
+    dump_build_info = build_info if build_info_raw else None
+    out = out_dir / f"{label}.abi.json"
+    # Merge the side's source-root .abicheck.yml `compile:` block into compare's
+    # resolved context — exactly what `dump --sources` / the old deep-compare did —
+    # but compute the CLI-over-config explicitness HERE (compare's real ctx, where
+    # --ast-frontend/--nostdinc are genuine COMMANDLINE params) and freeze the
+    # result, handing it to dump via the private _resolved_compile_context hook so
+    # dump does not re-resolve under ctx.invoke (which would lose that explicitness).
+    # This honors the tree's include_dirs/sysroot/frontend while keeping explicit
+    # CLI overrides winning (Codex review).
+    import dataclasses
+
+    from .cli_options import merge_compile_config
+
+    side_cli = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
+    frozen_cc, merged_includes = merge_compile_config(
+        side_cli,  # type: ignore[arg-type]
+        tuple(includes),
+        None,
+        sources=dump_sources,
+        frontend_explicit=frontend_explicit,
+        nostdinc_explicit=nostdinc_explicit,
+    )
+    ctx.invoke(
+        dump_cmd,
+        so_path=norm,
+        headers=tuple(headers),
+        includes=merged_includes,
+        version=version,
+        lang=lang,
+        _resolved_compile_context=frozen_cc,
+        follow_deps=follow_deps,
+        search_paths=search_paths,
+        ld_library_path=ld_library_path,
+        dwarf_only=dwarf_only,
+        debug_format_opt=debug_format,
+        pdb_path=pdb_path,
+        sources=dump_sources,
+        build_info=dump_build_info,
+        _resolved_collect_mode=collect_mode,
+        output=out,
+    )
+    # The raw sources/build-info are now embedded in the snapshot; pack-shaped
+    # inputs (kept_*) ride through to the later prepare_embedded_build_source so
+    # it does not re-process the consumed raws as bogus packs — Codex review.
+    return out, kept_sources, kept_build_info
 
 
 @main.command("compare")
@@ -1051,29 +1219,27 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
+# ── Release (directory/package) comparison knobs (ADR-037 D7) ────────────────
+@release_options
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
-# Two-sided header/include/version family (ADR-037 D3); --lang and the L2
-# --header-backend trio stay inline (not part of the shared family).
+# Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
+# family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
+# the shared @compile_context_options decorator so compare/dump/scan never drift
+# (ADR-037 D3); --lang and the per-side --old/new-ast-frontend overrides stay inline.
 @two_sided_input_options
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for the header backend.")
-@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+@compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
+@lang_option
+@click.option("--old-ast-frontend", "old_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for native-binary inputs: castxml "
-                   "(default) or clang (-ast-dump=json; for clang-only hosts). "
-                   "auto = castxml if present, else clang, and auto-falls back to "
-                   "clang on a castxml toolchain-version error. "
-                   "Env: ABICHECK_HEADER_BACKEND.")
-@click.option("--old-header-backend", "old_header_backend", default=None,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the old side only (overrides "
-                   "--header-backend for old). Use when the old release parses on "
+              help="C/C++ AST frontend for the old side only (overrides "
+                   "--ast-frontend for old). Use when the old release parses on "
                    "castxml but the new one needs clang (or vice versa).")
-@click.option("--new-header-backend", "new_header_backend", default=None,
+@click.option("--new-ast-frontend", "new_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the new side only (overrides "
-                   "--header-backend for new).")
+              help="C/C++ AST frontend for the new side only (overrides "
+                   "--ast-frontend for new).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -1197,17 +1363,24 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@build_source_compare_options  # --old/new-build-info, --old/new-sources, --collect-mode
+@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 @click.pass_context
 def compare_cmd(
     ctx: click.Context,
     old_input: Path, new_input: Path,
     jobs: int, dso_only: bool, output_dir: Path | None,
+    fail_on_removed: bool,
+    debug_info1: Path | None, debug_info2: Path | None,
+    devel_pkg1: Path | None, devel_pkg2: Path | None,
+    include_private_dso: bool, keep_extracted: bool,
+    manifest_path: Path | None, bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
+    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
     old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
@@ -1245,7 +1418,6 @@ def compare_cmd(
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
-    collect_mode: str = "off",
     depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
@@ -1367,6 +1539,8 @@ def compare_cmd(
                 ".abicheck.yml. Compare libraries individually for explicit "
                 "scheme control."
             )
+        _reject_compile_context_for_set_inputs(ctx, project_cfg)
+        _reject_evidence_flags_for_set_inputs(ctx)
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
@@ -1379,6 +1553,13 @@ def compare_cmd(
             require_justification=require_justification,
             policy=policy, policy_file_path=policy_file_path,
             dso_only=dso_only, jobs=jobs,
+            fail_on_removed=fail_on_removed,
+            debug_info1=debug_info1, debug_info2=debug_info2,
+            devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
+            include_private_dso=include_private_dso, keep_extracted=keep_extracted,
+            manifest_path=manifest_path,
+            bundle_system_providers=bundle_system_providers,
+            bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
             scope_public_headers=scope_public_headers,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
@@ -1402,21 +1583,11 @@ def compare_cmd(
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
-    # Fold the unified --depth/--max dial into the underlying collect mode
-    # (ADR-037 D5), the same way `dump`/`deep-compare` do. The hidden
-    # --collect-mode alias still works but warns; --depth symbols suppresses the
-    # L2 header AST (symbols-only).
-    collect_mode_explicit = (
-        click.get_current_context().get_parameter_source("collect_mode")
-        == click.core.ParameterSource.COMMANDLINE
-    )
-    if collect_mode_explicit:
-        click.echo(
-            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
-            err=True,
-        )
-    collect_mode = resolve_dump_depth(depth, max_depth, collect_mode, collect_mode_explicit)
-    if depth == "symbols":
+    # Fold the unified --depth/--max dial into the internal collect mode
+    # (ADR-037 D5), the same way `dump` does. With no preset, compare reads at
+    # "off"; --depth binary suppresses the L2 header AST (symbols-only).
+    collect_mode = resolve_dump_depth(depth, max_depth, "off")
+    if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
@@ -1442,11 +1613,10 @@ def compare_cmd(
         show_impact = True
 
     # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth/--max/
-    # --collect-mode signal (CLI > config).
+    # collection depth only when the user gave no explicit --depth/--max signal
+    # (CLI > config).
     if (
         resolved_cfg.source_method
-        and not collect_mode_explicit
         and depth is None
         and not max_depth
     ):
@@ -1459,10 +1629,111 @@ def compare_cmd(
                 f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
             ) from None
 
+    # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
+    # shared resolver folds the project's .abicheck.yml compile: block into the CLI
+    # cross-toolchain/frontend flags (CLI > config) and appends config include_dirs
+    # after the -I roots. It applies to both sides; the per-side --old/new-ast-frontend
+    # overrides still win for the frontend (threaded separately below). cfg_path is
+    # the same config compare resolves everything else from (explicit --config or the
+    # .abicheck.yml auto-discovered from cwd).
+    import dataclasses
+
+    compile_context, merged_includes = resolve_compile_context(
+        ctx,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes, build_config=cfg_path,
+    )
+    # The dirs the config appended past the CLI -I roots. These are documented as
+    # applying to *both* sides, so they must survive a per-side --old/new-include
+    # override (which replaces the both-sides -I for that side). Keep them separate
+    # and re-append after per-side resolution rather than folding into the shared
+    # tuple, else the overridden side would lose them (Codex review).
+    config_includes = tuple(merged_includes[len(includes):])
+    # The merged frontend flows to both sides through the explicit header_backend
+    # (so --old/new-ast-frontend can still override per side); neutralize the
+    # frontend on the threaded context so run_dump's `compile.frontend` does NOT
+    # outrank that per-side header_backend (it only carries the --gcc-*/--sysroot/
+    # --nostdinc knobs for both sides).
+    header_backend = compile_context.frontend
+    side_compile_context = dataclasses.replace(compile_context, frontend="auto")
+
     old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
+    if config_includes:
+        old_inc = list(old_inc) + list(config_includes)
+        new_inc = list(new_inc) + list(config_includes)
+
+    # Inline source-tree collection (deep-compare folded into compare): when a
+    # side's --old/new-sources points at a raw checkout, or --old/new-build-info
+    # at a raw build dir / compile_commands.json (not a `collect` pack), dump that
+    # side at --depth so its L3-L5 facts ride embedded in the snapshot, the way
+    # the standalone deep-compare command used to. Pre-built packs fall through
+    # unchanged to prepare_embedded_build_source below.
+    def _raw_evidence(p: Path | None) -> bool:
+        return p is not None and not _source_is_pack(p)
+
+    if (
+        _raw_evidence(old_sources)
+        or _raw_evidence(new_sources)
+        or _raw_evidence(old_build_info)
+        or _raw_evidence(new_build_info)
+    ):
+        import shutil
+        import tempfile
+
+        # CLI-over-config explicitness read from compare's *real* ctx (where
+        # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
+        # dump runs under ctx.invoke where that signal is lost, so we compute it
+        # here and thread it through (Codex review). A per-side --old/new-ast-frontend
+        # is itself an explicit frontend for that side.
+        _nostdinc_explicit = (
+            ctx.get_parameter_source("nostdinc")
+            == click.core.ParameterSource.COMMANDLINE
+        )
+        _frontend_explicit = (
+            ctx.get_parameter_source("header_backend")
+            == click.core.ParameterSource.COMMANDLINE
+        )
+
+        _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
+        # Cleanup on context teardown so the temp dir never leaks, even if an
+        # inline dump or _resolve_compare_snapshots raises before we return.
+        ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
+        old_input, old_sources, old_build_info = _embed_inline_source_side(
+            ctx, input_path=old_input, sources=old_sources,
+            headers=old_h, includes=old_inc, version=old_version, lang=lang,
+            header_backend=old_header_backend or header_backend,
+            compile_context=compile_context,
+            frontend_explicit=_frontend_explicit or old_header_backend is not None,
+            # A nostdinc already resolved True (from --config) must survive the
+            # tree-config merge even when the tree omits it (Codex review); False
+            # is the default and indistinguishable from "unset", so only True needs
+            # preserving.
+            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
+            build_info=old_build_info,
+            follow_deps=follow_deps, search_paths=search_paths,
+            ld_library_path=ld_library_path,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            pdb_path=old_pdb_path or pdb_path,
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
+        )
+        new_input, new_sources, new_build_info = _embed_inline_source_side(
+            ctx, input_path=new_input, sources=new_sources,
+            headers=new_h, includes=new_inc, version=new_version, lang=lang,
+            header_backend=new_header_backend or header_backend,
+            compile_context=compile_context,
+            frontend_explicit=_frontend_explicit or new_header_backend is not None,
+            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
+            build_info=new_build_info,
+            follow_deps=follow_deps, search_paths=search_paths,
+            ld_library_path=ld_library_path,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            pdb_path=new_pdb_path or pdb_path,
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
+        )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.
@@ -1505,6 +1776,7 @@ def compare_cmd(
         header_backend=header_backend,
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
+        compile_context=side_compile_context,
     )
 
     suppression, pf = _load_suppression_and_policy(
@@ -1581,10 +1853,12 @@ def compare_cmd(
 @main.command("recommend-collect-mode")
 @click.argument("paths", nargs=-1)
 def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
-    """Recommend a `--collect-mode` from a PR's changed paths (ADR-033 D3).
+    """Recommend an evidence collection scope from a PR's changed paths (ADR-033 D3).
 
-    Prints `build` for build-system-only changes, `source-changed` when sources
-    or headers changed, else `off`. The artifact compare stays authoritative —
+    Prints the internal collection mode a CI job should use: `build` for
+    build-system-only changes, `source-changed` when sources or headers changed,
+    else `off`. Use it to pick the `--depth` rung (build → `--depth build`,
+    source-changed → `--depth source`). The artifact compare stays authoritative —
     this only scopes which optional evidence a CI job should collect.
     """
     from .buildsource.source_replay import recommend_collect_mode
@@ -1636,14 +1910,13 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
-    cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
-    cli_max,  # noqa: F401  — registers deep-compare
+    cli_graph,  # noqa: F401  — registers graph (compare, explain)
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_scan,  # noqa: F401  — registers scan
-    cli_stack,  # noqa: F401  — registers deps, stack-check
+    cli_stack,  # noqa: F401  — registers deps (tree, compare)
     cli_suggest,  # noqa: F401  — registers suggest-suppressions
     cli_surface,  # noqa: F401  — registers surface-report
 )

@@ -247,25 +247,25 @@ class TestSmallHelpers:
     def test_resolve_dump_depth_maps_each_depth(self, depth: str, expected: str) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(depth, False, "source-target", False) == expected
+        assert resolve_dump_depth(depth, False, "source-target") == expected
 
     def test_resolve_dump_depth_max_is_full(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(None, True, "source-target", False) == "graph-full"
+        assert resolve_dump_depth(None, True, "source-target") == "graph-full"
 
-    def test_resolve_dump_depth_no_preset_keeps_collect_mode(self) -> None:
+    def test_resolve_dump_depth_no_preset_returns_default_mode(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(None, False, "build", True) == "build"
+        # No --depth/--max preset → the command's default collect mode is returned.
+        assert resolve_dump_depth(None, False, "build") == "build"
+        assert resolve_dump_depth(None, False, "off") == "off"
 
     def test_resolve_dump_depth_conflicts_raise(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
         with pytest.raises(click.UsageError):
-            resolve_dump_depth("source", False, "build", True)  # depth + explicit mode
-        with pytest.raises(click.UsageError):
-            resolve_dump_depth("build", True, "source-target", False)  # --max + --depth build
+            resolve_dump_depth("build", True, "source-target")  # --max + --depth build
 
     def test_help_option_groups_render(self) -> None:
         # G21.8/M1: rich-click renders option-group panels so the big commands'
@@ -367,21 +367,31 @@ class TestSmallHelpers:
         assert "carry only L0-L2 data" in result.output
 
     def test_dump_default_depth_no_warning(self, tmp_path) -> None:
-        # The bare default (no --depth/--collect-mode) must NOT warn — embedding
-        # is a no-op there by design, so a plain dump stays quiet about evidence.
+        # The bare default (no --depth) must NOT warn — embedding is a no-op
+        # there by design, so a plain dump stays quiet about evidence.
         so = tmp_path / "fake.so"
         so.write_bytes(b"\x7fELF")
         result = CliRunner().invoke(main, ["dump", str(so)])
         assert "carry only L0-L2 data" not in result.output
 
-    def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
-        # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
-        # dump path, so the CLI warns rather than dropping them silently.
+    def test_dump_gcc_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
+        # ADR-037 D3 (Codex): --gcc-option(s) are now threaded into the native
+        # PE/Mach-O header-scoping path (resolved before format dispatch), so the
+        # old "will be ignored" warning is gone and the context reaches the dump.
         import struct
+
+        import abicheck.cli as cli_mod
+
         dylib = tmp_path / "fake.dylib"
-        dylib.write_bytes(struct.pack("<I", 0xfeedfacf) + b"\x00" * 64)
+        dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            cli_mod, "_handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        )
         result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
-        assert "will be ignored" in result.output
+        assert result.exit_code == 0, result.output
+        assert "will be ignored" not in result.output
+        assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
 
     def test_dump_gcc_option_help(self) -> None:
         # G21.5: the repeatable --gcc-option is documented on dump.
@@ -389,18 +399,19 @@ class TestSmallHelpers:
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
         assert "--gcc-option" in norm
 
-    def test_dump_depth_help_and_mutual_exclusion(self) -> None:
+    def test_dump_depth_help_and_max_mutual_exclusion(self) -> None:
         runner = CliRunner()
         help_out = runner.invoke(main, ["dump", "--help"])
         assert help_out.exit_code == 0
         assert "--depth" in help_out.output and "--max" in help_out.output
-        # --depth and --collect-mode are mutually exclusive (resolved before any
-        # binary access, so a source-only invocation surfaces the error).
+        # --max is shorthand for --depth full; combining it with a *different*
+        # --depth is a usage error (resolved before any binary access, so a
+        # source-only invocation surfaces the error).
         clash = runner.invoke(
-            main, ["dump", "--depth", "source", "--collect-mode", "build"]
+            main, ["dump", "--depth", "source", "--max"]
         )
         assert clash.exit_code != 0
-        assert "mutually exclusive" in clash.output
+        assert "shorthand for --depth full" in clash.output
 
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)
@@ -951,7 +962,7 @@ class TestFoldReleaseGlobalSeverity:
 
 class TestCompareReleaseCommand:
     def test_help(self) -> None:
-        result = _invoke("compare-release", "--help")
+        result = _invoke("compare", "--help")
         assert result.exit_code == 0
 
     def test_annotate_additions_requires_annotate(self, tmp_path: Path) -> None:
@@ -962,7 +973,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--annotate-additions",
@@ -978,7 +989,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -996,7 +1007,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--severity-preset",
@@ -1013,7 +1024,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--severity-preset",
@@ -1029,7 +1040,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1047,7 +1058,7 @@ class TestCompareReleaseCommand:
         _write_snap(new_dir / "libfoo.json", _snap())
         out = tmp_path / "release.json"
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1067,7 +1078,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libgone.json", _snap(library="libgone.so"))
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1683,7 +1694,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(new_dir / "libfoo.json", new)
         out_dir = tmp_path / "reports"
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--output-dir",
@@ -1703,7 +1714,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
         _write_snap(new_dir / "libfoo.json", _snap(library="libfoo.so"))
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1725,7 +1736,7 @@ class TestCompareReleaseExtraFlows:
             "  - symbol: foo\n    reason: legacy\n    expires: 2000-01-01\n",
         )
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--suppress",
@@ -1749,7 +1760,7 @@ class TestCompareReleaseExtraFlows:
 
         monkeypatch.setattr(cr_mod, "_run_compare_pair", boom)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",

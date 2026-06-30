@@ -26,6 +26,7 @@ import json
 import struct
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -45,6 +46,334 @@ def _snap(version: str = "1.0", funcs: list[Function] | None = None,
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
     path.write_text(snapshot_to_json(snap), encoding="utf-8")
     return path
+
+
+def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
+    """A `collect` pack (manifest.json present) is distinguished from a raw tree."""
+    from abicheck.cli import _source_is_pack
+
+    tree = tmp_path / "checkout"
+    tree.mkdir()
+    (tree / "main.c").write_text("int main(void){return 0;}\n")
+    assert not _source_is_pack(tree)
+
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.json").write_text('{"build_source_pack_version": 1}')
+    assert _source_is_pack(pack)
+
+    # A Flow-2 inputs pack is NOT treated as a compare-sources pack: the evidence
+    # path only loads BuildSourcePack, so routing it here would mis-load it. Feed
+    # inputs packs through `merge` instead (Codex review).
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "manifest.json").write_text('{"kind": "abicheck_inputs"}')
+    assert not _source_is_pack(inputs)
+
+    # A raw checkout with a stray/sparse manifest.json is NOT a pack — it must
+    # still be collected from (Codex review).
+    stray = tmp_path / "stray"
+    stray.mkdir()
+    (stray / "manifest.json").write_text('{"name": "my-project"}')
+    assert not _source_is_pack(stray)
+    # A present-but-corrupt manifest stays classified as a (corrupt) pack so the
+    # downstream load errors loudly rather than silently collecting.
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "manifest.json").write_text("not json{")
+    assert _source_is_pack(bad)
+
+
+def test_embed_inline_source_forwards_toolchain_and_collects(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A raw source tree on a native side dumps inline at the requested depth and
+    forwards the resolved compile/toolchain context (gcc/sysroot/nostdinc)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()  # raw checkout (no manifest.json)
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    # Pretend the input is a native ELF binary so the embed path is taken.
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    cc = CompileContext(
+        gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
+        gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
+    )
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=cc,
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=True, search_paths=(Path("/libs"),),
+        ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
+        pdb_path=Path("/p.pdb"),
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+
+    assert kept is None and kept_bi is None and out == tmp_path / "old.abi.json"
+    # Every kwarg forwarded to dump must be a real dump_cmd parameter — guards
+    # against threading a removed/renamed option through ctx.invoke (which would
+    # only blow up at runtime with a real Context, not this fake one). Codex review.
+    import inspect
+    dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
+    assert set(captured) <= dump_params, set(captured) - dump_params
+    assert captured["sources"] == tree and captured["_resolved_collect_mode"] == "source-target"
+    # The resolved compile context is frozen and handed to dump verbatim (so dump
+    # does not re-resolve / re-discover the tree's config) — Codex review.
+    frozen = captured["_resolved_compile_context"]
+    assert frozen.gcc_path == "/x/g++" and frozen.sysroot == Path("/sysroot")
+    assert frozen.nostdinc is True and frozen.gcc_option_tokens == ("-DFOO",)
+    assert frozen.frontend == "auto"
+    # dependency-analysis knobs ride into the inline dump too (Codex review)
+    assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
+    assert captured["ld_library_path"] == "/x:/y"
+    # native dump selectors (dwarf-only/debug-format/pdb) too (Codex review)
+    assert captured["dwarf_only"] is True and captured["debug_format_opt"] == "dwarf"
+    assert captured["pdb_path"] == Path("/p.pdb")
+
+
+def test_embed_inline_source_merges_tree_config_but_cli_wins(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The side's source-root .abicheck.yml compile: block is merged into the
+    frozen context (so dump --sources behavior is preserved), but an explicit CLI
+    override still wins over the config frontend (both Codex findings)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / ".abicheck.yml").write_text(
+        "version: 3\ncompile:\n  frontend: clang\n  sysroot: /from/cfg\n"
+    )
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    # frontend left at default "auto", NOT explicit → config's clang wins; the
+    # tree's sysroot is picked up too.
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    merged = captured["_resolved_compile_context"]
+    assert merged.frontend == "clang" and merged.sysroot == Path("/from/cfg")
+
+    # Now mark --ast-frontend auto explicit → CLI "auto" must beat config clang.
+    captured.clear()
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    assert captured["_resolved_compile_context"].frontend == "auto"
+
+    # A nostdinc already resolved True (e.g. from compare --config) survives
+    # the tree merge even though this tree's config omits it (Codex review).
+    captured.clear()
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(nostdinc=True),
+        frontend_explicit=False, nostdinc_explicit=True, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    assert captured["_resolved_compile_context"].nostdinc is True
+
+
+def test_embed_inline_source_ignored_when_depth_collects_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """At a depth that collects no source (collect_mode 'off') a raw tree is
+    ignored rather than silently deepening the run."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+    )
+
+    assert kept is None and kept_bi is None and out == tmp_path / "lib.so"
+    assert called["n"] == 0  # no dump performed
+
+
+def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When the source tree can't be collected (here: collect_mode 'off'), a raw
+    --build-info dir is dropped too — otherwise prepare_embedded_build_source would
+    try to load it as a pack and abort with 'Invalid evidence pack' (Codex review).
+    A build-info that *is* a validated pack survives so it can still be applied."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    raw_build = tmp_path / "build"  # raw build dir, NOT a pack
+    raw_build.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    _, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+    )
+
+    assert kept is None and kept_bi is None  # raw build dir dropped, not kept
+
+
+def test_embed_inline_collects_raw_build_info_without_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A raw --build-info on a native side with no --sources still triggers the
+    inline dump (so L3 is collected/embedded) rather than falling through to the
+    pack loader and aborting with 'Invalid evidence pack' (Codex review)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"  # raw build dir, NOT a pack
+    raw_build.mkdir()
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="build", out_dir=tmp_path, label="old",
+    )
+
+    # The dump was invoked with the raw build-info forwarded; both consumed → None.
+    assert out == tmp_path / "old.abi.json"
+    assert kept is None and kept_bi is None
+    assert captured["build_info"] == raw_build and captured["sources"] is None
+    assert captured["_resolved_collect_mode"] == "build"
+
+
+def test_embed_inline_raw_build_info_on_snapshot_is_ignored(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A raw --build-info on a snapshot input (can't re-dump) is warned about and
+    cleared, so it never reaches the pack loader (Codex review)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"
+    raw_build.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("dump must not run on a snapshot input")
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), None))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "old.json", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="build", out_dir=tmp_path, label="old",
+    )
+
+    assert kept is None and kept_bi is None  # raw build-info dropped, not kept
+
+
+def test_embed_inline_raw_build_info_dropped_at_off_depth(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A raw --build-info with a no-collect depth (collect_mode 'off') is dropped
+    rather than reaching the pack loader."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"
+    raw_build.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    _, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="off", out_dir=tmp_path, label="old",
+    )
+
+    assert kept is None and kept_bi is None and called["n"] == 0
+
+
+def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
+    """A raw --old-sources tree on a snapshot input can't be embedded (you can't
+    re-dump a snapshot), so compare warns and still produces a verdict."""
+    old, new = _breaking_pair()
+    old_f = _write_snap(tmp_path / "old.json", old)
+    new_f = _write_snap(tmp_path / "new.json", new)
+    tree = tmp_path / "src"
+    tree.mkdir()  # no manifest.json → looks like a raw source checkout
+    result = CliRunner().invoke(
+        main, ["compare", str(old_f), str(new_f), "--old-sources", str(tree)]
+    )
+    out = (result.output or "") + (result.stderr or "")
+    assert "ignored" in out, out
+    assert result.exit_code in (0, 2, 4), out
 
 
 def _breaking_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -239,6 +568,38 @@ class TestCompareDispatch:
         assert code == 4
         assert json.loads(out)["verdict"] == "BREAKING"
 
+    @pytest.mark.parametrize(
+        "flag, value, is_path",
+        [
+            ("--max", None, False),
+            ("--depth", "source", False),
+            ("--old-sources", "src", True),
+            ("--new-build-info", "build", True),
+        ],
+    )
+    def test_evidence_flags_rejected_on_set_inputs(
+        self, tmp_path: Path, flag: str, value: str | None, is_path: bool
+    ) -> None:
+        # Inline build/source evidence flags can't be threaded through the
+        # release fan-out, so they are rejected rather than silently dropped
+        # (Codex review).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        if value is None:
+            extra = [flag]
+        elif is_path:
+            (tmp_path / value).mkdir(exist_ok=True)  # --sources/--build-info need a real path
+            extra = [flag, str(tmp_path / value)]
+        else:
+            extra = [flag, value]  # --depth takes a literal choice value
+        code, out, err = _invoke("compare", str(old_dir), str(new_dir), *extra)
+        assert code != 0
+        assert "not supported for directory/package" in (out + err)
+
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")
         new = _write_snap(tmp_path / "new.json", _snap())
@@ -285,7 +646,7 @@ class TestReleaseFanoutParity:
         _write_snap(new_dir / "libbar.json", _snap())
 
         rel = CliRunner().invoke(
-            main, ["compare-release", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
         )
         cmp = CliRunner().invoke(
             main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
@@ -312,24 +673,18 @@ class TestReleaseFanoutParity:
         assert list(out_dir.glob("*.json"))
 
 
-# ── alias smoke ────────────────────────────────────────────────────────────────
+# ── directory comparison (no deprecation: compare-release was removed) ───────
 
-class TestDeprecatedAliases:
-    def test_compare_release_still_works_and_warns(self, tmp_path: Path) -> None:
+class TestDirectoryComparison:
+    def test_compare_directories_runs_release_fanout(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        result = CliRunner().invoke(main, ["compare-release", str(old_dir), str(new_dir)])
+        result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
         assert result.exit_code == 0
-        assert "deprecated" in (result.stderr or "")
+        # The standalone compare-release command was removed; no deprecation note.
+        assert "deprecated" not in (result.stderr or "")
 
-    def test_deep_compare_still_works_and_warns(self, tmp_path: Path) -> None:
-        old, new = _breaking_pair()
-        old_f = _write_snap(tmp_path / "old.json", old)
-        new_f = _write_snap(tmp_path / "new.json", new)
-        result = CliRunner().invoke(main, ["deep-compare", str(old_f), str(new_f)])
-        assert result.exit_code == 4
-        assert "deprecated" in (result.stderr or "")

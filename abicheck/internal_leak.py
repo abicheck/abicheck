@@ -176,6 +176,26 @@ def _strip_decorators(typename: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+def _is_known_pointer_wrapper(outer: str) -> bool:
+    """Return True only for pointer-owning wrapper spellings we know.
+
+    This deliberately avoids substring matches such as
+    ``acme::unique_ptr_value<T>``: a user-defined type can embed ``T`` by
+    value while having a smart-pointer-like name.  In ambiguous cases, keep the
+    path value-propagating so the ABI break is visible.
+    """
+    clean = _strip_template_args(_strip_decorators(outer)).strip()
+    if not clean:
+        return False
+    leaf = clean.rsplit("::", 1)[-1]
+    leaf_l = leaf.lower()
+    if leaf_l in {"unique_ptr", "shared_ptr", "weak_ptr", "__uniq_ptr_impl"}:
+        return True
+    # oneDAL exposes detail::pimpl<T> as its public pimpl alias.  Keep this
+    # project-specific alias narrow; a bare ``acme::pimpl<T>`` may be an
+    # arbitrary by-value template and must not suppress layout leaks.
+    return clean == "oneapi::dal::detail::pimpl"
+
 def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     """Yield ``(candidate_type_name, reached_through_pointer)`` pairs for *typename*.
 
@@ -204,11 +224,7 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     # in an unrelated argument of a by-value template does not mark its siblings
     # indirect (Codex review).
     outer = _strip_decorators(top)
-    outer_leaf = outer.rsplit("::", 1)[-1].lower()
-    smart = (
-        any(m in outer for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr"))
-        or outer_leaf == "pimpl"  # oneDAL pimpl<T> alias
-    )
+    smart = _is_known_pointer_wrapper(outer)
     # Walk the outermost <...> of the ORIGINAL spelling (keeps inner */&).
     depth = 0
     start = -1

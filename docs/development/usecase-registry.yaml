@@ -330,9 +330,15 @@ use_cases:
     gap: G21
     plan: docs/development/plans/g21-oneshot-deep-compare.md
     evidence:
-      modules: [abicheck/cli_max.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
-      tests: [tests/test_cli_deep_compare.py, tests/test_cov95_cli.py]
+      modules: [abicheck/cli.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
+      Superseded: the standalone `deep-compare` orchestrator was removed and
+      folded into `compare`. `compare old.so new.so --old-sources ./src1
+      --new-sources ./src2 --max` collects L3-L5 inline from each raw source
+      tree (a pre-built `collect` pack is accepted too) and embeds it in the
+      per-side snapshot before comparing — the one-shot deep route, now on
+      `compare`. The text below is retained as historical context for G21.
       Shipped in PR #422: the --depth headers|build|graph|source|full dial
       (--max = --depth full) on dump reusing the scan_levels vocabulary/mapping;
       the one-shot `deep-compare` orchestrator (cli_max.py) that dumps both sides
@@ -349,9 +355,13 @@ use_cases:
   - id: UC-WF-cli-contract
     axis: workflow
     name: CLI interface contract, config balance, and extension policy
-    status: planned
+    status: complete
     gap: G22
     plan: docs/development/plans/g22-cli-consolidation.md
+    evidence:
+      modules: [abicheck/api_types.py, abicheck/service.py, abicheck/cli_options.py, abicheck/buildsource/inline.py]
+      tests: [tests/test_cli_contract.py, tests/test_api_types.py, tests/test_config_rebalance.py]
+      docs: [docs/development/adr/037-cli-interface-contract.md, docs/development/plans/g22-cli-consolidation.md]
     next_steps: >
       ADR-037. Formalises the CLI/API as three tiers (core/service/front-end)
       with the service layer as the only chokepoint, typed CompareRequest
@@ -548,8 +558,8 @@ use_cases:
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
       extractor (G4). ALSO DONE: per-side L2 backend selection
-      (`--old-header-backend`/`--new-header-backend` on `compare`/`deep-compare`,
-      each inheriting `--header-backend`) so a release whose new headers need the
+      (`--old-ast-frontend`/`--new-ast-frontend` on `compare`,
+      each inheriting `--ast-frontend`) so a release whose new headers need the
       host toolchain parses on clang while the old release keeps the castxml schema
       reference — the backend mirror of `--old-header`/`--new-header`
       (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an
@@ -605,6 +615,24 @@ use_cases:
       small Bazel C++ project, add it as a non-executing fixture + test asserting
       non-empty BuildEvidence, then flip to partial/complete.
 
+  - id: UC-TC-make-auto-query
+    axis: toolchain
+    name: GNU Make / EPICS-style zero-config build evidence (L3)
+    status: complete
+    note: >
+      `--sources` on a Make project now runs a fixed GNU Make dry-run query
+      (`-B -n -k -w`) when no compile DB exists, selects a GNU launcher by
+      version-probing the resolved executable path, cleanly skips BSD/non-GNU
+      make, and scrapes recursive directory markers from make/gmake/gnumake/
+      mingw32-make transcript spellings. CI unit tests cover launcher selection,
+      non-GNU fallback/skip, resolved-path execution, and directory-marker
+      parsing; PR #464 also carries a pvxs real-world proof with
+      compile_commands.json temporarily removed.
+    evidence:
+      modules: [abicheck/buildsource/build_query.py, abicheck/buildsource/adapters/make.py]
+      tests: [tests/test_build_query_inference.py, tests/test_make_adapter.py]
+      docs: [docs/user-guide/scan-levels.md, docs/concepts/build-source-data.md]
+
   # ── PR-tier source intelligence & cross-source validation (ADR-035 / G19) ──
   - id: UC-WORKFLOW-pr-source-tier
     axis: workflow
@@ -625,6 +653,8 @@ use_cases:
         - tests/test_risk.py
         - tests/test_scan_levels.py
         - tests/test_cli_scan.py
+        - tests/test_perf_binary_scan.py
+        - tests/test_scenarios.py
     next_steps: >
       ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
       (`buildsource/pattern_scan.py`); and the deterministic `scan` orchestrator
@@ -640,7 +670,11 @@ use_cases:
       preprocessor pre-scan (`buildsource/preprocessor_scan.py`) — per-TU ABI
       macro-value capture + divergence and public-header private/generated-header
       leak detection, conditional on a compile DB + `clang -E` — is done and wired
-      into `scan` with honest coverage. Phase 1 (D2) complete.
+      into `scan` with honest coverage. Depth semantics are tracked end-to-end:
+      the binary rung stays artifact-only (L0/L1) even when matrix-wide headers,
+      sources, or compile DB flags are present, with a slow native-ELF perf guard
+      and scenario catalog entry preventing source-pattern/L3 work from leaking
+      back into `--depth binary`. Phase 1 (D2) complete.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -709,10 +743,14 @@ use_cases:
       escalation triggers + L0/L1/L2 export deltas + risk score (reverse of the
       explain-finding localization walk); the floor is unconditional (risk/deltas
       only add, never drop a changed TU). `scan` runs the pattern pre-scan first
-      and feeds `poi.changed_paths()` into the source-replay scope. REMAINS:
-      handing the symbol POIs (not just paths) into `crosscheck` as a work-list,
-      and the automatic baseline-delta POI inside the `scan --baseline` path
-      (the builder already supports it; CLI wiring loads the baseline later).
+      and feeds `poi.changed_paths()` into the source-replay scope. The
+      `scan --baseline` path now reads a cheap, header-free L0 view of both sides
+      (`_load_exports_for_poi`) so the export-delta walk runs live, and
+      `resolve_symbol_tus` turns the resulting symbol POIs into declaring TUs
+      (via the baseline's cached L5 graph) that join the replay seed *and* the
+      `crosscheck` changed-path work-list. REMAINS: symbol→TU resolution only
+      fires when the baseline carries an L5 graph (the full-depth ADR-035 D9
+      baseline); a shallow baseline still focuses on changed paths only.
 
   - id: UC-TC-build-emitted-facts
     axis: toolchain

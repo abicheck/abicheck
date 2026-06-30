@@ -105,6 +105,7 @@ def manifest_pairs(filter_lib: str | None, subdir: str) -> list[dict]:
                 "new_ver": m["new_ver"],
                 "expected_verdict": m["expectation"],
                 "subdir": subdir,
+                "channel": m.get("channel", "conda-forge"),
                 "old_file": m.get("old_file"),
                 "new_file": m.get("new_file"),
                 "note": m.get("note"),
@@ -188,16 +189,18 @@ def run_validation(pairs: list[dict], max_pairs: int, label: str) -> dict:
                 break
             attempted.append(pair)
             pkg = pair["pkg"]
-            if pkg not in api_cache:
+            channel = pair.get("channel", "conda-forge")
+            cache_key = (pkg, channel)
+            if cache_key not in api_cache:
                 try:
-                    api_cache[pkg] = query_conda(pkg)
+                    api_cache[cache_key] = query_conda(pkg, channel=channel)
                 except (OSError, json.JSONDecodeError) as exc:
                     print(
-                        f"failed to query conda-forge for {pkg}: {exc}", file=sys.stderr
+                        f"failed to query {channel} for {pkg}: {exc}", file=sys.stderr
                     )
-                    api_cache[pkg] = {}
+                    api_cache[cache_key] = {}
             verdict = evaluate_pair(
-                pair, api_cache[pkg], pair["subdir"], tmp, i, evidence
+                pair, api_cache[cache_key], pair["subdir"], tmp, i, evidence
             )
             if verdict is None:
                 continue

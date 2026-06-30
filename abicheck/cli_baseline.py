@@ -27,6 +27,7 @@ from pathlib import Path
 import click
 
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import verbose_option
 from .errors import AbicheckError
 from .serialization import snapshot_to_json
 
@@ -66,7 +67,7 @@ def baseline_group() -> None:
               default=None,
               help="Path to an evidence-pack directory (from `collect`) "
                    "to store alongside the baseline snapshot.")
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def baseline_push(
     library: str, version: str, platform: str, variant: str,
     snapshot_path: Path, registry_path: Path | None,
@@ -153,12 +154,13 @@ def baseline_push(
               help="Output path for the snapshot JSON file.")
 @click.option("--registry", "registry_path", type=click.Path(path_type=Path),
               default=None,
-              help="Path to the baseline registry directory.")
+              help="Path to the baseline registry directory. "
+                   "Defaults to .abicheck/baselines in the current directory.")
 @click.option("--evidence-output", "evidence_output", type=click.Path(path_type=Path),
               default=None,
               help="If the baseline carries an evidence pack, copy it to this "
                    "directory.")
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def baseline_pull(
     spec: str, output: Path, registry_path: Path | None,
     evidence_output: Path | None, verbose: bool,
@@ -218,10 +220,11 @@ def baseline_pull(
 @click.argument("prefix", required=False, default=None)
 @click.option("--registry", "registry_path", type=click.Path(path_type=Path),
               default=None,
-              help="Path to the baseline registry directory.")
+              help="Path to the baseline registry directory. "
+                   "Defaults to .abicheck/baselines in the current directory.")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]),
-              default="text", show_default=True)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+              default="text", show_default=True, help="Output format.")
+@verbose_option
 def baseline_list(prefix: str | None, registry_path: Path | None, fmt: str, verbose: bool) -> None:
     """List available ABI baselines in the registry.
 
@@ -257,8 +260,9 @@ def baseline_list(prefix: str | None, registry_path: Path | None, fmt: str, verb
 @click.argument("spec", type=str)
 @click.option("--registry", "registry_path", type=click.Path(path_type=Path),
               default=None,
-              help="Path to the baseline registry directory.")
-@click.option("-v", "--verbose", is_flag=True, default=False)
+              help="Path to the baseline registry directory. "
+                   "Defaults to .abicheck/baselines in the current directory.")
+@verbose_option
 def baseline_delete(spec: str, registry_path: Path | None, verbose: bool) -> None:
     """Delete an ABI baseline from the registry.
 

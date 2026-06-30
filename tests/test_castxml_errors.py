@@ -380,14 +380,41 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(tmp_path, mo
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     parser = _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
     assert isinstance(parser, _ClangAstParser)
 
 
+def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypatch):
+    """An auto-selected castxml that fails on a direct-include #error guard (a
+    -H include-dir swept in an internal/detail header) falls back to clang, whose
+    path can granularly exclude the offending header and re-parse the rest."""
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError(
+            "castxml failed (exit 1):\n"
+            "/x/_detail.h:21:6: error: do not #include this internal header directly"
+        )
+
+    sentinel = object()
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+
+    parser = _header_ast_parser(
+        [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
+    )
+    assert isinstance(parser, _ClangAstParser)
+
+
 def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
-    """An explicit --header-backend castxml is honored verbatim — the toolchain
+    """An explicit --ast-frontend castxml is honored verbatim — the toolchain
     error surfaces unchanged rather than silently switching to clang."""
     from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
@@ -399,7 +426,7 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
         _header_ast_parser([Path("a.h")], [], backend="castxml", **_ast_parser_kwargs(tmp_path))
@@ -418,7 +445,7 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
         _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))

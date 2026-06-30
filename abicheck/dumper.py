@@ -17,12 +17,14 @@
 The header AST (L2) is produced by one of two interchangeable frontends behind
 ``_header_ast_parser``: **castxml** (the default / schema reference, parsed by
 ``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
-by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
-with ``header_backend=`` (``auto``/``castxml``/``clang``) or the
-``ABICHECK_HEADER_BACKEND`` env var. When the backend is auto-selected, a castxml
-*toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
-falls back to the clang backend automatically (G16); an explicit selection is
-honored verbatim. See ADR-003.
+by ``dumper_clang._ClangAstParser``) when explicitly requested. Select
+with ``header_backend=`` (``auto``/``castxml``/``clang``; CLI ``--ast-frontend``)
+or the ``ABICHECK_AST_FRONTEND`` env var. ``auto`` resolves to castxml and never
+silently falls back to clang on castxml-less hosts (clang's JSON AST lacks
+computed record layout, so an implicit fallback could miss layout-only breaks).
+The one exception is a runtime castxml *toolchain-version* failure (bundled
+Clang too old for the host libstdc++/GCC), which falls back to the clang backend
+automatically (G16); an explicit selection is honored verbatim. See ADR-003.
 """
 from __future__ import annotations
 
@@ -34,7 +36,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import warnings
 from collections.abc import Callable
@@ -52,14 +53,29 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from .dumper_cache import _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_clang_errors import (
+    _is_direct_include_guard_failure,
+    _is_missing_cpp_stdlib_header_error,
+    diagnose_header_compile_failure,
+    retry_excluding_error_headers,
+)
+from .dumper_sysinc import (
+    _auto_system_includes_enabled as _auto_system_includes_enabled,
+    _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
+    _probe_gnu_system_includes as _probe_gnu_system_includes,
+    _resolve_clang_system_includes as _resolve_clang_system_includes,
+    _resolve_probe_compiler as _resolve_probe_compiler,
+)
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
+from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
     ElfVisibility,
@@ -84,35 +100,33 @@ def _clang_available(clang_bin: str = "clang") -> bool:
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
 #: the schema reference; clang is the alternative for hosts where castxml is
 #: absent or its bundled frontend chokes (ADR-003, "clang as an alternative L2
-#: frontend"). ``auto`` prefers castxml, then clang.
+#: frontend"). ``auto`` resolves to castxml unless the environment explicitly
+#: selects clang; the clang backend lacks computed record layout evidence.
 HEADER_BACKENDS = ("auto", "castxml", "clang")
 
 
 def _resolve_header_backend(backend: str | None) -> str:
-    """Resolve an L2 header-AST backend request to a concrete ``castxml``/``clang``.
+    """Resolve an L2 header-AST frontend request to a concrete ``castxml``/``clang``.
 
     Precedence: an explicit ``castxml``/``clang`` is honored verbatim (and the
     caller gets a clear error later if that tool is missing). ``auto``/``None``
-    consults the ``ABICHECK_HEADER_BACKEND`` env var first — so a clang-only CI
-    image can flip the global default without touching every call site — then
-    prefers castxml (the schema reference), falling back to clang when only clang
-    is on PATH. When neither tool is present it returns ``castxml`` so the
-    existing "install castxml" error message is surfaced unchanged.
+    consults the ``ABICHECK_AST_FRONTEND`` env var first, then resolves to
+    castxml (the schema reference). It deliberately does not auto-fallback to
+    clang: clang JSON AST snapshots do not carry computed record size, alignment,
+    field offsets, or vtable layout, so implicit fallback could silently miss
+    layout-only ABI breaks on castxml-less hosts. Users who accept that evidence
+    tier may still request ``clang`` explicitly (or via the environment).
     """
     choice = (backend or "auto").lower()
     if choice in ("castxml", "clang"):
         return choice
     if choice != "auto":
         raise ValidationError(
-            f"Unknown header backend {backend!r}; expected one of {HEADER_BACKENDS}."
+            f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
-    env = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     if env in ("castxml", "clang"):
         return env
-    if _castxml_available():
-        return "castxml"
-    if _clang_available():
-        return "clang"
     return "castxml"
 
 
@@ -141,6 +155,7 @@ def _build_clang_header_command(
     gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
+    system_includes: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` command for the aggregate header.
 
@@ -150,6 +165,14 @@ def _build_clang_header_command(
     just a different frontend over the identical inputs. ``-fsyntax-only`` (no
     codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
     single bad decl does not blank the whole dump.
+
+    ``system_includes`` are host-compiler-probed system dirs (see
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
+    the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
+    castxml↔clang capability-parity fix. They are emitted **last** (after the
+    user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
+    auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
+    cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
@@ -162,12 +185,23 @@ def _build_clang_header_command(
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
+    # Auto-probed host system dirs go *after* the user's pass-through flags, so a
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
+    # (Codex review). Auto-detection is a fallback, never an override.
+    for sysinc in system_includes:
+        cmd += ["-isystem", sysinc]
     explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     if not force_cpp:
         if not explicit_std:
             cmd += ["-x", "c", "-std=gnu11"]
-    elif force_cpp20 and not explicit_std:
-        cmd += ["-x", "c++", "-std=gnu++20"]
+    elif not explicit_std:
+        # Select the C++ language explicitly (``-x c++``) rather than relying on
+        # the aggregate file's extension: the C→C++ retry reuses a ``.h`` aggregate
+        # that clang would otherwise parse as C. Only bump the standard to gnu++20
+        # when C++20 syntax was detected; otherwise leave clang's default dialect.
+        cmd += ["-x", "c++"]
+        if force_cpp20:
+            cmd += ["-std=gnu++20"]
     cmd += [
         "-fsyntax-only",
         "-ferror-limit=0",
@@ -190,6 +224,7 @@ def _clang_header_dump(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     """Run clang over *headers* and return the parsed ``-ast-dump=json`` root.
 
@@ -220,14 +255,63 @@ def _clang_header_dump(
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
             "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml backend (--header-backend castxml)."
+            "clang). Or use the castxml frontend (--ast-frontend castxml)."
         )
+
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers)
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    # Was C *explicitly* requested (``--lang c``), as opposed to auto-detected?
+    # Both leave ``force_cpp`` False, but the C→C++ self-heal below must treat
+    # them differently: an explicit C request that reparses as C++ overrides what
+    # the user asked for, so it stays a visible warning; the auto-detected probe
+    # self-healing is just noise and is demoted to debug (Codex review).
+    explicit_c_request = bool(lang) and not force_cpp
+    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
+
+    # castxml↔clang parity: probe the host GNU compiler for its system include
+    # dirs and inject them as ``-isystem`` so clang resolves libstdc++/libc the
+    # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
+    # toolchain change invalidates a stale dump.
+    def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
+        """Probe the host GNU driver's ``-isystem`` dirs for the given language."""
+        return _resolve_clang_system_includes(
+            compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            force_cpp=force_cpp,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+        )
+
+    system_includes = _resolve_sysinc(force_cpp=force_cpp)
+    # Pre-resolve the C++ system include set so it (a) folds into the cache key —
+    # the C→C++ retry below parses with these, and the C-mode probe omits the
+    # versioned libstdc++ dirs, so without this a libstdc++/GCC upgrade would not
+    # change the key and abicheck would reuse a stale C++ AST (Codex review); and
+    # (b) is reused by the retry without a second probe. This means a C-mode dump
+    # pays one extra ``g++ -E -v`` probe even when it never retries — accepted as
+    # the cost of a retry-stable cache key (a lazy resolve would reopen the
+    # staleness window). The probe is fast and the clang backend is opt-in.
+    cpp_system_includes = (
+        system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
+    )
 
     key = _cache_key(
         headers, extra_includes, clang_bin,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
+        # Both include sets feed the key: whichever the retry settles on, a
+        # toolchain change to either invalidates the cached AST. Equal when
+        # already in C++ mode — pass once so existing C++ cache keys are stable.
+        system_includes=system_includes
+        if force_cpp
+        else (*system_includes, *cpp_system_includes),
+        extra_hash_dirs=extra_hash_dirs,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -236,32 +320,86 @@ def _clang_header_dump(
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
 
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers)
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
-
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
-        for h in headers:
-            agg.write(f'#include "{h.resolve()}"\n')
         agg_path = Path(agg.name)
+    active_headers = list(headers)
 
-    cmd = _build_clang_header_command(
-        clang_bin, cc_id, extra_includes, agg_path,
-        sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        force_cpp=force_cpp, force_cpp20=force_cpp20,
-    )
-    try:
+    def _write_agg(hdrs: list[Path]) -> None:
+        agg_path.write_text(
+            "".join(f'#include "{h.resolve()}"\n' for h in hdrs), encoding="utf-8"
+        )
+
+    _write_agg(active_headers)
+
+    def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        """Build and run the clang AST-dump command for the given language mode."""
+        cmd = _build_clang_header_command(
+            clang_bin, cc_id, extra_includes, agg_path,
+            sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp=fcpp, force_cpp20=fcpp20,
+            system_includes=sysinc,
+        )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         except subprocess.TimeoutExpired as exc:
             raise SnapshotError(
                 "clang timed out after 120 seconds parsing the header(s). The header "
                 "may contain syntax that causes the frontend to hang."
             ) from exc
+
+    try:
+        result = _run_clang(force_cpp, force_cpp20, system_includes)
+        # C→C++ self-heal: a pure-``#include`` umbrella header (e.g. oneTBB's
+        # ``oneapi/tbb.h``) carries no inline C++ syntax, so ``_detect_cpp_headers``
+        # picks C mode — then ``#include <cstddef>`` fails because the C-mode probe
+        # never injected the libstdc++ ``-isystem`` dirs. A missing C++ *standard*
+        # header is an unambiguous "this is C++" signal (a C TU never includes one),
+        # so retry once in C++ mode with the pre-resolved C++ system includes.
+        # Mirrors the castxml C→C++ retry; skipped when already in C++ mode or the
+        # failure is anything other than a missing C++ stdlib header.
+        if (
+            result.returncode != 0
+            and not force_cpp
+            and _is_missing_cpp_stdlib_header_error(result.stderr or "")
+        ):
+            if explicit_c_request:
+                # The user asked for C, but the header needs the C++ standard
+                # library — self-heal to C++ so the dump still succeeds, but keep
+                # it visible: the result is C++ ABI evidence, not the C the
+                # request implied (Codex review).
+                log.warning(
+                    "clang was asked for C (--lang c) but the header(s) require the "
+                    "C++ standard library; self-healing to C++ mode. The result is "
+                    "C++ ABI evidence — pass --lang c++ to make this explicit, or "
+                    "verify you intended a C library."
+                )
+            else:
+                log.debug(
+                    "clang auto-detected C for a pure-#include umbrella header (no "
+                    "inline C++ syntax to key on), then self-healed to C++ after a "
+                    "missing C++ standard header — an unambiguous C++ signal. The "
+                    "result is unaffected; pass --lang c++ to skip the initial C probe."
+                )
+            cur_fcpp, cur_fcpp20, cur_sysinc = (
+                True, _detect_cpp20_headers(headers), cpp_system_includes,
+            )
+            result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
+        else:
+            cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
+        # Graceful #error handling: when ``-H`` expands to a public include dir,
+        # some headers are not meant to be included directly and raise a
+        # preprocessor ``#error`` (preview / internal ``detail`` headers) that
+        # would otherwise abort the whole aggregate compile. Drop the offending
+        # headers and re-parse the rest (see dumper_clang_errors).
+        result = retry_excluding_error_headers(
+            result=result,
+            run_clang=lambda: _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc),
+            write_agg=_write_agg,
+            agg_path=agg_path,
+            active_headers=active_headers,
+        )
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
         # replay (which tolerates partial coverage), the L2 header AST must be
         # complete to be authoritative — a truncated declaration set would
@@ -272,8 +410,9 @@ def _clang_header_dump(
             raise SnapshotError(
                 f"clang failed to parse the header(s) (exit {result.returncode}). The "
                 "header may be malformed or need build flags it was not given (try "
-                f"--gcc-options / -p, or --header-backend castxml):\n"
+                f"--gcc-options / -p, or --ast-frontend castxml):\n"
                 f"{result.stderr[:1000].strip()}"
+                f"{diagnose_header_compile_failure(result.stderr) or ''}"
             )
         if not result.stdout.strip():
             raise SnapshotError(
@@ -310,6 +449,7 @@ def _header_ast_parser(
     exported_static: set[str],
     public_header_paths: list[str],
     public_dir_paths: list[str],
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its parser (castxml or clang).
 
@@ -326,6 +466,7 @@ def _header_ast_parser(
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
         )
         return _ClangAstParser(
             ast_root, exported_dynamic, exported_static,
@@ -336,14 +477,18 @@ def _header_ast_parser(
     if resolved == "clang":
         return _run_clang()
 
-    # G16: when the backend was selected automatically (no explicit --header-backend
-    # and no ABICHECK_HEADER_BACKEND pin), a castxml *toolchain-version* failure
-    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
-    # backend parses against the host toolchain directly. Fall back to it rather
-    # than aborting. An explicit castxml request is honored verbatim (the error
-    # surfaces unchanged).
+    # G16: when the frontend was selected automatically (no explicit --ast-frontend
+    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are recoverable by
+    # falling back to the clang backend rather than aborting: a *toolchain-version*
+    # failure (bundled Clang too old for the host libstdc++/GCC — clang parses
+    # against the host toolchain directly), and a *direct-inclusion #error guard*
+    # (a `-H <include-dir>` swept in a preview/internal header that #errors on
+    # direct inclusion — only the clang path can granularly exclude the offending
+    # headers via retry_excluding_error_headers, so the headline include-dir scan
+    # works on the default frontend, not just --ast-frontend clang). An explicit
+    # castxml request is honored verbatim (the error surfaces unchanged).
     choice = (backend or "auto").lower()
-    env_pin = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
     try:
         xml_root = _castxml_dump(
@@ -351,17 +496,23 @@ def _header_ast_parser(
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
         )
     except SnapshotError as exc:
         if (
             auto_selected
             and _clang_available()
-            and _is_toolchain_version_failure(str(exc))
+            and (
+                _is_toolchain_version_failure(str(exc))
+                or _is_direct_include_guard_failure(str(exc))
+            )
         ):
             log.warning(
-                "castxml failed with a toolchain-version error; falling back to "
-                "the clang header backend (set --header-backend castxml to force "
-                "castxml and see the original error)."
+                "castxml could not parse the header(s) (toolchain mismatch or a "
+                "header that refuses direct inclusion); falling back to the clang "
+                "header backend, which parses against the host toolchain and can "
+                "exclude direct-include #error guard headers. Set --ast-frontend "
+                "castxml to force castxml and see the original error."
             )
             return _run_clang()
         raise
@@ -445,6 +596,8 @@ def _cache_key(
     nostdinc: bool = False,
     lang: str | None = None,
     backend: str = "castxml",
+    system_includes: tuple[str, ...] = (),
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> str:
     h = hashlib.sha256()
     # The header-AST backend is part of the key: a castxml-XML cache entry and a
@@ -456,12 +609,18 @@ def _cache_key(
             h.update(str(os.path.getmtime(p)).encode())
         except OSError:
             pass
-    # Also hash mtimes of files in extra_include dirs (catches most transitive changes)
-    for inc_dir in sorted(str(x) for x in extra_includes):
+    # Also hash mtimes of files in the include dirs (catches most transitive
+    # changes). extra_hash_dirs are dirs searched via *deferred* -isystem tokens
+    # (the inferred -H roots when a build context is present) rather than -I, so
+    # their contents must be folded in here too — otherwise an edit to a header
+    # transitively included from such a root would reuse a stale AST (Codex).
+    for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
         inc_path = Path(inc_dir)
         h.update(inc_dir.encode())
         if inc_path.is_dir():
-            for f in sorted(inc_path.rglob("*.h")) + sorted(inc_path.rglob("*.hpp")):
+            # Hash every header-like file (incl. .inl/.tcc template bodies, not
+            # just .h/.hpp) so any transitive include edit busts the key (#454).
+            for f in iter_cache_header_files(inc_path):
                 try:
                     h.update(str(f).encode())
                     h.update(str(f.stat().st_mtime).encode())
@@ -477,24 +636,11 @@ def _cache_key(
     h.update(f"sysroot={sysroot or ''}".encode())
     h.update(f"nostdinc={nostdinc}".encode())
     h.update(f"lang={lang or ''}".encode())
+    # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
+    # change must invalidate a cached clang dump (the resolved libstdc++ moved).
+    h.update(f"system_includes={chr(0).join(system_includes)}".encode())
     return h.hexdigest()
 
-
-def _cache_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + file extension per backend so the castxml-XML and
-    # clang-JSON caches live side by side without clashing.
-    ext = "json" if backend == "clang" else "xml"
-    if sys.platform == "win32":
-        # Use %LOCALAPPDATA%/abi_check/<backend> on Windows
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            cache_dir = Path(local) / "abi_check" / backend
-        else:
-            cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / backend
-    else:
-        cache_dir = Path.home() / ".cache" / "abi_check" / backend
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{key}.{ext}"
 
 
 # C++ file extensions that unambiguously indicate C++ content.
@@ -810,7 +956,10 @@ def _castxml_failure_hint(
             "(class, namespace, template) but --lang c was specified. "
             "Try removing --lang or using --lang c++."
         )
-    return ""
+    # 4) Generic remediable signatures (missing dependency header, required
+    #    config macro, undeclared type from a missing umbrella) — frontend-
+    #    agnostic, so the castxml path benefits from the same guidance as clang.
+    return diagnose_header_compile_failure(stderr) or ""
 
 
 def _validate_castxml_output(
@@ -871,6 +1020,7 @@ def _castxml_dump(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> Element:
     """Run castxml on headers and return parsed XML root.
 
@@ -896,6 +1046,7 @@ def _castxml_dump(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        extra_hash_dirs=extra_hash_dirs,
     )
     cached = _cache_path(key)
     if cached.exists():
@@ -960,7 +1111,10 @@ def _castxml_dump(
                 # error (and its hint), not the fallback's, so the diagnostic
                 # matches what the user asked for.
                 raise primary from None
-        shutil.copy2(str(out_xml), str(cached))
+        try:
+            shutil.copy2(str(out_xml), str(cached))
+        except OSError as exc:
+            log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         return root
     finally:
         out_xml.unlink(missing_ok=True)
@@ -1087,9 +1241,12 @@ def dump(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1114,6 +1271,12 @@ def dump(
         debug_format: Force debug format for ELF inputs: "dwarf", "btf", or "ctf".
             None = auto-detect (DWARF preferred for userspace, BTF for kernel).
             Ignored for Mach-O and PE binaries.
+        symbols_only: For ELF inputs, skip expensive DWARF type expansion and
+            build the ABI surface from exported symbols only while still
+            recording cheap debug-info presence. Used by ``scan --depth binary``.
+        debug_presence_only: For ELF inputs, skip expensive DWARF type expansion
+            while still allowing header parsing. Used by shallow scan depths that
+            collect L2/L3 from headers/build evidence.
         public_headers: Explicit public-header files used only to classify
             declaration provenance (ADR-015). When empty, every declaration's
             origin stays UNKNOWN and behaviour is unchanged.
@@ -1124,14 +1287,12 @@ def dump(
         AbiSnapshot with functions, variables, and types populated.
     """
     fmt = _detect_format(so_path)
-
     handler = _HANDLERS_BY_NAME.get(fmt)
     if handler is None:
         from .binary_utils import detect_archive
         if detect_archive(so_path):
             raise ValidationError(
-                f"'{so_path}' is a static/import library archive (.a/.lib), which "
-                "abicheck does not analyse — it compares single linkable images "
+                f"'{so_path}' is a static/import library archive (.a/.lib); abicheck compares single linkable images "
                 "(shared libraries and objects). Extract the members (e.g. "
                 "`ar x lib.a`) and compare the resulting object files or the shared "
                 "library built from them instead."
@@ -1142,21 +1303,20 @@ def dump(
             f"Ensure the file is a valid shared library."
         )
 
-    # Forward only the optional kwargs each format's builder accepts — preserves
-    # the exact per-format call the if/elif chain made (ELF: dwarf_only +
-    # debug_format; Mach-O: dwarf_only; PE: neither).
     extra: dict[str, Any] = {}
     if handler.accepts_dwarf_only:
         extra["dwarf_only"] = dwarf_only
     if handler.accepts_debug_format:
         extra["debug_format"] = debug_format
+        extra["symbols_only"] = symbols_only
+        extra["debug_presence_only"] = debug_presence_only
     snapshot = handler.builder(
         so_path, headers, extra_includes or [], version, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         public_headers=public_headers, public_header_dirs=public_header_dirs,
-        header_backend=header_backend,
+        header_backend=header_backend, extra_hash_dirs=extra_hash_dirs,
         **extra,
     )
 
@@ -1395,11 +1555,14 @@ def _try_dwarf_snapshot(
     # If DWARF produced functions (or was explicitly forced), use it.
     if snap.functions or snap.variables or dwarf_only:
         if not headers and not dwarf_only:
-            warnings.warn(
+            # Advisory, not a problem: header-less dump is a legitimate mode (a
+            # stripped/binary-only library). Demoted from UserWarning to an
+            # info log so it does not spam stderr on every run; visible under
+            # `-v` (ADR-035 P6). The genuine "headers passed but unusable"
+            # cases below stay UserWarnings.
+            log.info(
                 "No headers provided — using DWARF debug info as primary data source. "
-                "#define constants and default parameter values will be unavailable.",
-                UserWarning,
-                stacklevel=3,
+                "#define constants and default parameter values will be unavailable."
             )
         _populate_elf_visibility(snap)
         return snap, []
@@ -1432,20 +1595,24 @@ def _build_symbol_only_snapshot(
     # builder produced types but no functions, we still preserve
     # those types (see *dwarf_only_types*), so the warning is
     # narrowed to reflect what's actually missing.
+    # Advisory (ADR-035 P6): a header-less dump is a legitimate mode, so this is
+    # an info log (suppressed by default, shown under `-v`), not a stderr-spamming
+    # UserWarning on every run.
     if dwarf_only_types:
-        warnings.warn(
+        log.info(
             "No headers provided — using ELF-exported symbols for "
             "functions/variables; DWARF-derived type information "
-            "preserved.",
-            UserWarning,
-            stacklevel=3,
+            "preserved."
+        )
+    elif dwarf_meta.has_dwarf:
+        log.info(
+            "No headers provided — using ELF-exported symbols only; DWARF "
+            "debug info is present but was not expanded into the ABI surface."
         )
     else:
-        warnings.warn(
+        log.info(
             "No headers provided and no DWARF debug info — only ELF-exported "
-            "symbols will be captured; type information will be missing.",
-            UserWarning,
-            stacklevel=3,
+            "symbols will be captured; type information will be missing."
         )
     snapshot = AbiSnapshot(
         library=so_path.name,
@@ -1504,36 +1671,44 @@ def _dump_elf(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
-
     from .elf_metadata import parse_elf_metadata
-
     elf_meta = parse_elf_metadata(so_path)
     exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
-    dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
+    if symbols_only or debug_presence_only:
+        from .dwarf_presence import cheap_debug_presence_metadata
+        dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+            so_path,
+            debug_format=debug_format,
+        )
+    else:
+        dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
     profile_hint = _lang_to_profile(lang)
-
     # ADR-003: Updated fallback chain
     # --dwarf-only → force DWARF mode regardless of headers
     # no headers + DWARF available -> DWARF-only mode with type-aware checks
     # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
-    if dwarf_only or (not headers and dwarf_meta.has_dwarf):
+    if not (symbols_only or debug_presence_only) and (
+        dwarf_only or (not headers and dwarf_meta.has_dwarf)
+    ):
         snap, dwarf_only_types = _try_dwarf_snapshot(
             so_path, elf_meta, dwarf_meta, dwarf_adv,
             version, profile_hint, headers, dwarf_only,
         )
         if snap is not None:
             return snap
-
-    if not headers:
+    if symbols_only or not headers:
         return _build_symbol_only_snapshot(
             so_path, version, elf_meta, dwarf_meta, dwarf_adv,
             exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
@@ -1548,6 +1723,7 @@ def _dump_elf(
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     snapshot = AbiSnapshot(
@@ -1591,6 +1767,7 @@ def _dump_macho(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis."""
     if dwarf_only:
@@ -1612,11 +1789,10 @@ def _dump_macho(
     profile_hint = _lang_to_profile(lang)
 
     if not headers:
-        warnings.warn(
+        # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
+        log.info(
             "No headers provided — only Mach-O exported symbols will be captured; "
-            "type information will be missing.",
-            UserWarning,
-            stacklevel=2,
+            "type information will be missing."
         )
         # Normalize Mach-O leading underscore: _foo → foo, __Z... → _Z...
         def _normalize_macho_sym(s: str) -> str:
@@ -1681,6 +1857,7 @@ def _dump_macho(
         exported_dynamic=exported_no_underscore, exported_static=exported_no_underscore,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     return AbiSnapshot(
@@ -1719,6 +1896,7 @@ def _dump_pe(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """PE dump: export table from pefile + header-AST analysis."""
     from .pe_metadata import parse_pe_metadata
@@ -1733,11 +1911,10 @@ def _dump_pe(
     profile_hint = _lang_to_profile(lang)
 
     if not headers:
-        warnings.warn(
+        # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
+        log.info(
             "No headers provided — only PE exported symbols will be captured; "
-            "type information will be missing.",
-            UserWarning,
-            stacklevel=2,
+            "type information will be missing."
         )
         return AbiSnapshot(
             library=dll_path.name,
@@ -1765,6 +1942,7 @@ def _dump_pe(
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     return AbiSnapshot(

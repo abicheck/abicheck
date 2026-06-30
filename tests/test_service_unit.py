@@ -1,4 +1,5 @@
 """Unit tests for abicheck.service — targeting ≥80% coverage."""
+
 from __future__ import annotations
 
 import json
@@ -117,6 +118,20 @@ class TestExpandHeaderInputs:
         assert len(result) == 1
         assert result[0].name == "deep.h"
 
+    @pytest.mark.parametrize("noise_dir", [".abicheck-build", ".git"])
+    def test_prunes_abicheck_build_and_vcs_dirs(self, tmp_path, noise_dir):
+        # Generated headers under abicheck's own cmake build dir (and VCS dirs)
+        # must never inflate the L2 header surface (CodeRabbit).
+        d = tmp_path / "include"
+        d.mkdir()
+        (d / "public.h").write_text("int api(void);\n")
+        sub = d / noise_dir
+        sub.mkdir()
+        (sub / "config.h").write_text("#define GENERATED 1\n")
+        result = expand_header_inputs([d])
+        names = {p.name for p in result}
+        assert names == {"public.h"}  # generated config.h pruned
+
     def test_various_extensions(self, tmp_path):
         d = tmp_path / "hdrs"
         d.mkdir()
@@ -146,6 +161,33 @@ class TestResolveInput:
         with patch("abicheck.service.run_dump", return_value=snap):
             result = resolve_input(p)
         assert result is snap
+
+    def test_elf_forwards_provenance_to_dumper(self, tmp_path):
+        # P1 regression: the ELF service path (used by `scan`) must thread
+        # public_headers / public_header_dirs into dumper.dump, which runs
+        # apply_provenance. Without this the ELF origins stay UNKNOWN and the
+        # provenance-gated cross-checks silently skip — even with
+        # --public-header-dir given. The `dump` CLI always forwarded them; this
+        # path did not.
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        hdr = tmp_path / "pub.h"
+        hdr.write_text("int f();")
+        pubdir = tmp_path / "include"
+        pubdir.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            resolve_input(
+                so,
+                headers=[hdr],
+                includes=[],
+                is_elf=True,
+                public_headers=[hdr],
+                public_header_dirs=[pubdir],
+            )
+        kwargs = mock.call_args.kwargs
+        assert kwargs["public_headers"] == [hdr]
+        assert kwargs["public_header_dirs"] == [pubdir]
 
     def test_json_text_format(self, tmp_path):
         p = tmp_path / "snap.json"
@@ -242,10 +284,333 @@ class TestRunDump:
         assert result is snap
 
 
+# ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
+
+
+class TestImplicitHeaderIncludes:
+    def test_directory_input_is_its_own_root(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        assert _implicit_header_includes([inc]) == [inc]
+
+    def test_file_at_root_adds_parent(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        umb = inc / "dnnl.hpp"
+        umb.write_text("// umbrella")
+        assert _implicit_header_includes([umb]) == [inc]
+
+    def test_nested_umbrella_adds_include_root_ancestor(self, tmp_path):
+        # include/oneapi/tbb.h → both its parent (include/oneapi) and the
+        # conventional include root (include/) must be on the search path so
+        # `#include "oneapi/tbb/..."` resolves.
+        from abicheck.header_utils import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        umb = nested / "tbb.h"
+        umb.write_text("// umbrella")
+        dirs = _implicit_header_includes([umb])
+        assert nested in dirs
+        assert root in dirs
+
+    def test_namespace_directory_adds_include_root_ancestor(self, tmp_path):
+        # A -H *directory* nested under a conventional root, e.g.
+        # `-H include/oneapi`, must add BOTH itself and the include root —
+        # headers inside still `#include "oneapi/..."` relative to include/.
+        from abicheck.header_utils import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        dirs = _implicit_header_includes([nested])
+        assert nested in dirs
+        assert root in dirs
+
+    def test_deduplicates(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        (inc / "a.h").write_text("")
+        (inc / "b.h").write_text("")
+        # Two files in the same dir → the root appears once.
+        assert _implicit_header_includes([inc / "a.h", inc / "b.h"]) == [inc]
+
+    def test_skips_nonexistent_parent(self, tmp_path):
+        # A -H file whose parent dir does not exist contributes nothing.
+        from abicheck.header_utils import _implicit_header_includes
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert _implicit_header_includes([ghost]) == []
+
+
+class TestResolveInferredHeaderRoots:
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        return root, umb
+
+    def test_no_build_context_uses_plain_I(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [])
+        assert root in inc and toks == []
+
+    def test_isystem_context_defers_via_isystem(self, tmp_path):
+        # A build-context -isystem makes the inferred root defer — emitted as
+        # -isystem (below build context, above standard system dirs), not -I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-isystem", "/gen")
+        )
+        assert inc == []
+        # every inferred root is emitted as -isystem (not -I, not -idirafter)
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        assert "-idirafter" not in toks and "-I" not in toks
+
+    def test_gcc_options_include_string_detected(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-I /build/include -O2"
+        )
+        assert inc == [] and str(root) in toks
+
+    @pytest.mark.parametrize(
+        ("tok", "want"),
+        [
+            ("/Ibuild\\generated", "/I"),
+            ("/external:Igen", "/external:I"),
+            ("/imsvc", "/imsvc"),
+        ],
+    )
+    def test_msvc_slash_I_context_detected(self, tmp_path, tok, want):
+        # An MSVC/clang-cl build context (/I, /external:I, /imsvc) must also count
+        # as build context so the inferred root defers instead of shadowing it,
+        # and in the MSVC dialect (never GNU -isystem, which cl.exe/clang-cl
+        # would ignore). The deferred bucket mirrors the context's own lowest
+        # bucket so the root can't shadow /external:I//imsvc system dirs (#454):
+        # a plain /I context stays /I; a system-bucket context echoes it.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_option_tokens=(tok,))
+        assert inc == []  # detected as build context → deferred
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == want
+        assert "-isystem" not in toks
+
+    def test_msvc_system_bucket_root_does_not_shadow(self, tmp_path):
+        # #454 item 3: when the MSVC context uses a system bucket, the deferred
+        # root must echo that bucket (not collapse to /I, which clang-cl lowers
+        # to -I and searches *above* the /external:I//imsvc system dirs). With
+        # both a plain /I and a system bucket present, the system bucket wins so
+        # the root sits below every build-context include dir.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, ext = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/I build\\gen /external:I third_party"
+        )
+        assert ext[ext.index(str(root)) - 1] == "/external:I"
+        _, imsvc = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/I build\\gen /imsvc clang_sys"
+        )
+        assert imsvc[imsvc.index(str(root)) - 1] == "/imsvc"
+        # When both appear, the *lowest-searched* bucket wins: clang-cl searches
+        # /imsvc (%INCLUDE%-style) dirs after /external:I, so deferring into
+        # /imsvc keeps the root below the build's /imsvc dirs too (Codex review).
+        # A context using /imsvc is necessarily clang-cl, so /imsvc is supported.
+        _, both = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/imsvc a /external:I b"
+        )
+        assert both[both.index(str(root)) - 1] == "/imsvc"
+
+    def test_msvc_bucket_not_fooled_by_include_operand(self, tmp_path):
+        # A spaced /I operand that merely *starts with* a bucket name (a dir
+        # literally called /imsvc-sdk) must NOT be read as an /imsvc flag — the
+        # only real flag here is /I, so the deferred root stays /I (CodeRabbit
+        # review). Picking /imsvc would emit a flag cl.exe rejects.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("/I", "/imsvc-sdk")
+        )
+        assert toks[toks.index(str(root)) - 1] == "/I"
+
+        # The mirror case: a *GNU* -I context whose operand dir starts with a
+        # slash spelling must not be misclassified as MSVC (dialect detection
+        # filters operands too) — it stays the GNU -isystem bucket.
+        _, gnu_toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-I", "/imsvc-sdk")
+        )
+        assert gnu_toks[gnu_toks.index(str(root)) - 1] == "-isystem"
+
+    def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
+        # The deferred flag matches the build context's lowest include bucket:
+        # above-system GNU (-I/-isystem) → -isystem; MSVC /I → /I; an
+        # -idirafter-only context → -idirafter (so its below-system fallback
+        # keeps priority instead of being shadowed by an -isystem root).
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, gnu = resolve_inferred_header_roots([umb], [], gcc_options="-I /build/gen")
+        assert gnu[gnu.index(str(root)) - 1] == "-isystem"
+        _, msvc = resolve_inferred_header_roots([umb], [], gcc_options="/I build\\gen")
+        assert msvc[msvc.index(str(root)) - 1] == "/I"
+        _, after = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-idirafter /build/gen"
+        )
+        assert after[after.index(str(root)) - 1] == "-idirafter"
+        assert "-isystem" not in after
+
+    def test_root_already_in_build_context_is_skipped(self, tmp_path):
+        # A root the build context already supplies as -I must NOT be re-added as
+        # -isystem (GCC would then ignore the build's -I). Here the build provides
+        # the include root; only the *other* inferred ancestor (oneapi) defers.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)  # include/, umbrella at include/oneapi
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options=f"-I {root}")
+        assert inc == []
+        # the include root is in the build context → not re-emitted at all
+        assert str(root) not in toks
+        # the nested ancestor is not in the build context → deferred via -isystem
+        assert str(nested) in toks
+        assert toks[toks.index(str(nested)) - 1] == "-isystem"
+
+    def test_build_context_dir_attached_form_deduped(self, tmp_path):
+        # The attached spelling (-I<dir>) is parsed too, so the root is skipped.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=(f"-I{root}",)
+        )
+        assert str(root) not in toks
+
+    def test_deferred_token_dirs_extracts_isystem_paths(self):
+        from pathlib import Path
+
+        from abicheck.header_utils import deferred_token_dirs
+
+        toks = ["-isystem", "/a/include", "-isystem", "/b/oneapi"]
+        assert deferred_token_dirs(toks) == [Path("/a/include"), Path("/b/oneapi")]
+        assert deferred_token_dirs([]) == []
+
+    def test_dangling_include_flag_no_operand(self, tmp_path):
+        # A bare -I with no following dir (build context present but supplies no
+        # parsable dir) still defers the inferred roots via -isystem, no crash.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_option_tokens=("-I",))
+        assert inc == []
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+
+    def test_non_include_options_are_not_build_context(self, tmp_path):
+        # -O2/-DNDEBUG add no include dir, so the inferred root stays a plain -I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-O2 -DNDEBUG", gcc_option_tokens=("-Wall",)
+        )
+        assert root in inc and toks == []
+
+    def test_user_include_deduped(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots([umb], [nested])
+        # nested came from the user -I; only the include root is inferred-added.
+        assert nested not in inc and root in inc
+
+    def test_no_inferred_roots_returns_empty(self, tmp_path):
+        # A -H file with a nonexistent parent yields no inferred roots → no flags
+        # of either kind (and no spurious -isystem even with a build context).
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert resolve_inferred_header_roots(
+            [ghost], [], gcc_option_tokens=("-isystem", "/x")
+        ) == ([], [])
+
+    def test_malformed_gcc_options_falls_back_to_plain_split(self, tmp_path):
+        # An unbalanced quote makes shlex.split raise; we fall back to str.split
+        # so an -I in a malformed --gcc-options string is still detected.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options='-I "/broken')
+        assert inc == [] and str(root) in toks
+
+
 # ── _dump_elf() ─────────────────────────────────────────────────────────────
 
 
 class TestDumpElf:
+    def test_implicit_header_root_passed_to_dumper(self, tmp_path):
+        # P3 regression: a -H umbrella nested under include/ must reach the
+        # frontend with the include root on extra_includes, with no explicit -I.
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++")
+        passed = mock.call_args.kwargs["extra_includes"]
+        assert root in passed  # the include root was auto-added (plain -I)
+
+    def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
+        # Codex: when the caller's CompileContext supplies includes via -isystem,
+        # the inferred -H root must defer — emitted as its own -isystem token
+        # *after* the build's (build's is emitted first, so it wins), not jumping
+        # ahead as -I. -isystem also keeps it above the standard system dirs.
+        from abicheck.service import _dump_elf
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        gen = str(tmp_path / "gen")
+        snap = AbiSnapshot(library="t", version="1.0")
+        cc = CompileContext(gcc_option_tokens=("-isystem", gen))
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++", compile=cc)
+        kwargs = mock.call_args.kwargs
+        assert root not in kwargs["extra_includes"]  # not promoted to -I
+        toks = list(kwargs["gcc_option_tokens"])
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        # the build's -isystem dir stays ahead of the inferred root (wins)
+        assert toks.index(gen) < toks.index(str(root))
+
     def test_no_headers_warning(self, tmp_path):
         from abicheck.service import _dump_elf
 
@@ -302,10 +667,82 @@ class TestDumpElf:
             with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
                 _dump_elf(p, [], [], "1.0", "c")
         call_kwargs = mock_dump.call_args
-        assert call_kwargs.kwargs.get("compiler") == "cc" or call_kwargs[1].get("compiler") == "cc"
+        assert (
+            call_kwargs.kwargs.get("compiler") == "cc"
+            or call_kwargs[1].get("compiler") == "cc"
+        )
 
 
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
+
+
+class TestHeaderScopedInferredRoots:
+    """P3 parity: the PE/Mach-O header-scoped path also adds inferred -H roots."""
+
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("int f(void);\n", encoding="utf-8")
+        return root, umb
+
+    def test_pe_no_build_context_adds_root_as_I(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [umb], [], "1.0", "c++")
+        # no build context → inferred include root rides in extra_includes
+        assert root in captured["extra_includes"]
+
+    def test_no_headers_skips_inferred_derivation(self, tmp_path):
+        # With no -H headers the derivation is skipped: the original includes pass
+        # through unchanged and nothing is deferred/hashed.
+        from abicheck.service import _try_header_scoped_dump
+
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        inc = [tmp_path / "inc"]
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [], inc, "1.0", "c++")
+        assert captured["extra_includes"] == inc  # unchanged, no inferred roots
+        assert captured["extra_hash_dirs"] == ()
+
+    def test_macho_build_context_defers_and_hashes(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+        from abicheck.service_scan import CompileContext
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_macho(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        cc = CompileContext(gcc_option_tokens=("-isystem", str(tmp_path / "gen")))
+        with patch("abicheck.dumper._dump_macho", fake_macho):
+            _try_header_scoped_dump(
+                "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++", compile=cc
+            )
+        # build context → root defers to -isystem (gcc_option_tokens), not -I,
+        # and its dir is hashed into the cache key (extra_hash_dirs)
+        assert root not in captured["extra_includes"]
+        toks = list(captured["gcc_option_tokens"])
+        assert str(root) in toks and toks[toks.index(str(root)) - 1] == "-isystem"
+        assert root in captured["extra_hash_dirs"]
 
 
 class TestDumpPe:
@@ -356,7 +793,10 @@ class TestDumpPe:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.pe_metadata.parse_pe_metadata", side_effect=ImportError("no pefile")):
+        with patch(
+            "abicheck.pe_metadata.parse_pe_metadata",
+            side_effect=ImportError("no pefile"),
+        ):
             with pytest.raises(SnapshotError, match="no pefile"):
                 _dump_pe(p, "1.0")
 
@@ -365,7 +805,10 @@ class TestDumpPe:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.pe_metadata.parse_pe_metadata", side_effect=RuntimeError("corrupt")):
+        with patch(
+            "abicheck.pe_metadata.parse_pe_metadata",
+            side_effect=RuntimeError("corrupt"),
+        ):
             with pytest.raises(SnapshotError, match="Failed to parse PE"):
                 _dump_pe(p, "1.0")
 
@@ -400,7 +843,10 @@ class TestDumpPe:
         mock_adv = MagicMock()
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=Path("/fake.pdb")):
-                with patch("abicheck.pdb_metadata.parse_pdb_debug_info", return_value=(mock_dwarf, mock_adv)):
+                with patch(
+                    "abicheck.pdb_metadata.parse_pdb_debug_info",
+                    return_value=(mock_dwarf, mock_adv),
+                ):
                     result = _dump_pe(p, "1.0")
         assert result.dwarf is mock_dwarf
         assert result.dwarf_advanced is mock_adv
@@ -417,7 +863,9 @@ class TestDumpPe:
         pe_meta.machine = "AMD64"
         pe_meta.exports = [export]
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
-            with patch("abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")):
+            with patch(
+                "abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")
+            ):
                 result = _dump_pe(p, "1.0")
         assert result.dwarf is None
 
@@ -453,7 +901,9 @@ class TestDumpMacho:
         macho_meta.exports = [export]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert result.platform == "macho"
         assert len(result.functions) == 1
@@ -467,7 +917,9 @@ class TestDumpMacho:
         macho_meta.exports = []
         macho_meta.install_name = None
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             with pytest.raises(SnapshotError, match="no exports"):
                 _dump_macho(p, "1.0")
 
@@ -476,7 +928,10 @@ class TestDumpMacho:
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
-        with patch("abicheck.macho_metadata.parse_macho_metadata", side_effect=RuntimeError("bad macho")):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata",
+            side_effect=RuntimeError("bad macho"),
+        ):
             with pytest.raises(SnapshotError, match="Failed to parse Mach-O"):
                 _dump_macho(p, "1.0")
 
@@ -493,7 +948,9 @@ class TestDumpMacho:
         macho_meta.exports = [exp_named, exp_empty]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert len(result.functions) == 1
 
@@ -508,7 +965,9 @@ class TestDumpMacho:
         macho_meta.exports = [export]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert result.functions[0].is_extern_c is False
 
@@ -557,7 +1016,9 @@ class TestLoadSuppressionAndPolicy:
 
     def test_valid_suppression_file(self, tmp_path):
         f = tmp_path / "suppress.yaml"
-        f.write_text("version: 1\nsuppressions:\n  - symbol: 'foo'\n    change_kind: func_removed\n")
+        f.write_text(
+            "version: 1\nsuppressions:\n  - symbol: 'foo'\n    change_kind: func_removed\n"
+        )
         s, p = load_suppression_and_policy(f)
         assert s is not None
         assert p is None
@@ -568,7 +1029,9 @@ class TestLoadSuppressionAndPolicy:
         pf = tmp_path / "policy.yaml"
         pf.write_text("overrides: {}\n")
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            _, p = load_suppression_and_policy(None, policy="permissive", policy_file_path=pf)
+            _, p = load_suppression_and_policy(
+                None, policy="permissive", policy_file_path=pf
+            )
         assert p is not None
         assert "ignored" in caplog.text.lower()
 
@@ -586,13 +1049,20 @@ class TestRunCompare:
     def _make_snap_file(self, tmp_path, name, version="1.0"):
         """Create a minimal JSON snapshot file."""
         snap = AbiSnapshot(
-            library=name, version=version,
+            library=name,
+            version=version,
             functions=[
-                Function(name="foo", mangled="foo", return_type="int",
-                         visibility=Visibility.PUBLIC, is_extern_c=True),
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    is_extern_c=True,
+                ),
             ],
         )
         from abicheck.serialization import save_snapshot
+
         p = tmp_path / f"{name}_{version}.json"
         save_snapshot(snap, p)
         return p
@@ -609,7 +1079,9 @@ class TestRunCompare:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         sf = tmp_path / "suppress.yaml"
-        sf.write_text("version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n")
+        sf.write_text(
+            "version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n"
+        )
         result, _, _ = run_compare(old_p, new_p, suppress=sf)
         assert isinstance(result, DiffResult)
 
@@ -620,9 +1092,11 @@ class TestRunCompare:
 class TestRenderOutput:
     @pytest.fixture
     def snap(self):
-        return AbiSnapshot(library="libtest", version="1.0",
-                           functions=[Function(name="foo", mangled="foo",
-                                               return_type="int")])
+        return AbiSnapshot(
+            library="libtest",
+            version="1.0",
+            functions=[Function(name="foo", mangled="foo", return_type="int")],
+        )
 
     @pytest.fixture
     def diff_result(self):
@@ -648,7 +1122,11 @@ class TestRenderOutput:
 
     def test_html_format(self, diff_result, snap):
         out = render_output("html", diff_result, snap)
-        assert "<html" in out.lower() or "<!doctype" in out.lower() or "<div" in out.lower()
+        assert (
+            "<html" in out.lower()
+            or "<!doctype" in out.lower()
+            or "<div" in out.lower()
+        )
 
     def test_unsupported_format_raises(self, diff_result, snap):
         with pytest.raises(ValidationError, match="Unsupported output format"):
@@ -667,7 +1145,9 @@ class TestRenderOutput:
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],
         )
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("json", diff_result, snap, follow_deps=True)
         d = json.loads(out)
         assert "old_dependency_info" in d
@@ -676,13 +1156,17 @@ class TestRenderOutput:
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],
         )
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("markdown", diff_result, snap, follow_deps=True)
         assert "Dependency" in out
 
     def test_html_with_new_snap(self, snap):
         new_snap = AbiSnapshot(library="libtest", version="2.0")
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("html", diff_result, snap, new=new_snap)
         assert isinstance(out, str)
 
@@ -790,10 +1274,14 @@ class TestPeHeaderScoping:
         # Header-scoped dump only sees the symbol declared in the public header.
         scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump:
-            result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)], includes=[Path("inc")])
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
+        ):
+            result = _dump_pe(
+                p, "1.0", headers=[_mk_header(tmp_path)], includes=[Path("inc")]
+            )
 
         # The header-aware dumper was actually invoked with the (expanded) headers.
         assert mock_dump.called
@@ -822,15 +1310,21 @@ class TestPeHeaderScoping:
         new_scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
         with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
-            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe), \
-                 patch("abicheck.dumper._dump_pe", return_value=old_scoped):
+            with (
+                patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe),
+                patch("abicheck.dumper._dump_pe", return_value=old_scoped),
+            ):
                 old_snap = _dump_pe(old_p, "1.0", headers=[_mk_header(tmp_path)])
-            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe), \
-                 patch("abicheck.dumper._dump_pe", return_value=new_scoped):
+            with (
+                patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe),
+                patch("abicheck.dumper._dump_pe", return_value=new_scoped),
+            ):
                 new_snap = _dump_pe(new_p, "2.0", headers=[_mk_header(tmp_path)])
 
         result = compare(old_snap, new_snap)
-        removed = [c for c in result.changes if "InternalPrivateFunc" in (c.symbol or "")]
+        removed = [
+            c for c in result.changes if "InternalPrivateFunc" in (c.symbol or "")
+        ]
         assert removed == [], f"private export must not be reported: {removed}"
 
     def test_fallback_when_no_header_match(self, tmp_path):
@@ -843,10 +1337,14 @@ class TestPeHeaderScoping:
         # castxml parsed headers but nothing matched the export table.
         scoped = _scoped_snapshot("pe", ("someDecl", Visibility.HIDDEN))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped):
-            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped),
+        ):
+            with pytest.warns(
+                UserWarning, match="None of the provided headers matched"
+            ):
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         # Fell back to the full export table.
@@ -860,10 +1358,17 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", side_effect=RuntimeError("castxml not found")):
-            with pytest.warns(UserWarning, match="Header-based ABI scoping unavailable"):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch(
+                "abicheck.dumper._dump_pe",
+                side_effect=RuntimeError("castxml not found"),
+            ),
+        ):
+            with pytest.warns(
+                UserWarning, match="Header-based ABI scoping unavailable"
+            ):
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         names = [f.name for f in result.functions]
@@ -877,9 +1382,11 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc", "InternalPrivateFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe") as mock_dump:
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe") as mock_dump,
+        ):
             result = _dump_pe(p, "1.0")
 
         assert not mock_dump.called  # castxml path never taken
@@ -897,9 +1404,14 @@ class TestPeHeaderScoping:
         dwarf_meta = MagicMock()
         dwarf_adv = MagicMock()
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped), \
-             patch("abicheck.service._extract_pdb_debug", return_value=(dwarf_meta, dwarf_adv)):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.dumper._dump_pe", return_value=scoped),
+            patch(
+                "abicheck.service._extract_pdb_debug",
+                return_value=(dwarf_meta, dwarf_adv),
+            ),
+        ):
             result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert result.dwarf is dwarf_meta
@@ -918,9 +1430,11 @@ class TestPeHeaderScoping:
         pe_meta = _pe_meta("PublicApiFunc")
         scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump:
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
+        ):
             _dump_pe(p, "1.0", headers=[hdr_dir])
 
         # The dumper received the individual header files, not the directory.
@@ -936,8 +1450,10 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+        ):
             with pytest.raises(ValidationError, match="not found"):
                 _dump_pe(p, "1.0", headers=[tmp_path / "missing.h"])
 
@@ -956,8 +1472,12 @@ class TestMachoHeaderScoping:
         macho_meta.dependent_libs = []
         scoped = _scoped_snapshot("macho", ("publicFn", Visibility.PUBLIC))
 
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
-             patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump:
+        with (
+            patch(
+                "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+            ),
+            patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump,
+        ):
             result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert mock_dump.called
@@ -976,9 +1496,15 @@ class TestMachoHeaderScoping:
         macho_meta.dependent_libs = []
         scoped = _scoped_snapshot("macho", ("other", Visibility.HIDDEN))
 
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
-             patch("abicheck.dumper._dump_macho", return_value=scoped):
-            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+        with (
+            patch(
+                "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+            ),
+            patch("abicheck.dumper._dump_macho", return_value=scoped),
+        ):
+            with pytest.warns(
+                UserWarning, match="None of the provided headers matched"
+            ):
                 result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert [f.name for f in result.functions] == ["_publicFn"]
@@ -1050,3 +1576,51 @@ class TestCliNativeBinaryHeaderWiring:
         with patch("abicheck.service._dump_macho", side_effect=SnapshotError("nope")):
             with pytest.raises(click.ClickException, match="nope"):
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
+
+
+def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
+    # Fast-lane guard for the scan orchestrator's ownership of the inferred
+    # build-dir cleanup (the real end-to-end check is the integration suite):
+    # service_scan.run_scan must run the deferred cleanup thunks in its finally —
+    # both on success and when run_scan_core raises — so the temp cmake build dir
+    # never outlives the scan. Mirrors the same contract in cli_scan.run_scan.
+    from types import SimpleNamespace
+
+    from abicheck import service_scan as _ss
+
+    ran = {"n": 0}
+
+    def fake_core(**kw):
+        # The orchestrator hands us the cleanup list; register a sentinel thunk the
+        # way collect_inline_pack would for an inferred cmake build dir.
+        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        outcome = SimpleNamespace(
+            verdict="COMPATIBLE",
+            exit_code=0,
+            coverage=[],
+            crosscheck={},
+            to_dict=lambda: {},
+        )
+        return SimpleNamespace(outcome=outcome, findings=[])
+
+    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", fake_core)
+
+    req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
+    res = _ss.run_scan(req)
+    assert res.verdict == "COMPATIBLE"
+    assert ran["n"] == 1  # the finally ran the deferred cleanup on success
+
+    # And it still runs when the core raises a budget overflow mid-scan.
+    from abicheck.cli_scan import _BudgetOverflow
+
+    ran["n"] = 0
+
+    def raising_core(**kw):
+        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        raise _BudgetOverflow("over budget")
+
+    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", raising_core)
+    res = _ss.run_scan(req)
+    assert res.exit_code == 5  # budget overflow surfaced
+    assert ran["n"] == 1  # finally still ran the cleanup on the raise path

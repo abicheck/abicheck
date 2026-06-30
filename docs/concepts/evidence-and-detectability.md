@@ -44,7 +44,7 @@ are not reported there — they surface in the pack-aware `compare`
 |---|--------------------|:-----:|----------------|------------------------|
 | 1 | **Just the binary** | **L0** | a stripped `.so`/`.dll`/`.dylib` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies |
 | 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment |
-| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--header-backend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
+| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--ast-frontend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps |
 | 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates |
 

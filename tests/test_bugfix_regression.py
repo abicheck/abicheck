@@ -325,7 +325,7 @@ class TestBug6RemovedLibraryVerdict:
         _write_snap(new_dir / "libbar.json", snap_bar)
 
         result = _invoke(
-            "compare-release", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "--format", "json",
         )
         d = json.loads(result.output)
         assert d["verdict"] != "NO_CHANGE"
@@ -343,7 +343,7 @@ class TestBug6RemovedLibraryVerdict:
         _write_snap(new_dir / "libbar.json", snap_bar)
 
         result = _invoke(
-            "compare-release", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "--format", "json",
         )
         d = json.loads(result.output)
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"
@@ -362,7 +362,7 @@ class TestBug6RemovedLibraryVerdict:
         _write_snap(new_dir / "libfoo.json", snap_foo)
 
         result = _invoke(
-            "compare-release", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "--format", "json",
         )
         d = json.loads(result.output)
         # Added-only should not elevate verdict beyond matched results

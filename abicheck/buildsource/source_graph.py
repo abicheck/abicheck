@@ -27,7 +27,7 @@ This module implements the MVP scope of the ADR:
   :class:`~abicheck.buildsource.build_evidence.BuildEvidence` into a
   target/source/header/compile-unit/build-option graph.
 - A structural :func:`diff_source_graph` (Phase 5 seed) that powers the
-  ``compare-graph`` command for explanation and triage.
+  ``graph compare`` command for explanation and triage.
 
 Every edge carries provenance and a confidence label (ADR-031 D2, D9): a graph
 fact must always say *how* it was derived so a reader never mistakes graph
@@ -644,7 +644,7 @@ class GraphSummaryDiff:
     """Structural delta between two :class:`SourceGraphSummary` snapshots.
 
     A pure structural diff (which nodes/edges entered or left the graph) — the
-    foundation the ``compare-graph`` command renders and that a later phase maps
+    foundation the ``graph compare`` command renders and that a later phase maps
     onto the ADR-031 D6 secondary findings. Per ADR-028 D3 / ADR-031 D6 these
     deltas *explain and prioritize*; they never decide an ABI break on their own.
     """
@@ -675,7 +675,7 @@ class GraphSummaryDiff:
 
 
 def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
-    """Localize an exported symbol through the graph (ADR-031 D8 `explain-finding`).
+    """Localize an exported symbol through the graph (ADR-031 D8 `graph explain`).
 
     Given a (mangled) binary symbol, walk the graph to report what produced and
     reaches it: the exporting target(s), the source declaration(s) it maps to,

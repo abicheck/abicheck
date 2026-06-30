@@ -135,8 +135,6 @@ def test_service_compare_call_is_not_flagged(
 def _registered_commands() -> dict:
     """Force every verdict-emitting command module to register on ``main``."""
     import abicheck.cli_appcompat  # noqa: F401  — registers `appcompat`
-    import abicheck.cli_compare_release  # noqa: F401  — registers `compare-release`
-    import abicheck.cli_max  # noqa: F401  — registers `deep-compare`
     from abicheck.cli import main
 
     return main.commands
@@ -241,28 +239,34 @@ def test_gate_flags_missing_command(
 def test_intentional_subset_decorator_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`deep-compare` omitting `@severity_options` is allowlisted, not an error."""
+    """A command listed in the intentional-subset allowlist may omit a required
+    family without being flagged. The real allowlist is empty today, so this
+    drives the mechanism with a synthetic command + allowlist entry."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
-    (pkg / "cli_max.py").write_text(
+    (pkg / "cli_synth.py").write_text(
         "import click\n"
-        '@main.command("deep-compare")\n'
+        '@main.command("synth")\n'
         "@two_sided_input_options\n"
         "@policy_options\n"
         "@scope_options\n"
         "@output_options(['json'])\n"
-        "def deep_compare_cmd():\n"
+        "def synth_cmd():\n"
         "    pass\n"
     )
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_VERDICT_CMD_MODULES", {"cli_synth.py": "synth"})
+    monkeypatch.setattr(
+        gate, "_INTENTIONAL_SUBSET_DECORATORS", frozenset({("synth", "severity_options")})
+    )
 
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     msgs = [m for c, m in findings.errors if c == "cli-contract"]
-    assert not any("deep-compare" in m and "severity_options" in m for m in msgs), msgs
+    assert not any("synth" in m and "severity_options" in m for m in msgs), msgs
 
 
 # ── D10.4: one default per flag (ADR-037 D3 / G22 Phase 2) ───────────────────
@@ -301,10 +305,11 @@ def test_gate_flags_conflicting_default(
     assert len(msgs) == 1 and "--mode" in msgs[0], msgs
 
 
-def test_deferred_multi_default_is_not_flagged(
+def test_conflicting_defaults_always_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A flag on the ``DEFERRED_MULTI_DEFAULT`` allowlist is skipped (Phase 3)."""
+    """With the deprecation-era allowlist gone, any flag declared with two
+    different defaults across shared decorators is flagged (ADR-037 D10.4)."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
@@ -321,7 +326,8 @@ def test_deferred_multi_default_is_not_flagged(
 
     findings = gate.Findings()
     gate._check_one_default_per_flag(findings)
-    assert [m for c, m in findings.errors if c == "cli-contract"] == []
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(msgs) == 1 and "--collect-mode" in msgs[0], msgs
 
 
 # ── Gate tables mirror the cli_options source of truth ───────────────────────
@@ -345,7 +351,165 @@ def test_gate_tables_mirror_cli_options() -> None:
     assert gate._INTENTIONAL_SUBSET_DECORATORS == frozenset(
         (cmd, co.FAMILY_DECORATOR[fam]) for (cmd, fam) in co.INTENTIONAL_SUBSET
     )
-    assert gate._DEFERRED_MULTI_DEFAULT_FLAGS == co.DEFERRED_MULTI_DEFAULT
+
+
+# ── D10.3: MCP ⇄ CLI name-map completeness (ADR-037 / G22 Phase 6) ───────────
+
+
+def _has_mcp() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("mcp") is not None
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="MCP dependencies not installed")
+def test_mcp_cli_name_map_complete() -> None:
+    """Every ``abi_compare`` MCP param has a row in ``MCP_CLI_NAME_MAP``.
+
+    Live introspection of the actual tool signature (stronger than the gate's
+    AST scan): a new MCP param that forgets its name-map row is caught here, so
+    the MCP and CLI front-ends cannot silently diverge (ADR-037 D10.3).
+    """
+    import inspect
+
+    import scripts.check_ai_readiness as gate
+    from abicheck import cli_options as co, mcp_server
+
+    sig = inspect.signature(mcp_server.abi_compare)
+    params = set(sig.parameters)
+    # Mirror the gate's exemption set (framework-plumbing params) so an
+    # intentionally-exempt param does not fail here while the gate allows it.
+    missing = params - set(co.MCP_CLI_NAME_MAP) - set(gate._MCP_NAME_MAP_EXEMPT_PARAMS)
+    assert not missing, (
+        f"abi_compare params absent from MCP_CLI_NAME_MAP: {sorted(missing)} — "
+        "add a row mapping each to its compare flag (or None)."
+    )
+
+
+def test_mcp_cli_name_map_values_are_real_compare_flags() -> None:
+    """Each non-``None`` map value names a real ``compare`` flag (or positional).
+
+    Keeps the CLI side of the map honest: a typo'd or removed flag is caught
+    (ADR-037 D10.3). Positional-operand rows are spelled with parentheses and
+    are exempt from the flag-set check.
+    """
+    from abicheck import cli_options as co
+
+    compare_flags = _command_flags(_registered_commands()["compare"])
+    for mcp_param, cli_name in co.MCP_CLI_NAME_MAP.items():
+        if cli_name is None or "(" in cli_name:
+            continue  # no-flag row or a positional operand
+        assert cli_name in compare_flags, (
+            f"MCP_CLI_NAME_MAP[{mcp_param!r}] = {cli_name!r} is not a real "
+            "`compare` flag"
+        )
+
+
+def test_gate_flags_unmapped_mcp_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D10.3 is not a no-op: an ``abi_compare`` param missing from the map fails."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_options.py").write_text(
+        "MCP_CLI_NAME_MAP = {'old_input': '--old'}\n"
+    )
+    (pkg / "mcp_server.py").write_text(
+        "def abi_compare(old_input, new_input, mystery_param='x'):\n    return ''\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate._check_mcp_cli_name_map(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    # new_input and mystery_param are both absent from the planted map.
+    assert any("new_input" in m for m in msgs)
+    assert any("mystery_param" in m for m in msgs)
+
+
+# ── D8: --ast-frontend (legacy --header-backend aliases removed) ─────────────
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
+def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
+    """``--ast-frontend`` is the frontend flag; the removed ``--header-backend``
+    alias is gone (clean removal, ADR-037 D7/D8)."""
+    cmd = _registered_commands()[cmd_name]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    param = by_dest["header_backend"]
+    assert "--ast-frontend" in param.opts
+    assert "--header-backend" not in param.opts
+
+
+def test_per_side_ast_frontend_has_no_legacy_alias() -> None:
+    """Per-side ``--old/new-ast-frontend`` carry no legacy ``--*-header-backend``."""
+    cmd = _registered_commands()["compare"]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    for dest, new, old in (
+        ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
+        ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
+    ):
+        assert new in by_dest[dest].opts
+        assert old not in by_dest[dest].opts
+
+
+def test_legacy_header_backend_flag_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The removed ``--header-backend`` spelling is now a hard usage error."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--header-backend", "castxml"]
+    )
+    assert res.exit_code != 0
+    assert "no such option" in res.output.lower() or "No such option" in res.output
+
+
+# ── D8: --ast-frontend unifies L2 header AST + L4 source-ABI extractor ────────
+
+
+def test_ast_frontend_threads_to_l4_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--ast-frontend` selects the L4 source-ABI replay extractor too, not just
+    the L2 header AST — one frontend choice across both stages (ADR-037 D8)."""
+    import abicheck.buildsource.inline as inline
+    import abicheck.cli_buildsource as cb
+    from abicheck.model import AbiSnapshot
+
+    captured: dict[str, object] = {}
+
+    def _fake_collect(**kwargs: object) -> None:
+        captured.update(kwargs)
+        return None
+
+    # embed_build_source imports collect_inline_pack from the inline module at
+    # call time, so patch it at the source.
+    monkeypatch.setattr(inline, "collect_inline_pack", _fake_collect)
+    src = tmp_path / "src"
+    src.mkdir()
+    snap = AbiSnapshot(library="l", version="1")
+    cb.embed_build_source(snap, None, src, collect_mode="source-target", extractor="clang")
+    assert captured.get("extractor") == "clang"
+
+
+@pytest.mark.parametrize("name", ["dump", "scan"])
+def test_project_config_flag_is_config_not_build_config(name: str) -> None:
+    """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
+    and reflect that it loads the whole project .abicheck.yml. No back-compat
+    window is kept, so the old spelling must be gone on dump/scan."""
+    commands = _registered_commands()
+    flags = _command_flags(commands[name])
+    assert "--config" in flags, name
+    assert "--build-config" not in flags, name  # old spelling fully removed
 
 
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
@@ -354,41 +518,23 @@ def test_gate_tables_mirror_cli_options() -> None:
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate", "--annotate-additions", "--btf", "--collapse-versioned-symbols",
-        "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
-        "--config",
-        "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
-        "--dso-only", "--dwarf",
-        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--follow-deps",
-        "--format", "--header",
-        "--header-backend", "--include", "--jobs", "--lang", "--ld-library-path", "--max",
-        "--new-build-info",
-        "--new-header", "--new-header-backend", "--new-include", "--new-pdb-path",
-        "--new-sources", "--new-version", "--no-demangle", "--no-pattern-verdicts",
-        "--no-scope-public-headers", "--old-build-info", "--old-header",
-        "--old-header-backend", "--old-include", "--old-pdb-path", "--old-sources",
-        "--old-version", "--output", "--output-dir", "--pattern-verdicts", "--pdb-path",
-        "--policy",
-        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--public-symbol",
-        "--public-symbols-list", "--recommend", "--report-mode", "--require-justification",
-        "--scope-public-headers", "--search-path", "--severity-abi-breaking",
-        "--severity-addition", "--severity-potential-breaking", "--severity-preset",
-        "--severity-quality-issues", "--show-filtered", "--show-impact", "--show-only",
-        "--show-redundant", "--stat", "--strict-suppressions", "--suppress",
-        "--surface-metrics", "--verbose", "-H", "-I", "-j", "-o", "-v",
-    ),
-    "compare-release": (
-        "--annotate", "--annotate-additions", "--bundle-cohort", "--bundle-system-providers",
-        "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2", "--dso-only",
-        "--fail-on-removed-library", "--format", "--header", "--include",
-        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--manifest",
-        "--new-header", "--new-include", "--new-version", "--no-bundle-analysis",
-        "--no-fail-on-removed-library", "--no-scope-public-headers", "--old-header",
-        "--old-include", "--old-version", "--output", "--output-dir", "--policy",
-        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--require-justification",
-        "--scope-public-headers", "--severity-abi-breaking", "--severity-addition",
-        "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
-        "--strict-suppressions", "--suppress", "--verbose", "-H", "-I", "-j", "-o", "-v",
+        "--annotate", "--annotate-additions", "--ast-frontend", "--btf", "--bundle-cohort", "--bundle-system-providers",
+        "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format", "--debug-info1",
+        "--debug-info2", "--debug-root", "--debug-root1", "--debug-root2", "--debuginfod", "--debuginfod-url",
+        "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
+        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
+        "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--include",
+        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path", "--manifest",
+        "--max", "--new-ast-frontend", "--new-build-info", "--new-header", "--new-include", "--new-pdb-path",
+        "--new-sources", "--new-version", "--no-bundle-analysis", "--no-demangle", "--no-fail-on-removed-library", "--no-nostdinc",
+        "--no-pattern-verdicts", "--no-scope-public-headers", "--nostdinc", "--old-ast-frontend", "--old-build-info", "--old-header",
+        "--old-include", "--old-pdb-path", "--old-sources", "--old-version", "--output", "--output-dir",
+        "--pattern-verdicts", "--pdb-path", "--policy", "--policy-file", "--probe-matrix-new", "--probe-matrix-old",
+        "--public-symbol", "--public-symbols-list", "--recommend", "--report-mode", "--require-justification", "--scope-public-headers",
+        "--search-path", "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
+        "--show-filtered", "--show-impact", "--show-only", "--show-redundant", "--stat", "--strict-suppressions",
+        "--suppress", "--surface-metrics", "--sysroot", "--verbose", "-H", "-I",
+        "-j", "-o", "-v",
     ),
     "appcompat": (
         "--check-against", "--format", "--header", "--include", "--lang",
@@ -399,15 +545,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--severity-preset", "--severity-quality-issues", "--show-irrelevant", "--suppress",
         "--verbose", "-H", "-I", "-o", "-v",
     ),
-    "deep-compare": (
-        "--depth", "--format", "--header", "--header-backend", "--include",
-        "--keep-snapshots", "--lang", "--max", "--new-build-info", "--new-header",
-        "--new-header-backend", "--new-include", "--new-sources", "--new-version",
-        "--no-scope-public-headers", "--old-build-info", "--old-header",
-        "--old-header-backend", "--old-include", "--old-sources", "--old-version",
-        "--output", "--policy", "--policy-file", "--recommend", "--scope-public-headers",
-        "--severity-preset", "--sources", "--suppress", "--verbose", "-H", "-I", "-o", "-v",
-    ),
 }
 
 
@@ -417,6 +554,74 @@ def test_option_set_snapshot(cmd_name: str) -> None:
     commands = _registered_commands()
     flags = _command_flags(commands[cmd_name])
     assert sorted(flags) == sorted(_OPTION_SET_SNAPSHOT[cmd_name])
+
+
+def _all_leaf_commands() -> list[tuple[str, object]]:
+    """Every leaf command in the live tree, as (dotted-path, command)."""
+    import click
+
+    from abicheck.cli import main
+
+    out: list[tuple[str, object]] = []
+
+    def walk(cmd: object, path: list[str]) -> None:
+        if isinstance(cmd, click.Group):
+            for name, sub in cmd.commands.items():
+                walk(sub, path + [name])
+        elif path:
+            out.append((" ".join(path), cmd))
+
+    walk(main, [])
+    return out
+
+
+def test_no_option_has_empty_help() -> None:
+    """Every *visible* option on every command carries help text.
+
+    A blank ``--help`` line is a UX defect (the flag shows with no description).
+    Hidden options are exempt — they are deliberately off the help surface. This
+    guards the cleanup that routed `-v/--verbose` through `@verbose_option` and
+    filled the stray blank `-o`/`--format`/`--policy-file` strings.
+    """
+    import click
+
+    blank: list[str] = []
+    for path, cmd in _all_leaf_commands():
+        for p in cmd.params:  # type: ignore[attr-defined]
+            if isinstance(p, click.Option) and not p.hidden and not p.help:
+                blank.append(f"{path} {p.opts[-1]}")
+    assert blank == [], f"options with empty --help: {blank}"
+
+
+def test_shared_concept_canonical_spelling() -> None:
+    """A shared concept shows one canonical long flag across every command.
+
+    The CLI carries the same idea on many commands (public headers, the output
+    path). They had drifted in which spelling renders *first* in ``--help``
+    (`collect` led with ``--headers``; `probe run` used ``--out``). The aliases
+    still resolve, but the displayed primary must be uniform so the surface
+    reads as one tool. ABICC-dialect commands use their own single-dash dests
+    and are naturally excluded (they never bind ``headers``/``output``/``out``).
+    """
+    import click
+
+    header_offenders: list[str] = []
+    output_offenders: list[str] = []
+    for path, cmd in _all_leaf_commands():
+        for p in cmd.params:  # type: ignore[attr-defined]
+            if not isinstance(p, click.Option):
+                continue
+            longs = [o for o in p.opts if o.startswith("--")]
+            if p.name == "headers" and longs and longs[0] != "--header":
+                header_offenders.append(f"{path}: {longs}")
+            if p.name in {"output", "out"} and "--output" not in p.opts:
+                output_offenders.append(f"{path}: {list(p.opts)}")
+    assert header_offenders == [], (
+        f"header option must lead with --header: {header_offenders}"
+    )
+    assert output_offenders == [], (
+        f"output-path option must offer --output: {output_offenders}"
+    )
 
 
 # ── Chokepoint parity: one classifier, no scope_public drift ─────────────────

@@ -20,6 +20,7 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.pack import BuildSourcePack
@@ -93,10 +94,71 @@ def test_collect_evidence_requires_output(tmp_path):
 
 def test_collect_evidence_cmake_requires_build_dir(tmp_path):
     result = CliRunner().invoke(
-        main, ["collect", "--cmake", "-o", str(tmp_path / "e")],
+        main, ["collect", "--from", "cmake", "-o", str(tmp_path / "e")],
     )
     assert result.exit_code != 0
     assert "build-dir" in result.output
+
+
+def test_parse_from_specs_maps_adapters(tmp_path):
+    """The unified `--from adapter[=path]` parses into the per-adapter kwargs."""
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    got = parse_from_specs((
+        "cmake", "ninja",
+        f"ninja-compdb={tmp_path / 'c.json'}",
+        f"bazel-cquery={tmp_path / 'cq.json'}",
+        f"bazel-aquery={tmp_path / 'aq.json'}",
+        f"make={tmp_path / 'dry.txt'}",
+    ))
+    assert got["cmake"] is True and got["ninja"] is True
+    assert got["ninja_compdb"] == tmp_path / "c.json"
+    assert got["bazel_cquery"] == tmp_path / "cq.json"
+    assert got["bazel_aquery"] == tmp_path / "aq.json"
+    assert got["make_dry_run"] == tmp_path / "dry.txt"
+    # Empty specs → all defaults (no adapter requested).
+    empty = parse_from_specs(())
+    assert empty["cmake"] is False and empty["ninja_compdb"] is None
+
+
+@pytest.mark.parametrize(
+    "spec, needle",
+    [
+        ("cmake=foo", "takes no '=path'"),       # live adapter rejects a path
+        ("ninja=foo", "takes no '=path'"),
+        ("make", "requires a pre-captured path"),  # pre-captured needs a path
+        ("bazel-cquery", "requires a pre-captured path"),
+        ("bogus", "unknown adapter"),
+    ],
+)
+def test_parse_from_specs_rejects_bad_specs(spec, needle):
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs((spec,))
+    assert needle in str(exc.value)
+
+
+def test_parse_from_specs_rejects_duplicate_adapter():
+    """A repeated `--from` adapter is rejected, not silently last-wins."""
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs(("bazel-aquery=a.json", "bazel-aquery=b.json"))
+    assert "more than once" in str(exc.value)
+
+
+def test_collect_from_bogus_adapter_is_usage_error(tmp_path):
+    """The bad-spec error surfaces through the live `collect` command too."""
+    result = CliRunner().invoke(
+        main, ["collect", "--from", "nope", "-o", str(tmp_path / "e")],
+    )
+    assert result.exit_code != 0
+    assert "unknown adapter" in result.output
 
 
 def test_dump_attach_evidence_ref(tmp_path):
@@ -544,12 +606,12 @@ def _source_tree(tmp_path):
 
 
 def test_dump_collect_mode_build_collects_l3_only(tmp_path):
-    """ADR-033 D2/Phase-1: `dump --collect-mode build` captures L3 build context
+    """ADR-033 D2/Phase-1: `dump --depth build` captures L3 build context
     only — no L4 source replay or L5 graph."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "build", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -563,7 +625,7 @@ def test_dump_collect_mode_build_collects_l3_only(tmp_path):
 
 
 def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
-    """ADR-033 D2 (Codex review): `--collect-mode build` must strip L4/L5 from a
+    """ADR-033 D2 (Codex review): `--depth build` must strip L4/L5 from a
     pre-captured pack too, so an L3-only run can't smuggle in source evidence."""
     runner = CliRunner()
     cdb = _write_cdb(tmp_path, "c++17")
@@ -573,7 +635,7 @@ def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
     assert BuildSourcePack.load(ev).source_graph is not None  # full pack
     out = tmp_path / "s.json"
     result = runner.invoke(main, [
-        "dump", "--build-info", str(ev), "--collect-mode", "build", "-o", str(out),
+        "dump", "--build-info", str(ev), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -607,11 +669,11 @@ def test_recommend_collect_mode_cli():
 
 
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
-    """`--collect-mode off` collects no evidence even with a source tree."""
+    """`--depth headers` collects no source evidence even with a source tree."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "off", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "headers", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     assert load_snapshot(out).build_source is None
@@ -621,10 +683,10 @@ def test_compare_collect_mode_without_packs_is_noted(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--collect-mode", "build",
+        "compare", str(old_snap), str(new_snap), "--depth", "build",
     ])
     assert result.exit_code in (0, 2, 4), result.output
-    assert "collect-mode build" in result.stderr
+    assert "'build'" in result.stderr
 
 
 def test_compare_without_evidence_is_unchanged(tmp_path):
@@ -1107,18 +1169,21 @@ def test_embed_sources_without_tool_is_graceful(tmp_path):
     assert l4 is not None and l4.status.value in ("partial", "present")
 
 
-def test_build_query_skipped_without_allow_flag(tmp_path):
-    """build.query is not executed unless --allow-build-query (ADR-032 D5)."""
+def test_build_query_skipped_when_config_untrusted(tmp_path):
+    """An arbitrary build.query from an untrusted (auto-discovered) config is not
+    executed (ADR-032 amended): the --allow-build-query flag is gone, but the
+    trust gate remains — only an explicit --config / --build-query runs a query."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
 
     tree = tmp_path / "src"
     tree.mkdir()
     cfg = BuildConfig(query="this-tool-should-never-run --emit", compile_db="cc.json")
     pack = collect_inline_pack(
-        sources=tree, build_info=None, build_config=cfg, allow_build_query=False,
+        sources=tree, build_info=None, build_config=cfg,
+        build_config_trusted_for_query=False,
     )
-    # The query is not executed; no facts are collected. The pack survives only to
-    # carry the skipped-query diagnostic (A3), and the build_query tool never ran.
+    # The untrusted query is not executed; no facts are collected. The pack
+    # survives only to carry the skipped-query diagnostic (A3).
     assert pack is not None
     assert pack.build_evidence is None  # no L3 facts
     assert [e for e in pack.manifest.extractors
@@ -1126,7 +1191,7 @@ def test_build_query_skipped_without_allow_flag(tmp_path):
 
 
 def test_auto_discovered_build_query_is_not_executed(tmp_path):
-    """Source-tree .abicheck.yml may be untrusted, so queries need --build-config."""
+    """Source-tree .abicheck.yml may be untrusted, so queries need --config."""
     from abicheck.cli_buildsource import embed_build_source
 
     tree = tmp_path / "src"
@@ -1248,8 +1313,20 @@ def test_is_pack_dir_and_compile_db_resolution(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert is_pack_dir(plain) is False
+    # A valid manifest.json WITHOUT the BuildSourcePack marker is a stray file,
+    # not a pack — collect from the tree instead of mis-loading an empty pack.
     (plain / "manifest.json").write_text("{}", encoding="utf-8")
+    assert is_pack_dir(plain) is False
+    # The version marker makes it a real pack.
+    (plain / "manifest.json").write_text(
+        '{"build_source_pack_version": 1}', encoding="utf-8"
+    )
     assert is_pack_dir(plain) is True
+    # A present-but-corrupt manifest stays a (corrupt) pack so the load errors loudly.
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "manifest.json").write_text("{ not json", encoding="utf-8")
+    assert is_pack_dir(corrupt) is True
 
     # _compile_db_at: a build dir with build/compile_commands.json is found.
     bd = tmp_path / "bd"
@@ -1278,6 +1355,95 @@ def test_build_inline_coverage_rows():
     assert by["L3_build"].status.value == "not_collected"
     assert by["L4_source_abi"].status.value == "not_collected"
     assert by["L5_source_graph"].status.value == "not_collected"
+
+
+def test_l4_coverage_row_reports_tu_and_cache_counts():
+    # ADR-035 P5: the live L4 coverage row must carry the TU/symbol/cache counts,
+    # not print a bare "partial" with an empty detail.
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import build_inline_coverage
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    surface = SourceAbiSurface(
+        reachable_types=[SourceEntity(id="t1", kind="record", qualified_name="W")],
+        coverage={
+            "replay_scope": "headers-only",
+            "compile_units_selected": 4,
+            "compile_units_parsed": 3,
+            "matched_symbols": 7,
+            "exported_symbols": 10,
+            "cache_hits": 2,
+            "cache_misses": 1,
+            "extractor_failures": 1,
+        },
+    )
+    rows = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=surface, graph=None
+        )
+    }
+    detail = rows["L4_source_abi"].detail
+    assert "scope=headers-only" in detail
+    assert "3/4 TUs parsed" in detail
+    assert "7/10 symbols matched" in detail
+    assert "cache 2/3 hit" in detail
+    assert "1 extractor failures" in detail
+
+
+def test_l4_coverage_detail_partial_and_empty():
+    # The detail helper degrades gracefully: an empty coverage dict yields an
+    # empty string (no spurious segments), and absent optional counts are simply
+    # omitted (ADR-035 P5 — branch coverage of _l4_coverage_detail).
+    from abicheck.buildsource.inline import _l4_coverage_detail
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+
+    assert _l4_coverage_detail(SourceAbiSurface(coverage={})) == ""
+    only_scope = SourceAbiSurface(
+        coverage={
+            "replay_scope": "changed",
+            "compile_units_selected": 2,
+            "compile_units_parsed": 2,
+        }
+    )
+    detail = _l4_coverage_detail(only_scope)
+    assert detail == "scope=changed, 2/2 TUs parsed"
+    assert "symbols matched" not in detail and "cache" not in detail
+
+
+def test_l4_include_map_uses_depfile_not_recorded_inputs_for_headers_only(
+    monkeypatch,
+) -> None:
+    import abicheck.buildsource.include_graph as ig
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import _include_map_for_replay
+
+    class _FakeIncludeExtractor:
+        clang_bin = "clang++"
+
+        def __init__(self, **kw):
+            self.diagnostics = []
+
+        def extract_from_build(self, build):
+            return {"cu://b": ["include/api.h"]}
+
+    monkeypatch.setattr(ig, "ClangIncludeExtractor", _FakeIncludeExtractor)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", input_files=["include/api.h"]),
+            CompileUnit(id="cu://b", source="b.cpp", input_files=["src/impl.h"]),
+        ]
+    )
+    extractors = []
+    include_map = _include_map_for_replay(
+        build,
+        scope="headers-only",
+        roots=("include/api.h",),
+        clang_bin="definitely-not-needed",
+        extractors=extractors,
+    )
+    assert include_map == {"cu://b": ["include/api.h"]}
+    assert extractors[0].name == "include_graph:clang"
 
 
 def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
@@ -1608,14 +1774,16 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     assert a.content_hash() == same.content_hash()
 
 
-def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch):
-    """ADR-033 (Codex): inline dump has no PR diff, so a 'changed' scope must fall
-    back to 'target' for replay — otherwise L4 selects zero TUs and is empty."""
+def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkeypatch):
+    """ADR-035 P3: inline dump has no PR diff, so a 'changed' scope falls back to
+    'headers-only' (the public-API surface) — non-empty, but NOT the full-target
+    (== s6) replay that silently paid the cost cliff before."""
     import abicheck.buildsource.inline as inline
     captured = {}
 
     def _spy(sources, merged, extractors, *, extractor, scope, clang_bin,
-             exported_symbols=(), source_abi_cache_dir=None, changed_paths=()):
+             exported_symbols=(), source_abi_cache_dir=None, changed_paths=(),
+             public_header_roots=()):
         captured["scope"] = scope
         return None
 
@@ -1628,7 +1796,7 @@ def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch)
         "arguments": ["c++", "-c", "f.cpp"]}]))
     inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
                                layers=("L3", "L4", "L5"))
-    assert captured["scope"] == "target"
+    assert captured["scope"] == "headers-only"
 
 
 def test_exported_symbols_from_snapshot_extracts_mangled_names():
@@ -2009,10 +2177,10 @@ def test_a3_failed_query_pack_survives_with_no_facts(tmp_path):
     tree = tmp_path / "src"
     tree.mkdir()  # no compile DB inside → no L3 facts
     cfg = BuildConfig(query="some-build-query --emit")
-    # allow_build_query=False → query skipped, nothing collected.
+    # untrusted config → query skipped, nothing collected.
     pack = collect_inline_pack(
         sources=tree, build_info=None, build_config=cfg,
-        allow_build_query=False, layers=("L3",),
+        build_config_trusted_for_query=False, layers=("L3",),
     )
     assert pack is not None, "pack must survive to carry the A3 diagnostic"
     l3 = pack.manifest.coverage_for("L3_build")

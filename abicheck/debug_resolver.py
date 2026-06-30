@@ -532,7 +532,14 @@ class DebuginfodResolver:
         xdg = os.environ.get("XDG_CACHE_HOME", "")
         if xdg:
             return Path(xdg) / "abicheck" / "debuginfod"
-        return Path.home() / ".cache" / "abicheck" / "debuginfod"
+        try:
+            return Path.home() / ".cache" / "abicheck" / "debuginfod"
+        except RuntimeError:
+            return DebuginfodResolver._temp_cache()
+
+    @staticmethod
+    def _temp_cache() -> Path:
+        return Path(tempfile.gettempdir()) / "abicheck" / "debuginfod"
 
     def _url_allowed(self, url: str) -> bool:
         """Return True if *url* is permitted under the current security policy."""
@@ -595,7 +602,18 @@ class DebuginfodResolver:
             if len(data) < 16 or data[:4] != b"\x7fELF":
                 _logger.warning("Downloaded file is not valid ELF: %s", fetch_url)
                 return None
-            self._atomic_cache_write(cached, data)
+            try:
+                self._atomic_cache_write(cached, data)
+            except OSError as exc:
+                fallback = self._temp_cache() / build_id[:2] / f"{build_id[2:]}.debug"
+                _logger.warning(
+                    "debuginfod cache path %s is unavailable (%s); using %s",
+                    cached,
+                    exc,
+                    fallback,
+                )
+                self._atomic_cache_write(fallback, data)
+                cached = fallback
             _logger.info("Downloaded and cached debug info: %s", cached)
             return DebugArtifact(dwarf_path=cached, source=f"debuginfod ({url})")
         except (OSError, ValueError) as exc:

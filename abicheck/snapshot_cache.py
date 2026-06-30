@@ -15,7 +15,8 @@
 """Snapshot-level cache for avoiding redundant binary analysis.
 
 Cache key = SHA-256 of (binary content hash + header mtimes + compiler params).
-Cache location = ``~/.cache/abi_check/snapshots/<key>.json``.
+Cache location = ``$XDG_CACHE_HOME/abi_check/snapshots/<key>.json`` or
+``~/.cache/abi_check/snapshots/<key>.json``.
 """
 
 from __future__ import annotations

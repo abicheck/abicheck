@@ -15,9 +15,10 @@
 
 """Unified ``--depth`` dial + L5-internal graph (ADR-037 D5/D6 / G22 Phase 3).
 
-One depth vocabulary across ``compare``/``deep-compare``/``dump``/``scan``; the
-G21 ``graph`` rung and ``--collect-mode`` are deprecated aliases; the L5 graph is
-an internal consequence of ``--depth source``, never a user rung.
+One depth vocabulary across ``compare``/``dump``/``scan``; the
+G21 ``graph`` rung and the ``--collect-mode`` flag were removed outright (pre-1.0
+clean-up); the L5 graph is an internal consequence of ``--depth source``, never a
+user rung.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from abicheck.cli_params import DEPTH_PARAM
 
 def _registered() -> dict:
     """Register every depth-bearing command on ``main`` and return its map."""
-    import abicheck.cli_max  # noqa: F401  — registers deep-compare
     import abicheck.cli_scan  # noqa: F401  — registers scan
 
     return main.commands
@@ -39,7 +39,7 @@ def _registered() -> dict:
 
 # ── One dial: every depth-bearing command shows the same user-facing ladder ──
 
-_DEPTH_COMMANDS = ("compare", "deep-compare", "dump", "scan")
+_DEPTH_COMMANDS = ("compare", "dump", "scan")
 
 
 @pytest.mark.parametrize("cmd_name", _DEPTH_COMMANDS)
@@ -48,14 +48,14 @@ def test_depth_dial_is_uniform(cmd_name: str) -> None:
     cmd = _registered()[cmd_name]
     depth = next(p for p in cmd.params if "--depth" in getattr(p, "opts", []))
     metavar = depth.type.get_metavar(depth)
-    assert metavar == "[symbols|headers|build|source|full]", (cmd_name, metavar)
-    assert "graph" not in metavar
+    assert metavar == "[binary|headers|build|source|full]", (cmd_name, metavar)
+    assert "graph" not in metavar and "symbols" not in metavar
 
 
 # ── Alias resolution: every legacy spelling resolves to the right depth ──────
 
 
-@pytest.mark.parametrize("depth_value", ["symbols", "headers", "build", "source", "full"])
+@pytest.mark.parametrize("depth_value", ["binary", "headers", "build", "source", "full"])
 def test_depth_user_rung_passes_through(depth_value: str) -> None:
     """Each user-ladder rung resolves to itself, independently."""
     assert DEPTH_PARAM.convert(depth_value, None, None) == depth_value
@@ -66,14 +66,31 @@ def test_user_depths_match_ladder() -> None:
     from abicheck.buildsource.scan_levels import USER_DEPTHS
 
     assert [d.value for d in USER_DEPTHS] == [
-        "symbols", "headers", "build", "source", "full"
+        "binary", "headers", "build", "source", "full"
     ]
 
 
+@pytest.mark.parametrize("spelling", ["symbols", "SYMBOLS"])
+def test_depth_symbols_alias_resolves_to_binary(spelling: str) -> None:
+    """``symbols`` was renamed to the evidence-named ``binary`` rung (G22 Phase 6);
+    it keeps working as a deprecated alias for one release."""
+    assert DEPTH_PARAM.convert(spelling, None, None) == "binary"
+
+
+def test_depth_symbols_alias_warns_on_stderr() -> None:
+    res = CliRunner().invoke(main, ["dump", "--depth", "symbols", "/no/such/bin"])
+    text = _all_output(res)
+    assert "deprecated" in text and "--depth binary" in text
+
+
 @pytest.mark.parametrize("spelling", ["graph", "GRAPH"])
-def test_depth_graph_alias_resolves_to_source(spelling: str) -> None:
-    """``graph`` is no longer a user rung; it resolves to ``source`` (D6)."""
-    assert DEPTH_PARAM.convert(spelling, None, None) == "source"
+def test_depth_graph_is_rejected(spelling: str) -> None:
+    """``graph`` was removed outright (the L5 graph is internal to ``--depth
+    source``); it is no longer accepted as a user rung or a deprecated alias."""
+    import click
+
+    with pytest.raises(click.BadParameter):
+        DEPTH_PARAM.convert(spelling, None, None)
 
 
 def _all_output(res: object) -> str:
@@ -86,13 +103,12 @@ def _all_output(res: object) -> str:
     return out
 
 
-def test_depth_graph_warns_on_stderr() -> None:
-    """The deprecated ``--depth graph`` resolves but prints a one-line note."""
-    # A bad operand makes the command fail fast *after* param conversion, so the
-    # deprecation note (emitted during conversion) is captured regardless.
+def test_depth_graph_rejected_on_cli() -> None:
+    """The removed ``--depth graph`` is now a hard usage error on the CLI."""
     res = CliRunner().invoke(main, ["dump", "--depth", "graph", "/no/such/bin"])
+    assert res.exit_code != 0
     text = _all_output(res)
-    assert "deprecated" in text and "--depth source" in text
+    assert "graph" in text  # the rejected value is named in the error
 
 
 def test_unknown_depth_rejected() -> None:
@@ -170,12 +186,13 @@ def test_graph_built_at_source_depth() -> None:
 # ── --depth symbols suppresses the L2 header AST (symbols-only) ──────────────
 
 
-def test_resolve_dump_depth_symbols_collects_nothing() -> None:
+def test_resolve_dump_depth_binary_collects_nothing() -> None:
     from abicheck.cli_dump_helpers import resolve_dump_depth
 
-    assert resolve_dump_depth("symbols", False, "off", False) == "off"
-    assert resolve_dump_depth("headers", False, "off", False) == "off"
-    assert resolve_dump_depth("source", False, "off", False) != "off"
+    # DEPTH_PARAM normalizes the `symbols` alias to `binary` before this runs.
+    assert resolve_dump_depth("binary", False, "off") == "off"
+    assert resolve_dump_depth("headers", False, "off") == "off"
+    assert resolve_dump_depth("source", False, "off") != "off"
 
 
 # ── config: sources.graph: summary|full (ADR-037 D6) ─────────────────────────
@@ -245,64 +262,85 @@ def _fn(name: str):  # type: ignore[no-untyped-def]
     )
 
 
-@pytest.mark.parametrize("depth", ["symbols", "headers", "source"])
+@pytest.mark.parametrize("depth", ["binary", "headers", "source"])
 def test_compare_accepts_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
     """``compare`` folds ``--depth`` into the collect mode for snapshot inputs;
-    ``symbols`` clears headers, deeper rungs resolve without error."""
+    ``binary`` clears headers, deeper rungs resolve without error."""
     old = _snap(tmp_path, "libx", "1.0", [_fn("a"), _fn("b")])
     new = _snap(tmp_path, "libx", "2.0", [_fn("a"), _fn("b")])
     res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_compare_collect_mode_deprecation_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """An explicit ``--collect-mode`` on ``compare`` warns (deprecated, D5)."""
+def test_compare_collect_mode_flag_removed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The removed ``--collect-mode`` flag is now a hard usage error on compare."""
     old = _snap(tmp_path, "liby", "1.0", [_fn("a")])
     new = _snap(tmp_path, "liby", "2.0", [_fn("a")])
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--collect-mode", "off"]
     )
-    assert res.exit_code == 0
-    assert "deprecated" in _all_output(res)
+    assert res.exit_code != 0
+    assert "No such option" in _all_output(res)
 
 
-@pytest.mark.parametrize("depth", ["symbols", "headers"])
-def test_deep_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
-    """``deep-compare`` passes snapshot inputs straight through; ``--depth
-    symbols`` clears headers, the non-symbols branch leaves them as-is."""
-    import abicheck.cli_max  # noqa: F401
-
+@pytest.mark.parametrize("depth", ["binary", "headers"])
+def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
+    """``compare`` passes snapshot inputs straight through; ``--depth
+    binary`` clears headers, the non-binary branch leaves them as-is."""
     old = _snap(tmp_path, "libz", "1.0", [_fn("a")])
     new = _snap(tmp_path, "libz", "2.0", [_fn("a")])
     res = CliRunner().invoke(
-        main, ["deep-compare", str(old), str(new), "--depth", depth]
+        main, ["compare", str(old), str(new), "--depth", depth]
     )
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_dump_source_only_collect_mode_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A source-only ``dump`` with an explicit ``--collect-mode`` warns before
-    any collection (covers the deprecation note + the symbols branch path)."""
+def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A source-only ``dump --depth build`` resolves the L3 collect mode and runs
+    the source-only branch without error."""
     src = tmp_path / "src"
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--collect-mode", "build",
+        ["dump", "--sources", str(src), "--depth", "build",
          "-o", str(tmp_path / "out.json")],
     )
-    assert "deprecated" in _all_output(res)
+    assert res.exit_code == 0, _all_output(res)
 
 
-def test_dump_source_only_depth_symbols(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """``dump --depth symbols`` resolves and runs the symbols-only branch."""
+def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """``dump --depth binary`` resolves and runs the symbols-only branch."""
     src = tmp_path / "src2"
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "symbols",
+        ["dump", "--sources", str(src), "--depth", "binary",
          "-o", str(tmp_path / "out2.json")],
     )
     # Resolution + symbols-clearing ran; a source-only symbols dump writes an
     # L0-L2 snapshot and exits clean.
     assert res.exit_code == 0, _all_output(res)
     assert (tmp_path / "out2.json").is_file()
+
+
+def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """``dump --depth binary`` discards a -H + --compile-db invocation's L2 inputs:
+    it must NOT abort on the compile-DB header requirement just because binary depth
+    cleared the headers (Codex review)."""
+    hdr = tmp_path / "foo.h"
+    hdr.write_text("int foo(void);\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "/no/such/bin.so", "-H", str(hdr), "--compile-db", str(cdb),
+            "--depth", "binary", "-o", str(tmp_path / "o.json"),
+        ],
+    )
+    # The compile-DB-requires-headers UsageError must not fire (it would block the
+    # switch to the fast binary rung). Any later failure is the missing binary, not
+    # this validation.
+    out = _all_output(res)
+    assert "Compilation database" not in out
+    assert "requires -H" not in out

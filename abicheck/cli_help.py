@@ -40,7 +40,15 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--output", "--format", "--demangle", "--stat", "--report-mode",
                 "--show-impact", "--recommend", "--show-only", "--annotate",
-                "--annotate-additions",
+                "--annotate-additions", "--config", "--exit-code-scheme", "--verbose",
+            ],
+        },
+        {
+            "name": "Toolchain (L2 header AST)",
+            "options": [
+                "--ast-frontend", "--old-ast-frontend", "--new-ast-frontend",
+                "--gcc-path", "--gcc-prefix", "--gcc-options", "--gcc-option",
+                "--sysroot", "--nostdinc",
             ],
         },
         {
@@ -71,7 +79,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build/source evidence (L3–L5)",
             "options": [
                 "--old-build-info", "--new-build-info", "--old-sources",
-                "--new-sources", "--collect-mode",
+                "--new-sources", "--depth", "--max",
             ],
         },
         {
@@ -93,6 +101,54 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--explain-patterns", "--surface-metrics",
             ],
         },
+        {
+            "name": "Release (directory/package inputs)",
+            "options": [
+                "--jobs", "--dso-only", "--output-dir", "--fail-on-removed-library",
+                "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2",
+                "--include-private-dso", "--keep-extracted", "--manifest",
+                "--bundle-system-providers", "--bundle-cohort", "--no-bundle-analysis",
+            ],
+        },
+    ],
+    "* collect": [
+        {
+            "name": "Inputs",
+            "options": [
+                "--binary", "--header", "--source-root", "--build-dir",
+                "--compile-db", "-p",
+            ],
+        },
+        {
+            "name": "Build-system adapters",
+            "options": [
+                "--from", "--build-system",
+                "--read-compiler-record",
+            ],
+        },
+        {
+            "name": "Source-ABI (L4)",
+            "options": [
+                "--source-abi", "--source-abi-extractor", "--source-abi-scope",
+                "--source-abi-target", "--source-abi-cache", "--clang-bin",
+                "--android-dump",
+            ],
+        },
+        {
+            "name": "Source graph (L5)",
+            "options": [
+                "--source-graph", "--call-graph", "--include-graph",
+                "--kythe-entries", "--codeql-results",
+            ],
+        },
+        {
+            "name": "Extractors & collection",
+            "options": [
+                "--extractor-manifest", "--collection-mode", "--allow-build-query",
+                "--changed-path",
+            ],
+        },
+        {"name": "Output", "options": ["--output", "--verbose"]},
     ],
     "* dump": [
         {
@@ -102,12 +158,12 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--version", "--lang",
             ],
         },
-        {"name": "Output", "options": ["--output", "--show-data-sources"]},
+        {"name": "Output", "options": ["--output", "--show-data-sources", "--verbose"]},
         {
             "name": "Toolchain",
             "options": [
-                "--gcc-path", "--gcc-prefix", "--gcc-options", "--sysroot",
-                "--nostdinc",
+                "--ast-frontend", "--gcc-path", "--gcc-prefix", "--gcc-options",
+                "--gcc-option", "--sysroot", "--nostdinc",
             ],
         },
         {
@@ -120,9 +176,9 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--depth", "--max", "--collect-mode", "--build-info", "--sources",
+                "--depth", "--max", "--build-info", "--sources",
                 "--build-dir", "--compile-db-filter",
-                "--build-query", "--build-compile-db", "--build-config",
+                "--build-query", "--build-compile-db", "--config",
                 "--allow-build-query",
             ],
         },
@@ -135,6 +191,77 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--git-tag", "--build-id", "--no-git"],
         },
     ],
+    # `graph explain` (cli_graph). `graph compare` carries only --format, which
+    # the "* compare" key above already groups under "Output & reporting" (the
+    # fnmatch key matches the sub-command name) — so only `explain` needs an
+    # explicit entry to keep its inputs ahead of the output flag.
+    "* explain": [
+        {
+            "name": "Inputs",
+            "options": ["--sources", "--symbol", "--report", "--finding-id"],
+        },
+        {"name": "Output", "options": ["--format"]},
+    ],
+    "* scan": [
+        {
+            "name": "Inputs",
+            "options": [
+                "--binary", "--header", "--include", "--public-header-dir",
+                "--sources", "--build-info", "--compile-db", "--config",
+            ],
+        },
+        {
+            "name": "Baseline & scope",
+            "options": [
+                "--baseline", "--baseline-header", "--baseline-include",
+                "--depth", "--since", "--changed-path", "--budget",
+            ],
+        },
+        {
+            "name": "Modes",
+            "options": ["--audit", "--estimate", "--crosscheck", "--risk-rules"],
+        },
+        {
+            "name": "Toolchain (L2 header AST)",
+            "options": [
+                "--lang", "--ast-frontend", "--gcc-path", "--gcc-prefix",
+                "--gcc-options", "--gcc-option", "--sysroot", "--nostdinc",
+                "--allow-build-query",
+            ],
+        },
+        {"name": "Output", "options": ["--format", "--output", "--verbose"]},
+    ],
+    "* appcompat": [
+        {
+            "name": "Inputs",
+            "options": ["--check-against", "--header", "--include", "--lang"],
+        },
+        {
+            "name": "Per-side overrides",
+            "options": [
+                "--old-header", "--new-header", "--old-include", "--new-include",
+                "--old-version", "--new-version",
+            ],
+        },
+        {
+            "name": "Policy & severity",
+            "options": [
+                "--policy", "--policy-file", "--suppress", "--severity-preset",
+                "--scope-public-headers",
+            ],
+        },
+        {
+            "name": "Output & reporting",
+            "options": [
+                "--format", "--output", "--show-irrelevant",
+                "--list-required-symbols", "--verbose",
+            ],
+        },
+    ],
+    # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
+    # plain Click help — its group is not under the rich-click `main`, so panel
+    # config would be inert there. Its flags already carry help; the dialect's
+    # flat help is left as-is (ADR-037 non-goal to restyle the ABICC surface).
 }
 
 

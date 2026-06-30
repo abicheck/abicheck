@@ -20,6 +20,12 @@ from .pack import BuildSourcePack, _payload_sha256
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
+# Extractor names carrying a build-query no-facts diagnostic — the explicit
+# trusted `build.query` and the zero-config inferred query. Both must be
+# forwarded from a diagnostic-only pack so the combined manifest keeps the
+# explanation for why source scanning produced no L3 facts (mirrors inline.py).
+_BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
+
 
 def _layer_value(layer: object) -> str:
     return layer.value if hasattr(layer, "value") else str(layer)
@@ -151,7 +157,7 @@ def _merge_extractors(
     they do not pollute the combined manifest with unrelated extractor metadata.
     """
     for e in p.manifest.extractors:
-        if not contributed and e.name != "build_query":
+        if not contributed and e.name not in _BUILD_QUERY_DIAG_NAMES:
             continue
         key = (e.name, e.version, e.detail)
         if key not in seen_extractors:
@@ -177,7 +183,7 @@ def _accumulate_pack_provenance(
     contributed = bool(
         chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
     )
-    has_diag = any(e.name == "build_query" for e in p.manifest.extractors)
+    has_diag = any(e.name in _BUILD_QUERY_DIAG_NAMES for e in p.manifest.extractors)
     if not (contributed or has_diag):
         return
     if contributed:

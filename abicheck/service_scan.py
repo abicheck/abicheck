@@ -28,27 +28,32 @@ backward compatibility.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from .buildsource.build_query import (
+    PRUNED_HEADER_DIR_SEGMENTS,
+    drain_build_dir_cleanups,
+)
 from .errors import ValidationError
+from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+
+if TYPE_CHECKING:
+    from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 _logger = logging.getLogger(__name__)
 
-# Header file extensions recognised during directory expansion
-_HEADER_EXTS = frozenset(
-    {
-        ".h",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".h++",
-        ".ipp",
-        ".tpp",
-        ".inc",
-    }
-)
+# Header file extensions recognised during directory expansion. Shared with the
+# AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
+# expansion and cache-invalidation can never drift (Codex review).
+_HEADER_EXTS = HEADER_SUFFIXES
+
+# Directory segments never scanned for headers — VCS metadata plus abicheck's own
+# in-tree cmake build dir; see build_query.PRUNED_HEADER_DIR_SEGMENTS (the shared
+# single source of truth, also used by cli_resolve._expand_header_inputs).
+_PRUNED_DIR_SEGMENTS = PRUNED_HEADER_DIR_SEGMENTS
 
 
 def expand_header_inputs(inputs: list[Path]) -> list[Path]:
@@ -67,16 +72,12 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
-            ]
+            found = iter_directory_headers(p, _PRUNED_DIR_SEGMENTS)
             if not found:
                 raise ValidationError(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise ValidationError(f"Header path is neither file nor directory: {p}")
 
@@ -111,6 +112,7 @@ def _scan_imports() -> tuple[Any, ...]:
         ScanMode,
         SourceMethod,
         level_to_collect_mode,
+        parse_user_depth,
         resolve_level,
     )
 
@@ -122,6 +124,7 @@ def _scan_imports() -> tuple[Any, ...]:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     )
 
 
@@ -132,6 +135,34 @@ class Budget:
     total_timeout: float | None = None  # seconds; overflow FAILS (never shrinks)
     max_tus: int | None = None  # targeted-AST TU cap
     partial_ok: bool = True  # a partial scan (missing tool/layer) is success
+
+
+@dataclass(frozen=True)
+class CompileContext:
+    """L2 header-AST compile context — shared by ``dump`` and ``scan``.
+
+    The cross-toolchain + frontend knobs the header frontend needs to parse the
+    public headers: the cross-compiler (``--gcc-path``/``--gcc-prefix``), extra
+    compiler flags (``--gcc-options``/``--gcc-option``), an alternate
+    ``--sysroot``, ``--nostdinc``, and which ``--ast-frontend`` to drive. ADR-037
+    D3 (parity: ``dump`` and ``scan`` carry the *same* family via one decorator)
+    and the ADR-035 amendment (``scan`` must be able to reach a real L2 — the
+    cross-source checks depend on header provenance). All fields defaulted, so a
+    bare ``CompileContext()`` is additive over every request and dump path.
+    """
+
+    gcc_path: str | None = None
+    gcc_prefix: str | None = None
+    gcc_options: str | None = None
+    gcc_option_tokens: tuple[str, ...] = ()
+    sysroot: Path | None = None
+    nostdinc: bool = False
+    frontend: str = "auto"  # --ast-frontend (auto/castxml/clang)
+
+    @property
+    def is_default(self) -> bool:
+        """True when nothing was customised (lets call sites skip threading)."""
+        return self == CompileContext()
 
 
 @dataclass(frozen=True)
@@ -153,6 +184,8 @@ class ScanRequest:
     seeded: bool = False  # a real diff seed was produced (even if changed_paths is [])
     budget: Budget = field(default_factory=Budget)
     lang: str = "c++"
+    # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
+    compile: CompileContext = field(default_factory=CompileContext)
 
 
 @dataclass(frozen=True)
@@ -211,10 +244,41 @@ class LayerResult:
 #: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The real
 #: per-project number comes from the actual run; the estimate only ranks layers so
 #: a maintainer can pick a depth.
-_COST_PER_HEADER_PARSE = 0.08  # L2 castxml per public header
+_COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per header
+#: L2 marginal cost per KB of header text. A flat per-header anchor priced a
+#: one-line shim and a 200 KB templated umbrella (ICU's ``unicode/*.h``,
+#: hdf5's C++ API) identically, so a large public surface was under-ranked and
+#: ``scan --estimate`` understated header-audit cost. Weighting by on-disk size
+#: ranks heavy headers above trivial ones (field-eval P1: ICU/HDF5 header scans
+#: took 80-180 s while the estimate read flat).
+_COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
-_COST_PER_TU_REPLAY = 0.45  # L4 per-TU semantic AST replay
+# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU.
+# Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU anchor
+# under-promised source/full scans by an order of magnitude and made 100+ TU runs
+# look like one-minute jobs. Warm cache is reported by live coverage; dry-run stays
+# conservative unless a future cache probe can prove hits up front.
+_COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
+
+
+def _estimate_header_seconds(headers: list[Path]) -> float:
+    """Size-aware L2 cost: a fixed per-header parse/preprocess base plus a
+    marginal per-KB term over each header's on-disk size.
+
+    A large templated header (an ICU/hdf5 umbrella) is ranked above a one-line
+    shim instead of every header costing the same flat anchor. Falls back to the
+    base alone when a path can't be stat'd (a symlink/glob that no longer
+    resolves) so the estimate never raises mid-dry-run.
+    """
+    total = 0.0
+    for h in headers:
+        total += _COST_PER_HEADER_PARSE
+        try:
+            total += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
+        except OSError:
+            continue
+    return total
 
 
 def _count_compile_db_tus(compile_db: Path) -> int:
@@ -282,14 +346,17 @@ def _count_source_tus(sources: Path) -> int:
 
 
 def _compile_db_in(root: Path) -> Path | None:
-    """The ``compile_commands.json`` inside a build/source *directory*, if any."""
-    for cand in (
-        root / "compile_commands.json",
-        root / "build" / "compile_commands.json",
-    ):
-        if cand.is_file():
-            return cand
-    return None
+    """The ``compile_commands.json`` inside a build/source *directory*, if any.
+
+    Reuses the *execution* path's discovery (``inline._find_compile_db_in_dir``:
+    the conventional build-dir hints **plus** the depth-1 ``*/compile_commands.json``
+    glob fallback) so ``scan --estimate`` mirrors what the real scan collects — a
+    DB in a non-hint immediate subdirectory such as ``cmake-build-debug-gcc/`` is
+    priced, not reported as absent / 0 TUs (Codex review).
+    """
+    from .buildsource.inline import _find_compile_db_in_dir
+
+    return _find_compile_db_in_dir(root)
 
 
 def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
@@ -339,7 +406,40 @@ def _count_pack_tus(path: Path) -> int | None:
     return len(be.compile_units) if be is not None else 0
 
 
-def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
+def _count_bazel_build_info_tus(path: Path) -> int | None:
+    """Compile-unit count of a Bazel ``aquery``/``cquery`` ``--build-info``, else ``None``.
+
+    The real scan routes a Bazel jsonproto ``--build-info`` through
+    ``inline._maybe_collect_bazel_build_info`` → ``BazelAdapter`` (pre-captured,
+    ``allow_query=False``) and replays its compile actions; the estimate mirrors
+    that so a Bazel project does not report 0 L3/L4/L5 TUs and undersize the budget
+    (Codex review). Non-executing (parses the captured JSON only); best-effort —
+    any failure → ``None`` so the caller falls back to compile-DB / source counting.
+    """
+    if not path.is_file():
+        return None
+    try:
+        from .buildsource.inline import sniff_build_info_format
+
+        fmt = sniff_build_info_format(path)
+        if fmt not in ("bazel_aquery", "bazel_cquery"):
+            return None
+        from .buildsource.adapters.bazel import BazelAdapter
+
+        if fmt == "bazel_aquery":
+            adapter = BazelAdapter(aquery=path, allow_query=False)
+        else:
+            adapter = BazelAdapter(cquery=path, allow_query=False)
+        return len(adapter.collect().compile_units)
+    except Exception:  # noqa: BLE001 - estimate is advisory; never raise
+        return None
+
+
+def estimate_scan(
+    req: ScanRequest,
+    *,
+    resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
+) -> list[CostEstimate]:
     """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
 
     Probes the project (TU count from the compile DB or source tree, public-header
@@ -357,33 +457,54 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     ) = _scan_imports()
 
     mode = ScanMode(req.mode)
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = EvidenceDepth(req.depth) if req.depth else None
-    auto_method = None
-    # AUTO resolves from the risk score whenever a real diff seed was produced —
-    # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
-    # mirroring what the real scan does. Treating a seeded empty diff as unseeded
-    # would fall back to the mode preset and over-estimate a no-op PR (Codex
-    # review). A non-empty changed set is itself proof of a seed.
-    if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
-        auto_method = score_changed_paths(
-            list(req.changed_paths), RiskRules.default()
-        ).recommended_method
-    resolved, eff_depth = resolve_level(
-        mode=mode, source_method=sm, depth=dp, auto_method=auto_method
-    )
+    if resolved_level is not None:
+        # The caller (the CLI scan path) already resolved the concrete (method,
+        # depth) level — including the auto/risk choice. Honor it verbatim so the
+        # estimate matches the real scan: re-resolving from req.source_method/depth
+        # here would re-apply the source-method > depth precedence and collapse a
+        # mode preset that pins a *deeper* depth than its method implies
+        # (``pr-deep`` = (s5, graph) → graph-full), under-pricing it (Codex review).
+        resolved, eff_depth = resolved_level
+    else:
+        sm = SourceMethod(req.source_method) if req.source_method else None
+        dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
+        auto_method = None
+        # AUTO resolves from the risk score whenever a real diff seed was produced —
+        # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
+        # mirroring what the real scan does. Treating a seeded empty diff as unseeded
+        # would fall back to the mode preset and over-estimate a no-op PR (Codex
+        # review). A non-empty changed set is itself proof of a seed.
+        if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
+            auto_method = score_changed_paths(
+                list(req.changed_paths), RiskRules.default()
+            ).recommended_method
+        resolved, eff_depth = resolve_level(
+            mode=mode, source_method=sm, depth=dp, auto_method=auto_method
+        )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
 
-    # A --build-info that is an `abicheck collect` pack dir is loaded by the real
-    # scan and supplies its own L3 compile units, so the estimate must count them
-    # too — else a pack-only input reports 0 TUs and undersizes the budget (Codex
-    # review). A raw compile DB / source tree is counted otherwise.
-    pack_tus = _count_pack_tus(req.build_info) if req.build_info is not None else None
-    compile_db = _discover_compile_db(req.sources, req.compile_db or req.build_info)
-    if pack_tus is not None:
+    # Count TUs from the *same* effective build-info the real scan uses
+    # (`req.compile_db or req.build_info`) so an explicit --compile-db wins over a
+    # Bazel --build-info here too — else the estimate could price a different action
+    # graph than the scan executes (Codex review). A pack dir supplies its own L3
+    # compile units; a Bazel aquery/cquery jsonproto is routed through the Bazel
+    # adapter; a raw compile DB / source tree is counted otherwise.
+    eff_build_info = req.compile_db or req.build_info
+    bazel_tus = (
+        _count_bazel_build_info_tus(eff_build_info)
+        if eff_build_info is not None
+        else None
+    )
+    pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
+    compile_db = _discover_compile_db(req.sources, eff_build_info)
+    if bazel_tus is not None:
+        total_tus = bazel_tus
+        tu_note = "Bazel aquery/cquery (build_evidence)"
+    elif pack_tus is not None:
         total_tus = pack_tus
         tu_note = "abicheck collect pack (build_evidence)"
     elif compile_db is not None:
@@ -396,7 +517,14 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
         total_tus = 0
         tu_note = "no source tree / compile DB"
 
-    n_headers = len(expand_header_inputs(list(req.headers))) if req.headers else 0
+    # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
+    # the estimate must not price an L2_header layer for headers that won't be parsed
+    # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
+    # what executes (Codex review). Keyed on the resolved effective depth.
+    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
+    n_headers = len(expanded_headers)
+    l2_seconds = _estimate_header_seconds(expanded_headers)
     # The L4 replay scope: a changed-only collection touches at most the changed
     # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
     # budget's max_tus is a documented cap (never shrinks scope silently — it
@@ -440,9 +568,11 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
             None,
             "L2_header",
             n_headers,
-            _COST_PER_HEADER_PARSE * n_headers,
+            l2_seconds,
             0.0,
-            "public-header AST (needs castxml)" if n_headers else "no headers supplied",
+            "public-header AST (needs castxml or clang)"
+            if n_headers
+            else "no headers supplied",
         ),
     ]
 
@@ -578,16 +708,21 @@ def run_scan(req: ScanRequest) -> ScanResult:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan import _BudgetOverflow, _public_provenance_set, run_scan_core
+    from .cli_scan import (
+        _BudgetOverflow,
+        _EvidenceContractError,
+        _public_provenance_set,
+        run_scan_core,
+    )
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
-    prov_headers, prov_dirs = _public_provenance_set(
-        list(req.headers), list(req.public_header_dirs)
-    )
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
@@ -595,25 +730,45 @@ def run_scan(req: ScanRequest) -> ScanResult:
     risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = EvidenceDepth(req.depth) if req.depth else None
+    # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic
+    # API too: an explicit depth *always* pins (even with source_method=auto, which
+    # only picks the method), or a non-auto source_method does. So run_scan_core
+    # fails loud if it can't collect the evidence — same as the CLI. AUTO / preset-
+    # only requests stay best-effort (CodeRabbit review).
+    pinned_explicit = (dp is not None) or (
+        sm is not None and sm is not SourceMethod.AUTO
+    )
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
     resolved, eff_depth = resolve_level(
         mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
     )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
+    # provenance) even when the caller passes headers, so the collected evidence
+    # matches the reported depth — parity with the CLI's `scan --depth binary`.
+    # Keyed on the *resolved* effective depth, not the raw depth: --source-method
+    # wins over --depth, so a source-method scan that also passes `depth="binary"`
+    # still needs the header AST (Codex review).
+    eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    prov_headers, prov_dirs = _public_provenance_set(
+        eff_headers, list(req.public_header_dirs)
+    )
     effective_build_info = req.compile_db or req.build_info
     budget_s = req.budget.total_timeout
     budget_str = f"{budget_s:g}s" if budget_s is not None else None
 
     import time as _time
 
+    # Own the inferred cmake build-dir cleanup so it outlives run_scan_core's S2
+    # preprocessor phase (which runs `clang -E` with a compile unit's `directory`
+    # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
+    build_dir_cleanups: list[Callable[[], None]] = []
     try:
         core = run_scan_core(
             start=_time.monotonic(),
             binary=binary,
-            headers=list(req.headers),
+            headers=eff_headers,
             includes=list(req.includes),
             public_headers=prov_headers,
             public_header_dirs=prov_dirs,
@@ -636,10 +791,23 @@ def run_scan(req: ScanRequest) -> ScanResult:
             severities={},
             budget=budget_str,
             budget_s=budget_s,
+            pinned_explicit=pinned_explicit,
+            compile_context=None if req.compile.is_default else req.compile,
+            defer_cleanup=build_dir_cleanups,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
         return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+    except _EvidenceContractError:
+        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
+        # the programmatic API honors the same contract as the CLI (pinned_explicit
+        # above), so map the signal to a failed result rather than degrade silently.
+        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+    finally:
+        # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
+        # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
+        # removal/unlock error never aborts the rest nor masks the real outcome.
+        drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
     return ScanResult(

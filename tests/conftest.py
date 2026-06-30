@@ -1,4 +1,8 @@
 """conftest.py — pytest configuration for abicheck tests."""
+
+from __future__ import annotations
+
+import json
 import os
 import shutil
 import subprocess
@@ -11,6 +15,33 @@ try:
     import filelock  # explicit dev dependency; used for xdist cmake locking
 except ImportError:
     filelock = None  # type: ignore[assignment]
+
+
+@pytest.fixture
+def source_tree_with_compile_db(tmp_path: Path) -> Path:
+    """A minimal source tree with a compile_commands.json for L3/L4 scan tests.
+
+    The compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
+    note that would otherwise prepend to JSON stdout), so an `s5` scan reaches the
+    L4 replay path. Returns the source dir. Shared so multiple suites can drive a
+    `scan --sources` run without re-deriving the tree (ADR-035 P3 tests).
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
+    (src / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(src),
+                    "file": "foo.cpp",
+                    "arguments": ["c++", "-c", "foo.cpp"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return src
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -61,7 +92,9 @@ def _integration_skip_reason() -> str | None:
 
     if sys.platform == "win32":
         if shutil.which("gcc") is None:
-            return "gcc (MinGW) not found in PATH (required for Windows integration tests)"
+            return (
+                "gcc (MinGW) not found in PATH (required for Windows integration tests)"
+            )
         return None
 
     # Linux / other Unix: require castxml + gcc + g++ for ELF tests
@@ -115,12 +148,28 @@ def update_goldens(request: pytest.FixtureRequest) -> bool:
 
 _EXECUTED_TESTS = 0
 
+# Optional per-phase duration capture for test-time tracking. When
+# ``ABICHECK_DURATIONS_JSON`` is set, every (nodeid, phase, duration) tuple is
+# collected and written out at session end (see pytest_sessionfinish). Under
+# xdist the controller receives every worker's forwarded reports, so it alone
+# holds the complete picture — workers don't write. Zero cost when the env var
+# is unset.
+_PHASE_DURATIONS: list[dict[str, object]] = []
+
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    """Count tests that actually executed (ran their call phase)."""
+    """Count tests that actually executed, and (optionally) record durations."""
     global _EXECUTED_TESTS
     if report.when == "call" and report.outcome in ("passed", "failed"):
         _EXECUTED_TESTS += 1
+    if os.environ.get("ABICHECK_DURATIONS_JSON"):
+        _PHASE_DURATIONS.append(
+            {
+                "nodeid": report.nodeid,
+                "when": report.when,
+                "duration": float(report.duration),
+            }
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -129,7 +178,22 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     Skipped on xdist workers (the controller aggregates every worker's reports
     and is the one that owns the final exit status).
     """
-    if hasattr(session.config, "workerinput"):
+    is_worker = hasattr(session.config, "workerinput")
+
+    # Test-time tracking: write the captured per-phase durations once, from the
+    # controller (it has aggregated every worker's reports under xdist). The CI
+    # job renders the slowest entries into the run summary and uploads the file
+    # as an artifact for trend tracking.
+    durations_path = os.environ.get("ABICHECK_DURATIONS_JSON")
+    if durations_path and not is_worker:
+        try:
+            Path(durations_path).write_text(
+                json.dumps(_PHASE_DURATIONS), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
+    if is_worker:
         return  # this is an xdist worker; let the controller decide
     raw = os.environ.get("ABICHECK_MIN_EXECUTED")
     if not raw:
@@ -161,9 +225,17 @@ def _cmake_configure_once(build_dir: Path) -> bool:
         return False
     try:
         r = subprocess.run(
-            [cmake, "-S", str(examples_dir), "-B", str(build_dir),
-             "-DCMAKE_BUILD_TYPE=Debug"],
-            capture_output=True, text=True, timeout=120,
+            [
+                cmake,
+                "-S",
+                str(examples_dir),
+                "-B",
+                str(build_dir),
+                "-DCMAKE_BUILD_TYPE=Debug",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
     except subprocess.TimeoutExpired:
         return False
@@ -223,3 +295,91 @@ def shared_cmake_build_dir(tmp_path_factory: pytest.TempPathFactory) -> Path | N
         return None
 
     return build_dir
+
+
+@pytest.fixture
+def compile_db(tmp_path: Path) -> Path:
+    """A minimal ``compile_commands.json`` supplying L3 build metadata (no compiler).
+
+    Shared across scan tests: lets a pinned deep level collect L3 so auto-strict
+    (ADR-037 D5 — a pinned depth with no source input is an error) does not fire in
+    tests whose intent is level reporting / seed resolution, not collection.
+    """
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
+    return cdb
+
+
+# A real CMake C++ library (source tree + compiled .so), shared by the scan-level
+# integration suite — kept here per the "fixtures live in conftest.py" convention
+# so future source-scan integration tests can reuse it. Builds once per session;
+# only instantiated when a test requests it (no cost to other tests).
+_CMAKE_CXX_FOO_H = """\
+#ifndef FOO_H
+#define FOO_H
+namespace foo {
+class Widget {
+public:
+  Widget();
+  int value() const;
+  void set_value(int v);
+private:
+  int v_;
+};
+int add(int a, int b);
+}
+#endif
+"""
+
+_CMAKE_CXX_FOO_CPP = """\
+#include "foo.h"
+namespace foo {
+Widget::Widget() : v_(0) {}
+int Widget::value() const { return v_; }
+void Widget::set_value(int v) { v_ = v; }
+int add(int a, int b) { return a + b; }
+}
+"""
+
+_CMAKE_CXX_CMAKELISTS = """\
+cmake_minimum_required(VERSION 3.10)
+project(foo CXX)
+add_library(foo SHARED foo.cpp)
+target_include_directories(foo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(foo PROPERTIES VERSION 1.0.0 SOVERSION 1)
+"""
+
+
+@pytest.fixture(scope="session")
+def cmake_cxx_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real CMake C++ library: source tree (CMakeLists + public header) plus a
+    compiled ELF ``.so``. The compile DB is intentionally *absent* so scans over it
+    exercise the zero-config cmake inference path. Requires gcc/g++."""
+    root = tmp_path_factory.mktemp("cmake_cxx_project")
+    (root / "include").mkdir()
+    (root / "include" / "foo.h").write_text(_CMAKE_CXX_FOO_H, encoding="utf-8")
+    (root / "foo.cpp").write_text(_CMAKE_CXX_FOO_CPP, encoding="utf-8")
+    (root / "CMakeLists.txt").write_text(_CMAKE_CXX_CMAKELISTS, encoding="utf-8")
+    so = root / "libfoo.so.1.0.0"
+    subprocess.run(
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            f"-I{root / 'include'}",
+            "-o",
+            str(so),
+            str(root / "foo.cpp"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (root / "libfoo.so").symlink_to(so.name)
+    return root

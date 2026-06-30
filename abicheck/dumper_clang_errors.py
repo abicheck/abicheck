@@ -1,0 +1,453 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""clang L2 header-parse error analysis (split out of ``dumper.py``).
+
+Pure string-only diagnostics over clang stderr — the C→C++ language-probe signal
+(:func:`_is_missing_cpp_stdlib_header_error`) and the ``#error`` header
+attribution (:func:`_headers_failing_in_aggregate`) — plus the graceful
+exclusion driver (:func:`retry_excluding_error_headers`) that drops headers not
+meant for direct inclusion and re-parses. Kept in its own module so ``dumper.py``
+stays under the file-size cap; the parsers are unit-tested without a compiler.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import subprocess
+
+log = logging.getLogger(__name__)
+
+#: C++ ``<cXXX>`` C-compatibility headers. A missing one of these under a C-mode
+#: parse unambiguously means the TU is C++ — the signal that drives the clang
+#: C→C++ retry. Deliberately restricted to the ``<cXXX>`` spellings rather than
+#: the *full* C++ library set: a C project never bare-includes ``<cstddef>``,
+#: whereas plain names like ``<string>``/``<version>`` collide with plausible C
+#: project headers (oneTBB itself ships a ``version.h``), so matching those could
+#: re-parse a broken C build as C++ — silently caching a wrong AST instead of
+#: reporting the genuine missing dependency (Codex review). In practice the first
+#: miss for a C++ TU parsed in C mode is always a ``<cXXX>`` header (libstdc++
+#: pulls them in early); the rare "pure-C++ header missing first" case is handled
+#: by passing ``--lang c++`` explicitly.
+_CPP_STDLIB_HEADERS = frozenset(
+    {
+        "cassert",
+        "cctype",
+        "cerrno",
+        "cfenv",
+        "cfloat",
+        "cinttypes",
+        "ciso646",
+        "climits",
+        "clocale",
+        "cmath",
+        "csetjmp",
+        "csignal",
+        "cstdalign",
+        "cstdarg",
+        "cstdbool",
+        "cstddef",
+        "cstdint",
+        "cstdio",
+        "cstdlib",
+        "cstring",
+        "ctgmath",
+        "ctime",
+        "cuchar",
+        "cwchar",
+        "cwctype",
+    }
+)
+
+#: ``'<name>' file not found`` — captures the quoted include that clang could not
+#: resolve, checked against :data:`_CPP_STDLIB_HEADERS`.
+_MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
+
+#: clang's rendered source line under a diagnostic, e.g. ``  21 |     #error …``.
+#: Used to confirm a header failure is a preprocessor ``#error`` (a header not
+#: meant for direct inclusion) rather than a real compile error before excluding.
+_RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
+
+#: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal
+#: header that refuses to be ``#include``d on its own. Only these are safe to
+#: exclude, and the bar is deliberately high: the message must carry an
+#: unambiguous direct-inclusion signal — ``directly`` tied to an ``include`` verb
+#: ("do not #include this header directly", "directly include"), or the literal
+#: phrase ``internal header``. Nothing else qualifies. Every config / feature /
+#: include-order ``#error`` on an otherwise-public header — "Set FOO to include
+#: optional support", "feature X not included in this build", "define
+#: MYLIB_CONFIG first", "Do not include public.h before config.h" — lacks both
+#: signals, so it surfaces as a hard parse failure telling the user to fix the
+#: build rather than the header being silently dropped from the L2 surface
+#: (Codex P2, iterated: only ``directly``/``internal header`` count as guards).
+_DIRECT_INCLUDE_GUARD_RE = re.compile(
+    r"\binclude[ds]?\b.{0,40}\bdirectly\b"  # "include(d) this header ... directly"
+    r"|\bdirectly\b.{0,40}\binclude"  # "directly include ..."
+    r"|\binternal header\b",
+    re.IGNORECASE,
+)
+
+
+def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
+    """True if a clang parse failed because a C++ ``<cXXX>`` header was not found.
+
+    Pure/string-only so it is unit-testable without a compiler. Matches clang's
+    ``fatal error: '<name>' file not found`` and confirms ``<name>`` is one of the
+    C++ ``<cXXX>`` C-compatibility headers (:data:`_CPP_STDLIB_HEADERS`). A C TU
+    never includes one, so such a miss means the TU is C++ and a C-mode parse
+    picked the wrong language — driving the C→C++ retry. Plain-name C++ headers
+    (``<string>``/``<version>``/…) are deliberately *not* matched because they
+    collide with plausible C project header names; matching them could silently
+    re-parse a broken C build as C++ instead of reporting the missing dependency.
+    """
+    return any(
+        m.group(1) in _CPP_STDLIB_HEADERS for m in _MISSING_HEADER_RE.finditer(stderr)
+    )
+
+
+#: A missing include, either spelling: clang's ``'name' file not found`` or
+#: gcc/castxml's ``fatal error: name: No such file or directory``. The name is
+#: *not* required to carry an extension — extensionless C++ include roots
+#: (``Eigen/Core``, ``boost/version.hpp``'s siblings) are exactly the bare
+#: ``-H include/`` failures this hint targets (Codex review). The surrounding
+#: "file not found" / "No such file or directory" phrasing is specific enough
+#: to anchor on without a dot.
+_MISSING_INCLUDE_RE = re.compile(
+    r"'([^'\n]+)' file not found"
+    r"|fatal error:\s*(\S+):\s*No such file or directory"
+)
+#: A config/feature ``#error`` line (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH
+#: must be defined``). The graceful-exclusion path
+#: (:func:`retry_excluding_error_headers`) only drops *direct-inclusion guards*;
+#: a config ``#error`` like this surfaces as a hard failure, so a hint pointing
+#: at ``--gcc-options -D…`` is what unblocks it. ``#error`` is a literal C
+#: preprocessor directive (always lowercase), so this is *not* IGNORECASE.
+_ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
+#: A "must be defined / set" requirement phrased in the ``#error`` text. The
+#: prose around it is case-insensitive ("define"/"Define"/"DEFINED"), but the
+#: macro itself is pulled out separately and case-sensitively (below) so a
+#: lowercase word like "must" can never be mistaken for the macro.
+_DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
+#: A *negated* requirement — the ``#error`` *prohibits* defining the macro
+#: (``"OPENSSL_API_LEVEL must not be defined by application"``, ``"You must not
+#: define MP_DIGIT_BIT"``, ``"do not define FOO"``). Telling the user to pass
+#: ``-D<macro>`` there is exactly backwards (Codex review). The negation is
+#: matched only as a *prohibition modal* ("must/should/do/can not …", a
+#: contraction like "mustn't", or "never") sitting immediately before the
+#: define/set verb. A bare copula state — ``"FOO is not defined"`` (ICU's
+#: ``U_ICU_ENTRY_POINT_RENAME is not defined``) or ``"cannot be used without FOO
+#: defined"`` — is the *opposite*: a positive gate reporting the macro is
+#: currently absent, so it must still produce the ``-D`` hint and is NOT matched.
+_NEGATED_REQUIREMENT_RE = re.compile(
+    r"\b(?:must|shall|should|may|do|does|did|can|could|will|would)\b\s+not\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\b(?:must|do|does|did|ca|could|wo|would|sha|should)n['’]t\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\bnever\b[^\n]{0,15}?\b(?:defined?|define|set)\b",
+    re.IGNORECASE,
+)
+#: An *already-defined / conflicting* diagnostic — the macro is present or
+#: clashes, not missing (ncurses' ``MAX_COMMAND is already inconsistently
+#: defined``, Python's ``HAVE_THREAD_LOCAL is already defined``). Suggesting
+#: ``-D<macro>`` is the wrong direction, so these words on the ``#error`` line
+#: suppress the require-macro hint (Codex review). They never appear in a
+#: genuine "you must define X" requirement.
+_ALREADY_DEFINED_RE = re.compile(
+    r"\b(?:already|redefin\w*|inconsistent\w*|conflict\w*)\b", re.IGNORECASE
+)
+#: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
+#: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
+#: optional leading ``_*`` admits config macros that start with an underscore
+#: (``_GNU_SOURCE``, ``__STDC_LIMIT_MACROS``) — a ``\b[A-Z]`` anchor would miss
+#: those because ``_`` is itself a word char (CodeRabbit review).
+_UPPER_MACRO_RE = re.compile(r"(?<![A-Za-z0-9_])_*[A-Z][A-Z0-9_]{2,}(?![A-Za-z0-9_])")
+#: ALL-CAPS English words that turn up in "#error You MUST define FOO" prose but
+#: are never the macro the user must define — skipped when picking the macro.
+_MACRO_PROSE_STOPWORDS = frozenset(
+    {
+        "ERROR",
+        "MUST",
+        "DEFINE",
+        "DEFINED",
+        "SET",
+        "YOU",
+        "THIS",
+        "THE",
+        "BEFORE",
+        "FIRST",
+        "PLEASE",
+        "NOT",
+        "WITH",
+        "FOR",
+        "USE",
+        "USING",
+        "INCLUDE",
+        "INCLUDED",
+        "INCLUDING",
+        "ONLY",
+        "ONE",
+        "AND",
+        "PRIOR",
+    }
+)
+
+
+def _required_macro_from_error(stderr: str) -> str | None:
+    """The macro a config ``#error`` says must be defined, or ``None``.
+
+    Scans only ``#error`` lines that carry a define/set requirement and pulls the
+    uppercase, macro-style identifier *case-sensitively*, so lowercase prose
+    ("you must define …") is never mistaken for the macro (CodeRabbit/Codex
+    review). Prefers a compound ``NAME_WITH_UNDERSCORES`` token and skips common
+    ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
+    and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
+    A *negated* requirement ("must **not** be defined") is skipped — pointing the
+    user at ``-D<macro>`` there would be exactly backwards (Codex review). An
+    *already-defined / conflicting* diagnostic ("already defined", "inconsistently
+    defined") is likewise skipped — the macro is present, not missing. When no
+    compound token is present, the candidate *nearest the define/set verb* wins,
+    so ``#error API users must define FOO`` yields ``FOO``, not the ``API`` prose
+    acronym (Codex review).
+    """
+    for m in _ERROR_LINE_RE.finditer(stderr):
+        line = m.group(0)
+        dm = _DEFINE_WORD_RE.search(line)
+        if not dm:
+            continue
+        if _NEGATED_REQUIREMENT_RE.search(line):
+            continue
+        if _ALREADY_DEFINED_RE.search(line):
+            # The macro is already-defined / conflicting, not missing — a -D hint
+            # would point the wrong way (Codex review).
+            continue
+        cands = [
+            (tm.start(), tm.group(0))
+            for tm in _UPPER_MACRO_RE.finditer(line)
+            if tm.group(0) not in _MACRO_PROSE_STOPWORDS
+        ]
+        if not cands:
+            continue
+        underscored = [tok for _, tok in cands if "_" in tok]
+        if underscored:
+            return underscored[0]
+        # No compound NAME_WITH_UNDERSCORES macro: a bare token like FOO. Prefer
+        # the one closest to the define/set verb over a leading prose acronym.
+        verb_pos = dm.start()
+        return min(cands, key=lambda c: abs(c[0] - verb_pos))[1]
+    return None
+
+
+#: A name that resolved to no declaration — the signature of a header parsed
+#: without its umbrella/config prelude (``size_t``, ``hid_t``, ``H5std_string``,
+#: an incomplete forward-declared ``uv__queue``). Captures the offending name.
+_UNDECLARED_NAME_RE = re.compile(
+    r"unknown type name '([^']+)'"
+    r"|use of undeclared identifier '([^']+)'"
+    r"|'([^']+)' (?:was not declared|does not name a type|has not been declared)"
+)
+
+
+def diagnose_header_compile_failure(stderr: str) -> str | None:
+    """Map a remediable header-parse failure to an actionable ``\\n\\nHint: …`` block.
+
+    Frontend-agnostic (clang and castxml both emit clang-style diagnostics), pure
+    and string-only so it is unit-testable without a compiler. Returns ``None``
+    when no known signature matches, so callers can fall back to the raw stderr.
+
+    Covers the three recurring real-world aborts a bare ``-H include/`` hits on a
+    conda/runtime package (field-eval P1) that previously surfaced only as an
+    opaque compiler dump:
+
+    1. a missing dependency / split-include header (``absl/…``, ``gio/gio.h``),
+    2. a required config/feature macro (``PCRE2_CODE_UNIT_WIDTH``),
+    3. an undeclared type from missing umbrella/std context (``size_t``,
+       ``hid_t``, ``H5std_string``).
+    """
+    if not stderr:
+        return None
+
+    name = _required_macro_from_error(stderr)
+    if name:
+        return (
+            f"\n\nHint: a header requires the macro '{name}' to be defined before "
+            f"inclusion. Pass it via --gcc-options (e.g. --gcc-options "
+            f'"-D{name}=...", such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or point '
+            "-H at the library's umbrella header that defines it rather than an "
+            "individual sub-header."
+        )
+
+    miss = _MISSING_INCLUDE_RE.search(stderr)
+    if miss:
+        name = miss.group(1) or miss.group(2) or ""
+        nested = "/" in name
+        return (
+            f"\n\nHint: the include '{name}' was not found"
+            + (
+                " — it looks like a dependency or a split include root."
+                if nested
+                else "."
+            )
+            + " Add its directory with --include-dir / -I, or install the package "
+            "that ships it (often a separate *-dev/*-devel or dependency package; "
+            "conda runtime packages frequently omit headers)."
+        )
+
+    undecl = _UNDECLARED_NAME_RE.search(stderr)
+    if undecl:
+        name = undecl.group(1) or undecl.group(2) or undecl.group(3) or ""
+        return (
+            f"\n\nHint: '{name}' was used without a declaration — the header was "
+            "likely parsed without its standard prelude or umbrella context. Point "
+            "-H at the library's top-level public/umbrella header (which pulls in "
+            "config and base types) instead of an internal sub-header, or add the "
+            "missing dependency include roots with --include-dir / -I."
+        )
+
+    return None
+
+
+def _is_direct_include_guard_failure(stderr: str) -> bool:
+    """True if a parse failure looks like a header refusing direct inclusion.
+
+    A coarse, frontend-agnostic signal used to route a *castxml* ``auto`` failure
+    to the clang backend — which can granularly exclude the offending headers via
+    :func:`retry_excluding_error_headers`, a thing the castxml path cannot do — so
+    the ``-H <include-dir>`` case works on the default frontend too (review). The
+    failure text must both look like an error and carry a direct-inclusion guard
+    phrase (:data:`_DIRECT_INCLUDE_GUARD_RE`: "…include…directly" / "internal
+    header"). Deliberately conservative: a castxml toolchain/syntax failure that
+    merely happens to contain the word "directly" without "include" near it, or
+    without any error context, does not match. Pure/string-only.
+    """
+    return "error" in stderr.lower() and bool(_DIRECT_INCLUDE_GUARD_RE.search(stderr))
+
+
+def _headers_failing_in_aggregate(
+    stderr: str, agg_path: Path, n_headers: int
+) -> set[int]:
+    """0-based indices of aggregate ``#include`` lines whose chain raised an error.
+
+    The L2 aggregate TU emits one ``#include`` per header — header ``i`` on line
+    ``i + 1``. A header not meant to be included directly raises a preprocessor
+    ``#error`` (e.g. oneTBB's ``detail`` headers: "Do not #include this internal
+    header directly"). A preview/feature-macro gate ("Set TBB_PREVIEW_… to
+    include …") is *not* treated as a guard — it surfaces so the user defines the
+    macro (Codex P2). When the error
+    fires inside an *included* file, clang prints the include chain whose outermost
+    frame is the aggregate TU — ``In file included from <agg>:<N>:`` — immediately
+    before the ``error:`` line. ``<N>`` therefore identifies the offending
+    top-level header, even through a deeper transitive chain (the aggregate frame
+    is always printed first and persists until the next aggregate-rooted chain).
+
+    Pure / string-only so it is unit-testable without a compiler. A header is
+    excluded **only** when both hold: (1) the failure is a confirmed preprocessor
+    ``#error`` (clang renders ``  21 | #error …`` below the diagnostic), and (2)
+    the message reads like a *direct-inclusion guard*
+    (:data:`_DIRECT_INCLUDE_GUARD_RE` — "do not include directly" / "internal
+    header" / "Set … to include"). A real syntax error, a missing-build-flag
+    ``#error`` (e.g. ``#error "define MYLIB_CONFIG first"``), or an error in the
+    aggregate file itself is therefore *not* dropped — it surfaces as the hard
+    parse failure ``dumper.py`` raises, keeping the L2 surface authoritative and
+    telling the user to pass the required flag (Codex P2).
+    """
+    agg = str(agg_path)
+    prefix = "In file included from "
+    offending: set[int] = set()
+    root: int | None = None
+    lines = stderr.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            rest = line[len(prefix) :]
+            if rest.startswith(agg + ":"):
+                tail = rest[len(agg) + 1 :].split(":", 1)[0]
+                if tail.isdigit():
+                    root = int(tail)
+            # a deeper frame of the same chain keeps the aggregate root
+            continue
+        if ": error:" in line:
+            if line.startswith(agg + ":"):
+                root = None  # error in the umbrella itself — not header-excludable
+                continue
+            # Exclude only a *direct-inclusion guard*: (1) confirmed to be a
+            # preprocessor #error via clang's rendered source line, AND (2) whose
+            # message reads like a "don't include this directly" guard. A #error
+            # reporting a missing config macro / unsupported target on a public
+            # header matches (1) but not (2), so it is left in and surfaces as a
+            # hard failure telling the user to pass the build flag (Codex P2).
+            if root is not None:
+                window = lines[i + 1 : i + 4]
+                is_error_directive = any(
+                    _RENDERED_ERROR_DIRECTIVE.match(w) for w in window
+                )
+                guard_text = " ".join([line, *window])
+                if is_error_directive and _DIRECT_INCLUDE_GUARD_RE.search(guard_text):
+                    idx = root - 1
+                    if 0 <= idx < n_headers:
+                        offending.add(idx)
+    return offending
+
+
+def retry_excluding_error_headers(
+    *,
+    result: subprocess.CompletedProcess[str],
+    run_clang: Callable[[], subprocess.CompletedProcess[str]],
+    write_agg: Callable[[list[Path]], None],
+    agg_path: Path,
+    active_headers: list[Path],
+    max_attempts: int = 5,
+) -> subprocess.CompletedProcess[str]:
+    """Drop headers whose aggregate compile ``#error``s and re-parse; return result.
+
+    When ``-H`` expands to a whole public include dir, some headers are not meant
+    to be included directly (preview / internal ``detail`` headers) and a single
+    ``#error`` would otherwise abort the entire L2 parse. Exclude the offending
+    top-level headers (identified by :func:`_headers_failing_in_aggregate`),
+    rewrite the aggregate via *write_agg*, and retry *run_clang* — so the rest of
+    the public surface is still parsed. Bounded by *max_attempts* so a
+    pathological cascade can't loop forever; a single-header ``-H`` (an umbrella
+    file the user chose) is never reduced. Logs exactly which headers were dropped
+    on success so the omission is never silent.
+    """
+    excluded: list[Path] = []
+    attempts = 0
+    while (
+        result.returncode != 0 and len(active_headers) > 1 and attempts < max_attempts
+    ):
+        bad = _headers_failing_in_aggregate(
+            result.stderr or "", agg_path, len(active_headers)
+        )
+        if not bad or len(bad) >= len(active_headers):
+            break
+        excluded.extend(active_headers[i] for i in sorted(bad))
+        active_headers = [h for i, h in enumerate(active_headers) if i not in bad]
+        write_agg(active_headers)
+        result = run_clang()
+        attempts += 1
+    if excluded and result.returncode == 0:
+        log.warning(
+            "L2 header parse: excluded %d header(s) not meant for direct "
+            "inclusion (they raise #error): %s. Their declarations are absent "
+            "from the L2 surface — point -H at the library's umbrella header "
+            "(e.g. oneapi/tbb.h) to include the intended public API.",
+            len(excluded),
+            ", ".join(p.name for p in excluded),
+        )
+    return result

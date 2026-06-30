@@ -1,9 +1,14 @@
 # ADR-037: CLI Interface Contract, Configuration Balance, and Extension Policy
 
 **Date:** 2026-06-16
-**Status:** Proposed — tracked as G22 in
-`docs/development/usecase-registry.yaml`; phased work in
-[plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md).
+**Status:** Accepted — implemented. Tracked as G22 in
+`docs/development/usecase-registry.yaml` (entry `UC-WF-cli-contract`, now
+`complete`); phased work in
+[plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md). All seven
+phases landed (D1–D12), enforced by the `cli-contract` AI-readiness gate and
+`tests/test_cli_contract.py`. The single residual is the `--ast-frontend android`
+value, which stays exposed on `collect`'s `--source-abi-extractor` rather than
+the header-AST commands (it has no header-AST path).
 **Decision maker:** (pending)
 
 ---
@@ -140,6 +145,34 @@ contract violation (CI-checked, D10).
 | `@debug_resolution_options` | `--debug-root{,1,2}`, `--debuginfod[-url]`, `--debug-format`, `--dwarf-only` |
 | `@output_options` | `--format`, `-o/--output` |
 | `@evidence_options` | `--depth`, `--max`, `--sources` + per-side `--old/new-sources`, `--build-info` + per-side `--old/new-build-info` (D5) |
+| `@compile_context_options` | `--ast-frontend`, `--gcc-path`, `--gcc-prefix`, `--gcc-options`, `--gcc-option`, `--sysroot`, `--nostdinc` — the L2 header-AST compile context (D8.1) |
+
+**D8.1 — `dump` and `scan` share the L2 compile context (no drift).** The
+cross-toolchain + frontend flags that tell the header frontend *how* to parse the
+public headers were declared inline on `dump` but **absent from `scan`** — so a
+`scan` of a library whose headers need an include root, a `-std`, or a `-D`
+feature macro (e.g. oneTBB's `oneapi/tbb.h`) had no way to supply them and L2
+silently failed, dropping the scan to a binary-strict scope that flags internal
+removals as BREAKING. The whole family is now defined **once** in
+`@compile_context_options` and composed by **both** `dump` and `scan`
+(registered-but-not-required, like `@evidence_options`: only the
+header-parsing commands carry it). Threaded as a frozen
+`service_scan.CompileContext` through `run_dump`/`run_scan` (D2). A
+`tests/test_compile_context_parity.py` guard asserts the two commands expose an
+identical compile-context flag set, so they cannot drift again.
+
+**Capability parity is part of the frontend contract (D8).** `--ast-frontend`
+picks *which* frontend, but the two are only interchangeable (the ADR-003 parity
+promise) if they see the **same** translation-unit context. castxml gets that for
+free — `castxml --castxml-cc-gnu g++` runs the real compiler to discover its
+built-in system include paths. The clang backend (`clang -ast-dump=json`) does
+not, so it now auto-probes the host GNU compiler for its system include dirs and
+injects them as `-isystem` (on by default; suppressed by `--nostdinc`, an
+explicit `--sysroot`, or `ABICHECK_AUTO_SYSTEM_INCLUDES=0`). Auto-detection
+recovers the *system* headers (libstdc++/libc); the *project's own* include
+roots, `-D` feature macros, and exact `-std` still come from
+`-I`/`--gcc-options`, a compile DB, or the config `compile:` block (D4) — see the
+limitations in `docs/concepts/limitations.md`.
 
 A command that legitimately wants a *subset* opts out **explicitly with a code
 comment stating why** — the absence becomes a deliberate, reviewable decision

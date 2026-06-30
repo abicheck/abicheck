@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI — full-stack dependency commands (``deps``, ``stack-check``).
+"""CLI — full-stack dependency commands (the ``deps`` group).
 
-Split out of :mod:`abicheck.cli` to keep that module under the
+``deps tree`` resolves a single binary's dependency closure and symbol bindings;
+``deps compare`` diffs a binary's full dependency stack across two environments
+(the capability the standalone ``stack-check`` command used to provide, folded in
+here). Split out of :mod:`abicheck.cli` to keep that module under the
 AI-readiness file-size limit. Imported for side-effect at the bottom of
-:mod:`abicheck.cli` so the ``@main.command(...)`` decorators run.
+:mod:`abicheck.cli` so the ``@main.group(...)`` / ``@deps_group.command(...)``
+decorators run.
 """
 from __future__ import annotations
 
@@ -26,9 +30,21 @@ from pathlib import Path
 import click
 
 from .cli import _detect_binary_format, _safe_write_output, _setup_verbosity, main
+from .cli_options import verbose_option
 
 
-@main.command("deps")
+@main.group("deps")
+def deps_group() -> None:
+    """Inspect a binary's shared-library dependency stack.
+
+    \b
+    Subcommands:
+      tree     Resolve one binary's dependency closure and symbol bindings.
+      compare  Diff a binary's full dependency stack across two environments.
+    """
+
+
+@deps_group.command("tree")
 @click.argument("binary", type=click.Path(exists=True, path_type=Path))
 @click.option("--search-path", "search_paths", multiple=True,
               type=click.Path(exists=True, path_type=Path),
@@ -38,10 +54,11 @@ from .cli import _detect_binary_format, _safe_write_output, _setup_verbosity, ma
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
 @click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
-def deps_cmd(
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
+def deps_tree_cmd(
     binary: Path, search_paths: tuple[Path, ...],
     sysroot: Path | None, ld_library_path: str,
     fmt: str, output: Path | None, verbose: bool,
@@ -59,16 +76,17 @@ def deps_cmd(
 
     \b
     Examples:
-      abicheck deps ./build/libfoo.so
-      abicheck deps /usr/bin/myapp --format json -o deps.json
-      abicheck deps ./app --sysroot /path/to/container/rootfs
+      abicheck deps tree ./build/libfoo.so
+      abicheck deps tree /usr/bin/myapp --format json -o deps.json
+      abicheck deps tree ./app --sysroot /path/to/container/rootfs
     """
     _setup_verbosity(verbose)
 
     fmt_detected = _detect_binary_format(binary)
     if fmt_detected != "elf":
         raise click.ClickException(
-            f"deps requires an ELF binary; got {fmt_detected or 'unknown format'}: {binary}"
+            f"deps tree requires an ELF binary; got "
+            f"{fmt_detected or 'unknown format'}: {binary}"
         )
 
     from .stack_checker import check_single_env
@@ -98,7 +116,7 @@ def deps_cmd(
         sys.exit(1)
 
 
-@main.command("stack-check")
+@deps_group.command("compare")
 @click.argument("binary", type=click.Path(path_type=Path))
 @click.option("--baseline", type=click.Path(exists=True, path_type=Path),
               default=Path("/"), show_default=True,
@@ -112,10 +130,11 @@ def deps_cmd(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
 @click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
-def stack_check_cmd(
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
+def deps_compare_cmd(
     binary: Path, baseline: Path, candidate: Path,
     search_paths: tuple[Path, ...], ld_library_path: str,
     fmt: str, output: Path | None, verbose: bool,
@@ -136,8 +155,8 @@ def stack_check_cmd(
 
     \b
     Examples:
-      abicheck stack-check usr/bin/myapp --baseline /old-root --candidate /new-root
-      abicheck stack-check usr/lib/libfoo.so.1 \\
+      abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
+      abicheck deps compare usr/lib/libfoo.so.1 \\
         --baseline ./image-v1 --candidate ./image-v2 --format json
     """
     _setup_verbosity(verbose)
@@ -156,7 +175,7 @@ def stack_check_cmd(
             fmt_detected = _detect_binary_format(resolved)
             if fmt_detected != "elf":
                 raise click.ClickException(
-                    f"stack-check requires an ELF binary; got "
+                    f"deps compare requires an ELF binary; got "
                     f"{fmt_detected or 'unknown format'}: {resolved}"
                 )
 

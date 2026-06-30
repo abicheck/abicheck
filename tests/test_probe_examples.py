@@ -174,7 +174,7 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     runner = CliRunner()
     res = runner.invoke(
         main,
-        ["compare-release", str(old_dir), str(new_dir),
+        ["compare", str(old_dir), str(new_dir),
          "--probe-matrix-old", str(old_matrix),
          "--probe-matrix-new", str(new_matrix),
          "--format", "json"],
@@ -190,7 +190,7 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     # Without the matrix flags the same release is clean (regression guard
     # against the matrix path firing unconditionally).
     res_clean = runner.invoke(
-        main, ["compare-release", str(old_dir), str(new_dir), "--format", "json"],
+        main, ["compare", str(old_dir), str(new_dir), "--format", "json"],
     )
     assert res_clean.exit_code == 0, res_clean.output
     assert "matrix_findings" not in json.loads(res_clean.stdout)

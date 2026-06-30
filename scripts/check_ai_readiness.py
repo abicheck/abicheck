@@ -39,6 +39,8 @@ TESTS = ROOT / "tests"
 DOCS = ROOT / "docs"
 EXAMPLES = ROOT / "examples"
 SCRIPTS = ROOT / "scripts"
+EVAL = ROOT / "eval"
+VALIDATION = ROOT / "validation"
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -62,6 +64,8 @@ REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     DOCS,
     EXAMPLES,
     SCRIPTS,
+    EVAL,
+    VALIDATION,
 )
 
 # Minimum test-file ratio (test files / source files).
@@ -471,7 +475,8 @@ def check_doc_count_sync(f: Findings) -> None:
     # enum size. The anchors above pin specific headline sentences; this catches
     # the long tail of casual mentions that historically drifted (190, 183,
     # 180+, 150+, 100+...). ADRs are dated decision records and keep the counts
-    # that were true when they were written, so they are exempt.
+    # that were true when they were written, so they are exempt; the archive of
+    # retired/historical docs is exempt for the same reason.
     # `?...`? tolerates markdown code spans: "183 `ChangeKind` values",
     # "234 `ChangeKind`s".
     generic = re.compile(
@@ -479,6 +484,8 @@ def check_doc_count_sync(f: Findings) -> None:
         r"(?:-kind\b|\s+(?:ABI/API\s+)?(?:[Cc]hange\s+(?:kinds?|types?)|`?ChangeKinds?`?s?|detection\s+rules))"
     )
     adr_dir = DOCS / "development" / "adr"
+    archive_dir = DOCS / "development" / "archive"
+    exempt_dirs = (adr_dir, archive_dir)
     sweep_files = [
         ROOT / "README.md",
         ROOT / "CLAUDE.md",
@@ -487,7 +494,8 @@ def check_doc_count_sync(f: Findings) -> None:
     sweep_files += [
         p
         for p in sorted(DOCS.rglob("*"))
-        if p.suffix in {".md", ".yaml", ".yml"} and not p.is_relative_to(adr_dir)
+        if p.suffix in {".md", ".yaml", ".yml"}
+        and not any(p.is_relative_to(d) for d in exempt_dirs)
     ]
     for path in sweep_files:
         if not path.is_file():
@@ -516,6 +524,14 @@ def _module_name(path: Path) -> str:
 
 
 def _module_imports(path: Path) -> set[str]:
+    # Static-only: this walks `import` / `from … import` AST nodes. A *runtime*
+    # `importlib.import_module("abicheck.X")` call is deliberately invisible
+    # here — that is the escape hatch the `cli_buildsource` back-compat
+    # `__getattr__` shim uses to re-export the graph helpers from `cli_graph`
+    # without registering a `cli_buildsource → cli_graph` edge (which would form
+    # a real cycle). If you switch a shim like that to a static import, expect
+    # this gate to flag the cycle — add the module-set to IMPORT_CYCLE_ALLOWLIST
+    # only if the coupling is genuinely intended.
     src = _read(path)
     try:
         tree = ast.parse(src, filename=str(path))
@@ -596,8 +612,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_compare_release"}),
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
-        frozenset({"cli", "cli_max"}),
         frozenset({"cli", "cli_buildsource"}),
+        frozenset({"cli", "cli_graph"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
@@ -642,6 +658,14 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # simple cycle on each platform (e.g. via `cli_appcompat` vs `cli_plugin`).
         # A genuinely new bad cycle would pull in a module *outside* this SCC and so
         # would not be a subset — still flagged.
+        #
+        # ADR-037 D3 adds `cli_options`: the shared `@compile_context_options`
+        # decorator's one resolver (`merge_compile_config`/`resolve_compile_context`,
+        # shared by compare/dump/scan) reaches `CompileContext` in `service_scan` via
+        # a *function-local* `from .service_scan import CompileContext`; `service_scan`
+        # reaches `cli_scan` function-locally and `cli_scan` imports `cli_options` at
+        # module load. `cli_options` itself imports only `cli_params` at module load
+        # (it is a leaf), so this too closes only through function-local imports.
         frozenset(
             {
                 "appcompat",
@@ -653,7 +677,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_compare_release",
                 "cli_debian_symbols",
                 "cli_helpers_compare",
-                "cli_max",
+                "cli_options",
                 "cli_plugin",
                 "cli_pr_comment",
                 "cli_probe",
@@ -1176,12 +1200,15 @@ def _checker_module_bindings(tree: ast.Module) -> set[str]:
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
-    """The front-end modules the contract covers: every ``cli*.py`` plus the
-    consumer-side ``appcompat.py`` (it is a verdict-emitting front-end too)."""
+    """The front-end modules the contract covers: every ``cli*.py``, the
+    consumer-side ``appcompat.py`` (a verdict-emitting front-end too), and the
+    MCP server ``mcp_server.py`` — ADR-037 D1 names MCP a Tier-3 front-end, so it
+    must route through the Tier-2 service just like the CLI commands."""
     yield from PKG.glob("cli*.py")
-    appcompat = PKG / "appcompat.py"
-    if appcompat.is_file():
-        yield appcompat
+    for extra in ("appcompat.py", "mcp_server.py"):
+        path = PKG / extra
+        if path.is_file():
+            yield path
 
 
 # ── ADR-037 D10.2 / D10.4: shared-decorator coverage + one-default-per-flag ───
@@ -1194,9 +1221,7 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
 #: verdict-emitting command module basename → the command's registered name.
 _VERDICT_CMD_MODULES: dict[str, str] = {
     "cli.py": "compare",
-    "cli_compare_release.py": "compare-release",
     "cli_appcompat.py": "appcompat",
-    "cli_max.py": "deep-compare",
 }
 
 #: decorator callables every verdict-emitting command must compose (ADR-037 D3).
@@ -1212,15 +1237,7 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
 
 #: (command, decorator) pairs allowed to be absent — a deliberate, reviewed
 #: subset (mirrors ``cli_options.INTENTIONAL_SUBSET``).
-_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("deep-compare", "severity_options"),
-    }
-)
-
-#: flag names knowingly carrying two defaults across decorators, deferred to a
-#: later phase (mirrors ``cli_options.DEFERRED_MULTI_DEFAULT``).
-_DEFERRED_MULTI_DEFAULT_FLAGS: frozenset[str] = frozenset({"--collect-mode"})
+_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _decorator_callable_name(node: ast.expr) -> str | None:
@@ -1318,7 +1335,7 @@ def _option_flag_and_default(call: ast.Call) -> tuple[str | None, str | None]:
 
 def _check_one_default_per_flag(f: Findings) -> None:
     """ADR-037 D10.4: a flag declared in more than one shared decorator must not
-    carry two different defaults (the ``--collect-mode`` double-default trap)."""
+    carry two different defaults (the historical ``--collect-mode`` trap)."""
     path = PKG / "cli_options.py"
     if not path.is_file():
         return
@@ -1338,20 +1355,112 @@ def _check_one_default_per_flag(f: Findings) -> None:
             if flag is not None and default_src is not None:
                 defaults[flag].add(default_src)
     for flag, seen in sorted(defaults.items()):
-        if len(seen) > 1 and flag not in _DEFERRED_MULTI_DEFAULT_FLAGS:
+        if len(seen) > 1:
             f.err(
                 "cli-contract",
                 f"{rel}: flag `{flag}` is declared with conflicting defaults "
                 f"{sorted(seen)} across shared decorators (ADR-037 D10.4). "
-                "Give it one default, or add it to `DEFERRED_MULTI_DEFAULT`.",
+                "Give it one default.",
             )
+
+
+# ── ADR-037 D10.3: MCP ⇄ CLI name-map completeness ───────────────────────────
+#
+# The single ``MCP_CLI_NAME_MAP`` table (``cli_options.py``) reconciles the MCP
+# tool's JSON parameter names with the ``compare`` CLI flags so the two
+# front-ends can't silently diverge. This gate keys on the *MCP* side: every
+# ``abi_compare`` parameter must appear in the map (a CLI-flag-side completeness
+# check that needs the live Click command runs in ``tests/test_cli_contract.py``).
+
+#: ``abi_compare`` params that are framework plumbing, not part of the shared
+#: request surface, so they need no CLI-flag row.
+_MCP_NAME_MAP_EXEMPT_PARAMS: frozenset[str] = frozenset()
+
+
+def _dict_literal_keys(tree: ast.Module, name: str) -> set[str] | None:
+    """Return the string keys of a module-level ``name = {...}`` dict literal.
+
+    ``None`` when no such assignment (or annotated assignment) with a dict
+    literal value is found, so the caller can flag a missing table rather than
+    silently passing. Iterates ``tree.body`` (not ``ast.walk``) so a same-named
+    symbol nested in a function/class can never shadow the module-level table.
+    """
+    for node in tree.body:
+        target_names: list[str] = []
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            target_names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target_names = [node.target.id]
+            value = node.value
+        if name in target_names and isinstance(value, ast.Dict):
+            return {
+                k.value
+                for k in value.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)
+            }
+    return None
+
+
+def _function_param_names(tree: ast.Module, func_name: str) -> list[str] | None:
+    """Return the positional/keyword parameter names of a module-level
+    ``def func_name(...)``.
+
+    Iterates ``tree.body`` (not ``ast.walk``) so the lookup is scoped to
+    module-level definitions and a nested function of the same name cannot match.
+    """
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            a = node.args
+            return [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
+    return None
+
+
+def _check_mcp_cli_name_map(f: Findings) -> None:
+    """ADR-037 D10.3: every ``abi_compare`` MCP param is in ``MCP_CLI_NAME_MAP``."""
+    co_path = PKG / "cli_options.py"
+    mcp_path = PKG / "mcp_server.py"
+    if not co_path.is_file() or not mcp_path.is_file():
+        return
+    try:
+        co_tree = ast.parse(_read(co_path), filename=_rel(co_path))
+        mcp_tree = ast.parse(_read(mcp_path), filename=_rel(mcp_path))
+    except SyntaxError:
+        return
+    keys = _dict_literal_keys(co_tree, "MCP_CLI_NAME_MAP")
+    if keys is None:
+        f.err(
+            "cli-contract",
+            f"{_rel(co_path)}: MCP_CLI_NAME_MAP table not found (ADR-037 D10.3); "
+            "it is the single source of truth reconciling MCP params ⇄ CLI flags.",
+        )
+        return
+    params = _function_param_names(mcp_tree, "abi_compare")
+    if params is None:
+        f.err(
+            "cli-contract",
+            f"{_rel(mcp_path)}: MCP tool `abi_compare` not found; its param ⇄ flag "
+            "name-map coverage (ADR-037 D10.3) could not be verified.",
+        )
+        return
+    for p in params:
+        if p in _MCP_NAME_MAP_EXEMPT_PARAMS or p in keys:
+            continue
+        f.err(
+            "cli-contract",
+            f"{_rel(mcp_path)}: MCP param `abi_compare.{p}` is absent from "
+            "`MCP_CLI_NAME_MAP` (ADR-037 D10.3) — add a row mapping it to its "
+            "`compare` flag (or `None` if it has no CLI equivalent).",
+        )
 
 
 def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
     (``checker.compare``) directly instead of routing through the Tier-2 service.
 
-    Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
+    Covers every ``abicheck/cli*.py``, ``abicheck/appcompat.py``, and
+    ``abicheck/mcp_server.py``. ADR-037
     D1/D10.1: front-ends are thin adapters; one classification path is what keeps
     ``compare`` / ``compare-release`` / ``appcompat`` / MCP from drifting apart
     (the ``scope_public`` default divergence the ADR documents). Importing a
@@ -1387,6 +1496,8 @@ def check_cli_contract(f: Findings) -> None:
     # D10.2 shared-decorator coverage + D10.4 one-default-per-flag (ADR-037 D3).
     _check_decorator_coverage(f)
     _check_one_default_per_flag(f)
+    # D10.3 MCP ⇄ CLI name-map completeness (ADR-037 D8/D9 cross-front-end parity).
+    _check_mcp_cli_name_map(f)
 
 
 # ---------------------------------------------------------------------------

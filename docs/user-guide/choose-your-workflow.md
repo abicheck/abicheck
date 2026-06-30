@@ -32,8 +32,8 @@ command** when you need more confidence or a CI gate.
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck scan --binary build/libfoo.so -H include/ --sources . --baseline baseline.json --since origin/main` | One orchestrator over dump/compare: always-on pattern + cross-source checks plus the pinned L3/L4/L5 level — see [Source & Build Data](../concepts/build-source-data.md) and the [GitHub Action](github-action.md#source-scans-build-source-evidence) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow-2 `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
-| Several DSOs shipped together | `abicheck compare-release release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
-| RPM / Deb / tar / conda / wheel packages | `abicheck compare-release old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
+| Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
+| RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
 | An application + a library upgrade | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against new.so` when no old library exists (symbol-availability only) |
 | A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
 | Will this binary load in this sysroot / rootfs? | `abicheck deps ./app --sysroot /rootfs` | `abicheck deps ./app` alone checks the dependency tree resolves |
@@ -164,9 +164,10 @@ For large diffs, add `--report-mode leaf --show-impact` to group derived
 changes under their root cause. Full reference:
 [Output Formats](output-formats.md).
 
-> **`compare-release` formats are narrower:** the bundle/package command emits
-> only `markdown`, `json`, and `junit` — **not** `sarif` or `html`. Those two
-> formats apply to single-library `compare`. For a release bundle in GitHub Code
+> **Bundle/package compare formats are narrower:** a release/bundle `compare`
+> (directory/package inputs) emits only `markdown`, `json`, and `junit` —
+> **not** `sarif` or `html`. Those two formats apply to single-library
+> `compare`. For a release bundle in GitHub Code
 > Scanning, run per-library `compare --format sarif` for the libraries you want
 > to surface there.
 
@@ -183,7 +184,7 @@ changes under their root cause. Full reference:
 | Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [Local Compare](local-compare.md). |
 | Offline / air-gapped | Pre-dump snapshots, then `abicheck compare old.json new.json` — no castxml or network needed. |
 | Multi-platform project | Matrix over Linux/macOS/Windows, emit JSON per platform, aggregate in a final gate job — see [GitHub Action](github-action.md). |
-| Package / release validation | `compare-release` on RPM/Deb/tar/conda/wheel inputs, with debug/devel packages where available. |
+| Package / release validation | `compare` on RPM/Deb/tar/conda/wheel directory/package inputs, with debug/devel packages where available. |
 
 ---
 

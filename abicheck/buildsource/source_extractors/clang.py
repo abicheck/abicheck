@@ -52,9 +52,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -1320,27 +1322,38 @@ class ClangSourceExtractor:
             clang_bin=self.clang_bin,
             compiler_binary=self.compiler_binary,
         )
-        result = self._run(ast_cmd, directory, compile_unit.source)
-        if not result.stdout.strip():
-            raise SourceExtractionError(
-                f"clang produced no AST for {compile_unit.source} "
-                f"(exit {result.returncode}): {result.stderr[:1000]}"
-                + _missing_generated_header_hint(result.stderr)
-            )
+        # Spill the (potentially multi-GiB) JSON AST to a temp file rather than
+        # capturing it into a Python str. json.load still reads it back to parse, so
+        # one TU's parse peak is unchanged — the win is that N concurrent workers
+        # keep their AST payloads on disk (not heap) until each parses, so the
+        # GIL-serialized thread pool stops stacking N giant strings (the UXL OOM).
+        ast_path, ast_stderr, ast_rc = self._run_ast_to_file(
+            ast_cmd, directory, compile_unit.source
+        )
         try:
-            ast_root = json.loads(result.stdout)
-        except ValueError as exc:
-            raise SourceExtractionError(
-                f"clang AST for {compile_unit.source} was not valid JSON: {exc}"
-            ) from exc
+            if ast_path.stat().st_size == 0:
+                raise SourceExtractionError(
+                    f"clang produced no AST for {compile_unit.source} "
+                    f"(exit {ast_rc}): {ast_stderr[:1000]}"
+                    + _missing_generated_header_hint(ast_stderr)
+                )
+            try:
+                with open(ast_path, "rb") as fh:  # bytes: json detects encoding
+                    ast_root = json.load(fh)
+            except ValueError as exc:
+                raise SourceExtractionError(
+                    f"clang AST for {compile_unit.source} was not valid JSON: {exc}"
+                ) from exc
+        finally:
+            ast_path.unlink(missing_ok=True)
         # A non-zero exit with usable JSON means clang recovered from some errors;
         # record it as a diagnostic (partial coverage) rather than discarding the
         # dump (ADR-028 D7).
         diags: list[str] = []
-        if result.returncode != 0:
+        if ast_rc != 0:
             diags.append(
-                f"clang exited {result.returncode} (recovered): {result.stderr[:300]}"
-                + _missing_generated_header_hint(result.stderr)
+                f"clang exited {ast_rc} (recovered): {ast_stderr[:300]}"
+                + _missing_generated_header_hint(ast_stderr)
             )
         effective_public_roots = _equivalent_public_roots_for_unit(
             public_header_roots, compile_unit, compiler_binary=self.compiler_binary
@@ -1352,6 +1365,9 @@ class ClangSourceExtractor:
             target_id,
             diagnostics=diags,
         )
+        # Drop the large AST tree before the macro pass spawns another subprocess,
+        # so its memory is reclaimed and doesn't stack with the macro pass.
+        del ast_root
         self._attach_macros(tu, compile_unit, source, directory, effective_public_roots)
         return tu
 
@@ -1380,6 +1396,47 @@ class ClangSourceExtractor:
             raise SourceExtractionError(
                 f"clang timed out after {self.timeout}s on {source_label}"
             ) from exc
+
+    def _run_ast_to_file(
+        self, cmd: list[str], directory: str, source_label: str
+    ) -> tuple[Path, str, int]:
+        """Run clang with its JSON AST streamed to a temp file; return its path.
+
+        Returns ``(ast_file_path, stderr_text, returncode)``. The caller owns the
+        file and must delete it. Unlike :meth:`_run` (``capture_output``), clang's
+        large stdout is written **to disk**, not captured into a Python ``str``.
+        ``json.load`` still reads the file back to parse it, so a *single* TU's
+        parse peak is unchanged (~serialized bytes + tree); the wins are across
+        **concurrent** workers: payloads sit on disk — not the heap — until each
+        worker's turn, so the default thread pool (whose C ``json`` parse serializes
+        on the GIL) no longer stacks N giant AST strings in one address space the way
+        captured stdout did. It also drops the ``text=True`` decode copy (bytes
+        parse). ``stderr`` stays buffered (it is small). The temp file is removed on
+        timeout/failure here; on success the caller's ``finally`` removes it.
+        """
+        cmd = [unredact_home(tok) for tok in cmd]
+        fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
+        path = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=out,
+                    stderr=subprocess.PIPE,
+                    timeout=self.timeout,
+                    check=False,
+                    cwd=directory or None,
+                )
+            stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
+            return path, stderr, proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            path.unlink(missing_ok=True)
+            raise SourceExtractionError(
+                f"clang timed out after {self.timeout}s on {source_label}"
+            ) from exc
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
 
     def _attach_macros(
         self,

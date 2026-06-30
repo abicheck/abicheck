@@ -10,7 +10,7 @@ that.
 This page covers:
 
 - What "bundle analysis" actually checks
-- The new `compare-release` flags and what they do
+- The bundle-analysis flags on `compare` (directory/package inputs) and what they do
 - The manifest file format
 - How to read the JSON / markdown output
 - When you'd want to turn it off
@@ -36,7 +36,7 @@ becomes the worst of `bundle_verdict` and the per-library worst.
 The bundle layer is **enabled by default**:
 
 ```bash
-abicheck compare-release release-1.0/ release-2.0/ -H include/
+abicheck compare release-1.0/ release-2.0/ -H include/
 ```
 
 If the bundle is broken, you'll see a new section in the markdown
@@ -240,7 +240,7 @@ When to use it:
 Example:
 
 ```bash
-abicheck compare-release old/ new/ \
+abicheck compare old/ new/ \
     --bundle-system-providers libvpl.so.2,libcuda.so.1
 ```
 
@@ -251,8 +251,8 @@ These sonames are appended to the built-in allow-list for this run only.
 Skip bundle analysis entirely. Use this when:
 
 - You're debugging a per-library issue and want to suppress the noise.
-- You want **parity output** with the pre-ADR-023 behaviour of
-  `compare-release` (for instance, comparing a CI run from before the
+- You want **parity output** with the pre-ADR-023 behaviour of a bundle
+  `compare` (for instance, comparing a CI run from before the
   bundle layer landed).
 - The bundle layer raised a warning ("bundle analysis skipped: ..."),
   you want a clean run, and you've already filed a bug.
@@ -262,7 +262,7 @@ equivalent; the flag must appear in the command line.
 
 ## JSON output schema additions
 
-`compare-release --format json` adds two top-level keys when bundle
+`compare --format json` (on a bundle) adds two top-level keys when bundle
 analysis ran:
 
 ```json
@@ -330,7 +330,7 @@ Bundle analysis is **ELF/Linux-only** (ADR-018, ADR-023). Mach-O and
 PE/COFF bundles are out of scope for this iteration — the resolution
 graph relies on DT_NEEDED edges and `.gnu.version_r` / `.gnu.version_d`
 sections that PE and Mach-O don't have direct equivalents for. On
-non-Linux runs, `compare-release` skips bundle analysis silently and
+non-Linux runs, `compare` skips bundle analysis silently and
 emits per-library results only.
 
 ## Programmatic API

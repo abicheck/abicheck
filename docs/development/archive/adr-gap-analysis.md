@@ -7,7 +7,7 @@
 > **Historical snapshot.** Counts below (e.g. "114 ChangeKinds") describe the
 > codebase as of the analysis date. The current taxonomy is tracked in the
 > [Change Kind Reference](../../reference/change-kinds.md); the candidate ADRs
-> identified here have since been written (see the [ADR index](index.md)).
+> identified here have since been written (see the [ADR index](../adr/index.md)).
 
 ---
 

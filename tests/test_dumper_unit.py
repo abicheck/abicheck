@@ -98,6 +98,69 @@ class TestCacheKey:
         k = _cache_key([Path("/nonexistent/x.h")], [], "c++")
         assert isinstance(k, str) and len(k) == 64
 
+    def test_extra_hash_dirs_fold_in_contents(self, tmp_path):
+        # A deferred inferred root rides in gcc_option_tokens, not extra_includes,
+        # so its contents are hashed only via extra_hash_dirs. Editing a header
+        # under it (umbrella unchanged) must change the key — else a stale AST is
+        # reused (Codex review).
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        detail = root / "detail.h"
+        detail.write_text("int b(void);\n", encoding="utf-8")
+
+        k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+        detail.write_text("int b(int);\n", encoding="utf-8")
+        future = time.time() + 10
+        os.utime(detail, (future, future))
+        k2 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+        assert k1 != k2  # the deferred root's contents are folded into the key
+
+    def test_hash_dirs_cover_all_header_suffixes(self, tmp_path):
+        # Not just .h/.hpp — an edit to any recognised header suffix under a
+        # hashed dir must bust the key (Codex review).
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        for ext in (".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc", ".inl", ".tcc"):
+            detail = root / f"detail{ext}"
+            detail.write_text("int b(void);\n", encoding="utf-8")
+            k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+            detail.write_text("int b(int);\n", encoding="utf-8")
+            future = time.time() + 10
+            os.utime(detail, (future, future))
+            k2 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+            assert k1 != k2, ext
+            detail.unlink()
+
+    def test_without_hash_dir_transitive_edit_is_missed(self, tmp_path):
+        # The complementary gap the fix closes: with the root *not* hashed, an
+        # edit under it leaves the umbrella-only key unchanged.
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        detail = root / "detail.h"
+        detail.write_text("int b(void);\n", encoding="utf-8")
+
+        k1 = _cache_key([umb], [], "c++")
+        detail.write_text("int b(int);\n", encoding="utf-8")
+        future = time.time() + 10
+        os.utime(detail, (future, future))
+        k2 = _cache_key([umb], [], "c++")
+        assert k1 == k2  # detail.h not hashed → why extra_hash_dirs is needed
+
 
 # ── _cache_path ─────────────────────────────────────────────────────────
 
@@ -106,6 +169,34 @@ class TestCachePath:
         p = _cache_path("abc123")
         assert p.name == "abc123.xml"
         assert "abi_check" in str(p)
+
+    def test_posix_honors_xdg_cache_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+        p = _cache_path("abc123", backend="clang")
+
+        assert p == tmp_path / "xdg-cache" / "abi_check" / "clang" / "abc123.json"
+
+    def test_posix_readonly_home_falls_back_to_temp_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        blocked_home = tmp_path / "blocked-home"
+        blocked_cache = blocked_home / ".cache" / "abi_check" / "castxml"
+        real_mkdir = Path.mkdir
+
+        def fail_blocked_cache(self, *args, **kwargs):
+            if self == blocked_cache:
+                raise OSError("read-only home")
+            return real_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "home", lambda: blocked_home)
+        monkeypatch.setattr(Path, "mkdir", fail_blocked_cache)
+        monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+        p = _cache_path("abc123")
+
+        assert p == tmp_path / "abi_check" / "castxml" / "abc123.xml"
 
 
 # ── _resolve_debug_metadata ─────────────────────────────────────────────

@@ -16,8 +16,9 @@
 
 Verifies that an explicit changed-path set threaded by the `scan` orchestrator
 keeps the inline L4 replay at `changed` scope (narrow, POI-focused) instead of
-falling back to the full `target` replay — and that an empty set still falls back
-(the inline-dump default). No compiler needed: the extractor and the replay
+falling back to a broad replay — and that an empty set still falls back to the
+non-empty `headers-only` public-API surface (ADR-035 P3: never the full-target,
+== s6, cost). No compiler needed: the extractor and the replay
 driver are stubbed so only the scope-selection decision is exercised.
 """
 
@@ -57,6 +58,37 @@ def _capture_scope(monkeypatch) -> dict[str, object]:
     return captured
 
 
+def test_cache_stats_threaded_into_surface_coverage(monkeypatch, tmp_path: Path):
+    # ADR-035 P5: an L4 run with a cache dir records its hit/miss tally into the
+    # surface coverage so the live L4 coverage row can report it (not only
+    # `scan --estimate`). No compiler needed — the replay is stubbed.
+    def _fake_replay(build, extractor, *, scope="target", changed_paths=(), **kw):
+        # Exercise the cache so hit_rate is non-None (one recorded miss), which
+        # also drives the cache-hit-rate diagnostic branch.
+        cache = kw.get("cache")
+        if cache is not None:
+            cache.get("nonexistent-key")  # → one miss
+        return SourceAbiSurface(), []
+
+    monkeypatch.setattr(
+        inline, "_make_source_extractor", lambda *a, **k: (_FakeExtractor(), "fake")
+    )
+    monkeypatch.setattr(source_replay, "run_source_replay", _fake_replay)
+    surface = inline._run_inline_source_abi(
+        tmp_path,
+        _build_with_one_unit(),
+        [],
+        extractor="clang",
+        scope="changed",
+        clang_bin="clang",
+        changed_paths=("src/foo.cpp",),
+        source_abi_cache_dir=tmp_path / "l4cache",
+    )
+    assert surface is not None
+    assert surface.coverage["cache_hits"] == 0
+    assert surface.coverage["cache_misses"] == 1
+
+
 def test_changed_paths_keep_changed_scope(monkeypatch, tmp_path: Path):
     captured = _capture_scope(monkeypatch)
     inline._run_inline_source_abi(
@@ -83,8 +115,10 @@ def test_changed_scope_in_collect_pack_falls_back_without_paths(monkeypatch, tmp
         layers=("L3", "L4"),
         changed_paths=(),
     )
-    # No changed set → fall back to the non-empty target replay (inline default).
-    assert captured["scope"] == "target"
+    # No changed set → fall back to the non-empty public-API surface
+    # (headers-only), NOT a whole-target replay: an unseeded s5/pr run must not
+    # silently pay full-target (== s6) replay cost (ADR-035 P3 cliff).
+    assert captured["scope"] == "headers-only"
 
 
 def test_changed_scope_in_collect_pack_narrows_with_paths(monkeypatch, tmp_path):

@@ -66,6 +66,7 @@ class _WriteSnapshotOutput(Protocol):
         collect_mode: str,
         build_query: str | None = ...,
         build_compile_db: str | None = ...,
+        extractor: str = ...,
     ) -> None: ...
 
 
@@ -87,20 +88,18 @@ def resolve_dump_debug_format(
 def resolve_dump_depth(
     depth: str | None,
     max_depth: bool,
-    collect_mode: str,
-    collect_mode_explicit: bool,
+    default_mode: str,
 ) -> str:
-    """Resolve the ``--depth``/``--max`` preset into a ``--collect-mode`` value.
+    """Resolve the ``--depth``/``--max`` preset into the internal collect-mode value.
 
     ``--depth`` is the friendly evidence-depth dial (same vocabulary as
-    ``scan --depth``: headers/build/graph/source/full); it expands to the
+    ``scan --depth``: binary/headers/build/source/full); it expands to the
     underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
-    two commands stay consistent. ``--max`` is shorthand for ``--depth full``.
+    commands stay consistent. ``--max`` is shorthand for ``--depth full``.
 
-    ``--depth`` and an explicit ``--collect-mode`` are mutually exclusive (the
-    preset *is* the collect mode); raises :class:`click.UsageError` if both are
-    given, or if ``--max`` is combined with a different ``--depth``. When no
-    depth preset is supplied, ``collect_mode`` is returned unchanged.
+    Raises :class:`click.UsageError` if ``--max`` is combined with a different
+    ``--depth``. When no depth preset is supplied, the command's *default_mode* is
+    returned (``dump`` embeds at ``source-target``; ``compare`` reads at ``off``).
     """
     from .buildsource.scan_levels import (
         EvidenceDepth,
@@ -116,12 +115,7 @@ def resolve_dump_depth(
             )
         depth = EvidenceDepth.FULL.value
     if depth is None:
-        return collect_mode
-    if collect_mode_explicit:
-        raise click.UsageError(
-            "--depth and --collect-mode are mutually exclusive: --depth is the "
-            "friendly preset over --collect-mode."
-        )
+        return default_mode
     method = depth_to_method(EvidenceDepth(depth))
     # headers depth reaches no source method (L2 is intrinsic) — collect nothing.
     return "off" if method is None else method_to_collect_mode(method)
@@ -191,17 +185,40 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
+    # P3: auto-add the public-header roots so a -H umbrella resolves its own
+    # relative includes without a separate -I. resolve_inferred_header_roots
+    # picks the search bucket: plain -I (high priority, so an umbrella that pulls
+    # a system-colliding name like <endian.h> still finds the package header)
+    # when there is no build context, or -isystem (below the build-context dirs
+    # so generated/shim headers from -p/--gcc-options keep priority, but still
+    # above the standard system dirs) when the compile context supplies its own
+    # includes — see its docstring.
+    from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+
+    inc_extra, deferred = (
+        resolve_inferred_header_roots(
+            list(headers),
+            list(includes),
+            gcc_options=effective_gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens),
+        )
+        if resolved_headers
+        else ([], [])
+    )
+    # Deferred roots ride in gcc_option_tokens (as -isystem), not extra_includes,
+    # so their contents must be hashed into the AST cache key explicitly (Codex).
+    deferred_dirs = tuple(deferred_token_dirs(deferred))
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=list(includes),
+            extra_includes=list(includes) + inc_extra,
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens),
+            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,
@@ -210,6 +227,7 @@ def perform_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
+            extra_hash_dirs=deferred_dirs,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -225,4 +243,5 @@ def perform_elf_dump(
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend,
     )

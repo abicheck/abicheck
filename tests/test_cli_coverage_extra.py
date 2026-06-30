@@ -380,7 +380,7 @@ class TestStackCheckCommand:
         """stack-check with non-existent directories produces descriptive error."""
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", "usr/bin/test",
+            "deps", "compare", "usr/bin/test",
             "--baseline", "/nonexistent/baseline",
             "--candidate", "/nonexistent/candidate",
         ])
@@ -410,7 +410,7 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "stack-check", "usr/bin/test",
+                "deps", "compare", "usr/bin/test",
                 "--baseline", str(baseline),
                 "--candidate", str(candidate),
             ])
@@ -439,7 +439,7 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "stack-check", "usr/bin/test",
+                "deps", "compare", "usr/bin/test",
                 "--baseline", str(baseline),
                 "--candidate", str(candidate),
                 "--format", "json",
@@ -473,7 +473,7 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "stack-check", "usr/bin/test",
+                "deps", "compare", "usr/bin/test",
                 "--baseline", str(baseline),
                 "--candidate", str(candidate),
             ])
@@ -502,7 +502,7 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "stack-check", "usr/bin/test",
+                "deps", "compare", "usr/bin/test",
                 "--baseline", str(baseline),
                 "--candidate", str(candidate),
             ])
@@ -532,7 +532,7 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "stack-check", "usr/bin/test",
+                "deps", "compare", "usr/bin/test",
                 "--baseline", str(baseline),
                 "--candidate", str(candidate),
                 "--output", str(out_file),

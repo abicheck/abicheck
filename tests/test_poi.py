@@ -20,6 +20,7 @@ builder consumes to focus the expensive scan. Default lane.
 
 from __future__ import annotations
 
+from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.pattern_scan import (
     EscalationTrigger,
     PatternCategory,
@@ -27,10 +28,14 @@ from abicheck.buildsource.pattern_scan import (
 )
 from abicheck.buildsource.poi import (
     POIKind,
+    PointOfInterest,
+    PointsOfInterest,
     POIReason,
     build_points_of_interest,
+    resolve_symbol_tus,
 )
 from abicheck.buildsource.risk import score_changed_paths
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import (
     AbiSnapshot,
@@ -166,3 +171,180 @@ def test_empty_inputs_yield_empty_worklist() -> None:
     poi = build_points_of_interest()
     assert not poi
     assert poi.to_dict()["total"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# resolve_symbol_tus — the focusing half (symbol POI → declaring TU)
+# --------------------------------------------------------------------------- #
+
+
+def _sym_poi(*symbols: str) -> PointsOfInterest:
+    return PointsOfInterest(
+        points=[
+            PointOfInterest(s, POIKind.SYMBOL, POIReason.EXPORT_ADDED) for s in symbols
+        ]
+    )
+
+
+def _graph_baseline(graph: SourceGraphSummary | None) -> AbiSnapshot:
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    if graph is not None:
+        snap.build_source = BuildSourcePack(root="", source_graph=graph)
+    return snap
+
+
+def test_resolve_symbol_tus_maps_export_to_declaring_file() -> None:
+    # Changed export `_Z3barv` → its source decl (SOURCE_DECL_MAPS_TO_SYMBOL) →
+    # the file that declares it (SOURCE_DECLARES). That file is the focused TU.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(id="decl://bar", kind="source_decl", label="bar"),
+            GraphNode(id="header://src/bar.cpp", kind="header", label="src/bar.cpp"),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(
+                src="header://src/bar.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    tus = resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph))
+    assert tus == ("src/bar.cpp",)
+
+
+def test_resolve_symbol_tus_uses_decl_def_file_attr() -> None:
+    # A call-graph-style decl with no SOURCE_DECLARES edge still carries its file
+    # in def_file; the resolver falls back to that.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(
+                id="decl://bar",
+                kind="source_decl",
+                label="bar",
+                attrs={"def_file": "/work/src/bar.cpp"},
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+        ],
+    )
+    tus = resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph))
+    assert tus == ("/work/src/bar.cpp",)
+
+
+def test_resolve_symbol_tus_unknown_symbol_resolves_nothing() -> None:
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3foov", kind="binary_symbol", label="_Z3foov"
+            ),
+        ],
+        edges=[],
+    )
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == ()
+
+
+def test_resolve_symbol_tus_symbol_node_without_decl_mapping() -> None:
+    # The export's binary_symbol node exists, but nothing maps a decl to it (no
+    # SOURCE_DECL_MAPS_TO_SYMBOL edge) → no TU to focus, clean empty tuple.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+        ],
+        edges=[],
+    )
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == ()
+
+
+def test_resolve_symbol_tus_ignores_dangling_declares_edge() -> None:
+    # A SOURCE_DECLARES edge whose file node is absent (dangling src) is skipped,
+    # not crashed; the def_file fallback still resolves the TU.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(
+                id="decl://bar",
+                kind="source_decl",
+                label="bar",
+                attrs={"def_file": "src/bar.cpp"},
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            # Points at a header node that does not exist → fn is None, skipped.
+            GraphEdge(
+                src="header://gone.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == (
+        "src/bar.cpp",
+    )
+
+
+def test_resolve_symbol_tus_degrades_without_graph_or_baseline() -> None:
+    # No baseline, no graph, no symbols → always a clean empty tuple (never raises),
+    # so a shallow baseline simply contributes no extra focus (ADR-035 D7).
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), None) == ()
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(None)) == ()
+    assert (
+        resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(SourceGraphSummary()))
+        == ()
+    )
+    assert resolve_symbol_tus(PointsOfInterest(), _graph_baseline(None)) == ()
+
+
+def test_resolve_symbol_tus_end_to_end_from_export_delta() -> None:
+    # The full D7 cheap→target chain: build_points_of_interest derives the SYMBOL
+    # POI from the L0 export delta, and resolve_symbol_tus turns it into the TU.
+    old = AbiSnapshot(library="libfoo.so", version="1", elf=ElfMetadata(symbols=[]))
+    new = AbiSnapshot(
+        library="libfoo.so",
+        version="2",
+        elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3barv", is_default=True)]),
+    )
+    poi = build_points_of_interest(baseline=old, candidate=new)
+    assert "_Z3barv" in poi.symbols()
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(id="decl://bar", kind="source_decl", label="bar"),
+            GraphNode(id="header://src/bar.cpp", kind="header", label="src/bar.cpp"),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(
+                src="header://src/bar.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    assert resolve_symbol_tus(poi, _graph_baseline(graph)) == ("src/bar.cpp",)

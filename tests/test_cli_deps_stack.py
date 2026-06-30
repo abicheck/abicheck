@@ -108,7 +108,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", str(binary), "--format", "json"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "json"])
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
         assert parsed["root_binary"] == str(binary)
@@ -125,7 +125,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", str(binary), "--format", "markdown"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "markdown"])
         assert result.exit_code == 0, result.output
         assert "# Stack Report:" in result.output
         assert "Loadability" in result.output
@@ -143,7 +143,7 @@ class TestDepsCommand:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["deps", str(binary), "--format", "json", "-o", str(outfile)],
+            main, ["deps", "tree", str(binary), "--format", "json", "-o", str(outfile)],
         )
         assert result.exit_code == 0, result.output
         assert outfile.exists()
@@ -163,7 +163,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", str(binary), "--format", "json"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "json"])
         assert result.exit_code == 1
 
     def test_deps_sysroot_and_search_path(self, tmp_path, monkeypatch):
@@ -187,7 +187,7 @@ class TestDepsCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", str(binary),
+            "deps", "tree", str(binary),
             "--sysroot", str(sysroot),
             "--search-path", str(search_dir),
             "--format", "json",
@@ -236,7 +236,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -266,7 +266,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "markdown",
@@ -292,7 +292,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -322,7 +322,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -348,7 +348,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -374,7 +374,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -400,7 +400,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", binary_rel,
+            "deps", "compare", binary_rel,
             "--baseline", str(baseline),
             "--candidate", str(candidate),
             "--format", "json",
@@ -413,7 +413,7 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "stack-check", "usr/bin/myapp",
+            "deps", "compare", "usr/bin/myapp",
             "--baseline", str(same),
             "--candidate", str(same),
         ])

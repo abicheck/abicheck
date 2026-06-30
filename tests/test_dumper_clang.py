@@ -29,10 +29,14 @@ import pytest
 
 from abicheck import dumper
 from abicheck.dumper import (
+    _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
     _header_ast_parser,
+    _parse_gnu_include_search_dirs,
+    _resolve_clang_system_includes,
     _resolve_header_backend,
+    _resolve_probe_compiler,
 )
 from abicheck.dumper_clang import (
     _ClangAstParser,
@@ -466,24 +470,36 @@ def test_resolve_header_backend_rejects_unknown() -> None:
 
 
 def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
     # An explicit request always wins over the env default.
-    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
     assert _resolve_header_backend("castxml") == "castxml"
 
 
-def test_resolve_header_backend_auto_prefers_castxml(
+def test_resolve_header_backend_ast_frontend_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ABICHECK_AST_FRONTEND is the canonical env knob."""
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    assert _resolve_header_backend("auto") == "clang"
+    assert _resolve_header_backend(None) == "clang"
+    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto then
+    # fails closed to castxml.
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
+    monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
+    assert _resolve_header_backend("auto") == "castxml"
+
+
+def test_resolve_header_backend_auto_stays_castxml_without_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
     assert _resolve_header_backend("auto") == "castxml"
-    # castxml absent, clang present → clang.
+    # Do not silently fall back to clang: clang AST lacks computed layout
+    # evidence, so auto must fail closed through the castxml path.
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: False)
-    assert _resolve_header_backend("auto") == "clang"
+    assert _resolve_header_backend("auto") == "castxml"
 
 
 def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
@@ -514,6 +530,73 @@ def test_clang_header_dump_missing_clang_raises(
     header.write_text("int foo(void);\n")
     with pytest.raises(SnapshotError, match="not found in PATH"):
         _clang_header_dump([header], [])
+
+
+def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make _clang_header_dump fail once on a missing <cstddef> then succeed.
+
+    Mocks the clang availability/system-include probe and subprocess so the
+    C→C++ self-heal branch runs without a real compiler: the first parse exits
+    nonzero with a missing C++ stdlib header, the C++ retry returns a minimal AST.
+    """
+    import subprocess as _sp
+
+    monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
+    )
+    fail = _sp.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr="fatal error: 'cstddef' file not found",
+    )
+    ok = _sp.CompletedProcess(
+        args=[], returncode=0,
+        stdout='{"kind": "TranslationUnitDecl", "inner": []}', stderr="",
+    )
+    calls = {"n": 0}
+
+    def _run(*a: object, **k: object) -> _sp.CompletedProcess[str]:
+        calls["n"] += 1
+        return fail if calls["n"] == 1 else ok
+
+    monkeypatch.setattr("abicheck.dumper.subprocess.run", _run)
+
+
+def test_clang_self_heal_explicit_c_warns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
+) -> None:
+    # Explicit --lang c that self-heals to C++ overrides the user's request, so
+    # it stays a visible warning (Codex review).
+    import logging
+
+    _stub_clang_self_heal(monkeypatch)
+    header = tmp_path / "umbrella.h"
+    header.write_text("int foo(void);\n")
+    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
+        root = _clang_header_dump([header], [], lang="c")
+    assert root["kind"] == "TranslationUnitDecl"
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("asked for C" in r.message for r in warns), [r.message for r in warns]
+
+
+def test_clang_self_heal_auto_detected_is_debug(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
+) -> None:
+    # Auto-detected C (lang=None, no inline C++ syntax) self-healing to C++ is
+    # just noise → demoted to debug, no warning (the P6 fix this guards).
+    import logging
+
+    _stub_clang_self_heal(monkeypatch)
+    header = tmp_path / "umbrella.h"
+    header.write_text("int foo(void);\n")
+    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
+        root = _clang_header_dump([header], [])  # lang=None → auto-detect
+    assert root["kind"] == "TranslationUnitDecl"
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+    assert any(
+        r.levelno == logging.DEBUG and "self-healed to C++" in r.message
+        for r in caplog.records
+    )
 
 
 # ── parse_variables / constants edge branches ────────────────────────────────
@@ -918,6 +1001,9 @@ def test_clang_header_dump_success_and_cache(
 
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    # Isolate the single clang AST-dump call: disable the castxml↔clang
+    # system-include probe (itself a separate, best-effort subprocess).
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
 
     def _run(cmd, **kwargs):
@@ -967,10 +1053,91 @@ def test_clang_header_dump_bad_json_raises(
         _clang_header_dump([header], [])
 
 
+@pytest.mark.parametrize(
+    "stderr,expected",
+    [
+        # The <cXXX> C-compatibility wrappers are the unambiguous trigger.
+        ("fatal error: 'cstddef' file not found", True),
+        ("fatal error: 'cstdint' file not found", True),
+        ("error: 'cstdlib' file not found", True),
+        ("fatal error: 'cstring' file not found", True),
+        # A C header miss carries a .h suffix → not a C++ stdlib signal.
+        ("fatal error: 'stdio.h' file not found", False),
+        ("fatal error: 'oneapi/tbb.h' file not found", False),
+        # Plain-name C++ headers are deliberately NOT matched — they collide with
+        # plausible C project header names (oneTBB ships a version.h), so matching
+        # them could mask a real missing C dependency by re-parsing as C++.
+        ("fatal error: 'string' file not found", False),
+        ("fatal error: 'version' file not found", False),
+        ("fatal error: 'vector' file not found", False),
+        # An extensionless *project* include that is not a stdlib header must NOT
+        # trigger the retry (a C header's real missing dependency, not C++).
+        ("fatal error: 'config' file not found", False),
+        ("fatal error: 'myheader' file not found", False),
+        # Unrelated parse errors must not trigger the retry.
+        ("error: use of undeclared identifier 'foo'", False),
+        ("", False),
+    ],
+)
+def test_is_missing_cpp_stdlib_header_error(stderr: str, expected: bool) -> None:
+    assert dumper._is_missing_cpp_stdlib_header_error(stderr) is expected
+
+
+def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A pure-#include umbrella header has no inline C++ syntax, so it is parsed in
+    # C mode first; the missing-<cstddef> failure must trigger one C++-mode retry
+    # (with -x c++ in the rebuilt command) rather than hard-failing.
+    header = tmp_path / "umbrella.h"
+    header.write_text('#include "detail/impl.h"\n')
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
+    cmds: list[list[str]] = []
+
+    def _run(cmd, **kwargs):
+        cmds.append(list(cmd))
+        if len(cmds) == 1:
+            return _fake_proc(stderr="fatal error: 'cstddef' file not found", returncode=1)
+        return _fake_proc(stdout=ast_json, returncode=0)
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    root = _clang_header_dump([header], [])
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
+    assert len(cmds) == 2  # one C attempt + one C++ retry
+    assert "c" in cmds[0] and cmds[0][cmds[0].index("-x") + 1] == "c"
+    assert cmds[1][cmds[1].index("-x") + 1] == "c++"
+
+
+def test_clang_header_dump_no_retry_on_other_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A non-"missing C++ stdlib header" failure must NOT retry — it surfaces as-is.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        return _fake_proc(stderr="error: undeclared identifier 'x'", returncode=1)
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    with pytest.raises(SnapshotError, match="failed to parse"):
+        _clang_header_dump([header], [])
+    assert calls["n"] == 1  # no retry
+
+
 def test_resolve_header_backend_neither_tool_defaults_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr(dumper, "_castxml_available", lambda: False)
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: False)
     # Falls back to castxml so the existing "install castxml" error surfaces.
@@ -1607,3 +1774,226 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
     # The corrupt cache is unlinked and the fresh clang run repopulates it.
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
+
+
+# ── castxml↔clang system-include auto-detection (parity fix) ─────────────────
+
+_GCC_VERBOSE_STDERR = """\
+ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+#include "..." search starts here:
+#include <...> search starts here:
+ /usr/include/c++/13
+ /usr/include/x86_64-linux-gnu/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/include
+ /usr/include
+End of search list.
+"""
+
+
+def test_parse_gnu_include_search_dirs() -> None:
+    dirs = _parse_gnu_include_search_dirs(_GCC_VERBOSE_STDERR)
+    # Only the lines inside the <...> block, in order; the leading "ignoring"
+    # line and the quote-include marker are excluded.
+    assert dirs == [
+        "/usr/include/c++/13",
+        "/usr/include/x86_64-linux-gnu/c++/13",
+        "/usr/lib/gcc/x86_64-linux-gnu/13/include",
+        "/usr/include",
+    ]
+
+
+def test_parse_gnu_include_search_dirs_strips_framework_note() -> None:
+    stderr = (
+        "#include <...> search starts here:\n"
+        " /System/Library/Frameworks (framework directory)\n"
+        "End of search list.\n"
+    )
+    assert _parse_gnu_include_search_dirs(stderr) == ["/System/Library/Frameworks"]
+
+
+def test_parse_gnu_include_search_dirs_empty_when_no_block() -> None:
+    assert _parse_gnu_include_search_dirs("clang: error: no input files\n") == []
+
+
+@pytest.mark.parametrize("off", ["0", "false", "no", "off", "OFF"])
+def test_auto_system_includes_enabled_off_values(
+    monkeypatch: pytest.MonkeyPatch, off: str
+) -> None:
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", off)
+    assert _auto_system_includes_enabled() is False
+
+
+def test_auto_system_includes_enabled_default_and_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ABICHECK_AUTO_SYSTEM_INCLUDES", raising=False)
+    assert _auto_system_includes_enabled() is True
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    assert _auto_system_includes_enabled() is True
+
+
+def test_resolve_probe_compiler_prefers_gnu_gcc_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
+    # An explicit GNU --gcc-path is used verbatim…
+    assert _resolve_probe_compiler("c++", "/opt/gcc-13/bin/g++", None) == (
+        "/opt/gcc-13/bin/g++"
+    )
+    # …but a clang there is skipped (useless for libstdc++ discovery) → g++.
+    assert _resolve_probe_compiler("c++", "/usr/bin/clang++", None) == "g++"
+    # Cross prefix maps to the prefixed GNU driver.
+    assert _resolve_probe_compiler("c++", None, "aarch64-linux-gnu-") == (
+        "aarch64-linux-gnu-g++"
+    )
+    # C mode probes gcc.
+    assert _resolve_probe_compiler("cc", None, None) == "gcc"
+
+
+def test_resolve_probe_compiler_none_when_no_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: None)
+    assert _resolve_probe_compiler("c++", None, None) is None
+
+
+def test_resolve_clang_system_includes_gating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_probe_gnu_system_includes",
+        lambda *a, **k: ["/usr/include/c++/13"],
+    )
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")
+
+    base = dict(gcc_path=None, gcc_prefix=None, force_cpp=True)
+    # Default: probed dirs returned.
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=False, **base
+    ) == ("/usr/include/c++/13",)
+    # nostdinc, explicit sysroot, or the env toggle each suppress the probe.
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=True, **base
+    ) == ()
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=Path("/sysroot"), nostdinc=False, **base
+    ) == ()
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=False, **base
+    ) == ()
+
+
+def test_resolve_clang_system_includes_no_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: None)
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None,
+        nostdinc=False, force_cpp=True,
+    ) == ()
+
+
+def test_build_clang_command_injects_isystem(tmp_path: Path) -> None:
+    agg = tmp_path / "agg.hpp"
+    agg.write_text("")
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [tmp_path / "inc"], agg,
+        force_cpp=True,
+        system_includes=("/usr/include/c++/13", "/usr/include"),
+    )
+    # User -I precedes the probed -isystem dirs, which appear as pairs.
+    assert "-I" in cmd
+    i = cmd.index("-isystem")
+    assert cmd[i + 1] == "/usr/include/c++/13"
+    assert cmd[cmd.index("/usr/include") - 1] == "-isystem"
+    # The user's -I still comes before the first -isystem (explicit wins).
+    assert cmd.index("-I") < i
+
+
+def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> None:
+    # Auto-probed -isystem must follow the user's pass-through flags so a
+    # user-supplied SDK -isystem keeps higher search priority (Codex review).
+    agg = tmp_path / "agg.hpp"
+    agg.write_text("")
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], agg,
+        force_cpp=True,
+        gcc_options="-isystem /sdk/include",
+        gcc_option_tokens=("-isystem", "/sdk2"),
+        system_includes=("/usr/include/c++/13",),
+    )
+    user_sdk = cmd.index("/sdk/include")
+    user_sdk2 = cmd.index("/sdk2")
+    probed = cmd.index("/usr/include/c++/13")
+    # Both user-supplied system dirs are searched before the probed fallback.
+    assert user_sdk < probed
+    assert user_sdk2 < probed
+
+
+@pytest.mark.parametrize(
+    "gcc_options,gcc_option_tokens",
+    [
+        ("-nostdinc", ()),
+        ("-nostdinc++", ()),
+        ("--sysroot=/sdk", ()),
+        ("-isysroot /sdk", ()),
+        ("--gcc-toolchain=/opt/gcc", ()),
+        ("--gcc-install-dir=/opt/gcc/lib", ()),
+        ("--target=aarch64-linux-gnu", ()),
+        (None, ("-nostdinc",)),
+        (None, ("--sysroot=/sdk",)),
+        (None, ("-nostdinc++",)),
+        (None, ("--gcc-toolchain=/opt/gcc",)),
+        (None, ("--target=aarch64-linux-gnu",)),
+        (None, ("-target", "aarch64-linux-gnu")),
+    ],
+)
+def test_resolve_clang_system_includes_respects_passthrough(
+    monkeypatch: pytest.MonkeyPatch, gcc_options, gcc_option_tokens
+) -> None:
+    # Hermetic/cross flags supplied via --gcc-options/--gcc-option must suppress
+    # the host probe too, not just the structured nostdinc/sysroot (Codex review).
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
+    )
+    monkeypatch.setattr(
+        dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
+    )
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
+        force_cpp=True, gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens,
+    ) == ()
+
+
+def test_resolve_clang_system_includes_probes_without_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A benign --gcc-options that doesn't isolate the parse still probes.
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
+    )
+    monkeypatch.setattr(
+        dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
+    )
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
+        force_cpp=True, gcc_options="-DFOO=1", gcc_option_tokens=("-O2",),
+    ) == ("/usr/x",)

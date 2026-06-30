@@ -234,7 +234,7 @@ def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subpro
     return _run([
         "abicheck", "dump", "--sources", str(tree),
         "--build-info", str(build_dir),
-        "--collect-mode", "source-target",
+        "--depth", "full",
         "-o", str(out),
     ])
 

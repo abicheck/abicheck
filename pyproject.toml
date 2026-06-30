@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abicheck"
-version = "0.3.0"
+version = "0.4.0"
 description = "ABI compatibility checker for C/C++ shared libraries"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -68,6 +68,14 @@ dev = [
     "types-PyYAML",
     "jsonschema>=4.0",
 ]
+# Real-world validation harness (validation/): fetches + extracts conda-forge
+# packages. Modern conda-forge ships `.conda` (zstd-compressed) artifacts, so a
+# pure-Python zstd backend is needed to extract them without a system `zstd`
+# binary (Python <3.14 has no stdlib zstd). Kept out of `dev`/core to honour the
+# lightweight-core rule — only the validation lane needs it.
+validation = [
+    "zstandard>=0.21",
+]
 
 [tool.mypy]
 python_version = "3.10"
@@ -92,6 +100,7 @@ module = [
     "abicheck.dwarf_metadata",
     "abicheck.dwarf_advanced",
     "abicheck.dwarf_unified",
+    "abicheck.dwarf_presence",
     "abicheck.dumper",
     "abicheck.package",
     "abicheck.pdb_parser",
@@ -115,9 +124,9 @@ module = [
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
-    "abicheck.cli_max",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
+    "abicheck.cli_graph",
     "abicheck.cli_plugin",
     "abicheck.cli_pr_comment",
     "abicheck.cli_probe",

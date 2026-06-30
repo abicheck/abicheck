@@ -407,6 +407,7 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
     # Track which added fields were matched as reserved-field activations
     # so we skip emitting TYPE_FIELD_ADDED for them.
     reserved_matched_added: set[str] = set()
+    renamed_type_changed_added: set[str] = set()
 
     # Identify trailing FAM fields so we can skip them from generic checks
     # and let _diff_flexible_array_member handle them exclusively.
@@ -430,6 +431,26 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
             if matched is not None:
                 changes.append(matched)
                 continue
+            if f_old.offset_bits is not None:
+                f_new = added_by_offset.get(f_old.offset_bits)
+                if (
+                    f_new is not None
+                    and f_new.name not in reserved_matched_added
+                    and not _RESERVED_FIELD_RE.match(fname)
+                    and not _RESERVED_FIELD_RE.match(f_new.name)
+                    and canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
+                    and not cv_qualifiers_only_differ(f_old.type, f_new.type)
+                ):
+                    renamed_type_changed_added.add(f_new.name)
+                    changes.append(make_change(
+                        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                        symbol=name,
+                        name=name,
+                        detail=f"{fname} -> {f_new.name}",
+                        old=f_old.type,
+                        new=f_new.type,
+                    ))
+                    continue
             changes.append(make_change(
                 ChangeKind.TYPE_FIELD_REMOVED,
                 symbol=name,
@@ -442,7 +463,11 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
         changes.extend(_diff_type_field_pair(name, fname, f_old, f_new))
 
     for fname in new_fields:
-        if fname not in old_fields and fname not in reserved_matched_added:
+        if (
+            fname not in old_fields
+            and fname not in reserved_matched_added
+            and fname not in renamed_type_changed_added
+        ):
             # Skip trailing FAM additions — handled by _diff_flexible_array_member
             if fname == new_trailing_fam:
                 continue

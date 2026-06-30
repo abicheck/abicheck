@@ -58,8 +58,8 @@ Core pipeline (in order of data flow):
 2. **Snapshot** — `dumper.py` creates `AbiSnapshot` (model in `model.py`)
    - `dumper_castxml.py` — castxml XML → model parser (default L2 header backend)
    - `dumper_clang.py` — `clang -ast-dump=json` → model parser (alternative L2
-     backend for clang-only hosts; `--header-backend clang` /
-     `ABICHECK_HEADER_BACKEND=clang`). Both parsers expose the same `parse_*`
+     backend for clang-only hosts; `--ast-frontend clang` /
+     `ABICHECK_AST_FRONTEND=clang`). Both parsers expose the same `parse_*`
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
@@ -190,35 +190,35 @@ Four mechanisms guard test quality so coverage can't be "filled" without verifyi
 ## Line-coverage floor
 
 The fast lane enforces a **95%** line+branch coverage floor (`--cov-fail-under=95`),
-but **only on the Linux unit-test lane** in `.github/workflows/ci.yml` — that's where
-the full unit suite runs. macOS/Windows skip the Linux-only ELF/DWARF parsing tests,
-which structurally lowers their coverage (~93% on macOS), so those lanes run the same
-tests without the fail-under gate (macOS still emits a coverage report). If the macOS
-lane ever fails on coverage, the fix is to keep the gate Linux-scoped — **do not lower
-the global 95% floor** to make another platform pass.
+but **only on the canonical Linux/Python-3.13 unit-test lane** in
+`.github/workflows/ci.yml` — that's where the full unit suite runs under coverage.
+The other Linux Pythons (3.12/3.14) run the same suite *without* coverage (they would
+only re-check the identical floor, and coverage instrumentation adds ~60% wall time).
+macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers
+their coverage (~93% on macOS), so those lanes run the same tests without the
+fail-under gate (macOS still emits a coverage report). Coverage uses the
+`sys.monitoring` backend (`COVERAGE_CORE=sysmon`, Python 3.12+) to keep the
+instrumentation cheap. If the macOS lane ever fails on coverage, the fix is to keep the
+gate Linux-scoped — **do not lower the global 95% floor** to make another platform pass.
 
 ## Files that are large — edit carefully
 
-- `cli.py` (2,000 lines — at the hard cap) — main CLI, Click commands; sub-command modules below register on it
-- `diff_symbols.py` (~2,000 lines — at the hard cap) — function/variable/parameter diffing
-- `cli_buildsource.py` (~1,840 lines) — `collect`/`merge`/graph commands (build-source evidence)
-- `diff_platform.py` (~1,810 lines) — all platform-specific detection
-- `reporter.py` (~1,770 lines) — JSON/Markdown/text output
-- `cli_compare_release.py` (~1,660 lines) — `compare-release` command and helpers (split from `cli.py`)
-- `compat/cli.py` (~1,580 lines) — ABICC compat CLI
-- `bundle.py` (~1,520 lines) — bundle-aware multi-binary analysis
-- `diff_filtering.py` (~1,520 lines) — deduplication and redundancy removal
-- `dumper.py` (~1,360 lines) — binary metadata extraction
-- `dumper_castxml.py` (~990 lines) — castxml XML parser (split from `dumper.py`)
-- `cli_appcompat.py` (~390 lines) — `appcompat` command and helpers (split from `cli.py`)
-- `cli_baseline.py` (~290 lines) — `baseline` command group (split from `cli.py`)
-- `cli_stack.py` (~190 lines) — `deps` and `stack-check` commands (split from `cli.py`)
-- `diff_platform_templates.py` (~180 lines) — template inner-type detectors (split from `diff_platform.py`)
-- `compat/_errors.py` (~150 lines) — ABICC compat error classification helpers (split from `compat/cli.py`)
-- `cli_debian_symbols.py` (~130 lines) — `debian-symbols` command group (split from `cli.py`)
-- `cli_suggest.py` (~80 lines) — `suggest-suppressions` command (split from `cli.py`)
+**Don't trust hard-coded line counts — they drift.** The AI-readiness gate is the
+source of truth: it WARNs on any file >1500 lines and ERRORs >2000 (hard cap, no
+allowlist). To see today's large files, run:
 
-The 2000-line hard cap is enforced for every source file (no allowlist). Files above 1500 lines emit a WARN as a refactor signal. When editing, read the specific section you need rather than the whole file.
+```bash
+python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
+```
+
+As of this writing the WARN set (>1500 lines) is `cli.py`, `dumper.py`, and
+`buildsource/crosscheck.py` — the main CLI, binary-metadata extraction, and the
+cross-check engine. Treat that command output (not this sentence) as current.
+
+When editing any large file, read the specific section you need rather than the
+whole file. Several big commands have already been split into sibling
+`cli_<name>.py` / `diff_*` modules (see the module map above); prefer extending a
+split-out module over growing the parent toward the cap.
 
 ### Adding a new top-level command
 
@@ -231,6 +231,8 @@ Pick the right home:
   3. At the bottom of `cli.py`, add `cli_<name>` to the side-effect `from . import (...)` block — that runs after `main` and helpers are defined, registering the new command.
   4. If the new module uses `@click` decorators, add `abicheck.cli_<name>` to the `disallow_untyped_decorators = false` override in `pyproject.toml` (alongside the existing entries).
   5. If `scripts/check_ai_readiness.py` flags a cycle, add `frozenset({"cli", "cli_<name>"})` to `IMPORT_CYCLE_ALLOWLIST` — this registration pattern is by design.
+  6. **Shared utility flags go through a decorator, not an inline copy.** `-v/--verbose` is `@verbose_option`, `--format`/`-o/--output` are `output_options(...)`, language is `lang_option(...)` (all in `cli_options.py`). Every visible option must carry `help=` text and a shared concept must use one canonical primary spelling — both are enforced by `tests/test_cli_contract.py` (`test_no_option_has_empty_help`, `test_shared_concept_canonical_spelling`).
+  7. **Moving helpers out of a module that re-exports them?** If you relocate a helper that an existing module re-exports "for API stability / tests" (e.g. the `cli_buildsource` block), preserve the old import path with a lazy module-level `__getattr__` shim that resolves via `importlib.import_module` — a static `from .new_module import …` re-export would re-introduce the import cycle the split was meant to avoid (see the shim at the tail of `cli_buildsource.py`).
 
 ## Exit codes
 

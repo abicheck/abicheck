@@ -245,9 +245,9 @@ produce:
   L0–L2 artifact verdict.
 - **Build/source build/source packs (L3/L4)** are what add build-diff/source-diff
   **findings** and the `layer_coverage` table, and only when you pass them at
-  compare time via `--old-build-info`/`--new-build-info` (or a non-off
-  `--collect-mode`). These findings follow the authority rule — L3/L4 never
-  overrides an artifact-proven verdict.
+  compare time via `--old-build-info`/`--new-build-info` (or a deeper
+  `--depth` over `--old/new-sources`). These findings follow the authority rule
+  — L3/L4 never overrides an artifact-proven verdict.
 
 See [Evidence & Detectability](../concepts/evidence-and-detectability.md) for the
 full L0–L4 model.
@@ -441,14 +441,14 @@ others.
 
 ```bash
 abicheck compare old.json new.json --format junit -o results.xml
-abicheck compare-release release-1.0/ release-2.0/ --format junit -o abi-tests.xml
+abicheck compare release-1.0/ release-2.0/ --format junit -o abi-tests.xml
 ```
 
 ### How it works
 
 ABI changes are mapped to JUnit test cases:
 
-- Each **library** in a `compare-release` becomes a `<testsuite>`
+- Each **library** in a bundle `compare` (directory/package inputs) becomes a `<testsuite>`
 - Each **exported symbol or type** that was checked becomes a `<testcase>`
 - **BREAKING** and **API_BREAK** changes produce `<failure>` elements
 - **COMPATIBLE** changes (additions, no-change) are passing test cases

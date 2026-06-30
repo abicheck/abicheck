@@ -184,11 +184,11 @@ jobs:
 
 ## Compare Packages Directly
 
-For RPM, Deb, tar, conda, or wheel packages, use `compare-release` mode
-to compare all shared libraries inside two packages without manual extraction:
+For RPM, Deb, tar, conda, or wheel packages, pass the packages straight to
+`compare` to compare all shared libraries inside them without manual extraction:
 
 ```bash
-abicheck compare-release libfoo-1.0.rpm libfoo-1.1.rpm
+abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm
 ```
 
 See the [GitHub Action](github-action.md) guide for CI examples with packages.

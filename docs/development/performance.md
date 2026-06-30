@@ -311,10 +311,27 @@ on real source trees (it needs clang + a built tree, so it is manual, not in CI)
 Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
 
 - **`ABICHECK_L4_JOBS`** — worker count for the per-TU extract pool. Auto =
-  `min(TUs, cpu_count, 8)`. An explicit override is now **clamped** to
+  `min(TUs, cpu_count, 8)`. An explicit override is **clamped** to
   `max(8, 2×cpu_count)` (logged when it fires) so a stray `=64` can't
   oversubscribe a host into thrash (`eval/SCALING.md` already saw jobs=8 on 4
   CPUs *regress*). Set `=1` to force serial (determinism).
+- **Memory cap (auto + override).** A single template-heavy C++ TU's
+  `clang -ast-dump=json` output — and its in-Python parse — can reach several
+  GiB, so the worker count is **also capped by available RAM**
+  (`min(…, available / ABICHECK_L4_JOB_MEM_GIB)`, default `3.0` GiB/worker,
+  Linux only). "Available" is the *smaller* of host `MemAvailable`
+  (`/proc/meminfo`) and the **cgroup** memory headroom (v2 `memory.max` −
+  `memory.current`, or v1 `memory.limit_in_bytes` − `memory.usage_in_bytes`), so
+  a container/pod confined to a small cgroup on a large host sizes its workers to
+  what it is actually allowed to use rather than to host RAM. On a low-memory
+  host this stops N concurrent giant ASTs from
+  exhausting one process and getting the whole replay **OOM-killed** (the kernel
+  SIGKILLs it → `exit -9`, all L4 work lost — observed on the UXL oneTBB/oneDNN
+  `s5`/`s6` full-target replays on a 15 GiB host). The clamp is logged. For a
+  template-heavy tree on a constrained host, prefer a **seeded/scoped** scan
+  (`--since`/`--changed-path` → a handful of TUs) over a full-target `s5`/`s6`;
+  it sidesteps both the time *and* the memory cliff. `ABICHECK_L4_JOB_MEM_GIB`
+  tunes the per-worker budget (lower = more workers).
 - **`ABICHECK_L4_EXECUTOR`** (`thread` default / `process`) — after clang
   returns, the extractor parses clang's large JSON AST dump and builds
   structural fingerprints: pure-Python, **GIL-bound** work. A thread pool
@@ -326,6 +343,20 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
   with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
   driver falls back to serial if a process pool can't start (sandbox, spawn
   import error), so it never aborts L4.
+- **Concurrent AST memory: clang's output is spilled to a temp file, not captured.**
+  A template-heavy TU's `clang -ast-dump=json` output can be multiple GiB.
+  Capturing it (`capture_output=True`) holds the whole AST *string* in the heap from
+  the moment clang finishes — and because the C `json` parse holds the GIL, the
+  default **thread** pool serializes parsing, so all *N* workers sit holding their
+  giant AST strings (≈ N × text) while queued behind the GIL. Spilling clang's
+  stdout to a temp file keeps those payloads **on disk** until each worker's turn to
+  parse, so the heap holds roughly one payload at a time instead of N. `json.load`
+  still reads the file back to parse, so a *single* TU's parse peak is unchanged
+  (≈ serialized text + tree) — this is a concurrency win, not a per-TU one — and it
+  also drops the `text=True` decode copy (bytes parse) and frees the tree before the
+  macro pass. The per-TU tree itself (~2–5× the AST text) is irreducible without a
+  streaming JSON parser (a dependency the project avoids); for a template-heavy tree
+  on a constrained host, a **seeded/scoped** scan is still the structural win.
 - **`ABICHECK_L4_CACHE_DIR`** — persists the per-TU cache (`SourceAbiCache`,
   content-addressed + per-included-file dependency-hash invalidation) across
   `dump --sources` runs. Previously the inline path passed **no** cache, so every

@@ -50,7 +50,7 @@ except Exception as _exc:  # noqa: BLE001
         "Try: pip install --upgrade 'abicheck[mcp]'"
     ) from _exc
 
-from .checker import DiffResult, compare
+from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
     BREAKING_KINDS,
@@ -67,6 +67,7 @@ from .errors import AbicheckError
 from .model import AbiSnapshot
 from .reporter import to_json, to_markdown
 from .serialization import snapshot_to_json
+from .service import compare_snapshots
 
 _logger = logging.getLogger("abicheck.mcp")
 
@@ -641,7 +642,7 @@ def abi_compare(
             return (
                 old_snap,
                 new_snap,
-                compare(
+                compare_snapshots(
                     old_snap,
                     new_snap,
                     suppression=suppression,

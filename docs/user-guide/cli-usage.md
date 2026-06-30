@@ -51,6 +51,22 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
   --old-header v1/foo.h --new-header v2/foo.h --format junit -o results.xml
 ```
 
+#### Public headers vs. include roots
+
+`-H/--header` and `-I/--include` look similar but answer different questions:
+
+| Flag | Question | Role |
+|------|----------|------|
+| `-H` / `--header` (`--old-header`/`--new-header`) | **What** to analyse | The **public headers** — the files a consumer `#include`s. These *are* the API surface abicheck parses to decide what's public and to read types. Pass a directory to establish a public/internal boundary. |
+| `-I` / `--include` (`--old-include`/`--new-include`) | **How** to parse it | The **include roots** — directories added to the parser's search path so the public headers' *own* `#include "…"`/`<…>` lines resolve. They are **not** analysed; they only make the parse succeed. |
+
+Often a single `include/` is both the public header dir and the include root. But
+they diverge when a public header pulls in a dependency from elsewhere — e.g.
+`include/foo/api.h` doing `#include <bar/baz.h>` needs `third_party/` added as an
+include root (`-I third_party`) even though `bar/baz.h` itself is not part of
+`foo`'s public API. If the parser can't find an included file, add its directory
+as an include root.
+
 `compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json`
 snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
 You can mix them freely (see below).
@@ -84,9 +100,11 @@ abicheck compare libv1.so libv2.so -H foo.h --lang c
 #### Cross-compilation
 
 When analysing libraries built for a different architecture, pass cross-compilation
-flags to `dump`:
+flags. The same **compile-context family** is shared verbatim by `dump`, `compare`,
+and `scan` (one decorator, so the three never drift), so it works the same on each:
 
 ```bash
+# dump (single artifact)
 abicheck dump libfoo.so -H include/foo.h \
   --gcc-prefix aarch64-linux-gnu- \
   --sysroot /opt/sysroots/aarch64 \
@@ -97,14 +115,45 @@ abicheck dump libfoo.so -H include/foo.h \
 abicheck dump libfoo.so -H include/foo.h \
   --gcc-path /usr/bin/aarch64-linux-gnu-g++ \
   -o snap.json
+
+# compare (two artifacts) — the family applies to BOTH sides
+abicheck compare libv1.so libv2.so -H include/foo.h \
+  --gcc-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
 ```
 
-Available cross-compilation flags:
+Available compile-context flags (on `dump`, `compare`, and `scan`):
 - `--gcc-path` — path to the cross-compiler binary
 - `--gcc-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
-- `--gcc-options` — extra compiler flags passed to castxml
+- `--gcc-options` — extra compiler flags passed to the header frontend
 - `--sysroot` — alternative system root directory
-- `--nostdinc` — do not search standard system include paths
+- `--nostdinc` / `--no-nostdinc` — do not search standard system include paths
+- `--ast-frontend {auto,castxml,clang}` — which C/C++ AST frontend parses the headers
+
+On `compare` these apply to **both** old and new sides; the per-side
+`--old-ast-frontend` / `--new-ast-frontend` overrides still win for the frontend
+when one release parses on a different toolchain than the other.
+
+Rather than repeating these flags on every invocation, set them once in the
+project's `.abicheck.yml` `compile:` block — `dump`, `compare`, and `scan` all fold
+it into their L2 header parse (CLI flags override config):
+
+```yaml
+# .abicheck.yml
+compile:
+  frontend: castxml          # auto | castxml | clang
+  std: c++20                 # synthesizes -std=c++20
+  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG
+  include_dirs: [include, third_party/inc]   # appended after -I roots
+  sysroot: /opt/sysroots/aarch64
+  nostdinc: false
+```
+
+`compare` reads the block from `--config` or the nearest `.abicheck.yml` found from
+the current directory upward; `dump`/`scan` from `--config` or the one auto-discovered
+at the `--sources` tree root. It is applied on every header-scoping path — ELF and
+the PE/Mach-O header parse alike. A malformed **explicit** `--config` fails loudly
+rather than silently dropping the settings; an auto-discovered one warns and falls
+back.
 
 #### Build-context capture (`compile_commands.json`) — evidence layer L3
 
@@ -157,7 +206,7 @@ Packs](../concepts/build-source-data.md) for the full model.
 # 1. Collect a pack from an existing build tree (no rebuild).
 abicheck collect \
     --compile-db build/compile_commands.json \
-    --build-dir build --cmake --source-abi \
+    --build-dir build --from cmake --source-abi \
     --output libfoo.bs/
 
 # 2. Embed the build + source facts inline in the snapshot. The resulting
@@ -185,7 +234,7 @@ abicheck compare old.abi.json new.abi.json
 | `--sources <dir>` | `dump` | Embed a pack's L4/L5 source facts (source ABI replay + graph) inline in the snapshot |
 | `--old-build-info <dir>` / `--new-build-info <dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
 | `--old-sources <dir>` / `--new-sources <dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
-| `--collect-mode <mode>` | `compare` | Inline collection mode. Only `off` (the default) is functional in this release: it uses embedded facts and any explicitly-provided pack directories. Other modes are accepted and reported in the coverage table, but inline collection for them is not implemented yet — run `abicheck collect` separately instead. |
+| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial (`binary`/`headers`/`build`/`source`/`full`; `--max` == `--depth full`). On `compare`, depths past `headers` collect from an `--old/new-sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only — run `abicheck collect` separately instead. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
 default-argument values, uninstantiated templates), add `--source-abi` to
@@ -258,16 +307,16 @@ rather than producing a compare verdict:
 abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
 
 # Diff two L5 source-graph summaries (from `collect --source-graph`)
-abicheck compare-graph old-pack/ new-pack/
+abicheck graph compare old-pack/ new-pack/
 
 # Localize a compare finding through the L5 source graph (which TU/include chain)
-abicheck explain-finding --report report.json --finding-id <id> --sources new-pack/
+abicheck graph explain --report report.json --finding-id <id> --sources new-pack/
 ```
 
 See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
 the surface metrics and idiom recognizers mean, and
 [Build & Source Packs](../concepts/build-source-data.md) for producing the packs
-that `compare-graph` / `explain-finding` consume.
+that `graph compare` / `graph explain` consume.
 
 ### Report filtering and display options
 
@@ -492,11 +541,11 @@ stack-level ABI compatibility verdict.
 
 ```bash
 # Show dependency tree + symbol binding status
-abicheck deps /usr/bin/python3
-abicheck deps /usr/bin/python3 --format json
+abicheck deps tree /usr/bin/python3
+abicheck deps tree /usr/bin/python3 --format json
 
 # Compare a binary's full stack across two sysroots
-abicheck stack-check usr/bin/myapp \
+abicheck deps compare usr/bin/myapp \
     --baseline /rootfs/v1 --candidate /rootfs/v2
 
 # Include dependency info in dump/compare
@@ -504,12 +553,12 @@ abicheck dump libfoo.so -H foo.h --follow-deps -o snap.json
 abicheck compare old.so new.so -H foo.h --follow-deps
 ```
 
-The `deps` command resolves the transitive dependency closure and displays:
+The `deps tree` command resolves the transitive dependency closure and displays:
 - Dependency tree with resolution reasons (rpath, runpath, default, etc.)
 - Unresolved libraries
 - Symbol binding summary (resolved, missing, version mismatches)
 
-The `stack-check` command compares two environments and reports:
+The `deps compare` command compares two environments and reports:
 - Loadability verdict (will the binary load?)
 - ABI risk verdict (are there breaking changes in dependencies?)
 - Per-library ABI diffs intersected with actual symbol usage
@@ -630,8 +679,8 @@ The parser handles the full Debian symbols tag syntax:
 CLI
   dump                         — dump ABI snapshot to JSON
   compare                      — compare two ABI surfaces
-  deps                         — show dependency tree + binding status (Linux ELF)
-  stack-check                  — full-stack comparison across environments (Linux ELF)
+  deps tree                    — show dependency tree + binding status (Linux ELF)
+  deps compare                 — full-stack comparison across environments (Linux ELF)
   debian-symbols generate      — generate Debian symbols file from shared library
   debian-symbols validate      — validate symbols file against binary
   debian-symbols diff          — diff two Debian symbols files

@@ -31,16 +31,19 @@ caller is a CLI entry point — the parallel, framework-free contract lives in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
+from .header_utils import iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
 
 
 def _click_notify(message: str) -> None:
@@ -53,7 +56,6 @@ def _click_notify(message: str) -> None:
     """
     click.echo(message, err=True)
 
-_HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp", ".inc"}
 
 # Number of bytes to read when sniffing file format (covers ELF magic + JSON/Perl head)
 _SNIFF_BYTES = 256
@@ -62,7 +64,10 @@ _SNIFF_BYTES = 256
 def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
     """Expand header inputs where each item can be a file or a directory.
 
-    Directories are scanned recursively for known header extensions.
+    Directories are scanned recursively for known header extensions, via the same
+    shared walker the ``scan``/service path uses (``header_utils`` —
+    canonical :data:`~abicheck.header_utils.HEADER_SUFFIXES`, pruned-dir walk) so
+    the two front-ends never disagree on what counts as a header.
     """
     out: list[Path] = []
     for p in inputs:
@@ -72,16 +77,12 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
-            ]
+            found = iter_directory_headers(p, PRUNED_HEADER_DIR_SEGMENTS)
             if not found:
                 raise click.ClickException(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise click.ClickException(f"Header path is neither file nor directory: {p}")
 
@@ -201,6 +202,7 @@ def _dump_native_binary(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -214,6 +216,8 @@ def _dump_native_binary(
 
     ``public_headers`` / ``public_header_dirs`` classify declaration provenance
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
+    ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
+    threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -232,6 +236,7 @@ def _dump_native_binary(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
+            compile=compile,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -252,6 +257,7 @@ def _resolve_input(
     dwarf_only: bool = False,
     debug_format: str | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -290,6 +296,7 @@ def _resolve_input(
             dwarf_only=dwarf_only,
             debug_format=debug_format,
             header_backend=header_backend,
+            compile=compile,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -464,6 +471,7 @@ def _resolve_compare_snapshots(
     header_backend: str = "auto",
     old_header_backend: str | None = None,
     new_header_backend: str | None = None,
+    compile_context: CompileContext | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -472,6 +480,12 @@ def _resolve_compare_snapshots(
     A per-side override lets a release whose new headers need the host
     toolchain parse on ``clang`` while the old release keeps the ``castxml``
     schema reference — the backend mirror of ``--old-header``/``--new-header``.
+
+    ``compile_context`` carries the both-sides L2 cross-toolchain knobs
+    (``--gcc-*``/``--sysroot``/``--nostdinc``, ADR-037 D3) merged with the project
+    ``compile:`` block; it applies to both sides. Its ``frontend`` field is unused
+    here — the frontend is driven by the explicit ``header_backend`` so the per-side
+    override above still wins.
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
@@ -486,6 +500,7 @@ def _resolve_compare_snapshots(
         dwarf_only=dwarf_only,
         debug_format=debug_format,
         header_backend=old_backend,
+        compile=compile_context,
     )
     new = _resolve_input(
         new_input,
@@ -498,6 +513,7 @@ def _resolve_compare_snapshots(
         dwarf_only=dwarf_only,
         debug_format=debug_format,
         header_backend=new_backend,
+        compile=compile_context,
     )
     if follow_deps:
         if old_fmt == "elf":
@@ -509,3 +525,126 @@ def _resolve_compare_snapshots(
                 new, new_input, list(search_paths), None, ld_library_path
             )
     return old, new
+
+
+# ── Set-input (directory/package) compare guards (ADR-037 D3/D12) ─────────────
+#
+# The per-library release fan-out forwards only release-comparison kwargs; it
+# does not thread the single-pair L2 compile context or inline build/source
+# evidence per pair. So the corresponding flags would be silently dropped on a
+# directory/package compare — reject them loudly instead (Codex review). Kept
+# here (not in cli.py) so cli.py stays under the file-size hard cap.
+
+#: Compile-context flag dest → spelling, for the set-input rejection guard.
+_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
+    "gcc_path": "--gcc-path",
+    "gcc_prefix": "--gcc-prefix",
+    "gcc_options": "--gcc-options",
+    "gcc_option_tokens": "--gcc-option",
+    "sysroot": "--sysroot",
+    "nostdinc": "--nostdinc",
+    "header_backend": "--ast-frontend",
+    "old_header_backend": "--old-ast-frontend",
+    "new_header_backend": "--new-ast-frontend",
+}
+
+#: Build/source evidence flags (param dest → flag). ``max_depth``/``depth`` are
+#: the evidence-depth dial; the four per-side --sources/--build-info are the
+#: inline evidence inputs.
+_EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
+    "max_depth": "--max",
+    "depth": "--depth",
+    "old_sources": "--old-sources",
+    "new_sources": "--new-sources",
+    "old_build_info": "--old-build-info",
+    "new_build_info": "--new-build-info",
+}
+
+
+def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
+    """Reject inline build/source evidence flags for directory/package compares.
+
+    The release fan-out forwards only release-comparison kwargs, so ``--max``/
+    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
+    would be accepted and silently dropped (no L3-L5 collected). Fail loudly so
+    the user knows to compare libraries individually to collect deep evidence
+    (Codex review)."""
+    used = [
+        flag
+        for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used))
+            + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not collect inline build/source evidence. "
+            "Compare the libraries individually (or pre-dump snapshots with "
+            "`dump --sources/--build-info`) to collect L3-L5 evidence."
+        )
+
+
+def _config_has_compile_block(project_cfg: Any) -> bool:
+    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
+
+    Used to flag that a project's L2 compile context would be dropped by the
+    per-library release fan-out (which the single-pair path honors).
+    """
+    if project_cfg is None:
+        return False
+    return bool(
+        getattr(project_cfg, "compile_frontend", None)
+        or getattr(project_cfg, "compile_std", None)
+        or getattr(project_cfg, "compile_defines", None)
+        or getattr(project_cfg, "compile_include_dirs", None)
+        or getattr(project_cfg, "compile_sysroot", None)
+        or getattr(project_cfg, "compile_nostdinc", False)
+    )
+
+
+def _reject_compile_context_for_set_inputs(
+    ctx: click.Context, project_cfg: Any
+) -> None:
+    """Guard the L2 compile context for directory/package compares.
+
+    The per-library fan-out (release backend) runs each pair through
+    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
+    frontend context is not applied per library — unlike the single-pair path that
+    now honors it. Two cases, never silent (Codex review):
+
+    * An **explicitly-passed** compile-context flag is rejected loudly (a
+      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
+      it, so erroring beats ignoring it.
+    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
+      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
+      but the user must know those settings apply to single-library compares and
+      not to this fan-out (so per-library snapshots may differ).
+
+    Either way, compare libraries individually (or pre-dump snapshots) to apply
+    the context.
+    """
+    used = [
+        flag
+        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used))
+            + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not thread the L2 compile context to each "
+            "pair's header dump. Compare the libraries individually to use them."
+        )
+    if _config_has_compile_block(project_cfg):
+        click.echo(
+            "Warning: the .abicheck.yml compile: block is not applied to "
+            "directory/package (release) comparisons — the per-library fan-out "
+            "does not thread the L2 compile context. It affects single-library "
+            "compares only; compare libraries individually for consistent "
+            "per-library snapshots.",
+            err=True,
+        )

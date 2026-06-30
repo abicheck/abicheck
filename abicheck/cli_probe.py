@@ -87,10 +87,13 @@ def probe_group() -> None:
 )
 @click.option(
     "-o",
+    "--output",
     "--out",
+    "out",
     type=click.Path(path_type=Path),
     default=None,
-    help="Write the MatrixSnapshot JSON here (default: stdout).",
+    help="Write the MatrixSnapshot JSON here (default: stdout). "
+    "`--output` is the canonical spelling; `--out` is a back-compat alias.",
 )
 @click.option(
     "--work-dir",

@@ -121,7 +121,7 @@ Uses the same exit codes as `compare`:
 
 ---
 
-## `abicheck deps`
+## `abicheck deps tree`
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -130,7 +130,7 @@ Uses the same exit codes as `compare`:
 
 ---
 
-## `abicheck stack-check`
+## `abicheck deps compare`
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -142,16 +142,18 @@ Uses the same exit codes as `compare`:
 
 ```bash
 # Full-stack check: fail on FAIL, warn on WARN
-abicheck stack-check usr/bin/myapp --baseline /old-root --candidate /new-root
+abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
 ret=$?
 [ $ret -eq 4 ] && echo "FAIL — load failure or ABI break" && exit 1
 [ $ret -eq 1 ] && echo "WARN — ABI risk detected" && exit 1
+[ $ret -ne 0 ] && echo "ERROR — unexpected non-verdict exit code: $ret" && exit 1
 echo "PASS"
 
 # Permissive: only fail on load failure / ABI break
-abicheck stack-check usr/bin/myapp --baseline /old-root --candidate /new-root
+abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
 ret=$?
 [ $ret -eq 4 ] && exit 1   # FAIL only; WARN (exit 1) treated as OK
+[ $ret -ne 0 ] && [ $ret -ne 1 ] && exit 1   # fail closed on non-verdict errors
 exit 0
 ```
 
@@ -240,7 +242,7 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 
 ## Summary table
 
-| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `appcompat` exit | `deps` exit | `stack-check` exit | `debian-symbols validate` exit | `compat` exit |
+| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `appcompat` exit | `deps tree` exit | `deps compare` exit | `debian-symbols validate` exit | `compat` exit |
 |-----------------|------------------------|--------------------------|-----------------|-------------|-------------------|-------------------------------|---------------|
 | `NO_CHANGE` / `PASS` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | `COMPATIBLE` | `0` | `0` | `0` | — | — | — | `0` |
