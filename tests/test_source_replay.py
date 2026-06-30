@@ -373,7 +373,7 @@ def test_headers_only_external_roots_do_not_hide_uncovered_owned_header() -> Non
         },
         public_header_roots=["external/pvxs/log.h"],
     )
-    assert {u.id for u in units} == {"cu://a", "cu://c"}
+    assert {u.id for u in units} == {"cu://a", "cu://c", "cu://d"}
 
 
 def test_headers_only_suffix_match_requires_directory_context() -> None:

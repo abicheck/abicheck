@@ -325,6 +325,10 @@ def _select_headers_only(
         picked = _headers_only_set_cover(build, include_map, public_header_roots)
         if picked is not None:
             return picked
+    return _select_headers_only_heuristic(build)
+
+
+def _select_headers_only_heuristic(build: BuildEvidence) -> list[CompileUnit]:
     by_target: dict[str, list[CompileUnit]] = {}
     for cu in build.compile_units:
         by_target.setdefault(cu.target_id, []).append(cu)
@@ -433,11 +437,19 @@ def _headers_only_set_cover(
         need -= coverage[best]
     # A *partial* include graph may not reach every build-declared public header.
     # Returning the cover for only the reachable ones would silently drop a public
-    # target whose source-only changes would never be parsed. External CLI roots
-    # have no representative target, so those are reported as uncovered instead of
-    # widening back to every TU.
+    # target whose source-only changes would never be parsed. Fall back to the
+    # representative target heuristic for build-owned headers, but keep selected
+    # external CLI-root TUs because those roots have no representative target.
     if need and any(header_owners.get(ph) for ph in need):
-        return None
+        picked = _select_headers_only_heuristic(build)
+        picked_ids = {cu.id for cu in picked}
+        for cu_id in chosen:
+            if any(not header_owners.get(ph) for ph in coverage.get(cu_id, ())):
+                cu = by_id[cu_id]
+                if cu.id not in picked_ids:
+                    picked.append(cu)
+                    picked_ids.add(cu.id)
+        return picked
     return [by_id[c] for c in chosen]
 
 
