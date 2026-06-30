@@ -126,7 +126,7 @@ Widget::~Widget() {{}}
 long Widget::process(const std::vector<std::string>& in) const {{
     long acc = seed_;
     for (auto& s : in) acc += s.size();
-    Recur<8> r; acc += r.compute();
+    Recur<{depth}> r; acc += r.compute();
     return acc;
 }}
 std::map<std::string, long> Widget::histogram() const {{
@@ -172,7 +172,7 @@ def _gen_sources(
         )
     )
     (src / "widget.cpp").write_text(
-        _WIDGET_CPP.format(extra_defs="\n".join(extra_defs))
+        _WIDGET_CPP.format(depth=depth, extra_defs="\n".join(extra_defs))
     )
 
     fidx = 0
