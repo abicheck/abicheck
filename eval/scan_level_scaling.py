@@ -34,11 +34,12 @@ goes super-linear or where a *cheaper-looking* level secretly pays a full-tree
 cost (e.g. seedless ``--depth source`` runs the L5 call-graph pass over the whole
 compile DB even though its L4 replay is scoped to one TU).
 
-Gated on a C++ compiler + ``clang++`` (the L4/L5 source replay backend). Without
-a C++ compiler nothing runs (the sweep exits early — it cannot build the corpus);
-without ``clang++`` only, just the compiler-only tiers (``binary``/``build``) run
-and the clang-backed tiers are skipped. Manual (not in CI): a full template-heavy
-sweep is minutes of clang time.
+Gated on a C++ compiler + ``clang++`` (the L4/L5 source replay backend, and the
+L2 header AST). Without a C++ compiler nothing runs (the sweep exits early — it
+cannot build the corpus); without ``clang++`` only the ``binary`` tier runs
+(``--depth binary`` suppresses the L2 header AST), and every clang-backed tier is
+skipped. Manual (not in CI): a full template-heavy sweep is minutes of clang
+time.
 
 Reproduce::
 
@@ -265,11 +266,16 @@ def _maxrss_to_mb(maxrss: int) -> float:
 #: visible side by side.
 LEVELS = ("binary", "headers", "build", "graph", "source_seeded", "source", "full")
 
-#: Levels that need the clang source-replay backend (skip when clang++ absent).
-_NEEDS_CLANG = {"headers", "graph", "source_seeded", "source", "full"}
+#: Levels that need ``clang++`` (skipped when it is absent). Only ``binary`` is
+#: clang-free: ``--depth binary`` suppresses the L2 header AST, so it runs on the
+#: C++ compiler alone. Every other tier — including ``build``, since the harness
+#: always passes ``-H``/``--ast-frontend clang`` and the cumulative depth ladder
+#: puts L2 below L3 — parses headers with clang and fails without it.
+_NEEDS_CLANG = {"headers", "build", "graph", "source_seeded", "source", "full"}
 
 
 def _level_args(level: str, seed: str) -> list[str]:
+    """Map a sweep *level* name to the ``abicheck scan`` flags that select it."""
     return {
         "binary": ["--depth", "binary"],
         "headers": ["--depth", "headers"],
@@ -283,6 +289,8 @@ def _level_args(level: str, seed: str) -> list[str]:
 
 @dataclass
 class Point:
+    """One (size, level) measurement: timing, peak RSS, exit, verdict, L4 counts."""
+
     level: str
     n_tus: int
     depth: int
@@ -375,6 +383,7 @@ def run_sweep(
     have_clang: bool,
     workdir: Path,
 ) -> list[Point]:
+    """Build each size's old/new trees once, then run every *level* over them."""
     points: list[Point] = []
     for n in sizes:
         old = workdir / f"old_n{n}_f{funcs_per_tu}_d{depth}"
@@ -437,6 +446,7 @@ def render_table(points: list[Point]) -> str:
 
 
 def main() -> int:
+    """CLI entry: parse args, run the sweep, print the table, optionally dump JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -461,7 +471,7 @@ def main() -> int:
     have_clang = shutil.which("clang++") is not None
     if not have_clang:
         print(
-            "warning: clang++ not found — only binary/build tiers will run",
+            "warning: clang++ not found — only the binary tier will run",
             file=sys.stderr,
         )
 
