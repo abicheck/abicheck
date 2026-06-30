@@ -80,6 +80,7 @@ class LayerCoverage:
     status: CoverageStatus = CoverageStatus.NOT_COLLECTED
     confidence: LayerConfidence = LayerConfidence.UNKNOWN
     detail: str = ""                # human-readable note, e.g. "CMake+Ninja, 142 compile units"
+    elapsed_s: float = 0.0
 
     @property
     def present(self) -> bool:
@@ -91,6 +92,7 @@ class LayerCoverage:
             "status": self.status.value,
             "confidence": self.confidence.value,
             "detail": self.detail,
+            "elapsed_s": round(self.elapsed_s, 3),
         }
 
     @classmethod
@@ -100,6 +102,7 @@ class LayerCoverage:
             status=_coverage_status(d.get("status")),
             confidence=_confidence(d.get("confidence")),
             detail=str(d.get("detail", "")),
+            elapsed_s=float(d.get("elapsed_s", 0.0) or 0.0),
         )
 
 

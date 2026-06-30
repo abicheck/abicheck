@@ -253,7 +253,12 @@ _COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per
 #: took 80-180 s while the estimate read flat).
 _COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
-_COST_PER_TU_REPLAY = 0.45  # L4 per-TU semantic AST replay
+# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU.
+# Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU anchor
+# under-promised source/full scans by an order of magnitude and made 100+ TU runs
+# look like one-minute jobs. Warm cache is reported by live coverage; dry-run stays
+# conservative unless a future cache probe can prove hits up front.
+_COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 

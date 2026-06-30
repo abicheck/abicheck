@@ -44,6 +44,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
@@ -268,6 +269,7 @@ def select_compile_units(
     changed_paths: Iterable[str] = (),
     target_id: str = "",
     include_map: Mapping[str, Iterable[str]] | None = None,
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit]:
     """Select which compile units to replay for an ADR-030 D7 ``scope``.
 
@@ -308,19 +310,25 @@ def select_compile_units(
         return list(units)
     inc = _norm_include_map(include_map)
     if scope == "headers-only":
-        return _select_headers_only(build, inc)
+        return _select_headers_only(build, inc, public_header_roots)
     if scope == "target":
         return _select_target(build, target_id)
     return _select_changed(build, frozenset(changed_paths), inc)
 
 
 def _select_headers_only(
-    build: BuildEvidence, include_map: dict[str, list[str]]
+    build: BuildEvidence,
+    include_map: dict[str, list[str]],
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit]:
     if include_map:
-        picked = _headers_only_set_cover(build, include_map)
+        picked = _headers_only_set_cover(build, include_map, public_header_roots)
         if picked is not None:
             return picked
+    return _select_headers_only_heuristic(build)
+
+
+def _select_headers_only_heuristic(build: BuildEvidence) -> list[CompileUnit]:
     by_target: dict[str, list[CompileUnit]] = {}
     for cu in build.compile_units:
         by_target.setdefault(cu.target_id, []).append(cu)
@@ -352,7 +360,9 @@ def _public_header_compile_owner_ids(build: BuildEvidence) -> set[str]:
 
 
 def _headers_only_set_cover(
-    build: BuildEvidence, include_map: dict[str, list[str]]
+    build: BuildEvidence,
+    include_map: dict[str, list[str]],
+    public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit] | None:
     """Minimal TU set whose includes cover every public header (greedy set cover).
 
@@ -362,7 +372,7 @@ def _headers_only_set_cover(
     public header no recorded TU includes is left to the heuristic by returning
     ``None`` only when the graph covers nothing at all.
     """
-    public = public_header_roots_for(build)
+    public = sorted(set(public_header_roots_for(build)) | set(public_header_roots or ()))
     if not public:
         return None
     by_id = {cu.id: cu for cu in build.compile_units}
@@ -402,7 +412,10 @@ def _headers_only_set_cover(
             ph
             for ph in public
             if _included(ph, inc_norms, inc_suffixes, public_suffixes[ph])
-            and cu.target_id in header_owners.get(ph, set())
+            and (
+                not header_owners.get(ph)
+                or cu.target_id in header_owners.get(ph, set())
+            )
         }
         if covered:
             coverage[cu_id] = covered
@@ -422,14 +435,46 @@ def _headers_only_set_cover(
             break
         chosen.append(best)
         need -= coverage[best]
-    # A *partial* include graph may not reach every public header. Returning the
-    # cover for only the reachable ones would silently drop a public header no
-    # recorded TU includes — its source-only changes would never be parsed. Defer
-    # to the representative-per-target heuristic (which covers every public-header
-    # target) whenever the cover cannot satisfy all public headers (Codex review).
-    if need:
-        return None
+    # A *partial* include graph may not reach every build-declared public header.
+    # Returning the cover for only the reachable ones would silently drop a public
+    # target whose source-only changes would never be parsed. Fall back to the
+    # representative target heuristic for build-owned headers, but keep selected
+    # external CLI-root TUs because those roots have no representative target.
+    if need and any(header_owners.get(ph) for ph in need):
+        picked = _select_headers_only_heuristic(build)
+        picked_ids = {cu.id for cu in picked}
+        for cu_id in chosen:
+            if any(not header_owners.get(ph) for ph in coverage.get(cu_id, ())):
+                cu = by_id[cu_id]
+                if cu.id not in picked_ids:
+                    picked.append(cu)
+                    picked_ids.add(cu.id)
+        return picked
     return [by_id[c] for c in chosen]
+
+
+def _uncovered_public_headers(
+    roots: Sequence[str], units: Sequence[CompileUnit], include_map: dict[str, list[str]]
+) -> list[str]:
+    """Public roots not reached by the selected units' include graph."""
+    if not roots or not include_map:
+        return []
+    inc_norms: set[str] = set()
+    inc_suffixes: set[str] = set()
+    selected = {cu.id for cu in units}
+    for cu_id, incs in include_map.items():
+        if cu_id not in selected:
+            continue
+        for inc in incs:
+            norm = _norm(inc)
+            inc_norms.add(norm)
+            inc_suffixes.update(_suffixes(norm))
+    out: list[str] = []
+    for root in roots:
+        suffixes = _suffixes(_norm(root))
+        if not _included(root, inc_norms, inc_suffixes, suffixes):
+            out.append(root)
+    return out
 
 
 def _suffixes(path: str) -> set[str]:
@@ -450,7 +495,14 @@ def _included(
     (``include/foo.h``).
     """
     public_norm = _norm(public_header)
-    return public_norm in include_suffixes or bool(public_suffixes & include_norms)
+    public_dir_suffixes = {s for s in public_suffixes if "/" in s.strip("/")}
+    include_dir_suffixes = {s for s in include_suffixes if "/" in s.strip("/")}
+    return (
+        public_norm in include_norms
+        or ("/" in public_norm.strip("/") and public_norm in include_suffixes)
+        or bool(public_dir_suffixes & include_norms)
+        or bool(public_dir_suffixes & include_dir_suffixes)
+    )
 
 
 def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
@@ -834,12 +886,20 @@ def run_source_replay(
         if public_header_roots is not None
         else public_header_roots_for(build, target_id)
     )
+    total_started = time.monotonic()
     units = select_compile_units(
         build,
         scope=scope,
         changed_paths=changed_paths,
         target_id=target_id,
         include_map=include_map,
+        public_header_roots=roots,
+    )
+    scope_widened = (
+        scope == "headers-only"
+        and not _norm_include_map(include_map)
+        and len(units) == len(build.compile_units)
+        and len(units) > 1
     )
     # Fresh per-pass dep-digest memo so a shared header is hashed once across all
     # TUs' cache validation (scoped to this call — a file may change before the
@@ -851,6 +911,7 @@ def run_source_replay(
     # in unit order, so the linked surface and diagnostics are byte-for-byte
     # identical to the serial run regardless of worker count.
     # Phase 1 (serial): cache lookups, split hits from misses keeping order.
+    cache_started = time.monotonic()
     keys: list[str | None] = []
     results: list[SourceAbiTu | None] = [None] * len(units)
     misses: list[int] = []
@@ -870,6 +931,7 @@ def run_source_replay(
             results[i] = cached
         else:
             misses.append(i)
+    cache_elapsed = time.monotonic() - cache_started
 
     # Phase 2 (parallel): extract the cache misses. Stateless per TU, so the
     # worker is a module-level function (picklable for the process pool) fed the
@@ -879,6 +941,7 @@ def run_source_replay(
     jobs = _l4_jobs(len(misses))
     miss_units = [units[i] for i in misses]
     worker = partial(_extract_one, extractor, list(roots or []), target_id)
+    extract_started = time.monotonic()
     if jobs > 1 and len(misses) > 1:
         # Process pool parallelizes the GIL-bound AST post-processing too, not
         # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
@@ -902,6 +965,7 @@ def run_source_replay(
                 raise
     else:
         extracted = [worker(u) for u in miss_units]
+    extract_elapsed = time.monotonic() - extract_started
     for i, (tu, err) in zip(misses, extracted):
         if err is None:
             results[i] = tu
@@ -921,6 +985,7 @@ def run_source_replay(
         elif i in diags:
             diagnostics.append(diags[i])
 
+    link_started = time.monotonic()
     surface = link_source_abi(
         tus,
         exported_symbols=exported_symbols,
@@ -928,11 +993,28 @@ def run_source_replay(
         target_id=target_id,
         forced_public=forced_public,
     )
+    link_elapsed = time.monotonic() - link_started
     surface.coverage["replay_scope"] = scope
     surface.coverage["include_graph_used"] = bool(_norm_include_map(include_map))
     surface.coverage["compile_units_selected"] = len(units)
     surface.coverage["compile_units_parsed"] = len(tus)
     surface.coverage["extractor_failures"] = len(diagnostics)
+    uncovered = _uncovered_public_headers(roots, units, _norm_include_map(include_map))
+    if uncovered:
+        surface.coverage["public_headers_uncovered"] = len(uncovered)
+        surface.coverage["public_headers_uncovered_examples"] = uncovered[:10]
+    surface.coverage["cache_lookup_s"] = round(cache_elapsed, 3)
+    surface.coverage["extract_s"] = round(extract_elapsed, 3)
+    surface.coverage["link_s"] = round(link_elapsed, 3)
+    surface.coverage["elapsed_s"] = round(time.monotonic() - total_started, 3)
+    surface.coverage["extractor_jobs"] = jobs
+    surface.coverage["cache_misses"] = len(misses)
+    if scope_widened:
+        surface.coverage["scope_widened_to_full"] = True
+        surface.coverage["scope_widened_reason"] = (
+            "headers-only had no include graph/public-header target ownership; "
+            "selected every compile unit"
+        )
     return surface, diagnostics
 
 

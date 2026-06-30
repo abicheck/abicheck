@@ -287,6 +287,139 @@ def test_headers_only_heuristic_uses_header_target_reverse_dep() -> None:
     assert {u.id for u in units} == {"cu://kernel"}
 
 
+def test_headers_only_full_fanout_is_reported() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://a", "a.cpp"),
+            _cu("cu://b", "b.cpp"),
+        ]
+    )
+    surface, diagnostics = run_source_replay(
+        build,
+        _FakeExtractor(),
+        scope="headers-only",
+        exported_symbols=["_Z6unusedv"],
+    )
+    assert diagnostics == []
+    assert surface.coverage["compile_units_selected"] == 2
+    assert surface.coverage["scope_widened_to_full"] is True
+    assert (
+        "headers-only had no include graph"
+        in surface.coverage["scope_widened_reason"]
+    )
+    assert surface.coverage["elapsed_s"] >= 0.0
+    assert surface.coverage["extract_s"] >= 0.0
+
+
+def test_headers_only_set_cover_uses_external_public_roots() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://a", "a.cpp"),
+            _cu("cu://b", "b.cpp"),
+            _cu("cu://c", "c.cpp"),
+        ]
+    )
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://a": ["include/api.h"],
+            "cu://b": ["include/detail.h"],
+            "cu://c": ["src/impl.h"],
+        },
+        public_header_roots=["include/api.h"],
+    )
+    assert {u.id for u in units} == {"cu://a"}
+
+
+def test_headers_only_set_cover_matches_relative_depfile_paths() -> None:
+    build = BuildEvidence(compile_units=[_cu("cu://a", "a.cpp")])
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={"cu://a": ["../pvxs/log.h"]},
+        public_header_roots=["/work/build/include/pvxs/log.h"],
+    )
+    assert {u.id for u in units} == {"cu://a"}
+
+
+def test_headers_only_external_roots_do_not_full_fanout_for_uncovered_header() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://a", "a.cpp"),
+            _cu("cu://b", "b.cpp"),
+        ]
+    )
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://a": ["include/api.h"],
+            "cu://b": ["src/impl.h"],
+        },
+        public_header_roots=["include/api.h", "include/unreached.h"],
+    )
+    assert {u.id for u in units} == {"cu://a"}
+
+
+def test_headers_only_external_roots_do_not_hide_uncovered_owned_header() -> None:
+    build = _build()
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://b": ["include/foo.h"],
+            "cu://d": ["external/pvxs/log.h"],
+        },
+        public_header_roots=["external/pvxs/log.h"],
+    )
+    assert {u.id for u in units} == {"cu://a", "cu://c", "cu://d"}
+
+
+def test_headers_only_suffix_match_requires_directory_context() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://private", "private.cpp"),
+            _cu("cu://public", "public.cpp"),
+        ]
+    )
+    units = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map={
+            "cu://private": ["src/foo.h"],
+            "cu://public": ["../pvxs/foo.h"],
+        },
+        public_header_roots=["/work/pvxs/include/pvxs/foo.h"],
+    )
+    assert {u.id for u in units} == {"cu://public"}
+
+
+def test_source_replay_reports_uncovered_external_public_roots() -> None:
+    build = BuildEvidence(
+        compile_units=[
+            _cu("cu://a", "a.cpp"),
+            _cu("cu://b", "b.cpp"),
+        ]
+    )
+    surface, diagnostics = run_source_replay(
+        build,
+        _FakeExtractor(),
+        scope="headers-only",
+        include_map={
+            "cu://a": ["include/api.h"],
+            "cu://b": ["src/impl.h"],
+        },
+        public_header_roots=["include/api.h", "include/unreached.h"],
+    )
+    assert diagnostics == []
+    assert surface.coverage["compile_units_selected"] == 1
+    assert surface.coverage["public_headers_uncovered"] == 1
+    assert surface.coverage["public_headers_uncovered_examples"] == [
+        "include/unreached.h"
+    ]
+
+
 def test_headers_only_set_cover_needs_two_units() -> None:
     # No single TU covers both headers → cover needs two (one per header).
     include_map = {

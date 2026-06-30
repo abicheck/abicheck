@@ -1411,6 +1411,41 @@ def test_l4_coverage_detail_partial_and_empty():
     assert "symbols matched" not in detail and "cache" not in detail
 
 
+def test_l4_include_map_uses_depfile_not_recorded_inputs_for_headers_only(
+    monkeypatch,
+) -> None:
+    import abicheck.buildsource.include_graph as ig
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import _include_map_for_replay
+
+    class _FakeIncludeExtractor:
+        clang_bin = "clang++"
+
+        def __init__(self, **kw):
+            self.diagnostics = []
+
+        def extract_from_build(self, build):
+            return {"cu://b": ["include/api.h"]}
+
+    monkeypatch.setattr(ig, "ClangIncludeExtractor", _FakeIncludeExtractor)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", input_files=["include/api.h"]),
+            CompileUnit(id="cu://b", source="b.cpp", input_files=["src/impl.h"]),
+        ]
+    )
+    extractors = []
+    include_map = _include_map_for_replay(
+        build,
+        scope="headers-only",
+        roots=("include/api.h",),
+        clang_bin="definitely-not-needed",
+        extractors=extractors,
+    )
+    assert include_map == {"cu://b": ["include/api.h"]}
+    assert extractors[0].name == "include_graph:clang"
+
+
 def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
     """A failing build.query command degrades to a failed extractor, no abort."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
@@ -1747,7 +1782,8 @@ def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkey
     captured = {}
 
     def _spy(sources, merged, extractors, *, extractor, scope, clang_bin,
-             exported_symbols=(), source_abi_cache_dir=None, changed_paths=()):
+             exported_symbols=(), source_abi_cache_dir=None, changed_paths=(),
+             public_header_roots=()):
         captured["scope"] = scope
         return None
 

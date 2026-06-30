@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import logging
 import pickle
+import time
 from functools import partial
 from pathlib import Path
 
 import pytest
 
 from abicheck.buildsource import source_replay as sr
-from abicheck.buildsource.build_evidence import CompileUnit
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_abi import SourceAbiTu
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 
@@ -338,3 +339,35 @@ def test_dep_digest_memo_records_missing_as_none(tmp_path: Path) -> None:
     missing = str(tmp_path / "gone.h")
     assert sr._dep_digest(missing, memo) is None
     assert missing in memo and memo[missing] is None
+
+
+def test_headers_only_public_roots_perf_guard_avoids_full_fanout() -> None:
+    """Track the pvxs-style regression: public roots must not replay every TU."""
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id=f"cu://{idx}", source=f"src/unit{idx}.cpp")
+            for idx in range(120)
+        ]
+    )
+    include_map = {
+        f"cu://{idx}": [f"src/private{idx}.h"]
+        for idx in range(120)
+    }
+    include_map["cu://17"] = ["../pvxs/log.h", "src/private17.h"]
+    include_map["cu://89"] = ["../pvxs/client.h", "src/private89.h"]
+
+    started = time.perf_counter()
+    selected = sr.select_compile_units(
+        build,
+        scope="headers-only",
+        include_map=include_map,
+        public_header_roots=[
+            "/work/pvxs/include/pvxs/log.h",
+            "/work/pvxs/include/pvxs/client.h",
+        ],
+    )
+    elapsed = time.perf_counter() - started
+
+    assert {unit.id for unit in selected} == {"cu://17", "cu://89"}
+    assert len(selected) <= 2
+    assert elapsed < 0.25
