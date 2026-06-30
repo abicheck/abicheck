@@ -52,6 +52,7 @@ Reproduce::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -341,13 +342,17 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         "text",
         *_level_args(level, seed),
     ]
-    # ``jobs <= 0`` means "leave ABICHECK_L4_JOBS unset" so the sweep measures
-    # abicheck's normal auto scheduling (min(TUs, cpu, 8) + the RAM clamp). Forcing
-    # an explicit count would, on a >8-CPU host, run more L4 workers than the
-    # production auto path and skew/OOM the curves.
+    # ``jobs <= 0`` means "auto": the sweep must measure abicheck's normal auto
+    # scheduling (min(TUs, cpu, 8) + the RAM clamp). Forcing an explicit count
+    # would, on a >8-CPU host, run more L4 workers than the production auto path
+    # and skew/OOM the curves. Crucially, *clear* any ABICHECK_L4_JOBS the caller
+    # already exported — otherwise the inherited override leaks into the child and
+    # silently defeats auto mode despite the --jobs help promising it.
     env = dict(os.environ)
     if jobs > 0:
         env["ABICHECK_L4_JOBS"] = str(jobs)
+    else:
+        env.pop("ABICHECK_L4_JOBS", None)
     t0 = time.monotonic()
     proc = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True
@@ -384,6 +389,17 @@ def _tail_exponent(sizes: list[int], values: list[float]) -> float | None:
 
 
 # ── driver ──────────────────────────────────────────────────────────────────
+def _cxx_tag(cxx: str) -> str:
+    """Stable, filesystem-safe cache tag for a compiler.
+
+    A readable basename plus a short digest of the *full* ``--cxx`` string, so two
+    different compilers that share a basename (``/usr/bin/g++`` vs ``/opt/g++``)
+    never collide on the same cached tree.
+    """
+    base = re.sub(r"[^A-Za-z0-9]+", "", Path(cxx).name) or "cxx"
+    return f"{base}-{hashlib.sha1(cxx.encode()).hexdigest()[:8]}"
+
+
 def run_sweep(
     *,
     sizes: list[int],
@@ -397,9 +413,14 @@ def run_sweep(
 ) -> list[Point]:
     """Build each size's old/new trees once, then run every *level* over them."""
     points: list[Point] = []
+    # Encode the compiler in the cache key: the ``libsynth.so`` existence check
+    # below short-circuits regen+rebuild, so reusing a --workdir after a --cxx
+    # change would otherwise silently reuse a tree (and compile_commands.json)
+    # built by the *old* compiler, corrupting any toolchain comparison.
+    ctag = _cxx_tag(cxx)
     for n in sizes:
-        old = workdir / f"old_n{n}_f{funcs_per_tu}_d{depth}"
-        new = workdir / f"new_n{n}_f{funcs_per_tu}_d{depth}"
+        old = workdir / f"old_{ctag}_n{n}_f{funcs_per_tu}_d{depth}"
+        new = workdir / f"new_{ctag}_n{n}_f{funcs_per_tu}_d{depth}"
         for root, variant in ((old, "old"), (new, "new")):
             if not (root / "libsynth.so").exists():
                 _gen_sources(
