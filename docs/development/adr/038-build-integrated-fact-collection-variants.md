@@ -197,13 +197,17 @@ abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 
 ### Scope, cost, and when to use
 
-- **Backend:** `--source-abi-extractor auto|clang|castxml|android`. `clang` adds
-  inline/template/constexpr **body** fingerprints + default args; `castxml` gives
-  declarations/types/const values only; a requested `clang` not on PATH falls
-  back to castxml rather than disabling source checks.
-- **Scope:** `--source-abi-scope off|headers-only|changed|target|full` (+
-  `--changed-path`) bounds the replay. A PR run parses only what changed — it is
-  *not* forced to re-parse the whole tree.
+- **Backend:** on inline `dump --sources` the knob is `--ast-frontend
+  auto|clang|castxml` (ADR-037 D8; the same dial drives the L2 header AST);
+  `collect` spells it `--source-abi-extractor auto|clang|castxml|android`. `clang`
+  adds inline/template/constexpr **body** fingerprints + default args; `castxml`
+  gives declarations/types/const values only; a requested `clang` not on PATH
+  falls back to castxml rather than disabling source checks.
+- **Scope:** on inline `dump --sources` use the `--depth`/`--max` dial (ADR-037
+  D5; `binary|headers|build|source|full`) to bound how deep to collect. The
+  fine-grained replay scopes (`--source-abi-scope off|headers-only|changed|
+  target|full` + `--changed-path`) are **`collect`-only**. Either way a PR run
+  parses only what changed — it is *not* forced to re-parse the whole tree.
 - **Cost:** one parse per in-scope TU, paid **by abicheck**, not the build. The
   measured cost cliff is at L4 for template-heavy C++ (`scan_levels.py` cost
   model); scope + the per-TU content-addressed cache (`ABICHECK_L4_CACHE_DIR`)
