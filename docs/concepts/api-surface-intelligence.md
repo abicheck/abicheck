@@ -94,8 +94,8 @@ the consumer's own public ABI surface — the finding is **demoted to risk**
 (reason `consumer-internal-use`), never dropped. When the type leaks into a
 symbol the consumer itself exports, the finding stays a full-confidence
 cross-DSO break. The demotion is carried on the `BundleFinding` and propagated
-onto the lowered `Change`, so the **bundle verdict** and the release-compare
-exit code honour it — the same demote-don't-delete contract as A4.
+onto the lowered `Change`, so the **bundle verdict** and the `compare` exit
+code honour it — the same demote-don't-delete contract as A4.
 
 ## Surface-metric drift (A1, `--surface-metrics`)
 

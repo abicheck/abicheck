@@ -92,9 +92,9 @@ When `compare` is handed directory or package inputs (RPM/deb/tar/conda/wheel),
 it fans out to per-library pairs and aggregates the worst per-library verdict
 across the release — the behaviour formerly exposed as the standalone
 `compare-release` command (folded into `compare` per ADR-037 D7; still selectable
-as the GitHub Action's `mode: compare-release`). A set/release comparison keeps
-the verdict-based exit scheme (it is not silently promoted to the severity-aware
-codes), plus a dedicated code for removed libraries:
+as the GitHub Action's `mode: compare-release`). By default a set/release
+comparison uses the verdict-based scheme below, plus a dedicated code for
+removed libraries:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -103,9 +103,16 @@ codes), plus a dedicated code for removed libraries:
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
 | `8` | A library was removed between releases and `--fail-on-removed-library` is set — takes precedence over every other code |
 
-With any `--severity-*` flag, the severity-aware code (`0/1/2/4`) replaces the
-verdict-based `2/4` mapping — except exit `8` still wins, and an operational
-`ERROR` still floors the exit at `4`.
+The scheme is resolved exactly as for a single `compare`: it stays verdict-based
+unless severity is *active* — via any `--severity-*` flag **or** a `severity:`
+block in `.abicheck.yml` — in which case the severity-aware code (`0/1/2/4`)
+replaces the verdict-based `2/4` mapping. Exit `8` still wins, and an operational
+`ERROR` still floors the exit at `4`. (`--exit-code-scheme` itself is rejected on
+directory/package inputs; pin the scheme in config with `exit_code_scheme: legacy`
+instead.) One consequence worth gating on: with a config severity map, a release
+whose worst verdict is `BREAKING` can still exit `0` if that map downgrades ABI
+breaks (e.g. `abi_breaking: warning`) — parse the `verdict` from JSON output if
+you need scheme-independent CI behaviour.
 
 ---
 
