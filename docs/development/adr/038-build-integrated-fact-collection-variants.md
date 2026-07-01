@@ -151,9 +151,9 @@ One command materializes a baseline with L3/L4/L5 folded in:
 
 ```bash
 # Binary L0–L2 from the .so + L3/L4/L5 replayed from ./src, in-process.
-# --header gives the public-header roots L4 needs to classify the public surface;
-# no wrapper, no plugin, no build edit.
-abicheck dump libfoo.so --sources ./src --header include/ -o libfoo.baseline.json
+# --public-header-dir gives L4 the provenance roots it needs to classify the
+# public surface; no wrapper, no plugin, no build edit.
+abicheck dump libfoo.so --sources ./src --public-header-dir include/ -o libfoo.baseline.json
 
 abicheck compare libfoo.old.baseline.json libfoo.new.baseline.json
 ```
@@ -171,9 +171,11 @@ is never auto-run — it needs an explicit `--config`.
 is opt-in (`provenance.classify_origin`): with no public-header set, every
 declaration classifies `UNKNOWN` and `link_source_abi` drops it, leaving an
 *empty* L4 public surface even though the TUs parsed. A plain
-`compile_commands.json` carries no public-header metadata, so supply the roots via
-`-H/--header` (as above), a CMake File API build dir (whose fileSets populate
-`target.public_headers`), or `.abicheck.yml` `sources.public_headers`.
+`compile_commands.json` carries no public-header metadata, so supply the roots to
+`dump` via `--public-header`/`--public-header-dir` (the L4 provenance options — as
+above; `-H/--header` feeds only the L2 header AST, and `collect` instead accepts
+`-H/--header` as its L4 roots), a CMake File API build dir (whose fileSets
+populate `target.public_headers`), or `.abicheck.yml` `sources.public_headers`.
 
 ### A2 — Split producer/consumer (`collect` → `dump --build-info`)
 
@@ -231,6 +233,8 @@ export ABICHECK_CC_LIBRARY=libfoo
 
 make CC='abicheck-cc gcc' CXX='abicheck-cc g++'   # or set CMAKE_CXX_COMPILER
 
+# merge folds pre-existing .abi.json dumps + packs; dump the binary side first.
+abicheck dump libfoo.so -o libfoo.so.json
 abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
@@ -269,6 +273,8 @@ clang++ -std=c++17 -Iinclude \
   -c src/foo.cpp -o foo.o
 # real compile only; abicheck_inputs/source_facts/<tu>.jsonl appended
 
+# dump the binary side first, then fold the emitted facts in (no re-parse).
+abicheck dump libfoo.so -o libfoo.so.json
 abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
