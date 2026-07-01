@@ -15,6 +15,8 @@
 #define WIDGET_ENABLED 1
 #define WIDGET_SCALE(x) ((x) * 2)
 
+#include "generated/config.hpp"  // generated public header → GENERATED origin
+
 namespace demo {
 
 typedef int handle_t;

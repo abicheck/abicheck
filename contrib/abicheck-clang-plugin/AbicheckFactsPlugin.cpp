@@ -80,6 +80,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
@@ -732,6 +733,39 @@ bool isContiguousSubsequence(const std::vector<std::string> &hay,
   return false;
 }
 
+// Whether a header path looks machine-generated — a faithful port of
+// provenance._is_generated_header (a `generated`/`gen`/… directory segment, or
+// a moc_/ui_/qrc_/protobuf/flatbuffers/gRPC basename). The clang backend keeps
+// such a public header on the surface but marks it GENERATED/generated
+// (ADR-030 generated_header_changed); the plugin must mirror that for C.6.
+bool isGeneratedHeaderPath(llvm::StringRef file) {
+  std::vector<std::string> segs = pathSegments(file);
+  if (segs.empty())
+    return false;
+  static const std::set<std::string> genDirs = {
+      "generated", "_generated", ".generated", "gen", "autogen"};
+  for (size_t i = 0; i + 1 < segs.size(); ++i)
+    if (genDirs.count(segs[i]))
+      return true;
+  static const std::regex genBase(
+      R"(^moc_.*\.(h|hpp|cpp|cc)$|^ui_.*\.h$|^qrc_.*\.(cpp|cc)$|.*\.pb\.(h|cc)$|.*_generated\.h$|.*\.grpc\.pb\.(h|cc)$)");
+  return std::regex_match(segs.back(), genBase);
+}
+
+// The (origin, visibility) labels for a file already known to be on the public
+// surface: GENERATED for a generated public header, else PUBLIC_HEADER — matching
+// clang.py::_ClassifyContext.classify.
+void publicSurfaceLabels(llvm::StringRef file, std::string &origin,
+                         std::string &visibility) {
+  if (isGeneratedHeaderPath(file)) {
+    origin = "GENERATED";
+    visibility = "generated";
+  } else {
+    origin = "PUBLIC_HEADER";
+    visibility = "public_header";
+  }
+}
+
 std::string collapseWhitespace(llvm::StringRef s) {
   std::string out;
   bool inWs = false;
@@ -1068,8 +1102,7 @@ private:
     std::vector<std::string> fileSegs = pathSegments(file);
     for (const std::string &root : Roots)
       if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
-        origin = "PUBLIC_HEADER";
-        visibility = "public_header";
+        publicSurfaceLabels(file, origin, visibility);
         return true;
       }
     return false;
@@ -1223,8 +1256,7 @@ private:
     std::vector<std::string> fileSegs = pathSegments(file);
     for (const std::string &root : Roots)
       if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
-        origin = "PUBLIC_HEADER";
-        visibility = "public_header";
+        publicSurfaceLabels(file, origin, visibility);
         return true;
       }
     return false;
@@ -1270,13 +1302,20 @@ private:
         ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
         ",\"read_files\":[]}";
 
-    // Per-TU, deterministic filename keyed by the source path. One TU maps to
-    // one file, so truncate (not append): a rebuild overwrites its own facts
-    // rather than accumulating stale/duplicate records across recompiles.
+    // Per-TU, deterministic filename keyed by source path AND compile context.
+    // Including the context hash keeps distinct ABI-relevant compile variants of
+    // the same source (e.g. SIMD/feature builds) in separate files — one is not
+    // erased by another — while a rebuild of the *same* variant overwrites its
+    // own file (truncate), so no stale/duplicate records accumulate. Ingest
+    // globs `source_facts/*.jsonl`, so the filename shape is free.
+    std::string cfg = (ctxHash.rfind("sha256:", 0) == 0)
+                          ? ctxHash.substr(std::string("sha256:").size(), 12)
+                          : ctxHash.substr(0, 12);
     llvm::StringRef stem = llvm::sys::path::filename(source);
     std::string factsFile = factsDir + "/" +
                             (stem.empty() ? std::string("tu") : stem.str()) +
-                            "." + sha256Hex(source).substr(0, 12) + ".jsonl";
+                            "." + sha256Hex(source).substr(0, 12) + "." + cfg +
+                            ".jsonl";
     std::ofstream out(factsFile, std::ios::trunc);
     if (!out)
       return false;
