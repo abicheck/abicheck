@@ -260,19 +260,38 @@ running.
 ```bash
 clang++ -std=c++17 -Iinclude \
   -fplugin=./libabicheck-facts.so \
-  -fplugin-arg-abicheck-facts-out=abicheck_inputs \
+  -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs \
+  -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
   -c src/foo.cpp -o foo.o
 # real compile only; abicheck_inputs/source_facts/<tu>.jsonl appended
 
 abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
+Two argument details matter and are part of the spec:
+
+- **Use the `-Xclang -plugin-arg-<name> -Xclang <arg>` form, not the
+  `-fplugin-arg-<name>-<arg>` shorthand.** The shorthand mis-parses a *hyphenated*
+  plugin name: clang splits `-fplugin-arg-abicheck-facts-out=…` at the first
+  hyphen and delivers it to a plugin named `abicheck` (verify with `clang++ -###`),
+  so `abicheck-facts`'s `ParseArgs` never sees `out=`. The `-Xclang` cc1 form is
+  unambiguous. (Alternatively, register the action under a hyphen-free name so the
+  shorthand works — but the reference skeleton uses `abicheck-facts`.)
+- **`public-roots=` is mandatory** — it is the plugin's equivalent of the
+  wrapper's `ABICHECK_CC_HEADERS`. L4 provenance is opt-in
+  (`provenance.classify_origin`): with no public-header roots every declaration
+  classifies non-public and `link_source_abi` drops it, so the plugin would emit
+  an empty public surface. Repeatable; may also be sourced from build metadata.
+
 ### C.1 — Structure and lifecycle
 
 The plugin is a `clang::PluginASTAction` registered as `abicheck-facts` with
 `getActionType() == AddAfterMainAction` — it runs **after** the real codegen
-action, so it never perturbs the object output. `ParseArgs` reads
-`-fplugin-arg-abicheck-facts-out=<dir>` (default `abicheck_inputs`).
+action, so it never perturbs the object output. `ParseArgs` reads `out=<dir>`
+(default `abicheck_inputs`) and the repeatable `public-roots=<path>` (see the
+invocation note above for the correct `-Xclang -plugin-arg-abicheck-facts` form).
+To capture macros without a second parse (C.2), it registers `PPCallbacks` on the
+`CompilerInstance`'s `Preprocessor` in `CreateASTConsumer`/`ParseArgs`.
 `HandleTranslationUnit` walks the TU with a `RecursiveASTVisitor`, buffers one
 `SourceEntity` per public declaration, wraps them in a `SourceAbiTu` envelope,
 and appends **one JSON object per line** to a **per-TU** file.
@@ -296,7 +315,7 @@ the contract:
 | typedef / alias | `"typedef", qualified_name, underlying` | `underlying = type.qualType`; `type_hash = _hash("typedef-target", underlying)`; `value = underlying` |
 | constexpr var | `"constexpr", qualified_name, value` | `value` = lone-literal value, else `subtree_hash(init)` |
 | template | `"template", qualified_name` | `body_hash = subtree_hash(node)`; do not descend into the templated pattern |
-| macro | `"macro", name, value` | from a separate `-E -dD` pass; public-header macros only, include guards dropped |
+| macro | `"macro", name, value` | captured **in-compile** via `PPCallbacks` (`MacroDefined`/`MacroUndefined`) — never a second `-E -dD` pass (C.3); public-header macros only, include guards dropped, value normalized to match `clang.py::macros_from_preprocessor` |
 
 - **`subtree_hash`** is the hard part: `clang.py` hashes an **alpha-renamed,
   commutative-operator-normalized, build-root-stripped canonical form of clang's
@@ -360,11 +379,12 @@ image and injects it.
 ### C.6 — Validation: differential conformance
 
 The plugin is correct **iff** it is a drop-in for the **clang** backend. The gate
-is a differential test: compile a fixture header both ways — the plugin, and the
-wrapper pinned to clang (`ABICHECK_CC_EXTRACTOR=clang`, *not* `auto`, so the
-reference is the recipe the plugin targets) — ingest both packs, and assert the
-two surfaces are **entity-equivalent**: equal sets keyed by
-`SourceEntity.identity()`, with equal
+is a differential test: compile a fixture header both ways — the plugin (with
+`public-roots=include`), and the wrapper pinned to clang with the same roots
+(`ABICHECK_CC_EXTRACTOR=clang`, *not* `auto`, plus `ABICHECK_CC_HEADERS=include`,
+so both sides use the recipe *and* the public surface the plugin targets) —
+ingest both packs, and assert the two surfaces are **entity-equivalent**: equal
+sets keyed by `SourceEntity.identity()`, with equal
 `signature_hash`/`type_hash`/`body_hash`/`value`/`visibility`/`api_relevant` per
 entity. It runs only where a matching clang is available (an
 `integration`/`libabigail`-style marker), never as a required abicheck-CI gate.
@@ -383,6 +403,13 @@ entity. It runs only where a matching clang is available (an
   subtree hash it emits the declaration without it (partial, never wrong) and
   records a diagnostic — the clang wrapper/full-scan path stays the reference for
   those fields until parity is proven by the C.6 gate.
+- **Macros:** macro parity must be delivered by in-compile `PPCallbacks` (C.2),
+  never a second `-E -dD` pass — a companion preprocess would reintroduce exactly
+  the extra front-end pass Flow C exists to avoid. Until the `PPCallbacks` path is
+  implemented, the plugin marks macros unsupported (emits none, records a
+  diagnostic); a project needing macro findings uses Flow A/B, where the `-E -dD`
+  pass is expected. The plugin must normalize captured macro values to match
+  `macros_from_preprocessor` so a mixed comparison still folds.
 
 ---
 
