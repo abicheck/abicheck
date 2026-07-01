@@ -28,14 +28,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: clang-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   conformance:
     name: C.6 conformance (LLVM ${{ matrix.llvm }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      # Pin each LLVM major to a runner whose apt.llvm.org channel publishes it:
+      # 16 is only on jammy (noble-16 does not exist), 17/18 are on noble.
       matrix:
-        llvm: ["16", "17", "18"]
+        include:
+          - { llvm: "16", runner: "ubuntu-22.04" }
+          - { llvm: "17", runner: "ubuntu-24.04" }
+          - { llvm: "18", runner: "ubuntu-24.04" }
     steps:
       - uses: actions/checkout@v4
 

@@ -2,8 +2,11 @@
 # Optional optimization — not part of the abicheck CI build. The plugin is
 # ABI-locked to the loading clang's LLVM major (ADR-038 C.5): build it once
 # against your pinned toolchain image and inject it.
+# C is enabled alongside CXX because LLVM's FindFFI/FindTerminfo modules (pulled
+# in by find_package(LLVM)) run check_c_source_compiles, which requires the C
+# language to be enabled in the project.
 cmake_minimum_required(VERSION 3.20)
-project(abicheck_facts_plugin CXX)
+project(abicheck_facts_plugin CXX C)
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
