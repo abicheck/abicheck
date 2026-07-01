@@ -85,7 +85,8 @@ quietly demoted.
 
 ## Cross-library reachability (A3, multi-binary releases)
 
-In a `compare-release` / bundle run, a type changed in one library that is also
+In a multi-library / bundle `compare` run (directory or package inputs), a type
+changed in one library that is also
 referenced by a sibling is reported as `bundle_intra_type_changed`. A3 adds a
 **reachability filter**: if the consumer library references the changed type
 only through its *internal* (non-exported) symbols — so the change cannot reach
@@ -93,8 +94,8 @@ the consumer's own public ABI surface — the finding is **demoted to risk**
 (reason `consumer-internal-use`), never dropped. When the type leaks into a
 symbol the consumer itself exports, the finding stays a full-confidence
 cross-DSO break. The demotion is carried on the `BundleFinding` and propagated
-onto the lowered `Change`, so the **bundle verdict** and the `compare-release`
-exit code honour it — the same demote-don't-delete contract as A4.
+onto the lowered `Change`, so the **bundle verdict** and the `compare` exit
+code honour it — the same demote-don't-delete contract as A4.
 
 ## Surface-metric drift (A1, `--surface-metrics`)
 

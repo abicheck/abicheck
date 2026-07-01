@@ -86,10 +86,15 @@ verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d
 
 ---
 
-## `abicheck compare-release`
+## `abicheck compare` (multi-library / release inputs)
 
-Aggregates the worst per-library verdict across the release; exit codes mirror
-`compare`, plus a dedicated code for removed libraries:
+When `compare` is handed directory or package inputs (RPM/deb/tar/conda/wheel),
+it fans out to per-library pairs and aggregates the worst per-library verdict
+across the release — the behaviour formerly exposed as the standalone
+`compare-release` command (folded into `compare` per ADR-037 D7; still selectable
+as the GitHub Action's `mode: compare-release`). By default a set/release
+comparison uses the verdict-based scheme below, plus a dedicated code for
+removed libraries:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -98,9 +103,20 @@ Aggregates the worst per-library verdict across the release; exit codes mirror
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
 | `8` | A library was removed between releases and `--fail-on-removed-library` is set — takes precedence over every other code |
 
-With any `--severity-*` flag, the severity-aware code (`0/1/2/4`) replaces the
-verdict-based `2/4` mapping — except exit `8` still wins, and an operational
-`ERROR` still floors the exit at `4`.
+On the release path the severity-aware code (`0/1/2/4`) replaces the
+verdict-based `2/4` mapping only when a severity *map* is actually in effect —
+that is, any `--severity-*` flag is passed **or** `.abicheck.yml` carries a
+`severity:` block (a preset or per-category levels). Setting `exit_code_scheme:
+severity` on its own is **not** enough for directory/package inputs: with no
+severity values to apply, the fan-out has nothing to score against and falls
+back to the legacy verdict mapping. Exit `8` still wins, and an operational
+`ERROR` still floors the exit at `4`. (`--exit-code-scheme` is rejected on
+directory/package inputs; pin the legacy scheme in config with
+`exit_code_scheme: legacy` if you want to force it.) One consequence worth
+gating on: with an effective severity map, a release whose worst verdict is
+`BREAKING` can still exit `0` if that map downgrades ABI breaks (e.g.
+`abi_breaking: warning`) — parse the `verdict` from JSON output if you need
+scheme-independent CI behaviour.
 
 ---
 
