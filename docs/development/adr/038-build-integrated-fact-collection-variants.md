@@ -65,17 +65,28 @@ only in *where the parse happens* and *how much the product build must change*.
 | **B** | **Wrapper injection** (`abicheck-cc`) | Set `CC`/`CXX` | 1 companion, in-build | The build (as a companion action) | `merge` an `abicheck_inputs/` pack | ✅ Shipped (Flow 2) |
 | **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚠️ Skeleton — spec below |
 
-**D0 — the shared-contract invariant.** Whatever produced the evidence, the
-per-declaration records are **record-equivalent**: identical `SourceEntity`
-`id`/`*_hash`/`value`/`visibility` fields, so the linker (`link_source_abi`)
-folds them identically and the diff (`source_diff`) is byte-stable. The binary
-dump (L0–L2) stays artifact-authoritative for shipped-ABI verdicts; source
-evidence only *explains, localizes, scopes, or adds source-level
-(`API_BREAK`/`RISK`) findings* and never deletes an artifact-proven break
-(ADR-028 D3 authority rule). This is what makes the three flows a **migration
-path, not a lock-in**: a project adopts at Flow A with zero build changes and
-moves to B or C only when parse cost demands it — with no change to stored
-baselines or the compare side.
+**D0 — the shared-contract invariant.** A *comparison* is always old-vs-new
+produced by the **same** producer, and every producer is deterministic and
+diff-stable (same TU → same records). Producers are **not** required to be
+byte-identical to each other: the castxml and clang backends already hash the
+same declaration differently — castxml builds a `ret(params)` signature string
+(`base.py`), clang hashes its `type.qualType` and uses an alpha-normalized AST
+subtree hash for types (`clang.py`). Cross-producer equivalence is required only
+between the plugin and the **specific backend it substitutes**: because the
+plugin reads the clang AST, its reference is the **clang extractor** (`clang.py`),
+and the C.6 conformance gate compares the plugin against a *clang-backed* wrapper
+(not castxml). The linker folds by `SourceEntity.identity()` — the mangled name,
+else `qualified_name#signature_hash` — so mangled decls fold consistently even
+across producers, while unmangled-decl hashes are guaranteed stable only *within*
+one producer. The binary dump (L0–L2) stays artifact-authoritative for
+shipped-ABI verdicts; source evidence only *explains, localizes, scopes, or adds
+source-level (`API_BREAK`/`RISK`) findings* and never deletes an artifact-proven
+break (ADR-028 D3 authority rule). This is what makes the three flows a
+**migration path, not a lock-in**: a project adopts at Flow A with zero build
+changes and moves to B or C only when parse cost demands it — with no change to
+the compare side. The one operational rule this implies: **produce the old and
+new baselines of a comparison the same way** (a mixed-producer pair is only safe
+for the mangled surface).
 
 ---
 
@@ -162,10 +173,12 @@ with `collect`, then attach it to the binary dump with `dump --build-info`:
 
 ```bash
 # build host: L3 build evidence + L4 source-ABI replay → an evidence pack.
-# Pass --binary so collect relinks the L4 surface against the library's exports
-# (the source-decl ↔ binary-symbol map); dump --build-info only embeds the
-# pre-captured pack and does not relink it.
-abicheck collect --binary libfoo.so --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
+# --binary relinks the L4 surface against the library's exports (the source-decl
+# ↔ binary-symbol map); --headers gives the public-header roots that classify
+# which decls are on the public surface — without them the extractor marks decls
+# UNKNOWN and the linker drops them. dump --build-info only embeds the
+# pre-captured pack; it does not relink.
+abicheck collect --binary libfoo.so --headers include/ --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
 # analysis host: attach the pre-captured pack to the binary dump (no re-parse)
 abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
@@ -255,38 +268,49 @@ action, so it never perturbs the object output. `ParseArgs` reads
 `SourceEntity` per public declaration, wraps them in a `SourceAbiTu` envelope,
 and appends **one JSON object per line** to a **per-TU** file.
 
-### C.2 — What it MUST emit (record-equivalence with the wrapper)
+### C.2 — What it MUST emit (record-equivalence with the clang backend)
 
-The visitor's field mapping must reproduce
-`buildsource/source_extractors/base.py::entity_from_*` exactly. The hashing recipe
-is fixed and part of the contract:
+The plugin reads the clang AST, so its reference is
+`buildsource/source_extractors/clang.py` (`source_abi_from_clang_ast`) — **not**
+`base.py`, which is the castxml recipe. The hashing recipe is fixed and part of
+the contract:
 
-- **Content hash:** `id`/`*_hash` = `"sha256:" + hex(sha256(parts joined by "\x00"))`,
-  parts in the order below. Any deviation changes `identity()` and breaks the
-  fold.
+- **Content hash:** `_hash(*parts) = "sha256:" + hex(sha256(parts joined by "\x00"))`
+  — same construction as `base.py`, but the *parts* below are the clang recipe.
+  Any deviation changes `identity()`/`*_hash` and fails the C.6 gate.
 
 | Kind | `id` parts | key hashes / fields |
 |------|-----------|---------------------|
-| function | `"function", mangled_or_name, sig` | `signature_hash = hash("sig", sig)`, where `sig = "{ret}({p0,p1,…}){cv/ref}"`; `value` = comma-joined `"{param}={default_expr}"` for params with defaults |
-| record | `"record", name, type_repr` | `type_hash = hash("type", type_repr)`, `type_repr = "{kind}\|size=…\|align=…\|bases=…\|vt=…\|{field:name:type@offset_bits;…}"` |
-| enum | `"enum", name, type_repr` | `type_repr = "{underlying}\|{m=v,…}"` |
-| variable | `"variable", mangled_or_name, type` | `type_hash = hash("type", type)`, `value` = initializer |
-| constexpr | `"constexpr", name, value` | `value` = normalized constant value |
-| typedef | `"typedef", name, target` | `type_hash = hash("type", target)`, `value = target` |
+| function | `"function", mangled_or_name, sig` | `sig = type.qualType` (clang's printed function type); `signature_hash = _hash("sig", sig)`; `value = _default_arg_repr` → `p<pos>=<literal-or-subtree_hash>` per defaulted param |
+| inline body | `"inline", mangled_or_name, sig` | emitted when the function has a `CompoundStmt` body; `body_hash = subtree_hash(body, param_ids)` |
+| record / enum | `"type", qualified_name` | `type_hash = subtree_hash(node)`; definitions only (skip forward decls) |
+| typedef / alias | `"typedef", qualified_name, underlying` | `underlying = type.qualType`; `type_hash = _hash("typedef-target", underlying)`; `value = underlying` |
+| constexpr var | `"constexpr", qualified_name, value` | `value` = lone-literal value, else `subtree_hash(init)` |
+| template | `"template", qualified_name` | `body_hash = subtree_hash(node)`; do not descend into the templated pattern |
+| macro | `"macro", name, value` | from a separate `-E -dD` pass; public-header macros only, include guards dropped |
 
-- **Mangled-name rule:** compute the Itanium/MS mangling via
-  `MangleContext::mangleName`; if it equals the plain name (e.g. some
-  constructors), leave `mangled_name` **empty** so `identity()` falls back to
-  `qualified_name#signature_hash` and keeps unmangled overloads distinct. Copying
-  the bare name verbatim would collapse `Widget(int)` and `Widget(double)`.
-- **Visibility / api_relevant:** classify each decl's declaring file via
-  `SourceManager` into `PUBLIC_HEADER/PRIVATE_HEADER/SYSTEM_HEADER/GENERATED`.
-  Only `PUBLIC_HEADER`/`GENERATED` decls are `api_relevant=True`; a
-  private/protected member of a public class is **off** the callable surface
-  (`api_relevant=False`). Public-header roots come from the plugin arg / build.
-- **Determinism:** the same TU compiled twice must yield identical records.
-  Match the wrapper's normalization (e.g. sorted constants/typedefs); folding is
-  order-independent, but determinism keeps the pack diff-stable.
+- **`subtree_hash`** is the hard part: `clang.py` hashes an **alpha-renamed,
+  commutative-operator-normalized, build-root-stripped canonical form of clang's
+  *JSON* AST** (`_canonical`/`_alpha_rename_map`/`_subtree_hash`). Reproducing it
+  byte-for-byte from the in-memory AST means emitting the same canonical scalar
+  keys (`kind`/`name`/`value`/`opcode`/`castKind` + `type.qualType`), the same
+  local-binding placeholders (`$0`…), and the same commutative-operand sort. This
+  is why `type_hash`/`body_hash` parity is the plugin's genuine engineering risk
+  (see C.7).
+- **Mangled-name rule:** take clang's `mangledName`; if it equals the plain
+  `name` (e.g. some constructors), leave `mangled_name` **empty** so `identity()`
+  falls back to `qualified_name#signature_hash` and keeps unmangled overloads
+  distinct. Copying the bare name verbatim would collapse `Widget(int)` and
+  `Widget(double)`.
+- **Visibility / api_relevant:** classify each decl's declaring file (via
+  `SourceManager`, threading clang's sticky `loc.file`) into
+  `PUBLIC_HEADER/PRIVATE_HEADER/SYSTEM_HEADER/GENERATED`, mirroring
+  `clang.py::_ClassifyContext`. Only public-surface decls are emitted; a
+  private/protected member of a public class is dropped (its whole subtree stays
+  non-public). Public-header roots come from the plugin arg / build.
+- **Determinism:** the same TU compiled twice must yield identical records
+  (`clang.py` sorts macros; AST-order for the rest). Folding is order-independent,
+  but determinism keeps the pack diff-stable.
 
 ### C.3 — What it MUST NOT do
 
@@ -326,23 +350,30 @@ image and injects it.
 
 ### C.6 — Validation: differential conformance
 
-The plugin is correct **iff** it is a drop-in for the wrapper. The gate is a
-differential test: compile a fixture header both ways (plugin vs `abicheck-cc`),
-ingest both packs, and assert the two surfaces are **entity-equivalent** — equal
-sets keyed by `SourceEntity.identity()`, with equal `signature_hash`/`type_hash`/
-`body_hash`/`value`/`visibility`/`api_relevant` per entity. It runs only where a
-matching clang is available (an `integration`/`libabigail`-style marker), never
-as a required abicheck-CI gate.
+The plugin is correct **iff** it is a drop-in for the **clang** backend. The gate
+is a differential test: compile a fixture header both ways — the plugin, and the
+wrapper pinned to clang (`ABICHECK_CC_EXTRACTOR=clang`, *not* `auto`, so the
+reference is the recipe the plugin targets) — ingest both packs, and assert the
+two surfaces are **entity-equivalent**: equal sets keyed by
+`SourceEntity.identity()`, with equal
+`signature_hash`/`type_hash`/`body_hash`/`value`/`visibility`/`api_relevant` per
+entity. It runs only where a matching clang is available (an
+`integration`/`libabigail`-style marker), never as a required abicheck-CI gate.
 
 ### C.7 — Non-goals / limitations
 
 - **Compiler coverage:** clang only. GCC (`-fdump-lang-class`/`-fdump-tu`) and
   MSVC remain documented fallbacks via the wrapper; a small normalizer to
   `source_facts` is out of scope here.
-- **Body fingerprints:** `body_hash` for inline/template bodies is best-effort;
-  where the plugin cannot cheaply reproduce the clang extractor's fingerprint, it
-  emits the declaration without a body hash (partial, never wrong) and records a
-  diagnostic — the wrapper/full-scan path remains the reference for those fields.
+- **AST-subtree hashes:** `type_hash` (records/enums) and `body_hash`
+  (inline/template bodies) depend on reproducing `clang.py`'s JSON-AST
+  canonicalization from the in-memory AST (C.2) — the plugin's hardest part.
+  Declaration-level fields (`id`, `qualified_name`, `mangled_name`,
+  `signature_hash` from `qualType`, default-arg `value`, `visibility`) are
+  straightforward and match readily; where the plugin cannot yet reproduce a
+  subtree hash it emits the declaration without it (partial, never wrong) and
+  records a diagnostic — the clang wrapper/full-scan path stays the reference for
+  those fields until parity is proven by the C.6 gate.
 
 ---
 
@@ -416,8 +447,9 @@ baselines and readers are unaffected.
 - **ADR-035 (D5)** — introduced Flow 1/Flow 2 and the `abicheck_inputs/` protocol;
   this ADR expands them into the three-flow family and specifies the plugin.
 - **ADR-028 (D3/D6)** — authority rule + non-executing ingest; unchanged.
-- **ADR-030** — `SourceAbiTu`/`SourceEntity` schema and the `entity_from_*`
-  mapping the plugin must mirror.
+- **ADR-030** — `SourceAbiTu`/`SourceEntity` schema; `clang.py`
+  (`source_abi_from_clang_ast`) is the recipe the plugin mirrors, `base.py` the
+  castxml recipe.
 - **ADR-032** — extractor action/security model; producers of the same normalized
   facts, ingested by the non-executing `inputs_pack` path.
 - **ADR-033** — replay scopes, per-TU caching, and CI cost model that bound Flow
