@@ -85,8 +85,10 @@ break (ADR-028 D3 authority rule). This is what makes the three flows a
 **migration path, not a lock-in**: a project adopts at Flow A with zero build
 changes and moves to B or C only when parse cost demands it — with no change to
 the compare side. The one operational rule this implies: **produce the old and
-new baselines of a comparison the same way** (a mixed-producer pair is only safe
-for the mangled surface).
+new baselines of a comparison the same way** — the only sanctioned cross-producer
+pair is the plugin and the clang backend it is conformance-tested against (C.6),
+which agree on the *whole* surface including macros; an *arbitrary* producer mix
+(e.g. castxml vs clang) is reliable only on the mangled surface.
 
 ---
 
@@ -151,9 +153,9 @@ One command materializes a baseline with L3/L4/L5 folded in:
 
 ```bash
 # Binary L0–L2 from the .so + L3/L4/L5 replayed from ./src, in-process.
-# --public-header-dir gives L4 the provenance roots it needs to classify the
-# public surface; no wrapper, no plugin, no build edit.
-abicheck dump libfoo.so --sources ./src --public-header-dir include/ -o libfoo.baseline.json
+# No wrapper, no plugin, no build edit. (L4 needs public-header roots — see the
+# note below; the inline path takes them from config, not a dump flag.)
+abicheck dump libfoo.so --sources ./src -o libfoo.baseline.json
 
 abicheck compare libfoo.old.baseline.json libfoo.new.baseline.json
 ```
@@ -167,15 +169,17 @@ So `--sources ./src` alone yields L3 with no flag and no manual compile-DB step.
 An arbitrary `build.query` from an *auto-discovered* (untrusted) `.abicheck.yml`
 is never auto-run — it needs an explicit `--config`.
 
-**Public-header roots are a separate input from the compile DB.** L4 provenance
-is opt-in (`provenance.classify_origin`): with no public-header set, every
-declaration classifies `UNKNOWN` and `link_source_abi` drops it, leaving an
-*empty* L4 public surface even though the TUs parsed. A plain
-`compile_commands.json` carries no public-header metadata, so supply the roots to
-`dump` via `--public-header`/`--public-header-dir` (the L4 provenance options — as
-above; `-H/--header` feeds only the L2 header AST, and `collect` instead accepts
-`-H/--header` as its L4 roots), a CMake File API build dir (whose fileSets
-populate `target.public_headers`), or `.abicheck.yml` `sources.public_headers`.
+**Public-header roots are a separate input from the compile DB — and the inline
+`dump --sources` path takes them from *config*, not a CLI flag.** L4 provenance is
+opt-in (`provenance.classify_origin`): with no public-header set, every
+declaration classifies `UNKNOWN`, `link_source_abi` drops it, and the L4 surface
+is *empty* even though the TUs parsed. A plain `compile_commands.json` carries no
+public-header metadata, and `dump`'s `--public-header`/`--public-header-dir` flags
+feed only the **L2** header-AST provenance — `embed_build_source` does not forward
+them to the inline L4 collection. So give the inline L4 surface its roots via
+`.abicheck.yml` `sources.public_headers` or a CMake File API build dir (whose
+fileSets populate `target.public_headers`). For roots specified **on the command
+line**, use the A2 `collect -H/--header` path (which *does* feed L4).
 
 ### A2 — Split producer/consumer (`collect` → `dump --build-info`)
 
@@ -185,11 +189,11 @@ with `collect`, then attach it to the binary dump with `dump --build-info`:
 ```bash
 # build host: L3 build evidence + L4 source-ABI replay → an evidence pack.
 # --binary relinks the L4 surface against the library's exports (the source-decl
-# ↔ binary-symbol map); --headers gives the public-header roots that classify
+# ↔ binary-symbol map); --header gives the public-header roots that classify
 # which decls are on the public surface — without them the extractor marks decls
 # UNKNOWN and the linker drops them. dump --build-info only embeds the
 # pre-captured pack; it does not relink.
-abicheck collect --binary libfoo.so --headers include/ --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
+abicheck collect --binary libfoo.so --header include/ --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
 # analysis host: attach the pre-captured pack to the binary dump (no re-parse)
 abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
@@ -203,13 +207,19 @@ abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
   auto|clang|castxml` (ADR-037 D8; the same dial drives the L2 header AST);
   `collect` spells it `--source-abi-extractor auto|clang|castxml|android`. `clang`
   adds inline/template/constexpr **body** fingerprints + default args; `castxml`
-  gives declarations/types/const values only; a requested `clang` not on PATH
-  falls back to castxml rather than disabling source checks.
+  gives declarations/types/const values only. On `collect` a requested `clang`
+  not on PATH falls back to castxml; the inline `dump --sources` path instead
+  **disables** source-only checks when the selected frontend is unavailable (it
+  records "source-only checks disabled" rather than switching backends), so on a
+  clang-less host pass `--ast-frontend castxml` explicitly.
 - **Scope:** on inline `dump --sources` use the `--depth`/`--max` dial (ADR-037
   D5; `binary|headers|build|source|full`) to bound how deep to collect. The
   fine-grained replay scopes (`--source-abi-scope off|headers-only|changed|
-  target|full` + `--changed-path`) are **`collect`-only**. Either way a PR run
-  parses only what changed — it is *not* forced to re-parse the whole tree.
+  target|full` + `--changed-path`) are **`collect`-only**; inline `dump --sources`
+  has no `--changed-path` and defaults to a broader `source-target` collection.
+  **Changed-only** replay is therefore a `collect --source-abi-scope changed
+  --changed-path …` (or `scan --since`) capability — reach for it on PR jobs; the
+  inline `dump` default is not changed-scoped.
 - **Cost:** one parse per in-scope TU, paid **by abicheck**, not the build. The
   measured cost cliff is at L4 for template-heavy C++ (`scan_levels.py` cost
   model); scope + the per-TU content-addressed cache (`ABICHECK_L4_CACHE_DIR`)
@@ -417,9 +427,13 @@ entity. It runs only where a matching clang is available (an
   never a second `-E -dD` pass — a companion preprocess would reintroduce exactly
   the extra front-end pass Flow C exists to avoid. Until the `PPCallbacks` path is
   implemented, the plugin marks macros unsupported (emits none, records a
-  diagnostic); a project needing macro findings uses Flow A/B, where the `-E -dD`
-  pass is expected. The plugin must normalize captured macro values to match
-  `macros_from_preprocessor` so a mixed comparison still folds.
+  diagnostic); a project needing macro findings runs Flow A/B for **both** sides
+  of the comparison (where the `-E -dD` pass is expected), not a Flow-C/Flow-A
+  split within one comparison. Once implemented, the plugin must normalize
+  captured macro values to match `macros_from_preprocessor` so it stays
+  entity-equivalent to the clang backend it substitutes (the C.6 gate covers
+  macros) — the sanctioned plugin↔clang-backend equivalence of D0, not a licence
+  to mix arbitrary producers.
 
 ---
 

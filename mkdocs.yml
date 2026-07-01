@@ -197,7 +197,7 @@ nav:
       - "035: PR-Tier Source Intelligence & Cross-Check": development/adr/035-pr-tier-source-intelligence-and-crosscheck.md
       - "036: Report View-Model & Canonical Severity": development/adr/036-report-view-model.md
       - "037: CLI Interface Contract": development/adr/037-cli-interface-contract.md
-      - "038: Build-Integrated Fact Collection": development/adr/038-build-integrated-fact-collection-variants.md
+      - "038: Working With Sources": development/adr/038-build-integrated-fact-collection-variants.md
     - Archive (historical):
       - "ADR Gap Analysis": development/archive/adr-gap-analysis.md
       - "Data-Source Process Remediation Plan": development/archive/data-source-process-remediation-plan.md

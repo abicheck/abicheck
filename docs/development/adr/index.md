@@ -41,5 +41,5 @@
 | [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Accepted — implemented (G19, D1–D10) |
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
 | [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Accepted — implemented (G22) |
-| [038](038-build-integrated-fact-collection-variants.md) | Build-Integrated Source-Fact Collection — Three Producer Variants | Proposed |
+| [038](038-build-integrated-fact-collection-variants.md) | Working With Sources — Full-Scan and Two Build-Injection Flows | Proposed |
 | [Gap Analysis](../archive/adr-gap-analysis.md) | Decisions Needing Formal ADRs (historical snapshot, archived) | Reference |
