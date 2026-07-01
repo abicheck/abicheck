@@ -241,7 +241,7 @@ export ABICHECK_INPUTS_DIR=abicheck_inputs
 export ABICHECK_CC_HEADERS=include        # public-header roots
 export ABICHECK_CC_LIBRARY=libfoo
 
-make CC='abicheck-cc gcc' CXX='abicheck-cc g++'   # or set CMAKE_CXX_COMPILER
+make CC='abicheck-cc gcc' CXX='abicheck-cc g++'   # CMake: -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc
 
 # merge folds pre-existing .abi.json dumps + packs; dump the binary side first.
 abicheck dump libfoo.so -o libfoo.so.json
