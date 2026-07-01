@@ -398,6 +398,13 @@ public:
     SourceLocation loc = mi->getDefinitionLoc();
     if (loc.isInvalid())
       return;
+    // stdlib/toolchain macros are never the library's public surface. The
+    // path-only `isPublicFile` check downstream would otherwise accept a system
+    // header like /usr/include/... because it contains an `include` segment, so
+    // filter system headers here — where we still have the SourceLocation —
+    // mirroring the decl classifier's SM.isInSystemHeader guard.
+    if (SM.isInSystemHeader(loc))
+      return;
     PresumedLoc pl = SM.getPresumedLoc(loc);
     if (pl.isInvalid())
       return;
