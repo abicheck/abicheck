@@ -50,11 +50,14 @@
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+#include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/MacroInfo.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/PreprocessorOptions.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
@@ -808,6 +811,16 @@ std::string upperStrippedStem(llvm::StringRef file) {
   return collapsed;
 }
 
+std::string joinStrings(const std::vector<std::string> &v, char sep) {
+  std::string out;
+  for (size_t i = 0; i < v.size(); ++i) {
+    if (i)
+      out.push_back(sep);
+    out += v[i];
+  }
+  return out;
+}
+
 std::string nowIso8601Utc() {
   std::time_t t = std::time(nullptr);
   std::tm tm{};
@@ -873,15 +886,20 @@ private:
     std::string params;
     if (mi->isFunctionLike()) {
       params += "(";
-      bool first = true;
-      for (const IdentifierInfo *pi : mi->params()) {
-        if (!first)
+      auto pl = mi->params();
+      for (unsigned i = 0; i < pl.size(); ++i) {
+        if (i)
           params += ",";
-        first = false;
-        if (pi->getName() == "__VA_ARGS__")
-          params += "...";
-        else
+        const IdentifierInfo *pi = pl[i];
+        if (pi->getName() == "__VA_ARGS__") {
+          params += "..."; // C99 variadic
+        } else {
           params += pi->getName().str();
+          // GNU named variadic (`#define LOG(fmt, args...)`): the ellipsis rides
+          // the last parameter, so append it to keep the call contract distinct.
+          if (mi->isGNUVarargs() && i + 1 == pl.size())
+            params += "...";
+        }
       }
       params += ")";
     }
@@ -1174,10 +1192,11 @@ class FactsConsumer : public ASTConsumer {
 public:
   FactsConsumer(std::string outDir, std::vector<std::string> roots,
                 std::string library, std::string version,
+                std::string ctxHash,
                 std::shared_ptr<std::map<std::string, MacroRecord>> macros)
       : OutDir(std::move(outDir)), Roots(std::move(roots)),
         Library(std::move(library)), Version(std::move(version)),
-        Macros(std::move(macros)) {}
+        CtxHash(std::move(ctxHash)), Macros(std::move(macros)) {}
 
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
@@ -1193,13 +1212,7 @@ public:
     std::string source;
     if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID()))
       source = fe->getName().str();
-    std::string standard;
-    if (ctx.getLangOpts().LangStd != LangStandard::lang_unspecified)
-      standard =
-          LangStandard::getLangStandardForKind(ctx.getLangOpts().LangStd)
-              .getName();
-    std::string triple = ctx.getTargetInfo().getTriple().str();
-    std::string ctxHash = H({"ctx", standard, triple});
+    const std::string &ctxHash = CtxHash;
     std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
     std::string tuId = "cu://" + source + "#cfg:" + cfg;
     std::string targetId = Library.empty() ? "" : "target://" + Library;
@@ -1355,6 +1368,7 @@ private:
   std::vector<std::string> Roots;
   std::string Library;
   std::string Version;
+  std::string CtxHash;
   std::shared_ptr<std::map<std::string, MacroRecord>> Macros;
 };
 
@@ -1375,7 +1389,31 @@ public:
     Preprocessor &pp = ci.getPreprocessor();
     pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
     return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
-                                           macros);
+                                           computeContextHash(ci), macros);
+  }
+
+  // The compile-context hash — the per-TU cache key (ADR-030 D8) and the `cfg`
+  // segment of the facts filename. Fold in every ABI-relevant compile input the
+  // clang extractor's context uses (standard/triple/sysroot/defines/includes/
+  // target-features), so distinct variants of one source get distinct hashes
+  // (and distinct facts files) rather than colliding. Not compared in C.6 (only
+  // entities are) — it only needs to be deterministic and discriminating.
+  static std::string computeContextHash(const CompilerInstance &ci) {
+    std::string standard;
+    const LangOptions &lo = ci.getLangOpts();
+    if (lo.LangStd != LangStandard::lang_unspecified)
+      standard = LangStandard::getLangStandardForKind(lo.LangStd).getName();
+    const TargetOptions &to = ci.getTargetOpts();
+    std::vector<std::string> defs;
+    for (const auto &m : ci.getPreprocessorOpts().Macros)
+      defs.push_back((m.second ? "U:" : "D:") + m.first);
+    std::sort(defs.begin(), defs.end());
+    std::vector<std::string> incs;
+    const HeaderSearchOptions &hso = ci.getHeaderSearchOpts();
+    for (const auto &e : hso.UserEntries)
+      incs.push_back(e.Path);
+    return H({"ctx", standard, to.Triple, hso.Sysroot, joinStrings(defs, ','),
+              joinStrings(incs, ','), joinStrings(to.Features, ',')});
   }
 
   bool ParseArgs(const CompilerInstance &,

@@ -14,6 +14,7 @@
 #define WIDGET_VERSION 3
 #define WIDGET_ENABLED 1
 #define WIDGET_SCALE(x) ((x) * 2)
+#define WIDGET_LOG(fmt, args...) fmt  // GNU named variadic → params keep `args...`
 
 #include "generated/config.hpp"  // generated public header → GENERATED origin
 
