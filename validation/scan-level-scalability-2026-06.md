@@ -57,10 +57,12 @@ dominated by the binary dump + the L2 header AST + the L3 compile-DB parse, none
 of which grow with the number of `.cpp` files. Confirms the UXL "cheap tier is one
 price" result, now with a scaling exponent rather than a single point. `graph`
 (s4) sits just above them: it is still far cheaper than the L4 tiers (no AST
-replay) but **does** grow mildly with TU count (~0.5 tail exponent, 7.6 s → 14.0 s
-from n=4 to n=16) because the L5 graph fold visits every compile unit — so it is
-not in the same "size-independent" class as binary/headers/build. `full` (s6) is
-**linear** in TU count (every TU is replayed). So far, so expected.
+replay) but **does** grow with TU count because the L5 graph fold visits every
+compile unit — mildly at small N (~0.5, 7.6 s → 14.0 s from n=4 to n=16) but
+**fully linear at scale** (~0.8 in both time and memory by 64 TUs; see
+[Larger-N behaviour](#larger-n-behaviour-n--64)), so it is *not* in the
+"size-independent" class of binary/headers/build. `full` (s6) is **linear** in TU
+count (every TU is replayed). So far, so expected.
 
 The interesting result is two scalability *gaps* on the `source` (s5) rung,
 both quantified below and both now addressed/filed.
@@ -140,6 +142,41 @@ clamped the L4 replay, which was a single TU) — the call-graph pass ran 4 work
 regardless of the RAM budget. After it, a host with a tighter budget trades wall
 time for ~half the peak RSS, which is what converts an OOM-kill on a constrained
 host into a slower-but-successful scan.
+
+## Larger-N behaviour (n → 64)
+
+A follow-up sweep extended the expensive tiers to n=16→32 and the cheap tiers to
+n=64 (same 4 vCPU / 15 GiB host, default auto jobs):
+
+| level | n=16 | n=32 | n=64 | wall exp (16→32) |
+|---|---|---|---|---|
+| `binary`        | 1.4 s / 39 MB   | 0.6 s / 39 MB   | 0.7 s / 39 MB    | flat |
+| `headers` (L2)  | —               | —               | 6.6 s / 637 MB   | flat |
+| `build` (L3)    | 11.1 s / 634 MB | 8.1 s / 635 MB  | 7.2 s / 455 MB   | flat |
+| `graph` (s4)    | 17.0 s / 534 MB | 29.5 s / 960 MB | **55.3 s / 1488 MB** | **~0.8 (linear)** |
+| `source_seeded` | 28.3 s / 1166 MB | 38.5 s / 1437 MB | —               | ~0.4 |
+| `source` (seedless) | 81.4 s / 2611 MB | 144.8 s / 2894 MB | —           | ~0.8 (linear) |
+| `full` (s6)     | 142.8 s / 3652 MB | 256.3 s / 3303 MB | —              | ~0.8 (linear) |
+
+Three things the larger sweep adds:
+
+1. **The memory clamp holds at scale.** Peak RSS on the L4/L5 tiers stays
+   *bounded by the worker count* (~2.6–2.9 GB seedless `source`, ~3.3–3.7 GB
+   `full`) rather than growing with TU count — **no OOM at n=32 or n=64**. This is
+   the Gap-2 fix validated past the sizes at which the UXL replays were
+   OOM-killed.
+2. **`graph` (s4) is *not* a flat-cheap tier at scale** — it is **linear in both
+   time and memory** (17 → 29 → 55 s, 534 → 960 → 1488 MB from n=16→32→64, tail
+   exponent ~0.8/0.85). At small N it looks nearly flat (~0.5), but the L5
+   structural fold visits every compile unit, so by 64 TUs `graph` costs as much
+   as a small source run. Only `binary`/`headers`/`build` are truly
+   size-independent; budget `graph` as *linear-but-cheap-per-TU*, not free.
+3. **Gap 1 worsens with N, as predicted.** Seedless-vs-seeded `source` widens from
+   1.9× (n=4) to **2.9× (n=16) and 3.8× (n=32)** — the unscoped call-graph pass
+   scales with the whole tree while the seeded run stays flat. This is the
+   strongest argument for the Gap-1 follow-up (scope the unseeded call-graph pass,
+   or at least report its TU count): the bigger the project, the more a seedless
+   `--depth source` overpays for coverage the report never shows.
 
 ## Reproduce
 
