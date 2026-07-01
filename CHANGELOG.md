@@ -9,8 +9,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] — 2026-07-01
+
 ### Changed
 
+- **Breaking — CLI interface contract (ADR-037 / G22).** Reshaped the command
+  surface behind a typed Tier-2 service chokepoint and shared option-family
+  decorators. Migration notes:
+  - `--header-backend` is renamed to `--ast-frontend` (per-side
+    `--old-ast-frontend` / `--new-ast-frontend`); the old spelling is rejected.
+  - `compare-release` and `deep-compare` are folded into `compare` via
+    input-type dispatch — pass two directories/packages for the release/bundle
+    flow, or `compare --sources …` for the former deep-compare path. (The
+    GitHub Action still accepts `mode: compare-release` as an alias.)
+  - Per-side L2 header backend on `compare`, and `--public-header-dir` on
+    `scan` to classify public/internal provenance.
 - **Breaking — command-surface consolidation (ADR-037 / G22).** Completed the
   ADR-037 cleanup begun in 0.4.0: removed the remaining deprecated command
   paths and introduced a shared `--lang` factory used identically across
@@ -21,6 +36,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--gcc-*`, `--ast-frontend`, `--sysroot`, `--nostdinc`, and `--lang` flags
   behave identically on all three, plus native `--baseline` /
   `--baseline-header` / `--baseline-include` on `scan`.
+- Version bump to 0.4.0.
 
 ### Added
 
@@ -50,25 +66,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   it is consistent with the L4 surface and no longer scales with the tree
   (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs
   (`--since`/`--changed-path`) and `--depth full` are unchanged.
-
----
-
-## [0.4.0] — 2026-06-18
-
-### Changed
-
-- **Breaking — CLI interface contract (ADR-037 / G22).** Reshaped the command
-  surface behind a typed Tier-2 service chokepoint and shared option-family
-  decorators. Migration notes:
-  - `--header-backend` is renamed to `--ast-frontend` (per-side
-    `--old-ast-frontend` / `--new-ast-frontend`); the old spelling is rejected.
-  - `compare-release` and `deep-compare` are folded into `compare` via
-    input-type dispatch — pass two directories/packages for the release/bundle
-    flow, or `compare --sources …` for the former deep-compare path. (The
-    GitHub Action still accepts `mode: compare-release` as an alias.)
-  - Per-side L2 header backend on `compare`, and `--public-header-dir` on
-    `scan` to classify public/internal provenance.
-- Version bump to 0.4.0.
 
 ---
 
