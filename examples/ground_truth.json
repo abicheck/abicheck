@@ -316,6 +316,10 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting \u2192 buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
+      "known_gap": "macOS/Homebrew castxml currently drops the header-only typedef/type-removal signal for this fixture, so the macOS nightly observes NO_CHANGE even with L2 headers. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "typedef_removed",
         "type_removed"
@@ -600,6 +604,10 @@
       "api_break": true,
       "bad_practice": false,
       "description": "A public constexpr constant changes value (8 -> 16). The value is baked into consumers at compile time, so mixing header versions disagrees on sizes; yet the constant has internal linkage (no symbol), so the binaries are identical and object/DWARF comparison sees nothing. Detected only in header mode via constant_changed: the dumper extracts const/constexpr initializers declared in the provided public headers (castxml `init` attribute). Plain #define macros remain invisible (castxml emits no macros).",
+      "known_gap": "macOS/Homebrew castxml does not emit the constexpr initializer signal this case relies on, so the macOS nightly observes NO_CHANGE. Linux remains the blocking detector lane for constant_changed.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "constant_changed"
       ]
@@ -618,6 +626,10 @@
       "api_break": true,
       "bad_practice": false,
       "description": "A public, extensible base class gains the `final` specifier in v2. Layout, vtable and mangled names are unchanged, so already-compiled binaries keep running, but any consumer that derives from it no longer compiles. Detected via the new TYPE_BECAME_FINAL ChangeKind, which reads the `final` class-key from castxml header analysis. Invisible in object/DWARF mode (the binaries are ABI-identical), demonstrating why source/header analysis is required for the full API picture.",
+      "known_gap": "macOS/Homebrew castxml does not expose the class final marker consistently for this fixture, so the macOS nightly observes NO_CHANGE. Linux remains the blocking detector lane for type_became_final.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "type_became_final"
       ]
@@ -1187,7 +1199,11 @@
       ],
       "abi_break": false,
       "api_break": true,
-      "bad_practice": false
+      "bad_practice": false,
+      "known_gap": "macOS/Homebrew castxml currently drops the access-level transition for this fixture, so the macOS nightly observes NO_CHANGE. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos"
+      ]
     },
     "case35_field_rename": {
       "expected": "BREAKING",
@@ -1230,6 +1246,10 @@
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
+      "known_gap": "macOS debug/header extraction currently misses this base-class change and observes NO_CHANGE in the nightly. Linux remains the blocking detector lane for type_base_changed.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "type_base_changed"
       ]
@@ -1314,7 +1334,11 @@
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
-      "description": "Data member added to base class shifts derived class layout (libabigail: Added_Base_Class_Data_Member)"
+      "description": "Data member added to base class shifts derived class layout (libabigail: Added_Base_Class_Data_Member)",
+      "known_gap": "macOS debug/header extraction currently misses the base-class member addition and observes NO_CHANGE in the nightly. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos"
+      ]
     },
     "case44_cyclic_type_member_added": {
       "expected": "BREAKING",
@@ -1619,6 +1643,9 @@
       "platforms": [
         "linux"
       ],
+      "architectures": [
+        "x86_64"
+      ],
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
@@ -1761,6 +1788,10 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Intermediate class inserted into hierarchy \u2014 vtable layout shifts, object size changes, covariant return type changes from Circle* to Drawable* (TYPE_BASE_CHANGED)",
+      "known_gap": "macOS debug/header extraction currently reports this hierarchy/covariant-return fixture as COMPATIBLE instead of BREAKING. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "type_base_changed",
         "type_vtable_changed",
@@ -1953,6 +1984,10 @@
       "api_break": false,
       "bad_practice": false,
       "description": "AVX-512 ISA tier dropped: every *_avx512_* symbol removed across all algorithms. Dispatcher-using callers unaffected; ISA-pinned callers break. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding (RISK_KINDS).",
+      "known_gap": "macOS Mach-O symbol evidence does not preserve the ELF-style ISA-dispatch grouping signal for this fixture; the nightly reports BREAKING instead of COMPATIBLE_WITH_RISK. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "cpu_dispatch_isa_dropped"
       ]
@@ -2211,6 +2246,10 @@
       "api_break": true,
       "bad_practice": false,
       "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector \u2014 combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
+      "known_gap": "macOS/Homebrew castxml currently drops the nested typedef removal signal for this fixture, so the macOS nightly observes NO_CHANGE. Linux remains the blocking detector lane for typedef_removed.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "expected_kinds": [
         "typedef_removed"
       ]

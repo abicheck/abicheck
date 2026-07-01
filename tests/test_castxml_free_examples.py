@@ -140,8 +140,10 @@ def test_subset_entries_are_well_formed() -> None:
         entry = _GT.get(name)
         assert entry is not None, f"{name}: no ground_truth entry"
         assert entry.get("expected") is not None, f"{name}: null verdict"
-        assert "known_gap" not in entry, (
-            f"{name}: tagged known_gap — should not be in the castxml-free subset"
+        gap_platforms = set(entry.get("known_gap_platforms", []))
+        assert "known_gap" not in entry or gap_platforms.isdisjoint({"linux"}), (
+            f"{name}: tagged with an unscoped/Linux known_gap — should not be "
+            "in the Linux castxml-free subset"
         )
         assert "scope_public_headers" not in entry or True  # informational
     assert len(set(CASTXML_FREE_CASES)) == len(CASTXML_FREE_CASES), "duplicate entries"

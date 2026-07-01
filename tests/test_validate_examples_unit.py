@@ -21,6 +21,7 @@ from tests.validate_examples import (  # noqa: E402
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
     _build_info_path,
+    _check_case_preconditions,
     _embedded_present_layers,
     _evaluate_verdict,
     _gap_applies,
@@ -111,10 +112,54 @@ class TestKnownGapToolchainScope:
         with patch.object(ve, "_toolchain_family", lambda _is_cpp: "gcc"):
             assert _gap_applies({"known_gap_toolchains": ["clang"]}, True) is False
 
+    def test_platform_scoped_gap_only_on_that_platform(self):
+        with patch.object(ve, "CURRENT_PLATFORM", "macos"):
+            assert _gap_applies({"known_gap_platforms": ["macos"]}, True) is True
+        with patch.object(ve, "CURRENT_PLATFORM", "linux"):
+            assert _gap_applies({"known_gap_platforms": ["macos"]}, True) is False
+
+    def test_toolchain_and_platform_scopes_both_apply(self):
+        entry = {
+            "known_gap_toolchains": ["clang"],
+            "known_gap_platforms": ["macos"],
+        }
+        with (
+            patch.object(ve, "_toolchain_family", lambda _is_cpp: "clang"),
+            patch.object(ve, "CURRENT_PLATFORM", "linux"),
+        ):
+            assert _gap_applies(entry, True) is False
+        with (
+            patch.object(ve, "_toolchain_family", lambda _is_cpp: "gcc"),
+            patch.object(ve, "CURRENT_PLATFORM", "macos"),
+        ):
+            assert _gap_applies(entry, True) is False
+        with (
+            patch.object(ve, "_toolchain_family", lambda _is_cpp: "clang"),
+            patch.object(ve, "CURRENT_PLATFORM", "macos"),
+        ):
+            assert _gap_applies(entry, True) is True
+
     def test_real_cases_are_scoped(self):
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
+
+
+class TestCasePreconditions:
+    def test_architecture_filter_skips_unsupported_machine(self):
+        with patch.object(ve, "CURRENT_ARCHITECTURE", "aarch64"):
+            result = _check_case_preconditions(
+                "case64",
+                {
+                    "expected": "BREAKING",
+                    "platforms": ["linux"],
+                    "architectures": ["x86_64"],
+                },
+            )
+
+        assert result is not None
+        assert result.status == "SKIP"
+        assert "requires ['x86_64']" in result.message
 
 
 class TestGroundTruthIntegrity:

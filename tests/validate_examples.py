@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -72,6 +73,19 @@ def _current_platform() -> str:
 
 
 CURRENT_PLATFORM = _current_platform()
+
+
+def _current_architecture() -> str:
+    """Return a normalized architecture tag for ground_truth.json."""
+    machine = platform.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "x86_64"
+    if machine in {"arm64", "aarch64"}:
+        return "aarch64"
+    return machine
+
+
+CURRENT_ARCHITECTURE = _current_architecture()
 
 
 def _shared_lib_suffix() -> str:
@@ -162,12 +176,16 @@ def _gap_applies(entry: dict, is_cpp: bool) -> bool:
     A ``known_gap_toolchains`` list scopes the gap to specific producers; on any
     other producer a verdict mismatch is a real failure (so a producer-specific
     gap like case64/case103 does not mask a regression on the other producer).
+    ``known_gap_platforms`` similarly scopes platform-specific extractor gaps.
     Absent ⇒ applies everywhere (back-compat).
     """
-    scope = entry.get("known_gap_toolchains")
-    if not scope:
-        return True
-    return _toolchain_family(is_cpp) in scope
+    toolchains = entry.get("known_gap_toolchains")
+    if toolchains and _toolchain_family(is_cpp) not in toolchains:
+        return False
+    platforms = entry.get("known_gap_platforms")
+    if platforms and CURRENT_PLATFORM not in platforms:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -901,6 +919,16 @@ def _check_case_preconditions(
     if CURRENT_PLATFORM not in platforms:
         return CaseResult(name, "SKIP", expected_raw, None,
                           f"not supported on {CURRENT_PLATFORM} (requires {platforms})")
+
+    architectures = entry.get("architectures")
+    if architectures and CURRENT_ARCHITECTURE not in architectures:
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            f"not supported on {CURRENT_ARCHITECTURE} (requires {architectures})",
+        )
 
     # Skip cases whose required compiler feature is unavailable (e.g. C23
     # _BitInt on GCC < 14): the fixture cannot compile, so it is not a FAIL.

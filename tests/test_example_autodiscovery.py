@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,17 @@ def _current_platform() -> str:
     return sys.platform
 
 CURRENT_PLATFORM = _current_platform()
+
+def _current_architecture() -> str:
+    """Return a normalized architecture tag for ground_truth.json."""
+    machine = platform.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "x86_64"
+    if machine in {"arm64", "aarch64"}:
+        return "aarch64"
+    return machine
+
+CURRENT_ARCHITECTURE = _current_architecture()
 
 def _shared_lib_suffix() -> str:
     """Return the shared library file extension for the current platform."""
@@ -97,6 +109,19 @@ KNOWN_GAP_TOOLCHAINS: dict[str, list[str]] = {
     k: list(v["known_gap_toolchains"])
     for k, v in _gt_data["verdicts"].items()
     if v.get("known_gap_toolchains")
+}
+# known_gap_platforms: case_name → platform tags where the gap applies.
+# When set, the gap only xfails on those platforms. Absent ⇒ all platforms.
+KNOWN_GAP_PLATFORMS: dict[str, list[str]] = {
+    k: list(v["known_gap_platforms"])
+    for k, v in _gt_data["verdicts"].items()
+    if v.get("known_gap_platforms")
+}
+# architectures: case_name → machine tags where the fixture can run.
+ARCHITECTURES: dict[str, list[str]] = {
+    k: list(v["architectures"])
+    for k, v in _gt_data["verdicts"].items()
+    if v.get("architectures")
 }
 # requires_feature: case_name → compiler feature that must be available, else
 # the case is skipped (the fixture cannot even compile on toolchains lacking
@@ -527,10 +552,13 @@ def _toolchain_family(is_cpp: bool) -> str:
 
 def _gap_applies(case_name: str, is_cpp: bool) -> bool:
     """Whether *case_name*'s known_gap applies under the case's actual compiler."""
-    scope = KNOWN_GAP_TOOLCHAINS.get(case_name)
-    if not scope:
-        return True  # unscoped gap applies everywhere (back-compat)
-    return _toolchain_family(is_cpp) in scope
+    toolchains = KNOWN_GAP_TOOLCHAINS.get(case_name)
+    if toolchains and _toolchain_family(is_cpp) not in toolchains:
+        return False
+    platforms = KNOWN_GAP_PLATFORMS.get(case_name)
+    if platforms and CURRENT_PLATFORM not in platforms:
+        return False
+    return True
 
 
 def _assert_verdict(
@@ -571,6 +599,12 @@ def test_example_pipeline(
         pytest.skip(
             f"{case_name} not supported on {CURRENT_PLATFORM} "
             f"(requires {case_platforms})"
+        )
+    case_architectures = ARCHITECTURES.get(case_name)
+    if case_architectures and CURRENT_ARCHITECTURE not in case_architectures:
+        pytest.skip(
+            f"{case_name} not supported on {CURRENT_ARCHITECTURE} "
+            f"(requires {case_architectures})"
         )
 
     if case_name in BUILD_INFO_CASES:
@@ -657,6 +691,12 @@ def test_example_build_evidence(case_name: str, tmp_path: Path) -> None:
     case_platforms = entry.get("platforms", ["linux", "macos", "windows"])
     if CURRENT_PLATFORM not in case_platforms:
         pytest.skip(f"{case_name} not supported on {CURRENT_PLATFORM}")
+    case_architectures = ARCHITECTURES.get(case_name)
+    if case_architectures and CURRENT_ARCHITECTURE not in case_architectures:
+        pytest.skip(
+            f"{case_name} not supported on {CURRENT_ARCHITECTURE} "
+            f"(requires {case_architectures})"
+        )
     if not shutil.which("castxml"):
         pytest.skip("castxml not found in PATH")
 
