@@ -195,6 +195,22 @@ def test_buildconfig_parses_compile_block() -> None:
     assert BuildConfig.from_dict(bc.to_dict()).to_dict() == bc.to_dict()
 
 
+def test_buildconfig_rejects_compile_std_flag_injection() -> None:
+    from abicheck.buildsource.inline import BuildConfig
+
+    with pytest.raises(ValueError, match=r"compile\.std"):
+        BuildConfig.from_dict({"compile": {"std": "c++20 -Xclang"}})
+
+
+def test_buildconfig_rejects_compile_define_flag_injection() -> None:
+    from abicheck.buildsource.inline import BuildConfig
+
+    with pytest.raises(ValueError, match=r"compile\.defines"):
+        BuildConfig.from_dict(
+            {"compile": {"defines": ["SAFE=1 -Xclang -load -Xclang ./evil.so"]}}
+        )
+
+
 def test_buildconfig_rejects_bad_compile_frontend() -> None:
     import pytest as _pytest
 
