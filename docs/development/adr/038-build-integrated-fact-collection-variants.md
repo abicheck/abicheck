@@ -104,9 +104,12 @@ analysis host with `dump --build-info` (Variant A produces a `BuildSourcePack`,
 not a Flow-2 `abicheck_inputs/` pack — that protocol belongs to Variants B/C):
 
 ```bash
-# build host: L3 build evidence + L4 source-ABI replay → an evidence pack
-abicheck collect --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
-# analysis host: attach the pack to the binary dump (no re-parse here)
+# build host: L3 build evidence + L4 source-ABI replay → an evidence pack.
+# Pass --binary so collect relinks the L4 surface against the library's exports
+# (the source-decl ↔ binary-symbol map); dump --build-info only embeds the
+# pre-captured pack and does not relink it.
+abicheck collect --binary libfoo.so --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
+# analysis host: attach the pre-captured pack to the binary dump (no re-parse here)
 abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
 
