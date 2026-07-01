@@ -44,32 +44,42 @@ Per `SourceEntity`: `id`, `kind`, `qualified_name`, `mangled_name`,
 
 ### Coverage (ADR-038 C.7)
 
-Implemented and matching `clang.py`:
+Implemented and matching `clang.py`, validated by the C.6 CI matrix:
 
 - **functions/methods/ctors/dtors** — `id`, `qualified_name`, `mangled_name`
-  (with the mangled-name rule: a mangled name equal to the plain name is left
-  empty so `identity()` falls back to `qualified_name#signature_hash`),
-  `signature_hash` from the printed function type, and default-argument `value`
-  for literal defaults;
-- **typedefs / type-aliases** — fully reproducible (`type_hash =
-  _hash("typedef-target", underlying)`, `value = underlying`);
-- **constexpr variables** with a literal initializer;
-- **macros** — captured **in-compile** via `PPCallbacks`
-  (`MacroDefined`/`MacroUndefined`), never a second `-E -dD` pass; include
-  guards dropped, non-public macros filtered, values whitespace-normalized;
-- **visibility / api_relevant** — public-header classification from the
-  declaring file against the `public-roots` set; only public-surface decls are
-  emitted (a private/protected member is dropped).
+  (mangled-name rule: a mangled name equal to the plain name is left empty so
+  `identity()` falls back to `qualified_name#signature_hash`), `signature_hash`
+  from `type.qualType`, and default-argument `value`;
+- **inline bodies** — `body_hash` = subtree hash of the `CompoundStmt`;
+- **records / enums** — `type_hash` = subtree hash (definitions only);
+- **function / class templates** — `body_hash` = subtree hash of the whole
+  template node (members of a class template are *not* re-emitted — no descent);
+- **typedefs / type-aliases** — `type_hash = _hash("typedef-target",
+  underlying)`, `value = underlying`;
+- **constexpr variables** — literal *and* computed initializers (a computed
+  initializer's `value` is its subtree hash, as in `clang.py`);
+- **macros** — captured **in-compile** via `PPCallbacks`, never a second
+  `-E -dD` pass; include guards dropped, non-public/system macros filtered;
+- **visibility / api_relevant** — public-header classification against the
+  `public-roots` set, with inherited access threaded so a public member of a
+  private nested class is dropped.
 
-Deferred, emitted **partial (never wrong)** with a diagnostic — the AST-subtree
-hashes that depend on reproducing `clang.py`'s canonicalized JSON-AST form:
+**How the subtree hashes reach parity.** `clang.py`'s `_subtree_hash` hashes a
+canonicalized form of clang's *JSON* AST. Rather than hand-reproduce that JSON,
+the plugin serializes the subtree with **clang's own JSON dumper in-process**
+(`Decl::dump(os, false, ADOF_JSON)` — the exact `-ast-dump=json` path) and ports
+`clang.py`'s `_alpha_rename_map`/`_canonical`/`_subtree_hash` onto it. Because the
+wrapper's clang backend consumes the same clang JSON, the hashes match by
+construction for a given clang version — which is what the C.6 matrix verifies.
+No second parse is added: the dump reads the AST clang already built.
 
-- `type_hash` for records/enums, `body_hash` for inline/template bodies — the
-  entity is emitted without the subtree hash so presence/removal is still
-  tracked; the clang wrapper / full-scan path stays the reference for those
-  fields until parity is proven by the C.6 gate;
-- a constexpr with a non-literal initializer is skipped (its value also feeds
-  the entity `id`, so a divergent id is avoided rather than emitted).
+The one documented residual is a **floating-point literal's textual value inside
+a hashed subtree** (`pyFloat`): clang's JSON emits an approximate numeric value
+whose shortest-round-trip form is reproduced only best-effort. It stays
+self-consistent within the producer, so under D0 it never yields a false finding;
+only the cross-producer C.6 gate can surface it. If a JSON dump fails at runtime,
+the entity is emitted without the subtree hash (partial, never wrong) + a
+diagnostic.
 
 Raw AST dumps (`raw_ast/`) are **forensic only** — abicheck does not ingest
 them (ADR-035 D5); the plugin normalizes to `source_facts` itself.
@@ -108,15 +118,28 @@ Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 
 ## Validation: differential conformance (ADR-038 C.6)
 
-The plugin is correct **iff** it is a drop-in for the **clang** backend. Compile
-a fixture header both ways — the plugin (with `public-roots=include`), and the
-`abicheck-cc` wrapper pinned to clang with the same roots
-(`ABICHECK_CC_EXTRACTOR=clang`, *not* `auto`, plus `ABICHECK_CC_HEADERS=include`)
-— ingest both packs, and assert the two surfaces are **entity-equivalent**:
-equal sets keyed by `SourceEntity.identity()`, with equal
+The plugin is correct **iff** it is a drop-in for the **clang** backend. The gate
+is `tests/conformance.py`: it compiles one fixture TU both ways with the *same*
+clang — the plugin (`public-roots=include`) and the `abicheck-cc` wrapper pinned
+to clang (`ABICHECK_CC_EXTRACTOR=clang`, `ABICHECK_CC_HEADERS=include`) — ingests
+both packs, and asserts the two surfaces are **entity-equivalent**: equal sets
+keyed by `SourceEntity.identity()` with equal
 `signature_hash`/`type_hash`/`body_hash`/`value`/`visibility`/`api_relevant`.
-It runs only where a matching clang is available and is never a required
-abicheck-CI gate.
+Non-macro entities are strict; macro values are lenient (the documented spacing
+soft edge).
+
+Run it locally against a built plugin:
+
+```bash
+python contrib/abicheck-clang-plugin/tests/conformance.py \
+  --plugin build/libabicheck-facts.so --clangxx clang++
+```
+
+CI runs it on a **matrix of LLVM/Clang majors** via
+`.github/workflows/clang-plugin.yml` (pinning `clang`/`clang++` on `PATH` to each
+matrix version, so the plugin and the wrapper's extractor use the identical
+clang — the precondition for byte-for-byte parity). It is a standalone,
+non-blocking workflow, never a required abicheck-CI gate.
 
 ## Compiler fallbacks (documented, not required)
 

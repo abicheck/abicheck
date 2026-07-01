@@ -1,0 +1,80 @@
+# ADR-038 Flow C — build the Clang facts plugin against several LLVM/Clang
+# majors and run the C.6 differential-conformance test on each. The plugin is
+# ABI-locked to its LLVM major (ADR-038 C.5), so it cannot ship one .so for
+# every clang; this validates parity per-version instead. Non-blocking: it is a
+# standalone workflow, not part of the required abicheck CI gates, and is
+# path-filtered to the plugin + the clang-recipe modules it mirrors.
+name: clang-plugin
+
+on:
+  push:
+    paths:
+      - "contrib/abicheck-clang-plugin/**"
+      - ".github/workflows/clang-plugin.yml"
+      - "abicheck/buildsource/source_extractors/clang.py"
+      - "abicheck/buildsource/inputs_pack.py"
+      - "abicheck/buildsource/inputs_emit.py"
+      - "abicheck/buildsource/source_abi.py"
+  pull_request:
+    paths:
+      - "contrib/abicheck-clang-plugin/**"
+      - ".github/workflows/clang-plugin.yml"
+      - "abicheck/buildsource/source_extractors/clang.py"
+      - "abicheck/buildsource/inputs_pack.py"
+      - "abicheck/buildsource/inputs_emit.py"
+      - "abicheck/buildsource/source_abi.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: C.6 conformance (LLVM ${{ matrix.llvm }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm: ["16", "17", "18"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install LLVM/Clang ${{ matrix.llvm }}
+        run: |
+          set -eux
+          # apt.llvm.org installer reliably provides any recent major.
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${{ matrix.llvm }}
+          sudo apt-get install -y \
+            llvm-${{ matrix.llvm }}-dev \
+            libclang-${{ matrix.llvm }}-dev \
+            clang-${{ matrix.llvm }} \
+            cmake ninja-build
+          # Pin `clang`/`clang++` on PATH to the matrix version, so the plugin
+          # (linked against LLVM N) and the wrapper's clang extractor use the
+          # SAME clang — the precondition for byte-for-byte hash parity (D0/C.6).
+          sudo ln -sf /usr/bin/clang-${{ matrix.llvm }} /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-${{ matrix.llvm }} /usr/local/bin/clang++
+          clang --version
+
+      - name: Install abicheck
+        run: pip install -e ".[dev]"
+
+      - name: Build the plugin
+        run: |
+          set -eux
+          cmake -S contrib/abicheck-clang-plugin -B build/plugin -G Ninja \
+            -DCMAKE_PREFIX_PATH="/usr/lib/llvm-${{ matrix.llvm }}"
+          cmake --build build/plugin
+          test -f build/plugin/libabicheck-facts.so
+
+      - name: Run C.6 differential conformance
+        run: |
+          python contrib/abicheck-clang-plugin/tests/conformance.py \
+            --plugin build/plugin/libabicheck-facts.so \
+            --clangxx clang++

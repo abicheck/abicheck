@@ -8,32 +8,33 @@
 // During a normal compile this plugin emits abicheck's normalized Flow-2 source
 // facts (source_facts/*.jsonl, schema =
 // abicheck.buildsource.source_abi.SourceAbiTu) straight from the AST Clang
-// already built, so no second front-end pass is needed (the cost the
-// `abicheck-cc` wrapper otherwise pays). The output is the same
+// already built, so no second front-end pass is needed. The output is the same
 // `abicheck_inputs/` protocol abicheck ingests via `merge`.
 //
-// Reference recipe (ADR-038 C.2): because the plugin reads the *clang* AST its
+// Reference recipe (ADR-038 C.2). Because the plugin reads the *clang* AST its
 // reference is `abicheck/buildsource/source_extractors/clang.py`
 // (`source_abi_from_clang_ast`) — NOT `base.py`, which is the castxml recipe.
-// Field/hash construction here mirrors clang.py so the emitted records are
-// entity-equivalent to the clang backend the plugin substitutes (the C.6
-// differential-conformance gate).
 //
-// Coverage (ADR-038 C.7). Declaration-level fields — `id`, `qualified_name`,
-// `mangled_name` (with the mangled-name rule), `signature_hash`, default-arg
-// `value` for literal defaults, typedef `type_hash`/`value`, `visibility`,
-// `api_relevant`, and macros (via in-compile PPCallbacks) — are implemented and
-// match clang.py. The AST-*subtree* hashes — `type_hash` for records/enums and
-// `body_hash` for inline/template bodies — depend on reproducing clang.py's
-// alpha-renamed, commutative-normalized, build-root-stripped canonical form of
-// clang's JSON AST; that is the plugin's genuine engineering risk, so those
-// entities are emitted WITHOUT the subtree hash (partial, never wrong) and a
-// diagnostic is recorded, exactly as C.7 sanctions. The clang wrapper/full-scan
-// path stays the reference for those fields until parity is proven by C.6.
+// How subtree-hash parity is achieved (ADR-038 C.7 → now implemented). The
+// hard part of clang.py is `_subtree_hash`: it hashes an alpha-renamed,
+// commutative-normalized, build-root-stripped canonical form of clang's *JSON*
+// AST. Rather than hand-reproduce clang's JSON (which drifts across LLVM majors
+// and is enormous to mirror node-by-node), this plugin serializes the relevant
+// subtree with clang's OWN JSON dumper in-process — `Decl::dump(os, false,
+// ADOF_JSON)`, the exact code path `-ast-dump=json` uses — and then ports
+// clang.py's `_alpha_rename_map` / `_canonical` / `_subtree_hash` (and
+// `_expr_value` / `_default_arg_repr`) onto that JSON. Because the wrapper's
+// clang backend consumes the *same* clang JSON, the hashes match by
+// construction for a given clang version. Cross-version drift is caught by the
+// C.6 differential-conformance gate, which now runs as a CI matrix over several
+// clang versions (see `.github/workflows/clang-plugin.yml`). Producing both
+// baselines of a comparison the same way (D0) keeps it correct in real use even
+// where a floating-point literal's textual value is only reproduced
+// best-effort (the one documented residual — see `pyFloat`).
 //
 // This plugin links against the *loading* clang's LLVM/Clang libraries and is
-// therefore ABI-locked to its LLVM major (C.5). It is `contrib/` reference and
-// is never built or gated in abicheck's own CI.
+// therefore ABI-locked to its LLVM major (C.5). It stays `contrib/` reference
+// and is not a required gate in abicheck's own CI.
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
@@ -42,10 +43,9 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
-#include "clang/AST/GlobalDecl.h"
-#include "clang/AST/Mangle.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Basic/ASTDumperUtils.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -57,19 +57,27 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -107,9 +115,10 @@ std::string H(std::initializer_list<std::string> parts) {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal JSON emission with a fixed key order, so the pack is diff-stable
-// (ADR-038 C.2 "Determinism") and matches SourceEntity.to_dict/SourceAbiTu
-// .to_dict field order.
+// Minimal JSON emission with a fixed key order, for the emitted SourceEntity /
+// SourceAbiTu records (matches SourceEntity.to_dict / SourceAbiTu.to_dict field
+// order). Distinct from the *canonical* serializer below, which reproduces
+// Python's json.dumps for hashing.
 // ---------------------------------------------------------------------------
 std::string jsonEscape(llvm::StringRef s) {
   std::string out;
@@ -174,9 +183,478 @@ std::string jsonRawArray(const std::vector<std::string> &items) {
   return out;
 }
 
-// A normalized SourceEntity (ADR-030 D4). Empty hash fields are the sanctioned
-// partial state (ADR-038 C.7); to_json emits them as "" like SourceEntity
-// .to_dict does for an unset hash.
+// ===========================================================================
+// Canonical serializer + subtree hashing — a faithful C++ port of clang.py's
+// `_hash("clang-ast", json.dumps(_canonical(node, amap), sort_keys=True))`.
+// Operates on `llvm::json::Value` parsed from clang's own JSON dumper, so the
+// input is byte-identical to what clang.py consumes for the same clang version.
+// ===========================================================================
+using llvm::json::Array;
+using llvm::json::Object;
+using llvm::json::Value;
+
+// json.dumps of a Python str: quoted, ensure_ascii=True (non-ASCII → \uXXXX,
+// with surrogate pairs for astral code points), lowercase hex — matching the
+// CPython json encoder defaults clang.py relies on.
+std::string pyStr(llvm::StringRef s) {
+  std::string out = "\"";
+  size_t i = 0, n = s.size();
+  auto emitU = [&](uint32_t cp) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "\\u%04x", cp);
+    out += b;
+  };
+  while (i < n) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c == '"') { out += "\\\""; i++; continue; }
+    if (c == '\\') { out += "\\\\"; i++; continue; }
+    if (c == '\n') { out += "\\n"; i++; continue; }
+    if (c == '\r') { out += "\\r"; i++; continue; }
+    if (c == '\t') { out += "\\t"; i++; continue; }
+    if (c == '\b') { out += "\\b"; i++; continue; }
+    if (c == '\f') { out += "\\f"; i++; continue; }
+    if (c < 0x20) { emitU(c); i++; continue; }
+    if (c < 0x80) { out.push_back(static_cast<char>(c)); i++; continue; }
+    // Decode a UTF-8 sequence to a code point and emit \uXXXX (ensure_ascii).
+    uint32_t cp = 0;
+    int extra = 0;
+    if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+    else { emitU(c); i++; continue; }
+    if (i + extra >= n) { emitU(c); i++; continue; }
+    bool ok = true;
+    for (int k = 1; k <= extra; k++) {
+      unsigned char cc = static_cast<unsigned char>(s[i + k]);
+      if ((cc & 0xC0) != 0x80) { ok = false; break; }
+      cp = (cp << 6) | (cc & 0x3F);
+    }
+    if (!ok) { emitU(c); i++; continue; }
+    i += extra + 1;
+    if (cp <= 0xFFFF) {
+      emitU(cp);
+    } else {
+      cp -= 0x10000;
+      emitU(0xD800 + (cp >> 10));
+      emitU(0xDC00 + (cp & 0x3FF));
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+// Best-effort Python repr() of a float. Exact byte-parity with CPython's
+// shortest-round-trip formatting is the one documented residual (ADR-038 C.7):
+// a floating-point literal appearing *inside* a hashed subtree may serialize
+// differently here. It is still self-consistent within this producer, so under
+// D0 (both baselines produced the same way) it never yields a false finding;
+// only the cross-producer C.6 gate can surface it.
+std::string pyFloat(double d) {
+  char buf[64];
+  for (int prec = 1; prec <= 17; ++prec) {
+    std::snprintf(buf, sizeof(buf), "%.*g", prec, d);
+    if (std::strtod(buf, nullptr) == d)
+      break;
+  }
+  std::string s = buf;
+  if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
+      s.find('n') == std::string::npos && s.find('i') == std::string::npos)
+    s += ".0";
+  return s;
+}
+
+// json.dumps of an arbitrary JSON value with sort_keys=True and the default
+// (', ', ': ') separators — used to copy a scalar `value` verbatim inside the
+// canonical form.
+std::string pyDumps(const Value &v) {
+  switch (v.kind()) {
+  case Value::Null:
+    return "null";
+  case Value::Boolean:
+    return *v.getAsBoolean() ? "true" : "false";
+  case Value::Number:
+    if (auto i = v.getAsInteger())
+      return std::to_string(*i);
+    return pyFloat(*v.getAsNumber());
+  case Value::String:
+    return pyStr(*v.getAsString());
+  case Value::Array: {
+    std::string out = "[";
+    bool first = true;
+    for (const Value &e : *v.getAsArray()) {
+      if (!first) out += ", ";
+      first = false;
+      out += pyDumps(e);
+    }
+    return out + "]";
+  }
+  case Value::Object: {
+    std::map<std::string, std::string> kv;
+    for (const auto &kvp : *v.getAsObject())
+      kv[llvm::StringRef(kvp.first).str()] = pyDumps(kvp.second);
+    std::string out = "{";
+    bool first = true;
+    for (auto &e : kv) {
+      if (!first) out += ", ";
+      first = false;
+      out += pyStr(e.first) + ": " + e.second;
+    }
+    return out + "}";
+  }
+  }
+  return "null";
+}
+
+// Python str(x) semantics for a JSON `value` used by _expr_value: a string is
+// its raw characters (no quotes), a bool is "True"/"False", an int its digits.
+std::string pyStrOfValue(const Value &v) {
+  switch (v.kind()) {
+  case Value::Null:
+    return "None";
+  case Value::Boolean:
+    return *v.getAsBoolean() ? "True" : "False";
+  case Value::Number:
+    if (auto i = v.getAsInteger())
+      return std::to_string(*i);
+    return pyFloat(*v.getAsNumber());
+  case Value::String:
+    return v.getAsString()->str();
+  default:
+    return pyDumps(v);
+  }
+}
+
+bool isRenameableLocal(const Object &o) {
+  auto kind = o.getString("kind");
+  if (!kind)
+    return false;
+  if (*kind == "ParmVarDecl" || *kind == "BindingDecl" ||
+      *kind == "DecompositionDecl")
+    return true;
+  if (*kind == "VarDecl") {
+    if (auto sc = o.getString("storageClass"))
+      if (*sc == "static" || *sc == "extern")
+        return false;
+    return true;
+  }
+  return false;
+}
+
+// Port of clang.py::_alpha_rename_map: map each local-binding clang id to a
+// positional placeholder ($0, $1, …) by first occurrence (params first).
+llvm::StringMap<std::string> alphaRenameMap(const Value &node,
+                                            llvm::ArrayRef<std::string> paramIds) {
+  std::set<std::string> localIds;
+  for (const std::string &p : paramIds)
+    if (!p.empty())
+      localIds.insert(p);
+
+  std::function<void(const Value &)> collect = [&](const Value &n) {
+    const Object *o = n.getAsObject();
+    if (!o)
+      return;
+    if (auto id = o->getString("id"))
+      if (isRenameableLocal(*o))
+        localIds.insert(id->str());
+    if (const Array *inner = o->getArray("inner"))
+      for (const Value &c : *inner)
+        collect(c);
+  };
+  collect(node);
+  llvm::StringMap<std::string> amap;
+  if (localIds.empty())
+    return amap;
+
+  std::vector<std::string> order;
+  std::set<std::string> seen;
+  for (const std::string &p : paramIds)
+    if (localIds.count(p) && !seen.count(p)) {
+      seen.insert(p);
+      order.push_back(p);
+    }
+  std::function<void(const Value &)> walk = [&](const Value &n) {
+    const Object *o = n.getAsObject();
+    if (!o)
+      return;
+    if (auto id = o->getString("id"))
+      if (localIds.count(id->str()) && !seen.count(id->str())) {
+        seen.insert(id->str());
+        order.push_back(id->str());
+      }
+    if (const Object *ref = o->getObject("referencedDecl"))
+      if (auto rid = ref->getString("id"))
+        if (localIds.count(rid->str()) && !seen.count(rid->str())) {
+          seen.insert(rid->str());
+          order.push_back(rid->str());
+        }
+    if (const Array *inner = o->getArray("inner"))
+      for (const Value &c : *inner)
+        walk(c);
+  };
+  walk(node);
+  for (size_t i = 0; i < order.size(); ++i)
+    amap[order[i]] = "$" + std::to_string(i);
+  return amap;
+}
+
+const std::set<std::string> &commutativeOps() {
+  static const std::set<std::string> ops = {"+", "*", "==", "!=", "&", "|", "^"};
+  return ops;
+}
+
+// Port of clang.py::_canonical → json.dumps(..., sort_keys=True) as one string.
+std::string canonical(const Value &node, const llvm::StringMap<std::string> &amap) {
+  const Object *o = node.getAsObject();
+  if (!o)
+    return pyDumps(node);
+
+  std::map<std::string, std::string> kv; // std::map keeps keys sorted (ASCII)
+  std::optional<std::string> placeholder;
+  if (auto id = o->getString("id")) {
+    auto it = amap.find(*id);
+    if (it != amap.end())
+      placeholder = it->second;
+  }
+  for (const char *key : {"kind", "name", "value", "opcode", "castKind"}) {
+    if (const Value *v = o->get(key)) {
+      if (std::strcmp(key, "name") == 0 && placeholder)
+        kv[key] = pyStr(*placeholder);
+      else
+        kv[key] = pyDumps(*v);
+    }
+  }
+  if (const Object *t = o->getObject("type"))
+    if (auto q = t->getString("qualType"))
+      kv["type"] = pyStr(*q);
+  if (const Object *ref = o->getObject("referencedDecl")) {
+    std::optional<std::string> refph;
+    if (auto rid = ref->getString("id")) {
+      auto it = amap.find(*rid);
+      if (it != amap.end())
+        refph = it->second;
+    }
+    if (refph)
+      kv["ref"] = pyStr(*refph);
+    else if (auto rn = ref->getString("name"); rn && !rn->empty())
+      kv["ref"] = pyStr(*rn);
+  }
+  if (const Array *inner = o->getArray("inner")) {
+    std::vector<std::string> children;
+    children.reserve(inner->size());
+    for (const Value &c : *inner)
+      children.push_back(canonical(c, amap));
+    // Commutative-operator normalization: sort the two operands of a
+    // commutative binary operator by their canonical serialization.
+    auto kind = o->getString("kind");
+    auto op = o->getString("opcode");
+    if (kind && *kind == "BinaryOperator" && op &&
+        commutativeOps().count(op->str()) && children.size() == 2)
+      std::sort(children.begin(), children.end());
+    std::string arr = "[";
+    for (size_t i = 0; i < children.size(); ++i) {
+      if (i) arr += ", ";
+      arr += children[i];
+    }
+    arr += "]";
+    kv["inner"] = arr;
+  }
+
+  std::string out = "{";
+  bool first = true;
+  for (auto &e : kv) {
+    if (!first) out += ", ";
+    first = false;
+    out += pyStr(e.first) + ": " + e.second;
+  }
+  out += "}";
+  return out;
+}
+
+std::string subtreeHash(const Value &node, llvm::ArrayRef<std::string> paramIds) {
+  auto amap = alphaRenameMap(node, paramIds);
+  return H({"clang-ast", canonical(node, amap)});
+}
+
+// clang.py::_WRAPPER_EXPR_KINDS — single-child wrappers descended through when
+// deciding whether an initializer is a lone literal.
+bool isWrapperExpr(llvm::StringRef k) {
+  return k == "ImplicitCastExpr" || k == "CStyleCastExpr" ||
+         k == "CXXStaticCastExpr" || k == "ConstantExpr" ||
+         k == "ExprWithCleanups" || k == "ParenExpr" ||
+         k == "CXXFunctionalCastExpr" || k == "MaterializeTemporaryExpr";
+}
+
+bool isLiteralKind(llvm::StringRef k) {
+  return k == "IntegerLiteral" || k == "FloatingLiteral" ||
+         k == "CharacterLiteral" || k == "StringLiteral" ||
+         k == "CXXBoolLiteralExpr" || k == "FixedPointLiteral";
+}
+
+bool declLikeKind(llvm::StringRef k) {
+  return k.ends_with("Decl") || k.ends_with("Attr") || k.ends_with("Comment");
+}
+
+// Port of clang.py::_unwrap_expr.
+const Value *unwrapExprJson(const Value *node) {
+  const Value *cur = node;
+  while (cur) {
+    const Object *o = cur->getAsObject();
+    if (!o)
+      break;
+    auto kind = o->getString("kind");
+    if (!kind || !isWrapperExpr(*kind))
+      break;
+    const Array *inner = o->getArray("inner");
+    if (!inner)
+      break;
+    std::vector<const Value *> dicts;
+    for (const Value &c : *inner)
+      if (c.getAsObject())
+        dicts.push_back(&c);
+    if (dicts.size() != 1)
+      break;
+    cur = dicts[0];
+  }
+  return cur;
+}
+
+// Port of clang.py::_init_expr: the last child that is not a decl/attr/comment.
+const Value *initExprJson(const Object &node) {
+  const Array *inner = node.getArray("inner");
+  if (!inner)
+    return nullptr;
+  const Value *last = nullptr;
+  for (const Value &c : *inner) {
+    const Object *co = c.getAsObject();
+    if (!co)
+      continue;
+    auto kind = co->getString("kind");
+    if (kind && declLikeKind(*kind))
+      continue;
+    last = &c;
+  }
+  return last;
+}
+
+// Port of clang.py::_expr_value.
+std::string exprValueJson(const Value &node) {
+  const Value *core = unwrapExprJson(&node);
+  if (core) {
+    const Object *o = core->getAsObject();
+    if (o) {
+      auto kind = o->getString("kind");
+      const Value *val = o->get("value");
+      if (kind && isLiteralKind(*kind) && val)
+        return pyStrOfValue(*val);
+    }
+  }
+  return subtreeHash(node, {});
+}
+
+// Port of clang.py::_default_arg_repr over the FunctionDecl JSON.
+std::string defaultArgReprJson(const Object &fnNode) {
+  const Array *inner = fnNode.getArray("inner");
+  if (!inner)
+    return "";
+  std::string out;
+  bool first = true;
+  int position = -1;
+  for (const Value &c : *inner) {
+    const Object *co = c.getAsObject();
+    if (!co)
+      continue;
+    auto kind = co->getString("kind");
+    if (!kind || *kind != "ParmVarDecl")
+      continue;
+    ++position;
+    const Value *init = initExprJson(*co);
+    // clang.py: `if not child.get("init") and init is None: continue`. clang's
+    // JSON marks a defaulted parameter with a truthy "init" string (e.g. "c").
+    bool hasInitFlag = false;
+    if (const Value *f = co->get("init")) {
+      if (auto s = f->getAsString())
+        hasInitFlag = !s->empty();
+      else if (auto b = f->getAsBoolean())
+        hasInitFlag = *b;
+      else
+        hasInitFlag = f->kind() != Value::Null;
+    }
+    if (!hasInitFlag && init == nullptr)
+      continue;
+    std::string rep = init ? exprValueJson(*init) : "default";
+    if (!first)
+      out += ",";
+    first = false;
+    out += "p" + std::to_string(position) + "=" + rep;
+  }
+  return out;
+}
+
+// Port of clang.py::_param_ids: the FunctionDecl's ParmVarDecl child ids.
+std::vector<std::string> paramIdsJson(const Object &fnNode) {
+  std::vector<std::string> ids;
+  if (const Array *inner = fnNode.getArray("inner"))
+    for (const Value &c : *inner) {
+      const Object *co = c.getAsObject();
+      if (!co)
+        continue;
+      auto kind = co->getString("kind");
+      if (kind && *kind == "ParmVarDecl")
+        if (auto id = co->getString("id"))
+          ids.push_back(id->str());
+    }
+  return ids;
+}
+
+// The CompoundStmt body child of a FunctionDecl JSON node, or nullptr.
+const Value *bodyStmtJson(const Object &fnNode) {
+  if (const Array *inner = fnNode.getArray("inner"))
+    for (const Value &c : *inner) {
+      const Object *co = c.getAsObject();
+      if (co)
+        if (auto kind = co->getString("kind"); kind && *kind == "CompoundStmt")
+          return &c;
+    }
+  return nullptr;
+}
+
+// clang.py::_mangled over JSON: take the node's mangledName; if it equals the
+// plain (unqualified) name — extern "C", some ctors — leave it empty so
+// identity() falls back to qualified_name#signature_hash.
+std::string mangledFromJson(const Object &o) {
+  auto m = o.getString("mangledName");
+  auto n = o.getString("name");
+  if (m && !m->empty() && (!n || *m != *n))
+    return m->str();
+  return "";
+}
+
+// clang.py::_signature over JSON: the node's type.qualType.
+std::string qualTypeFromJson(const Object &o) {
+  if (const Object *t = o.getObject("type"))
+    if (auto q = t->getString("qualType"))
+      return q->str();
+  return "";
+}
+
+// Dump a Decl to clang's JSON (identical to -ast-dump=json for that node) and
+// parse it. Returns nullopt on any dump/parse failure (best-effort, C.3).
+std::optional<Value> dumpDeclJson(const Decl *d) {
+  std::string buf;
+  llvm::raw_string_ostream os(buf);
+  d->dump(os, /*Deserialize=*/false, ADOF_JSON);
+  os.flush();
+  auto parsed = llvm::json::parse(buf);
+  if (!parsed) {
+    llvm::consumeError(parsed.takeError());
+    return std::nullopt;
+  }
+  return std::move(*parsed);
+}
+
+// ---------------------------------------------------------------------------
+// Emitted SourceEntity (ADR-030 D4).
+// ---------------------------------------------------------------------------
 struct Entity {
   std::string id;
   std::string kind;
@@ -196,8 +674,6 @@ struct Entity {
     std::string loc = "{\"path\":" + jsonStr(loc_path) +
                       ",\"line\":" + std::to_string(loc_line) +
                       ",\"origin\":" + jsonStr(loc_origin) + "}";
-    // Field order mirrors SourceEntity.to_dict(); confidence is always "high"
-    // (directly observed from the AST), matching clang.py's LayerConfidence.HIGH.
     return "{\"id\":" + jsonStr(id) + ",\"kind\":" + jsonStr(kind) +
            ",\"qualified_name\":" + jsonStr(qualified_name) +
            ",\"mangled_name\":" + jsonStr(mangled_name) +
@@ -213,21 +689,14 @@ struct Entity {
 
 // ---------------------------------------------------------------------------
 // Path helpers for public-surface classification (ADR-038 C.2 visibility).
-// A pragmatic reference classifier: a file is on the public surface when a
-// public-root's path segments appear as a contiguous subsequence of the file's
-// path segments (so `public-roots=include` matches `/proj/include/api/foo.h`,
-// and an exact-file root matches its own tail). clang.py uses a richer
-// include-spelling-equivalence model; matching it byte-for-byte is not required
-// for identity, only visibility, which C.7 lists as decl-level/straightforward.
 // ---------------------------------------------------------------------------
 std::vector<std::string> pathSegments(llvm::StringRef p) {
   std::vector<std::string> segs;
   std::string cur;
   for (char c : p) {
     if (c == '/' || c == '\\') {
-      if (!cur.empty() && cur != ".") {
+      if (!cur.empty() && cur != ".")
         segs.push_back(cur);
-      }
       cur.clear();
     } else {
       cur.push_back(c);
@@ -244,12 +713,11 @@ bool isContiguousSubsequence(const std::vector<std::string> &hay,
     return false;
   for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
     bool ok = true;
-    for (size_t j = 0; j < needle.size(); ++j) {
+    for (size_t j = 0; j < needle.size(); ++j)
       if (hay[i + j] != needle[j]) {
         ok = false;
         break;
       }
-    }
     if (ok)
       return true;
   }
@@ -257,7 +725,6 @@ bool isContiguousSubsequence(const std::vector<std::string> &hay,
 }
 
 std::string collapseWhitespace(llvm::StringRef s) {
-  // Mirrors clang.py's re.sub(r"\s+", " ", ...).strip() over macro text.
   std::string out;
   bool inWs = false;
   for (char c : s) {
@@ -275,17 +742,15 @@ std::string collapseWhitespace(llvm::StringRef s) {
 }
 
 std::string upperStrippedStem(llvm::StringRef file) {
-  // foo.h -> FOO_H (mirrors clang.py::_is_include_guard stem derivation).
   llvm::StringRef base = llvm::sys::path::filename(file);
   std::string stem;
   for (char c : base) {
-    if (std::isalnum(static_cast<unsigned char>(c))) {
-      stem.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-    } else {
+    if (std::isalnum(static_cast<unsigned char>(c)))
+      stem.push_back(
+          static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    else
       stem.push_back('_');
-    }
   }
-  // Collapse runs of '_' then strip leading/trailing '_'.
   std::string collapsed;
   bool underscore = false;
   for (char c : stem) {
@@ -314,69 +779,10 @@ std::string nowIso8601Utc() {
   return buf;
 }
 
-// Strip paren/cast/ConstantExpr wrappers, matching the intent of clang.py's
-// _unwrap_expr, so a lone literal under implicit casts reads as that literal.
-const Expr *unwrapExpr(const Expr *e) {
-  if (!e)
-    return nullptr;
-  const Expr *cur = e->IgnoreParenCasts();
-  if (const auto *ce = dyn_cast<ConstantExpr>(cur))
-    cur = ce->getSubExpr()->IgnoreParenCasts();
-  return cur;
-}
-
-// A value string for a lone literal, reproducing clang's JSON `value` for the
-// literal kinds clang.py reads (_LITERAL_NODE_KINDS): integer, bool, character,
-// and string are reproducible byte-for-byte here. Returns false for any other
-// (compound) expression — those need the subtree hash, deferred per C.7 — and
-// for floating-/fixed-point literals (see below).
-bool literalValue(const Expr *e, std::string &out) {
-  const Expr *core = unwrapExpr(e);
-  if (!core)
-    return false;
-  if (const auto *il = dyn_cast<IntegerLiteral>(core)) {
-    bool isSigned = core->getType()->isSignedIntegerOrEnumerationType();
-    llvm::SmallString<32> s;
-    il->getValue().toString(s, 10, isSigned);
-    out = std::string(s.str());
-    return true;
-  }
-  if (const auto *bl = dyn_cast<CXXBoolLiteralExpr>(core)) {
-    out = bl->getValue() ? "true" : "false";
-    return true;
-  }
-  if (const auto *cl = dyn_cast<CharacterLiteral>(core)) {
-    // clang's JSON dumper emits the integer code point for a CharacterLiteral.
-    out = std::to_string(cl->getValue());
-    return true;
-  }
-  if (const auto *sl = dyn_cast<StringLiteral>(core)) {
-    // clang's JSON dumper stores StringLiteral::outputString (the quoted,
-    // escaped spelling), so reproduce it byte-for-byte.
-    std::string buf;
-    llvm::raw_string_ostream os(buf);
-    sl->outputString(os);
-    os.flush();
-    out = buf;
-    return true;
-  }
-  // Floating- and fixed-point literals: clang's JSON emits an approximate
-  // numeric `value` whose textual form is not reproducible byte-for-byte from
-  // the AST without the JSON dumper, so they stay deferred (partial, never
-  // wrong) like the AST-subtree hashes (ADR-038 C.7) rather than risk a
-  // divergent value — and, for constexpr, a divergent id.
-  return false;
-}
-
 // ---------------------------------------------------------------------------
-// Macro capture via in-compile PPCallbacks (ADR-038 C.2 / C.7). No second
-// `-E -dD` pass — that would reintroduce the extra front end Flow C exists to
-// avoid. Values are token-reconstructed and whitespace-collapsed to match
-// clang.py::macros_from_preprocessor's "{params} {body}" normalization. Because
-// D0 requires the old and new baselines of a comparison to be produced the same
-// way, this token normalization is self-consistent within the producer; the
-// only place operator-adjacent spacing could differ from the textual `-E -dD`
-// backend is the cross-producer C.6 gate, which finalizes macro parity.
+// Macro capture via in-compile PPCallbacks (ADR-038 C.2). No second `-E -dD`
+// pass. Values are token-reconstructed and whitespace-collapsed to match
+// clang.py::macros_from_preprocessor's "{params} {body}" normalization.
 // ---------------------------------------------------------------------------
 struct MacroRecord {
   std::string value;
@@ -398,18 +804,16 @@ public:
     SourceLocation loc = mi->getDefinitionLoc();
     if (loc.isInvalid())
       return;
-    // stdlib/toolchain macros are never the library's public surface. The
-    // path-only `isPublicFile` check downstream would otherwise accept a system
-    // header like /usr/include/... because it contains an `include` segment, so
-    // filter system headers here — where we still have the SourceLocation —
-    // mirroring the decl classifier's SM.isInSystemHeader guard.
+    // stdlib/toolchain macros are never the library's public surface; the
+    // path-only isPublicFile check would otherwise accept /usr/include/... via
+    // its `include` segment. Filter system headers here, where we still have a
+    // SourceLocation, mirroring the decl classifier.
     if (SM.isInSystemHeader(loc))
       return;
     PresumedLoc pl = SM.getPresumedLoc(loc);
     if (pl.isInvalid())
       return;
     llvm::StringRef file = pl.getFilename();
-    // <built-in>, <command line>, <scratch space> are not real files.
     if (file.empty() || file.starts_with("<"))
       return;
     Defs[ii->getName().str()] = MacroRecord{macroValue(mi), file.str()};
@@ -461,39 +865,38 @@ public:
                std::vector<Entity> &functions, std::vector<Entity> &types,
                std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
                std::vector<Entity> &constexprValues, std::set<std::string> &diags)
-      : Ctx(ctx), SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()),
-        Roots(roots), Functions(functions), Types(types), Templates(templates),
+      : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
+        Functions(functions), Types(types), Templates(templates),
         InlineBodies(inlineBodies), ConstexprValues(constexprValues),
-        Diags(diags), Mangle(ctx.createMangleContext()) {}
+        Diags(diags) {}
 
-  // We want deterministic AST-order emission (C.2 Determinism); the default
-  // traversal is pre-order, which is deterministic for one TU.
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
 
   bool VisitFunctionDecl(FunctionDecl *fd) {
     if (fd->isImplicit() || fd->getDescribedFunctionTemplate())
-      return true; // the pattern is emitted by the template visitor
+      return true;
     if (fd->getTemplatedKind() == FunctionDecl::TK_FunctionTemplateSpecialization)
-      return true; // an instantiation — noise, not a source declaration
+      return true;
     if (!isAccessible(fd) || fd->getNameAsString().empty())
       return true;
     std::string file, origin, visibility;
     if (!classify(fd, file, origin, visibility))
       return true;
 
+    // Read signature + mangled name from clang's own JSON (as clang.py does),
+    // so id/signature_hash match the wrapper's clang backend exactly.
+    std::optional<Value> json = dumpDeclJson(fd);
+    if (!json || !json->getAsObject()) {
+      Diags.insert("function facts unavailable (JSON dump failed)");
+      return true;
+    }
+    const Object &o = *json->getAsObject();
     std::string name = fd->getQualifiedNameAsString();
-    std::string sig = fd->getType().getAsString(PP);
-    std::string mangled = mangledName(fd);
+    std::string sig = qualTypeFromJson(o);
+    std::string mangled = mangledFromJson(o);
     std::string key = mangled.empty() ? name : mangled;
     int line = presumedLine(fd);
-
-    std::string value;
-    if (!defaultArgRepr(fd, value)) {
-      value.clear();
-      Diags.insert("default-argument value with a non-literal expression omitted "
-                   "(subtree-hash parity pending, ADR-038 C.7)");
-    }
 
     Entity e;
     e.id = H({"function", key, sig});
@@ -501,17 +904,13 @@ public:
     e.qualified_name = name;
     e.mangled_name = mangled;
     e.signature_hash = H({"sig", sig});
-    e.value = value;
+    e.value = defaultArgReprJson(o);
     e.loc_path = file;
     e.loc_line = line;
     e.loc_origin = origin;
     e.visibility = visibility;
     Functions.push_back(e);
 
-    // A function/method defined in a public header ships its body to consumers;
-    // clang.py fingerprints it (inline_body_changed). The body_hash is a subtree
-    // hash, deferred per C.7 — emit the inline entity without it so presence is
-    // tracked, and record the diagnostic once.
     if (fd->doesThisDeclarationHaveABody() && fd->hasBody()) {
       Entity ib;
       ib.id = H({"inline", key, sig});
@@ -519,24 +918,26 @@ public:
       ib.qualified_name = name;
       ib.mangled_name = mangled;
       ib.signature_hash = H({"sig", sig});
+      if (const Value *body = bodyStmtJson(o))
+        ib.body_hash = subtreeHash(*body, paramIdsJson(o));
+      if (ib.body_hash.empty())
+        Diags.insert("inline body_hash unavailable (no CompoundStmt in JSON)");
       ib.loc_path = file;
       ib.loc_line = line;
       ib.loc_origin = origin;
       ib.visibility = visibility;
       InlineBodies.push_back(ib);
-      Diags.insert("inline body_hash omitted (AST-subtree hash parity pending, "
-                   "ADR-038 C.7)");
     }
     return true;
   }
 
   bool VisitCXXRecordDecl(CXXRecordDecl *rd) {
     if (rd->isImplicit() || rd->getDescribedClassTemplate())
-      return true; // template pattern handled by the template visitor
+      return true;
     if (isa<ClassTemplateSpecializationDecl>(rd))
-      return true; // an instantiation
+      return true;
     if (!rd->isThisDeclarationADefinition())
-      return true; // forward decls carry no meaningful type hash (clang.py)
+      return true;
     emitType(rd, rd->getQualifiedNameAsString(), "record");
     return true;
   }
@@ -553,7 +954,7 @@ public:
       return true;
     if (const auto *alias = dyn_cast<TypeAliasDecl>(td))
       if (alias->getDescribedAliasTemplate())
-        return true; // alias-template pattern — clang.py does not emit these
+        return true;
     if (!isAccessible(td))
       return true;
     std::string file, origin, visibility;
@@ -563,8 +964,6 @@ public:
     if (underlying.empty())
       return true;
     std::string name = td->getQualifiedNameAsString();
-    // Fully reproducible: typedef entities need no subtree hash (clang.py uses
-    // _hash("typedef-target", underlying)).
     Entity e;
     e.id = H({"typedef", name, underlying});
     e.kind = "typedef";
@@ -583,27 +982,26 @@ public:
     if (vd->isImplicit() || isa<ParmVarDecl>(vd) || !vd->isConstexpr())
       return true;
     if (vd->getParentFunctionOrMethod())
-      return true; // a function-local constexpr is not part of the surface
+      return true;
     if (!isAccessible(vd) || vd->getNameAsString().empty())
       return true;
     std::string file, origin, visibility;
     if (!classify(vd, file, origin, visibility))
       return true;
-    std::string value;
-    if (!literalValue(vd->getInit(), value)) {
-      // A compound constexpr initializer needs the subtree hash (which also
-      // feeds this entity's id); rather than emit a divergent id, skip it and
-      // record the partial state (clang.py stays the reference — C.7).
-      Diags.insert("constexpr with a non-literal initializer skipped "
-                   "(value/id subtree-hash parity pending, ADR-038 C.7)");
+    std::optional<Value> json = dumpDeclJson(vd);
+    if (!json || !json->getAsObject()) {
+      Diags.insert("constexpr value unavailable (JSON dump failed)");
       return true;
     }
+    const Object &o = *json->getAsObject();
+    const Value *init = initExprJson(o);
+    std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
     std::string name = vd->getQualifiedNameAsString();
     Entity e;
     e.id = H({"constexpr", name, value});
     e.kind = "constexpr";
     e.qualified_name = name;
-    e.mangled_name = mangledName(vd);
+    e.mangled_name = mangledFromJson(o);
     e.value = value;
     e.loc_path = file;
     e.loc_line = presumedLine(vd);
@@ -613,13 +1011,10 @@ public:
     return true;
   }
 
-  // Emit the template entity and STOP — matching clang.py, which fingerprints a
-  // template whole and does not descend into the templated pattern. Returning
-  // true from a Visit* method would NOT stop RAV descending into the pattern's
-  // members: a class template's member functions are not themselves template
-  // patterns (`getDescribedFunctionTemplate()` is null), so they would leak in
-  // as ordinary — possibly still type-dependent — functions. Overriding
-  // Traverse* and not calling the base is what actually prunes the subtree.
+  // Emit the template entity and STOP descending — matching clang.py, which
+  // fingerprints a template whole and does not descend into the templated
+  // pattern (a class template's member functions are not themselves template
+  // patterns, so a Visit*+return-true would leak them in as ordinary functions).
   bool TraverseFunctionTemplateDecl(FunctionTemplateDecl *td) {
     emitTemplate(td);
     return true;
@@ -631,11 +1026,6 @@ public:
   }
 
 private:
-  // A decl is on the public surface only if it AND every enclosing record are
-  // accessible: a `public` member of a `private` nested class is not reachable
-  // by consumers. clang.py threads this inherited access down the subtree; RAV
-  // visits nested decls independently, so re-derive it by walking the semantic
-  // context up through the enclosing records.
   bool isAccessible(const Decl *d) const {
     const Decl *cur = d;
     while (cur) {
@@ -644,7 +1034,7 @@ private:
         return false;
       const DeclContext *dc = cur->getDeclContext();
       if (!dc || !isa<CXXRecordDecl>(dc))
-        break; // only record contexts impose C++ access control
+        break;
       cur = Decl::castFromDeclContext(dc);
     }
     return true;
@@ -655,9 +1045,6 @@ private:
     return pl.isValid() ? static_cast<int>(pl.getLine()) : 0;
   }
 
-  // Classify a decl's declaring file into the public surface. Returns false
-  // (drop) for system headers and anything not under a public root — mirroring
-  // clang.py, which drops UNKNOWN/private decls from the L4 surface.
   bool classify(const Decl *d, std::string &file, std::string &origin,
                 std::string &visibility) const {
     SourceLocation loc = SM.getExpansionLoc(d->getLocation());
@@ -670,62 +1057,13 @@ private:
       return false;
     file = pl.getFilename();
     std::vector<std::string> fileSegs = pathSegments(file);
-    for (const std::string &root : Roots) {
+    for (const std::string &root : Roots)
       if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
         origin = "PUBLIC_HEADER";
         visibility = "public_header";
         return true;
       }
-    }
     return false;
-  }
-
-  std::string mangledName(const NamedDecl *nd) {
-    // clang.py::_mangled: take clang's mangledName; if it equals the plain name
-    // (extern "C", some ctors) leave it empty so identity() falls back to
-    // qualified_name#signature_hash and keeps unmangled overloads distinct.
-    if (!Mangle || !Mangle->shouldMangleDeclName(nd))
-      return "";
-    std::string out;
-    llvm::raw_string_ostream os(out);
-    if (const auto *cd = dyn_cast<CXXConstructorDecl>(nd))
-      Mangle->mangleName(GlobalDecl(cd, Ctor_Complete), os);
-    else if (const auto *dd = dyn_cast<CXXDestructorDecl>(nd))
-      Mangle->mangleName(GlobalDecl(dd, Dtor_Complete), os);
-    else if (const auto *fd = dyn_cast<FunctionDecl>(nd))
-      Mangle->mangleName(GlobalDecl(fd), os);
-    else if (const auto *vd = dyn_cast<VarDecl>(nd))
-      Mangle->mangleName(GlobalDecl(vd), os);
-    else
-      return "";
-    os.flush();
-    if (out == nd->getNameAsString())
-      return "";
-    return out;
-  }
-
-  // Build clang.py::_default_arg_repr: p<pos>=<literal-or-...> per defaulted
-  // parameter. Returns false when any defaulted parameter has a non-literal
-  // default (needs the deferred subtree hash) — the caller then omits `value`.
-  bool defaultArgRepr(const FunctionDecl *fd, std::string &out) {
-    out.clear();
-    int pos = -1;
-    bool first = true;
-    for (const ParmVarDecl *p : fd->parameters()) {
-      ++pos;
-      if (!p->hasDefaultArg())
-        continue;
-      if (p->hasUninstantiatedDefaultArg())
-        return false;
-      std::string rep;
-      if (!literalValue(p->getDefaultArg(), rep))
-        return false;
-      if (!first)
-        out += ",";
-      first = false;
-      out += "p" + std::to_string(pos) + "=" + rep;
-    }
-    return true;
   }
 
   void emitType(const TagDecl *td, const std::string &name,
@@ -735,24 +1073,23 @@ private:
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
       return;
-    // type_hash is a subtree hash, deferred per C.7 — emit the type so its
-    // presence/removal is tracked and record the diagnostic once.
     Entity e;
     e.id = H({"type", name});
     e.kind = kind;
     e.qualified_name = name;
+    if (std::optional<Value> json = dumpDeclJson(td))
+      e.type_hash = subtreeHash(*json, {});
+    if (e.type_hash.empty())
+      Diags.insert("record/enum type_hash unavailable (JSON dump failed)");
     e.loc_path = file;
     e.loc_line = presumedLine(td);
     e.loc_origin = origin;
     e.visibility = visibility;
     Types.push_back(e);
-    Diags.insert("record/enum type_hash omitted (AST-subtree hash parity "
-                 "pending, ADR-038 C.7)");
   }
 
   void emitTemplate(const TemplateDecl *td) {
-    if (td->isImplicit() || !isAccessible(td) ||
-        td->getNameAsString().empty())
+    if (td->isImplicit() || !isAccessible(td) || td->getNameAsString().empty())
       return;
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
@@ -762,16 +1099,17 @@ private:
     e.id = H({"template", name});
     e.kind = "template";
     e.qualified_name = name;
+    if (std::optional<Value> json = dumpDeclJson(td))
+      e.body_hash = subtreeHash(*json, {});
+    if (e.body_hash.empty())
+      Diags.insert("template body_hash unavailable (JSON dump failed)");
     e.loc_path = file;
     e.loc_line = presumedLine(td);
     e.loc_origin = origin;
     e.visibility = visibility;
     Templates.push_back(e);
-    Diags.insert("template body_hash omitted (AST-subtree hash parity pending, "
-                 "ADR-038 C.7)");
   }
 
-  ASTContext &Ctx;
   SourceManager &SM;
   PrintingPolicy PP;
   const std::vector<std::string> &Roots;
@@ -781,12 +1119,11 @@ private:
   std::vector<Entity> &InlineBodies;
   std::vector<Entity> &ConstexprValues;
   std::set<std::string> &Diags;
-  std::unique_ptr<MangleContext> Mangle;
 };
 
 // ---------------------------------------------------------------------------
-// The consumer: run the visitor after the real codegen, assemble one SourceAbiTu
-// per TU, and append it to a per-TU JSONL file (ADR-038 C.1/C.4).
+// The consumer: run the visitor after the real codegen and append one
+// SourceAbiTu per TU to a per-TU JSONL file (ADR-038 C.1/C.4).
 // ---------------------------------------------------------------------------
 class FactsConsumer : public ASTConsumer {
 public:
@@ -808,7 +1145,6 @@ public:
 
     std::vector<Entity> macros = collectMacros(diags);
 
-    // Provenance for this TU.
     std::string source;
     if (const auto *fe = sm.getFileEntryForID(sm.getMainFileID()))
       source = fe->getName().str();
@@ -824,13 +1160,9 @@ public:
     std::string targetId = Library.empty() ? "" : "target://" + Library;
 
     if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
-                 inlineBodies, constexprValues, macros, diags)) {
-      // Best-effort: a fact-emission failure must never abort codegen
-      // (ADR-038 C.3). AddAfterMainAction already ran, so the object is safe;
-      // we only warn.
-      llvm::errs() << "abicheck-facts: could not write source facts to "
-                   << OutDir << "\n";
-    }
+                 inlineBodies, constexprValues, macros, diags))
+      llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
+                   << "\n";
   }
 
 private:
@@ -841,13 +1173,10 @@ private:
       const std::string &name = kv.first;
       const std::string &value = kv.second.value;
       const std::string &file = kv.second.file;
-      // Drop include guards (empty value whose name is the file's guard token),
-      // mirroring clang.py::_is_include_guard.
       if (value.empty()) {
         std::string up = name;
         for (char &c : up)
           c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        // strip surrounding underscores
         size_t b = up.find_first_not_of('_');
         size_t e = up.find_last_not_of('_');
         std::string core =
@@ -880,19 +1209,15 @@ private:
   bool isPublicFile(const std::string &file, std::string &origin,
                     std::string &visibility) const {
     std::vector<std::string> fileSegs = pathSegments(file);
-    for (const std::string &root : Roots) {
+    for (const std::string &root : Roots)
       if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
         origin = "PUBLIC_HEADER";
         visibility = "public_header";
         return true;
       }
-    }
     return false;
   }
 
-  // Assemble the SourceAbiTu JSON (field order mirrors SourceAbiTu.to_dict) and
-  // append it as one line to the per-TU facts file. Also ensures the pack's
-  // source_facts dir and manifest.json exist (C.4), matching init_inputs_pack.
   bool writeTu(const std::string &source, const std::string &tuId,
                const std::string &targetId, const std::string &ctxHash,
                const std::vector<Entity> &functions,
@@ -933,8 +1258,6 @@ private:
         ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
         ",\"read_files\":[]}";
 
-    // Per-TU, race-free filename: <stem>.<sha256(source)[:12]>.jsonl, mirroring
-    // inputs_emit.facts_filename so parallel -j compiles never share a file.
     llvm::StringRef stem = llvm::sys::path::filename(source);
     std::string factsFile = factsDir + "/" +
                             (stem.empty() ? std::string("tu") : stem.str()) +
@@ -946,10 +1269,6 @@ private:
     return true;
   }
 
-  // Idempotent, atomic manifest write (matches inputs_emit.init_inputs_pack /
-  // _write_manifest). Only the first TU to observe a missing manifest writes it;
-  // concurrent writers each produce identical content, so the atomic rename is
-  // safe regardless of which one wins.
   void ensureManifest() {
     std::string manifestPath = OutDir + "/manifest.json";
     if (llvm::sys::fs::exists(manifestPath))
@@ -974,8 +1293,6 @@ private:
       llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
       os << manifest;
     }
-    // Atomic publish; if another writer beat us, the rename still yields a valid
-    // manifest (identical content).
     if (llvm::sys::fs::rename(tmp, manifestPath))
       llvm::sys::fs::remove(tmp);
   }
@@ -995,8 +1312,6 @@ class FactsAction : public PluginASTAction {
 public:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &ci,
                                                   llvm::StringRef) override {
-    // Register the macro collector on the live preprocessor so macros are
-    // captured in-compile, with no second -E pass (ADR-038 C.2).
     Preprocessor &pp = ci.getPreprocessor();
     pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, Macros));
     return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
@@ -1008,15 +1323,13 @@ public:
     // Invoke with the unambiguous cc1 form (ADR-038 Flow C):
     //   -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs
     //   -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include
-    // The -fplugin-arg-abicheck-facts-<arg> shorthand mis-parses a *hyphenated*
-    // plugin name, so it is not the documented form.
     for (const std::string &arg : args) {
       if (consumePrefix(arg, "out=", OutDir))
         continue;
       std::string root;
       if (consumePrefix(arg, "public-roots=", root)) {
         if (!root.empty())
-          Roots.push_back(root); // repeatable
+          Roots.push_back(root);
         continue;
       }
       if (consumePrefix(arg, "library=", Library))
@@ -1027,8 +1340,6 @@ public:
     return true;
   }
 
-  // Emit facts by default during a normal compile (no explicit -plugin needed
-  // beyond -fplugin); the action attaches after the main codegen action.
   ActionType getActionType() override { return AddAfterMainAction; }
 
 private:
