@@ -618,14 +618,13 @@ use_cases:
   - id: UC-TC-make-auto-query
     axis: toolchain
     name: GNU Make / EPICS-style zero-config build evidence (L3)
-    status: complete
+    status: partial
     note: >
-      `--sources` on a Make project now runs a fixed GNU Make dry-run query
-      (`-B -n -k -w`) when no compile DB exists, selects a GNU launcher by
-      version-probing the resolved executable path, cleanly skips BSD/non-GNU
-      make, and scrapes recursive directory markers from make/gmake/gnumake/
-      mingw32-make transcript spellings. CI unit tests cover launcher selection,
-      non-GNU fallback/skip, resolved-path execution, and directory-marker
+      `--sources` on a Make project detects the Makefile but does not run an
+      automatic dry-run query because GNU Make can execute recipes even with
+      `-n`; users must provide `--build-info` / `--compile-db` for Make evidence.
+      CI unit tests cover that the inferred path skips Make without invoking a
+      subprocess, while MakeAdapter tests continue to cover explicit transcript
       parsing; PR #464 also carries a pvxs real-world proof with
       compile_commands.json temporarily removed.
     evidence:
