@@ -352,3 +352,70 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
         call_graph_units=None,
     )
     assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+
+
+def test_run_inline_source_abi_no_sources_returns_empty_selection():
+    # No --sources tree: returns (None, []) so the caller keeps a broad
+    # call-graph pass rather than scoping to an empty (unavailable) selection.
+    surface, units = inline._run_inline_source_abi(
+        None,
+        _build_with_one_unit(),
+        [],
+        extractor="clang",
+        scope="headers-only",
+        clang_bin="clang",
+    )
+    assert surface is None
+    assert units == []
+
+
+def test_run_inline_source_abi_no_compile_units_returns_empty_selection():
+    # A source tree but no L3 compile units: nothing to replay/select.
+    surface, units = inline._run_inline_source_abi(
+        Path("/tmp/x"),
+        BuildEvidence(),
+        [],
+        extractor="clang",
+        scope="headers-only",
+        clang_bin="clang",
+    )
+    assert surface is None
+    assert units == []
+
+
+def test_run_inline_source_abi_returns_selected_units(monkeypatch, tmp_path):
+    # A real build + stubbed replay: select_compile_units runs for real and its
+    # result is returned alongside the surface (fed to the call-graph scope).
+    _capture_scope(monkeypatch)
+    surface, units = inline._run_inline_source_abi(
+        tmp_path,
+        _build_with_one_unit(),
+        [],
+        extractor="clang",
+        scope="headers-only",
+        clang_bin="clang",
+    )
+    assert surface is not None
+    assert [cu.source for cu in units] == ["src/foo.cpp"]
+
+
+def test_run_inline_source_abi_extractor_unavailable_returns_empty_selection(
+    monkeypatch, tmp_path
+):
+    class _Unavailable:
+        def available(self) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        inline, "_make_source_extractor", lambda *a, **k: (_Unavailable(), "fake")
+    )
+    surface, units = inline._run_inline_source_abi(
+        tmp_path,
+        _build_with_one_unit(),
+        [],
+        extractor="clang",
+        scope="headers-only",
+        clang_bin="clang",
+    )
+    assert surface is not None  # empty SourceAbiSurface, not None
+    assert units == []

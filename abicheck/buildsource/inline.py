@@ -637,7 +637,13 @@ def collect_inline_pack(
             # Gap-1: on an unseeded headers-only replay, scope the L5 call-graph
             # pass to the *same* TU set L4 used instead of the whole compile DB.
             # (Seeded runs scope by changed_paths; full/target keep the broad pass.)
-            if replay_scope == "headers-only" and not changed_paths:
+            #
+            # Only narrow when L4 *actually* selected units. An empty set means L4
+            # could not select (no --sources tree, no compile units, or no
+            # extractor) — NOT "scope to zero" — so a build-info-only deep scan must
+            # keep the broad call-graph pass over ``merged`` rather than silently
+            # collecting zero call edges (Codex review).
+            if replay_scope == "headers-only" and not changed_paths and l4_selected_units:
                 call_graph_units = l4_selected_units
         # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
         # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not

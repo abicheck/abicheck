@@ -1799,6 +1799,80 @@ def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkey
     assert captured["scope"] == "headers-only"
 
 
+def _tree_with_two_units(tmp_path):
+    tree = tmp_path / "src"
+    tree.mkdir()
+    for name in ("a.cpp", "b.cpp"):
+        (tree / name).write_text("int f(){return 0;}\n")
+    (tree / "compile_commands.json").write_text(json.dumps([
+        {"directory": str(tree), "file": n, "arguments": ["c++", "-c", n]}
+        for n in ("a.cpp", "b.cpp")
+    ]))
+    return tree
+
+
+def _stub_call_graph(monkeypatch, seen: list[str]):
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            seen.extend(cu.source for cu in build.compile_units)
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+
+
+def test_inline_unseeded_call_graph_uses_l4_selection(tmp_path, monkeypatch):
+    """Gap-1: an unseeded headers-only run scopes the L5 call-graph pass to the
+    exact compile units the L4 replay selected, not the whole compile DB."""
+    import abicheck.buildsource.inline as inline
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+
+    def _spy(sources, merged, extractors, **kw):
+        # L4 selected only a.cpp (a headers-only subset of the two-unit DB).
+        return SourceAbiSurface(), [CompileUnit(id="cu://a.cpp", source="a.cpp")]
+
+    monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
+    seen: list[str] = []
+    _stub_call_graph(monkeypatch, seen)
+    tree = _tree_with_two_units(tmp_path)
+    inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
+                               layers=("L3", "L4", "L5"))
+    assert seen == ["a.cpp"]  # scoped to the L4 selection, not both units
+
+
+def test_inline_unseeded_call_graph_stays_broad_when_l4_selects_nothing(
+    tmp_path, monkeypatch
+):
+    """Codex review: an empty L4 selection (e.g. --build-info only, no --sources)
+    must NOT collapse the call-graph pass to zero units — it stays broad over the
+    compile DB so a build-info-only deep scan still collects L5 call edges."""
+    from pathlib import Path
+
+    import abicheck.buildsource.inline as inline
+
+    def _spy(sources, merged, extractors, **kw):
+        return None, []  # L4 could not select any units
+
+    monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
+    seen: list[str] = []
+    _stub_call_graph(monkeypatch, seen)
+    tree = _tree_with_two_units(tmp_path)
+    inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
+                               layers=("L3", "L4", "L5"))
+    # Broad, not zero: both compile-DB units are parsed for call edges.
+    assert sorted(Path(s).name for s in seen) == ["a.cpp", "b.cpp"]
+
+
 def test_exported_symbols_from_snapshot_extracts_mangled_names():
     """A1 plumbing: export extraction pulls mangled function/variable names from
     an already-parsed snapshot (no re-dump), and is empty for a bare snapshot."""
