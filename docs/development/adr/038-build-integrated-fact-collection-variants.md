@@ -4,9 +4,12 @@
 **Status:** Proposed. Formalizes and extends ADR-035 D5 (Flow 1 / Flow 2) into a
 complete, three-flow producer contract and pins the Clang-plugin specification.
 Flow A (full source scan / no injection) and Flow B (the `abicheck-cc` wrapper)
-already ship; Flow C (the Clang plugin) exists as a reference skeleton
-(`contrib/abicheck-clang-plugin/`) whose AST visitor is unimplemented — this ADR
-is its build-to spec.
+already ship; Flow C (the Clang plugin, `contrib/abicheck-clang-plugin/`) now
+implements this spec to **declaration-level parity** with the clang backend —
+functions/mangled-name rule/signatures/default args, typedefs, constexpr
+literals, macros (in-compile `PPCallbacks`), and visibility — with the AST
+*subtree* hashes (`type_hash`/`body_hash`) emitted partial-with-diagnostic
+pending the C.6 conformance gate (C.7).
 **Decision maker:** (pending)
 
 ---
@@ -63,7 +66,7 @@ only in *where the parse happens* and *how much the product build must change*.
 |------|------|--------------|-------------|------------|---------------|--------|
 | **A** | **Full source scan** (`dump --sources` / `collect`) | **None** | 1, post-build | **abicheck** | inline, or `collect` → `dump --build-info` | ✅ Shipped (Flow 1) |
 | **B** | **Wrapper injection** (`abicheck-cc`) | Set `CC`/`CXX` | 1 companion, in-build | The build (as a companion action) | `merge` an `abicheck_inputs/` pack | ✅ Shipped (Flow 2) |
-| **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚠️ Skeleton — spec below |
+| **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚙️ Reference — decl-level implemented; subtree hashes partial (C.7) |
 
 **D0 — the shared-contract invariant.** A *comparison* is always old-vs-new
 produced by the **same** producer, and every producer is deterministic and
