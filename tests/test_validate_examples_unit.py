@@ -147,7 +147,10 @@ class TestKnownGapToolchainScope:
 
 class TestCasePreconditions:
     def test_architecture_filter_skips_unsupported_machine(self):
-        with patch.object(ve, "CURRENT_ARCHITECTURE", "aarch64"):
+        with (
+            patch.object(ve, "CURRENT_PLATFORM", "linux"),
+            patch.object(ve, "CURRENT_ARCHITECTURE", "aarch64"),
+        ):
             result = _check_case_preconditions(
                 "case64",
                 {
