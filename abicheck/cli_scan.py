@@ -1251,9 +1251,10 @@ def run_scan_core(
     # (CodeRabbit review).
     if not seeded and collect_mode == "source-changed" and sources is not None:
         advisories.append(
-            "no --since/--changed-path seed; the source replay covers the "
-            "public-API surface (headers-only) instead of a focused diff. Pass "
-            "--since <ref> or --changed-path to scope it to the change."
+            "no --since/--changed-path seed; the L4 replay and the L5 call-graph "
+            "pass both cover the public-API surface (headers-only) instead of a "
+            "focused diff — cost grows with the project, not the change. Pass "
+            "--since <ref> or --changed-path to scope both to the changed TUs."
         )
     # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
     # defines a build.query, together with an *explicitly pinned* deep level

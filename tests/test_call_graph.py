@@ -524,12 +524,60 @@ def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
 
 
 def test_call_graph_jobs_env_override_is_bounded(monkeypatch) -> None:
+    import abicheck.buildsource.call_graph as cg
+
     monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    # Pin the RAM probe high so the memory clamp never interferes with the
+    # CPU/oversubscription bounds this test asserts.
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: None)
     assert _call_graph_jobs(120) == 2
     monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "9999")
     assert 1 <= _call_graph_jobs(120) <= 120
     monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "nope")
     assert _call_graph_jobs(120) == 1
+
+
+def test_call_graph_jobs_clamped_by_available_memory(monkeypatch) -> None:
+    """The L5 call-graph pass shares the L4 RAM clamp (OOM guard parity).
+
+    A low-memory host that would OOM under N concurrent multi-GiB clang ASTs must
+    reduce the worker count on the call-graph pass just as it does on the L4
+    replay — both shell out to the same ``clang -ast-dump=json``.
+    """
+    import abicheck.buildsource.call_graph as cg
+
+    monkeypatch.delenv("ABICHECK_CALL_GRAPH_JOBS", raising=False)
+    # Pretend the host/cgroup only has room for one heavy clang worker.
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 1)
+    assert _call_graph_jobs(120) == 1
+
+    # An explicit override is clamped too — memory wins over the requested count,
+    # mirroring source_replay._l4_jobs.
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "8")
+    assert _call_graph_jobs(120) == 1
+
+    # When the RAM probe can't read memory (None), the CPU bound stands.
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: None)
+    assert _call_graph_jobs(120) == 8
+
+    # The clamp only ever *reduces*: a generous mem_cap leaves the CPU bound.
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 1000)
+    assert _call_graph_jobs(120) == 8
+
+
+def test_call_graph_mem_cap_shares_l4_budget(monkeypatch) -> None:
+    """_call_graph_mem_cap delegates to the L4 cap and never raises."""
+    import abicheck.buildsource.call_graph as cg
+    import abicheck.buildsource.source_replay as sr
+
+    monkeypatch.setattr(sr, "_l4_mem_cap", lambda: 3)
+    assert cg._call_graph_mem_cap() == 3
+
+    def _boom() -> int:
+        raise RuntimeError("RAM probe failed")
+
+    monkeypatch.setattr(sr, "_l4_mem_cap", _boom)
+    assert cg._call_graph_mem_cap() is None
 
 
 def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:

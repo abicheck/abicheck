@@ -618,6 +618,7 @@ def collect_inline_pack(
         _check_build_info_source_mismatch(merged, sources, extractors)
 
         surface = None
+        call_graph_units: list[Any] | None = None
         if "L4" in layers:
             # A 'changed' scope with no PR diff would select zero TUs and embed an
             # empty L4 surface (Codex review), so fall back to a non-empty scope that
@@ -640,7 +641,7 @@ def collect_inline_pack(
             if l4_cache_dir is None:
                 env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
                 l4_cache_dir = Path(env_dir) if env_dir else None
-            surface = _run_inline_source_abi(
+            surface, l4_selected_units = _run_inline_source_abi(
                 sources,
                 merged,
                 extractors,
@@ -652,6 +653,17 @@ def collect_inline_pack(
                 changed_paths=changed_paths,
                 public_header_roots=public_header_roots,
             )
+            # Gap-1: on an unseeded headers-only replay, scope the L5 call-graph
+            # pass to the *same* TU set L4 used instead of the whole compile DB.
+            # (Seeded runs scope by changed_paths; full/target keep the broad pass.)
+            #
+            # Only narrow when L4 *actually* selected units. An empty set means L4
+            # could not select (no --sources tree, no compile units, or no
+            # extractor) — NOT "scope to zero" — so a build-info-only deep scan must
+            # keep the broad call-graph pass over ``merged`` rather than silently
+            # collecting zero call edges (Codex review).
+            if replay_scope == "headers-only" and not changed_paths and l4_selected_units:
+                call_graph_units = l4_selected_units
         # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
         # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
         # the structural-only graph-build (L3+L5, no L4). This is what makes the
@@ -667,6 +679,7 @@ def collect_inline_pack(
                 clang_bin=clang_bin,
                 extractors=extractors,
                 changed_paths=changed_paths,
+                call_graph_units=call_graph_units,
             )
             if "L5" in layers
             else None
@@ -1262,15 +1275,19 @@ def _run_inline_source_abi(
     source_abi_cache_dir: Path | None = None,
     changed_paths: tuple[str, ...] = (),
     public_header_roots: tuple[str, ...] = (),
-) -> SourceAbiSurface | None:
-    """Run L4 replay over a source tree; ``None`` when no source tree is given.
+) -> tuple[SourceAbiSurface | None, list[Any]]:
+    """Run L4 replay over a source tree; ``(None, [])`` when no source tree given.
+
+    Returns ``(surface, selected_units)`` — the L4 surface plus the exact
+    compile-unit set the replay scope selected, so the L5 call-graph pass can match
+    that scope on an unseeded run (Gap-1 fix) instead of re-parsing all TUs.
 
     Requires L3 compile units to replay against (ADR-030 D5). A missing source
     extractor (clang/castxml) yields a partial surface and a clear note rather
     than aborting — the artifact tiers stay authoritative (ADR-028 D3).
     """
     if sources is None:
-        return None
+        return None, []
     from .source_abi import SourceAbiSurface
     from .source_replay import (
         SourceAbiCache,
@@ -1293,7 +1310,7 @@ def _run_inline_source_abi(
                 ),
             )
         )
-        return None
+        return None, []
 
     impl, tool_name = _make_source_extractor(extractor, clang_bin)
     if not impl.available():
@@ -1304,7 +1321,7 @@ def _run_inline_source_abi(
                 detail=f"{tool_name} not found in PATH; source-only checks disabled",
             )
         )
-        return SourceAbiSurface()
+        return SourceAbiSurface(), []
 
     roots = sorted(set(public_header_roots_for(merged)) | set(public_header_roots))
     include_map = _include_map_for_replay(
@@ -1313,6 +1330,19 @@ def _run_inline_source_abi(
         roots=tuple(roots),
         clang_bin=clang_bin,
         extractors=extractors,
+    )
+    # The exact compile-unit set this replay scope selects (pure, reuses the
+    # already-computed include graph — no extra clang pass). Returned so the L5
+    # call-graph pass can match the L4 scope for an unseeded run (Gap-1 fix) rather
+    # than re-parsing the whole compile DB.
+    from .source_replay import select_compile_units
+
+    selected_units = select_compile_units(
+        merged,
+        scope=scope,
+        changed_paths=changed_paths,
+        include_map=include_map,
+        public_header_roots=roots,
     )
     # D8 per-TU cache: re-extracting every TU on every `dump --sources` is the
     # cold-start cost (eval E4: zstd 48.6 s cold → 3.4 s warm). Wire the cache
@@ -1363,7 +1393,7 @@ def _run_inline_source_abi(
             ),
         )
     )
-    return surface
+    return surface, selected_units
 
 
 def _include_map_for_replay(
@@ -1423,6 +1453,7 @@ def _build_inline_graph(
     clang_bin: str = "clang",
     extractors: list[ExtractorRecord] | None = None,
     changed_paths: tuple[str, ...] = (),
+    call_graph_units: list[Any] | None = None,
 ) -> SourceGraphSummary | None:
     """Fold L3 + optional L4 into the compact L5 source graph (always when L3).
 
@@ -1443,7 +1474,14 @@ def _build_inline_graph(
 
     graph = build_source_graph(merged, source_abi=surface)
     if with_call_graph:
-        _fold_call_graph(graph, merged, clang_bin, extractors, changed_paths)
+        _fold_call_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=call_graph_units,
+        )
     graph.finalize()
     return graph
 
@@ -1486,6 +1524,7 @@ def _fold_call_graph(
     clang_bin: str,
     extractors: list[ExtractorRecord] | None,
     changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang call-graph augmentation of *graph* (ADR-031 D4).
 
@@ -1494,10 +1533,21 @@ def _fold_call_graph(
     leaves the graph without call edges — it never raises (ADR-028 D3 authority
     rule: source evidence never aborts collection).
 
-    When *changed_paths* is supplied (a PR/``--since`` scan), the call-graph pass
-    is scoped to the changed compile units only — parsing every TU of a large
-    compile DB would defeat the targeted PR cost model (ADR-035 D7 / Codex review).
-    An empty set keeps the broad pass (the unseeded / full-scope contract).
+    Scope selection, in precedence order:
+
+    - *changed_paths* (a PR/``--since`` scan) → the changed compile units only —
+      parsing every TU of a large compile DB would defeat the targeted PR cost
+      model (ADR-035 D7 / Codex review). A changed *header* still fans out to all
+      TUs (we cannot tell which it affects without an include graph).
+    - *scoped_units* (an **unseeded** run) → the exact compile-unit set the L4
+      replay used (``headers-only``). Without this the unseeded call-graph pass
+      re-parsed the *whole* compile DB even though L4 was scoped to one TU — the
+      Gap-1 asymmetry (``validation/scan-level-scalability-2026-06.md``): the pass
+      scaled with the whole tree while its reported L4 coverage stayed at a
+      fraction. Aligning the two makes the L5 call-graph consistent with the L4
+      surface (no phantom edges from TUs L4 never examined) and removes the
+      seedless ``--depth source`` cost blow-up.
+    - neither → the broad pass over all TUs (the ``full``/``s6`` contract).
     """
     from dataclasses import replace
 
@@ -1534,6 +1584,11 @@ def _fold_call_graph(
         scoped_note = " (changed-scoped)"
     elif changed_paths:
         scoped_note = " (header change → all TUs)"
+    elif scoped_units is not None:
+        # Unseeded: match the L4 replay's scope (headers-only) instead of fanning
+        # out to the whole compile DB (Gap-1 fix).
+        target = replace(merged, compile_units=list(scoped_units))
+        scoped_note = " (headers-only scope, matching L4)"
     edges = extractor.extract_from_build(target)
     # The project's own compile-unit sources — used to mark call-graph decls
     # ``defined_in_project`` from source-location provenance, so the cross-checks

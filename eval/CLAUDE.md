@@ -12,7 +12,8 @@ exercised by `.github/workflows/eval-suite.yml`. Don't move this tree under
 | `manifest.yaml` | **Source of truth** — curated libraries, version pairs, expected verdicts, `.so` stems, optional source repo/tags. Edit here; everything else is generated. |
 | `runner.py` | Fetch → `abicheck dump`/`compare` → schema'd `results/` + generated `REPORT.md`. Flags any library whose verdict drifts from its manifest `expect`, so it doubles as a real-world regression guard. |
 | `condafetch.py` | conda-forge fetch/extract helper (no `conda` needed). |
-| `scaling.py` | Scaling sweep behind `SCALING.md`. |
+| `scaling.py` | `ABICHECK_L4_JOBS` parallel-L4 scaling sweep on one real tree, behind `SCALING.md`. |
+| `scan_level_scaling.py` | Scan-*level* scalability sweep (`--depth binary…full`) over a **self-contained synthetic** corpus of tunable complexity (TU count / template depth). No network/repo; gated on a C++ compiler + `clang++`. Records wall + peak child RSS per (size, level); surfaces where a level goes super-linear (see `docs/development/performance.md` § "Scan-level scalability sweep"). |
 | `results/latest.json` | Latest schema'd results (`result_schema` 1) — committed. |
 | `REPORT.md`, `SCALING.md` | **Generated — do not hand-edit.** Rebuild via `runner.py --report-only`. |
 | `FINDINGS.md`, `FOLLOWUPS.md` | Human narrative: qualitative problem log (P01–P21) + follow-up plan. Hand-edited. |

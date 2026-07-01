@@ -301,6 +301,46 @@ L0/L1 binary diff sets the gate; L3–L5 add coverage/localization, not a differ
 pass/fail. **For a CI gate, the cheap tier suffices; spend on L4 only when you
 want source-body semantics or PR localization for humans.**
 
+### Scan-level scalability sweep
+
+The UXL run above fixed the corpus (two real libs) and varied the level. The
+complementary question — how each level scales as a project's *complexity*
+grows — is swept by [`eval/scan_level_scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scan_level_scaling.py),
+a self-contained harness (no network/repo) that synthesises STL/template-heavy
+C++ trees of increasing TU count, builds them with the host compiler, and runs
+`scan` at each level against a slightly-changed baseline — recording wall time
+and **peak child RSS** (`os.wait4`) per (size, level). Raw findings:
+[`validation/scan-level-scalability-2026-06.md`](https://github.com/abicheck/abicheck/blob/main/validation/scan-level-scalability-2026-06.md).
+
+Two results:
+
+- **The cheap tier is flat in TU count.** `binary`/`headers`/`build`/`graph`
+  (s4) cost the same at 4, 8, and 16 TUs (tail exponent ≈0) — they are priced on
+  the binary dump + L2 header AST + L3 compile-DB parse, none of which grow with
+  the number of `.cpp` files. `full` (s6) is **linear** in TU count (every TU is
+  replayed). Both as expected.
+- **Seedless `--depth source` (s5) used to hide a full-tree cost — now fixed.**
+  It cost ~2× the wall time and ~2.5× the RSS of the *seeded* run for the
+  **identical** L4 coverage (both report `L4=1/1`), and the gap *widened* with TU
+  count. The seed scopes both the L4 replay **and** the L5 clang call-graph pass
+  to the changed TU; without a seed the L4 replay fell back to headers-only (one
+  TU) but the **call-graph pass ran over the whole compile DB** — a second
+  `clang -ast-dump=json` over every TU. The unseeded call-graph pass now scopes to
+  the **same** compile units the L4 replay used (headers-only), so it is
+  consistent with the L4 surface and no longer scales with the tree
+  (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs and
+  `--depth full` are unchanged.
+
+That whole-DB call-graph pass shells out to the same multi-GiB
+`clang -ast-dump=json` as the L4 replay, but its worker count
+(`call_graph._call_graph_jobs`) was **CPU-bound only** — it lacked the
+RAM-aware, cgroup-aware clamp the L4 replay grew (`_l4_jobs` → `_l4_mem_cap`)
+after the UXL oneTBB/oneDNN OOM. On a constrained host the L4 pass was protected
+but the unseeded call-graph pass was not. `_call_graph_jobs` now shares the L4
+memory cap (`_call_graph_mem_cap` → `_l4_mem_cap`, same `ABICHECK_L4_JOB_MEM_GIB`
+budget); `ABICHECK_CALL_GRAPH_JOBS` still overrides the CPU count but memory wins
+over an over-eager override, exactly like `_l4_jobs`.
+
 ## L4 source-replay (dump-side) performance
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The

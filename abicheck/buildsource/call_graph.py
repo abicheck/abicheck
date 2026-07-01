@@ -36,6 +36,7 @@ This module is split so the hard part stays testable:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
@@ -53,6 +54,8 @@ from .source_graph import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN, GraphEdge, Grap
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
     from .source_graph import SourceGraphSummary
+
+_log = logging.getLogger(__name__)
 
 # ── call-edge labels (ADR-031 D4) ───────────────────────────────────────────
 CALL_KIND_DIRECT = "direct"
@@ -470,8 +473,38 @@ def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str
     return [*flags, "--", cu.source]
 
 
+def _call_graph_mem_cap() -> int | None:
+    """Max call-graph workers that fit in available RAM, or ``None`` when unknown.
+
+    The L5 call-graph pass shells out to the *same* heavy ``clang -ast-dump=json``
+    per TU as the L4 replay, so it shares the L4 per-worker RAM budget and
+    cgroup-aware available-memory probe (``source_replay._l4_mem_cap``). Imported
+    lazily so a failure there (non-Linux / sandbox) just skips the clamp rather
+    than breaking the call-graph pass. ``ABICHECK_L4_JOB_MEM_GIB`` tunes the
+    shared budget.
+    """
+    try:
+        from .source_replay import _l4_mem_cap
+
+        return _l4_mem_cap()
+    except Exception:  # defensive: a RAM-probe failure must never break L5 (tested)
+        return None
+
+
 def _call_graph_jobs(n_units: int) -> int:
-    """Bounded worker count for the best-effort L5 clang call-graph pass."""
+    """Bounded worker count for the best-effort L5 clang call-graph pass.
+
+    Capped by *available RAM* as well as CPU, mirroring the L4 replay
+    (``source_replay._l4_jobs``): the pass runs the same multi-GiB
+    ``clang -ast-dump=json`` per TU, so N concurrent template-heavy ASTs in one
+    process can exhaust a low-memory host and get the pass OOM-killed — the exact
+    failure the L4 memory clamp was added to prevent (the UXL oneTBB/oneDNN OOM).
+    Without this, a constrained host (small cgroup / CI container) was protected
+    on the L4 pass but not on the unseeded full-DB call-graph pass that
+    ``--depth source``/``pr-deep`` runs. ``ABICHECK_CALL_GRAPH_JOBS`` overrides the
+    CPU count; ``ABICHECK_L4_JOB_MEM_GIB`` tunes the shared per-worker RAM budget.
+    The clamp is logged, never silent.
+    """
     if n_units <= 1:
         return max(0, n_units)
     cpu = os.cpu_count() or 1
@@ -482,8 +515,20 @@ def _call_graph_jobs(n_units: int) -> int:
             requested = int(raw)
         except ValueError:
             return 1
-        return max(1, min(n_units, requested, cap))
-    return max(1, min(n_units, cpu, 8))
+        jobs = max(1, min(n_units, requested, cap))
+    else:
+        jobs = max(1, min(n_units, cpu, 8))
+    mem_cap = _call_graph_mem_cap()
+    if mem_cap is not None and mem_cap < jobs:
+        _log.info(
+            "L5 call-graph workers reduced %d -> %d to fit available memory; "
+            "set ABICHECK_CALL_GRAPH_JOBS / ABICHECK_L4_JOB_MEM_GIB to override, "
+            "or seed/scope the scan (--since/--changed-path) to fewer TUs.",
+            jobs,
+            mem_cap,
+        )
+        return mem_cap
+    return jobs
 
 
 # ── live clang extraction (integration only) ────────────────────────────────
