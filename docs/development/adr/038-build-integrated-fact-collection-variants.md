@@ -98,11 +98,16 @@ abicheck dump libfoo.so --sources ./src -o libfoo.baseline.json
 abicheck compare libfoo.old.baseline.json libfoo.new.baseline.json
 ```
 
-Or split producer/consumer across machines by materializing the pack:
+Or split producer/consumer across machines: materialize a build/source evidence
+pack on the build host with `collect`, then attach it to the binary dump on the
+analysis host with `dump --build-info` (Variant A produces a `BuildSourcePack`,
+not a Flow-2 `abicheck_inputs/` pack — that protocol belongs to Variants B/C):
 
 ```bash
-abicheck collect --sources ./src --build-info ./build -o abicheck_inputs/
-abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
+# build host: L3 build evidence + L4 source-ABI replay → an evidence pack
+abicheck collect --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
+# analysis host: attach the pack to the binary dump (no re-parse here)
+abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
 
 - **Cost:** one parse per in-scope TU, paid **by abicheck**, not the build. Scope
@@ -206,7 +211,7 @@ the wrapper. This test runs only where a matching clang is available (an
 
 ## Producer selection
 
-```
+```text
 Can you change the build at all?
  └─ No  ───────────────────────────────► Variant A (replay). Default. Zero integration.
  └─ Yes, and it's a large template-heavy
