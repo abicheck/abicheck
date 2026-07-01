@@ -353,14 +353,17 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
     # ``jobs <= 0`` means "auto": the sweep must measure abicheck's normal auto
     # scheduling (min(TUs, cpu, 8) + the RAM clamp). Forcing an explicit count
     # would, on a >8-CPU host, run more L4 workers than the production auto path
-    # and skew/OOM the curves. Crucially, *clear* any ABICHECK_L4_JOBS the caller
-    # already exported — otherwise the inherited override leaks into the child and
-    # silently defeats auto mode despite the --jobs help promising it.
+    # and skew/OOM the curves. Crucially, *clear* any ABICHECK_L4_JOBS **and**
+    # ABICHECK_CALL_GRAPH_JOBS the caller already exported — otherwise an inherited
+    # override on either the L4 replay or the L5 call-graph pass leaks into the
+    # child and silently defeats auto mode (both feed the scaling/RSS curves this
+    # harness validates), despite the --jobs help promising auto scheduling.
     env = dict(os.environ)
     if jobs > 0:
         env["ABICHECK_L4_JOBS"] = str(jobs)
     else:
         env.pop("ABICHECK_L4_JOBS", None)
+        env.pop("ABICHECK_CALL_GRAPH_JOBS", None)
     t0 = time.monotonic()
     proc = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True
