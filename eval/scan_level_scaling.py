@@ -336,6 +336,14 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         str(new_root),
         "--baseline",
         str(base_so),
+        # The old/new trees have *different* public headers (the new side adds a
+        # method + free fn and changes some return types), so the native baseline
+        # must be parsed with the *old* headers — otherwise scan reads the old .so
+        # through the new headers and can mask/misattribute the very diff the sweep
+        # generates (the CLI even warns about this). Ignored for --depth binary /
+        # snapshot baselines.
+        "--baseline-header",
+        str(base_so.parent / "include"),
         "--ast-frontend",
         "clang",
         "--format",
