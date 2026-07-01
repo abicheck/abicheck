@@ -274,6 +274,21 @@ class BuildConfig:
                 return [v]
             return []
 
+        def _safe_compile_atom(key: str, value: str) -> str:
+            # Values from auto-discovered source-tree configs are later embedded
+            # in individual compiler flags (``-std=<value>``/``-D<value>``) and
+            # flow through legacy shlex-split ``gcc_options`` plumbing.  Reject
+            # whitespace so one config scalar cannot become multiple compiler
+            # arguments such as ``-Xclang -load ./evil.so``.
+            if not value or any(ch.isspace() for ch in value):
+                raise ValueError(
+                    f"compile.{key} must be a single compiler option atom, got {value!r}"
+                )
+            return value
+
+        def _safe_compile_atoms(key: str) -> list[str]:
+            return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
+
         def _level(key: str) -> str | None:
             raw = _opt_str(severity, key)
             if raw is not None and raw not in _SEVERITY_LEVELS:
@@ -346,9 +361,13 @@ class BuildConfig:
             ),
             source_method=_opt_str(source, "method"),
             compile_frontend=compile_frontend,
-            compile_std=_opt_str(compile_blk, "std"),
+            compile_std=(
+                _safe_compile_atom("std", std)
+                if (std := _opt_str(compile_blk, "std")) is not None
+                else None
+            ),
             compile_include_dirs=_strs(compile_blk, "include_dirs"),
-            compile_defines=_strs(compile_blk, "defines"),
+            compile_defines=_safe_compile_atoms("defines"),
             compile_sysroot=_opt_str(compile_blk, "sysroot"),
             compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
             exit_code_scheme=scheme,

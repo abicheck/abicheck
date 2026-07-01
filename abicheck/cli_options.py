@@ -365,8 +365,9 @@ def merge_compile_config(
     The single resolver shared by ``compare`` / ``dump`` / ``scan`` (ADR-037 D3):
     precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4) — a per-field CLI value
     overrides config, an unset CLI field inherits it. The config's ``std`` +
-    ``defines`` synthesize ``-std=…``/``-D…`` flags only when the user did not pass
-    ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
+    ``defines`` synthesize literal ``-std=…``/``-D…`` argv entries only when the
+    user did not pass ``--gcc-options``; ``include_dirs`` (resolved against the
+    config's directory)
     are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
     Returns the merged ``(CompileContext, includes)``.
 
@@ -421,14 +422,20 @@ def merge_compile_config(
         else (bc.compile_frontend or "auto")
     )
     gcc_options: str | None
+    gcc_option_tokens = cli_ctx.gcc_option_tokens
     if cli_ctx.gcc_options is not None:
         gcc_options = cli_ctx.gcc_options
     else:
-        parts: list[str] = []
+        # Config fields are structured metadata, not a shell-like option string.
+        # Keep each synthesized flag as one literal argv entry so whitespace inside
+        # a define/std value cannot be shlex-split into additional compiler
+        # options (for example plugin-loading flags).
+        config_tokens: list[str] = []
         if bc.compile_std:
-            parts.append(f"-std={bc.compile_std}")
-        parts += [f"-D{d}" for d in bc.compile_defines]
-        gcc_options = " ".join(parts) or None
+            config_tokens.append(f"-std={bc.compile_std}")
+        config_tokens += [f"-D{d}" for d in bc.compile_defines]
+        gcc_options = None
+        gcc_option_tokens = gcc_option_tokens + tuple(config_tokens)
     sysroot = (
         cli_ctx.sysroot
         if cli_ctx.sysroot is not None
@@ -441,7 +448,7 @@ def merge_compile_config(
         gcc_path=cli_ctx.gcc_path,
         gcc_prefix=cli_ctx.gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=cli_ctx.gcc_option_tokens,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=frontend,
