@@ -1,107 +1,164 @@
-# ADR-038: Build-Integrated Source-Fact Collection — Three Producer Variants
+# ADR-038: Working With Sources — Full-Scan and Two Build-Injection Flows, and the Clang Plugin Specification
 
 **Date:** 2026-07-01
-**Status:** Proposed. Formalizes and extends ADR-035 D5 (Flow 1 / Flow 2). Two of
-the three variants already ship (Variant A — replay; Variant B — `abicheck-cc`
-wrapper); Variant C (the Clang plugin) exists as a reference skeleton
-(`contrib/abicheck-clang-plugin/`) whose AST visitor is not yet implemented. This
-ADR pins the shared contract all three obey and makes the **no-injection** path a
-first-class, documented default rather than an implicit fallback.
+**Status:** Proposed. Formalizes and extends ADR-035 D5 (Flow 1 / Flow 2) into a
+complete, three-flow producer contract and pins the Clang-plugin specification.
+Flow A (full source scan / no injection) and Flow B (the `abicheck-cc` wrapper)
+already ship; Flow C (the Clang plugin) exists as a reference skeleton
+(`contrib/abicheck-clang-plugin/`) whose AST visitor is unimplemented — this ADR
+is its build-to spec.
 **Decision maker:** (pending)
 
 ---
 
 ## Context
 
-Turning a library's C/C++ **headers and sources** into abicheck's normalized
-source-ABI model (L4 `SourceAbiSurface`, L5 graph) means parsing translation
-units with a front end (castxml or `clang -ast-dump=json`). For template-heavy
-C++ this is the single most expensive thing abicheck can do: one TU's clang JSON
-AST can be **multi-GiB** (the reason `source_replay.py` carries RAM-aware worker
-throttling, AST-spill-to-tempfile, and an opt-in process pool).
+Every source-aware check in abicheck rests on one expensive step: turning a
+library's C/C++ **headers and sources** into abicheck's normalized source-ABI
+model. Concretely that means running a C++ front end (castxml or
+`clang -ast-dump=json`) over translation units and folding the result into the
+L4/L5 evidence layers:
 
-ADR-035 D5 established two ways to pay that cost — *Flow 1* (abicheck runs the
-replay) and *Flow 2* (the build emits normalized facts). It also introduced the
-`abicheck_inputs/` artifact protocol (`buildsource/inputs_pack.py` ingest side,
-`buildsource/inputs_emit.py` producer side) and two Flow-2 producers: the
-portable `abicheck-cc` wrapper (shipped) and a Clang plugin (skeleton only,
-`contrib/abicheck-clang-plugin/`).
+- **L0/L1/L2** — artifact-authoritative binary / debug-info / header-AST scan
+  (`dumper.py`, `elf|pe|macho_metadata.py`, `dwarf_*.py`). Always the source of
+  truth for a *shipped-ABI* verdict.
+- **L3** — build/toolchain context from a compile DB, CMake, Ninja, Bazel, or
+  Make (`buildsource/adapters/*`, `build_evidence.py`).
+- **L4** — scoped per-TU **source-ABI replay**: parse each TU under its real
+  build flags → a normalized `SourceAbiTu` (`source_extractors/*`,
+  `source_replay.py`, `source_abi.py`).
+- **L5** — the source/implementation graph folded from L3+L4
+  (`source_graph.py`).
 
-Two gaps remain, and this ADR closes them:
+L4 is the cost centre. For template-heavy C++ a single TU's `clang` JSON AST can
+be **multi-GiB** — the reason `source_replay.py` carries RAM-aware worker caps,
+AST-spill-to-tempfile, and an opt-in process pool. The strategic lever is *where*
+that parse happens and *who pays for it*.
 
-1. **The plugin variant is undocumented as an operational choice.** ADR-035 D5
-   mentions it as a "performance optimization" but never says *whose* build runs
-   it, *whose* CI builds the `.so`, or how it is wired next to the wrapper. A
-   maintainer choosing between producers has no decision record.
+ADR-035 D5 named two answers — *Flow 1* (abicheck runs the replay) and *Flow 2*
+(the build emits normalized facts) — and shipped the `abicheck_inputs/` artifact
+protocol plus the `abicheck-cc` wrapper. It left two things underspecified:
 
-2. **The "inject nothing" path is not stated as first-class.** The cheapest
-   integration for most consumers is to change *nothing* about their build and
-   let abicheck replay from the `compile_commands.json` the build already emits.
-   Today that is implicit in Flow 1; it should be an explicit, supported,
-   equally-blessed variant so a team can adopt source-aware checks with **zero**
-   build-pipeline changes and graduate to injection only if cost demands it.
+1. **The "work with sources" story is not written down end-to-end.** A user has
+   to reverse-engineer, from flags and module docs, that there is a full-scan
+   path *and* two injection paths, that they interoperate, and how to move
+   between them.
+2. **The plugin has no build-to specification.** ADR-035 D5 calls it a
+   "performance optimization" but never states what it must emit, how its records
+   must match the wrapper's byte-for-byte, how it is built/versioned, or how it
+   is validated.
 
-All three variants must be interchangeable at the consumer: whatever produced the
-facts, `abicheck merge` + `abicheck compare` behave identically. That
-interchangeability is the whole point — it lets a project start at zero
-integration and move along the spectrum without touching its verdict tooling.
+This ADR closes both: it documents the **three flows** as one interchangeable
+family and gives the plugin a complete, testable contract.
 
 ---
 
 ## Decision
 
-Support **three producer variants** on one shared contract. They differ only in
-*where the parse happens* and *how much the product build must change*; they all
-converge on the same normalized `source_facts/*.jsonl` (`SourceAbiTu` schema,
-`buildsource/source_abi.py`) and the same consumer path.
+Support **three flows** for producing source evidence, all converging on one
+normalized `SourceAbiTu` contract and one `merge`/`compare` consumer. They differ
+only in *where the parse happens* and *how much the product build must change*.
 
-| # | Variant | Build change | Extra parses | Portability | Whose CI runs it | Status |
-|---|---------|--------------|--------------|-------------|------------------|--------|
-| **A** | **No injection — replay** (`dump --sources` / `compile_commands.json`) | **None** | 1, run by **abicheck** post-build | Highest (any compiler, any build) | abicheck's job, reading a build artifact | ✅ Shipped (Flow 1) |
-| **B** | **Wrapper injection** (`abicheck-cc CC/CXX`) | Set `CC`/`CXX` | 1 companion, run **in the build**, exact per-TU flags | High (wraps any compiler) | The product's build job | ✅ Shipped (Flow 2) |
-| **C** | **Plugin injection** (`-fplugin=libabicheck-facts.so`) | Add a clang flag | **0** — rides the AST clang already built | Clang-only, version-pinned | The product's build job | ⚠️ Skeleton — this ADR's implementation target |
+| Flow | Name | Build change | Extra parse | Who parses | Consumer path | Status |
+|------|------|--------------|-------------|------------|---------------|--------|
+| **A** | **Full source scan** (`dump --sources` / `collect`) | **None** | 1, post-build | **abicheck** | inline, or `collect` → `dump --build-info` | ✅ Shipped (Flow 1) |
+| **B** | **Wrapper injection** (`abicheck-cc`) | Set `CC`/`CXX` | 1 companion, in-build | The build (as a companion action) | `merge` an `abicheck_inputs/` pack | ✅ Shipped (Flow 2) |
+| **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚠️ Skeleton — spec below |
 
-**The invariant (D0).** All three emit byte-compatible `SourceAbiTu` records and
-drop a conformant `abicheck_inputs/` pack (or, for Variant A, feed the same
-`link_source_abi` linker in-process). The consumer — `abicheck merge <binary>.json
-./abicheck_inputs/` then `abicheck compare` — is identical and unaware of which
-variant ran. The binary dump (L0–L2) stays artifact-authoritative for shipped-ABI
-verdicts; source facts add L3/L4/L5 explanation and source-level
-(`API_BREAK`/`RISK`) findings and never delete an artifact-proven break (ADR-028
-D3 authority rule).
+**D0 — the shared-contract invariant.** Whatever produced the evidence, the
+per-declaration records are **record-equivalent**: identical `SourceEntity`
+`id`/`*_hash`/`value`/`visibility` fields, so the linker (`link_source_abi`)
+folds them identically and the diff (`source_diff`) is byte-stable. The binary
+dump (L0–L2) stays artifact-authoritative for shipped-ABI verdicts; source
+evidence only *explains, localizes, scopes, or adds source-level
+(`API_BREAK`/`RISK`) findings* and never deletes an artifact-proven break
+(ADR-028 D3 authority rule). This is what makes the three flows a **migration
+path, not a lock-in**: a project adopts at Flow A with zero build changes and
+moves to B or C only when parse cost demands it — with no change to stored
+baselines or the compare side.
 
 ---
 
-## Variant A — No injection (replay from `compile_commands.json`)
+## The shared contract: `SourceAbiTu` and `SourceEntity`
 
-**The straight way: change nothing in the build.** Almost every modern C/C++
-build can emit a `compile_commands.json` (CMake `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`,
-Bazel/Ninja compdb, Bear over Make). abicheck reads that **post-build** artifact
-and replays the selected TUs itself with their recorded flags. Nothing is
-injected into the compile; the build is untouched and unaware.
+All three flows emit the same abicheck-owned normalized schema
+(`buildsource/source_abi.py`, `SOURCE_ABI_VERSION`). Raw front-end output
+(castxml XML, clang AST JSON, Android `.lsdump`) is provenance only and is never
+compared (ADR-028 D4).
 
-This is Flow 1 (ADR-035 D5, already shipped: `buildsource/inline.py`
-`collect_inline_pack`, `source_replay.py`). ADR-035 D6.1 / ADR-032 (amended) even
-make the compile DB *zero-config*: `--sources <tree>` alone will auto-discover a
-`compile_commands.json` or run abicheck's own fixed, authored build-system query
-to produce one (`build_query.py`), so a consumer often needs no compile-DB step
-at all.
+**`SourceAbiTu`** — one per translation unit:
 
-**Userflow:**
+| Field | Meaning |
+|-------|---------|
+| `schema_version` | `SOURCE_ABI_VERSION` |
+| `tu_id` | `cu://<source>#cfg:<hash>` — stable per-TU id |
+| `target_id` | `target://<library>` |
+| `extractor` | `{"name", "version"}` producer id |
+| `compile_context_hash` | `sha256:` over standard/triple/sysroot/defines/includes (D8 cache key) |
+| `source` | the TU source path |
+| `public_header_roots` | configured public-header roots (ADR-015) |
+| `functions`/`types`/`variables`/`macros`/`templates`/`inline_bodies`/`constexpr_values`/`declarations` | `SourceEntity[]` buckets |
+| `source_edges` | optional intra-TU decl edges (→ L5) |
+| `read_files` | every file the parse actually read (cache invalidation) |
+| `diagnostics` | non-fatal producer notes |
+
+**`SourceEntity`** — one per public declaration:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | content hash; the primary key within a TU |
+| `kind` | `function`/`record`/`enum`/`typedef`/`union`/`variable`/`macro`/`template`/`inline`/`constexpr` |
+| `qualified_name` | fully-qualified source name |
+| `mangled_name` | C++ ABI symbol, or `""` when indistinct (see the mangled-name rule) |
+| `signature_hash` | type-level signature (params/return + cv/ref) — stable across default-arg edits |
+| `body_hash` | inline/template body fingerprint |
+| `type_hash` | record/enum/typedef structural hash |
+| `value` | macro/`constexpr` value, or the function's default-argument string |
+| `source_location` | `{path, line, origin}` where `origin ∈ PUBLIC_HEADER/PRIVATE_HEADER/SYSTEM_HEADER/GENERATED/SOURCE/UNKNOWN` |
+| `visibility` | `public_header`/`private_header`/`system_header`/`generated`/`unknown` |
+| `api_relevant` | on the callable public surface? |
+| `confidence` | `LayerConfidence` |
+
+`SourceEntity.identity()` — the key the linker/diff fold on — is the
+`mangled_name` when present, else `qualified_name#signature_hash`, else the bare
+`qualified_name`. Because folding is by `identity()`, **entity ordering within a
+TU does not affect the verdict**; the contract is per-entity equality, not raw
+file-byte equality.
+
+---
+
+## Flow A — Full source scan (no injection)
+
+**The straight way: change nothing in the build.** abicheck reads the build's
+existing `compile_commands.json` (or infers one) *post-build* and replays the
+in-scope TUs itself. Nothing is injected into the compile; the build is untouched
+and unaware. This is the default and the recommended starting point.
+
+### A1 — Inline (`dump --sources`)
+
+One command materializes a baseline with L3/L4/L5 folded in:
 
 ```bash
-# The build ran normally and left a compile_commands.json (or none — abicheck
-# can infer one). No wrapper, no plugin, no build edit.
+# Binary L0–L2 from the .so + L3/L4/L5 replayed from ./src, in-process.
+# No wrapper, no plugin, no build edit.
 abicheck dump libfoo.so --sources ./src -o libfoo.baseline.json
-#         ^ binary L0–L2        ^ abicheck replays TUs → L4/L5, in-process
 
 abicheck compare libfoo.old.baseline.json libfoo.new.baseline.json
 ```
 
-Or split producer/consumer across machines: materialize a build/source evidence
-pack on the build host with `collect`, then attach it to the binary dump on the
-analysis host with `dump --build-info` (Variant A produces a `BuildSourcePack`,
-not a Flow-2 `abicheck_inputs/` pack — that protocol belongs to Variants B/C):
+Compile-DB resolution is **zero-config** (`buildsource/inline.py` +
+`build_query.py`, ADR-032 amended): explicit `--build-info` → a trusted
+`--build-query` command → a `build.compile_db` glob → an auto-discovered
+`compile_commands.json` → an inferred, abicheck-authored build-system query
+(`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` / `bazel aquery` / `make -B -n -k -w`).
+So `--sources ./src` alone yields L3 with no flag and no manual compile-DB step.
+An arbitrary `build.query` from an *auto-discovered* (untrusted) `.abicheck.yml`
+is never auto-run — it needs an explicit `--config`.
+
+### A2 — Split producer/consumer (`collect` → `dump --build-info`)
+
+To parse on a build host and compare elsewhere, materialize a `BuildSourcePack`
+with `collect`, then attach it to the binary dump with `dump --build-info`:
 
 ```bash
 # build host: L3 build evidence + L4 source-ABI replay → an evidence pack.
@@ -109,106 +166,183 @@ not a Flow-2 `abicheck_inputs/` pack — that protocol belongs to Variants B/C):
 # (the source-decl ↔ binary-symbol map); dump --build-info only embeds the
 # pre-captured pack and does not relink it.
 abicheck collect --binary libfoo.so --compile-db build/compile_commands.json --source-abi -o libfoo.evidence/
-# analysis host: attach the pre-captured pack to the binary dump (no re-parse here)
+# analysis host: attach the pre-captured pack to the binary dump (no re-parse)
 abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
 
-- **Cost:** one parse per in-scope TU, paid **by abicheck**, not the build. Scope
-  is controllable (`--depth`, changed-path/PR localization, per-TU cache) so a PR
-  run parses only what changed — it is *not* forced to re-parse the whole tree.
-- **When to use:** the default. Any project unwilling or unable to alter its
-  build; open-source consumers; first adoption. Recommended starting point.
-- **Limitation:** abicheck must have a compatible front end (castxml/clang) on the
-  analysis host, and it pays the parse cost that Variants B/C amortize into the
-  build. That cost is bounded by scope, not by whole-tree size.
+`collect` produces a `BuildSourcePack` consumed via `dump --build-info`/`--sources`
+— **not** an `abicheck_inputs/` pack via `merge` (that protocol is Flow B/C).
+
+### Scope, cost, and when to use
+
+- **Backend:** `--source-abi-extractor auto|clang|castxml|android`. `clang` adds
+  inline/template/constexpr **body** fingerprints + default args; `castxml` gives
+  declarations/types/const values only; a requested `clang` not on PATH falls
+  back to castxml rather than disabling source checks.
+- **Scope:** `--source-abi-scope off|headers-only|changed|target|full` (+
+  `--changed-path`) bounds the replay. A PR run parses only what changed — it is
+  *not* forced to re-parse the whole tree.
+- **Cost:** one parse per in-scope TU, paid **by abicheck**, not the build. The
+  measured cost cliff is at L4 for template-heavy C++ (`scan_levels.py` cost
+  model); scope + the per-TU content-addressed cache (`ABICHECK_L4_CACHE_DIR`)
+  are the levers that keep it bounded.
+- **Use it when:** you can't or won't alter the build; open-source consumers;
+  first adoption. Requires a compatible front end on the analysis host.
 
 ---
 
-## Variant B — Wrapper injection (`abicheck-cc`)
+## Flow B — Wrapper injection (`abicheck-cc`)
 
-Prefix the real compiler with `abicheck-cc` (`abicheck/cc_wrapper.py`, shipped).
-The wrapper runs the real compile pass-through (preserving its exit code), then
+Prefix the real compiler with `abicheck-cc` (`abicheck/cc_wrapper.py`). The
+wrapper runs the real compile pass-through (preserving its exit code), then
 **best-effort** extracts one `SourceAbiTu` per source TU using that TU's *exact*
-flags/macros and appends it to `abicheck_inputs/`. Fact extraction never fails the
-build (a missing front end or parse error degrades to a warning — ADR-028 D3).
-
-**Userflow (in the product's build job):**
+flags/macros and appends it to an `abicheck_inputs/` pack.
 
 ```bash
 export ABICHECK_INPUTS_DIR=abicheck_inputs
 export ABICHECK_CC_HEADERS=include        # public-header roots
 export ABICHECK_CC_LIBRARY=libfoo
 
-make CC='abicheck-cc gcc' CXX='abicheck-cc g++'   # or cmake -DCMAKE_CXX_COMPILER=...
+make CC='abicheck-cc gcc' CXX='abicheck-cc g++'   # or set CMAKE_CXX_COMPILER
 
 abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
-- **Cost:** one *companion* parse per TU, paid inside the build. More than
-  Variant C, but with exact per-TU build context and no version-pinned artifact.
-- **Portability:** wraps **any** compiler (gcc/clang/MSVC via the launcher);
-  build-system agnostic (anything that honours `CC`/`CXX`).
-- **When to use:** you control the build invocation and want exact-build-context
-  facts (correct macros/flags per TU) without abicheck re-deriving them, but can't
-  or won't pin a Clang-plugin `.so` to your toolchain.
-- **Configuration** is entirely by environment (argv-transparent):
-  `ABICHECK_INPUTS_DIR`, `ABICHECK_CC_EXTRACTOR`, `ABICHECK_CC_HEADERS`,
-  `ABICHECK_CC_LIBRARY`, `ABICHECK_CC_VERSION`, `ABICHECK_CC_DISABLE`.
+- **Best-effort authority (ADR-028 D3):** extraction is skipped on a failed
+  compile and any extraction error is downgraded to a warning — it **never fails
+  the build**. A preprocess-/dependency-only invocation (`-E`, `-M`/`-MM`,
+  `/E /P /EP`) is detected and skipped so no non-shipping TU pollutes the pack.
+  A multi-source compile (`g++ -c a.cpp b.cpp`) contributes *both* objects'
+  facts, per-TU isolated.
+- **Exact per-TU context:** flags, macros, includes, sysroot, and target triple
+  are captured from the real argv, so `compile_context_hash` matches the build.
+- **Cost:** one *companion* parse per TU, inside the build. More than Flow C,
+  but no version-pinned artifact and it wraps any compiler.
+- **Config (argv-transparent, all env):** `ABICHECK_INPUTS_DIR`,
+  `ABICHECK_CC_EXTRACTOR`, `ABICHECK_CC_HEADERS`, `ABICHECK_CC_LIBRARY`,
+  `ABICHECK_CC_VERSION`, `ABICHECK_CC_DISABLE`.
+- **Use it when:** you control the build invocation, want exact-build-context
+  facts, and can't/won't pin a Clang-plugin `.so` to your toolchain.
 
 ---
 
-## Variant C — Plugin injection (`-fplugin`) — the implementation target
+## Flow C — Plugin injection: the specification
 
 Load an abicheck Clang plugin during the normal compile
-(`contrib/abicheck-clang-plugin/`). It emits the *same* `source_facts` schema from
-the AST **Clang already built for the real compile** — so there is **zero** extra
-front-end pass. This is the fastest producer and the strategic answer for
-large/template-heavy builds, because the fact stream falls out of a compile the
-project was already running.
-
-**Userflow (in the product's build job):**
+(`contrib/abicheck-clang-plugin/`). It emits the *same* `source_facts` from the
+AST **Clang already built for the real compile** — **zero** extra front-end pass.
+This is the fastest producer and the strategic answer for large/template-heavy
+builds, because the fact stream falls out of a compile the project was already
+running.
 
 ```bash
 clang++ -std=c++17 -Iinclude \
   -fplugin=./libabicheck-facts.so \
   -fplugin-arg-abicheck-facts-out=abicheck_inputs \
   -c src/foo.cpp -o foo.o
-# real compile only; abicheck_inputs/source_facts/foo.cpp.<hash>.jsonl appended
+# real compile only; abicheck_inputs/source_facts/<tu>.jsonl appended
 
 abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
-- **Cost:** ~0 extra — a RecursiveASTVisitor walk over the in-memory AST, no
-  second parse.
-- **Portability:** Clang-only, and the `.so` is **ABI-locked to its LLVM
-  version** — a plugin built against LLVM *N* only loads into that `clang`. This
-  is why it is `contrib/` reference and **never gated in abicheck's own CI**.
-- **When to use:** a large, template-heavy build where the Variant-B companion
-  parse is measurably expensive **and** you own the toolchain image (so you can
-  build the plugin once against your pinned clang).
+### C.1 — Structure and lifecycle
 
-**Implementation contract (the gap to close).** The plugin's `FactsVisitor`
-(`AbicheckFactsPlugin.cpp`) must produce records **byte-compatible** with the
-wrapper by mirroring `buildsource/source_extractors/base.py::entity_from_*`:
+The plugin is a `clang::PluginASTAction` registered as `abicheck-facts` with
+`getActionType() == AddAfterMainAction` — it runs **after** the real codegen
+action, so it never perturbs the object output. `ParseArgs` reads
+`-fplugin-arg-abicheck-facts-out=<dir>` (default `abicheck_inputs`).
+`HandleTranslationUnit` walks the TU with a `RecursiveASTVisitor`, buffers one
+`SourceEntity` per public declaration, wraps them in a `SourceAbiTu` envelope,
+and appends **one JSON object per line** to a **per-TU** file.
 
-| `SourceEntity` field | Clang AST source |
-|---|---|
-| `id`, `kind` | Decl kind (function/method/record/enum/typedef/union/variable/macro/template/inline/constexpr) |
-| `qualified_name` | `NamedDecl::getQualifiedNameAsString()` |
-| `mangled_name` | `MangleContext::mangleName()` |
-| `signature_hash` | canonical param/return type signature hash |
-| `body_hash` | inline/template body token hash |
-| `value` | normalized macro / `constexpr` value / default-argument string |
-| `source_location {path,line,origin}` | `SourceManager` → PUBLIC/PRIVATE/SYSTEM/GENERATED classification |
-| `visibility`, `api_relevant` | visibility attribute + public-header origin |
+### C.2 — What it MUST emit (record-equivalence with the wrapper)
 
-Records are wrapped in the `SourceAbiTu` envelope in `HandleTranslationUnit` and
-appended one-JSON-object-per-line, per-TU filename (mirror `facts_filename()`) to
-avoid parallel-build races. **Validation** is a *differential conformance test*:
-compile a fixture header under Variant C and Variant B and assert the two
-`source_facts` streams are equal. The plugin is valid only if it is a drop-in for
-the wrapper. This test runs only where a matching clang is available (an
-`integration`-style marker), never as a required abicheck-CI gate.
+The visitor's field mapping must reproduce
+`buildsource/source_extractors/base.py::entity_from_*` exactly. The hashing recipe
+is fixed and part of the contract:
+
+- **Content hash:** `id`/`*_hash` = `"sha256:" + hex(sha256(parts joined by "\x00"))`,
+  parts in the order below. Any deviation changes `identity()` and breaks the
+  fold.
+
+| Kind | `id` parts | key hashes / fields |
+|------|-----------|---------------------|
+| function | `"function", mangled_or_name, sig` | `signature_hash = hash("sig", sig)`, where `sig = "{ret}({p0,p1,…}){cv/ref}"`; `value` = comma-joined `"{param}={default_expr}"` for params with defaults |
+| record | `"record", name, type_repr` | `type_hash = hash("type", type_repr)`, `type_repr = "{kind}\|size=…\|align=…\|bases=…\|vt=…\|{field:name:type@offset_bits;…}"` |
+| enum | `"enum", name, type_repr` | `type_repr = "{underlying}\|{m=v,…}"` |
+| variable | `"variable", mangled_or_name, type` | `type_hash = hash("type", type)`, `value` = initializer |
+| constexpr | `"constexpr", name, value` | `value` = normalized constant value |
+| typedef | `"typedef", name, target` | `type_hash = hash("type", target)`, `value = target` |
+
+- **Mangled-name rule:** compute the Itanium/MS mangling via
+  `MangleContext::mangleName`; if it equals the plain name (e.g. some
+  constructors), leave `mangled_name` **empty** so `identity()` falls back to
+  `qualified_name#signature_hash` and keeps unmangled overloads distinct. Copying
+  the bare name verbatim would collapse `Widget(int)` and `Widget(double)`.
+- **Visibility / api_relevant:** classify each decl's declaring file via
+  `SourceManager` into `PUBLIC_HEADER/PRIVATE_HEADER/SYSTEM_HEADER/GENERATED`.
+  Only `PUBLIC_HEADER`/`GENERATED` decls are `api_relevant=True`; a
+  private/protected member of a public class is **off** the callable surface
+  (`api_relevant=False`). Public-header roots come from the plugin arg / build.
+- **Determinism:** the same TU compiled twice must yield identical records.
+  Match the wrapper's normalization (e.g. sorted constants/typedefs); folding is
+  order-independent, but determinism keeps the pack diff-stable.
+
+### C.3 — What it MUST NOT do
+
+- **Never fail or slow the real compile abnormally** — a fact-emission error is
+  swallowed (write to `stderr` at most), exactly like the wrapper's best-effort
+  rule. A plugin exception must not abort codegen.
+- **Never emit a verdict.** It produces evidence, not decisions.
+- **Never ship raw AST as the comparison format.** `raw_ast/` is forensic only
+  and is never ingested (ADR-035 D5); the plugin normalizes to `source_facts`
+  itself.
+- **No second parse.** If a mapping needs data the AST does not cheaply expose,
+  approximate within the visitor — do not re-invoke the front end.
+
+### C.4 — Output layout (per-TU, race-free)
+
+Append to `<out>/source_facts/<stem>.<sha256(source)[:12]>.jsonl`, mirroring
+`inputs_emit.facts_filename()`, so parallel `-j` compiles never race on one file.
+The plugin also ensures `<out>/manifest.json` exists (`kind: abicheck_inputs`,
+`created_by: "abicheck-clang-plugin <ver>"`) — idempotent, atomic write, matching
+`init_inputs_pack`.
+
+### C.5 — Build and versioning
+
+```bash
+cmake -S contrib/abicheck-clang-plugin -B build \
+  -DCMAKE_PREFIX_PATH="$(llvm-config --cmakedir)/.."
+cmake --build build     # → libabicheck-facts.so
+```
+
+The plugin is a CMake `MODULE` linked against the **loading clang's** symbols
+(`find_package(LLVM/Clang CONFIG)`, `cxx_std_17`, no bundled LLVM). It is
+therefore **ABI-locked to its LLVM major**: a plugin built against LLVM *N* only
+loads into that `clang`. This is why it is `contrib/` reference and **never gated
+in abicheck's own CI** — abicheck cannot ship one `.so` for every LLVM. A product
+build has a pinned toolchain image, so it builds the plugin once against that
+image and injects it.
+
+### C.6 — Validation: differential conformance
+
+The plugin is correct **iff** it is a drop-in for the wrapper. The gate is a
+differential test: compile a fixture header both ways (plugin vs `abicheck-cc`),
+ingest both packs, and assert the two surfaces are **entity-equivalent** — equal
+sets keyed by `SourceEntity.identity()`, with equal `signature_hash`/`type_hash`/
+`body_hash`/`value`/`visibility`/`api_relevant` per entity. It runs only where a
+matching clang is available (an `integration`/`libabigail`-style marker), never
+as a required abicheck-CI gate.
+
+### C.7 — Non-goals / limitations
+
+- **Compiler coverage:** clang only. GCC (`-fdump-lang-class`/`-fdump-tu`) and
+  MSVC remain documented fallbacks via the wrapper; a small normalizer to
+  `source_facts` is out of scope here.
+- **Body fingerprints:** `body_hash` for inline/template bodies is best-effort;
+  where the plugin cannot cheaply reproduce the clang extractor's fingerprint, it
+  emits the declaration without a body hash (partial, never wrong) and records a
+  diagnostic — the wrapper/full-scan path remains the reference for those fields.
 
 ---
 
@@ -216,42 +350,62 @@ the wrapper. This test runs only where a matching clang is available (an
 
 ```text
 Can you change the build at all?
- └─ No  ───────────────────────────────► Variant A (replay). Default. Zero integration.
+ └─ No  ───────────────────────────────► Flow A (full scan). Default. Zero integration.
  └─ Yes, and it's a large template-heavy
-    build where the companion parse hurts,
-    and you own the toolchain image ─────► Variant C (plugin). Zero extra parse.
- └─ Yes, otherwise ───────────────────── ► Variant B (wrapper). Exact context, portable.
+    build where a companion parse hurts,
+    and you own the toolchain image ─────► Flow C (plugin). Zero extra parse.
+ └─ Yes, otherwise ───────────────────── ► Flow B (wrapper). Exact context, portable.
 ```
 
-Because all three share the D0 contract, this is a **migration path, not a
-lock-in**: adopt at Variant A with no build changes, and if/when a PR-tier or
-nightly replay becomes the bottleneck, switch on the wrapper or plugin in the
-build with **no change** to the `merge`/`compare` side or to stored baselines.
-Mixed fleets are fine — different targets in one release may use different
-variants and still `merge` into one baseline.
+Because all three share the D0 contract, this is a spectrum, not a fork: start at
+A, graduate to B or C when parse cost bites, and mixed fleets are fine — different
+targets in one release may use different flows and still `merge` into one
+baseline.
+
+---
+
+## The shared consumer: `abicheck_inputs/` and `merge`
+
+Flows B and C drop a self-describing pack next to the binary; Flow A feeds the
+same linker in-process. The pack (ADR-035 D5) is:
+
+```text
+abicheck_inputs/
+  manifest.json               # kind: abicheck_inputs, library/version, created_by
+  binary/…  headers/…         # shipped artifact + public headers (dumped separately, L0–L2)
+  build/compile_commands.json # optional → L3 build evidence
+  source_facts/*.jsonl        # THE PAYLOAD — normalized SourceAbiTu, one per line → L4/L5
+  raw_ast/…  pp/…  deps/…     # optional, forensic only, NEVER ingested
+```
+
+`abicheck merge libfoo.so.json ./abicheck_inputs/` auto-detects the pack
+(`is_inputs_pack()` → `kind: abicheck_inputs`) and routes it to
+`ingest_inputs_pack()`: **pure parsing**, no compiler. It reads
+`source_facts/*.jsonl` → L4 surface (`link_source_abi`), the optional compile DB
+→ L3, folds the L5 graph, and embeds the result. Third-party packs are guarded
+(pack-root path constraint, symlink-escape safe, per-record skip-with-diagnostic).
 
 ---
 
 ## Consequences
 
 **Positive.**
-- The cheapest adoption (Variant A) is explicitly first-class: source-aware
-  checks with zero build-pipeline changes.
-- One documented spectrum from "inject nothing" to "zero-cost in-compiler,"
-  selectable by cost/control without changing the consumer or the stored format.
-- The plugin gets a concrete, testable implementation contract (byte-compatible
-  with the wrapper, differential-tested) instead of an open TODO.
+- The full end-to-end story of working with sources is documented as one
+  interchangeable family; the cheapest path (Flow A, no injection) is explicitly
+  first-class.
+- The plugin has a complete, testable build-to spec — hashing recipe, mangled-name
+  rule, visibility model, output layout, versioning, and a differential
+  conformance gate — instead of an open TODO.
 
 **Negative / costs.**
-- Variants B and C add build-time cost and CI wiring on the **product** side;
-  Variant A moves that cost to the analysis host instead. There is no free parse —
-  the ADR only lets a team choose *where* to pay it.
-- Variant C carries a real maintenance burden: the `.so` must be rebuilt per LLVM
-  version, and the differential conformance test must track any change to the
-  Python extractor's field/hash mapping. It stays optional precisely for this
-  reason.
+- Flows B and C add build-time cost and CI wiring on the **product** side; Flow A
+  moves that cost to the analysis host. There is no free parse — the ADR only
+  lets a team choose *where* to pay it.
+- The plugin carries real maintenance burden: rebuilt per LLVM major, and its
+  differential test must track any change to `base.py`'s field/hash mapping. It
+  stays optional for exactly this reason.
 
-**No new `ChangeKind`s, no schema bump.** This ADR is about *producers*; the
+**No new `ChangeKind`s, no schema bump.** This ADR governs *producers*; the
 `SourceAbiTu`/`abicheck_inputs` contract is unchanged (ADR-035 D5), so old
 baselines and readers are unaffected.
 
@@ -259,13 +413,13 @@ baselines and readers are unaffected.
 
 ## Relationship to other ADRs
 
-- **ADR-035 (D5)** — introduced Flow 1 / Flow 2 and the `abicheck_inputs/`
-  protocol. This ADR formalizes the three producer variants under it and elevates
-  the no-injection path to first-class.
-- **ADR-028 (D3/D6)** — authority rule (source facts never delete an
-  artifact-proven break) and non-executing-ingest discipline; unchanged.
-- **ADR-030** — `SourceAbiTu`/`SourceAbiSurface` schema every variant emits.
-- **ADR-032** — extractor action/security model; the wrapper/plugin are producers
-  of the same normalized facts, ingested by the non-executing `inputs_pack` path.
-- **ADR-033** — CI rollout, replay scopes, and caching that bound Variant A's
-  parse cost to changed scope.
+- **ADR-035 (D5)** — introduced Flow 1/Flow 2 and the `abicheck_inputs/` protocol;
+  this ADR expands them into the three-flow family and specifies the plugin.
+- **ADR-028 (D3/D6)** — authority rule + non-executing ingest; unchanged.
+- **ADR-030** — `SourceAbiTu`/`SourceEntity` schema and the `entity_from_*`
+  mapping the plugin must mirror.
+- **ADR-032** — extractor action/security model; producers of the same normalized
+  facts, ingested by the non-executing `inputs_pack` path.
+- **ADR-033** — replay scopes, per-TU caching, and CI cost model that bound Flow
+  A's parse cost to changed scope.
+- **ADR-037** — the `--depth`/`--ast-frontend` CLI dials that drive Flow A.
