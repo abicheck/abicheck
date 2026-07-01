@@ -46,8 +46,10 @@
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/ASTDumperUtils.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 #include "clang/Lex/MacroInfo.h"
@@ -275,6 +277,10 @@ std::string pyDumps(const Value &v) {
   case Value::Number:
     if (auto i = v.getAsInteger())
       return std::to_string(*i);
+    // A JSON number above int64_t::max is stored as uint64 and rejected by
+    // getAsInteger; render it exactly before falling back to float.
+    if (auto u = v.getAsUINT64())
+      return std::to_string(*u);
     return pyFloat(*v.getAsNumber());
   case Value::String:
     return pyStr(*v.getAsString());
@@ -316,6 +322,8 @@ std::string pyStrOfValue(const Value &v) {
   case Value::Number:
     if (auto i = v.getAsInteger())
       return std::to_string(*i);
+    if (auto u = v.getAsUINT64())
+      return std::to_string(*u);
     return pyFloat(*v.getAsNumber());
   case Value::String:
     return v.getAsString()->str();
@@ -791,8 +799,9 @@ struct MacroRecord {
 
 class MacroCollector : public PPCallbacks {
 public:
-  MacroCollector(Preprocessor &pp, std::map<std::string, MacroRecord> &out)
-      : PP(pp), SM(pp.getSourceManager()), Defs(out) {}
+  MacroCollector(Preprocessor &pp,
+                 std::shared_ptr<std::map<std::string, MacroRecord>> out)
+      : PP(pp), SM(pp.getSourceManager()), Defs(std::move(out)) {}
 
   void MacroDefined(const Token &nameTok, const MacroDirective *md) override {
     const MacroInfo *mi = md ? md->getMacroInfo() : nullptr;
@@ -816,13 +825,13 @@ public:
     llvm::StringRef file = pl.getFilename();
     if (file.empty() || file.starts_with("<"))
       return;
-    Defs[ii->getName().str()] = MacroRecord{macroValue(mi), file.str()};
+    (*Defs)[ii->getName().str()] = MacroRecord{macroValue(mi), file.str()};
   }
 
   void MacroUndefined(const Token &nameTok, const MacroDefinition &,
                       const MacroDirective *) override {
     if (const IdentifierInfo *ii = nameTok.getIdentifierInfo())
-      Defs.erase(ii->getName().str());
+      Defs->erase(ii->getName().str());
   }
 
 private:
@@ -853,7 +862,7 @@ private:
 
   Preprocessor &PP;
   SourceManager &SM;
-  std::map<std::string, MacroRecord> &Defs;
+  std::shared_ptr<std::map<std::string, MacroRecord>> Defs;
 };
 
 // ---------------------------------------------------------------------------
@@ -1068,7 +1077,10 @@ private:
 
   void emitType(const TagDecl *td, const std::string &name,
                 const std::string &kind) {
-    if (!isAccessible(td))
+    // Anonymous records/enums have an empty qualified name; clang.py only treats
+    // named type nodes as entities (bool(name)), so skip them — otherwise every
+    // anonymous tag collides on H({"type", ""}).
+    if (name.empty() || !isAccessible(td))
       return;
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
@@ -1129,10 +1141,10 @@ class FactsConsumer : public ASTConsumer {
 public:
   FactsConsumer(std::string outDir, std::vector<std::string> roots,
                 std::string library, std::string version,
-                std::map<std::string, MacroRecord> &macros)
+                std::shared_ptr<std::map<std::string, MacroRecord>> macros)
       : OutDir(std::move(outDir)), Roots(std::move(roots)),
         Library(std::move(library)), Version(std::move(version)),
-        Macros(macros) {}
+        Macros(std::move(macros)) {}
 
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
@@ -1146,7 +1158,7 @@ public:
     std::vector<Entity> macros = collectMacros(diags);
 
     std::string source;
-    if (const auto *fe = sm.getFileEntryForID(sm.getMainFileID()))
+    if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID()))
       source = fe->getName().str();
     std::string standard;
     if (ctx.getLangOpts().LangStd != LangStandard::lang_unspecified)
@@ -1169,7 +1181,7 @@ private:
   std::vector<Entity> collectMacros(std::set<std::string> &diags) {
     std::vector<Entity> out;
     bool any = false;
-    for (const auto &kv : Macros) { // std::map iterates sorted by name (C.2)
+    for (const auto &kv : *Macros) { // std::map iterates sorted by name (C.2)
       const std::string &name = kv.first;
       const std::string &value = kv.second.value;
       const std::string &file = kv.second.file;
@@ -1258,11 +1270,14 @@ private:
         ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
         ",\"read_files\":[]}";
 
+    // Per-TU, deterministic filename keyed by the source path. One TU maps to
+    // one file, so truncate (not append): a rebuild overwrites its own facts
+    // rather than accumulating stale/duplicate records across recompiles.
     llvm::StringRef stem = llvm::sys::path::filename(source);
     std::string factsFile = factsDir + "/" +
                             (stem.empty() ? std::string("tu") : stem.str()) +
                             "." + sha256Hex(source).substr(0, 12) + ".jsonl";
-    std::ofstream out(factsFile, std::ios::app);
+    std::ofstream out(factsFile, std::ios::trunc);
     if (!out)
       return false;
     out << tu << "\n";
@@ -1301,7 +1316,7 @@ private:
   std::vector<std::string> Roots;
   std::string Library;
   std::string Version;
-  std::map<std::string, MacroRecord> &Macros;
+  std::shared_ptr<std::map<std::string, MacroRecord>> Macros;
 };
 
 // ---------------------------------------------------------------------------
@@ -1312,10 +1327,16 @@ class FactsAction : public PluginASTAction {
 public:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &ci,
                                                   llvm::StringRef) override {
+    // The PluginASTAction is destroyed right after this returns, while the
+    // consumer it produces (and the PPCallbacks) run later — so the macro map
+    // must be owned by something that outlives the action. Share it (shared_ptr)
+    // between the collector and the consumer rather than referencing an action
+    // member (which would dangle).
+    auto macros = std::make_shared<std::map<std::string, MacroRecord>>();
     Preprocessor &pp = ci.getPreprocessor();
-    pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, Macros));
+    pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
     return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
-                                           Macros);
+                                           macros);
   }
 
   bool ParseArgs(const CompilerInstance &,
@@ -1357,7 +1378,6 @@ private:
   std::vector<std::string> Roots;
   std::string Library;
   std::string Version;
-  std::map<std::string, MacroRecord> Macros;
 };
 
 } // namespace

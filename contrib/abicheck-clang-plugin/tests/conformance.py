@@ -35,15 +35,11 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-STRICT_KINDS = {
-    "function",
-    "inline",
-    "record",
-    "enum",
-    "typedef",
-    "template",
-    "constexpr",
-}
+# Every entity kind is compared strictly except macros, whose *values* are
+# compared leniently (see _compare). Using an exclusion set rather than an
+# allowlist means new SourceEntity kinds (union, variable, …) are covered by
+# default instead of being silently dropped.
+LENIENT_KINDS = {"macro"}
 COMPARED_FIELDS = (
     "signature_hash",
     "type_hash",
@@ -69,7 +65,9 @@ def _load_entities(pack_dir: Path) -> dict[tuple[str, str], object]:
 
 def _run(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> None:
     print("+ " + " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=str(cwd), env=env, check=True)
+    # Bound each invocation so a hung clang++/abicheck-cc (e.g. a plugin crash
+    # loop) fails the job fast instead of blocking CI.
+    subprocess.run(cmd, cwd=str(cwd), env=env, check=True, timeout=300)
 
 
 def _compile_with_plugin(work: Path, plugin: Path, clangxx: str) -> Path:
@@ -129,7 +127,7 @@ def _compare(plugin: dict, wrapper: dict) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
 
     def _strict(d: dict) -> set:
-        return {k for k in d if k[0] in STRICT_KINDS}
+        return {k for k in d if k[0] not in LENIENT_KINDS}
 
     pk, wk = _strict(plugin), _strict(wrapper)
     for missing in sorted(wk - pk):

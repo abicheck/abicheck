@@ -7,9 +7,10 @@
 // visibility (a public member of a private nested class must be dropped).
 #pragma once
 
-// Object-like macros only in the strict set: their token reconstruction matches
-// the clang `-E -dD` backend exactly. (Function-like macro spacing is the one
-// documented soft edge, compared leniently — see WIDGET_SCALE.)
+// Macro values are always compared leniently (warn, not fail) in the C.6 test
+// (ADR-038 C.7). Object-like macros happen to reconstruct identically to the
+// clang `-E -dD` backend; the function-like WIDGET_SCALE exercises the known
+// operator-adjacent spacing difference that the lenient comparison tolerates.
 #define WIDGET_VERSION 3
 #define WIDGET_ENABLED 1
 #define WIDGET_SCALE(x) ((x) * 2)
