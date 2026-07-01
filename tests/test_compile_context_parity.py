@@ -259,9 +259,13 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
     from abicheck.cli_scan import _merge_compile_config
 
     # Each compile config scalar reaches gcc_option_tokens as ONE literal token
-    # (`-std=<v>` / `-D<v>`), not shell-split. The values must be single option
-    # atoms: PR #471 rejects whitespace in compile.std/compile.defines so a config
-    # scalar can never expand into multiple compiler arguments (flag injection like
+    # (`-std=<v>` / `-D<v>`), not shell-split. The define carries embedded quotes
+    # (a legal single option atom — a string-valued macro) precisely so this stays
+    # a regression test: a token that flowed through shlex-split plumbing would be
+    # de-quoted to `-DMSG=hi`, so the verbatim `-DMSG="hi"` below proves the literal
+    # path. The values must be single option atoms with no whitespace: PR #471
+    # rejects whitespace in compile.std/compile.defines so a config scalar can never
+    # expand into multiple compiler arguments (flag injection like
     # `-Xclang -load ./evil.so`) — that rejection is covered by
     # test_buildconfig_rejects_compile_{std,define}_flag_injection.
     cfg = tmp_path / ".abicheck.yml"
@@ -269,14 +273,14 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
         "compile:\n"
         "  std: 'c++20'\n"
         "  defines:\n"
-        "    - 'DUMMY=1'\n",
+        '    - \'MSG="hi"\'\n',
         encoding="utf-8",
     )
     merged, _ = _merge_compile_config(CompileContext(), (), cfg)
     assert merged.gcc_options is None
     assert merged.gcc_option_tokens == (
         "-std=c++20",
-        "-DDUMMY=1",
+        '-DMSG="hi"',
     )
 
 def test_merge_compile_config_noop_without_path() -> None:
