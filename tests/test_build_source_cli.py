@@ -1785,7 +1785,7 @@ def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkey
              exported_symbols=(), source_abi_cache_dir=None, changed_paths=(),
              public_header_roots=()):
         captured["scope"] = scope
-        return None
+        return None, []
 
     monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
     tree = tmp_path / "src"
