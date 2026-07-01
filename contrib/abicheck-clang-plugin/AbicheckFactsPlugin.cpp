@@ -325,9 +325,11 @@ const Expr *unwrapExpr(const Expr *e) {
   return cur;
 }
 
-// A value string for a lone literal, matching clang.py's use of clang's JSON
-// `value` for IntegerLiteral / CXXBoolLiteralExpr. Returns false for any other
-// (compound) expression — those need the subtree hash, deferred per C.7.
+// A value string for a lone literal, reproducing clang's JSON `value` for the
+// literal kinds clang.py reads (_LITERAL_NODE_KINDS): integer, bool, character,
+// and string are reproducible byte-for-byte here. Returns false for any other
+// (compound) expression — those need the subtree hash, deferred per C.7 — and
+// for floating-/fixed-point literals (see below).
 bool literalValue(const Expr *e, std::string &out) {
   const Expr *core = unwrapExpr(e);
   if (!core)
@@ -343,6 +345,26 @@ bool literalValue(const Expr *e, std::string &out) {
     out = bl->getValue() ? "true" : "false";
     return true;
   }
+  if (const auto *cl = dyn_cast<CharacterLiteral>(core)) {
+    // clang's JSON dumper emits the integer code point for a CharacterLiteral.
+    out = std::to_string(cl->getValue());
+    return true;
+  }
+  if (const auto *sl = dyn_cast<StringLiteral>(core)) {
+    // clang's JSON dumper stores StringLiteral::outputString (the quoted,
+    // escaped spelling), so reproduce it byte-for-byte.
+    std::string buf;
+    llvm::raw_string_ostream os(buf);
+    sl->outputString(os);
+    os.flush();
+    out = buf;
+    return true;
+  }
+  // Floating- and fixed-point literals: clang's JSON emits an approximate
+  // numeric `value` whose textual form is not reproducible byte-for-byte from
+  // the AST without the JSON dumper, so they stay deferred (partial, never
+  // wrong) like the AST-subtree hashes (ADR-038 C.7) rather than risk a
+  // divergent value — and, for constexpr, a divergent id.
   return false;
 }
 
@@ -584,20 +606,41 @@ public:
     return true;
   }
 
-  bool VisitFunctionTemplateDecl(FunctionTemplateDecl *td) {
+  // Emit the template entity and STOP — matching clang.py, which fingerprints a
+  // template whole and does not descend into the templated pattern. Returning
+  // true from a Visit* method would NOT stop RAV descending into the pattern's
+  // members: a class template's member functions are not themselves template
+  // patterns (`getDescribedFunctionTemplate()` is null), so they would leak in
+  // as ordinary — possibly still type-dependent — functions. Overriding
+  // Traverse* and not calling the base is what actually prunes the subtree.
+  bool TraverseFunctionTemplateDecl(FunctionTemplateDecl *td) {
     emitTemplate(td);
     return true;
   }
 
-  bool VisitClassTemplateDecl(ClassTemplateDecl *td) {
+  bool TraverseClassTemplateDecl(ClassTemplateDecl *td) {
     emitTemplate(td);
     return true;
   }
 
 private:
+  // A decl is on the public surface only if it AND every enclosing record are
+  // accessible: a `public` member of a `private` nested class is not reachable
+  // by consumers. clang.py threads this inherited access down the subtree; RAV
+  // visits nested decls independently, so re-derive it by walking the semantic
+  // context up through the enclosing records.
   bool isAccessible(const Decl *d) const {
-    AccessSpecifier as = d->getAccess();
-    return as != AS_private && as != AS_protected;
+    const Decl *cur = d;
+    while (cur) {
+      AccessSpecifier as = cur->getAccess();
+      if (as == AS_private || as == AS_protected)
+        return false;
+      const DeclContext *dc = cur->getDeclContext();
+      if (!dc || !isa<CXXRecordDecl>(dc))
+        break; // only record contexts impose C++ access control
+      cur = Decl::castFromDeclContext(dc);
+    }
+    return true;
   }
 
   int presumedLine(const Decl *d) const {
