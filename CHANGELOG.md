@@ -41,6 +41,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `ABICHECK_CALL_GRAPH_JOBS` still overrides CPU count but memory wins, mirroring
   `ABICHECK_L4_JOBS`. See `docs/development/performance.md` § "Scan-level
   scalability sweep".
+- **Seedless `--depth source` no longer pays a full-tree call-graph cost.** An
+  unseeded s5 run scoped its L4 replay to the public-API surface (headers-only,
+  ~1 TU) but ran the L5 clang call-graph pass over the *whole* compile DB, so its
+  cost scaled with the whole tree even though its reported L4 coverage stayed at a
+  fraction (seedless-vs-seeded widened to ~3.7× at 16 TUs). The unseeded
+  call-graph pass now scopes to the **same** compile units the L4 replay used, so
+  it is consistent with the L4 surface and no longer scales with the tree
+  (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs
+  (`--since`/`--changed-path`) and `--depth full` are unchanged.
 
 ---
 

@@ -67,7 +67,7 @@ count (every TU is replayed). So far, so expected.
 The interesting result is two scalability *gaps* on the `source` (s5) rung,
 both quantified below and both now addressed/filed.
 
-## Gap 1 — seedless `--depth source` pays a full-tree call-graph cost the report hides
+## Gap 1 — seedless `--depth source` pays a full-tree call-graph cost the report hides — **fixed**
 
 `source` (seedless s5) costs **~2× the wall time and ~2.5× the RSS of the
 seeded run, for the *identical* L4 coverage** — both report `L4=1/1` (one TU
@@ -91,10 +91,28 @@ still pays an unscoped full-tree clang pass — so seedless s5 is not merely "as
 expensive as s6", its call-graph half scales with the whole tree while its
 reported L4 coverage stays at one TU.
 
-**Status:** documented here + in `docs/development/performance.md`. The
-honest-cost fix (either scope the call-graph pass to the L4 replay's effective
-scope when unseeded, or report its TU count in the coverage line) is filed as a
-follow-up — it is a behaviour/UX change, not a hot-path bug.
+**Fix (this change):** the follow-up landed as A+B+C.
+
+- **B (scope) —** `_run_inline_source_abi` now returns the exact compile-unit set
+  the replay scope selected (pure, reusing the already-computed include graph — no
+  extra clang pass), and on an unseeded headers-only run `collect_inline_pack`
+  threads it into `_fold_call_graph`, so the call-graph pass parses the **same**
+  TUs as the L4 replay instead of the whole DB. Seeded runs still scope by
+  `changed_paths`; `full`/`target` (s6) keep the broad pass. This also makes the
+  L5 call graph *consistent* with the L4 surface (no phantom edges from TUs L4
+  never examined). Unit-tested in `tests/test_inline_changed_paths.py`
+  (`test_inline_unseeded_call_graph_scoped_to_l4_units`, plus a broad-fallback
+  case).
+- **A (honest cost) —** the call-graph extractor row now carries a
+  `(headers-only scope, matching L4)` note alongside its TU count.
+- **C (advisory) —** the unseeded source-scan advisory now names both the L4
+  replay and the L5 call-graph pass and states the cost grows with the project,
+  nudging toward `--since`/`--changed-path`.
+
+Measured effect (synthetic n=8, 4 vCPU): seedless `--depth source` wall
+**50 s → 22 s (~2.4×)** — now matching the seeded run — for the identical
+verdict. The prior widening (3.7× at n=16) is removed at the root: the call-graph
+pass no longer scales with the whole tree on an unseeded run.
 
 ## Gap 2 — the L5 call-graph pass had no memory clamp (OOM-guard parity with L4) — **fixed**
 

@@ -319,15 +319,17 @@ Two results:
   the binary dump + L2 header AST + L3 compile-DB parse, none of which grow with
   the number of `.cpp` files. `full` (s6) is **linear** in TU count (every TU is
   replayed). Both as expected.
-- **Seedless `--depth source` (s5) hides a full-tree cost.** It costs ~2× the
-  wall time and ~2.5× the RSS of the *seeded* run for the **identical** L4
-  coverage (both report `L4=1/1`), and the gap *widens* with TU count. The seed
-  scopes both the L4 replay **and** the L5 clang call-graph pass to the changed
-  TU; without a seed the L4 replay falls back to headers-only (one TU) but the
-  **call-graph pass still runs over the whole compile DB** — a second
-  `clang -ast-dump=json` over every TU, whose cost the `L4=1/1` coverage line
-  never shows. So a seedless s5's call-graph half scales with the whole tree even
-  though its reported L4 coverage stays at one TU.
+- **Seedless `--depth source` (s5) used to hide a full-tree cost — now fixed.**
+  It cost ~2× the wall time and ~2.5× the RSS of the *seeded* run for the
+  **identical** L4 coverage (both report `L4=1/1`), and the gap *widened* with TU
+  count. The seed scopes both the L4 replay **and** the L5 clang call-graph pass
+  to the changed TU; without a seed the L4 replay fell back to headers-only (one
+  TU) but the **call-graph pass ran over the whole compile DB** — a second
+  `clang -ast-dump=json` over every TU. The unseeded call-graph pass now scopes to
+  the **same** compile units the L4 replay used (headers-only), so it is
+  consistent with the L4 surface and no longer scales with the tree
+  (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs and
+  `--depth full` are unchanged.
 
 That whole-DB call-graph pass shells out to the same multi-GiB
 `clang -ast-dump=json` as the L4 replay, but its worker count
