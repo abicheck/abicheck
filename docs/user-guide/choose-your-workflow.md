@@ -37,7 +37,7 @@ command** when you need more confidence or a CI gate.
 | An application + a library upgrade | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against new.so` when no old library exists (symbol-availability only) |
 | A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
 | Will this binary load in this sysroot / rootfs? | `abicheck deps ./app --sysroot /rootfs` | `abicheck deps ./app` alone checks the dependency tree resolves |
-| Two sysroots / container images to compare | `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` | Per-library ABI diff across the whole transitive dependency stack |
+| Two sysroots / container images to compare | `abicheck deps compare usr/bin/app --baseline /old-root --candidate /new-root` | Per-library ABI diff across the whole transitive dependency stack |
 | Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members (`ar x libfoo.a`) and compare the `.o` objects, or compare a shared library built from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib) |
 
 `compare` auto-detects each input: `.so` files are dumped on the fly, `.json`

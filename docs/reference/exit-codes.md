@@ -86,10 +86,15 @@ verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d
 
 ---
 
-## `abicheck compare-release`
+## `abicheck compare` (multi-library / release inputs)
 
-Aggregates the worst per-library verdict across the release; exit codes mirror
-`compare`, plus a dedicated code for removed libraries:
+When `compare` is handed directory or package inputs (RPM/deb/tar/conda/wheel),
+it fans out to per-library pairs and aggregates the worst per-library verdict
+across the release — the behaviour formerly exposed as the standalone
+`compare-release` command (folded into `compare` per ADR-037 D7; still selectable
+as the GitHub Action's `mode: compare-release`). A set/release comparison keeps
+the verdict-based exit scheme (it is not silently promoted to the severity-aware
+codes), plus a dedicated code for removed libraries:
 
 | Exit code | Meaning |
 |-----------|---------|

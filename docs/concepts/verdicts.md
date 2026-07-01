@@ -20,7 +20,8 @@ groups every fixture by both verdict and category.
 > **Beyond the five core verdicts.** `compare` in severity-aware mode (any
 > `--severity-*` flag) can also report **`SEVERITY_ERROR`** with exit code `1`
 > when an addition/quality finding is promoted to error level — for example to
-> block accidental public-API expansion. The `compare-release` package mode adds
+> block accidental public-API expansion. A package/bundle `compare` (directory
+> or package inputs) adds
 > **`REMOVED_LIBRARY`** (exit `8`) when a shared object present in the old
 > package is absent from the new one. See the
 > [GitHub Action](../user-guide/github-action.md#outputs) and
