@@ -17,6 +17,8 @@ source-replay diff findings (D4, D5, D6, D10)."""
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.buildsource import (
     SOURCE_ABI_VERSION,
     BuildSourcePack,
@@ -34,6 +36,24 @@ from abicheck.checker_policy import (
     RISK_KINDS,
     ChangeKind,
 )
+
+
+def _no_demangler() -> bool:
+    """True when no working C++ demangler (cxxfilt / c++filt) is available — some
+    CI runners (macOS, Windows) have neither. Demangler-dependent matching
+    degrades gracefully in that case, so the tests that assert the *demangler-
+    present* behaviour are skipped rather than failed."""
+    from abicheck.demangle import demangle
+
+    return demangle("_ZN6WidgetC1Ev") is None
+
+
+#: Skip marker for tests that assert demangler-derived matching (RTTI/vtable
+#: attribution, the ctor/dtor demangle backstop, the demangled-identity rematch).
+needs_demangler = pytest.mark.skipif(
+    _no_demangler(), reason="no C++ demangler (cxxfilt/c++filt) available"
+)
+
 
 # -- helpers -----------------------------------------------------------------
 
@@ -472,6 +492,7 @@ def test_ctor_dtor_fold_handles_function_type_template_args() -> None:
     )
 
 
+@needs_demangler
 def test_ctor_dtor_demangle_fallback() -> None:
     # The demangler backstop collapses ctor/dtor clones for any Itanium
     # production the structural parser doesn't model (a robustness net). It keys a
@@ -510,6 +531,7 @@ def test_ctor_dtor_fold_parser_edge_cases() -> None:
     )
 
 
+@needs_demangler
 def test_linker_attributes_rtti_vtable_thunk_to_public_owner() -> None:
     # vtable/typeinfo/typeinfo-name/thunk exports belong to a type/method, not a
     # free decl, so exact matching orphaned them. They are now attributed to their
@@ -546,6 +568,7 @@ def test_linker_attributes_rtti_vtable_thunk_to_public_owner() -> None:
     }
 
 
+@needs_demangler
 def test_synthesized_attribution_requires_exact_specialization() -> None:
     # Codex review: with only `ns::A<int>` on the surface, the vtable for a
     # DIFFERENT specialization `ns::A<char>` (which base-splits to the same
@@ -565,6 +588,7 @@ def test_synthesized_attribution_requires_exact_specialization() -> None:
     assert surface2.unmatched["symbols_without_decl"] == []
 
 
+@needs_demangler
 def test_relink_also_attributes_synthesized_exports() -> None:
     # The merge/relink path (used by `merge` on a plugin/wrapper pack) must apply
     # the same RTTI/vtable attribution as link_source_abi.
@@ -578,6 +602,7 @@ def test_relink_also_attributes_synthesized_exports() -> None:
     assert surface.coverage["unmatched_symbols"] == 0
 
 
+@needs_demangler
 def test_linker_demangled_identity_rematch() -> None:
     # A source decl whose mangled name differs *textually* from the export but
     # demangles identically (substitution-form / mangler drift) is rescued by the
