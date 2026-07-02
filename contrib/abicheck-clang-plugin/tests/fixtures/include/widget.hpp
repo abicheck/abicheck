@@ -24,6 +24,8 @@ typedef int handle_t;
 using size_type = unsigned long;
 
 enum class Color { Red, Green, Blue };
+enum class EmptyEnum {};  // empty enum — clang backend skips it (no `inner`)
+struct EmptyStruct {};    // empty struct — has implicit members, so kept
 
 struct Point {
   int x;

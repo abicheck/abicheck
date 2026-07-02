@@ -1136,11 +1136,21 @@ private:
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
       return;
+    std::optional<Value> json = dumpDeclJson(td);
+    if (json) {
+      const Object *o = json->getAsObject();
+      const Array *inner = o ? o->getArray("inner") : nullptr;
+      // clang.py::_emit_type skips a type node without `inner` (a forward decl,
+      // or an empty enum with no enumerators). An empty struct still has
+      // implicit members in the JSON, so it is kept — mirroring the backend.
+      if (!inner || inner->empty())
+        return;
+    }
     Entity e;
     e.id = H({"type", name});
     e.kind = kind;
     e.qualified_name = name;
-    if (std::optional<Value> json = dumpDeclJson(td))
+    if (json)
       e.type_hash = subtreeHash(*json, {});
     if (e.type_hash.empty())
       Diags.insert("record/enum type_hash unavailable (JSON dump failed)");
@@ -1210,8 +1220,15 @@ public:
     std::vector<Entity> macros = collectMacros(diags);
 
     std::string source;
-    if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID()))
-      source = fe->getName().str();
+    if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {
+      // Resolve to an absolute path: a relative main-file spelling (e.g.
+      // `foo.cpp`) would make two same-spelled sources built from different
+      // directories into one pack collide on the tu_id / facts-filename hash,
+      // and the truncating write would drop one. Absolute paths are distinct.
+      llvm::SmallString<256> abs(fe->getName());
+      llvm::sys::fs::make_absolute(abs);
+      source = std::string(abs.str());
+    }
     const std::string &ctxHash = CtxHash;
     std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
     std::string tuId = "cu://" + source + "#cfg:" + cfg;
