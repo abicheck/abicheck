@@ -43,6 +43,12 @@ inline int square(int n) { return n * n; }  // inline body -> body hash
 template <class T>
 T identity(T v) { return v; }               // function template -> body hash
 
+template <>
+inline int identity(int v) { return v + 1; }  // explicit specialization (callable)
+
+template <class T>
+using Ptr = T *;                            // alias template -> typedef `Ptr`
+
 template <class T>
 struct Box {                                 // class template -> body hash
   T value;

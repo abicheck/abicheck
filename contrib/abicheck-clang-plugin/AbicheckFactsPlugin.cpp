@@ -937,8 +937,10 @@ public:
   bool VisitFunctionDecl(FunctionDecl *fd) {
     if (fd->isImplicit() || fd->getDescribedFunctionTemplate())
       return true;
-    if (fd->getTemplatedKind() == FunctionDecl::TK_FunctionTemplateSpecialization)
-      return true;
+    // Explicit specializations (`template<> int id<int>(int)`) are real callable
+    // decls the clang backend emits (it stops only at the FunctionTemplateDecl
+    // pattern), so do NOT skip TK_FunctionTemplateSpecialization; implicit
+    // instantiations are already excluded by shouldVisitTemplateInstantiations().
     if (!isAccessible(fd) || fd->getNameAsString().empty())
       return true;
     std::string file, origin, visibility;
@@ -1013,9 +1015,10 @@ public:
   bool VisitTypedefNameDecl(TypedefNameDecl *td) {
     if (td->isImplicit())
       return true;
-    if (const auto *alias = dyn_cast<TypeAliasDecl>(td))
-      if (alias->getDescribedAliasTemplate())
-        return true;
+    // Alias templates (`template<class T> using Ptr = T*;`) are a
+    // TypeAliasTemplateDecl wrapping a TypeAliasDecl; the clang backend does not
+    // treat TypeAliasTemplateDecl as a template node, so it descends and emits a
+    // typedef for the alias. Emit it too (do not skip the described-alias child).
     if (!isAccessible(td))
       return true;
     std::string file, origin, visibility;
