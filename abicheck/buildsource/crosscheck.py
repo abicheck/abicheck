@@ -1256,16 +1256,26 @@ def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str
     surface = pack.source_abi if pack is not None else None
     if surface is None:
         return set()
+    # The single-leading-underscore strip only applies on Mach-O, whose export
+    # table drops one `_` from every symbol. On ELF/PE the mapped `sym` is already
+    # the raw exported spelling, so applying the strip there would over-match: a
+    # stale mapping to a leading-underscore C symbol `_bar` (no longer exported)
+    # would be reconciled whenever an unrelated `bar` is exported, wrongly
+    # suppressing a real public_not_exported (Codex review). Gate on the platform.
+    is_macho = getattr(snapshot, "macho", None) is not None
     mapping = (surface.mappings or {}).get("source_decl_to_binary_symbol") or {}
     reconciled: set[str] = set()
     for key, sym in mapping.items():
         if not sym:
             continue
         # The mapped symbol must be in the CURRENT default export table (directly,
-        # or with the Mach-O single leading underscore stripped as
-        # `_exported_symbol_names` does) — otherwise the mapping is stale evidence
+        # or — on Mach-O only — with the single leading underscore stripped as
+        # `_exported_symbol_names` does); otherwise the mapping is stale evidence
         # from another binary and must not suppress the finding.
-        if sym in exported or (sym.startswith("_") and sym[1:] in exported):
+        present = sym in exported or (
+            is_macho and sym.startswith("_") and sym[1:] in exported
+        )
+        if present:
             reconciled.add(key[1:] if key.startswith("__Z") else key)
     return reconciled
 

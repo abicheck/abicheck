@@ -401,6 +401,31 @@ def test_public_not_exported_reconciliation_ignores_stale_mapping():
     assert _l4_reconciled_symbols(snap, {"_Z4livev"}) == set()
 
 
+def test_reconciliation_underscore_strip_is_macho_only():
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    # ELF: the single-underscore strip must NOT apply. A stale mapping to a
+    # leading-underscore C symbol `_bar` (no longer exported) must NOT be
+    # reconciled just because an unrelated `bar` is exported (Codex review).
+    elf_snap = _snap(elf=_elf("bar"))
+    surf = SourceAbiSurface(library="l")
+    surf.mappings["source_decl_to_binary_symbol"] = {"_bar": "_bar"}
+    elf_snap.build_source = BuildSourcePack(root="", source_abi=surf)
+    assert _l4_reconciled_symbols(elf_snap, {"bar"}) == set()
+
+    # Mach-O: the export table strips one underscore, so a raw `__ZN…`/`_foo`
+    # mapping value still reconciles against the stripped export set.
+    macho_snap = _snap(
+        macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")])
+    )
+    surf2 = SourceAbiSurface(library="l")
+    surf2.mappings["source_decl_to_binary_symbol"] = {"__ZN1A3fooEv": "__ZN1A3fooEv"}
+    macho_snap.build_source = BuildSourcePack(root="", source_abi=surf2)
+    # _exported_symbol_names strips one underscore → {"_ZN1A3fooEv"}; the mapping
+    # value "__ZN1A3fooEv" reconciles via the Mach-O strip.
+    assert _l4_reconciled_symbols(macho_snap, {"_ZN1A3fooEv"}) == {"_ZN1A3fooEv"}
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

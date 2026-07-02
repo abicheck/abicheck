@@ -688,6 +688,49 @@ def test_linker_attributes_call_operator_thunk_to_owner() -> None:
 
 
 @needs_demangler
+def test_thunk_attribution_requires_overload_identity() -> None:
+    # Codex review: a thunk carries the full mangling of the overload it forwards
+    # to. `_ZThn8_N1D3fooEd` is a thunk for `D::foo(double)`; with only the
+    # `D::foo(int)` overload public, it must NOT be attributed to `D::foo` (bare
+    # name) — that would drop a real unmatched export and inflate coverage.
+    tu = SourceAbiTu(functions=[_entity("D::foo", "function", mangled="_ZN1D3fooEi")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN1D3fooEi", "_ZThn8_N1D3fooEd"]
+    )
+    # The (double)-overload thunk stays orphaned; nothing attributed.
+    assert surface.unmatched["symbols_without_decl"] == ["_ZThn8_N1D3fooEd"]
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+
+    # When the (double) overload IS public, its thunk attributes to it.
+    tu2 = SourceAbiTu(
+        functions=[
+            _entity("D::foo", "function", mangled="_ZN1D3fooEi"),
+            _entity("D::foo", "function", mangled="_ZN1D3fooEd"),
+        ]
+    )
+    surface2 = link_source_abi(
+        [tu2],
+        exported_symbols=["_ZN1D3fooEi", "_ZN1D3fooEd", "_ZThn8_N1D3fooEd"],
+    )
+    assert surface2.unmatched["symbols_without_decl"] == []
+    assert surface2.mappings["synthesized_symbol_to_owner"]["_ZThn8_N1D3fooEd"] == {
+        "kind": "thunk",
+        "owner": "D::foo",
+    }
+
+
+def test_thunk_target_mangled_parses_offset_forms() -> None:
+    from abicheck.buildsource.source_link import _thunk_target_mangled
+
+    # non-virtual (h), virtual (v), Mach-O prefix, and a non-thunk.
+    assert _thunk_target_mangled("_ZThn8_N1D3fooEd") == "_ZN1D3fooEd"
+    assert _thunk_target_mangled("_ZTv0_n24_N6Widget3fooEv") == "_ZN6Widget3fooEv"
+    assert _thunk_target_mangled("__ZThn8_N1DclEv") == "_ZN1DclEv"
+    assert _thunk_target_mangled("_ZN1D3fooEv") is None  # not a thunk
+    assert _thunk_target_mangled("_ZTV6Widget") is None  # vtable, not a thunk
+
+
+@needs_demangler
 def test_synthesized_attribution_requires_exact_specialization() -> None:
     # Codex review: with only `ns::A<int>` on the surface, the vtable for a
     # DIFFERENT specialization `ns::A<char>` (which base-splits to the same

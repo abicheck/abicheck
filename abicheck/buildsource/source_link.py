@@ -370,6 +370,66 @@ def _strip_call_signature(name: str) -> str:
     return name.strip()
 
 
+def _thunk_target_mangled(symbol: str) -> str | None:
+    """Extract the underlying target symbol a thunk adjusts to, or ``None``.
+
+    Itanium thunk special names embed the full mangling of the function they
+    forward to after one or two ``<call-offset>`` fields:
+
+      * ``_ZTh<nv-offset>_<encoding>``          non-virtual (``h``)
+      * ``_ZTv<v-offset>_<vcall-offset>_<encoding>``  virtual (``v``)
+      * ``_ZTc<call-offset><call-offset><encoding>``  covariant (``c``)
+
+    where a ``<call-offset>`` is ``h<number>_`` or ``v<number>_<number>_`` and a
+    ``<number>`` is ``[n]<digits>``. Returning ``_Z<encoding>`` (Mach-O-normalized
+    in) yields the *overload-specific* target symbol, so a thunk is attributed to
+    the exact overload it forwards to rather than any same-named decl (Codex
+    review). Best-effort: ``None`` on any shape it doesn't recognize.
+    """
+    s = _norm_itanium(symbol)
+    if not s.startswith("_ZT"):
+        return None
+    n = len(s)
+    i = 3
+    if i >= n or s[i] not in "hvc":
+        return None
+    kind = s[i]
+
+    def read_number(j: int) -> int | None:
+        if j < n and s[j] == "n":
+            j += 1
+        k = j
+        while k < n and s[k].isdigit():
+            k += 1
+        return k if k > j else None
+
+    def read_call_offset(j: int) -> int | None:
+        # h <number> _   |   v <number> _ <number> _
+        if j >= n or s[j] not in "hv":
+            return None
+        virtual = s[j] == "v"
+        j2 = read_number(j + 1)
+        if j2 is None or j2 >= n or s[j2] != "_":
+            return None
+        j2 += 1
+        if virtual:
+            j3 = read_number(j2)
+            if j3 is None or j3 >= n or s[j3] != "_":
+                return None
+            j2 = j3 + 1
+        return j2
+
+    if kind == "c":  # covariant: two call-offsets
+        j = read_call_offset(i + 1)
+        if j is not None:
+            j = read_call_offset(j)
+    else:  # h / v begin their own call-offset at i
+        j = read_call_offset(i)
+    if j is None or j >= n:
+        return None
+    return "_Z" + s[j:]
+
+
 def _synthesized_target(demangled: str) -> tuple[str, str, str] | None:
     """Parse a demangled synthesized symbol into ``(kind, target, owner_kind)``.
 
@@ -409,6 +469,14 @@ def _attribute_synthesized_exports(
     func_names = {
         d.qualified_name for d in surface.reachable_declarations if d.qualified_name
     }
+    # Overload-specific index: a decl's real mangled name → its qualified name, so a
+    # thunk is attributed to the EXACT overload it forwards to (Codex review). Keyed
+    # Mach-O-normalized to line up with `_thunk_target_mangled`'s `_Z…` output.
+    mangled_to_qname = {
+        _norm_itanium(d.mangled_name): (d.qualified_name or d.mangled_name)
+        for d in surface.reachable_declarations
+        if d.mangled_name
+    }
 
     def _owner_present(name: str, public: set[str]) -> bool:
         # Exact match, OR a base match ONLY when the *unspecialized* name is
@@ -436,7 +504,17 @@ def _attribute_synthesized_exports(
         if owner == "type":
             if _owner_present(target, type_names):
                 attributed[sym] = (kind, target)
-        else:  # func — cut the parameter list, match the qualified name
+        elif kind == "thunk":
+            # A thunk carries the FULL mangling of the function it forwards to, so
+            # attribute to the exact overload rather than any same-named decl: a
+            # thunk for `D::foo(double)` (absent from the surface) must NOT be
+            # attributed to a public `D::foo(int)` (Codex review). Fall through to
+            # no attribution when the target overload is not a public decl.
+            tgt = _thunk_target_mangled(sym)
+            qn = mangled_to_qname.get(tgt) if tgt else None
+            if qn is not None:
+                attributed[sym] = (kind, qn)
+        else:  # guard variable — attribute to the enclosing function by name
             fname = _strip_call_signature(target)
             if _owner_present(fname, func_names):
                 attributed[sym] = (kind, fname)
