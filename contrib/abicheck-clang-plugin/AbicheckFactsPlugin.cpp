@@ -2,82 +2,1652 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// abicheck Clang facts plugin (ADR-035 D5) — REFERENCE SKELETON.
+// abicheck Clang facts plugin (ADR-035 D5, ADR-038 Flow C) — REFERENCE
+// IMPLEMENTATION.
 //
-// Optional optimization that emits abicheck's Flow-2 normalized source facts
-// (source_facts/*.jsonl, schema = abicheck.buildsource.source_abi.SourceAbiTu)
-// straight from the AST Clang already built, removing the second front-end pass
-// the `abicheck-cc` wrapper otherwise runs. The supported portable producer
-// remains the wrapper + compile_commands.json replay; this plugin is
-// compiler-version-sensitive and therefore never required.
+// During a normal compile this plugin emits abicheck's normalized Flow-2 source
+// facts (source_facts/*.jsonl, schema =
+// abicheck.buildsource.source_abi.SourceAbiTu) straight from the AST Clang
+// already built, so no second front-end pass is needed. The output is the same
+// `abicheck_inputs/` protocol abicheck ingests via `merge`.
 //
-// This skeleton wires the PluginASTAction so a maintainer can fill in the
-// RecursiveASTVisitor body that maps public Decls -> SourceEntity records. It is
-// intentionally minimal and not built in abicheck CI.
+// Reference recipe (ADR-038 C.2). Because the plugin reads the *clang* AST its
+// reference is `abicheck/buildsource/source_extractors/clang.py`
+// (`source_abi_from_clang_ast`) — NOT `base.py`, which is the castxml recipe.
+//
+// How subtree-hash parity is achieved (ADR-038 C.7 → now implemented). The
+// hard part of clang.py is `_subtree_hash`: it hashes an alpha-renamed,
+// commutative-normalized, build-root-stripped canonical form of clang's *JSON*
+// AST. Rather than hand-reproduce clang's JSON (which drifts across LLVM majors
+// and is enormous to mirror node-by-node), this plugin serializes the relevant
+// subtree with clang's OWN JSON dumper in-process — `Decl::dump(os, false,
+// ADOF_JSON)`, the exact code path `-ast-dump=json` uses — and then ports
+// clang.py's `_alpha_rename_map` / `_canonical` / `_subtree_hash` (and
+// `_expr_value` / `_default_arg_repr`) onto that JSON. Because the wrapper's
+// clang backend consumes the *same* clang JSON, the hashes match by
+// construction for a given clang version. Cross-version drift is caught by the
+// C.6 differential-conformance gate, which now runs as a CI matrix over several
+// clang versions (see `.github/workflows/clang-plugin.yml`). Producing both
+// baselines of a comparison the same way (D0) keeps it correct in real use even
+// where a floating-point literal's textual value is only reproduced
+// best-effort (the one documented residual — see `pyFloat`).
+//
+// This plugin links against the *loading* clang's LLVM/Clang libraries and is
+// therefore ABI-locked to its LLVM major (C.5). It stays `contrib/` reference
+// and is not a required gate in abicheck's own CI.
 
 #include "clang/AST/ASTConsumer.h"
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/Decl.h"
+#include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclTemplate.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/ExprCXX.h"
+#include "clang/AST/PrettyPrinter.h"
+#include "clang/AST/ASTDumperUtils.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Basic/FileManager.h"
+#include "clang/Basic/LangStandard.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+#include "clang/Lex/HeaderSearchOptions.h"
+#include "clang/Lex/MacroInfo.h"
+#include "clang/Lex/PPCallbacks.h"
+#include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/PreprocessorOptions.h"
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/JSON.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/SHA256.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <map>
+#include <memory>
+#include <optional>
+#include <regex>
+#include <set>
 #include <string>
+#include <vector>
 
 using namespace clang;
 
 namespace {
 
-// Visits top-level declarations and (TODO) appends one SourceEntity JSON object
-// per public declaration to the per-TU facts file. The mapping must mirror
-// abicheck/buildsource/source_extractors/base.py::entity_from_* so the emitted
-// facts are byte-compatible with the wrapper's output.
+// Producer id, recorded in the manifest's `created_by` and the TU `extractor`
+// field. Bump on any change to the emitted-record recipe.
+constexpr const char *kPluginVersion = "0.1";
+
+// ---------------------------------------------------------------------------
+// Hashing — mirrors clang.py::_hash exactly:
+//   _hash(*parts) = "sha256:" + hex(sha256(parts joined by "\x00")).
+// Any deviation changes identity()/*_hash and fails the C.6 gate (ADR-038 C.2).
+// ---------------------------------------------------------------------------
+std::string sha256Hex(llvm::StringRef data) {
+  auto digest = llvm::SHA256::hash(
+      llvm::ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(data.data()),
+                              data.size()));
+  return llvm::toHex(llvm::ArrayRef<uint8_t>(digest), /*LowerCase=*/true);
+}
+
+std::string H(std::initializer_list<std::string> parts) {
+  std::string blob;
+  bool first = true;
+  for (const std::string &p : parts) {
+    if (!first)
+      blob.push_back('\0');
+    first = false;
+    blob += p;
+  }
+  return "sha256:" + sha256Hex(blob);
+}
+
+// ---------------------------------------------------------------------------
+// Minimal JSON emission with a fixed key order, for the emitted SourceEntity /
+// SourceAbiTu records (matches SourceEntity.to_dict / SourceAbiTu.to_dict field
+// order). Distinct from the *canonical* serializer below, which reproduces
+// Python's json.dumps for hashing.
+// ---------------------------------------------------------------------------
+std::string jsonEscape(llvm::StringRef s) {
+  std::string out;
+  out.reserve(s.size() + 2);
+  for (char c : s) {
+    switch (c) {
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    case '\b':
+      out += "\\b";
+      break;
+    case '\f':
+      out += "\\f";
+      break;
+    default:
+      if (static_cast<unsigned char>(c) < 0x20) {
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), "\\u%04x", c & 0xff);
+        out += buf;
+      } else {
+        out.push_back(c);
+      }
+    }
+  }
+  return out;
+}
+
+std::string jsonStr(llvm::StringRef s) { return "\"" + jsonEscape(s) + "\""; }
+
+std::string jsonStrArray(const std::vector<std::string> &items) {
+  std::string out = "[";
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i)
+      out += ",";
+    out += jsonStr(items[i]);
+  }
+  out += "]";
+  return out;
+}
+
+std::string jsonRawArray(const std::vector<std::string> &items) {
+  std::string out = "[";
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i)
+      out += ",";
+    out += items[i];
+  }
+  out += "]";
+  return out;
+}
+
+// ===========================================================================
+// Canonical serializer + subtree hashing — a faithful C++ port of clang.py's
+// `_hash("clang-ast", json.dumps(_canonical(node, amap), sort_keys=True))`.
+// Operates on `llvm::json::Value` parsed from clang's own JSON dumper, so the
+// input is byte-identical to what clang.py consumes for the same clang version.
+// ===========================================================================
+using llvm::json::Array;
+using llvm::json::Object;
+using llvm::json::Value;
+
+// json.dumps of a Python str: quoted, ensure_ascii=True (non-ASCII → \uXXXX,
+// with surrogate pairs for astral code points), lowercase hex — matching the
+// CPython json encoder defaults clang.py relies on.
+std::string pyStr(llvm::StringRef s) {
+  std::string out = "\"";
+  size_t i = 0, n = s.size();
+  auto emitU = [&](uint32_t cp) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "\\u%04x", cp);
+    out += b;
+  };
+  while (i < n) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c == '"') { out += "\\\""; i++; continue; }
+    if (c == '\\') { out += "\\\\"; i++; continue; }
+    if (c == '\n') { out += "\\n"; i++; continue; }
+    if (c == '\r') { out += "\\r"; i++; continue; }
+    if (c == '\t') { out += "\\t"; i++; continue; }
+    if (c == '\b') { out += "\\b"; i++; continue; }
+    if (c == '\f') { out += "\\f"; i++; continue; }
+    if (c < 0x20) { emitU(c); i++; continue; }
+    if (c < 0x80) { out.push_back(static_cast<char>(c)); i++; continue; }
+    // Decode a UTF-8 sequence to a code point and emit \uXXXX (ensure_ascii).
+    uint32_t cp = 0;
+    int extra = 0;
+    if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+    else { emitU(c); i++; continue; }
+    if (i + extra >= n) { emitU(c); i++; continue; }
+    bool ok = true;
+    for (int k = 1; k <= extra; k++) {
+      unsigned char cc = static_cast<unsigned char>(s[i + k]);
+      if ((cc & 0xC0) != 0x80) { ok = false; break; }
+      cp = (cp << 6) | (cc & 0x3F);
+    }
+    if (!ok) { emitU(c); i++; continue; }
+    i += extra + 1;
+    if (cp <= 0xFFFF) {
+      emitU(cp);
+    } else {
+      cp -= 0x10000;
+      emitU(0xD800 + (cp >> 10));
+      emitU(0xDC00 + (cp & 0x3FF));
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+// Best-effort Python repr() of a float. Exact byte-parity with CPython's
+// shortest-round-trip formatting is the one documented residual (ADR-038 C.7):
+// a floating-point literal appearing *inside* a hashed subtree may serialize
+// differently here. It is still self-consistent within this producer, so under
+// D0 (both baselines produced the same way) it never yields a false finding;
+// only the cross-producer C.6 gate can surface it.
+std::string pyFloat(double d) {
+  char buf[64];
+  for (int prec = 1; prec <= 17; ++prec) {
+    std::snprintf(buf, sizeof(buf), "%.*g", prec, d);
+    if (std::strtod(buf, nullptr) == d)
+      break;
+  }
+  std::string s = buf;
+  if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
+      s.find('n') == std::string::npos && s.find('i') == std::string::npos)
+    s += ".0";
+  return s;
+}
+
+// json.dumps of an arbitrary JSON value with sort_keys=True and the default
+// (', ', ': ') separators — used to copy a scalar `value` verbatim inside the
+// canonical form.
+std::string pyDumps(const Value &v) {
+  switch (v.kind()) {
+  case Value::Null:
+    return "null";
+  case Value::Boolean:
+    return *v.getAsBoolean() ? "true" : "false";
+  case Value::Number:
+    if (auto i = v.getAsInteger())
+      return std::to_string(*i);
+    // A JSON number above int64_t::max is stored as uint64 and rejected by
+    // getAsInteger; render it exactly before falling back to float.
+    if (auto u = v.getAsUINT64())
+      return std::to_string(*u);
+    return pyFloat(*v.getAsNumber());
+  case Value::String:
+    return pyStr(*v.getAsString());
+  case Value::Array: {
+    std::string out = "[";
+    bool first = true;
+    for (const Value &e : *v.getAsArray()) {
+      if (!first) out += ", ";
+      first = false;
+      out += pyDumps(e);
+    }
+    return out + "]";
+  }
+  case Value::Object: {
+    std::map<std::string, std::string> kv;
+    for (const auto &kvp : *v.getAsObject())
+      kv[llvm::StringRef(kvp.first).str()] = pyDumps(kvp.second);
+    std::string out = "{";
+    bool first = true;
+    for (auto &e : kv) {
+      if (!first) out += ", ";
+      first = false;
+      out += pyStr(e.first) + ": " + e.second;
+    }
+    return out + "}";
+  }
+  }
+  return "null";
+}
+
+// Python str(x) semantics for a JSON `value` used by _expr_value: a string is
+// its raw characters (no quotes), a bool is "True"/"False", an int its digits.
+std::string pyStrOfValue(const Value &v) {
+  switch (v.kind()) {
+  case Value::Null:
+    return "None";
+  case Value::Boolean:
+    return *v.getAsBoolean() ? "True" : "False";
+  case Value::Number:
+    if (auto i = v.getAsInteger())
+      return std::to_string(*i);
+    if (auto u = v.getAsUINT64())
+      return std::to_string(*u);
+    return pyFloat(*v.getAsNumber());
+  case Value::String:
+    return v.getAsString()->str();
+  default:
+    return pyDumps(v);
+  }
+}
+
+bool isRenameableLocal(const Object &o) {
+  auto kind = o.getString("kind");
+  if (!kind)
+    return false;
+  if (*kind == "ParmVarDecl" || *kind == "BindingDecl" ||
+      *kind == "DecompositionDecl")
+    return true;
+  if (*kind == "VarDecl") {
+    if (auto sc = o.getString("storageClass"))
+      if (*sc == "static" || *sc == "extern")
+        return false;
+    return true;
+  }
+  return false;
+}
+
+// Port of clang.py::_alpha_rename_map: map each local-binding clang id to a
+// positional placeholder ($0, $1, …) by first occurrence (params first).
+llvm::StringMap<std::string> alphaRenameMap(const Value &node,
+                                            llvm::ArrayRef<std::string> paramIds) {
+  std::set<std::string> localIds;
+  for (const std::string &p : paramIds)
+    if (!p.empty())
+      localIds.insert(p);
+
+  std::function<void(const Value &)> collect = [&](const Value &n) {
+    const Object *o = n.getAsObject();
+    if (!o)
+      return;
+    if (auto id = o->getString("id"))
+      if (isRenameableLocal(*o))
+        localIds.insert(id->str());
+    if (const Array *inner = o->getArray("inner"))
+      for (const Value &c : *inner)
+        collect(c);
+  };
+  collect(node);
+  llvm::StringMap<std::string> amap;
+  if (localIds.empty())
+    return amap;
+
+  std::vector<std::string> order;
+  std::set<std::string> seen;
+  for (const std::string &p : paramIds)
+    if (localIds.count(p) && !seen.count(p)) {
+      seen.insert(p);
+      order.push_back(p);
+    }
+  std::function<void(const Value &)> walk = [&](const Value &n) {
+    const Object *o = n.getAsObject();
+    if (!o)
+      return;
+    if (auto id = o->getString("id"))
+      if (localIds.count(id->str()) && !seen.count(id->str())) {
+        seen.insert(id->str());
+        order.push_back(id->str());
+      }
+    if (const Object *ref = o->getObject("referencedDecl"))
+      if (auto rid = ref->getString("id"))
+        if (localIds.count(rid->str()) && !seen.count(rid->str())) {
+          seen.insert(rid->str());
+          order.push_back(rid->str());
+        }
+    if (const Array *inner = o->getArray("inner"))
+      for (const Value &c : *inner)
+        walk(c);
+  };
+  walk(node);
+  for (size_t i = 0; i < order.size(); ++i)
+    amap[order[i]] = "$" + std::to_string(i);
+  return amap;
+}
+
+const std::set<std::string> &commutativeOps() {
+  static const std::set<std::string> ops = {"+", "*", "==", "!=", "&", "|", "^"};
+  return ops;
+}
+
+// Port of clang.py::_canonical → json.dumps(..., sort_keys=True) as one string.
+std::string canonical(const Value &node, const llvm::StringMap<std::string> &amap) {
+  const Object *o = node.getAsObject();
+  if (!o)
+    return pyDumps(node);
+
+  std::map<std::string, std::string> kv; // std::map keeps keys sorted (ASCII)
+  std::optional<std::string> placeholder;
+  if (auto id = o->getString("id")) {
+    auto it = amap.find(*id);
+    if (it != amap.end())
+      placeholder = it->second;
+  }
+  for (const char *key : {"kind", "name", "value", "opcode", "castKind"}) {
+    if (const Value *v = o->get(key)) {
+      if (std::strcmp(key, "name") == 0 && placeholder)
+        kv[key] = pyStr(*placeholder);
+      else
+        kv[key] = pyDumps(*v);
+    }
+  }
+  if (const Object *t = o->getObject("type"))
+    if (auto q = t->getString("qualType"))
+      kv["type"] = pyStr(*q);
+  if (const Object *ref = o->getObject("referencedDecl")) {
+    std::optional<std::string> refph;
+    if (auto rid = ref->getString("id")) {
+      auto it = amap.find(*rid);
+      if (it != amap.end())
+        refph = it->second;
+    }
+    if (refph)
+      kv["ref"] = pyStr(*refph);
+    else if (auto rn = ref->getString("name"); rn && !rn->empty())
+      kv["ref"] = pyStr(*rn);
+  }
+  if (const Array *inner = o->getArray("inner")) {
+    std::vector<std::string> children;
+    children.reserve(inner->size());
+    for (const Value &c : *inner)
+      children.push_back(canonical(c, amap));
+    // Commutative-operator normalization: sort the two operands of a
+    // commutative binary operator by their canonical serialization.
+    auto kind = o->getString("kind");
+    auto op = o->getString("opcode");
+    if (kind && *kind == "BinaryOperator" && op &&
+        commutativeOps().count(op->str()) && children.size() == 2)
+      std::sort(children.begin(), children.end());
+    std::string arr = "[";
+    for (size_t i = 0; i < children.size(); ++i) {
+      if (i) arr += ", ";
+      arr += children[i];
+    }
+    arr += "]";
+    kv["inner"] = arr;
+  }
+
+  std::string out = "{";
+  bool first = true;
+  for (auto &e : kv) {
+    if (!first) out += ", ";
+    first = false;
+    out += pyStr(e.first) + ": " + e.second;
+  }
+  out += "}";
+  return out;
+}
+
+std::string subtreeHash(const Value &node, llvm::ArrayRef<std::string> paramIds) {
+  auto amap = alphaRenameMap(node, paramIds);
+  return H({"clang-ast", canonical(node, amap)});
+}
+
+// clang.py::_WRAPPER_EXPR_KINDS — single-child wrappers descended through when
+// deciding whether an initializer is a lone literal.
+bool isWrapperExpr(llvm::StringRef k) {
+  return k == "ImplicitCastExpr" || k == "CStyleCastExpr" ||
+         k == "CXXStaticCastExpr" || k == "ConstantExpr" ||
+         k == "ExprWithCleanups" || k == "ParenExpr" ||
+         k == "CXXFunctionalCastExpr" || k == "MaterializeTemporaryExpr";
+}
+
+bool isLiteralKind(llvm::StringRef k) {
+  return k == "IntegerLiteral" || k == "FloatingLiteral" ||
+         k == "CharacterLiteral" || k == "StringLiteral" ||
+         k == "CXXBoolLiteralExpr" || k == "FixedPointLiteral";
+}
+
+bool declLikeKind(llvm::StringRef k) {
+  return k.ends_with("Decl") || k.ends_with("Attr") || k.ends_with("Comment");
+}
+
+// Port of clang.py::_unwrap_expr.
+const Value *unwrapExprJson(const Value *node) {
+  const Value *cur = node;
+  while (cur) {
+    const Object *o = cur->getAsObject();
+    if (!o)
+      break;
+    auto kind = o->getString("kind");
+    if (!kind || !isWrapperExpr(*kind))
+      break;
+    const Array *inner = o->getArray("inner");
+    if (!inner)
+      break;
+    std::vector<const Value *> dicts;
+    for (const Value &c : *inner)
+      if (c.getAsObject())
+        dicts.push_back(&c);
+    if (dicts.size() != 1)
+      break;
+    cur = dicts[0];
+  }
+  return cur;
+}
+
+// Port of clang.py::_init_expr: the last child that is not a decl/attr/comment.
+const Value *initExprJson(const Object &node) {
+  const Array *inner = node.getArray("inner");
+  if (!inner)
+    return nullptr;
+  const Value *last = nullptr;
+  for (const Value &c : *inner) {
+    const Object *co = c.getAsObject();
+    if (!co)
+      continue;
+    auto kind = co->getString("kind");
+    if (kind && declLikeKind(*kind))
+      continue;
+    last = &c;
+  }
+  return last;
+}
+
+// Port of clang.py::_expr_value.
+std::string exprValueJson(const Value &node) {
+  const Value *core = unwrapExprJson(&node);
+  if (core) {
+    const Object *o = core->getAsObject();
+    if (o) {
+      auto kind = o->getString("kind");
+      const Value *val = o->get("value");
+      if (kind && isLiteralKind(*kind) && val)
+        return pyStrOfValue(*val);
+    }
+  }
+  return subtreeHash(node, {});
+}
+
+// Port of clang.py::_default_arg_repr over the FunctionDecl JSON.
+std::string defaultArgReprJson(const Object &fnNode) {
+  const Array *inner = fnNode.getArray("inner");
+  if (!inner)
+    return "";
+  std::string out;
+  bool first = true;
+  int position = -1;
+  for (const Value &c : *inner) {
+    const Object *co = c.getAsObject();
+    if (!co)
+      continue;
+    auto kind = co->getString("kind");
+    if (!kind || *kind != "ParmVarDecl")
+      continue;
+    ++position;
+    const Value *init = initExprJson(*co);
+    // clang.py: `if not child.get("init") and init is None: continue`. clang's
+    // JSON marks a defaulted parameter with a truthy "init" string (e.g. "c").
+    bool hasInitFlag = false;
+    if (const Value *f = co->get("init")) {
+      if (auto s = f->getAsString())
+        hasInitFlag = !s->empty();
+      else if (auto b = f->getAsBoolean())
+        hasInitFlag = *b;
+      else
+        hasInitFlag = f->kind() != Value::Null;
+    }
+    if (!hasInitFlag && init == nullptr)
+      continue;
+    std::string rep = init ? exprValueJson(*init) : "default";
+    if (!first)
+      out += ",";
+    first = false;
+    out += "p" + std::to_string(position) + "=" + rep;
+  }
+  return out;
+}
+
+// Port of clang.py::_param_ids: the FunctionDecl's ParmVarDecl child ids.
+std::vector<std::string> paramIdsJson(const Object &fnNode) {
+  std::vector<std::string> ids;
+  if (const Array *inner = fnNode.getArray("inner"))
+    for (const Value &c : *inner) {
+      const Object *co = c.getAsObject();
+      if (!co)
+        continue;
+      auto kind = co->getString("kind");
+      if (kind && *kind == "ParmVarDecl")
+        if (auto id = co->getString("id"))
+          ids.push_back(id->str());
+    }
+  return ids;
+}
+
+// The CompoundStmt body child of a FunctionDecl JSON node, or nullptr.
+const Value *bodyStmtJson(const Object &fnNode) {
+  if (const Array *inner = fnNode.getArray("inner"))
+    for (const Value &c : *inner) {
+      const Object *co = c.getAsObject();
+      if (co)
+        if (auto kind = co->getString("kind"); kind && *kind == "CompoundStmt")
+          return &c;
+    }
+  return nullptr;
+}
+
+// clang.py::_mangled over JSON: take the node's mangledName; if it equals the
+// plain (unqualified) name — extern "C", some ctors — leave it empty so
+// identity() falls back to qualified_name#signature_hash.
+std::string mangledFromJson(const Object &o) {
+  auto m = o.getString("mangledName");
+  auto n = o.getString("name");
+  if (m && !m->empty() && (!n || *m != *n))
+    return m->str();
+  return "";
+}
+
+// clang.py::_signature over JSON: the node's type.qualType.
+std::string qualTypeFromJson(const Object &o) {
+  if (const Object *t = o.getObject("type"))
+    if (auto q = t->getString("qualType"))
+      return q->str();
+  return "";
+}
+
+// Dump a Decl to clang's JSON (identical to -ast-dump=json for that node) and
+// parse it. Returns nullopt on any dump/parse failure (best-effort, C.3).
+std::optional<Value> dumpDeclJson(const Decl *d) {
+  std::string buf;
+  llvm::raw_string_ostream os(buf);
+  d->dump(os, /*Deserialize=*/false, ADOF_JSON);
+  os.flush();
+  auto parsed = llvm::json::parse(buf);
+  if (!parsed) {
+    llvm::consumeError(parsed.takeError());
+    return std::nullopt;
+  }
+  return std::move(*parsed);
+}
+
+// ---------------------------------------------------------------------------
+// Emitted SourceEntity (ADR-030 D4).
+// ---------------------------------------------------------------------------
+struct Entity {
+  std::string id;
+  std::string kind;
+  std::string qualified_name;
+  std::string mangled_name;
+  std::string signature_hash;
+  std::string body_hash;
+  std::string type_hash;
+  std::string value;
+  std::string loc_path;
+  int loc_line = 0;
+  std::string loc_origin = "UNKNOWN";
+  std::string visibility = "unknown";
+  bool api_relevant = true;
+
+  std::string to_json() const {
+    std::string loc = "{\"path\":" + jsonStr(loc_path) +
+                      ",\"line\":" + std::to_string(loc_line) +
+                      ",\"origin\":" + jsonStr(loc_origin) + "}";
+    return "{\"id\":" + jsonStr(id) + ",\"kind\":" + jsonStr(kind) +
+           ",\"qualified_name\":" + jsonStr(qualified_name) +
+           ",\"mangled_name\":" + jsonStr(mangled_name) +
+           ",\"signature_hash\":" + jsonStr(signature_hash) +
+           ",\"body_hash\":" + jsonStr(body_hash) +
+           ",\"type_hash\":" + jsonStr(type_hash) +
+           ",\"value\":" + jsonStr(value) + ",\"source_location\":" + loc +
+           ",\"visibility\":" + jsonStr(visibility) +
+           ",\"api_relevant\":" + (api_relevant ? "true" : "false") +
+           ",\"confidence\":\"high\"}";
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Path helpers for public-surface classification (ADR-038 C.2 visibility).
+// ---------------------------------------------------------------------------
+std::vector<std::string> pathSegments(llvm::StringRef p) {
+  std::vector<std::string> segs;
+  std::string cur;
+  for (char c : p) {
+    if (c == '/' || c == '\\') {
+      if (!cur.empty() && cur != ".")
+        segs.push_back(cur);
+      cur.clear();
+    } else {
+      cur.push_back(c);
+    }
+  }
+  if (!cur.empty() && cur != ".")
+    segs.push_back(cur);
+  return segs;
+}
+
+bool isContiguousSubsequence(const std::vector<std::string> &hay,
+                             const std::vector<std::string> &needle) {
+  if (needle.empty() || needle.size() > hay.size())
+    return false;
+  for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+    bool ok = true;
+    for (size_t j = 0; j < needle.size(); ++j)
+      if (hay[i + j] != needle[j]) {
+        ok = false;
+        break;
+      }
+    if (ok)
+      return true;
+  }
+  return false;
+}
+
+// Absolute-normalized path segments: resolve `p` against the compile's CWD (the
+// same base a relative `-I` resolves against) before segmenting.
+std::vector<std::string> absSegments(llvm::StringRef p) {
+  llvm::SmallString<256> abs(p);
+  llvm::sys::fs::make_absolute(abs);
+  // Collapse `.`/`..` lexically: an out-of-source build compiling with
+  // `-I../include` reports headers as `../include/foo.hpp`, which make_absolute
+  // turns into `/repo/build/../include/foo.hpp`; without this the retained `..`
+  // segment stops the `/repo/include` root from matching (Codex review).
+  llvm::sys::path::remove_dots(abs, /*remove_dot_dot=*/true);
+  return pathSegments(abs);
+}
+
+// Whether `file` sits under any of `roots`, matching either the raw spellings
+// OR their absolute-normalized forms. Without the absolute fallback an absolute
+// public-root (e.g. `$PWD/include`) never matches a relative header spelling
+// (`include/foo.hpp`) — the root's segments are longer — so every decl from that
+// root would be silently dropped and the pack look empty (Codex review).
+bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &roots) {
+  std::vector<std::string> fileSegs = pathSegments(file);
+  std::vector<std::string> fileAbs;
+  bool haveAbs = false;
+  for (const std::string &root : roots) {
+    if (isContiguousSubsequence(fileSegs, pathSegments(root)))
+      return true;
+    if (!haveAbs) {
+      fileAbs = absSegments(file);
+      haveAbs = true;
+    }
+    if (isContiguousSubsequence(fileAbs, absSegments(root)))
+      return true;
+  }
+  return false;
+}
+
+// Whether a header path looks machine-generated — a faithful port of
+// provenance._is_generated_header (a `generated`/`gen`/… directory segment, or
+// a moc_/ui_/qrc_/protobuf/flatbuffers/gRPC basename). The clang backend keeps
+// such a public header on the surface but marks it GENERATED/generated
+// (ADR-030 generated_header_changed); the plugin must mirror that for C.6.
+bool isGeneratedHeaderPath(llvm::StringRef file) {
+  std::vector<std::string> segs = pathSegments(file);
+  if (segs.empty())
+    return false;
+  static const std::set<std::string> genDirs = {
+      "generated", "_generated", ".generated", "gen", "autogen"};
+  for (size_t i = 0; i + 1 < segs.size(); ++i)
+    if (genDirs.count(segs[i]))
+      return true;
+  static const std::regex genBase(
+      R"(^moc_.*\.(h|hpp|cpp|cc)$|^ui_.*\.h$|^qrc_.*\.(cpp|cc)$|.*\.pb\.(h|cc)$|.*_generated\.h$|.*\.grpc\.pb\.(h|cc)$)");
+  return std::regex_match(segs.back(), genBase);
+}
+
+// The (origin, visibility) labels for a file already known to be on the public
+// surface: GENERATED for a generated public header, else PUBLIC_HEADER — matching
+// clang.py::_ClassifyContext.classify.
+void publicSurfaceLabels(llvm::StringRef file, std::string &origin,
+                         std::string &visibility) {
+  if (isGeneratedHeaderPath(file)) {
+    origin = "GENERATED";
+    visibility = "generated";
+  } else {
+    origin = "PUBLIC_HEADER";
+    visibility = "public_header";
+  }
+}
+
+std::string collapseWhitespace(llvm::StringRef s) {
+  std::string out;
+  bool inWs = false;
+  for (char c : s) {
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
+        c == '\v') {
+      inWs = true;
+      continue;
+    }
+    if (inWs && !out.empty())
+      out.push_back(' ');
+    inWs = false;
+    out.push_back(c);
+  }
+  return out;
+}
+
+std::string upperStrippedStem(llvm::StringRef file) {
+  llvm::StringRef base = llvm::sys::path::filename(file);
+  std::string stem;
+  for (char c : base) {
+    if (std::isalnum(static_cast<unsigned char>(c)))
+      stem.push_back(
+          static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    else
+      stem.push_back('_');
+  }
+  std::string collapsed;
+  bool underscore = false;
+  for (char c : stem) {
+    if (c == '_') {
+      underscore = true;
+      continue;
+    }
+    if (underscore && !collapsed.empty())
+      collapsed.push_back('_');
+    underscore = false;
+    collapsed.push_back(c);
+  }
+  return collapsed;
+}
+
+std::string joinStrings(const std::vector<std::string> &v, char sep) {
+  std::string out;
+  for (size_t i = 0; i < v.size(); ++i) {
+    if (i)
+      out.push_back(sep);
+    out += v[i];
+  }
+  return out;
+}
+
+std::string nowIso8601Utc() {
+  std::time_t t = std::time(nullptr);
+  std::tm tm{};
+#if defined(_WIN32)
+  gmtime_s(&tm, &t);
+#else
+  gmtime_r(&t, &tm);
+#endif
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S+00:00", &tm);
+  return buf;
+}
+
+// ---------------------------------------------------------------------------
+// Macro capture via in-compile PPCallbacks (ADR-038 C.2). No second `-E -dD`
+// pass. Values are token-reconstructed and whitespace-collapsed to match
+// clang.py::macros_from_preprocessor's "{params} {body}" normalization.
+// ---------------------------------------------------------------------------
+struct MacroRecord {
+  std::string value;
+  std::string file;
+};
+
+class MacroCollector : public PPCallbacks {
+public:
+  MacroCollector(Preprocessor &pp,
+                 std::shared_ptr<std::map<std::string, MacroRecord>> out)
+      : PP(pp), SM(pp.getSourceManager()), Defs(std::move(out)) {}
+
+  void MacroDefined(const Token &nameTok, const MacroDirective *md) override {
+    const MacroInfo *mi = md ? md->getMacroInfo() : nullptr;
+    const IdentifierInfo *ii = nameTok.getIdentifierInfo();
+    if (!mi || !ii)
+      return;
+    const std::string name = ii->getName().str();
+    // Determine whether this — the current (final so far) definition — is on the
+    // library's public surface. A non-public (re)definition must ERASE any prior
+    // public entry, not merely be skipped: clang's `-E -dD` backend tracks the
+    // final definition and then filters by its defining file, so a system header
+    // redefining a public macro (without an intervening #undef) drops it. Leaving
+    // the stale public value here would emit a phantom public macro.
+    // (stdlib/toolchain headers are never public; the path-only isPublicFile
+    // check downstream would otherwise accept /usr/include/... via its `include`
+    // segment, so the SourceManager::isInSystemHeader guard belongs here.)
+    SourceLocation loc = mi->getDefinitionLoc();
+    bool nonPublic = mi->isBuiltinMacro() || loc.isInvalid() ||
+                     SM.isInSystemHeader(loc);
+    std::string file;
+    if (!nonPublic) {
+      PresumedLoc pl = SM.getPresumedLoc(loc);
+      if (pl.isInvalid() || llvm::StringRef(pl.getFilename()).empty() ||
+          llvm::StringRef(pl.getFilename()).starts_with("<"))
+        nonPublic = true;
+      else
+        file = pl.getFilename();
+    }
+    if (nonPublic) {
+      Defs->erase(name);
+      return;
+    }
+    (*Defs)[name] = MacroRecord{macroValue(mi), file};
+  }
+
+  void MacroUndefined(const Token &nameTok, const MacroDefinition &,
+                      const MacroDirective *) override {
+    if (const IdentifierInfo *ii = nameTok.getIdentifierInfo())
+      Defs->erase(ii->getName().str());
+  }
+
+private:
+  std::string macroValue(const MacroInfo *mi) {
+    std::string params;
+    if (mi->isFunctionLike()) {
+      params += "(";
+      auto pl = mi->params();
+      for (unsigned i = 0; i < pl.size(); ++i) {
+        if (i)
+          params += ",";
+        const IdentifierInfo *pi = pl[i];
+        if (pi->getName() == "__VA_ARGS__") {
+          params += "..."; // C99 variadic
+        } else {
+          params += pi->getName().str();
+          // GNU named variadic (`#define LOG(fmt, args...)`): the ellipsis rides
+          // the last parameter, so append it to keep the call contract distinct.
+          if (mi->isGNUVarargs() && i + 1 == pl.size())
+            params += "...";
+        }
+      }
+      params += ")";
+    }
+    std::string body;
+    for (const Token &t : mi->tokens()) {
+      if (!body.empty())
+        body += " ";
+      body += PP.getSpelling(t);
+    }
+    return collapseWhitespace(params + " " + body);
+  }
+
+  Preprocessor &PP;
+  SourceManager &SM;
+  std::shared_ptr<std::map<std::string, MacroRecord>> Defs;
+};
+
+// ---------------------------------------------------------------------------
+// The AST visitor: maps public Decls -> SourceEntity records (ADR-038 C.2).
+// ---------------------------------------------------------------------------
 class FactsVisitor : public RecursiveASTVisitor<FactsVisitor> {
 public:
-  explicit FactsVisitor(ASTContext &Ctx, std::ostream &Out) : Ctx(Ctx), Out(Out) {}
+  FactsVisitor(ASTContext &ctx, const std::vector<std::string> &roots,
+               std::vector<Entity> &functions, std::vector<Entity> &types,
+               std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
+               std::vector<Entity> &constexprValues, std::set<std::string> &diags)
+      : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
+        Functions(functions), Types(types), Templates(templates),
+        InlineBodies(inlineBodies), ConstexprValues(constexprValues),
+        Diags(diags) {}
 
-  bool VisitNamedDecl(NamedDecl *D) {
-    // TODO: classify public surface (visibility/header origin), compute
-    // signature_hash / mangled_name, and write one SourceEntity JSON object.
-    (void)D;
-    (void)Ctx;
+  bool shouldVisitTemplateInstantiations() const { return false; }
+  bool shouldVisitImplicitCode() const { return false; }
+
+  bool VisitFunctionDecl(FunctionDecl *fd) {
+    if (fd->isImplicit() || fd->getDescribedFunctionTemplate())
+      return true;
+    // Explicit specializations (`template<> int id<int>(int)`) are real callable
+    // decls the clang backend emits (it stops only at the FunctionTemplateDecl
+    // pattern), so do NOT skip TK_FunctionTemplateSpecialization; implicit
+    // instantiations are already excluded by shouldVisitTemplateInstantiations().
+    if (!isAccessible(fd) || fd->getNameAsString().empty())
+      return true;
+    std::string file, origin, visibility;
+    if (!classify(fd, file, origin, visibility))
+      return true;
+
+    // Read signature + mangled name from clang's own JSON (as clang.py does),
+    // so id/signature_hash match the wrapper's clang backend exactly.
+    std::optional<Value> json = dumpDeclJson(fd);
+    if (!json || !json->getAsObject()) {
+      Diags.insert("function facts unavailable (JSON dump failed)");
+      return true;
+    }
+    const Object &o = *json->getAsObject();
+    std::string name = scopedName(fd);
+    std::string sig = qualTypeFromJson(o);
+    std::string mangled = mangledFromJson(o);
+    std::string key = mangled.empty() ? name : mangled;
+    int line = presumedLine(fd);
+
+    Entity e;
+    e.id = H({"function", key, sig});
+    e.kind = "function";
+    e.qualified_name = name;
+    e.mangled_name = mangled;
+    e.signature_hash = H({"sig", sig});
+    e.value = defaultArgReprJson(o);
+    e.loc_path = file;
+    e.loc_line = line;
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    Functions.push_back(e);
+
+    // Gate the whole inline entity on a CompoundStmt being present in the
+    // dumped JSON (clang.py::_has_body), NOT on the AST body predicate. Because
+    // this runs post-codegen (AddAfterMainAction), an implicit/defaulted
+    // special member that codegen defined reports hasBody()==true while its
+    // JSON dump carries no ordinary CompoundStmt; keying on the predicate would
+    // emit an `inline` entity (with an empty body_hash) that the wrapper's
+    // -fsyntax-only pass never produces (Codex/review).
+    if (const Value *body = bodyStmtJson(o)) {
+      Entity ib;
+      ib.id = H({"inline", key, sig});
+      ib.kind = "inline";
+      ib.qualified_name = name;
+      ib.mangled_name = mangled;
+      ib.signature_hash = H({"sig", sig});
+      ib.body_hash = subtreeHash(*body, paramIdsJson(o));
+      ib.loc_path = file;
+      ib.loc_line = line;
+      ib.loc_origin = origin;
+      ib.visibility = visibility;
+      InlineBodies.push_back(ib);
+    }
     return true;
   }
 
+  bool VisitCXXRecordDecl(CXXRecordDecl *rd) {
+    if (rd->isImplicit() || rd->getDescribedClassTemplate())
+      return true;
+    if (isa<ClassTemplateSpecializationDecl>(rd))
+      return true;
+    if (!rd->isThisDeclarationADefinition())
+      return true;
+    emitType(rd, scopedName(rd), "record");
+    return true;
+  }
+
+  bool VisitEnumDecl(EnumDecl *ed) {
+    if (ed->isImplicit() || !ed->isThisDeclarationADefinition())
+      return true;
+    emitType(ed, scopedName(ed), "enum");
+    return true;
+  }
+
+  bool VisitTypedefNameDecl(TypedefNameDecl *td) {
+    if (td->isImplicit())
+      return true;
+    // Alias templates (`template<class T> using Ptr = T*;`) are a
+    // TypeAliasTemplateDecl wrapping a TypeAliasDecl; the clang backend does not
+    // treat TypeAliasTemplateDecl as a template node, so it descends and emits a
+    // typedef for the alias. Emit it too (do not skip the described-alias child).
+    if (!isAccessible(td))
+      return true;
+    std::string file, origin, visibility;
+    if (!classify(td, file, origin, visibility))
+      return true;
+    // Read the aliased spelling from clang's own JSON `type.qualType` (falling
+    // back to `desugaredQualType`), exactly as clang.py::_typedef_underlying
+    // does — NOT from getUnderlyingType().getAsString(PP). The pretty-printer
+    // and the JSON qualType can spell the same type differently (`_Bool` vs
+    // `bool`, elaborated `struct X` vs `X`, sugared aliases), which would make
+    // `value`/`type_hash`/`id` diverge from the clang backend (Codex review).
+    std::optional<Value> tjson = dumpDeclJson(td);
+    const Object *to = tjson ? tjson->getAsObject() : nullptr;
+    std::string underlying;
+    if (to)
+      if (const Object *t = to->getObject("type")) {
+        if (auto q = t->getString("qualType"))
+          underlying = q->str();
+        if (underlying.empty())
+          if (auto dq = t->getString("desugaredQualType"))
+            underlying = dq->str();
+      }
+    if (underlying.empty())
+      return true;
+    std::string name = scopedName(td);
+    Entity e;
+    e.id = H({"typedef", name, underlying});
+    e.kind = "typedef";
+    e.qualified_name = name;
+    e.type_hash = H({"typedef-target", underlying});
+    e.value = underlying;
+    e.loc_path = file;
+    e.loc_line = presumedLine(td);
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    Types.push_back(e);
+    return true;
+  }
+
+  bool VisitVarDecl(VarDecl *vd) {
+    if (vd->isImplicit() || isa<ParmVarDecl>(vd) || !vd->isConstexpr())
+      return true;
+    // Block-scope `constexpr` inside a public inline/header function body IS
+    // emitted (not skipped on getParentFunctionOrMethod): the clang backend
+    // descends accessible function bodies and emits such locals as `constexpr`
+    // entities just like it emits body-local types, so the plugin matches it
+    // (Codex review). scopedName() omits the function scope, so a local `k` in
+    // `demo::f()` is named `demo::k` exactly as the backend names it. Local
+    // constexpr are syntactic (present in the AST regardless of codegen), so
+    // there is no capture-point asymmetry here.
+    if (!isAccessible(vd) || vd->getNameAsString().empty())
+      return true;
+    std::string file, origin, visibility;
+    if (!classify(vd, file, origin, visibility))
+      return true;
+    std::optional<Value> json = dumpDeclJson(vd);
+    if (!json || !json->getAsObject()) {
+      Diags.insert("constexpr value unavailable (JSON dump failed)");
+      return true;
+    }
+    const Object &o = *json->getAsObject();
+    const Value *init = initExprJson(o);
+    std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
+    std::string name = scopedName(vd);
+    Entity e;
+    e.id = H({"constexpr", name, value});
+    e.kind = "constexpr";
+    e.qualified_name = name;
+    e.mangled_name = mangledFromJson(o);
+    e.value = value;
+    e.loc_path = file;
+    e.loc_line = presumedLine(vd);
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    ConstexprValues.push_back(e);
+    return true;
+  }
+
+  // Emit the template entity and STOP descending — matching clang.py, which
+  // fingerprints a template whole and does not descend into the templated
+  // pattern (a class template's member functions are not themselves template
+  // patterns, so a Visit*+return-true would leak them in as ordinary functions).
+  bool TraverseFunctionTemplateDecl(FunctionTemplateDecl *td) {
+    emitTemplate(td);
+    return true;
+  }
+
+  bool TraverseClassTemplateDecl(ClassTemplateDecl *td) {
+    emitTemplate(td);
+    return true;
+  }
+
+  // Prune the whole subtree of an inaccessible (private/protected) function.
+  // isAccessible() only climbs enclosing CXXRecordDecl contexts, so a type or
+  // typedef declared *inside a private method body* has a FunctionDecl for its
+  // DeclContext and would otherwise be classified public and leaked into the
+  // surface. clang.py keeps a non-accessible decl's whole subtree hidden
+  // (running_access is preserved wholesale), so match it: for a hidden
+  // function, emit nothing and do not descend. Accessible function bodies are
+  // still traversed (clang.py emits local types of a public inline function),
+  // and template patterns keep their dedicated Traverse* overrides above
+  // (FunctionTemplateDecl is not a FunctionDecl, so it falls through here).
+  bool TraverseDecl(Decl *d) {
+    if (const auto *fd = dyn_cast_or_null<FunctionDecl>(d))
+      if (!isAccessible(fd))
+        return true;
+    return RecursiveASTVisitor<FactsVisitor>::TraverseDecl(d);
+  }
+
 private:
-  ASTContext &Ctx;
-  std::ostream &Out;
+  bool isAccessible(const Decl *d) const {
+    const Decl *cur = d;
+    while (cur) {
+      AccessSpecifier as = cur->getAccess();
+      if (as == AS_private || as == AS_protected)
+        return false;
+      const DeclContext *dc = cur->getDeclContext();
+      if (!dc || !isa<CXXRecordDecl>(dc))
+        break;
+      cur = Decl::castFromDeclContext(dc);
+    }
+    return true;
+  }
+
+  // Build the qualified name the way clang.py does: join only the *named*
+  // enclosing namespace and record/tag scopes (its _SCOPE_NODE_KINDS, which
+  // does NOT include functions), then the decl's own simple name. This
+  // deliberately differs from getQualifiedNameAsString(), which prepends
+  // function scopes ("n::f()::Local") for a body-local type and
+  // "(anonymous namespace)::" for an unnamed-namespace decl — spellings
+  // clang.py's scope stack never produces. Since qualified_name feeds the
+  // entity id (types/typedefs/constexpr/templates) and identity(), matching
+  // clang.py here keeps ids equal to the clang backend for those cases rather
+  // than reading as simultaneous add+remove (Codex review).
+  std::string scopedName(const NamedDecl *d) const {
+    std::vector<std::string> scopes;
+    // Walk the LEXICAL context chain, not the semantic one: clang.py builds the
+    // scope from JSON AST nesting (where the decl is written), so an out-of-line
+    // qualified definition (`int n::f(){}` written at TU scope, esp. extern "C"
+    // where the mangled name is suppressed and identity falls back to the
+    // qualified name) is named `f`, not `n::f`. getLexicalDeclContext mirrors
+    // that; for the common in-place declaration lexical == semantic (Codex review).
+    for (const DeclContext *dc = d->getLexicalDeclContext(); dc;
+         dc = dc->getLexicalParent()) {
+      if (const auto *ns = dyn_cast<NamespaceDecl>(dc)) {
+        if (!ns->isAnonymousNamespace() && !ns->getName().empty())
+          scopes.push_back(ns->getNameAsString());
+      } else if (const auto *rd = dyn_cast<RecordDecl>(dc)) {
+        if (!rd->getName().empty())
+          scopes.push_back(rd->getNameAsString());
+      }
+      // FunctionDecl / LinkageSpecDecl / the TU contribute nothing to the
+      // name, exactly like clang.py's _child_scope.
+    }
+    std::string out;
+    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
+      out += *it + "::";
+    out += d->getNameAsString();
+    return out;
+  }
+
+  int presumedLine(const Decl *d) const {
+    PresumedLoc pl = SM.getPresumedLoc(SM.getExpansionLoc(d->getLocation()));
+    return pl.isValid() ? static_cast<int>(pl.getLine()) : 0;
+  }
+
+  bool classify(const Decl *d, std::string &file, std::string &origin,
+                std::string &visibility) const {
+    SourceLocation loc = SM.getExpansionLoc(d->getLocation());
+    if (loc.isInvalid())
+      return false;
+    if (SM.isInSystemHeader(loc))
+      return false;
+    PresumedLoc pl = SM.getPresumedLoc(loc);
+    if (pl.isInvalid())
+      return false;
+    file = pl.getFilename();
+    if (pathUnderAnyRoot(file, Roots)) {
+      publicSurfaceLabels(file, origin, visibility);
+      return true;
+    }
+    return false;
+  }
+
+  void emitType(const TagDecl *td, const std::string &name,
+                const std::string &kind) {
+    // Anonymous records/enums have an empty qualified name; clang.py only treats
+    // named type nodes as entities (bool(name)), so skip them — otherwise every
+    // anonymous tag collides on H({"type", ""}).
+    if (name.empty() || !isAccessible(td))
+      return;
+    std::string file, origin, visibility;
+    if (!classify(td, file, origin, visibility))
+      return;
+    std::optional<Value> json = dumpDeclJson(td);
+    if (json) {
+      const Object *o = json->getAsObject();
+      const Array *inner = o ? o->getArray("inner") : nullptr;
+      // clang.py::_emit_type skips a type node without `inner` (a forward decl,
+      // or an empty enum with no enumerators). An empty struct still has
+      // implicit members in the JSON, so it is kept — mirroring the backend.
+      if (!inner || inner->empty())
+        return;
+    }
+    Entity e;
+    e.id = H({"type", name});
+    e.kind = kind;
+    e.qualified_name = name;
+    if (json)
+      e.type_hash = subtreeHash(*json, {});
+    if (e.type_hash.empty())
+      Diags.insert("record/enum type_hash unavailable (JSON dump failed)");
+    e.loc_path = file;
+    e.loc_line = presumedLine(td);
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    Types.push_back(e);
+  }
+
+  void emitTemplate(const TemplateDecl *td) {
+    if (td->isImplicit() || !isAccessible(td) || td->getNameAsString().empty())
+      return;
+    std::string file, origin, visibility;
+    if (!classify(td, file, origin, visibility))
+      return;
+    std::string name = scopedName(td);
+    Entity e;
+    e.id = H({"template", name});
+    e.kind = "template";
+    e.qualified_name = name;
+    if (std::optional<Value> json = dumpDeclJson(td))
+      e.body_hash = subtreeHash(*json, {});
+    if (e.body_hash.empty())
+      Diags.insert("template body_hash unavailable (JSON dump failed)");
+    e.loc_path = file;
+    e.loc_line = presumedLine(td);
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    Templates.push_back(e);
+  }
+
+  SourceManager &SM;
+  PrintingPolicy PP;
+  const std::vector<std::string> &Roots;
+  std::vector<Entity> &Functions;
+  std::vector<Entity> &Types;
+  std::vector<Entity> &Templates;
+  std::vector<Entity> &InlineBodies;
+  std::vector<Entity> &ConstexprValues;
+  std::set<std::string> &Diags;
 };
 
+// ---------------------------------------------------------------------------
+// The consumer: run the visitor after the real codegen and append one
+// SourceAbiTu per TU to a per-TU JSONL file (ADR-038 C.1/C.4).
+// ---------------------------------------------------------------------------
 class FactsConsumer : public ASTConsumer {
 public:
-  explicit FactsConsumer(std::string OutDir) : OutDir(std::move(OutDir)) {}
+  FactsConsumer(std::string outDir, std::vector<std::string> roots,
+                std::string library, std::string version,
+                std::string ctxHash,
+                std::shared_ptr<std::map<std::string, MacroRecord>> macros)
+      : OutDir(std::move(outDir)), Roots(std::move(roots)),
+        Library(std::move(library)), Version(std::move(version)),
+        CtxHash(std::move(ctxHash)), Macros(std::move(macros)) {}
 
-  void HandleTranslationUnit(ASTContext &Ctx) override {
-    // One JSONL line = one SourceAbiTu. Append so parallel TUs each own a file.
-    const std::string Path = OutDir + "/source_facts/tu.jsonl";
-    std::ofstream Out(Path, std::ios::app);
-    if (!Out)
-      return;
-    FactsVisitor V(Ctx, Out);
-    V.TraverseDecl(Ctx.getTranslationUnitDecl());
-    // TODO: wrap the visited entities in the SourceAbiTu envelope and emit it.
+  void HandleTranslationUnit(ASTContext &ctx) override {
+    SourceManager &sm = ctx.getSourceManager();
+
+    std::vector<Entity> functions, types, templates, inlineBodies, constexprValues;
+    std::set<std::string> diags;
+    FactsVisitor visitor(ctx, Roots, functions, types, templates, inlineBodies,
+                         constexprValues, diags);
+    visitor.TraverseDecl(ctx.getTranslationUnitDecl());
+
+    std::vector<Entity> macros = collectMacros(diags);
+
+    std::string source;
+    if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {
+      // Resolve to an absolute path: a relative main-file spelling (e.g.
+      // `foo.cpp`) would make two same-spelled sources built from different
+      // directories into one pack collide on the tu_id / facts-filename hash,
+      // and the truncating write would drop one. Absolute paths are distinct.
+      llvm::SmallString<256> abs(fe->getName());
+      llvm::sys::fs::make_absolute(abs);
+      source = std::string(abs.str());
+    }
+    const std::string &ctxHash = CtxHash;
+    std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
+    std::string tuId = "cu://" + source + "#cfg:" + cfg;
+    std::string targetId = Library.empty() ? "" : "target://" + Library;
+
+    if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
+                 inlineBodies, constexprValues, macros, diags))
+      llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
+                   << "\n";
   }
 
 private:
-  std::string OutDir;
-};
-
-class FactsAction : public PluginASTAction {
-public:
-  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &, llvm::StringRef) override {
-    return std::make_unique<FactsConsumer>(OutDir);
+  std::vector<Entity> collectMacros(std::set<std::string> &diags) {
+    std::vector<Entity> out;
+    bool any = false;
+    for (const auto &kv : *Macros) { // std::map iterates sorted by name (C.2)
+      const std::string &name = kv.first;
+      const std::string &value = kv.second.value;
+      const std::string &file = kv.second.file;
+      if (value.empty()) {
+        std::string up = name;
+        for (char &c : up)
+          c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        size_t b = up.find_first_not_of('_');
+        size_t e = up.find_last_not_of('_');
+        std::string core =
+            (b == std::string::npos) ? "" : up.substr(b, e - b + 1);
+        if (core == upperStrippedStem(file))
+          continue;
+      }
+      std::string origin, visibility;
+      if (!isPublicFile(file, origin, visibility))
+        continue;
+      Entity m;
+      m.id = H({"macro", name, value});
+      m.kind = "macro";
+      m.qualified_name = name;
+      m.value = value;
+      m.loc_path = file;
+      m.loc_line = 0;
+      m.loc_origin = origin;
+      m.visibility = visibility;
+      out.push_back(m);
+      any = true;
+    }
+    if (any)
+      diags.insert("macro values are token-reconstructed in-compile "
+                   "(PPCallbacks); operator-adjacent spacing may differ from the "
+                   "clang -E -dD backend until the C.6 gate (ADR-038 C.7)");
+    return out;
   }
 
-  bool ParseArgs(const CompilerInstance &, const std::vector<std::string> &Args) override {
-    for (const auto &Arg : Args) {
-      const std::string Prefix = "out=";
-      if (Arg.rfind(Prefix, 0) == 0)
-        OutDir = Arg.substr(Prefix.size());
+  bool isPublicFile(const std::string &file, std::string &origin,
+                    std::string &visibility) const {
+    if (pathUnderAnyRoot(file, Roots)) {
+      publicSurfaceLabels(file, origin, visibility);
+      return true;
+    }
+    return false;
+  }
+
+  bool writeTu(const std::string &source, const std::string &tuId,
+               const std::string &targetId, const std::string &ctxHash,
+               const std::vector<Entity> &functions,
+               const std::vector<Entity> &types,
+               const std::vector<Entity> &templates,
+               const std::vector<Entity> &inlineBodies,
+               const std::vector<Entity> &constexprValues,
+               const std::vector<Entity> &macros,
+               const std::set<std::string> &diags) {
+    std::string factsDir = OutDir + "/source_facts";
+    if (llvm::sys::fs::create_directories(factsDir))
+      return false;
+    ensureManifest();
+
+    auto arr = [](const std::vector<Entity> &v) {
+      std::vector<std::string> items;
+      items.reserve(v.size());
+      for (const Entity &e : v)
+        items.push_back(e.to_json());
+      return jsonRawArray(items);
+    };
+
+    std::string extractor = "{\"name\":\"abicheck-clang-plugin\",\"version\":" +
+                            jsonStr(kPluginVersion) + "}";
+    std::vector<std::string> diagVec(diags.begin(), diags.end());
+
+    std::string tu =
+        "{\"schema_version\":1,\"tu_id\":" + jsonStr(tuId) +
+        ",\"target_id\":" + jsonStr(targetId) + ",\"extractor\":" + extractor +
+        ",\"compile_context_hash\":" + jsonStr(ctxHash) +
+        ",\"source\":" + jsonStr(source) + ",\"public_header_roots\":" +
+        jsonStrArray(Roots) + ",\"declarations\":[]" +
+        ",\"types\":" + arr(types) + ",\"functions\":" + arr(functions) +
+        ",\"variables\":[]" + ",\"macros\":" + arr(macros) +
+        ",\"templates\":" + arr(templates) +
+        ",\"inline_bodies\":" + arr(inlineBodies) +
+        ",\"constexpr_values\":" + arr(constexprValues) +
+        ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
+        ",\"read_files\":[]}";
+
+    // Per-TU, deterministic filename keyed by source path AND compile context.
+    // Including the context hash keeps distinct ABI-relevant compile variants of
+    // the same source (e.g. SIMD/feature builds) in separate files — one is not
+    // erased by another — while a rebuild of the *same* variant overwrites its
+    // own file (truncate), so no stale/duplicate records accumulate. Ingest
+    // globs `source_facts/*.jsonl`, so the filename shape is free.
+    std::string cfg = (ctxHash.rfind("sha256:", 0) == 0)
+                          ? ctxHash.substr(std::string("sha256:").size(), 12)
+                          : ctxHash.substr(0, 12);
+    llvm::StringRef stem = llvm::sys::path::filename(source);
+    std::string factsFile = factsDir + "/" +
+                            (stem.empty() ? std::string("tu") : stem.str()) +
+                            "." + sha256Hex(source).substr(0, 12) + "." + cfg +
+                            ".jsonl";
+    std::ofstream out(factsFile, std::ios::trunc);
+    if (!out)
+      return false;
+    out << tu << "\n";
+    return true;
+  }
+
+  void ensureManifest() {
+    std::string manifestPath = OutDir + "/manifest.json";
+    if (llvm::sys::fs::exists(manifestPath))
+      return;
+    std::string createdBy =
+        std::string("abicheck-clang-plugin ") + kPluginVersion;
+    std::string manifest =
+        "{\n  \"abicheck_inputs_version\": 1,\n  \"binary\": \"\",\n"
+        "  \"compile_db\": \"\",\n  \"created_at\": " +
+        jsonStr(nowIso8601Utc()) + ",\n  \"created_by\": " + jsonStr(createdBy) +
+        ",\n  \"exported_symbols\": [],\n  \"headers\": [],\n"
+        "  \"kind\": \"abicheck_inputs\",\n  \"library\": " + jsonStr(Library) +
+        ",\n  \"source_facts\": [],\n  \"version\": " + jsonStr(Version) +
+        "\n}\n";
+
+    llvm::SmallString<128> tmp;
+    int fd = -1;
+    if (llvm::sys::fs::createUniqueFile(
+            llvm::Twine(OutDir) + "/.manifest.%%%%%%.tmp", fd, tmp))
+      return;
+    {
+      llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
+      os << manifest;
+    }
+    if (llvm::sys::fs::rename(tmp, manifestPath))
+      llvm::sys::fs::remove(tmp);
+  }
+
+  std::string OutDir;
+  std::vector<std::string> Roots;
+  std::string Library;
+  std::string Version;
+  std::string CtxHash;
+  std::shared_ptr<std::map<std::string, MacroRecord>> Macros;
+};
+
+// ---------------------------------------------------------------------------
+// The plugin action. AddAfterMainAction runs after the real codegen, so fact
+// emission never perturbs the object output (ADR-038 C.1).
+// ---------------------------------------------------------------------------
+class FactsAction : public PluginASTAction {
+public:
+  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &ci,
+                                                  llvm::StringRef) override {
+    // The PluginASTAction is destroyed right after this returns, while the
+    // consumer it produces (and the PPCallbacks) run later — so the macro map
+    // must be owned by something that outlives the action. Share it (shared_ptr)
+    // between the collector and the consumer rather than referencing an action
+    // member (which would dangle).
+    auto macros = std::make_shared<std::map<std::string, MacroRecord>>();
+    Preprocessor &pp = ci.getPreprocessor();
+    pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
+    return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
+                                           computeContextHash(ci), macros);
+  }
+
+  // The compile-context hash — the per-TU cache key (ADR-030 D8) and the `cfg`
+  // segment of the facts filename. Fold in every ABI-relevant compile input the
+  // clang extractor's context uses (standard/triple/sysroot/defines/includes/
+  // target-features), so distinct variants of one source get distinct hashes
+  // (and distinct facts files) rather than colliding. Not compared in C.6 (only
+  // entities are) — it only needs to be deterministic and discriminating.
+  static std::string computeContextHash(const CompilerInstance &ci) {
+    std::string standard;
+    const LangOptions &lo = ci.getLangOpts();
+    if (lo.LangStd != LangStandard::lang_unspecified)
+      standard = LangStandard::getLangStandardForKind(lo.LangStd).getName();
+    const TargetOptions &to = ci.getTargetOpts();
+    // Preserve command-line ORDER of -D/-U (do not sort): `-D FOO -U FOO` and
+    // `-U FOO -D FOO` yield different final macro state, so ordering is
+    // ABI-relevant and must change the hash.
+    std::vector<std::string> defs;
+    for (const auto &m : ci.getPreprocessorOpts().Macros)
+      defs.push_back((m.second ? "U:" : "D:") + m.first);
+    std::vector<std::string> incs;
+    const HeaderSearchOptions &hso = ci.getHeaderSearchOpts();
+    // Resolve include dirs to absolute paths and fold in the search-kind
+    // (Group): two build dirs both passing a relative `-Igenerated` see
+    // different physical headers, and `-I include` vs `-isystem include` yield a
+    // different public surface (via isInSystemHeader) — both must change the
+    // hash, so they cannot collide on the facts filename.
+    auto absStr = [](llvm::StringRef s) {
+      llvm::SmallString<256> p(s);
+      llvm::sys::fs::make_absolute(p);
+      return std::string(p.str());
+    };
+    // Fold the search-mode flags (IsFramework: `-F` vs `-I`; IgnoreSysRoot:
+    // `-isystem` vs `-iwithsysroot`) alongside Group + absolute path: the same
+    // directory reached through a different search mode can expose different
+    // headers, so those variants must not collide on the facts filename (Codex
+    // review).
+    for (const auto &e : hso.UserEntries)
+      incs.push_back(std::to_string(static_cast<int>(e.Group)) +
+                     (e.IsFramework ? ":F" : ":I") +
+                     (e.IgnoreSysRoot ? ":r" : ":s") + ":" + absStr(e.Path));
+    // Forced preincludes (-include) and macro-includes (-imacros) also change the
+    // TU's ABI-relevant context; keep their order (significant) and root them to
+    // absolute paths so a relative `-include ./config.hpp` from two build dirs
+    // does not collide.
+    std::vector<std::string> preinc;
+    for (const auto &f : ci.getPreprocessorOpts().Includes)
+      preinc.push_back("i:" + absStr(f));
+    for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
+      preinc.push_back("m:" + absStr(f));
+    // A precompiled header (`-include-pch`) is included implicitly and can inject
+    // macros/declarations that change the public-header AST, so fold it in too
+    // (rooted like the other path inputs) — else two source variants differing
+    // only by their PCH collide on the facts filename (Codex review).
+    if (!ci.getPreprocessorOpts().ImplicitPCHInclude.empty())
+      preinc.push_back("p:" + absStr(ci.getPreprocessorOpts().ImplicitPCHInclude));
+    // `-ffile-prefix-map`/`-fmacro-prefix-map` rewrite the strings clang emits
+    // for __FILE__/__builtin_FILE(), so a public constexpr/default arg using
+    // those builtins parses to different facts under otherwise-identical flags.
+    // Fold the (ordered) prefix-map pairs in so the variants get distinct facts
+    // files (Codex review). LangOptions::MacroPrefixMap is an ordered map.
+    for (const auto &kv : lo.MacroPrefixMap)
+      preinc.push_back("x:" + kv.first + "=" + kv.second);
+    // VFS overlays (`-ivfsoverlay`) remap the virtual filesystem, so two builds
+    // of one source with different overlays can parse different header content
+    // under otherwise-identical flags. Fold the overlay files in (ordered,
+    // rooted to absolute like the other path inputs), or those variants collide
+    // on the facts filename and the later write truncates the earlier (Codex
+    // review). Predefines cannot capture this — it is a content change, not a
+    // macro change.
+    for (const auto &f : hso.VFSOverlayFiles)
+      preinc.push_back("v:" + absStr(f));
+    // Root a relative sysroot too (but leave an unset one empty, so the cfg is
+    // not made cwd-dependent when no sysroot is in play).
+    std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);
+    // The Clang resource directory (`-resource-dir`) holds the compiler's
+    // builtin headers (stddef.h, stdint.h, intrinsics …); two variants pointing
+    // at different resource dirs can parse different builtins under otherwise
+    // identical flags, so fold it in (rooted) to keep their facts files distinct
+    // (Codex review).
+    std::string resourceDir =
+        hso.ResourceDir.empty() ? std::string() : absStr(hso.ResourceDir);
+    // Fold in the compiler's full predefined-macro buffer. Every language ABI
+    // mode that changes the *declared* public surface manifests as a predefined
+    // macro (-fexceptions → __EXCEPTIONS, -frtti → __GXX_RTTI, -fshort-wchar →
+    // __WCHAR_WIDTH__/__WCHAR_TYPE__, -fno-char8_t → __cpp_char8_t, fast-math →
+    // __FAST_MATH__, …), so hashing the whole buffer discriminates every such
+    // variant at once instead of chasing a hand-maintained flag allow-list one
+    // Codex review at a time — the wrapper's compile_unit_id hashes the full
+    // argv for the same reason. The buffer is deterministic for a given
+    // invocation (it excludes __DATE__/__TIME__), so it never spuriously
+    // differs; distinct clang majors legitimately differ, and the context hash
+    // is not compared in C.6 (Codex review, P2).
+    const std::string &predefines = ci.getPreprocessor().getPredefines();
+    return H({"ctx", standard, to.Triple, sysroot, resourceDir,
+              joinStrings(defs, ','), joinStrings(incs, ','),
+              joinStrings(to.Features, ','), joinStrings(preinc, ','),
+              predefines});
+  }
+
+  bool ParseArgs(const CompilerInstance &,
+                 const std::vector<std::string> &args) override {
+    // Invoke with the unambiguous cc1 form (ADR-038 Flow C):
+    //   -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs
+    //   -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include
+    for (const std::string &arg : args) {
+      if (consumePrefix(arg, "out=", OutDir))
+        continue;
+      std::string root;
+      if (consumePrefix(arg, "public-roots=", root)) {
+        if (!root.empty())
+          Roots.push_back(root);
+        continue;
+      }
+      if (consumePrefix(arg, "library=", Library))
+        continue;
+      if (consumePrefix(arg, "version=", Version))
+        continue;
     }
     return true;
   }
@@ -85,10 +1655,23 @@ public:
   ActionType getActionType() override { return AddAfterMainAction; }
 
 private:
+  static bool consumePrefix(const std::string &arg, const char *prefix,
+                            std::string &out) {
+    std::string p(prefix);
+    if (arg.rfind(p, 0) == 0) {
+      out = arg.substr(p.size());
+      return true;
+    }
+    return false;
+  }
+
   std::string OutDir = "abicheck_inputs";
+  std::vector<std::string> Roots;
+  std::string Library;
+  std::string Version;
 };
 
 } // namespace
 
 static FrontendPluginRegistry::Add<FactsAction>
-    X("abicheck-facts", "emit abicheck Flow-2 source facts during compile");
+    X("abicheck-facts", "emit abicheck Flow-C source facts during compile");
