@@ -736,6 +736,36 @@ bool isContiguousSubsequence(const std::vector<std::string> &hay,
   return false;
 }
 
+// Absolute-normalized path segments: resolve `p` against the compile's CWD (the
+// same base a relative `-I` resolves against) before segmenting.
+std::vector<std::string> absSegments(llvm::StringRef p) {
+  llvm::SmallString<256> abs(p);
+  llvm::sys::fs::make_absolute(abs);
+  return pathSegments(abs);
+}
+
+// Whether `file` sits under any of `roots`, matching either the raw spellings
+// OR their absolute-normalized forms. Without the absolute fallback an absolute
+// public-root (e.g. `$PWD/include`) never matches a relative header spelling
+// (`include/foo.hpp`) — the root's segments are longer — so every decl from that
+// root would be silently dropped and the pack look empty (Codex review).
+bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &roots) {
+  std::vector<std::string> fileSegs = pathSegments(file);
+  std::vector<std::string> fileAbs;
+  bool haveAbs = false;
+  for (const std::string &root : roots) {
+    if (isContiguousSubsequence(fileSegs, pathSegments(root)))
+      return true;
+    if (!haveAbs) {
+      fileAbs = absSegments(file);
+      haveAbs = true;
+    }
+    if (isContiguousSubsequence(fileAbs, absSegments(root)))
+      return true;
+  }
+  return false;
+}
+
 // Whether a header path looks machine-generated — a faithful port of
 // provenance._is_generated_header (a `generated`/`gen`/… directory segment, or
 // a moc_/ui_/qrc_/protobuf/flatbuffers/gRPC basename). The clang backend keeps
@@ -1209,12 +1239,10 @@ private:
     if (pl.isInvalid())
       return false;
     file = pl.getFilename();
-    std::vector<std::string> fileSegs = pathSegments(file);
-    for (const std::string &root : Roots)
-      if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
-        publicSurfaceLabels(file, origin, visibility);
-        return true;
-      }
+    if (pathUnderAnyRoot(file, Roots)) {
+      publicSurfaceLabels(file, origin, visibility);
+      return true;
+    }
     return false;
   }
 
@@ -1375,12 +1403,10 @@ private:
 
   bool isPublicFile(const std::string &file, std::string &origin,
                     std::string &visibility) const {
-    std::vector<std::string> fileSegs = pathSegments(file);
-    for (const std::string &root : Roots)
-      if (isContiguousSubsequence(fileSegs, pathSegments(root))) {
-        publicSurfaceLabels(file, origin, visibility);
-        return true;
-      }
+    if (pathUnderAnyRoot(file, Roots)) {
+      publicSurfaceLabels(file, origin, visibility);
+      return true;
+    }
     return false;
   }
 
@@ -1555,6 +1581,13 @@ public:
     // only by their PCH collide on the facts filename (Codex review).
     if (!ci.getPreprocessorOpts().ImplicitPCHInclude.empty())
       preinc.push_back("p:" + absStr(ci.getPreprocessorOpts().ImplicitPCHInclude));
+    // `-ffile-prefix-map`/`-fmacro-prefix-map` rewrite the strings clang emits
+    // for __FILE__/__builtin_FILE(), so a public constexpr/default arg using
+    // those builtins parses to different facts under otherwise-identical flags.
+    // Fold the (ordered) prefix-map pairs in so the variants get distinct facts
+    // files (Codex review). LangOptions::MacroPrefixMap is an ordered map.
+    for (const auto &kv : lo.MacroPrefixMap)
+      preinc.push_back("x:" + kv.first + "=" + kv.second);
     // VFS overlays (`-ivfsoverlay`) remap the virtual filesystem, so two builds
     // of one source with different overlays can parse different header content
     // under otherwise-identical flags. Fold the overlay files in (ordered,
