@@ -65,6 +65,15 @@ private:
    public:
     void run();          // must be dropped by both producers
   };
+  // A private method with an inline body that declares a body-local type. The
+  // whole subtree of an inaccessible function is hidden, so neither producer
+  // may emit `Scratch` (regression guard: an isAccessible() walk that stopped
+  // at the FunctionDecl context would have leaked it in as public).
+  int compute() const {
+    struct Scratch { int lo; int hi; };
+    Scratch s{w_, w_};
+    return s.hi - s.lo;
+  }
   int w_;
 };
 

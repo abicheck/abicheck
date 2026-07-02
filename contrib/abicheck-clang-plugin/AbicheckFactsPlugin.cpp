@@ -1098,6 +1098,23 @@ public:
     return true;
   }
 
+  // Prune the whole subtree of an inaccessible (private/protected) function.
+  // isAccessible() only climbs enclosing CXXRecordDecl contexts, so a type or
+  // typedef declared *inside a private method body* has a FunctionDecl for its
+  // DeclContext and would otherwise be classified public and leaked into the
+  // surface. clang.py keeps a non-accessible decl's whole subtree hidden
+  // (running_access is preserved wholesale), so match it: for a hidden
+  // function, emit nothing and do not descend. Accessible function bodies are
+  // still traversed (clang.py emits local types of a public inline function),
+  // and template patterns keep their dedicated Traverse* overrides above
+  // (FunctionTemplateDecl is not a FunctionDecl, so it falls through here).
+  bool TraverseDecl(Decl *d) {
+    if (const auto *fd = dyn_cast_or_null<FunctionDecl>(d))
+      if (!isAccessible(fd))
+        return true;
+    return RecursiveASTVisitor<FactsVisitor>::TraverseDecl(d);
+  }
+
 private:
   bool isAccessible(const Decl *d) const {
     const Decl *cur = d;
@@ -1466,9 +1483,20 @@ public:
     // Root a relative sysroot too (but leave an unset one empty, so the cfg is
     // not made cwd-dependent when no sysroot is in play).
     std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);
+    // Language ABI options that change the *declared* public surface via clang
+    // predefined macros (`-fexceptions`/`-fno-exceptions` → __EXCEPTIONS,
+    // `-frtti`/`-fno-rtti` → __GXX_RTTI). The wrapper's compile_unit_id hashes
+    // the full argv, so those variants of one source get distinct cfgs there;
+    // fold them in here too, or two variants collide on the facts filename and
+    // the later compile truncates the earlier one (Codex review, P2).
+    std::vector<std::string> langAbi = {
+        std::string("exc=") + (lo.Exceptions ? "1" : "0"),
+        std::string("cxxexc=") + (lo.CXXExceptions ? "1" : "0"),
+        std::string("rtti=") + (lo.RTTI ? "1" : "0"),
+    };
     return H({"ctx", standard, to.Triple, sysroot, joinStrings(defs, ','),
               joinStrings(incs, ','), joinStrings(to.Features, ','),
-              joinStrings(preinc, ',')});
+              joinStrings(preinc, ','), joinStrings(langAbi, ',')});
   }
 
   bool ParseArgs(const CompilerInstance &,
