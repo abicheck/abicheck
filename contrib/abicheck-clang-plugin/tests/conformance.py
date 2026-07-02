@@ -176,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: plugin not found: {plugin}", file=sys.stderr)
         return 2
 
+    # Only auto-created temp dirs are ours to delete; a caller-supplied --work
+    # is owned by the caller and must never be rmtree'd (Codex review).
+    created_tmp = args.work is None
     work = Path(args.work).resolve() if args.work else Path(tempfile.mkdtemp(prefix="abicheck-c6-"))
     work.mkdir(parents=True, exist_ok=True)
     shutil.copytree(FIXTURES / "include", work / "include", dirs_exist_ok=True)
@@ -205,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
               "to the clang backend.")
         return 0
     finally:
-        if not args.keep:
+        if created_tmp and not args.keep:
             shutil.rmtree(work, ignore_errors=True)
 
 

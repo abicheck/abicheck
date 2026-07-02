@@ -110,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
     if not plugin.is_file():
         raise SystemExit(f"plugin not found: {plugin}")
 
+    # Only auto-created temp dirs are ours to delete; a caller-supplied --work
+    # is owned by the caller and must never be rmtree'd (Codex review).
+    created_tmp = args.work is None
     work = Path(args.work).resolve() if args.work else Path(
         tempfile.mkdtemp(prefix="abicheck-scan-")
     )
@@ -151,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     finally:
-        if not args.keep:
+        if created_tmp and not args.keep:
             shutil.rmtree(work, ignore_errors=True)
 
 

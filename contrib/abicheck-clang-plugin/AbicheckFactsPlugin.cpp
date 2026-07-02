@@ -1600,6 +1600,13 @@ public:
     // Root a relative sysroot too (but leave an unset one empty, so the cfg is
     // not made cwd-dependent when no sysroot is in play).
     std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);
+    // The Clang resource directory (`-resource-dir`) holds the compiler's
+    // builtin headers (stddef.h, stdint.h, intrinsics …); two variants pointing
+    // at different resource dirs can parse different builtins under otherwise
+    // identical flags, so fold it in (rooted) to keep their facts files distinct
+    // (Codex review).
+    std::string resourceDir =
+        hso.ResourceDir.empty() ? std::string() : absStr(hso.ResourceDir);
     // Fold in the compiler's full predefined-macro buffer. Every language ABI
     // mode that changes the *declared* public surface manifests as a predefined
     // macro (-fexceptions → __EXCEPTIONS, -frtti → __GXX_RTTI, -fshort-wchar →
@@ -1612,9 +1619,10 @@ public:
     // differs; distinct clang majors legitimately differ, and the context hash
     // is not compared in C.6 (Codex review, P2).
     const std::string &predefines = ci.getPreprocessor().getPredefines();
-    return H({"ctx", standard, to.Triple, sysroot, joinStrings(defs, ','),
-              joinStrings(incs, ','), joinStrings(to.Features, ','),
-              joinStrings(preinc, ','), predefines});
+    return H({"ctx", standard, to.Triple, sysroot, resourceDir,
+              joinStrings(defs, ','), joinStrings(incs, ','),
+              joinStrings(to.Features, ','), joinStrings(preinc, ','),
+              predefines});
   }
 
   bool ParseArgs(const CompilerInstance &,
