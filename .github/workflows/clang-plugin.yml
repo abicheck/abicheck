@@ -1,9 +1,12 @@
 # ADR-038 Flow C — build the Clang facts plugin against several LLVM/Clang
-# majors and run the C.6 differential-conformance test on each. The plugin is
+# majors (with GCC and Clang as the host compiler), run the C.6 differential-
+# conformance test, and validate the end-to-end scan flow on each. The plugin is
 # ABI-locked to its LLVM major (ADR-038 C.5), so it cannot ship one .so for
-# every clang; this validates parity per-version instead. Non-blocking: it is a
-# standalone workflow, not part of the required abicheck CI gates, and is
-# path-filtered to the plugin + the clang-recipe modules it mirrors.
+# every clang; this validates parity per-version instead. Each leg also proves
+# the emitted pack is consumable by the ordinary scan pipeline (dump → merge →
+# compare), not just entity-equivalent. Non-blocking: it is a standalone
+# workflow, not part of the required abicheck CI gates, and is path-filtered to
+# the plugin + the clang-recipe modules it mirrors.
 name: clang-plugin
 
 on:
@@ -34,17 +37,25 @@ concurrency:
 
 jobs:
   conformance:
-    name: C.6 conformance (LLVM ${{ matrix.llvm }})
+    name: C.6 + scan (LLVM ${{ matrix.llvm }}, host ${{ matrix.host_cxx }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      # Pin each LLVM major to a runner whose apt.llvm.org channel publishes it:
-      # 16 is only on jammy (noble-16 does not exist), 17/18 are on noble.
+      # Two dimensions:
+      #  * LLVM major — the plugin is ABI-locked to its LLVM (C.5), so parity is
+      #    validated per-version. Each major is pinned to a runner whose
+      #    apt.llvm.org channel publishes it (16 is jammy-only; noble-16 does not
+      #    exist; 17/18 are on noble).
+      #  * Host C++ compiler — the plugin is a plain LLVM shared module, so it
+      #    must build with either GCC or Clang as the *host* compiler. LLVM 18
+      #    is built both ways (g++ and clang++) to prove that; 16/17 use the
+      #    distro default (g++) to keep the matrix small.
       matrix:
         include:
-          - { llvm: "16", runner: "ubuntu-22.04" }
-          - { llvm: "17", runner: "ubuntu-24.04" }
-          - { llvm: "18", runner: "ubuntu-24.04" }
+          - { llvm: "16", runner: "ubuntu-22.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "17", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "18", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "18", runner: "ubuntu-24.04", host_cc: "clang", host_cxx: "clang++" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,16 +87,27 @@ jobs:
       - name: Install abicheck
         run: pip install -e ".[dev]"
 
-      - name: Build the plugin
+      - name: Build the plugin (host ${{ matrix.host_cxx }})
         run: |
           set -eux
+          # Ensure the selected host compiler is present (clang comes from the
+          # LLVM install above; gcc/g++ ship on the runner).
+          ${{ matrix.host_cxx }} --version
           cmake -S contrib/abicheck-clang-plugin -B build/plugin -G Ninja \
-            -DCMAKE_PREFIX_PATH="/usr/lib/llvm-${{ matrix.llvm }}"
+            -DCMAKE_PREFIX_PATH="/usr/lib/llvm-${{ matrix.llvm }}" \
+            -DCMAKE_C_COMPILER="${{ matrix.host_cc }}" \
+            -DCMAKE_CXX_COMPILER="${{ matrix.host_cxx }}"
           cmake --build build/plugin
           test -f build/plugin/libabicheck-facts.so
 
       - name: Run C.6 differential conformance
         run: |
           python contrib/abicheck-clang-plugin/tests/conformance.py \
+            --plugin build/plugin/libabicheck-facts.so \
+            --clangxx clang++
+
+      - name: Validate the Flow C scan flow (dump → merge → compare)
+        run: |
+          python contrib/abicheck-clang-plugin/tests/scan_flow.py \
             --plugin build/plugin/libabicheck-facts.so \
             --clangxx clang++
