@@ -26,7 +26,6 @@ Linking is cheap relative to parsing, so it is recomputed rather than cached
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -42,18 +41,81 @@ from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 #: with no source decl" — a systematic under-count for every class with exported
 #: ctors/dtors. Folding the tag to a canonical marker lets the single declaration
 #: claim all of its clone symbols (ADR-030 D5 symbol linking).
-_CTOR_DTOR_TAG_RE = re.compile(r"(?<=[A-Za-z])(C[1-4]|D[0-4])E")
+_CTOR_DTOR_TAGS = frozenset({"C1", "C2", "C3", "C4", "D0", "D1", "D2", "D4"})
 
 
 def _ctor_dtor_canonical(symbol: str) -> str:
-    """Fold C++ ctor/dtor ABI clone tags to a single canonical marker.
+    """Fold a genuine Itanium ``<ctor-dtor-name>`` to a single canonical marker.
 
-    ``_ZN3FooC1Ev``/``_ZN3FooC2Ev``/``_ZN3FooC4Ev`` all fold to the same key, and
-    likewise for the ``D0``/``D1``/``D2``/``D4`` destructor variants. A no-op for
-    any name without such a tag, so non-ctor/dtor symbols keep exact-match
-    semantics and cannot be conflated.
+    ``_ZN3FooC1Ev``/``_ZN3FooC2Ev``/``_ZN3FooC4Ev`` fold to one key (and likewise
+    the ``D0``/``D1``/``D2``/``D4`` destructor variants), so a single source
+    ctor/dtor declaration claims all of its exported ABI clones.
+
+    Only a *genuine* special name is folded — one that sits at a ``<nested-name>``
+    component boundary, right after the class ``<source-name>``. A ``C1``/``D0``
+    that is merely the tail of a length-prefixed **ordinary identifier** (a
+    function literally named ``AC1`` mangles as ``_ZN1N3AC1Ev``) must NOT fold,
+    or two unrelated symbols (``AC1``/``AC2``) would collide and one would be
+    dropped from ``symbols_without_decl`` (Codex review). To tell them apart the
+    nested name is parsed component-by-component: length-prefixed identifiers are
+    consumed *wholesale* (by their declared length), so their interior characters
+    — including any ``C1``/``D0`` — never reach the tag test. A no-op for any name
+    without a genuine tag, so non-ctor/dtor symbols keep exact-match semantics.
     """
-    return _CTOR_DTOR_TAG_RE.sub(lambda m: m.group(1)[0] + "@E", symbol)
+    # A ctor/dtor is always a class member → a nested name. Non-nested symbols
+    # (plain ``_Z…``, vtables/typeinfo ``_ZTV``/``_ZTI``, data) have none.
+    if not symbol.startswith("_ZN"):
+        return symbol
+    i, n = 3, len(symbol)
+    # Leading CV-/ref-qualifiers on the implicit object parameter.
+    while i < n and symbol[i] in "rVKRO":
+        i += 1
+    # ``boundary`` = we are at a clean prefix-component boundary (the previous
+    # token was a fully-consumed source-name / substitution / template-arg list),
+    # so a leading ``C``/``D`` here can only be a ctor/dtor special name — never
+    # the middle of an identifier.
+    boundary = False
+    while i < n:
+        c = symbol[i]
+        if c == "E":  # end of the nested-name
+            break
+        if c.isdigit():  # <source-name> := <len> <identifier> — consume wholesale
+            j = i
+            while j < n and symbol[j].isdigit():
+                j += 1
+            i = j + int(symbol[i:j])
+            boundary = True
+            continue
+        if c == "I":  # <template-args> := I … E (skip balanced)
+            depth = 0
+            while i < n:
+                if symbol[i] == "I":
+                    depth += 1
+                elif symbol[i] == "E":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+            boundary = True
+            continue
+        if c == "S":  # <substitution> := S_ | S<id>_ | S[abisod]
+            if i + 1 < n and symbol[i + 1] in "atbsiod":
+                i += 2
+            else:
+                i += 1
+                while i < n and symbol[i] != "_":
+                    i += 1
+                i += 1  # consume the trailing '_'
+            boundary = True
+            continue
+        if boundary and c in "CD" and symbol[i : i + 2] in _CTOR_DTOR_TAGS:
+            return symbol[:i] + c + "@" + symbol[i + 2 :]
+        # Unknown production: advance without claiming a boundary, so a later
+        # C1/D0 reached only by char-skip is never mistaken for a special name.
+        boundary = False
+        i += 1
+    return symbol
 
 
 def _build_export_index(exported: set[str]) -> dict[str, list[str]]:

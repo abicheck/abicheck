@@ -116,6 +116,30 @@ def main(argv: list[str] | None = None) -> int:
         if n == 0:
             failures.append("correct public-roots produced an EMPTY pack")
 
+        # 3) De-dup: two TUs with the wrong root sharing one out dir must emit the
+        # human-facing stderr line only ONCE (a big -j build must not spam), while
+        # each TU still records the note in its own pack diagnostics.
+        shared = work / "out_shared"
+        argp = ["-Xclang", "-plugin-arg-abicheck-facts", "-Xclang"]
+        n_warn = 0
+        for obj in ("a.o", "b.o"):
+            proc = subprocess.run(
+                [
+                    args.clangxx, "-std=c++17", "-Iinclude", f"-fplugin={plugin}",
+                    *argp, f"out={shared}",
+                    *argp, "public-roots=no-such-public-root",
+                    "-c", "widget.cpp", "-o", str(work / obj),
+                ],
+                cwd=str(work), capture_output=True, text=True, timeout=300,
+                check=True,
+            )
+            n_warn += proc.stderr.count(_DIAG)
+        if n_warn != 1:
+            failures.append(
+                f"stderr warning not de-duplicated: emitted {n_warn} times across "
+                "2 TUs sharing one out dir (expected exactly 1)"
+            )
+
         if failures:
             print("CAVEAT-A DIAGNOSTIC TEST FAILED:", file=sys.stderr)
             for f in failures:

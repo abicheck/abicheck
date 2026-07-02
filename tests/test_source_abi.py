@@ -335,10 +335,67 @@ def test_ctor_dtor_fold_leaves_non_ctor_symbols_exact() -> None:
     dtors = {_ctor_dtor_canonical(f"_ZN6WidgetD{n}Ev") for n in (0, 1, 2, 4)}
     assert len(ctors) == 1 and len(dtors) == 1
     assert ctors != dtors
+    # Non-nested / vtable / plain names have no ctor/dtor and stay untouched.
+    assert _ctor_dtor_canonical("_Z3barv") == "_Z3barv"
+    assert _ctor_dtor_canonical("_ZTVN3fooE") == "_ZTVN3fooE"
     # A non-exported, non-ctor decl stays unmatched (no accidental fold match).
     tu = SourceAbiTu(functions=[_entity("ns::f", "function", mangled="_ZN2ns1fEi")])
     surface = link_source_abi([tu], exported_symbols=["_ZN2ns1gEi"])
     assert surface.mappings["source_decl_to_binary_symbol"]["_ZN2ns1fEi"] == ""
+
+
+def test_ctor_dtor_fold_does_not_touch_length_encoded_identifiers() -> None:
+    # Codex review: a `C1`/`D0` that is merely the TAIL of a length-prefixed
+    # ordinary identifier must NOT fold — else two unrelated functions collide and
+    # one is wrongly dropped from symbols_without_decl. `N::AC1()`/`N::AC2()`
+    # mangle as `_ZN1N3AC1Ev`/`_ZN1N3AC2Ev`; the `C1`/`C2` are identifier chars,
+    # not a ctor special name (which is never length-prefixed).
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZN1N3AC1Ev") == "_ZN1N3AC1Ev"
+    assert _ctor_dtor_canonical("_ZN1N3AC1Ev") != _ctor_dtor_canonical("_ZN1N3AC2Ev")
+    # Through the linker: AC1 is a real source decl; AC2 is exported without one.
+    # AC2 must remain an orphan (symbols_without_decl), not be claimed by AC1.
+    tu = SourceAbiTu(
+        functions=[_entity("N::AC1", "function", mangled="_ZN1N3AC1Ev")]
+    )
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN1N3AC1Ev", "_ZN1N3AC2Ev"]
+    )
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN1N3AC1Ev"] == (
+        "_ZN1N3AC1Ev"
+    )
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN1N3AC2Ev"]
+
+
+def test_ctor_dtor_fold_handles_digit_suffixed_class_names() -> None:
+    # CodeRabbit review: a class whose <source-name> ends in a digit (Vec2, Mat4,
+    # Base64 — common in graphics/math code) must still fold. The structural parse
+    # consumes the length-prefixed identifier wholesale, so the trailing digit is
+    # part of the class name, and the following C1/D0 is correctly seen as the
+    # ctor/dtor special name. (A naive letter-only lookbehind would miss these.)
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    for cls in ("_ZN4Vec2", "_ZN4Mat4", "_ZN6Base64"):
+        assert _ctor_dtor_canonical(cls + "C1Ev") == _ctor_dtor_canonical(cls + "C2Ev")
+        assert _ctor_dtor_canonical(cls + "D0Ev") == _ctor_dtor_canonical(cls + "D1Ev")
+        # and the fold actually happened (not a no-op)
+        assert _ctor_dtor_canonical(cls + "C1Ev") != cls + "C1Ev"
+
+
+def test_ctor_dtor_fold_parses_template_and_substitution_prefixes() -> None:
+    # The nested-name parser must skip <substitution> (St = std::) and
+    # <template-args> (I…E) before reaching a genuine ctor/dtor tag, e.g.
+    # std::vector<int>::vector() → _ZNSt6vectorIiEC1Ev. Exercises the S and I
+    # branches of the parser.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZNSt6vectorIiEC1Ev") == _ctor_dtor_canonical(
+        "_ZNSt6vectorIiEC2Ev"
+    )
+    assert _ctor_dtor_canonical("_ZNSt6vectorIiEC1Ev") != "_ZNSt6vectorIiEC1Ev"
+    # A backref substitution (S_) in the prefix, then the ctor.
+    assert _ctor_dtor_canonical("_ZN1NS_3FooC1Ev") != "_ZN1NS_3FooC1Ev"
 
 
 def test_linker_excludes_non_public_entities() -> None:

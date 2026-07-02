@@ -1921,6 +1921,23 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
     assert "_ZN3FooC4Ev" in exports
 
 
+def test_exported_symbols_from_snapshot_uses_pe_and_macho_tables():
+    """The same export-table union covers PE and Mach-O binaries, not just ELF."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.macho_metadata import MachoExport, MachoMetadata
+    from abicheck.pe_metadata import PeExport, PeMetadata
+
+    pe_snap = AbiSnapshot(library="foo.dll", version="1")
+    pe_snap.pe = PeMetadata()
+    pe_snap.pe.exports = [PeExport(name="CreateFoo"), PeExport(name="DestroyFoo")]
+    assert _exported_symbols_from_snapshot(pe_snap) == ("CreateFoo", "DestroyFoo")
+
+    macho_snap = AbiSnapshot(library="libfoo.dylib", version="1")
+    macho_snap.macho = MachoMetadata()
+    macho_snap.macho.exports = [MachoExport(name="_foo"), MachoExport(name="_bar")]
+    assert _exported_symbols_from_snapshot(macho_snap) == ("_bar", "_foo")
+
+
 def test_build_info_source_mismatch_records_diagnostic(tmp_path):
     """A4: a compile DB whose sources are absent from the --sources tree records
     a build_info_source_tree_mismatch diagnostic (collection-time, not a kind)."""

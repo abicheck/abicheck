@@ -1398,11 +1398,20 @@ public:
 
     // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
     // but this TU emitted zero public entities *while* header-declared decls were
-    // rejected for not being under any root, public-roots almost certainly does
-    // not match how the compiler resolves the public headers (e.g. it points at
-    // the installed `include/` while `-I..` makes `<pvxs/x.h>` resolve to
-    // `src/pvxs/`). Previously this produced an empty pack with exit 0 and no
-    // message. Emit a diagnostic to stderr AND record it in the pack.
+    // rejected for not being under any root, public-roots may not match how the
+    // compiler resolves the public headers (e.g. it points at the installed
+    // `include/` while `-I..` makes `<pvxs/x.h>` resolve to `src/pvxs/`).
+    // Previously this produced an empty pack with exit 0 and no message.
+    //
+    // This signal is necessarily per-TU: an internal-implementation-only TU that
+    // includes a private header and defines nothing public trips the same
+    // condition even with correct roots — the plugin cannot see whether *other*
+    // TUs produced public facts (it runs once per compile). To keep the "fail
+    // loud" signal credible without crying wolf on every internal TU under `-j`,
+    // the human-facing stderr line is emitted **once per output pack** (a
+    // deterministic misconfiguration shows it on the first TU); the accurate
+    // per-TU note is still recorded in this TU's pack `diagnostics` as forensic
+    // data. A whole build whose pack ends up empty is the real confirmation.
     size_t publicCount = functions.size() + types.size() + templates.size() +
                          inlineBodies.size() + constexprValues.size() +
                          macros.size();
@@ -1415,11 +1424,13 @@ public:
           std::to_string(visitor.rejectedHeaderDecls()) +
           " header decl(s) were seen outside the root(s) [" + roots +
           "], e.g. " + visitor.exampleRejectedHeader() +
-          "). public-roots must be the directory the compiler actually resolves "
-          "the public headers from (verify with `clang -H`), not necessarily the "
-          "installed include dir; the emitted pack is empty.";
-      llvm::errs() << msg << "\n";
+          "). If this TU defines public API, public-roots likely does not match "
+          "how the compiler resolves the public headers (verify with `clang -H`) "
+          "— it must be the resolved directory, not necessarily the installed "
+          "include dir. (Harmless for an internal-only TU.)";
       diags.insert(msg);
+      if (claimFirstRootsWarning())
+        llvm::errs() << msg << "\n";
     }
 
     std::string source;
@@ -1551,6 +1562,29 @@ private:
     if (!out)
       return false;
     out << tu << "\n";
+    return true;
+  }
+
+  // Return true for exactly the first caller across all parallel compiles that
+  // share this OutDir, by atomically creating a sentinel file (CD_CreateNew
+  // fails if it already exists). Used to emit the public-roots stderr warning
+  // once per pack instead of once per TU (Caveat A / CodeRabbit review). A
+  // failure to create for any *other* reason falls back to emitting (fail loud
+  // rather than swallow the signal).
+  bool claimFirstRootsWarning() {
+    // The out dir is otherwise created lazily by writeTu (which runs after this
+    // check); create it up front so the sentinel has a home on the very first TU.
+    llvm::sys::fs::create_directories(OutDir);
+    int fd = -1;
+    std::error_code ec = llvm::sys::fs::openFile(
+        llvm::Twine(OutDir) + "/.abicheck-roots-warning", fd,
+        llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
+        llvm::sys::fs::OF_None);
+    if (ec == std::errc::file_exists)
+      return false;
+    if (ec)
+      return true; // unexpected error: prefer emitting over silence
+    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true); // create + close
     return true;
   }
 
