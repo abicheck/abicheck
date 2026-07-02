@@ -486,15 +486,6 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
   explicitly public, and exact-file public roots given from a **different tree**
   than the compile's are matched only by segment-subsequence. A project hitting
   either runs Flow A/B for both sides of the comparison.
-- **Block-scope `constexpr`:** the plugin does **not** emit `constexpr`
-  variables declared inside a function body (it descends into a public inline
-  function's body to emit body-local *types*, matching the clang backend, but
-  stops short of local `constexpr`). Such locals are not part of the callable
-  ABI surface, and the clang backend's emission of them keys multiple distinct
-  locals on the same bare name; the plugin intentionally omits them rather than
-  reproduce that. Under D0 (both baselines produced the same way) this is never
-  a false finding; it can only surface as a benign MISSING on the cross-producer
-  C.6 gate, which the fixture does not trigger.
 - **Compiler-implicit special members:** the plugin does **not** emit
   compiler-*implicit* (never user-declared) special members — the default/copy/
   move constructors, destructor, and assignment operators a class gets for free.

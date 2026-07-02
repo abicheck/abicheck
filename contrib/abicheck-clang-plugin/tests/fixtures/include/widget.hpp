@@ -90,4 +90,9 @@ private:
   int w_;
 };
 
+inline int withLocalConst() {
+  constexpr int kLocal = 7;   // block-scope constexpr in a PUBLIC inline fn
+  return kLocal;
+}
+
 }  // namespace demo

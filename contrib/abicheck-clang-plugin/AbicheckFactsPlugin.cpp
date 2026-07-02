@@ -1074,8 +1074,14 @@ public:
   bool VisitVarDecl(VarDecl *vd) {
     if (vd->isImplicit() || isa<ParmVarDecl>(vd) || !vd->isConstexpr())
       return true;
-    if (vd->getParentFunctionOrMethod())
-      return true;
+    // Block-scope `constexpr` inside a public inline/header function body IS
+    // emitted (not skipped on getParentFunctionOrMethod): the clang backend
+    // descends accessible function bodies and emits such locals as `constexpr`
+    // entities just like it emits body-local types, so the plugin matches it
+    // (Codex review). scopedName() omits the function scope, so a local `k` in
+    // `demo::f()` is named `demo::k` exactly as the backend names it. Local
+    // constexpr are syntactic (present in the AST regardless of codegen), so
+    // there is no capture-point asymmetry here.
     if (!isAccessible(vd) || vd->getNameAsString().empty())
       return true;
     std::string file, origin, visibility;
