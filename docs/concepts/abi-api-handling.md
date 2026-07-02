@@ -310,6 +310,15 @@ rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes, or raises
 its own source-/API-level findings, but **never deletes an artifact-proven
 break**.
 
+**Who produces the source facts.** The default is a post-build
+`compile_commands.json` replay — nothing in your build changes (`abicheck scan`
+/ `dump --sources`). If you'd rather have the build *emit* the facts itself, two
+producers write the identical schema for `abicheck merge` to fold in: the
+portable **`abicheck-cc`** compiler wrapper, and — for large/template-heavy
+builds where a companion parse hurts — an optional **Clang plugin** that rides
+the compile's own AST (zero extra parse). The three are one interchangeable
+family; see [Build & Source data](build-source-data.md) for enable steps.
+
 `scan --mode` picks a fixed depth: `pr` (the cheap per-PR gate, diff-seeded L4),
 `pr-deep` (PR + the full L5 graph), `baseline` (a full-depth release snapshot),
 and `audit` — an **intra-version single-build hygiene lint that needs no previous
