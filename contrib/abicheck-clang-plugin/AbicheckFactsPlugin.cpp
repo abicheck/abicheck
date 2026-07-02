@@ -1549,6 +1549,12 @@ public:
       preinc.push_back("i:" + absStr(f));
     for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
       preinc.push_back("m:" + absStr(f));
+    // A precompiled header (`-include-pch`) is included implicitly and can inject
+    // macros/declarations that change the public-header AST, so fold it in too
+    // (rooted like the other path inputs) — else two source variants differing
+    // only by their PCH collide on the facts filename (Codex review).
+    if (!ci.getPreprocessorOpts().ImplicitPCHInclude.empty())
+      preinc.push_back("p:" + absStr(ci.getPreprocessorOpts().ImplicitPCHInclude));
     // VFS overlays (`-ivfsoverlay`) remap the virtual filesystem, so two builds
     // of one source with different overlays can parse different header content
     // under otherwise-identical flags. Fold the overlay files in (ordered,
