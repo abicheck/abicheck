@@ -424,6 +424,24 @@ def test_ctor_dtor_fold_handles_nested_template_argument_names() -> None:
     )
 
 
+def test_ctor_dtor_fold_handles_non_type_template_parameters() -> None:
+    # Codex review: a non-type template parameter mangles as an L<type><value>E
+    # literal whose VALUE is raw digits — `Fixed<3>::Fixed()` → `_ZN5FixedILi3EE`
+    # `C1Ev`. Those digits must not be read as a source-name length (which would
+    # swallow the trailing ctor tag). The literal is consumed to its own E.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    for sym in (
+        "_ZN5FixedILi3EE{tag}Ev",  # Fixed<3>
+        "_ZN3ArrIiLm5EE{tag}Ev",  # Arr<int, 5ul>
+        "_ZN1XILin1EE{tag}Ev",  # X<-1>
+    ):
+        assert _ctor_dtor_canonical(sym.format(tag="C1")) == _ctor_dtor_canonical(
+            sym.format(tag="C2")
+        )
+        assert _ctor_dtor_canonical(sym.format(tag="C1")) != sym.format(tag="C1")
+
+
 def test_ctor_dtor_fold_parser_edge_cases() -> None:
     # Exercise the remaining parser branches for coverage + robustness:
     from abicheck.buildsource.source_link import _ctor_dtor_canonical

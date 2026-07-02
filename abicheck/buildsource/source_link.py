@@ -63,6 +63,24 @@ def _skip_e_terminated(symbol: str, i: int) -> int:
     i += 1
     while i < n and depth:
         c = symbol[i]
+        if c == "L":
+            # <expr-primary> literal := L <type> <value> E. Its VALUE is raw
+            # digits (a non-type template parameter, e.g. `Fixed<3>` → `Li3E`),
+            # NOT a length-prefixed source-name — so consume the literal to its
+            # own matching E flatly (digits are literal chars here), only
+            # balancing any nested I/N/L in its type. Without this the digit
+            # would be misread as a length and swallow the trailing ctor tag
+            # (Codex review).
+            ldepth = 1
+            i += 1
+            while i < n and ldepth:
+                d = symbol[i]
+                if d in "INL":
+                    ldepth += 1
+                elif d == "E":
+                    ldepth -= 1
+                i += 1
+            continue
         if c.isdigit():  # <source-name> — consume by its declared length
             j = i
             while j < n and symbol[j].isdigit():

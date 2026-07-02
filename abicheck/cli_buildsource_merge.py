@@ -51,28 +51,34 @@ def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
 
     The authoritative export set is the platform **dynamic symbol table**
     (``elf.symbols`` / ``pe.exports`` / ``macho.exports``), which lists every
-    exported symbol as its raw linker name. The modeled ``functions``/
-    ``variables`` lists are a *narrower*, DWARF-shaped view that (a) may cover
-    only a fraction of the exports and (b) can carry non-ABI ctor/dtor linkage
-    tags (GCC's unified ``C4``/``D4``) that never match the binary's real
-    ``C1``/``C2`` clones. Feeding only those to the linker collapsed symbol
-    matching to a handful of hits (the plugin/``merge`` regression), so union the
-    raw export table in as the source of truth and keep the modeled mangled names
-    as a fallback for backends that expose no raw table.
+    exported symbol as its raw linker name. When one is present it is used
+    **alone**: the modeled ``functions``/``variables`` lists are a *narrower*,
+    DWARF-shaped view that (a) covers only a fraction of the exports — feeding
+    only those collapsed symbol matching to a handful of hits (the plugin/
+    ``merge`` regression) — and (b) can carry non-ABI ctor/dtor linkage tags
+    (GCC's unified ``C4``/``D4``) that are **not** real exports; unioning them in
+    would let a source decl mangled ``C4`` exact-match a phantom and inflate
+    ``exported_symbols``/``matched_symbols`` with a name the binary never exported
+    (Codex review). The modeled mangled names are therefore only a *fallback* for
+    backends that expose no raw table at all (a source-only snapshot, or a format
+    whose export table did not parse).
     """
-    syms = {fn.mangled for fn in snap.functions if fn.mangled}
-    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    raw: set[str] = set()
     elf = getattr(snap, "elf", None)
     if elf is not None:
-        syms |= {s.name for s in getattr(elf, "symbols", ()) if getattr(s, "name", "")}
+        raw |= {s.name for s in getattr(elf, "symbols", ()) if getattr(s, "name", "")}
     pe = getattr(snap, "pe", None)
     if pe is not None:
-        syms |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
+        raw |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
     macho = getattr(snap, "macho", None)
     if macho is not None:
-        syms |= {
-            e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")
-        }
+        raw |= {e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")}
+    raw.discard("")
+    if raw:  # a raw dynamic table is authoritative — do not dilute it
+        return tuple(sorted(raw))
+    # No raw export table (source-only / unparsed): fall back to modeled names.
+    syms = {fn.mangled for fn in snap.functions if fn.mangled}
+    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     syms.discard("")
     return tuple(sorted(syms))
 

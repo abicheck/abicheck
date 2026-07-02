@@ -1913,12 +1913,29 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
         ElfSymbol(name="_Z3barv"),
     ]
     exports = _exported_symbols_from_snapshot(snap)
-    # Raw dynamic-table names are present (not just the modeled C4 tag).
+    # The raw dynamic table is authoritative and used alone.
     assert "_ZN3FooC1Ev" in exports
     assert "_ZN3FooC2Ev" in exports
     assert "_Z3barv" in exports
-    # The modeled mangled name is still included as a fallback.
-    assert "_ZN3FooC4Ev" in exports
+    # The DWARF-only unified C4 tag is NOT a real export — it must not leak into
+    # the export set (or a source decl mangled C4 would exact-match a phantom and
+    # inflate exported_symbols/matched_symbols; Codex review).
+    assert "_ZN3FooC4Ev" not in exports
+
+
+def test_exported_symbols_falls_back_to_modeled_names_without_raw_table():
+    """With no raw dynamic table (a source-only snapshot), the modeled mangled
+    names are the only available fallback."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.model import Function, Variable
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    snap.functions = [
+        Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
+    ]
+    snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+    # No .elf/.pe/.macho set → fall back to the modeled names.
+    assert _exported_symbols_from_snapshot(snap) == ("_Z1g", "_Z3foov")
 
 
 def test_exported_symbols_from_snapshot_uses_pe_and_macho_tables():
