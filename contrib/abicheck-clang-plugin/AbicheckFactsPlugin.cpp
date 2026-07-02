@@ -1531,9 +1531,15 @@ public:
       llvm::sys::fs::make_absolute(p);
       return std::string(p.str());
     };
+    // Fold the search-mode flags (IsFramework: `-F` vs `-I`; IgnoreSysRoot:
+    // `-isystem` vs `-iwithsysroot`) alongside Group + absolute path: the same
+    // directory reached through a different search mode can expose different
+    // headers, so those variants must not collide on the facts filename (Codex
+    // review).
     for (const auto &e : hso.UserEntries)
-      incs.push_back(std::to_string(static_cast<int>(e.Group)) + ":" +
-                     absStr(e.Path));
+      incs.push_back(std::to_string(static_cast<int>(e.Group)) +
+                     (e.IsFramework ? ":F" : ":I") +
+                     (e.IgnoreSysRoot ? ":r" : ":s") + ":" + absStr(e.Path));
     // Forced preincludes (-include) and macro-includes (-imacros) also change the
     // TU's ABI-relevant context; keep their order (significant) and root them to
     // absolute paths so a relative `-include ./config.hpp` from two build dirs
