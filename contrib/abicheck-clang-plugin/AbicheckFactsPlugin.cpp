@@ -771,6 +771,36 @@ bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &root
   return false;
 }
 
+// Auto-derive public roots from the compile's user include search paths when the
+// operator passed no explicit `public-roots=` (ADR-038 Flow C, Caveat A). The
+// `-I` (Angled) and `-iquote` (Quoted) directories are exactly where a project's
+// own public headers resolve, so treating them as roots turns the common "forgot
+// public-roots → silently empty pack" trap into a populated (if slightly broad)
+// public surface. System / compiler-builtin entries (`-isystem`, the resource
+// dir, the sysroot) are excluded so libstdc++ / SDK headers do not flood the
+// surface. Returns absolute-normalized directories, de-duplicated, in search
+// order. The operator can always pass an explicit `public-roots=` to scope the
+// surface precisely; inference only runs when they passed none.
+std::vector<std::string> deriveRootsFromIncludes(const HeaderSearchOptions &hso) {
+  std::vector<std::string> roots;
+  std::set<std::string> seen;
+  for (const auto &e : hso.UserEntries) {
+    if (e.IsFramework)
+      continue;
+    if (e.Group != frontend::Angled && e.Group != frontend::Quoted)
+      continue;
+    if (e.Path.empty())
+      continue;
+    llvm::SmallString<256> abs(e.Path);
+    llvm::sys::fs::make_absolute(abs);
+    llvm::sys::path::remove_dots(abs, /*remove_dot_dot=*/true);
+    std::string s(abs.str());
+    if (seen.insert(s).second)
+      roots.push_back(s);
+  }
+  return roots;
+}
+
 // Whether `file` names a C/C++ translation-unit source (not a header). Used to
 // tell an ordinary internal .cpp decl (expected to be non-public) from a decl in
 // a *header* that fell outside the public roots (the public-roots-misconfigured
@@ -1380,10 +1410,12 @@ public:
   FactsConsumer(std::string outDir, std::vector<std::string> roots,
                 std::string library, std::string version,
                 std::string ctxHash,
-                std::shared_ptr<std::map<std::string, MacroRecord>> macros)
+                std::shared_ptr<std::map<std::string, MacroRecord>> macros,
+                size_t inferredRootCount = 0)
       : OutDir(std::move(outDir)), Roots(std::move(roots)),
         Library(std::move(library)), Version(std::move(version)),
-        CtxHash(std::move(ctxHash)), Macros(std::move(macros)) {}
+        CtxHash(std::move(ctxHash)), Macros(std::move(macros)),
+        InferredRootCount(inferredRootCount) {}
 
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
@@ -1395,6 +1427,26 @@ public:
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
+
+    // Public-roots inference note (ADR-038 Flow C, Caveat A): when no explicit
+    // `public-roots=` was given, the roots were auto-derived from the compile's
+    // -I/-iquote include dirs. Record that per-TU (forensic) and tell the operator
+    // once — the inferred surface can be slightly broad, so an explicit
+    // public-roots= is the precise scoping knob. Not an error: a populated (broad)
+    // surface beats the silent empty pack the missing flag used to produce.
+    if (InferredRootCount > 0) {
+      std::string roots;
+      for (const std::string &r : Roots)
+        roots += (roots.empty() ? "" : ", ") + r;
+      std::string msg =
+          "abicheck-facts: no public-roots given; inferred " +
+          std::to_string(InferredRootCount) +
+          " public root(s) from the compile's -I/-iquote include dirs [" + roots +
+          "]. Pass public-roots=<dir> to scope the public surface precisely.";
+      diags.insert(msg);
+      if (claimFirstInferenceNote())
+        llvm::errs() << msg << "\n";
+    }
 
     // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
     // but this TU emitted zero public entities *while* header-declared decls were
@@ -1588,6 +1640,25 @@ private:
     return true;
   }
 
+  // Same once-per-pack claim as claimFirstRootsWarning, for the distinct
+  // public-roots-inference note (a different sentinel so the two notes do not
+  // suppress each other). Emitted at most once across all parallel compiles that
+  // share this OutDir.
+  bool claimFirstInferenceNote() {
+    llvm::sys::fs::create_directories(OutDir);
+    int fd = -1;
+    std::error_code ec = llvm::sys::fs::openFile(
+        llvm::Twine(OutDir) + "/.abicheck-roots-inferred", fd,
+        llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
+        llvm::sys::fs::OF_None);
+    if (ec == std::errc::file_exists)
+      return false;
+    if (ec)
+      return true; // unexpected error: prefer emitting over silence
+    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
+    return true;
+  }
+
   void ensureManifest() {
     std::string manifestPath = OutDir + "/manifest.json";
     if (llvm::sys::fs::exists(manifestPath))
@@ -1622,6 +1693,9 @@ private:
   std::string Version;
   std::string CtxHash;
   std::shared_ptr<std::map<std::string, MacroRecord>> Macros;
+  //: >0 when Roots were auto-derived from the compile's -I/-iquote include dirs
+  //: (no explicit public-roots= given) — drives the one-time inference note.
+  size_t InferredRootCount = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -1640,8 +1714,18 @@ public:
     auto macros = std::make_shared<std::map<std::string, MacroRecord>>();
     Preprocessor &pp = ci.getPreprocessor();
     pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
-    return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
-                                           computeContextHash(ci), macros);
+    // Auto-derive public roots from the -I/-iquote include dirs when the operator
+    // gave none (ADR-038 Flow C, Caveat A): a populated (broad) surface beats the
+    // silent empty pack a missing public-roots= used to produce.
+    std::vector<std::string> roots = Roots;
+    size_t inferredRootCount = 0;
+    if (roots.empty()) {
+      roots = deriveRootsFromIncludes(ci.getHeaderSearchOpts());
+      inferredRootCount = roots.size();
+    }
+    return std::make_unique<FactsConsumer>(OutDir, std::move(roots), Library,
+                                           Version, computeContextHash(ci),
+                                           macros, inferredRootCount);
   }
 
   // The compile-context hash — the per-TU cache key (ADR-030 D8) and the `cfg`

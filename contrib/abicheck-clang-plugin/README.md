@@ -99,9 +99,13 @@ Pass plugin arguments with the **`-Xclang -plugin-arg-abicheck-facts -Xclang
 <arg>`** cc1 form, not the `-fplugin-arg-abicheck-facts-<arg>` shorthand: the
 shorthand mis-parses the *hyphenated* plugin name (clang splits it at the first
 hyphen and hands `out=…` to a plugin named `abicheck`; verify with `clang++
--###`). `public-roots=` is **mandatory** — it is the plugin's equivalent of the
-wrapper's `ABICHECK_CC_HEADERS`; without it every decl classifies non-public and
-the plugin emits an empty public surface.
+-###`). `public-roots=` is the plugin's equivalent of the wrapper's
+`ABICHECK_CC_HEADERS` — it scopes which resolved header paths count as the public
+surface. It is **strongly recommended** but no longer strictly required: when it
+is omitted the plugin auto-derives roots from the compile's own `-I`/`-iquote`
+include directories (see below), so a forgotten flag yields a populated surface
+instead of a silently empty pack. Pass it explicitly whenever you want to scope
+the surface precisely (e.g. only the installed `include/` tree).
 
 ```bash
 clang++ -std=c++17 -Iinclude \
@@ -146,6 +150,25 @@ Two ways to get it right:
 
   and records the same note in the pack's `diagnostics`. An empty pack is now a
   loud error, not a 20-minute debug.
+
+### Auto-derived public roots (when `public-roots=` is omitted)
+
+If you pass no `public-roots=` at all, the plugin derives roots from the
+compile's user include search paths — every `-I` (angled) and `-iquote` (quoted)
+directory, resolved to an absolute path; compiler/system entries (`-isystem`,
+the resource dir, the sysroot) are excluded so libstdc++/SDK headers don't flood
+the surface. The plugin then emits a one-time note per pack:
+
+```
+abicheck-facts: no public-roots given; inferred 2 public root(s) from the
+compile's -I/-iquote include dirs [/proj/include, /proj/gen]. Pass
+public-roots=<dir> to scope the public surface precisely.
+```
+
+and records it in each TU's `diagnostics`. This is a convenience, not a
+replacement for scoping: the inferred surface can be broader than your true
+public API (it includes any header reachable through a `-I` dir), so for a
+precise baseline still pass an explicit `public-roots=`.
 
 ## Validation: differential conformance (ADR-038 C.6)
 

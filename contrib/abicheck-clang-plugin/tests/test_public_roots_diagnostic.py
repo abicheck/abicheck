@@ -22,8 +22,11 @@ pack with exit 0 and no message — a 20-minute debug for the operator. The plug
 must now:
 
   * WARN (naming the count, an example rejected header, and the ``clang -H`` tip)
-    when public-roots matches zero declarations though header decls were seen, and
-  * stay silent and emit a non-empty pack when public-roots is correct.
+    when public-roots matches zero declarations though header decls were seen,
+  * stay silent and emit a non-empty pack when public-roots is correct, and
+  * auto-derive roots from the compile's ``-I``/``-iquote`` include dirs (with a
+    one-time inference note) when no ``public-roots`` is given at all, so a
+    forgotten flag yields a populated surface rather than an empty pack.
 
 Standalone (mirrors ``conformance.py``); run by the ``clang-plugin`` workflow:
 
@@ -50,7 +53,7 @@ def _compile(
     work: Path,
     plugin: Path,
     clangxx: str,
-    public_root: str,
+    public_root: str | None,
     out_dir: Path | None = None,
     obj: str = "widget.o",
 ) -> str:
@@ -58,15 +61,19 @@ def _compile(
 
     *out_dir* overrides the pack output directory (default: one per root) so
     several TUs can be pointed at a shared pack; *obj* names the object file so
-    two invocations don't clobber each other. Returns ``stderr + "@@PACK@@" +
-    out_dir`` — the single source of the plugin invocation contract.
+    two invocations don't clobber each other. When *public_root* is ``None`` the
+    ``public-roots=`` argument is omitted entirely, exercising the plugin's
+    auto-derivation from the compile's ``-I`` include dirs. Returns
+    ``stderr + "@@PACK@@" + out_dir`` — the single source of the plugin
+    invocation contract.
     """
     out = (
         out_dir
         if out_dir is not None
-        else work / f"out_{public_root.replace('/', '_')}"
+        else work / f"out_{(public_root or 'auto').replace('/', '_')}"
     )
     argp = ["-Xclang", "-plugin-arg-abicheck-facts", "-Xclang"]
+    roots_args = [] if public_root is None else [*argp, f"public-roots={public_root}"]
     proc = subprocess.run(
         [
             clangxx,
@@ -75,8 +82,7 @@ def _compile(
             f"-fplugin={plugin}",
             *argp,
             f"out={out}",
-            *argp,
-            f"public-roots={public_root}",
+            *roots_args,
             "-c",
             "widget.cpp",
             "-o",
@@ -173,6 +179,23 @@ def main(argv: list[str] | None = None) -> int:
             failures.append(
                 f"stderr warning not de-duplicated: emitted {n_warn} times across "
                 "2 TUs sharing one out dir (expected exactly 1)"
+            )
+
+        # 4) AUTO-DERIVE: with NO public-roots arg at all, the plugin infers roots
+        # from the compile's -I/-iquote include dirs, so the pack is non-empty and a
+        # one-time inference note names how many roots it derived. This turns the
+        # "forgot public-roots" trap into a populated surface instead of an empty
+        # pack (ADR-038 Flow C, Caveat A).
+        auto = _compile(work, plugin, args.clangxx, None)
+        auto_err, auto_pack = auto.split("\n@@PACK@@")
+        if "no public-roots given; inferred" not in auto_err:
+            failures.append(
+                "auto-derive did NOT emit the inference note when public-roots was "
+                f"omitted. stderr was:\n{auto_err.strip() or '<empty>'}"
+            )
+        if _pack_entity_count(Path(auto_pack)) == 0:
+            failures.append(
+                "auto-derive produced an EMPTY pack (roots not inferred from -I)"
             )
 
         if failures:

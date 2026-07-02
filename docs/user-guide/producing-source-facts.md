@@ -105,6 +105,13 @@ of the zero-parse path, and why Flow A/B remain the portable defaults.
     an example header and the `clang -H` tip, and records it in the pack's
     `diagnostics`.
 
+    And if you omit `public-roots=` entirely, the plugin **auto-derives** roots
+    from the compile's own `-I`/`-iquote` include dirs (compiler/system paths
+    excluded) and emits a one-time inference note — so a forgotten flag yields a
+    populated (if slightly broad) surface rather than an empty pack. Still pass an
+    explicit `public-roots=` when you want the surface scoped precisely to your
+    installed public headers.
+
 ## Then: fold the facts onto the binary
 
 However you produced them, ingest is the same — dump the binary side, then merge:

@@ -24,6 +24,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   the DWARF-shaped `functions[].mangled` view. On a pvxs Flow-C merge this lifts
   `matched_symbols` from 6 to 287 (`exported_symbols` 126 → 950).
 
+- **Source→binary matching normalizes Mach-O spellings for all names.** The
+  linker normalizes the optional Mach-O leading underscore (`__ZN…` → `_ZN…`)
+  for every Itanium source/export key, not only ctor/dtor canonical keys, so an
+  ordinary C++ method the plugin records as `__ZN1A3fooEv` exact-matches the
+  export table's `_ZN1A3fooEv` instead of orphaning into the unmatched sets.
+- **`merge` excludes non-default ELF version aliases from the relink set.** A
+  symbol that exists only as `foo@VER` (no default `foo@@VER`) can't be linked
+  against by an unversioned consumer, so it no longer enters the export set —
+  preventing the two-way reconciliation from masking a real `public_not_exported`.
+
 ### Changed
 
 - **Clang facts plugin fails loud on a misconfigured `public-roots`** (ADR-038
@@ -31,12 +41,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `diagnostics`) when `public-roots` matches zero declarations though header
   decls were seen outside the roots, instead of silently producing an empty
   pack with exit 0.
+- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038 Flow
+  C): with no explicit `public-roots=`, roots are inferred from the compile's
+  `-I`/`-iquote` include dirs (compiler/system entries excluded) and a one-time
+  inference note is emitted, so a forgotten flag yields a populated surface
+  rather than a silently empty pack. An explicit `public-roots=` still scopes
+  the surface precisely.
 
 ### Added
 
 - New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
   three source-fact producers, a selection tree, and the `public-roots`/
   `ABICHECK_CC_HEADERS` header-resolution trap.
+- **Two-way reconciliation in the `public_not_exported` cross-check** (ADR-035
+  D4): a public header decl the L4 source-linker already tied to an export under
+  a variant spelling (ctor/dtor clone, Mach-O underscore, ABI-tag/substitution
+  drift) is no longer double-reported as "declared but not exported".
 
 ---
 
