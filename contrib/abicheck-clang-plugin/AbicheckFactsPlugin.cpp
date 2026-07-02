@@ -741,6 +741,11 @@ bool isContiguousSubsequence(const std::vector<std::string> &hay,
 std::vector<std::string> absSegments(llvm::StringRef p) {
   llvm::SmallString<256> abs(p);
   llvm::sys::fs::make_absolute(abs);
+  // Collapse `.`/`..` lexically: an out-of-source build compiling with
+  // `-I../include` reports headers as `../include/foo.hpp`, which make_absolute
+  // turns into `/repo/build/../include/foo.hpp`; without this the retained `..`
+  // segment stops the `/repo/include` root from matching (Codex review).
+  llvm::sys::path::remove_dots(abs, /*remove_dot_dot=*/true);
   return pathSegments(abs);
 }
 
