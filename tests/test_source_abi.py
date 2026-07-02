@@ -487,6 +487,40 @@ def test_linker_matches_macho_decl_against_stripped_exports() -> None:
     assert surface.unmatched["symbols_without_decl"] == []
 
 
+def test_linker_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
+    # Codex review: an ORDINARY (non ctor/dtor) C++ method takes the no-fold path,
+    # so on macOS Flow-C the plugin's `__ZN1A3fooEv` must still exact-match the
+    # export table's `_ZN1A3fooEv` (one underscore stripped). Before the fix these
+    # landed in decls_without_symbol / symbols_without_decl because normalization
+    # was applied only to ctor/dtor canonical keys.
+    tu = SourceAbiTu(functions=[_entity("A::foo", "function", mangled="__ZN1A3fooEv")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1A3fooEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+    # The mapping resolves to the REAL exported spelling (the `_Z…` form actually in
+    # the binary), not the plugin's raw `__Z…` key.
+    assert (
+        surface.mappings["source_decl_to_binary_symbol"]["__ZN1A3fooEv"]
+        == "_ZN1A3fooEv"
+    )
+
+
+def test_relink_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
+    # Same normalization must apply on the merge/relink path (a plugin/wrapper pack
+    # linked with no binary, then relinked against the Mach-O export table).
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(functions=[_entity("A::foo", "function", mangled="__ZN1A3fooEv")])
+    surface = link_source_abi([tu])  # source-only, no exports yet
+    relink_surface_exports(surface, ["_ZN1A3fooEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+    assert (
+        surface.mappings["source_decl_to_binary_symbol"]["__ZN1A3fooEv"]
+        == "_ZN1A3fooEv"
+    )
+
+
 def test_ctor_dtor_fold_handles_function_type_template_args() -> None:
     # Codex review: a function-type template argument (`A<void(int)>` → `FviE`,
     # `std::function<void()>` → `FvvE`) is itself E-terminated; the balanced skip
@@ -612,6 +646,34 @@ def test_relink_also_attributes_synthesized_exports() -> None:
     assert surface.unmatched["symbols_without_decl"] == []
     assert surface.coverage["synthesized_symbols_matched"] == 2
     assert surface.coverage["unmatched_symbols"] == 0
+
+
+@needs_demangler
+def test_relink_clears_stale_synthesized_owners() -> None:
+    # Codex review: a relink runs against a possibly different export set. A surface
+    # that recorded synthesized owners on a previous link but attributes NONE under
+    # the new exports must have the stale mapping cleared — otherwise the serialized
+    # L4 surface keeps claiming ownership of vtables/typeinfo the new binary never
+    # exports, contradicting the recomputed coverage / symbols_without_decl.
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(
+        types=[_entity("Widget", "record", type_hash="t1")],
+        functions=[_entity("Widget::foo", "function", mangled="_ZN6Widget3fooEv")],
+    )
+    surface = link_source_abi([tu])
+    # First relink: Widget's vtable/typeinfo attribute → mapping is populated.
+    relink_surface_exports(surface, ["_ZTV6Widget", "_ZTI6Widget"])
+    assert surface.mappings["synthesized_symbol_to_owner"]  # non-empty
+
+    # Second relink against an export set with NO synthesized matches: the previous
+    # owners must be cleared, not left as stale evidence.
+    relink_surface_exports(surface, ["_ZN6Widget3fooEv"])
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+    assert surface.coverage["synthesized_symbols_matched"] == 0
+    # And the surface round-trips with the cleared (empty) mapping.
+    restored = SourceAbiSurface.from_dict(surface.to_dict())
+    assert restored.mappings["synthesized_symbol_to_owner"] == {}
 
 
 @needs_demangler

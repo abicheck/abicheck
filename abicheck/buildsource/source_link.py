@@ -136,7 +136,8 @@ def _ctor_dtor_demangle_fallback(symbol: str) -> str:
     try:
         from ..demangle import demangle as _demangle
 
-        demangled = _demangle(symbol)
+        # Normalize the Mach-O `__Z` prefix first (the demangler only accepts `_Z`).
+        demangled = _demangle(_norm_itanium(symbol))
     except Exception:  # noqa: BLE001 - demangling is a best-effort backstop
         return symbol
     if not demangled or "(" not in demangled:
@@ -239,12 +240,27 @@ def _ctor_dtor_structural(symbol: str) -> str:
     return original
 
 
+def _norm_itanium(symbol: str) -> str:
+    """Strip the Mach-O leading underscore so ``__ZN…`` and ``_ZN…`` share a key.
+
+    Mach-O/Darwin prefixes every Itanium symbol with an extra ``_``, so the Clang
+    facts plugin records a method as ``__ZN1A3fooEv`` while ``macho_metadata``
+    strips one underscore off the export table to ``_ZN1A3fooEv``. Ordinary (non
+    ctor/dtor) names take the no-fold path in :func:`_ctor_dtor_structural` and are
+    returned verbatim, so without normalizing here the two spellings would never
+    exact-match and every plain C++ API on macOS would land in the unmatched sets
+    (Codex review). Only the *matching key* is normalized; the real exported name
+    is preserved so ``symbols_without_decl`` still subtracts the true spelling.
+    """
+    return symbol[1:] if symbol.startswith("__Z") else symbol
+
+
 def _build_export_index(exported: set[str]) -> dict[str, list[str]]:
     """Index ctor/dtor canonical forms → the concrete exported clone symbols.
 
     Only names whose canonical form *differs* (i.e. actual ctor/dtor symbols) are
     indexed, so the map stays small and a non-ctor symbol can never collide into
-    it — those still match exactly against ``exported``.
+    it — those still match via the normalized exact index (:func:`_build_exact_index`).
     """
     index: dict[str, list[str]] = {}
     for sym in exported:
@@ -254,25 +270,48 @@ def _build_export_index(exported: set[str]) -> dict[str, list[str]]:
     return index
 
 
+def _build_exact_index(exported: set[str]) -> dict[str, str]:
+    """Map each export's Mach-O-normalized key → its real (as-exported) spelling.
+
+    So an ordinary decl the plugin recorded as ``__ZN1A3fooEv`` resolves to the
+    binary's ``_ZN1A3fooEv`` at the exact tier. Iterated in sorted order and the
+    canonical ``_Z`` spelling wins any (practically impossible) collision where a
+    binary lists both ``_ZN…`` and ``__ZN…`` for one entity, so the result is
+    deterministic and returns a name that is genuinely in ``exported``.
+    """
+    index: dict[str, str] = {}
+    for sym in sorted(exported):
+        norm = _norm_itanium(sym)
+        if norm not in index or sym == norm:
+            index[norm] = sym
+    return index
+
+
 def _match_export(
-    export_sym: str, exported: set[str], ctor_dtor_index: dict[str, list[str]]
+    export_sym: str,
+    exported: set[str],
+    ctor_dtor_index: dict[str, list[str]],
+    exact_index: dict[str, str],
 ) -> tuple[str, list[str]]:
     """Resolve a decl's export name to ``(primary_symbol, all_clone_symbols)``.
 
-    Exact match wins; its ctor/dtor siblings (if any were also exported) are
-    folded in so none is orphaned. When there is no exact hit but the name is a
-    ctor/dtor, it is matched against the canonical index so a decl mangled as
-    ``C1``/``D1`` (or the DWARF ``C4``/``D4``) still claims the ``C2``/``D2``/…
-    clones the binary actually exports. Returns ``("", [])`` when nothing matches.
+    Exact match (via the Mach-O-normalized :func:`_build_exact_index`, so a
+    plugin-emitted ``__ZN…`` name resolves to the binary's ``_ZN…`` export) wins;
+    its ctor/dtor siblings (if any were also exported) are folded in so none is
+    orphaned. When there is no exact hit but the name is a ctor/dtor, it is matched
+    against the canonical index so a decl mangled as ``C1``/``D1`` (or the DWARF
+    ``C4``/``D4``) still claims the ``C2``/``D2``/… clones the binary actually
+    exports. Returns ``("", [])`` when nothing matches.
     """
     if not export_sym:
         return "", []
     canon = _ctor_dtor_canonical(export_sym)
     clones = ctor_dtor_index.get(canon)
-    if export_sym in exported:
+    real = exact_index.get(_norm_itanium(export_sym))
+    if real is not None:
         if clones:
-            return export_sym, sorted(set(clones) | {export_sym})
-        return export_sym, [export_sym]
+            return real, sorted(set(clones) | {real})
+        return real, [real]
     if clones:
         variants = sorted(clones)
         return variants[0], variants
@@ -409,8 +448,11 @@ def _demangled_rematch(
         return {}
 
     def _dem(sym: str) -> str | None:
+        # Normalize the Mach-O leading underscore first: the shared demangler only
+        # accepts `_Z…`, so a raw `__ZN…` plugin name would otherwise fail to
+        # demangle and never rematch (Codex review).
         try:
-            return _demangle(sym)
+            return _demangle(_norm_itanium(sym))
         except Exception:  # noqa: BLE001
             return None
 
@@ -486,6 +528,7 @@ def link_source_abi(
 
     state = _LinkState()
     state.export_index = _build_export_index(exported)
+    state.exact_index = _build_exact_index(exported)
     for tu in tus:
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (
@@ -565,6 +608,7 @@ def relink_surface_exports(
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
     export_index = _build_export_index(exported)
+    exact_index = _build_exact_index(exported)
     mapping: dict[str, str] = {}
     matched: set[str] = set()
     # identity -> display name, so the recomputed decls_without_symbol carries the
@@ -576,7 +620,9 @@ def relink_surface_exports(
             continue
         identity_to_qname[key] = entity.qualified_name or key
         export_sym = entity.mangled_name or entity.qualified_name
-        primary, variants = _match_export(export_sym, exported, export_index)
+        primary, variants = _match_export(
+            export_sym, exported, export_index, exact_index
+        )
         if primary:
             mapping[key] = primary
             matched.update(variants)
@@ -591,11 +637,16 @@ def relink_surface_exports(
     # flow (used by `merge` on a plugin/wrapper pack) reports the same honest
     # counts as `dump <binary> --sources`.
     synthesized = _attribute_synthesized_exports(surface, exported - matched)
-    if synthesized:
-        surface.mappings["synthesized_symbol_to_owner"] = {
-            sym: {"kind": kind, "owner": owner}
-            for sym, (kind, owner) in sorted(synthesized.items())
-        }
+    # Assign UNCONDITIONALLY (empty dict when nothing was attributed): a relink runs
+    # against a possibly different export set, so a surface that previously recorded
+    # synthesized owners but has none under the new exports must have the stale map
+    # cleared — else the serialized L4 surface keeps claiming ownership of vtables/
+    # typeinfo the new binary never exports, contradicting the recomputed coverage
+    # and symbols_without_decl (Codex review).
+    surface.mappings["synthesized_symbol_to_owner"] = {
+        sym: {"kind": kind, "owner": owner}
+        for sym, (kind, owner) in sorted(synthesized.items())
+    }
     all_matched = matched | set(synthesized)
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
@@ -634,6 +685,8 @@ class _LinkState:
     matched_symbols: set[str] = field(default_factory=set)
     #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
     export_index: dict[str, list[str]] = field(default_factory=dict)
+    #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)
+    exact_index: dict[str, str] = field(default_factory=dict)
 
 
 def _route_entity(
@@ -720,7 +773,9 @@ def _route_declaration(
         return
     state.identity_to_qname[key] = entity.qualified_name or key
     export_sym = entity.mangled_name or entity.qualified_name
-    primary, variants = _match_export(export_sym, exported, state.export_index)
+    primary, variants = _match_export(
+        export_sym, exported, state.export_index, state.exact_index
+    )
     if primary:
         state.decl_to_symbol[key] = primary
         state.matched_symbols.update(variants)
