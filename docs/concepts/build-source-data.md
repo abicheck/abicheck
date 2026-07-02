@@ -246,7 +246,7 @@ clang++ -std=c++17 -Iinclude \
   -c src/foo.cpp -o foo.o
 
 # 3. Fold the emitted pack in, exactly like the wrapper (no re-parse).
-abicheck dump libfoo.so -o libfoo.bin.json
+abicheck dump libfoo.so -H include/ -o libfoo.bin.json
 abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
