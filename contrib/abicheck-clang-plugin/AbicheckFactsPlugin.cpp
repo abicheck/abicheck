@@ -781,9 +781,30 @@ bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &root
 // surface. Returns absolute-normalized directories, de-duplicated, in search
 // order. The operator can always pass an explicit `public-roots=` to scope the
 // surface precisely; inference only runs when they passed none.
+// Whether `path` is at or below directory `prefix` (both absolute-normalized),
+// checked at a path-component boundary so `/home/proj` does not "contain"
+// `/home/project2`.
+bool pathIsUnder(llvm::StringRef path, llvm::StringRef prefix) {
+  if (prefix.empty() || !path.starts_with(prefix))
+    return false;
+  return path.size() == prefix.size() ||
+         llvm::sys::path::is_separator(path[prefix.size()]);
+}
+
 std::vector<std::string> deriveRootsFromIncludes(const HeaderSearchOptions &hso) {
   std::vector<std::string> roots;
   std::set<std::string> seen;
+  // Restrict inference to PROJECT-LOCAL include dirs: an absolute `-I` outside the
+  // compile's working directory (`/opt/boost/include`, `/usr/include/eigen3`) is a
+  // third-party dependency whose headers must not flood the public surface, so
+  // only dirs at/below the build cwd are inferred (Codex review). In-tree includes
+  // (`-Iinclude`, `./gen`, an absolute path under the build/source tree) are kept.
+  // An out-of-source layout that puts headers elsewhere infers nothing here and
+  // gets the "pass public-roots=" diagnostic instead of a Boost-flooded pack.
+  llvm::SmallString<256> cwd;
+  bool haveCwd = !llvm::sys::fs::current_path(cwd);
+  if (haveCwd)
+    llvm::sys::path::remove_dots(cwd, /*remove_dot_dot=*/true);
   for (const auto &e : hso.UserEntries) {
     if (e.IsFramework)
       continue;
@@ -794,6 +815,8 @@ std::vector<std::string> deriveRootsFromIncludes(const HeaderSearchOptions &hso)
     llvm::SmallString<256> abs(e.Path);
     llvm::sys::fs::make_absolute(abs);
     llvm::sys::path::remove_dots(abs, /*remove_dot_dot=*/true);
+    if (haveCwd && !pathIsUnder(abs, cwd))
+      continue;
     std::string s(abs.str());
     if (seen.insert(s).second)
       roots.push_back(s);
@@ -1467,7 +1490,25 @@ public:
     size_t publicCount = functions.size() + types.size() + templates.size() +
                          inlineBodies.size() + constexprValues.size() +
                          macros.size();
-    if (!Roots.empty() && publicCount == 0 && visitor.rejectedHeaderDecls() > 0) {
+    bool emptyWithRejections =
+        publicCount == 0 && visitor.rejectedHeaderDecls() > 0;
+    if (emptyWithRejections && Roots.empty()) {
+      // NO roots at all — neither an explicit public-roots= nor any project-local
+      // -I/-iquote to infer from — yet this TU saw header decls. Previously this
+      // fell through silently (the `!Roots.empty()` guard), reproducing the exact
+      // empty-pack trap the diagnostic exists to kill (Codex review). Fail loud.
+      std::string msg =
+          "abicheck-facts: no public-roots given and no project-local include "
+          "dirs to infer from; this TU produced 0 public entities though " +
+          std::to_string(visitor.rejectedHeaderDecls()) +
+          " header decl(s) were seen (e.g. " + visitor.exampleRejectedHeader() +
+          "). Pass public-roots=<dir> so the public headers are recognized.";
+      diags.insert(msg);
+      if (claimFirstRootsWarning())
+        llvm::errs() << msg << "\n";
+    } else if (emptyWithRejections && InferredRootCount == 0) {
+      // Explicit public-roots= that matched nothing (roots were operator-set, not
+      // inferred): the classic Caveat-A misconfiguration message.
       std::string roots;
       for (const std::string &r : Roots)
         roots += (roots.empty() ? "" : ", ") + r;
@@ -1484,6 +1525,11 @@ public:
       if (claimFirstRootsWarning())
         llvm::errs() << msg << "\n";
     }
+    // When roots were INFERRED (InferredRootCount > 0) the inference note above
+    // already told the operator; a per-TU "matched 0" here would (a) misadvise
+    // them to fix a public-roots= they never set and (b) cry wolf on every
+    // internal-only TU (Codex review). The authoritative empty-pack signal for the
+    // inferred case is the project-level `merge` warning over the whole surface.
 
     std::string source;
     if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {

@@ -56,6 +56,7 @@ def _compile(
     public_root: str | None,
     out_dir: Path | None = None,
     obj: str = "widget.o",
+    extra_flags: list[str] | None = None,
 ) -> str:
     """Compile the widget fixture with *public_root*; return combined stderr.
 
@@ -79,6 +80,7 @@ def _compile(
             clangxx,
             "-std=c++17",
             "-Iinclude",
+            *(extra_flags or []),
             f"-fplugin={plugin}",
             *argp,
             f"out={out}",
@@ -196,6 +198,68 @@ def main(argv: list[str] | None = None) -> int:
         if _pack_entity_count(Path(auto_pack)) == 0:
             failures.append(
                 "auto-derive produced an EMPTY pack (roots not inferred from -I)"
+            )
+
+        # 5) THIRD-PARTY EXCLUSION: an absolute -I OUTSIDE the build cwd (a
+        # dependency like /opt/boost/include) must NOT be inferred as a public root
+        # — only project-local include dirs are. Point a second -I at a temp dir
+        # outside the work tree and assert the inference note omits it.
+        outside = Path(tempfile.mkdtemp(prefix="abicheck-thirdparty-"))
+        try:
+            (outside / "dep.hpp").write_text("struct Dep { int z; };\n")
+            tp = _compile(
+                work,
+                plugin,
+                args.clangxx,
+                None,
+                out_dir=work / "out_thirdparty",
+                extra_flags=[f"-I{outside}"],
+            )
+            tp_err, _ = tp.split("\n@@PACK@@")
+            if str(outside) in tp_err:
+                failures.append(
+                    "auto-derive inferred a THIRD-PARTY -I dir outside the build "
+                    f"cwd ({outside}); it must be excluded. stderr:\n{tp_err}"
+                )
+            if "inferred 1 public root" not in tp_err:
+                failures.append(
+                    "auto-derive should infer exactly the 1 in-tree root, not the "
+                    f"outside dir. stderr:\n{tp_err}"
+                )
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+        # 6) NO ROOTS AT ALL: a TU with header decls but no -I/-iquote to infer
+        # from (and no explicit public-roots) must FAIL LOUD, not fall through to a
+        # silent empty pack — the exact trap the diagnostic exists to kill.
+        sub = work / "noinc"
+        sub.mkdir(exist_ok=True)
+        (sub / "loc.h").write_text("struct Pub { int a; };\n")
+        (sub / "main.cpp").write_text('#include "loc.h"\nint useit() { return 0; }\n')
+        noinc = subprocess.run(
+            [
+                args.clangxx,
+                "-std=c++17",
+                f"-fplugin={plugin}",
+                "-Xclang",
+                "-plugin-arg-abicheck-facts",
+                "-Xclang",
+                f"out={sub / 'out'}",
+                "-c",
+                "main.cpp",
+                "-o",
+                str(sub / "main.o"),
+            ],
+            cwd=str(sub),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=True,
+        )
+        if "no project-local include dirs to infer from" not in noinc.stderr:
+            failures.append(
+                "a TU with header decls but no -I and no public-roots did NOT emit "
+                f"the no-roots diagnostic (silent empty pack). stderr:\n{noinc.stderr}"
             )
 
         if failures:
