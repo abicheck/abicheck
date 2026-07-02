@@ -654,6 +654,39 @@ def test_linker_attributes_rtti_vtable_thunk_to_public_owner() -> None:
     }
 
 
+def test_strip_call_signature_preserves_operator_parens() -> None:
+    from abicheck.buildsource.source_link import _strip_call_signature
+
+    # Ordinary functions: the trailing parameter list is dropped.
+    assert _strip_call_signature("ns::Widget::foo()") == "ns::Widget::foo"
+    assert _strip_call_signature("ns::f(int, char)") == "ns::f"
+    # Call operator: the `()` that is part of the name is preserved; only the
+    # trailing (parameter-list) group is removed.
+    assert _strip_call_signature("D::operator()()") == "D::operator()"
+    assert _strip_call_signature("D::operator()(int)") == "D::operator()"
+    # A nested paren inside the parameter list balances right-to-left.
+    assert _strip_call_signature("f(void (*)(int))") == "f"
+    # No parens at all → returned as-is.
+    assert _strip_call_signature("ns::x") == "ns::x"
+
+
+@needs_demangler
+def test_linker_attributes_call_operator_thunk_to_owner() -> None:
+    # Codex review: a thunk to a call operator demangles to `D::operator()()`;
+    # splitting at the first `(` would yield `D::operator`, orphaning the thunk.
+    # The owner `D::operator()` must be matched and the thunk attributed.
+    tu = SourceAbiTu(
+        functions=[_entity("D::operator()", "function", mangled="_ZN1DclEv")],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=["_ZN1DclEv", "_ZThn8_N1DclEv"],  # the op + its thunk
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    owners = surface.mappings["synthesized_symbol_to_owner"]
+    assert owners["_ZThn8_N1DclEv"] == {"kind": "thunk", "owner": "D::operator()"}
+
+
 @needs_demangler
 def test_synthesized_attribution_requires_exact_specialization() -> None:
     # Codex review: with only `ns::A<int>` on the surface, the vtable for a

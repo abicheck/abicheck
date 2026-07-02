@@ -342,6 +342,34 @@ _SYNTHESIZED_PREFIXES: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _strip_call_signature(name: str) -> str:
+    """Drop a demangled function's trailing parameter list, keeping its name.
+
+    ``ns::Widget::foo()`` → ``ns::Widget::foo``; ``ns::f(int, char)`` → ``ns::f``.
+    A naive ``split("(", 1)[0]`` would turn ``D::operator()()`` into ``D::operator``
+    — orphaning call-operator (functor) thunks, whose owning decl is spelled
+    ``D::operator()`` (Codex review). Instead the *trailing* balanced parenthesis
+    group (the parameter list) is removed by matching the final ``)`` back to its
+    opener right-to-left, so the ``()`` that is part of ``operator()`` is preserved.
+    Best-effort: a name with no ``)`` is returned stripped of surrounding space.
+    """
+    close = name.rfind(")")
+    if close == -1:
+        return name.strip()
+    depth = 0
+    i = close
+    while i >= 0:
+        c = name[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            depth -= 1
+            if depth == 0:
+                return name[:i].strip()
+        i -= 1
+    return name.strip()
+
+
 def _synthesized_target(demangled: str) -> tuple[str, str, str] | None:
     """Parse a demangled synthesized symbol into ``(kind, target, owner_kind)``.
 
@@ -408,8 +436,8 @@ def _attribute_synthesized_exports(
         if owner == "type":
             if _owner_present(target, type_names):
                 attributed[sym] = (kind, target)
-        else:  # func — cut the signature, match the qualified name
-            fname = target.split("(", 1)[0].strip()
+        else:  # func — cut the parameter list, match the qualified name
+            fname = _strip_call_signature(target)
             if _owner_present(fname, func_names):
                 attributed[sym] = (kind, fname)
     return attributed

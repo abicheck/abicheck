@@ -370,7 +370,35 @@ def test_public_not_exported_reconciles_macho_underscore_variant():
     # normalized key builds without error and is present in the reconciled set.)
     from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
 
-    assert "_ZN1A3fooEv" in _l4_reconciled_symbols(snap)
+    assert "_ZN1A3fooEv" in _l4_reconciled_symbols(snap, {"_ZN1A3fooEv"})
+
+
+def test_public_not_exported_reconciliation_ignores_stale_mapping():
+    # A merge pack whose exported_symbols were pre-set is NOT relinked, so its L4
+    # mapping can reference an OLDER binary. A decl mapped to a symbol the CURRENT
+    # snapshot no longer exports must still be flagged — the reconciliation only
+    # trusts a mapping whose target is in the current export table (Codex review).
+    snap = _snap(elf=_elf("_Z4livev"))  # current binary exports only `live`
+    snap.functions = [
+        Function(
+            name="stale",
+            mangled="_Z5stalev",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    # L4 mapping from an older binary that still "exported" `stale`.
+    surface.mappings["source_decl_to_binary_symbol"] = {"_Z5stalev": "_Z5stalev"}
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    # The stale mapping must NOT suppress the finding — `stale` is genuinely gone.
+    assert hits == ["_Z5stalev"]
+    # And the direct helper drops the stale key (its target is not in exports).
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    assert _l4_reconciled_symbols(snap, {"_Z4livev"}) == set()
 
 
 @pytest.mark.parametrize(
