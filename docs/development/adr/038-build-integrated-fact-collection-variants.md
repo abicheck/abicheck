@@ -459,6 +459,19 @@ abicheck-CI gate.
   entity-equivalent to the clang backend it substitutes (the C.6 gate covers
   macros) — the sanctioned plugin↔clang-backend equivalence of D0, not a licence
   to mix arbitrary producers.
+- **Public-surface classifier (pragmatic):** the plugin classifies a decl/macro
+  as public by matching its declaring file's path segments against the
+  `public-roots` set (with a `SourceManager::isInSystemHeader` guard so stdlib
+  headers reached through a coincidental path segment like `include` do not
+  leak). This is an approximation of `clang.py`'s include-spelling model
+  (`build_public_set`/`classify_origin`), not a byte-port. It agrees with the
+  backend for the common `-Iinclude` layout (the C.6 gate passes), but two
+  configurations are known to diverge until the full matcher is ported: public
+  headers reached via a **system include path** (`-isystem`, CMake
+  `SYSTEM PUBLIC`) are dropped by the system-header guard even though they are
+  explicitly public, and exact-file public roots given from a **different tree**
+  than the compile's are matched only by segment-subsequence. A project hitting
+  either runs Flow A/B for both sides of the comparison.
 
 ---
 

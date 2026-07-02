@@ -1432,8 +1432,17 @@ public:
     const HeaderSearchOptions &hso = ci.getHeaderSearchOpts();
     for (const auto &e : hso.UserEntries)
       incs.push_back(e.Path);
+    // Forced preincludes (-include) and macro-includes (-imacros) also change the
+    // TU's ABI-relevant context; keep their order (it is significant) so two
+    // variants differing only by a forced config header get distinct hashes.
+    std::vector<std::string> preinc;
+    for (const auto &f : ci.getPreprocessorOpts().Includes)
+      preinc.push_back("i:" + f);
+    for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
+      preinc.push_back("m:" + f);
     return H({"ctx", standard, to.Triple, hso.Sysroot, joinStrings(defs, ','),
-              joinStrings(incs, ','), joinStrings(to.Features, ',')});
+              joinStrings(incs, ','), joinStrings(to.Features, ','),
+              joinStrings(preinc, ',')});
   }
 
   bool ParseArgs(const CompilerInstance &,
