@@ -1890,6 +1890,115 @@ def test_exported_symbols_from_snapshot_extracts_mangled_names():
     assert _exported_symbols_from_snapshot(AbiSnapshot(library="l", version="1")) == ()
 
 
+def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
+    """The authoritative export set is the ELF dynamic symbol table, not just the
+    DWARF-shaped ``functions`` list. Feeding only the modeled functions truncated
+    the linker's export set (the ``merge`` symbol-matching regression), so the raw
+    ``elf.symbols`` names must be unioned in."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import Function
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    # A DWARF-modeled function whose linkage name is the non-ABI unified C4 tag —
+    # never present in the real export table.
+    snap.functions = [
+        Function(name="Foo::Foo", mangled="_ZN3FooC4Ev", return_type="void", params=[])
+    ]
+    snap.elf = ElfMetadata()
+    # The real exported clones the loader sees.
+    snap.elf.symbols = [
+        ElfSymbol(name="_ZN3FooC1Ev"),
+        ElfSymbol(name="_ZN3FooC2Ev"),
+        ElfSymbol(name="_Z3barv"),
+    ]
+    exports = _exported_symbols_from_snapshot(snap)
+    # The raw dynamic table is authoritative and used alone.
+    assert "_ZN3FooC1Ev" in exports
+    assert "_ZN3FooC2Ev" in exports
+    assert "_Z3barv" in exports
+    # The DWARF-only unified C4 tag is NOT a real export — it must not leak into
+    # the export set (or a source decl mangled C4 would exact-match a phantom and
+    # inflate exported_symbols/matched_symbols; Codex review).
+    assert "_ZN3FooC4Ev" not in exports
+
+
+def test_exported_symbols_from_snapshot_excludes_non_default_versions():
+    """A symbol that exists only as a non-default version alias (``foo@VER`` with
+    no default ``foo@@VER``) cannot be linked against by an unversioned consumer,
+    so it must NOT enter the relink export set — otherwise the L4 mapping marks a
+    header decl backed only by that alias as exported and the crosscheck's two-way
+    reconciliation wrongly suppresses ``public_not_exported`` (Codex review)."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    snap.elf = ElfMetadata()
+    snap.elf.symbols = [
+        ElfSymbol(name="_Z3foov", version="LIB_1", is_default=True),  # default → in
+        ElfSymbol(name="_Z3oldv", version="LIB_1", is_default=False),  # alias → out
+        ElfSymbol(name="_Z3barv"),  # unversioned (is_default defaults True) → in
+    ]
+    exports = _exported_symbols_from_snapshot(snap)
+    assert set(exports) == {"_Z3foov", "_Z3barv"}
+    assert "_Z3oldv" not in exports
+
+
+def test_merge_warns_on_empty_source_surface(capsys):
+    """Project-level Caveat A: merging a pack whose whole source surface is empty
+    while the binary exports symbols warns that public-roots was likely wrong."""
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource_merge import _warn_if_source_surface_empty
+
+    empty = SourceAbiSurface(library="libfoo.so", target_id="t")  # no entities
+    combined = SimpleNamespace(source_abi=empty)
+    _warn_if_source_surface_empty(combined, ("_Z3foov", "_Z3barv"))
+    err = capsys.readouterr().err
+    assert "no public entities" in err
+    assert "public-roots" in err
+
+    # A non-empty surface (or no exports) is silent.
+    populated = SourceAbiSurface(library="libfoo.so", target_id="t")
+    populated.reachable_declarations.append(object())
+    _warn_if_source_surface_empty(SimpleNamespace(source_abi=populated), ("_Z3foov",))
+    _warn_if_source_surface_empty(SimpleNamespace(source_abi=empty), ())
+    assert capsys.readouterr().err == ""
+
+
+def test_exported_symbols_falls_back_to_modeled_names_without_raw_table():
+    """With no raw dynamic table (a source-only snapshot), the modeled mangled
+    names are the only available fallback."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.model import Function, Variable
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    snap.functions = [
+        Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
+    ]
+    snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+    # No .elf/.pe/.macho set → fall back to the modeled names.
+    assert _exported_symbols_from_snapshot(snap) == ("_Z1g", "_Z3foov")
+
+
+def test_exported_symbols_from_snapshot_uses_pe_and_macho_tables():
+    """The same export-table union covers PE and Mach-O binaries, not just ELF."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.macho_metadata import MachoExport, MachoMetadata
+    from abicheck.pe_metadata import PeExport, PeMetadata
+
+    pe_snap = AbiSnapshot(library="foo.dll", version="1")
+    pe_snap.pe = PeMetadata()
+    pe_snap.pe.exports = [PeExport(name="CreateFoo"), PeExport(name="DestroyFoo")]
+    assert _exported_symbols_from_snapshot(pe_snap) == ("CreateFoo", "DestroyFoo")
+
+    macho_snap = AbiSnapshot(library="libfoo.dylib", version="1")
+    macho_snap.macho = MachoMetadata()
+    macho_snap.macho.exports = [MachoExport(name="_foo"), MachoExport(name="_bar")]
+    assert _exported_symbols_from_snapshot(macho_snap) == ("_bar", "_foo")
+
+
 def test_build_info_source_mismatch_records_diagnostic(tmp_path):
     """A4: a compile DB whose sources are absent from the --sources tree records
     a build_info_source_tree_mismatch diagnostic (collection-time, not a kind)."""
@@ -2110,7 +2219,7 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     from abicheck.buildsource.model import BuildSourceManifest
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
     from abicheck.model import Function
 
     # Source-only snapshot: a surface with one public decl, no exports yet.
@@ -2128,6 +2237,9 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     # Binary snapshot exporting _Z3foov.
     bin_snap = AbiSnapshot(library="libfoo.so", version="1")
     bin_snap.elf = ElfMetadata()
+    # A realistic binary exports _Z3foov via its dynamic symbol table (the
+    # authoritative export set), not merely via the DWARF-modeled functions list.
+    bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
     bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
                                    return_type="void", params=[])]
     bin_path = tmp_path / "bin.json"
@@ -2156,7 +2268,7 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
     from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
     from abicheck.model import Function
 
     surf = SourceAbiSurface(library="libfoo.so", target_id="t")
@@ -2174,6 +2286,9 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
 
     bin_snap = AbiSnapshot(library="libfoo.so", version="1")
     bin_snap.elf = ElfMetadata()
+    # A realistic binary exports _Z3foov via its dynamic symbol table (the
+    # authoritative export set), not merely via the DWARF-modeled functions list.
+    bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
     bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
                                    return_type="void", params=[])]
     bin_path = tmp_path / "bin.json"

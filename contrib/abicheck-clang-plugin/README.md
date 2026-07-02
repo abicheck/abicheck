@@ -99,9 +99,13 @@ Pass plugin arguments with the **`-Xclang -plugin-arg-abicheck-facts -Xclang
 <arg>`** cc1 form, not the `-fplugin-arg-abicheck-facts-<arg>` shorthand: the
 shorthand mis-parses the *hyphenated* plugin name (clang splits it at the first
 hyphen and hands `out=…` to a plugin named `abicheck`; verify with `clang++
--###`). `public-roots=` is **mandatory** — it is the plugin's equivalent of the
-wrapper's `ABICHECK_CC_HEADERS`; without it every decl classifies non-public and
-the plugin emits an empty public surface.
+-###`). `public-roots=` is the plugin's equivalent of the wrapper's
+`ABICHECK_CC_HEADERS` — it scopes which resolved header paths count as the public
+surface. It is **strongly recommended** but no longer strictly required: when it
+is omitted the plugin auto-derives roots from the compile's own `-I`/`-iquote`
+include directories (see below), so a forgotten flag yields a populated surface
+instead of a silently empty pack. Pass it explicitly whenever you want to scope
+the surface precisely (e.g. only the installed `include/` tree).
 
 ```bash
 clang++ -std=c++17 -Iinclude \
@@ -117,6 +121,60 @@ abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 
 Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 `version=<v>`. `public-roots=` is repeatable.
+
+### `public-roots` must match how headers *resolve*, not where they are installed
+
+The plugin classifies a declaration as public by the **physical path the
+compiler resolved its header to**, then tests that path against `public-roots`.
+The trap: your public headers may be installed at `include/pvxs/…`, but if an
+earlier `-I` makes `<pvxs/data.h>` resolve to `src/pvxs/data.h`, then
+`public-roots=include` matches **nothing** and the pack comes back empty — even
+though everything "looks" configured. Include order decides the resolved path,
+not the install layout.
+
+Two ways to get it right:
+
+- **Check the resolution** — `clang++ <your -I flags> -H -fsyntax-only x.cpp`
+  prints the actual file each `#include` opened; point `public-roots=` at *that*
+  directory (e.g. `src/pvxs`), not the installed copy.
+- **Trust the diagnostic** — since ADR-038 Flow C the plugin no longer fails
+  silently: if `public-roots` matches zero declarations while header decls were
+  seen outside the roots, it prints
+
+  ```
+  abicheck-facts: public-roots matched 0 declarations for this TU
+  (799 header decl(s) were seen outside the root(s) [.../include],
+   e.g. .../epicsAssert.h). public-roots must be the directory the compiler
+   actually resolves the public headers from (verify with `clang -H`) …
+  ```
+
+  and records the same note in the pack's `diagnostics`. An empty pack is now a
+  loud error, not a 20-minute debug.
+
+### Auto-derived public roots (when `public-roots=` is omitted)
+
+If you pass no `public-roots=` at all, the plugin derives roots from the
+compile's user include search paths — every `-I` (angled) and `-iquote` (quoted)
+directory, resolved to an absolute path; compiler/system entries (`-isystem`,
+the resource dir, the sysroot) are excluded so libstdc++/SDK headers don't flood
+the surface. The plugin then emits a one-time note per pack:
+
+```
+abicheck-facts: no public-roots given; inferred 2 public root(s) from the
+compile's -I/-iquote include dirs [/proj/include, /proj/gen]. Pass
+public-roots=<dir> to scope the public surface precisely.
+```
+
+and records it in each TU's `diagnostics`. Inference is scoped to keep the
+surface honest: only include dirs **at or below the build working directory** are
+used (a third-party `-I/opt/boost/include` is not a public root), and decls
+defined in a **translation-unit source** (`.cpp`/`.cc`/…) are excluded even when
+an inferred `-I.` root covers them — public API lives in headers. It is still a
+convenience, not a replacement for scoping: the inferred surface can be broader
+than your true public API (any header reachable through an in-tree `-I` dir), so
+for a precise baseline still pass an explicit `public-roots=`. (Explicit roots are
+taken verbatim — no source-file/locality filtering — to stay byte-identical to the
+`abicheck-cc` wrapper for the C.6 conformance gate.)
 
 ## Validation: differential conformance (ADR-038 C.6)
 

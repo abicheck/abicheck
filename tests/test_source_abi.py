@@ -17,6 +17,8 @@ source-replay diff findings (D4, D5, D6, D10)."""
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.buildsource import (
     SOURCE_ABI_VERSION,
     BuildSourcePack,
@@ -34,6 +36,24 @@ from abicheck.checker_policy import (
     RISK_KINDS,
     ChangeKind,
 )
+
+
+def _no_demangler() -> bool:
+    """True when no working C++ demangler (cxxfilt / c++filt) is available — some
+    CI runners (macOS, Windows) have neither. Demangler-dependent matching
+    degrades gracefully in that case, so the tests that assert the *demangler-
+    present* behaviour are skipped rather than failed."""
+    from abicheck.demangle import demangle
+
+    return demangle("_ZN6WidgetC1Ev") is None
+
+
+#: Skip marker for tests that assert demangler-derived matching (RTTI/vtable
+#: attribution, the ctor/dtor demangle backstop, the demangled-identity rematch).
+needs_demangler = pytest.mark.skipif(
+    _no_demangler(), reason="no C++ demangler (cxxfilt/c++filt) available"
+)
+
 
 # -- helpers -----------------------------------------------------------------
 
@@ -271,6 +291,614 @@ def test_linker_matches_unmangled_c_exports() -> None:
     assert surface.mappings["source_decl_to_binary_symbol"]["foo"] == "foo"
     assert surface.unmatched["symbols_without_decl"] == []
     assert surface.unmatched["decls_without_symbol"] == []
+
+
+def test_linker_matches_ctor_dtor_abi_clone_variants() -> None:
+    # One source ctor/dtor Decl mangles to a single name (C1/D1), but the compiler
+    # exports several ABI clones (C1 complete + C2 base; D0 deleting + D1 + D2).
+    # An exact-string match would orphan the C2/D0/D2 clones as
+    # "exported but no source decl"; the linker folds ctor/dtor tags so the one
+    # declaration claims every clone (ADR-030 D5 symbol linking).
+    tu = SourceAbiTu(
+        functions=[
+            _entity("Widget::Widget", "function", mangled="_ZN6WidgetC1Ev"),
+            _entity("Widget::~Widget", "function", mangled="_ZN6WidgetD1Ev"),
+        ],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=[
+            "_ZN6WidgetC1Ev",  # complete-object ctor (matches decl exactly)
+            "_ZN6WidgetC2Ev",  # base-object ctor clone (only via folding)
+            "_ZN6WidgetD0Ev",  # deleting dtor clone
+            "_ZN6WidgetD1Ev",  # complete-object dtor (matches decl exactly)
+            "_ZN6WidgetD2Ev",  # base-object dtor clone
+        ],
+    )
+    # Every exported clone is attributed to a declaration — none is orphaned.
+    assert surface.unmatched["symbols_without_decl"] == []
+    # Both declarations resolve to a concrete exported symbol (not "").
+    mapping = surface.mappings["source_decl_to_binary_symbol"]
+    assert mapping["_ZN6WidgetC1Ev"]
+    assert mapping["_ZN6WidgetD1Ev"]
+    assert surface.coverage["matched_symbols"] == 5
+
+
+def test_linker_matches_dwarf_unified_ctor_tag_to_real_clones() -> None:
+    # GCC's DWARF linkage name uses the non-standard *unified* C4/D4 tag for a
+    # ctor/dtor, which never appears in the ELF export table (which has C1/C2 …).
+    # The fold canonicalizes C4/D4 too, so a DWARF-sourced decl still matches the
+    # real exported clones instead of collapsing to zero matches.
+    tu = SourceAbiTu(
+        functions=[_entity("Widget::Widget", "function", mangled="_ZN6WidgetC4Ev")],
+    )
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev"]
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["matched_symbols"] == 2
+    # The single decl maps to one of the concrete clones (a stable pick).
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN6WidgetC4Ev"] in {
+        "_ZN6WidgetC1Ev",
+        "_ZN6WidgetC2Ev",
+    }
+
+
+def test_ctor_dtor_fold_leaves_non_ctor_symbols_exact() -> None:
+    # The fold must be a no-op for ordinary symbols: a regular function whose name
+    # merely contains letters+digits must not be conflated with a ctor/dtor clone.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZN3foo3barEv") == "_ZN3foo3barEv"
+    # C1/C2/C3/C4 fold together; D0/D1/D2/D4 fold together; the two stay distinct.
+    ctors = {_ctor_dtor_canonical(f"_ZN6WidgetC{n}Ev") for n in (1, 2, 3, 4)}
+    dtors = {_ctor_dtor_canonical(f"_ZN6WidgetD{n}Ev") for n in (0, 1, 2, 4)}
+    assert len(ctors) == 1 and len(dtors) == 1
+    assert ctors != dtors
+    # Non-nested / vtable / plain names have no ctor/dtor and stay untouched.
+    assert _ctor_dtor_canonical("_Z3barv") == "_Z3barv"
+    assert _ctor_dtor_canonical("_ZTVN3fooE") == "_ZTVN3fooE"
+    # A non-exported, non-ctor decl stays unmatched (no accidental fold match).
+    tu = SourceAbiTu(functions=[_entity("ns::f", "function", mangled="_ZN2ns1fEi")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN2ns1gEi"])
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN2ns1fEi"] == ""
+
+
+def test_ctor_dtor_fold_does_not_touch_length_encoded_identifiers() -> None:
+    # Codex review: a `C1`/`D0` that is merely the TAIL of a length-prefixed
+    # ordinary identifier must NOT fold — else two unrelated functions collide and
+    # one is wrongly dropped from symbols_without_decl. `N::AC1()`/`N::AC2()`
+    # mangle as `_ZN1N3AC1Ev`/`_ZN1N3AC2Ev`; the `C1`/`C2` are identifier chars,
+    # not a ctor special name (which is never length-prefixed).
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZN1N3AC1Ev") == "_ZN1N3AC1Ev"
+    assert _ctor_dtor_canonical("_ZN1N3AC1Ev") != _ctor_dtor_canonical("_ZN1N3AC2Ev")
+    # Through the linker: AC1 is a real source decl; AC2 is exported without one.
+    # AC2 must remain an orphan (symbols_without_decl), not be claimed by AC1.
+    tu = SourceAbiTu(
+        functions=[_entity("N::AC1", "function", mangled="_ZN1N3AC1Ev")]
+    )
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN1N3AC1Ev", "_ZN1N3AC2Ev"]
+    )
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN1N3AC1Ev"] == (
+        "_ZN1N3AC1Ev"
+    )
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN1N3AC2Ev"]
+
+
+def test_ctor_dtor_fold_handles_digit_suffixed_class_names() -> None:
+    # CodeRabbit review: a class whose <source-name> ends in a digit (Vec2, Mat4,
+    # Base64 — common in graphics/math code) must still fold. The structural parse
+    # consumes the length-prefixed identifier wholesale, so the trailing digit is
+    # part of the class name, and the following C1/D0 is correctly seen as the
+    # ctor/dtor special name. (A naive letter-only lookbehind would miss these.)
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    for cls in ("_ZN4Vec2", "_ZN4Mat4", "_ZN6Base64"):
+        assert _ctor_dtor_canonical(cls + "C1Ev") == _ctor_dtor_canonical(cls + "C2Ev")
+        assert _ctor_dtor_canonical(cls + "D0Ev") == _ctor_dtor_canonical(cls + "D1Ev")
+        # and the fold actually happened (not a no-op)
+        assert _ctor_dtor_canonical(cls + "C1Ev") != cls + "C1Ev"
+
+
+def test_ctor_dtor_fold_parses_template_and_substitution_prefixes() -> None:
+    # The nested-name parser must skip <substitution> (St = std::) and
+    # <template-args> (I…E) before reaching a genuine ctor/dtor tag, e.g.
+    # std::vector<int>::vector() → _ZNSt6vectorIiEC1Ev. Exercises the S and I
+    # branches of the parser.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZNSt6vectorIiEC1Ev") == _ctor_dtor_canonical(
+        "_ZNSt6vectorIiEC2Ev"
+    )
+    assert _ctor_dtor_canonical("_ZNSt6vectorIiEC1Ev") != "_ZNSt6vectorIiEC1Ev"
+    # A backref substitution (S_) in the prefix, then the ctor.
+    assert _ctor_dtor_canonical("_ZN1NS_3FooC1Ev") != "_ZN1NS_3FooC1Ev"
+
+
+def test_ctor_dtor_fold_handles_nested_template_argument_names() -> None:
+    # Codex review: a template argument that is itself a nested name (e.g. the
+    # NSt7__cxx11…E of std::string) must not close the outer I…E early — the
+    # balanced skip consumes length-prefixed identifiers wholesale and tracks
+    # I/N nesting, so the ctor tag *after* the template-args is still folded.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    # std::vector<std::string>::vector()  (C1 complete vs C2 base)
+    vec_str = (
+        "_ZNSt6vectorINSt7__cxx1112basic_string"
+        "IcSt11char_traitsIcESaIcEEEE{tag}Ev"
+    )
+    assert _ctor_dtor_canonical(vec_str.format(tag="C1")) == _ctor_dtor_canonical(
+        vec_str.format(tag="C2")
+    )
+    assert _ctor_dtor_canonical(vec_str.format(tag="C1")) != vec_str.format(tag="C1")
+    # ns::A<std::map<std::string, Foo>>::A() — two levels of nested template args.
+    a_map = (
+        "_ZN2ns1AISt3mapINSt7__cxx1112basic_string"
+        "IcSt11char_traitsIcESaIcEEE3FooEE{tag}Ev"
+    )
+    assert _ctor_dtor_canonical(a_map.format(tag="C1")) == _ctor_dtor_canonical(
+        a_map.format(tag="C2")
+    )
+
+
+def test_ctor_dtor_fold_handles_non_type_template_parameters() -> None:
+    # Codex review: a non-type template parameter mangles as an L<type><value>E
+    # literal whose VALUE is raw digits — `Fixed<3>::Fixed()` → `_ZN5FixedILi3EE`
+    # `C1Ev`. Those digits must not be read as a source-name length (which would
+    # swallow the trailing ctor tag). The literal is consumed to its own E.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    for sym in (
+        "_ZN5FixedILi3EE{tag}Ev",  # Fixed<3>
+        "_ZN3ArrIiLm5EE{tag}Ev",  # Arr<int, 5ul>
+        "_ZN1XILin1EE{tag}Ev",  # X<-1>
+    ):
+        assert _ctor_dtor_canonical(sym.format(tag="C1")) == _ctor_dtor_canonical(
+            sym.format(tag="C2")
+        )
+        assert _ctor_dtor_canonical(sym.format(tag="C1")) != sym.format(tag="C1")
+
+
+def test_ctor_dtor_fold_handles_macho_leading_underscore() -> None:
+    # Codex review: Mach-O/Darwin prefixes every Itanium symbol with an extra
+    # leading underscore (`__ZN1AC1Ev`). The fold must NORMALIZE it away for the
+    # canonical key so it unifies with the export table's `_ZN…` spelling.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("__ZN1AC2Ev")
+    # The prefix is NORMALIZED away (not restored): the export table strips one
+    # underscore (`_ZN…`) while the plugin emits `__ZN…`, so the canonical key must
+    # unify both spellings or the clones never match on macOS Flow-C (Codex).
+    assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("_ZN1AC1Ev")
+    assert not _ctor_dtor_canonical("__ZN1AC1Ev").startswith("__ZN")
+    # A Mach-O non-ctor symbol is returned byte-for-byte unchanged.
+    assert _ctor_dtor_canonical("__ZN1N3barEv") == "__ZN1N3barEv"
+
+
+def test_linker_matches_macho_decl_against_stripped_exports() -> None:
+    # End-to-end macOS Flow-C: the plugin decl keeps the raw `__ZN…` mangling but
+    # the export table stores `_ZN…` (one underscore stripped). The ctor clones
+    # must still fold and match across the two spellings (Codex review).
+    tu = SourceAbiTu(functions=[_entity("A::A", "function", mangled="__ZN1AC1Ev")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1AC1Ev", "_ZN1AC2Ev"])
+    assert surface.unmatched["symbols_without_decl"] == []
+
+
+def test_linker_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
+    # Codex review: an ORDINARY (non ctor/dtor) C++ method takes the no-fold path,
+    # so on macOS Flow-C the plugin's `__ZN1A3fooEv` must still exact-match the
+    # export table's `_ZN1A3fooEv` (one underscore stripped). Before the fix these
+    # landed in decls_without_symbol / symbols_without_decl because normalization
+    # was applied only to ctor/dtor canonical keys.
+    tu = SourceAbiTu(functions=[_entity("A::foo", "function", mangled="__ZN1A3fooEv")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1A3fooEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+    # The mapping resolves to the REAL exported spelling (the `_Z…` form actually in
+    # the binary), not the plugin's raw `__Z…` key.
+    assert (
+        surface.mappings["source_decl_to_binary_symbol"]["__ZN1A3fooEv"]
+        == "_ZN1A3fooEv"
+    )
+
+
+def test_relink_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
+    # Same normalization must apply on the merge/relink path (a plugin/wrapper pack
+    # linked with no binary, then relinked against the Mach-O export table).
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(functions=[_entity("A::foo", "function", mangled="__ZN1A3fooEv")])
+    surface = link_source_abi([tu])  # source-only, no exports yet
+    relink_surface_exports(surface, ["_ZN1A3fooEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+    assert (
+        surface.mappings["source_decl_to_binary_symbol"]["__ZN1A3fooEv"]
+        == "_ZN1A3fooEv"
+    )
+
+
+def test_norm_itanium_strips_only_macho_double_underscore() -> None:
+    from abicheck.buildsource.source_link import _norm_itanium
+
+    # `__Z…` loses exactly one leading underscore; every other spelling is byte-
+    # for-byte unchanged (a C symbol, an already-normalized `_Z…`, a bare name).
+    assert _norm_itanium("__ZN1A3fooEv") == "_ZN1A3fooEv"
+    assert _norm_itanium("_ZN1A3fooEv") == "_ZN1A3fooEv"
+    assert _norm_itanium("foo") == "foo"
+    assert _norm_itanium("") == ""
+
+
+def test_build_exact_index_prefers_canonical_spelling_on_collision() -> None:
+    from abicheck.buildsource.source_link import _build_exact_index
+
+    # If a binary somehow lists BOTH spellings of one Itanium name (practically
+    # impossible), the canonical `_Z…` form wins the normalized key so the returned
+    # real spelling is deterministic and genuinely in the export set.
+    idx = _build_exact_index({"__ZN1A3fooEv", "_ZN1A3fooEv"})
+    assert idx["_ZN1A3fooEv"] == "_ZN1A3fooEv"
+    # A lone Mach-O spelling maps its normalized key back to the real `__Z…` name.
+    idx2 = _build_exact_index({"__ZN1A3fooEv"})
+    assert idx2["_ZN1A3fooEv"] == "__ZN1A3fooEv"
+
+
+@needs_demangler
+def test_demangled_rematch_normalizes_macho_decl() -> None:
+    # The second-tier rematch must normalize a Mach-O `__Z…` decl before demangling
+    # (the shared demangler only accepts `_Z…`), so a drifted macOS decl still
+    # rescues against the `_Z…` export.
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    decl = _entity("N::f", "function", mangled="__ZN1N1fEN1N1TE")  # Mach-O spelling
+    mapping = {decl.identity(): ""}
+    matched: set[str] = set()
+    exported = {"_ZN1N1fENS_1TE"}  # substitution form, same demangled identity
+    new = _demangled_rematch([decl], mapping, matched, exported)
+    assert new == {decl.identity(): "_ZN1N1fENS_1TE"}
+    assert mapping[decl.identity()] == "_ZN1N1fENS_1TE"
+
+
+def test_ctor_dtor_fold_handles_function_type_template_args() -> None:
+    # Codex review: a function-type template argument (`A<void(int)>` → `FviE`,
+    # `std::function<void()>` → `FvvE`) is itself E-terminated; the balanced skip
+    # must treat `F` as an opener so its `E` doesn't close the template-arg list
+    # early and hide the trailing ctor tag.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    # A<void(int)>::A()
+    assert _ctor_dtor_canonical("_ZN1AIFviEEC1Ev") == _ctor_dtor_canonical(
+        "_ZN1AIFviEEC2Ev"
+    )
+    # std::function<void()>::function(function const&)
+    assert _ctor_dtor_canonical("_ZNSt8functionIFvvEEC1ERKS1_") == _ctor_dtor_canonical(
+        "_ZNSt8functionIFvvEEC2ERKS1_"
+    )
+
+
+@needs_demangler
+def test_ctor_dtor_demangle_fallback() -> None:
+    # The demangler backstop collapses ctor/dtor clones for any Itanium
+    # production the structural parser doesn't model (a robustness net). It keys a
+    # ctor/dtor to a `ctordtor:<qualified>` form and leaves everything else alone.
+    from abicheck.buildsource.source_link import _ctor_dtor_demangle_fallback as fb
+
+    # Ctor clones and dtor clones each collapse to one key.
+    assert fb("_ZN6WidgetC1Ev") == fb("_ZN6WidgetC2Ev")
+    assert fb("_ZN6WidgetD0Ev") == fb("_ZN6WidgetD1Ev")
+    assert fb("_ZN6WidgetC1Ev").startswith("ctordtor:")
+    # An ordinary function whose name merely ends in C1/C2 is NOT a ctor — the
+    # demangled form (`N::AC1()`) is not `Class::Class`, so it stays unchanged.
+    assert fb("_ZN1N3AC1Ev") == "_ZN1N3AC1Ev"
+    # A plain free function is untouched.
+    assert fb("_Z3foov") == "_Z3foov"
+
+
+def test_ctor_dtor_fold_parser_edge_cases() -> None:
+    # Exercise the remaining parser branches for coverage + robustness:
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    # CV-qualified member function (K = const): _ZNK… — the qualifier is skipped.
+    assert _ctor_dtor_canonical("_ZNK3foo3barEv") == "_ZNK3foo3barEv"  # not a ctor
+    # A nested-name that simply ends (no ctor/dtor) hits the closing-E break.
+    assert _ctor_dtor_canonical("_ZN3foo3barEv") == "_ZN3foo3barEv"
+    # A non-ctor `C`/`D` at a boundary (a member named `Cat`) must NOT fold: the
+    # tag test requires an exact C1-C4/D0-D4 special name.
+    assert _ctor_dtor_canonical("_ZN3foo3CatEv") == "_ZN3foo3CatEv"
+    # An empty / non-mangled string is returned untouched (early out).
+    assert _ctor_dtor_canonical("") == ""
+    assert _ctor_dtor_canonical("plain_c_symbol") == "plain_c_symbol"
+    # A *numbered* backref substitution (S0_) — the S<id>_ branch — still reaches
+    # and folds the trailing ctor tag.
+    assert _ctor_dtor_canonical("_ZN1NS0_3FooC1Ev") == _ctor_dtor_canonical(
+        "_ZN1NS0_3FooC2Ev"
+    )
+
+
+@needs_demangler
+def test_linker_attributes_rtti_vtable_thunk_to_public_owner() -> None:
+    # vtable/typeinfo/typeinfo-name/thunk exports belong to a type/method, not a
+    # free decl, so exact matching orphaned them. They are now attributed to their
+    # public owner and drop out of symbols_without_decl (ADR-030 D5).
+    tu = SourceAbiTu(
+        types=[_entity("Widget", "record", type_hash="t1")],
+        functions=[_entity("Widget::foo", "function", mangled="_ZN6Widget3fooEv")],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=[
+            "_ZN6Widget3fooEv",  # the method itself (decl match)
+            "_ZTV6Widget",  # vtable for Widget
+            "_ZTI6Widget",  # typeinfo for Widget
+            "_ZTS6Widget",  # typeinfo name for Widget
+            "_ZThn8_N6Widget3fooEv",  # non-virtual thunk to Widget::foo()
+            "_ZTVN2ns7UnknownE",  # vtable for a type NOT on the surface
+        ],
+    )
+    # The unknown type's vtable stays unmatched; everything for Widget attributes.
+    assert surface.unmatched["symbols_without_decl"] == ["_ZTVN2ns7UnknownE"]
+    owners = surface.mappings["synthesized_symbol_to_owner"]
+    assert owners["_ZTV6Widget"] == {"kind": "vtable", "owner": "Widget"}
+    assert owners["_ZThn8_N6Widget3fooEv"] == {"kind": "thunk", "owner": "Widget::foo"}
+    # Honest coverage breakdown: 1 decl match + 4 synthesized + 1 remainder.
+    assert surface.coverage["matched_symbols"] == 1
+    assert surface.coverage["synthesized_symbols_matched"] == 4
+    assert surface.coverage["unmatched_symbols"] == 1
+    # The attribution mapping survives serialization.
+    restored = SourceAbiSurface.from_dict(surface.to_dict())
+    assert restored.mappings["synthesized_symbol_to_owner"]["_ZTI6Widget"] == {
+        "kind": "typeinfo",
+        "owner": "Widget",
+    }
+
+
+def test_strip_call_signature_preserves_operator_parens() -> None:
+    from abicheck.buildsource.source_link import _strip_call_signature
+
+    # Ordinary functions: the trailing parameter list is dropped.
+    assert _strip_call_signature("ns::Widget::foo()") == "ns::Widget::foo"
+    assert _strip_call_signature("ns::f(int, char)") == "ns::f"
+    # Call operator: the `()` that is part of the name is preserved; only the
+    # trailing (parameter-list) group is removed.
+    assert _strip_call_signature("D::operator()()") == "D::operator()"
+    assert _strip_call_signature("D::operator()(int)") == "D::operator()"
+    # A nested paren inside the parameter list balances right-to-left.
+    assert _strip_call_signature("f(void (*)(int))") == "f"
+    # No parens at all → returned as-is.
+    assert _strip_call_signature("ns::x") == "ns::x"
+
+
+@needs_demangler
+def test_linker_attributes_call_operator_thunk_to_owner() -> None:
+    # Codex review: a thunk to a call operator demangles to `D::operator()()`;
+    # splitting at the first `(` would yield `D::operator`, orphaning the thunk.
+    # The owner `D::operator()` must be matched and the thunk attributed.
+    tu = SourceAbiTu(
+        functions=[_entity("D::operator()", "function", mangled="_ZN1DclEv")],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=["_ZN1DclEv", "_ZThn8_N1DclEv"],  # the op + its thunk
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    owners = surface.mappings["synthesized_symbol_to_owner"]
+    assert owners["_ZThn8_N1DclEv"] == {"kind": "thunk", "owner": "D::operator()"}
+
+
+@needs_demangler
+def test_thunk_attribution_requires_overload_identity() -> None:
+    # Codex review: a thunk carries the full mangling of the overload it forwards
+    # to. `_ZThn8_N1D3fooEd` is a thunk for `D::foo(double)`; with only the
+    # `D::foo(int)` overload public, it must NOT be attributed to `D::foo` (bare
+    # name) — that would drop a real unmatched export and inflate coverage.
+    tu = SourceAbiTu(functions=[_entity("D::foo", "function", mangled="_ZN1D3fooEi")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN1D3fooEi", "_ZThn8_N1D3fooEd"]
+    )
+    # The (double)-overload thunk stays orphaned; nothing attributed.
+    assert surface.unmatched["symbols_without_decl"] == ["_ZThn8_N1D3fooEd"]
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+
+    # When the (double) overload IS public, its thunk attributes to it.
+    tu2 = SourceAbiTu(
+        functions=[
+            _entity("D::foo", "function", mangled="_ZN1D3fooEi"),
+            _entity("D::foo", "function", mangled="_ZN1D3fooEd"),
+        ]
+    )
+    surface2 = link_source_abi(
+        [tu2],
+        exported_symbols=["_ZN1D3fooEi", "_ZN1D3fooEd", "_ZThn8_N1D3fooEd"],
+    )
+    assert surface2.unmatched["symbols_without_decl"] == []
+    assert surface2.mappings["synthesized_symbol_to_owner"]["_ZThn8_N1D3fooEd"] == {
+        "kind": "thunk",
+        "owner": "D::foo",
+    }
+
+
+def test_thunk_target_mangled_parses_offset_forms() -> None:
+    from abicheck.buildsource.source_link import _thunk_target_mangled
+
+    # non-virtual (h), virtual (v), Mach-O prefix, and a non-thunk.
+    assert _thunk_target_mangled("_ZThn8_N1D3fooEd") == "_ZN1D3fooEd"
+    assert _thunk_target_mangled("_ZTv0_n24_N6Widget3fooEv") == "_ZN6Widget3fooEv"
+    assert _thunk_target_mangled("__ZThn8_N1DclEv") == "_ZN1DclEv"
+    assert _thunk_target_mangled("_ZN1D3fooEv") is None  # not a thunk
+    assert _thunk_target_mangled("_ZTV6Widget") is None  # vtable, not a thunk
+
+
+@pytest.mark.parametrize(
+    "sym,expected",
+    [
+        # non-virtual, positive and negative (n) this-adjustment.
+        ("_ZTh4_N1D3fooEv", "_ZN1D3fooEv"),
+        ("_ZThn8_N1D3fooEv", "_ZN1D3fooEv"),
+        # virtual thunk: two numbers (v-offset _ vcall-offset _).
+        ("_ZTv0_n24_N1D3fooEv", "_ZN1D3fooEv"),
+        # covariant: TWO call-offsets (h/v) before the encoding.
+        ("_ZTch0_h4_N1D5cloneEv", "_ZN1D5cloneEv"),
+        ("_ZTcv0_n24_h8_N1D5cloneEv", "_ZN1D5cloneEv"),
+        # --- malformed / non-thunk → None (error branches) ---
+        ("", None),
+        ("foo", None),
+        ("_ZT", None),  # too short, no kind char
+        ("_ZTz0_N1DfooEv", None),  # kind not h/v/c
+        ("_ZTh", None),  # kind but no offset digits (read_number → None)
+        ("_ZThX_N1DfooEv", None),  # non-digit offset
+        ("_ZThn8N1DfooEv", None),  # missing '_' after the number
+        ("_ZTv0_N1DfooEv", None),  # virtual missing the second offset
+        ("_ZTch0_N1DfooEv", None),  # covariant missing the second call-offset
+        ("_ZThn8_", None),  # valid offset but empty encoding
+    ],
+)
+def test_thunk_target_mangled_branches(sym: str, expected: str | None) -> None:
+    from abicheck.buildsource.source_link import _thunk_target_mangled
+
+    assert _thunk_target_mangled(sym) == expected
+
+
+@needs_demangler
+def test_synthesized_attribution_skips_unrecognized_symbols() -> None:
+    # A synthesized-looking symbol that fails to demangle (`_ZTTN6Widget`) or
+    # demangles to an unrecognized form (`_ZTW1x` = "TLS wrapper function for x")
+    # is left orphaned, never attributed — exercising the best-effort skip branches.
+    tu = SourceAbiTu(types=[_entity("Widget", "record", type_hash="t1")])
+    surface = link_source_abi([tu], exported_symbols=["_ZTTN6Widget", "_ZTW1x"])
+    assert sorted(surface.unmatched["symbols_without_decl"]) == [
+        "_ZTTN6Widget",
+        "_ZTW1x",
+    ]
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+
+
+@needs_demangler
+def test_guard_variable_attributed_to_enclosing_function() -> None:
+    # A guard variable for a function-local static (`_ZGVZ3foovE3bar` demangles to
+    # "guard variable for foo()::bar") is attributed to its enclosing public
+    # function `foo` — the guard-owner (bare-name) path, distinct from the
+    # overload-specific thunk path.
+    tu = SourceAbiTu(functions=[_entity("foo", "function", mangled="_Z3foov")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_Z3foov", "_ZGVZ3foovE3bar"]
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.mappings["synthesized_symbol_to_owner"]["_ZGVZ3foovE3bar"] == {
+        "kind": "guard",
+        "owner": "foo",
+    }
+
+
+@needs_demangler
+def test_synthesized_attribution_requires_exact_specialization() -> None:
+    # Codex review: with only `ns::A<int>` on the surface, the vtable for a
+    # DIFFERENT specialization `ns::A<char>` (which base-splits to the same
+    # `ns::A`) must NOT be attributed — that would hide an exported, unchecked
+    # specialization. Base matching is allowed only when the *unspecialized*
+    # template is itself public.
+    tu = SourceAbiTu(types=[_entity("ns::A<int>", "record", type_hash="t1")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZTVN2ns1AIiEE", "_ZTVN2ns1AIcEE"]
+    )
+    # A<int> attributes; A<char> stays an orphan (no public owner).
+    assert surface.unmatched["symbols_without_decl"] == ["_ZTVN2ns1AIcEE"]
+
+    # When the bare (unspecialized) template `ns::A` is public, a base match is OK.
+    tu2 = SourceAbiTu(types=[_entity("ns::A", "record", type_hash="t2")])
+    surface2 = link_source_abi([tu2], exported_symbols=["_ZTVN2ns1AIiEE"])
+    assert surface2.unmatched["symbols_without_decl"] == []
+
+
+@needs_demangler
+def test_relink_also_attributes_synthesized_exports() -> None:
+    # The merge/relink path (used by `merge` on a plugin/wrapper pack) must apply
+    # the same RTTI/vtable attribution as link_source_abi.
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(types=[_entity("Widget", "record", type_hash="t1")])
+    surface = link_source_abi([tu])  # no exports yet (source-only)
+    relink_surface_exports(surface, ["_ZTV6Widget", "_ZTI6Widget"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["synthesized_symbols_matched"] == 2
+    assert surface.coverage["unmatched_symbols"] == 0
+
+
+@needs_demangler
+def test_relink_clears_stale_synthesized_owners() -> None:
+    # Codex review: a relink runs against a possibly different export set. A surface
+    # that recorded synthesized owners on a previous link but attributes NONE under
+    # the new exports must have the stale mapping cleared — otherwise the serialized
+    # L4 surface keeps claiming ownership of vtables/typeinfo the new binary never
+    # exports, contradicting the recomputed coverage / symbols_without_decl.
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(
+        types=[_entity("Widget", "record", type_hash="t1")],
+        functions=[_entity("Widget::foo", "function", mangled="_ZN6Widget3fooEv")],
+    )
+    surface = link_source_abi([tu])
+    # First relink: Widget's vtable/typeinfo attribute → mapping is populated.
+    relink_surface_exports(surface, ["_ZTV6Widget", "_ZTI6Widget"])
+    assert surface.mappings["synthesized_symbol_to_owner"]  # non-empty
+
+    # Second relink against an export set with NO synthesized matches: the previous
+    # owners must be cleared, not left as stale evidence.
+    relink_surface_exports(surface, ["_ZN6Widget3fooEv"])
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+    assert surface.coverage["synthesized_symbols_matched"] == 0
+    # And the surface round-trips with the cleared (empty) mapping.
+    restored = SourceAbiSurface.from_dict(surface.to_dict())
+    assert restored.mappings["synthesized_symbol_to_owner"] == {}
+
+
+@needs_demangler
+def test_linker_demangled_identity_rematch() -> None:
+    # A source decl whose mangled name differs *textually* from the export but
+    # demangles identically (substitution-form / mangler drift) is rescued by the
+    # second-tier demangled-identity match. `_ZN1N1fEN1N1TE` (expanded) and
+    # `_ZN1N1fENS_1TE` (substitution form) both demangle to `N::f(N::T)`.
+    decl = _entity("N::f", "function", mangled="_ZN1N1fEN1N1TE")
+    tu = SourceAbiTu(functions=[decl])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1N1fENS_1TE"])
+    # Exact match misses (different strings); the demangled tier rescues it.
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN1N1fEN1N1TE"] == (
+        "_ZN1N1fENS_1TE"
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+
+
+@needs_demangler
+def test_demangled_rematch_skips_ambiguous_forms() -> None:
+    # The rematch must never *guess* when a demangled form maps to more than one
+    # export. `_ZN1N1fENS_1TE` (substitution form) and `_ZN1N1fEN1N1TE` (expanded)
+    # both demangle to `N::f(N::T)`; an unmatched decl demangling to that same
+    # form has two candidate exports, so neither may be claimed (CodeRabbit).
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    decl = _entity("N::f", "function", mangled="_ZN1N1fENS_1TE")
+    mapping = {decl.identity(): ""}  # unmatched
+    matched: set[str] = set()
+    exported = {"_ZN1N1fENS_1TE", "_ZN1N1fEN1N1TE"}  # both → "N::f(N::T)"
+    new = _demangled_rematch([decl], mapping, matched, exported)
+    # Ambiguous form → no claim; the decl stays unmatched and nothing is consumed.
+    assert new == {}
+    assert mapping[decl.identity()] == ""
+    assert matched == set()
+
+
+def test_demangled_rematch_is_noop_when_already_matched() -> None:
+    # Distinct overloads already exact-matched: the rematch has nothing to do.
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    fi = _entity("f", "function", mangled="_Z1fi")  # f(int)
+    fd = _entity("f", "function", mangled="_Z1fd")  # f(double)
+    mapping = {"_Z1fi": "_Z1fi", "_Z1fd": "_Z1fd"}
+    matched = {"_Z1fi", "_Z1fd"}
+    new = _demangled_rematch([fi, fd], mapping, matched, {"_Z1fi", "_Z1fd"})
+    assert new == {}
 
 
 def test_linker_excludes_non_public_entities() -> None:

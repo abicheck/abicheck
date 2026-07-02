@@ -43,6 +43,7 @@ nav:
     - Everyday Use:
       - CLI Usage: user-guide/cli-usage.md
       - Source-Scan Levels: user-guide/scan-levels.md
+      - Producing Source Facts: user-guide/producing-source-facts.md
       - Output Formats: user-guide/output-formats.md
       - Baseline Management: user-guide/baseline-management.md
     - CI & Gating:

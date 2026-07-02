@@ -131,3 +131,9 @@ jobs:
           python contrib/abicheck-clang-plugin/tests/scan_flow.py \
             --plugin build/plugin/libabicheck-facts.so \
             --clangxx clang++
+
+      - name: Public-roots misconfiguration diagnostic (Caveat A)
+        run: |
+          python contrib/abicheck-clang-plugin/tests/test_public_roots_diagnostic.py \
+            --plugin build/plugin/libabicheck-facts.so \
+            --clangxx clang++

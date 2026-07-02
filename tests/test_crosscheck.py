@@ -315,6 +315,148 @@ def test_public_not_exported_flags_missing_symbol():
     assert hits[0].confidence == Confidence.HIGH
 
 
+def test_public_not_exported_reconciles_l4_variant_export():
+    # Two-way reconciliation: a public ctor decl mangled `_ZN6WidgetC1Ev` whose
+    # binary lists only the base-object clone `_ZN6WidgetC2Ev` is NOT missing — the
+    # L4 source-linker already tied the C1 decl to the exported C2 clone. Without
+    # the reconciliation set it would false-positive; with the L4 mapping attached
+    # it must stay silent. A genuinely-absent decl in the same snapshot still fires.
+    snap = _snap(elf=_elf("_ZN6WidgetC2Ev"))
+    snap.functions = [
+        Function(
+            name="Widget::Widget",
+            mangled="_ZN6WidgetC1Ev",  # complete-object ctor; binary lists only C2
+            return_type="",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="gone",
+            mangled="_Z4gonev",  # truly not exported, not reconciled
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "_ZN6WidgetC1Ev": "_ZN6WidgetC2Ev",  # linker reconciled the clone
+        "_Z4gonev": "",  # linker could not match it
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    # Only the genuinely-missing symbol is flagged; the reconciled ctor is exempt.
+    assert hits == ["_Z4gonev"]
+
+
+def test_public_not_exported_reconciles_l4_variant_variable():
+    # Parity with the function case (CodeRabbit): the same L4 reconciliation
+    # suppression is applied to snapshot.variables. A public extern variable the L4
+    # linker tied to a currently-exported symbol under a spelling drift (here an
+    # ABI-tag) is not flagged; a genuinely-absent one still is.
+    snap = _snap(elf=_elf("_ZN2ns3fooB5cxx11E"))
+    snap.variables = [
+        Variable(
+            name="ns::foo",
+            mangled="_ZN2ns3fooE",  # drifts from the exported ABI-tag spelling
+            type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Variable(
+            name="ns::gone",
+            mangled="_ZN2ns4goneE",  # truly not exported, not reconciled
+            type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "_ZN2ns3fooE": "_ZN2ns3fooB5cxx11E",  # reconciled to the exported symbol
+        "_ZN2ns4goneE": "",  # linker could not match it
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    assert hits == ["_ZN2ns4goneE"]
+
+
+def test_public_not_exported_reconciles_macho_underscore_variant():
+    # Reconciliation keys are Mach-O-normalized: a plugin-recorded `__ZN…` decl key
+    # must still exempt the L2 `_ZN…` mangled decl (Codex Mach-O normalization).
+    snap = _snap(elf=_elf("_ZN1A3fooEv"))
+    snap.functions = [
+        Function(
+            name="A::foo",
+            mangled="_ZN1A3fooEv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    # The L4 linker recorded the raw Mach-O key spelling.
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "__ZN1A3fooEv": "_ZN1A3fooEv",
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    # (This symbol IS exported here, so it would not flag anyway; the point is the
+    # normalized key builds without error and is present in the reconciled set.)
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    assert "_ZN1A3fooEv" in _l4_reconciled_symbols(snap, {"_ZN1A3fooEv"})
+
+
+def test_public_not_exported_reconciliation_ignores_stale_mapping():
+    # A merge pack whose exported_symbols were pre-set is NOT relinked, so its L4
+    # mapping can reference an OLDER binary. A decl mapped to a symbol the CURRENT
+    # snapshot no longer exports must still be flagged — the reconciliation only
+    # trusts a mapping whose target is in the current export table (Codex review).
+    snap = _snap(elf=_elf("_Z4livev"))  # current binary exports only `live`
+    snap.functions = [
+        Function(
+            name="stale",
+            mangled="_Z5stalev",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    # L4 mapping from an older binary that still "exported" `stale`.
+    surface.mappings["source_decl_to_binary_symbol"] = {"_Z5stalev": "_Z5stalev"}
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    # The stale mapping must NOT suppress the finding — `stale` is genuinely gone.
+    assert hits == ["_Z5stalev"]
+    # And the direct helper drops the stale key (its target is not in exports).
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    assert _l4_reconciled_symbols(snap, {"_Z4livev"}) == set()
+
+
+def test_reconciliation_underscore_strip_is_macho_only():
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    # ELF: the single-underscore strip must NOT apply. A stale mapping to a
+    # leading-underscore C symbol `_bar` (no longer exported) must NOT be
+    # reconciled just because an unrelated `bar` is exported (Codex review).
+    elf_snap = _snap(elf=_elf("bar"))
+    surf = SourceAbiSurface(library="l")
+    surf.mappings["source_decl_to_binary_symbol"] = {"_bar": "_bar"}
+    elf_snap.build_source = BuildSourcePack(root="", source_abi=surf)
+    assert _l4_reconciled_symbols(elf_snap, {"bar"}) == set()
+
+    # Mach-O: the export table strips one underscore, so a raw `__ZN…`/`_foo`
+    # mapping value still reconciles against the stripped export set.
+    macho_snap = _snap(
+        macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")])
+    )
+    surf2 = SourceAbiSurface(library="l")
+    surf2.mappings["source_decl_to_binary_symbol"] = {"__ZN1A3fooEv": "__ZN1A3fooEv"}
+    macho_snap.build_source = BuildSourcePack(root="", source_abi=surf2)
+    # _exported_symbol_names strips one underscore → {"_ZN1A3fooEv"}; the mapping
+    # value "__ZN1A3fooEv" reconciles via the Mach-O strip.
+    assert _l4_reconciled_symbols(macho_snap, {"_ZN1A3fooEv"}) == {"_ZN1A3fooEv"}
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

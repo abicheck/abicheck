@@ -22,7 +22,8 @@
       "mappings": {
         "public_header_to_target": {},
         "source_decl_to_binary_symbol": {},
-        "source_type_to_debug_type": {}
+        "source_type_to_debug_type": {},
+        "synthesized_symbol_to_owner": {}
       },
       "odr_conflicts": [
         {

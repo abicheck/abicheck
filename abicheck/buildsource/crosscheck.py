@@ -320,11 +320,16 @@ def _check_public_not_exported(
             [], "skipped", "no binary export table on the snapshot", providers
         )
 
+    # Two-way reconciliation (ADR-035 D4): exempt decls the L4 linker already tied
+    # to an export under a variant spelling (ctor clone / Mach-O / demangle drift),
+    # so the check does not double-report a symbol that is genuinely exported.
+    reconciled = _l4_reconciled_symbols(snapshot, exported)
+
     findings: list[Change] = []
     for fn in snapshot.functions:
         if not _has_export_obligation(fn):
             continue
-        if fn.mangled not in exported:
+        if fn.mangled not in exported and fn.mangled not in reconciled:
             findings.append(
                 _change(
                     ChangeKind.PUBLIC_NOT_EXPORTED,
@@ -340,7 +345,7 @@ def _check_public_not_exported(
     for var in snapshot.variables:
         if not _var_has_export_obligation(var):
             continue
-        if var.mangled not in exported:
+        if var.mangled not in exported and var.mangled not in reconciled:
             findings.append(
                 _change(
                     ChangeKind.PUBLIC_NOT_EXPORTED,
@@ -1223,6 +1228,56 @@ def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
             if e.name
         }
     return None
+
+
+def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str]:
+    """Decl mangled names the L4 source-linker tied to a *currently-exported* symbol.
+
+    ``public_not_exported`` compares each public-header decl's mangled name against
+    the *literal* binary export table. But the L4 source-ABI linker
+    (``source_link``) reconciles spellings the table lists under a *variant*: a
+    ctor/dtor ABI clone (a decl mangled ``C1``/``C4`` whose binary lists only
+    ``C2``), a Mach-O leading underscore, or an ABI-tag / substitution drift caught
+    by demangled identity. A decl the linker resolved to an export *is* exported,
+    so flagging it as missing would be a two-way-reconciliation false positive.
+
+    Crucially, the mapping is trusted **only when the current snapshot still
+    exports the mapped symbol**: a ``merge`` pack whose ``exported_symbols`` were
+    pre-set is *not* relinked, so its L4 mapping can reference an older/different
+    binary — a symbol the current binary no longer exports must still be flagged or
+    a consumer hits an undefined symbol (Codex review). ``sym`` is checked against
+    the current default export set both directly (ELF) and with one leading
+    underscore stripped (the Mach-O export table drops one, e.g. ``__ZN…`` →
+    ``_ZN…``). Returns the decl mangled names (Mach-O-normalized to the L2
+    ``Function.mangled`` spelling). Empty when no L4 surface is attached, so it can
+    only *suppress* a false positive, never add one (ADR-028 D3).
+    """
+    pack = snapshot.build_source
+    surface = pack.source_abi if pack is not None else None
+    if surface is None:
+        return set()
+    # The single-leading-underscore strip only applies on Mach-O, whose export
+    # table drops one `_` from every symbol. On ELF/PE the mapped `sym` is already
+    # the raw exported spelling, so applying the strip there would over-match: a
+    # stale mapping to a leading-underscore C symbol `_bar` (no longer exported)
+    # would be reconciled whenever an unrelated `bar` is exported, wrongly
+    # suppressing a real public_not_exported (Codex review). Gate on the platform.
+    is_macho = getattr(snapshot, "macho", None) is not None
+    mapping = (surface.mappings or {}).get("source_decl_to_binary_symbol") or {}
+    reconciled: set[str] = set()
+    for key, sym in mapping.items():
+        if not sym:
+            continue
+        # The mapped symbol must be in the CURRENT default export table (directly,
+        # or — on Mach-O only — with the single leading underscore stripped as
+        # `_exported_symbol_names` does); otherwise the mapping is stale evidence
+        # from another binary and must not suppress the finding.
+        present = sym in exported or (
+            is_macho and sym.startswith("_") and sym[1:] in exported
+        )
+        if present:
+            reconciled.add(key[1:] if key.startswith("__Z") else key)
+    return reconciled
 
 
 def _has_export_obligation(fn: Function) -> bool:

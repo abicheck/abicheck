@@ -48,9 +48,59 @@ def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
 
     Used to plumb L0 exports into inline source replay (A1) for the
     ``dump <binary> --sources`` flow. Empty for a source-only snapshot.
+
+    The authoritative export set is the platform **dynamic symbol table**
+    (``elf.symbols`` / ``pe.exports`` / ``macho.exports``), which lists every
+    exported symbol as its raw linker name. When one is present it is used
+    **alone**: the modeled ``functions``/``variables`` lists are a *narrower*,
+    DWARF-shaped view that (a) covers only a fraction of the exports — feeding
+    only those collapsed symbol matching to a handful of hits (the plugin/
+    ``merge`` regression) — and (b) can carry non-ABI ctor/dtor linkage tags
+    (GCC's unified ``C4``/``D4``) that are **not** real exports; unioning them in
+    would let a source decl mangled ``C4`` exact-match a phantom and inflate
+    ``exported_symbols``/``matched_symbols`` with a name the binary never exported
+    (Codex review). The modeled mangled names are therefore only a *fallback* for
+    backends that expose no raw table at all (a source-only snapshot, or a format
+    whose export table did not parse).
     """
+    raw: set[str] = set()
+    have_raw_table = False
+    elf = getattr(snap, "elf", None)
+    if elf is not None:
+        have_raw_table = True
+        # Only DEFAULT-versioned ELF exports enter the relink set. A name that
+        # exists *solely* as a non-default version alias (`foo@VER` with no
+        # `foo@@VER`) cannot be linked against by an unversioned consumer, so
+        # including it would let the L4 mapping mark a header decl backed only by
+        # such an alias as "exported" — and the crosscheck's two-way reconciliation
+        # would then wrongly suppress the `public_not_exported` finding the consumer
+        # would actually hit as an undefined symbol (Codex review). Mirrors
+        # `crosscheck._exported_symbol_names`. `is_default` is True for unversioned
+        # symbols, so plain (non-versioned) libraries are unaffected.
+        raw |= {
+            s.name
+            for s in getattr(elf, "symbols", ())
+            if getattr(s, "name", "") and getattr(s, "is_default", True)
+        }
+    pe = getattr(snap, "pe", None)
+    if pe is not None:
+        have_raw_table = True
+        raw |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
+    macho = getattr(snap, "macho", None)
+    if macho is not None:
+        have_raw_table = True
+        raw |= {e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")}
+    raw.discard("")
+    if have_raw_table:
+        # A parsed platform table is authoritative EVEN WHEN EMPTY — a hidden-only
+        # library genuinely exports nothing, so its DWARF-modeled `functions` are
+        # *not* exports and must not be relinked as if they were (Codex review).
+        return tuple(sorted(raw))
+    # No platform table parsed at all (a source-only snapshot): the modeled
+    # mangled names are the only available fallback.
     syms = {fn.mangled for fn in snap.functions if fn.mangled}
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    syms.discard("")
     return tuple(sorted(syms))
 
 
@@ -191,8 +241,45 @@ def _merge_attach_combined(
             )
         # Mutating payloads invalidates precomputed artifact digests; clear them.
         combined.manifest.artifacts = []
+    _warn_if_source_surface_empty(combined, base_exports)
     base.build_source = combined
     base.build_source_pack = combined.to_ref(path_hint=str(output))
+
+
+def _warn_if_source_surface_empty(
+    combined: BuildSourcePack, base_exports: tuple[str, ...]
+) -> None:
+    """Project-level ``public-roots`` misconfiguration signal (ADR-038 Caveat A).
+
+    The Clang facts plugin can only detect an empty public surface *per TU*, and
+    a single internal-only TU legitimately produces none — so the per-TU
+    diagnostic is necessarily fuzzy. ``merge`` is the first point that sees the
+    *whole* assembled surface, so it is where the authoritative call can be made:
+    if the binary exports symbols but the folded source surface carries **zero**
+    public entities across every TU, the producer's public-roots almost certainly
+    did not match how the headers resolve (the pack is empty). Emit one clear
+    warning here rather than leaving the user with a silently source-less
+    baseline.
+    """
+    surface = getattr(combined, "source_abi", None)
+    if surface is None or not base_exports:
+        return
+    entities = (
+        len(surface.reachable_declarations)
+        + len(surface.reachable_types)
+        + len(surface.reachable_macros)
+        + len(surface.reachable_templates)
+        + len(surface.reachable_inline_bodies)
+    )
+    if entities == 0:
+        click.echo(
+            "warning: merged source pack carries no public entities though the "
+            f"binary exports {len(base_exports)} symbol(s). The producer's "
+            "public-roots / ABICHECK_CC_HEADERS likely did not match how the "
+            "public headers resolve (verify with `clang -H`); the baseline has no "
+            "L4/L5 source evidence. See docs: user-guide/producing-source-facts.",
+            err=True,
+        )
 
 
 def _merge_print_summary(

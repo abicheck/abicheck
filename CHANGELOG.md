@@ -9,6 +9,55 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **Source→binary symbol matching now recovers ctor/dtor ABI clones.** The
+  linker (`link_source_abi` / `relink_surface_exports`) folds C++ Itanium
+  ctor/dtor clone tags (`C1`/`C2`/`C3`/`C4`, `D0`/`D1`/`D2`/`D4`) so one source
+  ctor/dtor declaration claims every clone the compiler exports, instead of
+  orphaning the siblings as "exported symbol with no source decl". Also bridges
+  GCC's non-standard unified `C4`/`D4` DWARF linkage tag to the real `C1`/`C2`
+  exports.
+- **`merge` no longer truncates the binary export set.**
+  `_exported_symbols_from_snapshot` unions the authoritative platform dynamic
+  export table (`elf.symbols` / `pe.exports` / `macho.exports`) instead of only
+  the DWARF-shaped `functions[].mangled` view. On a pvxs Flow-C merge this lifts
+  `matched_symbols` from 6 to 287 (`exported_symbols` 126 → 950).
+
+- **Source→binary matching normalizes Mach-O spellings for all names.** The
+  linker normalizes the optional Mach-O leading underscore (`__ZN…` → `_ZN…`)
+  for every Itanium source/export key, not only ctor/dtor canonical keys, so an
+  ordinary C++ method the plugin records as `__ZN1A3fooEv` exact-matches the
+  export table's `_ZN1A3fooEv` instead of orphaning into the unmatched sets.
+- **`merge` excludes non-default ELF version aliases from the relink set.** A
+  symbol that exists only as `foo@VER` (no default `foo@@VER`) can't be linked
+  against by an unversioned consumer, so it no longer enters the export set —
+  preventing the two-way reconciliation from masking a real `public_not_exported`.
+
+### Changed
+
+- **Clang facts plugin fails loud on a misconfigured `public-roots`** (ADR-038
+  Flow C, Caveat A): it now emits a diagnostic (and records it in the pack's
+  `diagnostics`) when `public-roots` matches zero declarations though header
+  decls were seen outside the roots, instead of silently producing an empty
+  pack with exit 0.
+- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038 Flow
+  C): with no explicit `public-roots=`, roots are inferred from the compile's
+  `-I`/`-iquote` include dirs (compiler/system entries excluded) and a one-time
+  inference note is emitted, so a forgotten flag yields a populated surface
+  rather than a silently empty pack. An explicit `public-roots=` still scopes
+  the surface precisely.
+
+### Added
+
+- New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
+  three source-fact producers, a selection tree, and the `public-roots`/
+  `ABICHECK_CC_HEADERS` header-resolution trap.
+- **Two-way reconciliation in the `public_not_exported` cross-check** (ADR-035
+  D4): a public header decl the L4 source-linker already tied to an export under
+  a variant spelling (ctor/dtor clone, Mach-O underscore, ABI-tag/substitution
+  drift) is no longer double-reported as "declared but not exported".
+
 ---
 
 ## [0.4.0] — 2026-07-01

@@ -771,6 +771,71 @@ bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &root
   return false;
 }
 
+// Auto-derive public roots from the compile's user include search paths when the
+// operator passed no explicit `public-roots=` (ADR-038 Flow C, Caveat A). The
+// `-I` (Angled) and `-iquote` (Quoted) directories are exactly where a project's
+// own public headers resolve, so treating them as roots turns the common "forgot
+// public-roots → silently empty pack" trap into a populated (if slightly broad)
+// public surface. System / compiler-builtin entries (`-isystem`, the resource
+// dir, the sysroot) are excluded so libstdc++ / SDK headers do not flood the
+// surface. Returns absolute-normalized directories, de-duplicated, in search
+// order. The operator can always pass an explicit `public-roots=` to scope the
+// surface precisely; inference only runs when they passed none.
+// Whether `path` is at or below directory `prefix` (both absolute-normalized),
+// checked at a path-component boundary so `/home/proj` does not "contain"
+// `/home/project2`.
+bool pathIsUnder(llvm::StringRef path, llvm::StringRef prefix) {
+  if (prefix.empty() || !path.starts_with(prefix))
+    return false;
+  return path.size() == prefix.size() ||
+         llvm::sys::path::is_separator(path[prefix.size()]);
+}
+
+std::vector<std::string> deriveRootsFromIncludes(const HeaderSearchOptions &hso) {
+  std::vector<std::string> roots;
+  std::set<std::string> seen;
+  // Restrict inference to PROJECT-LOCAL include dirs: an absolute `-I` outside the
+  // compile's working directory (`/opt/boost/include`, `/usr/include/eigen3`) is a
+  // third-party dependency whose headers must not flood the public surface, so
+  // only dirs at/below the build cwd are inferred (Codex review). In-tree includes
+  // (`-Iinclude`, `./gen`, an absolute path under the build/source tree) are kept.
+  // An out-of-source layout that puts headers elsewhere infers nothing here and
+  // gets the "pass public-roots=" diagnostic instead of a Boost-flooded pack.
+  llvm::SmallString<256> cwd;
+  bool haveCwd = !llvm::sys::fs::current_path(cwd);
+  if (haveCwd)
+    llvm::sys::path::remove_dots(cwd, /*remove_dot_dot=*/true);
+  for (const auto &e : hso.UserEntries) {
+    if (e.IsFramework)
+      continue;
+    if (e.Group != frontend::Angled && e.Group != frontend::Quoted)
+      continue;
+    if (e.Path.empty())
+      continue;
+    llvm::SmallString<256> abs(e.Path);
+    llvm::sys::fs::make_absolute(abs);
+    llvm::sys::path::remove_dots(abs, /*remove_dot_dot=*/true);
+    if (haveCwd && !pathIsUnder(abs, cwd))
+      continue;
+    std::string s(abs.str());
+    if (seen.insert(s).second)
+      roots.push_back(s);
+  }
+  return roots;
+}
+
+// Whether `file` names a C/C++ translation-unit source (not a header). Used to
+// tell an ordinary internal .cpp decl (expected to be non-public) from a decl in
+// a *header* that fell outside the public roots (the public-roots-misconfigured
+// signal, ADR-038 Flow C Caveat A).
+bool isSourceFileName(llvm::StringRef file) {
+  llvm::StringRef ext = llvm::sys::path::extension(file);
+  return ext.equals_insensitive(".c") || ext.equals_insensitive(".cc") ||
+         ext.equals_insensitive(".cpp") || ext.equals_insensitive(".cxx") ||
+         ext.equals_insensitive(".c++") || ext.equals_insensitive(".cp") ||
+         ext == ".C";
+}
+
 // Whether a header path looks machine-generated — a faithful port of
 // provenance._is_generated_header (a `generated`/`gen`/… directory segment, or
 // a moc_/ui_/qrc_/protobuf/flatbuffers/gRPC basename). The clang backend keeps
@@ -971,11 +1036,12 @@ public:
   FactsVisitor(ASTContext &ctx, const std::vector<std::string> &roots,
                std::vector<Entity> &functions, std::vector<Entity> &types,
                std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
-               std::vector<Entity> &constexprValues, std::set<std::string> &diags)
+               std::vector<Entity> &constexprValues, std::set<std::string> &diags,
+               bool inferredRoots = false)
       : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
         Functions(functions), Types(types), Templates(templates),
         InlineBodies(inlineBodies), ConstexprValues(constexprValues),
-        Diags(diags) {}
+        Diags(diags), InferredRoots(inferredRoots) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1262,11 +1328,40 @@ private:
       return false;
     file = pl.getFilename();
     if (pathUnderAnyRoot(file, Roots)) {
+      // With INFERRED roots (no explicit public-roots=), a root can be an ancestor
+      // of the translation-unit sources — e.g. `-I.`/`-I$repo` — so a decl in an
+      // implementation `.cpp` under the repo would be pulled onto the public
+      // surface, polluting L4/L5 with private API and possibly masking
+      // exported-not-public leaks. Public API lives in headers, so a source-file
+      // decl is never public when roots were inferred (Codex review). Explicit
+      // roots keep exact wrapper/C.6 parity (no extension filter).
+      if (InferredRoots && isSourceFileName(file))
+        return false;
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
+    // Misconfiguration signal (ADR-038 Flow C, Caveat A): a decl in a real,
+    // non-system *header* that is not under any public root. Ordinary internal
+    // code lives in the .cpp source, so counting only header-declared rejections
+    // distinguishes "public-roots does not match how headers resolve" (every
+    // public header rejected → an empty pack) from a legitimately internal TU.
+    if (!isSourceFileName(file)) {
+      ++RejectedHeaderDecls;
+      if (ExampleRejectedHeader.empty())
+        ExampleRejectedHeader = file;
+    }
     return false;
   }
+
+public:
+  //: Header-declared decls rejected because no public root matched them, plus one
+  //: example path — feeds the "0 public entities" diagnostic (Caveat A).
+  size_t rejectedHeaderDecls() const { return RejectedHeaderDecls; }
+  const std::string &exampleRejectedHeader() const {
+    return ExampleRejectedHeader;
+  }
+
+private:
 
   void emitType(const TagDecl *td, const std::string &name,
                 const std::string &kind) {
@@ -1334,6 +1429,13 @@ private:
   std::vector<Entity> &InlineBodies;
   std::vector<Entity> &ConstexprValues;
   std::set<std::string> &Diags;
+  //: True when Roots were auto-derived (no explicit public-roots=); gates the
+  //: source-file exclusion so an inferred `-I.` root does not pull `.cpp` decls
+  //: onto the public surface.
+  bool InferredRoots = false;
+  // Mutable: updated from the const `classify` gate while walking the AST.
+  mutable size_t RejectedHeaderDecls = 0;
+  mutable std::string ExampleRejectedHeader;
 };
 
 // ---------------------------------------------------------------------------
@@ -1345,10 +1447,12 @@ public:
   FactsConsumer(std::string outDir, std::vector<std::string> roots,
                 std::string library, std::string version,
                 std::string ctxHash,
-                std::shared_ptr<std::map<std::string, MacroRecord>> macros)
+                std::shared_ptr<std::map<std::string, MacroRecord>> macros,
+                size_t inferredRootCount = 0)
       : OutDir(std::move(outDir)), Roots(std::move(roots)),
         Library(std::move(library)), Version(std::move(version)),
-        CtxHash(std::move(ctxHash)), Macros(std::move(macros)) {}
+        CtxHash(std::move(ctxHash)), Macros(std::move(macros)),
+        InferredRootCount(inferredRootCount) {}
 
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
@@ -1356,10 +1460,90 @@ public:
     std::vector<Entity> functions, types, templates, inlineBodies, constexprValues;
     std::set<std::string> diags;
     FactsVisitor visitor(ctx, Roots, functions, types, templates, inlineBodies,
-                         constexprValues, diags);
+                         constexprValues, diags, InferredRootCount > 0);
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
+
+    // Public-roots inference note (ADR-038 Flow C, Caveat A): when no explicit
+    // `public-roots=` was given, the roots were auto-derived from the compile's
+    // -I/-iquote include dirs. Record that per-TU (forensic) and tell the operator
+    // once — the inferred surface can be slightly broad, so an explicit
+    // public-roots= is the precise scoping knob. Not an error: a populated (broad)
+    // surface beats the silent empty pack the missing flag used to produce.
+    if (InferredRootCount > 0) {
+      std::string roots;
+      for (const std::string &r : Roots)
+        roots += (roots.empty() ? "" : ", ") + r;
+      std::string msg =
+          "abicheck-facts: no public-roots given; inferred " +
+          std::to_string(InferredRootCount) +
+          " public root(s) from the compile's -I/-iquote include dirs [" + roots +
+          "]. Pass public-roots=<dir> to scope the public surface precisely.";
+      diags.insert(msg);
+      if (claimFirstInferenceNote())
+        llvm::errs() << msg << "\n";
+    }
+
+    // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
+    // but this TU emitted zero public entities *while* header-declared decls were
+    // rejected for not being under any root, public-roots may not match how the
+    // compiler resolves the public headers (e.g. it points at the installed
+    // `include/` while `-I..` makes `<pvxs/x.h>` resolve to `src/pvxs/`).
+    // Previously this produced an empty pack with exit 0 and no message.
+    //
+    // This signal is necessarily per-TU: an internal-implementation-only TU that
+    // includes a private header and defines nothing public trips the same
+    // condition even with correct roots — the plugin cannot see whether *other*
+    // TUs produced public facts (it runs once per compile). To keep the "fail
+    // loud" signal credible without crying wolf on every internal TU under `-j`,
+    // the human-facing stderr line is emitted **once per output pack** (a
+    // deterministic misconfiguration shows it on the first TU); the accurate
+    // per-TU note is still recorded in this TU's pack `diagnostics` as forensic
+    // data. A whole build whose pack ends up empty is the real confirmation.
+    size_t publicCount = functions.size() + types.size() + templates.size() +
+                         inlineBodies.size() + constexprValues.size() +
+                         macros.size();
+    bool emptyWithRejections =
+        publicCount == 0 && visitor.rejectedHeaderDecls() > 0;
+    if (emptyWithRejections && Roots.empty()) {
+      // NO roots at all — neither an explicit public-roots= nor any project-local
+      // -I/-iquote to infer from — yet this TU saw header decls. Previously this
+      // fell through silently (the `!Roots.empty()` guard), reproducing the exact
+      // empty-pack trap the diagnostic exists to kill (Codex review). Fail loud.
+      std::string msg =
+          "abicheck-facts: no public-roots given and no project-local include "
+          "dirs to infer from; this TU produced 0 public entities though " +
+          std::to_string(visitor.rejectedHeaderDecls()) +
+          " header decl(s) were seen (e.g. " + visitor.exampleRejectedHeader() +
+          "). Pass public-roots=<dir> so the public headers are recognized.";
+      diags.insert(msg);
+      if (claimFirstRootsWarning())
+        llvm::errs() << msg << "\n";
+    } else if (emptyWithRejections && InferredRootCount == 0) {
+      // Explicit public-roots= that matched nothing (roots were operator-set, not
+      // inferred): the classic Caveat-A misconfiguration message.
+      std::string roots;
+      for (const std::string &r : Roots)
+        roots += (roots.empty() ? "" : ", ") + r;
+      std::string msg =
+          "abicheck-facts: public-roots matched 0 declarations for this TU (" +
+          std::to_string(visitor.rejectedHeaderDecls()) +
+          " header decl(s) were seen outside the root(s) [" + roots +
+          "], e.g. " + visitor.exampleRejectedHeader() +
+          "). If this TU defines public API, public-roots likely does not match "
+          "how the compiler resolves the public headers (verify with `clang -H`) "
+          "— it must be the resolved directory, not necessarily the installed "
+          "include dir. (Harmless for an internal-only TU.)";
+      diags.insert(msg);
+      if (claimFirstRootsWarning())
+        llvm::errs() << msg << "\n";
+    }
+    // When roots were INFERRED (InferredRootCount > 0) the inference note above
+    // already told the operator; a per-TU "matched 0" here would (a) misadvise
+    // them to fix a public-roots= they never set and (b) cry wolf on every
+    // internal-only TU (Codex review). The authoritative empty-pack signal for the
+    // inferred case is the project-level `merge` warning over the whole surface.
 
     std::string source;
     if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {
@@ -1426,6 +1610,11 @@ private:
   bool isPublicFile(const std::string &file, std::string &origin,
                     std::string &visibility) const {
     if (pathUnderAnyRoot(file, Roots)) {
+      // Same source-file exclusion as FactsVisitor::classify for inferred roots:
+      // a macro defined in an implementation `.cpp` under an inferred `-I.` root
+      // is not public API (Codex review).
+      if (InferredRootCount > 0 && isSourceFileName(file))
+        return false;
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
@@ -1493,6 +1682,48 @@ private:
     return true;
   }
 
+  // Return true for exactly the first caller across all parallel compiles that
+  // share this OutDir, by atomically creating a sentinel file (CD_CreateNew
+  // fails if it already exists). Used to emit the public-roots stderr warning
+  // once per pack instead of once per TU (Caveat A / CodeRabbit review). A
+  // failure to create for any *other* reason falls back to emitting (fail loud
+  // rather than swallow the signal).
+  bool claimFirstRootsWarning() {
+    // The out dir is otherwise created lazily by writeTu (which runs after this
+    // check); create it up front so the sentinel has a home on the very first TU.
+    llvm::sys::fs::create_directories(OutDir);
+    int fd = -1;
+    std::error_code ec = llvm::sys::fs::openFile(
+        llvm::Twine(OutDir) + "/.abicheck-roots-warning", fd,
+        llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
+        llvm::sys::fs::OF_None);
+    if (ec == std::errc::file_exists)
+      return false;
+    if (ec)
+      return true; // unexpected error: prefer emitting over silence
+    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true); // create + close
+    return true;
+  }
+
+  // Same once-per-pack claim as claimFirstRootsWarning, for the distinct
+  // public-roots-inference note (a different sentinel so the two notes do not
+  // suppress each other). Emitted at most once across all parallel compiles that
+  // share this OutDir.
+  bool claimFirstInferenceNote() {
+    llvm::sys::fs::create_directories(OutDir);
+    int fd = -1;
+    std::error_code ec = llvm::sys::fs::openFile(
+        llvm::Twine(OutDir) + "/.abicheck-roots-inferred", fd,
+        llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
+        llvm::sys::fs::OF_None);
+    if (ec == std::errc::file_exists)
+      return false;
+    if (ec)
+      return true; // unexpected error: prefer emitting over silence
+    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
+    return true;
+  }
+
   void ensureManifest() {
     std::string manifestPath = OutDir + "/manifest.json";
     if (llvm::sys::fs::exists(manifestPath))
@@ -1527,6 +1758,9 @@ private:
   std::string Version;
   std::string CtxHash;
   std::shared_ptr<std::map<std::string, MacroRecord>> Macros;
+  //: >0 when Roots were auto-derived from the compile's -I/-iquote include dirs
+  //: (no explicit public-roots= given) — drives the one-time inference note.
+  size_t InferredRootCount = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -1545,8 +1779,18 @@ public:
     auto macros = std::make_shared<std::map<std::string, MacroRecord>>();
     Preprocessor &pp = ci.getPreprocessor();
     pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
-    return std::make_unique<FactsConsumer>(OutDir, Roots, Library, Version,
-                                           computeContextHash(ci), macros);
+    // Auto-derive public roots from the -I/-iquote include dirs when the operator
+    // gave none (ADR-038 Flow C, Caveat A): a populated (broad) surface beats the
+    // silent empty pack a missing public-roots= used to produce.
+    std::vector<std::string> roots = Roots;
+    size_t inferredRootCount = 0;
+    if (roots.empty()) {
+      roots = deriveRootsFromIncludes(ci.getHeaderSearchOpts());
+      inferredRootCount = roots.size();
+    }
+    return std::make_unique<FactsConsumer>(OutDir, std::move(roots), Library,
+                                           Version, computeContextHash(ci),
+                                           macros, inferredRootCount);
   }
 
   // The compile-context hash — the per-TU cache key (ADR-030 D8) and the `cfg`
