@@ -330,11 +330,21 @@ def _attribute_synthesized_exports(
     except Exception:  # noqa: BLE001 - attribution is a best-effort enhancement
         return {}
     type_names = {t.qualified_name for t in surface.reachable_types if t.qualified_name}
-    type_bases = {n.split("<", 1)[0] for n in type_names}
     func_names = {
         d.qualified_name for d in surface.reachable_declarations if d.qualified_name
     }
-    func_bases = {n.split("<", 1)[0] for n in func_names}
+
+    def _owner_present(name: str, public: set[str]) -> bool:
+        # Exact match, OR a base match ONLY when the *unspecialized* name is
+        # itself a public entity. A base match derived from another specialization
+        # (e.g. `ns::A<int>` present, `ns::A<char>` not) must NOT attribute the
+        # other specialization's RTTI — that would hide an exported, unchecked
+        # specialization (Codex review). So require the bare base in `public`.
+        if name in public:
+            return True
+        base = name.split("<", 1)[0]
+        return base != name and base in public
+
     attributed: dict[str, tuple[str, str]] = {}
     for sym in candidates:
         try:
@@ -348,13 +358,73 @@ def _attribute_synthesized_exports(
             continue
         kind, target, owner = parsed
         if owner == "type":
-            if target in type_names or target.split("<", 1)[0] in type_bases:
+            if _owner_present(target, type_names):
                 attributed[sym] = (kind, target)
         else:  # func — cut the signature, match the qualified name
             fname = target.split("(", 1)[0].strip()
-            if fname in func_names or fname.split("<", 1)[0] in func_bases:
+            if _owner_present(fname, func_names):
                 attributed[sym] = (kind, fname)
     return attributed
+
+
+def _demangled_rematch(
+    reachable_declarations: list[SourceEntity],
+    mapping: dict[str, str],
+    matched: set[str],
+    exported: set[str],
+) -> dict[str, str]:
+    """Second-tier match by *demangled identity* for decls exact-matching missed.
+
+    A source extractor's mangled name can differ *textually* from the binary's
+    export for the same entity — most commonly a missing/extra ABI tag
+    (``[abi:cxx11]``), a substitution-form difference, or minor vendor mangling
+    drift — so the exact/ctor-fold tiers leave the decl in ``decls_without_symbol``
+    even though the export is right there. This demangles both sides and matches a
+    still-unmatched decl to a still-unmatched export **only when the demangled
+    forms are equal and the export is unique** for that form (so an overload set,
+    whose members demangle distinctly, can never cross-match). Best-effort: a
+    no-op without a demangler. Returns ``{identity: export}`` for the new matches
+    and updates *mapping*/*matched* in place.
+    """
+    unmatched_exports = [e for e in exported if e not in matched]
+    unmatched_decls = [
+        e
+        for e in reachable_declarations
+        if e.identity() and not mapping.get(e.identity()) and e.mangled_name
+    ]
+    if not unmatched_exports or not unmatched_decls:
+        return {}
+    try:
+        from ..demangle import demangle as _demangle
+    except Exception:  # noqa: BLE001 - best-effort second tier
+        return {}
+
+    def _dem(sym: str) -> str | None:
+        try:
+            return _demangle(sym)
+        except Exception:  # noqa: BLE001
+            return None
+
+    # Demangled form → exports; keep only forms that map to exactly one export so
+    # a match is never ambiguous.
+    by_demangled: dict[str, list[str]] = {}
+    for exp_sym in unmatched_exports:
+        exp_dem = _dem(exp_sym)
+        if exp_dem:
+            by_demangled.setdefault(exp_dem, []).append(exp_sym)
+    unique = {d: syms[0] for d, syms in by_demangled.items() if len(syms) == 1}
+    new_matches: dict[str, str] = {}
+    for decl in unmatched_decls:
+        decl_dem = _dem(decl.mangled_name)
+        if not decl_dem:
+            continue
+        exp = unique.get(decl_dem)
+        if exp and exp not in matched:
+            mapping[decl.identity()] = exp
+            matched.add(exp)
+            new_matches[decl.identity()] = exp
+            del unique[decl_dem]  # consume so two decls can't claim the same export
+    return new_matches
 
 
 #: Entity kinds routed to each reachable bucket of the linked surface (D5).
@@ -419,6 +489,14 @@ def link_source_abi(
             _route_entity(entity, surface, state, exported)
 
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
+    # Second-tier: rescue decls whose mangled name differs textually from the
+    # export (ABI-tag / substitution drift) via demangled identity.
+    _demangled_rematch(
+        surface.reachable_declarations,
+        state.decl_to_symbol,
+        state.matched_symbols,
+        exported,
+    )
     surface.mappings["source_decl_to_binary_symbol"] = dict(
         sorted(state.decl_to_symbol.items())
     )
@@ -495,6 +573,8 @@ def relink_surface_exports(
             matched.update(variants)
         else:
             mapping.setdefault(key, "")
+    # Second-tier demangled-identity rematch (ABI-tag / substitution drift).
+    _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
 
     # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their

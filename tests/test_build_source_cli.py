@@ -1923,6 +1923,29 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
     assert "_ZN3FooC4Ev" not in exports
 
 
+def test_merge_warns_on_empty_source_surface(capsys):
+    """Project-level Caveat A: merging a pack whose whole source surface is empty
+    while the binary exports symbols warns that public-roots was likely wrong."""
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource_merge import _warn_if_source_surface_empty
+
+    empty = SourceAbiSurface(library="libfoo.so", target_id="t")  # no entities
+    combined = SimpleNamespace(source_abi=empty)
+    _warn_if_source_surface_empty(combined, ("_Z3foov", "_Z3barv"))
+    err = capsys.readouterr().err
+    assert "no public entities" in err
+    assert "public-roots" in err
+
+    # A non-empty surface (or no exports) is silent.
+    populated = SourceAbiSurface(library="libfoo.so", target_id="t")
+    populated.reachable_declarations.append(object())
+    _warn_if_source_surface_empty(SimpleNamespace(source_abi=populated), ("_Z3foov",))
+    _warn_if_source_surface_empty(SimpleNamespace(source_abi=empty), ())
+    assert capsys.readouterr().err == ""
+
+
 def test_exported_symbols_falls_back_to_modeled_names_without_raw_table():
     """With no raw dynamic table (a source-only snapshot), the modeled mangled
     names are the only available fallback."""

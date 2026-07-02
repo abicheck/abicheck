@@ -220,8 +220,45 @@ def _merge_attach_combined(
             )
         # Mutating payloads invalidates precomputed artifact digests; clear them.
         combined.manifest.artifacts = []
+    _warn_if_source_surface_empty(combined, base_exports)
     base.build_source = combined
     base.build_source_pack = combined.to_ref(path_hint=str(output))
+
+
+def _warn_if_source_surface_empty(
+    combined: BuildSourcePack, base_exports: tuple[str, ...]
+) -> None:
+    """Project-level ``public-roots`` misconfiguration signal (ADR-038 Caveat A).
+
+    The Clang facts plugin can only detect an empty public surface *per TU*, and
+    a single internal-only TU legitimately produces none — so the per-TU
+    diagnostic is necessarily fuzzy. ``merge`` is the first point that sees the
+    *whole* assembled surface, so it is where the authoritative call can be made:
+    if the binary exports symbols but the folded source surface carries **zero**
+    public entities across every TU, the producer's public-roots almost certainly
+    did not match how the headers resolve (the pack is empty). Emit one clear
+    warning here rather than leaving the user with a silently source-less
+    baseline.
+    """
+    surface = getattr(combined, "source_abi", None)
+    if surface is None or not base_exports:
+        return
+    entities = (
+        len(surface.reachable_declarations)
+        + len(surface.reachable_types)
+        + len(surface.reachable_macros)
+        + len(surface.reachable_templates)
+        + len(surface.reachable_inline_bodies)
+    )
+    if entities == 0:
+        click.echo(
+            "warning: merged source pack carries no public entities though the "
+            f"binary exports {len(base_exports)} symbol(s). The producer's "
+            "public-roots / ABICHECK_CC_HEADERS likely did not match how the "
+            "public headers resolve (verify with `clang -H`); the baseline has no "
+            "L4/L5 source evidence. See docs: user-guide/producing-source-facts.",
+            err=True,
+        )
 
 
 def _merge_print_summary(

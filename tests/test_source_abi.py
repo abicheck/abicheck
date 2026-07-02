@@ -546,6 +546,25 @@ def test_linker_attributes_rtti_vtable_thunk_to_public_owner() -> None:
     }
 
 
+def test_synthesized_attribution_requires_exact_specialization() -> None:
+    # Codex review: with only `ns::A<int>` on the surface, the vtable for a
+    # DIFFERENT specialization `ns::A<char>` (which base-splits to the same
+    # `ns::A`) must NOT be attributed — that would hide an exported, unchecked
+    # specialization. Base matching is allowed only when the *unspecialized*
+    # template is itself public.
+    tu = SourceAbiTu(types=[_entity("ns::A<int>", "record", type_hash="t1")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZTVN2ns1AIiEE", "_ZTVN2ns1AIcEE"]
+    )
+    # A<int> attributes; A<char> stays an orphan (no public owner).
+    assert surface.unmatched["symbols_without_decl"] == ["_ZTVN2ns1AIcEE"]
+
+    # When the bare (unspecialized) template `ns::A` is public, a base match is OK.
+    tu2 = SourceAbiTu(types=[_entity("ns::A", "record", type_hash="t2")])
+    surface2 = link_source_abi([tu2], exported_symbols=["_ZTVN2ns1AIiEE"])
+    assert surface2.unmatched["symbols_without_decl"] == []
+
+
 def test_relink_also_attributes_synthesized_exports() -> None:
     # The merge/relink path (used by `merge` on a plugin/wrapper pack) must apply
     # the same RTTI/vtable attribution as link_source_abi.
@@ -557,6 +576,37 @@ def test_relink_also_attributes_synthesized_exports() -> None:
     assert surface.unmatched["symbols_without_decl"] == []
     assert surface.coverage["synthesized_symbols_matched"] == 2
     assert surface.coverage["unmatched_symbols"] == 0
+
+
+def test_linker_demangled_identity_rematch() -> None:
+    # A source decl whose mangled name differs *textually* from the export but
+    # demangles identically (substitution-form / mangler drift) is rescued by the
+    # second-tier demangled-identity match. `_ZN1N1fEN1N1TE` (expanded) and
+    # `_ZN1N1fENS_1TE` (substitution form) both demangle to `N::f(N::T)`.
+    decl = _entity("N::f", "function", mangled="_ZN1N1fEN1N1TE")
+    tu = SourceAbiTu(functions=[decl])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1N1fENS_1TE"])
+    # Exact match misses (different strings); the demangled tier rescues it.
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN1N1fEN1N1TE"] == (
+        "_ZN1N1fENS_1TE"
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+
+
+def test_demangled_rematch_is_unambiguous_only() -> None:
+    # The rematch must never cross-match an overload set: two decls that demangle
+    # distinctly (f(int) vs f(double)) can only claim their own exact export, and
+    # a demangled form shared by >1 export is skipped (never a guess).
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    fi = _entity("f", "function", mangled="_Z1fi")  # f(int)
+    fd = _entity("f", "function", mangled="_Z1fd")  # f(double)
+    # Both exports present and exact — rematch has nothing to do, no misfire.
+    mapping = {"_Z1fi": "_Z1fi", "_Z1fd": "_Z1fd"}
+    matched = {"_Z1fi", "_Z1fd"}
+    new = _demangled_rematch([fi, fd], mapping, matched, {"_Z1fi", "_Z1fd"})
+    assert new == {}
 
 
 def test_linker_excludes_non_public_entities() -> None:
