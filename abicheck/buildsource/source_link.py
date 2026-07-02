@@ -44,6 +44,39 @@ from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 _CTOR_DTOR_TAGS = frozenset({"C1", "C2", "C3", "C4", "D0", "D1", "D2", "D4"})
 
 
+def _skip_e_terminated(symbol: str, i: int) -> int:
+    """Return the index just past the ``E`` that closes the ``I``/``N`` at *i*.
+
+    Balances nested ``I`` (template-args) and ``N`` (nested-name) productions and
+    consumes length-prefixed ``<source-name>`` components *wholesale* — so their
+    interior characters (which can include ``I``/``N``/``E``) never miscount.
+    Without this, a nested type inside a template argument (e.g. the
+    ``NSt7__cxx11…E`` in ``std::vector<std::string>``) would close the balance
+    early and the real ctor tag that follows would be missed (Codex review).
+
+    Best-effort: on any unrecognized production it advances one character, so an
+    exotic tail (a non-type-template ``L…E`` literal, say) can only cause a
+    *missed* fold — never a wrong one, preserving the no-false-fold guarantee.
+    """
+    n = len(symbol)
+    depth = 1  # symbol[i] is the opener
+    i += 1
+    while i < n and depth:
+        c = symbol[i]
+        if c.isdigit():  # <source-name> — consume by its declared length
+            j = i
+            while j < n and symbol[j].isdigit():
+                j += 1
+            i = j + int(symbol[i:j])
+            continue
+        if c in "IN":
+            depth += 1
+        elif c == "E":
+            depth -= 1
+        i += 1
+    return i
+
+
 def _ctor_dtor_canonical(symbol: str) -> str:
     """Fold a genuine Itanium ``<ctor-dtor-name>`` to a single canonical marker.
 
@@ -86,17 +119,8 @@ def _ctor_dtor_canonical(symbol: str) -> str:
             i = j + int(symbol[i:j])
             boundary = True
             continue
-        if c == "I":  # <template-args> := I … E (skip balanced)
-            depth = 0
-            while i < n:
-                if symbol[i] == "I":
-                    depth += 1
-                elif symbol[i] == "E":
-                    depth -= 1
-                    if depth == 0:
-                        i += 1
-                        break
-                i += 1
+        if c == "I":  # <template-args> := I … E (skip the balanced, nested run)
+            i = _skip_e_terminated(symbol, i)
             boundary = True
             continue
         if c == "S":  # <substitution> := S_ | S<id>_ | S[abisod]

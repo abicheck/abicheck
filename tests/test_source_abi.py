@@ -398,6 +398,53 @@ def test_ctor_dtor_fold_parses_template_and_substitution_prefixes() -> None:
     assert _ctor_dtor_canonical("_ZN1NS_3FooC1Ev") != "_ZN1NS_3FooC1Ev"
 
 
+def test_ctor_dtor_fold_handles_nested_template_argument_names() -> None:
+    # Codex review: a template argument that is itself a nested name (e.g. the
+    # NSt7__cxx11…E of std::string) must not close the outer I…E early — the
+    # balanced skip consumes length-prefixed identifiers wholesale and tracks
+    # I/N nesting, so the ctor tag *after* the template-args is still folded.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    # std::vector<std::string>::vector()  (C1 complete vs C2 base)
+    vec_str = (
+        "_ZNSt6vectorINSt7__cxx1112basic_string"
+        "IcSt11char_traitsIcESaIcEEEE{tag}Ev"
+    )
+    assert _ctor_dtor_canonical(vec_str.format(tag="C1")) == _ctor_dtor_canonical(
+        vec_str.format(tag="C2")
+    )
+    assert _ctor_dtor_canonical(vec_str.format(tag="C1")) != vec_str.format(tag="C1")
+    # ns::A<std::map<std::string, Foo>>::A() — two levels of nested template args.
+    a_map = (
+        "_ZN2ns1AISt3mapINSt7__cxx1112basic_string"
+        "IcSt11char_traitsIcESaIcEEE3FooEE{tag}Ev"
+    )
+    assert _ctor_dtor_canonical(a_map.format(tag="C1")) == _ctor_dtor_canonical(
+        a_map.format(tag="C2")
+    )
+
+
+def test_ctor_dtor_fold_parser_edge_cases() -> None:
+    # Exercise the remaining parser branches for coverage + robustness:
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    # CV-qualified member function (K = const): _ZNK… — the qualifier is skipped.
+    assert _ctor_dtor_canonical("_ZNK3foo3barEv") == "_ZNK3foo3barEv"  # not a ctor
+    # A nested-name that simply ends (no ctor/dtor) hits the closing-E break.
+    assert _ctor_dtor_canonical("_ZN3foo3barEv") == "_ZN3foo3barEv"
+    # A non-ctor `C`/`D` at a boundary (a member named `Cat`) must NOT fold: the
+    # tag test requires an exact C1-C4/D0-D4 special name.
+    assert _ctor_dtor_canonical("_ZN3foo3CatEv") == "_ZN3foo3CatEv"
+    # An empty / non-mangled string is returned untouched (early out).
+    assert _ctor_dtor_canonical("") == ""
+    assert _ctor_dtor_canonical("plain_c_symbol") == "plain_c_symbol"
+    # A *numbered* backref substitution (S0_) — the S<id>_ branch — still reaches
+    # and folds the trailing ctor tag.
+    assert _ctor_dtor_canonical("_ZN1NS0_3FooC1Ev") == _ctor_dtor_canonical(
+        "_ZN1NS0_3FooC2Ev"
+    )
+
+
 def test_linker_excludes_non_public_entities() -> None:
     tu = SourceAbiTu(
         functions=[
