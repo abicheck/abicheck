@@ -730,6 +730,67 @@ def test_thunk_target_mangled_parses_offset_forms() -> None:
     assert _thunk_target_mangled("_ZTV6Widget") is None  # vtable, not a thunk
 
 
+@pytest.mark.parametrize(
+    "sym,expected",
+    [
+        # non-virtual, positive and negative (n) this-adjustment.
+        ("_ZTh4_N1D3fooEv", "_ZN1D3fooEv"),
+        ("_ZThn8_N1D3fooEv", "_ZN1D3fooEv"),
+        # virtual thunk: two numbers (v-offset _ vcall-offset _).
+        ("_ZTv0_n24_N1D3fooEv", "_ZN1D3fooEv"),
+        # covariant: TWO call-offsets (h/v) before the encoding.
+        ("_ZTch0_h4_N1D5cloneEv", "_ZN1D5cloneEv"),
+        ("_ZTcv0_n24_h8_N1D5cloneEv", "_ZN1D5cloneEv"),
+        # --- malformed / non-thunk → None (error branches) ---
+        ("", None),
+        ("foo", None),
+        ("_ZT", None),  # too short, no kind char
+        ("_ZTz0_N1DfooEv", None),  # kind not h/v/c
+        ("_ZTh", None),  # kind but no offset digits (read_number → None)
+        ("_ZThX_N1DfooEv", None),  # non-digit offset
+        ("_ZThn8N1DfooEv", None),  # missing '_' after the number
+        ("_ZTv0_N1DfooEv", None),  # virtual missing the second offset
+        ("_ZTch0_N1DfooEv", None),  # covariant missing the second call-offset
+        ("_ZThn8_", None),  # valid offset but empty encoding
+    ],
+)
+def test_thunk_target_mangled_branches(sym: str, expected: str | None) -> None:
+    from abicheck.buildsource.source_link import _thunk_target_mangled
+
+    assert _thunk_target_mangled(sym) == expected
+
+
+@needs_demangler
+def test_synthesized_attribution_skips_unrecognized_symbols() -> None:
+    # A synthesized-looking symbol that fails to demangle (`_ZTTN6Widget`) or
+    # demangles to an unrecognized form (`_ZTW1x` = "TLS wrapper function for x")
+    # is left orphaned, never attributed — exercising the best-effort skip branches.
+    tu = SourceAbiTu(types=[_entity("Widget", "record", type_hash="t1")])
+    surface = link_source_abi([tu], exported_symbols=["_ZTTN6Widget", "_ZTW1x"])
+    assert sorted(surface.unmatched["symbols_without_decl"]) == [
+        "_ZTTN6Widget",
+        "_ZTW1x",
+    ]
+    assert surface.mappings["synthesized_symbol_to_owner"] == {}
+
+
+@needs_demangler
+def test_guard_variable_attributed_to_enclosing_function() -> None:
+    # A guard variable for a function-local static (`_ZGVZ3foovE3bar` demangles to
+    # "guard variable for foo()::bar") is attributed to its enclosing public
+    # function `foo` — the guard-owner (bare-name) path, distinct from the
+    # overload-specific thunk path.
+    tu = SourceAbiTu(functions=[_entity("foo", "function", mangled="_Z3foov")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_Z3foov", "_ZGVZ3foovE3bar"]
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.mappings["synthesized_symbol_to_owner"]["_ZGVZ3foovE3bar"] == {
+        "kind": "guard",
+        "owner": "foo",
+    }
+
+
 @needs_demangler
 def test_synthesized_attribution_requires_exact_specialization() -> None:
     # Codex review: with only `ns::A<int>` on the surface, the vtable for a

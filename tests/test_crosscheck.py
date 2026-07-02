@@ -348,6 +348,37 @@ def test_public_not_exported_reconciles_l4_variant_export():
     assert hits == ["_Z4gonev"]
 
 
+def test_public_not_exported_reconciles_l4_variant_variable():
+    # Parity with the function case (CodeRabbit): the same L4 reconciliation
+    # suppression is applied to snapshot.variables. A public extern variable the L4
+    # linker tied to a currently-exported symbol under a spelling drift (here an
+    # ABI-tag) is not flagged; a genuinely-absent one still is.
+    snap = _snap(elf=_elf("_ZN2ns3fooB5cxx11E"))
+    snap.variables = [
+        Variable(
+            name="ns::foo",
+            mangled="_ZN2ns3fooE",  # drifts from the exported ABI-tag spelling
+            type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Variable(
+            name="ns::gone",
+            mangled="_ZN2ns4goneE",  # truly not exported, not reconciled
+            type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "_ZN2ns3fooE": "_ZN2ns3fooB5cxx11E",  # reconciled to the exported symbol
+        "_ZN2ns4goneE": "",  # linker could not match it
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    assert hits == ["_ZN2ns4goneE"]
+
+
 def test_public_not_exported_reconciles_macho_underscore_variant():
     # Reconciliation keys are Mach-O-normalized: a plugin-recorded `__ZN…` decl key
     # must still exempt the L2 `_ZN…` mangled decl (Codex Mach-O normalization).
