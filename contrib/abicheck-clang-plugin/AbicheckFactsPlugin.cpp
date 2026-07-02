@@ -1215,7 +1215,14 @@ private:
         if (!ns->isAnonymousNamespace() && !ns->getName().empty())
           scopes.push_back(ns->getNameAsString());
       } else if (const auto *rd = dyn_cast<RecordDecl>(dc)) {
-        if (!rd->getName().empty())
+        // clang.py's JSON kind for an explicit/partial class-template
+        // specialization is ClassTemplateSpecializationDecl /
+        // ClassTemplatePartialSpecializationDecl, which are NOT in
+        // _SCOPE_NODE_KINDS, so it never adds them as a scope segment. They
+        // derive from CXXRecordDecl, so exclude them explicitly — otherwise a
+        // type nested in `template<> struct S<int>{ struct N{}; }` would be
+        // named `ns::S::N` here but `ns::N` by the backend (Codex/review).
+        if (!isa<ClassTemplateSpecializationDecl>(rd) && !rd->getName().empty())
           scopes.push_back(rd->getNameAsString());
       }
       // FunctionDecl / LinkageSpecDecl / the TU contribute nothing to the

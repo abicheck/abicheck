@@ -16,18 +16,22 @@ on:
       - ".github/workflows/clang-plugin.yml"
       - "abicheck/buildsource/source_extractors/clang.py"
       - "abicheck/buildsource/source_extractors/clang_public_roots.py"
+      - "abicheck/buildsource/source_extractors/_argv.py"
       - "abicheck/buildsource/inputs_pack.py"
       - "abicheck/buildsource/inputs_emit.py"
       - "abicheck/buildsource/source_abi.py"
+      - "abicheck/provenance.py"
   pull_request:
     paths:
       - "contrib/abicheck-clang-plugin/**"
       - ".github/workflows/clang-plugin.yml"
       - "abicheck/buildsource/source_extractors/clang.py"
       - "abicheck/buildsource/source_extractors/clang_public_roots.py"
+      - "abicheck/buildsource/source_extractors/_argv.py"
       - "abicheck/buildsource/inputs_pack.py"
       - "abicheck/buildsource/inputs_emit.py"
       - "abicheck/buildsource/source_abi.py"
+      - "abicheck/provenance.py"
   workflow_dispatch:
 
 permissions:

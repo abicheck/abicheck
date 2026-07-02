@@ -101,3 +101,18 @@ inline int withLocalConst() {
 // back to qualified_name#sig — the case where lexical vs semantic scope matters.
 namespace ec { extern "C" int cfn(int); }
 extern "C" inline int ec::cfn(int x) { return x; }
+
+// A type nested in an explicit class-template specialization. clang's JSON kind
+// for the specialization is ClassTemplateSpecializationDecl (not a scope node in
+// the backend), so the nested record is named `spec::Nested`, not
+// `spec::Q::Nested` — scopedName() must exclude the specialization from the
+// scope stack even though it derives from CXXRecordDecl (regression guard).
+namespace spec {
+template <class T>
+struct Q { int a; };
+template <>
+struct Q<int> {
+  struct Nested { int z; };
+  int b;
+};
+}  // namespace spec

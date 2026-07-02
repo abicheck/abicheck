@@ -37,10 +37,13 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-#: Source-entity list keys inside the embedded build_source payload; their total
-#: length is the count of source facts the plugin pack contributed to the merge.
+#: Source-entity list keys inside the *embedded* build_source payload. link_source_abi
+#: folds functions/methods/variables/constexpr into `declarations`, so the embedded
+#: SourceAbiSurface has exactly these five buckets — NOT the raw per-TU `functions`/
+#: `constexpr_values` names. Getting these wrong makes the folded>0 gate silently
+#: ignore a declarations-only (e.g. C, function-only) surface and fail spuriously.
 _ENTITY_LIST_KEYS = frozenset(
-    {"functions", "types", "templates", "inline_bodies", "constexpr_values", "macros"}
+    {"declarations", "types", "templates", "inline_bodies", "macros"}
 )
 
 
