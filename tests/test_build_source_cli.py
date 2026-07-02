@@ -1890,6 +1890,37 @@ def test_exported_symbols_from_snapshot_extracts_mangled_names():
     assert _exported_symbols_from_snapshot(AbiSnapshot(library="l", version="1")) == ()
 
 
+def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
+    """The authoritative export set is the ELF dynamic symbol table, not just the
+    DWARF-shaped ``functions`` list. Feeding only the modeled functions truncated
+    the linker's export set (the ``merge`` symbol-matching regression), so the raw
+    ``elf.symbols`` names must be unioned in."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import Function
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    # A DWARF-modeled function whose linkage name is the non-ABI unified C4 tag —
+    # never present in the real export table.
+    snap.functions = [
+        Function(name="Foo::Foo", mangled="_ZN3FooC4Ev", return_type="void", params=[])
+    ]
+    snap.elf = ElfMetadata()
+    # The real exported clones the loader sees.
+    snap.elf.symbols = [
+        ElfSymbol(name="_ZN3FooC1Ev"),
+        ElfSymbol(name="_ZN3FooC2Ev"),
+        ElfSymbol(name="_Z3barv"),
+    ]
+    exports = _exported_symbols_from_snapshot(snap)
+    # Raw dynamic-table names are present (not just the modeled C4 tag).
+    assert "_ZN3FooC1Ev" in exports
+    assert "_ZN3FooC2Ev" in exports
+    assert "_Z3barv" in exports
+    # The modeled mangled name is still included as a fallback.
+    assert "_ZN3FooC4Ev" in exports
+
+
 def test_build_info_source_mismatch_records_diagnostic(tmp_path):
     """A4: a compile DB whose sources are absent from the --sources tree records
     a build_info_source_tree_mismatch diagnostic (collection-time, not a kind)."""

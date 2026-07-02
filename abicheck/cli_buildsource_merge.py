@@ -48,9 +48,32 @@ def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
 
     Used to plumb L0 exports into inline source replay (A1) for the
     ``dump <binary> --sources`` flow. Empty for a source-only snapshot.
+
+    The authoritative export set is the platform **dynamic symbol table**
+    (``elf.symbols`` / ``pe.exports`` / ``macho.exports``), which lists every
+    exported symbol as its raw linker name. The modeled ``functions``/
+    ``variables`` lists are a *narrower*, DWARF-shaped view that (a) may cover
+    only a fraction of the exports and (b) can carry non-ABI ctor/dtor linkage
+    tags (GCC's unified ``C4``/``D4``) that never match the binary's real
+    ``C1``/``C2`` clones. Feeding only those to the linker collapsed symbol
+    matching to a handful of hits (the plugin/``merge`` regression), so union the
+    raw export table in as the source of truth and keep the modeled mangled names
+    as a fallback for backends that expose no raw table.
     """
     syms = {fn.mangled for fn in snap.functions if fn.mangled}
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    elf = getattr(snap, "elf", None)
+    if elf is not None:
+        syms |= {s.name for s in getattr(elf, "symbols", ()) if getattr(s, "name", "")}
+    pe = getattr(snap, "pe", None)
+    if pe is not None:
+        syms |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
+    macho = getattr(snap, "macho", None)
+    if macho is not None:
+        syms |= {
+            e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")
+        }
+    syms.discard("")
     return tuple(sorted(syms))
 
 

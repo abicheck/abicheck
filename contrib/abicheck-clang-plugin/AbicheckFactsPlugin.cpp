@@ -771,6 +771,18 @@ bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &root
   return false;
 }
 
+// Whether `file` names a C/C++ translation-unit source (not a header). Used to
+// tell an ordinary internal .cpp decl (expected to be non-public) from a decl in
+// a *header* that fell outside the public roots (the public-roots-misconfigured
+// signal, ADR-038 Flow C Caveat A).
+bool isSourceFileName(llvm::StringRef file) {
+  llvm::StringRef ext = llvm::sys::path::extension(file);
+  return ext.equals_insensitive(".c") || ext.equals_insensitive(".cc") ||
+         ext.equals_insensitive(".cpp") || ext.equals_insensitive(".cxx") ||
+         ext.equals_insensitive(".c++") || ext.equals_insensitive(".cp") ||
+         ext == ".C";
+}
+
 // Whether a header path looks machine-generated — a faithful port of
 // provenance._is_generated_header (a `generated`/`gen`/… directory segment, or
 // a moc_/ui_/qrc_/protobuf/flatbuffers/gRPC basename). The clang backend keeps
@@ -1265,8 +1277,28 @@ private:
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
+    // Misconfiguration signal (ADR-038 Flow C, Caveat A): a decl in a real,
+    // non-system *header* that is not under any public root. Ordinary internal
+    // code lives in the .cpp source, so counting only header-declared rejections
+    // distinguishes "public-roots does not match how headers resolve" (every
+    // public header rejected → an empty pack) from a legitimately internal TU.
+    if (!isSourceFileName(file)) {
+      ++RejectedHeaderDecls;
+      if (ExampleRejectedHeader.empty())
+        ExampleRejectedHeader = file;
+    }
     return false;
   }
+
+public:
+  //: Header-declared decls rejected because no public root matched them, plus one
+  //: example path — feeds the "0 public entities" diagnostic (Caveat A).
+  size_t rejectedHeaderDecls() const { return RejectedHeaderDecls; }
+  const std::string &exampleRejectedHeader() const {
+    return ExampleRejectedHeader;
+  }
+
+private:
 
   void emitType(const TagDecl *td, const std::string &name,
                 const std::string &kind) {
@@ -1334,6 +1366,9 @@ private:
   std::vector<Entity> &InlineBodies;
   std::vector<Entity> &ConstexprValues;
   std::set<std::string> &Diags;
+  // Mutable: updated from the const `classify` gate while walking the AST.
+  mutable size_t RejectedHeaderDecls = 0;
+  mutable std::string ExampleRejectedHeader;
 };
 
 // ---------------------------------------------------------------------------
@@ -1360,6 +1395,32 @@ public:
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
+
+    // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
+    // but this TU emitted zero public entities *while* header-declared decls were
+    // rejected for not being under any root, public-roots almost certainly does
+    // not match how the compiler resolves the public headers (e.g. it points at
+    // the installed `include/` while `-I..` makes `<pvxs/x.h>` resolve to
+    // `src/pvxs/`). Previously this produced an empty pack with exit 0 and no
+    // message. Emit a diagnostic to stderr AND record it in the pack.
+    size_t publicCount = functions.size() + types.size() + templates.size() +
+                         inlineBodies.size() + constexprValues.size() +
+                         macros.size();
+    if (!Roots.empty() && publicCount == 0 && visitor.rejectedHeaderDecls() > 0) {
+      std::string roots;
+      for (const std::string &r : Roots)
+        roots += (roots.empty() ? "" : ", ") + r;
+      std::string msg =
+          "abicheck-facts: public-roots matched 0 declarations for this TU (" +
+          std::to_string(visitor.rejectedHeaderDecls()) +
+          " header decl(s) were seen outside the root(s) [" + roots +
+          "], e.g. " + visitor.exampleRejectedHeader() +
+          "). public-roots must be the directory the compiler actually resolves "
+          "the public headers from (verify with `clang -H`), not necessarily the "
+          "installed include dir; the emitted pack is empty.";
+      llvm::errs() << msg << "\n";
+      diags.insert(msg);
+    }
 
     std::string source;
     if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {

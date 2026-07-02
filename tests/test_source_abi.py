@@ -273,6 +273,74 @@ def test_linker_matches_unmangled_c_exports() -> None:
     assert surface.unmatched["decls_without_symbol"] == []
 
 
+def test_linker_matches_ctor_dtor_abi_clone_variants() -> None:
+    # One source ctor/dtor Decl mangles to a single name (C1/D1), but the compiler
+    # exports several ABI clones (C1 complete + C2 base; D0 deleting + D1 + D2).
+    # An exact-string match would orphan the C2/D0/D2 clones as
+    # "exported but no source decl"; the linker folds ctor/dtor tags so the one
+    # declaration claims every clone (ADR-030 D5 symbol linking).
+    tu = SourceAbiTu(
+        functions=[
+            _entity("Widget::Widget", "function", mangled="_ZN6WidgetC1Ev"),
+            _entity("Widget::~Widget", "function", mangled="_ZN6WidgetD1Ev"),
+        ],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=[
+            "_ZN6WidgetC1Ev",  # complete-object ctor (matches decl exactly)
+            "_ZN6WidgetC2Ev",  # base-object ctor clone (only via folding)
+            "_ZN6WidgetD0Ev",  # deleting dtor clone
+            "_ZN6WidgetD1Ev",  # complete-object dtor (matches decl exactly)
+            "_ZN6WidgetD2Ev",  # base-object dtor clone
+        ],
+    )
+    # Every exported clone is attributed to a declaration — none is orphaned.
+    assert surface.unmatched["symbols_without_decl"] == []
+    # Both declarations resolve to a concrete exported symbol (not "").
+    mapping = surface.mappings["source_decl_to_binary_symbol"]
+    assert mapping["_ZN6WidgetC1Ev"]
+    assert mapping["_ZN6WidgetD1Ev"]
+    assert surface.coverage["matched_symbols"] == 5
+
+
+def test_linker_matches_dwarf_unified_ctor_tag_to_real_clones() -> None:
+    # GCC's DWARF linkage name uses the non-standard *unified* C4/D4 tag for a
+    # ctor/dtor, which never appears in the ELF export table (which has C1/C2 …).
+    # The fold canonicalizes C4/D4 too, so a DWARF-sourced decl still matches the
+    # real exported clones instead of collapsing to zero matches.
+    tu = SourceAbiTu(
+        functions=[_entity("Widget::Widget", "function", mangled="_ZN6WidgetC4Ev")],
+    )
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev"]
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["matched_symbols"] == 2
+    # The single decl maps to one of the concrete clones (a stable pick).
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN6WidgetC4Ev"] in {
+        "_ZN6WidgetC1Ev",
+        "_ZN6WidgetC2Ev",
+    }
+
+
+def test_ctor_dtor_fold_leaves_non_ctor_symbols_exact() -> None:
+    # The fold must be a no-op for ordinary symbols: a regular function whose name
+    # merely contains letters+digits must not be conflated with a ctor/dtor clone.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    assert _ctor_dtor_canonical("_ZN3foo3barEv") == "_ZN3foo3barEv"
+    # C1/C2/C3/C4 fold together; D0/D1/D2/D4 fold together; the two stay distinct.
+    ctors = {_ctor_dtor_canonical(f"_ZN6WidgetC{n}Ev") for n in (1, 2, 3, 4)}
+    dtors = {_ctor_dtor_canonical(f"_ZN6WidgetD{n}Ev") for n in (0, 1, 2, 4)}
+    assert len(ctors) == 1 and len(dtors) == 1
+    assert ctors != dtors
+    # A non-exported, non-ctor decl stays unmatched (no accidental fold match).
+    tu = SourceAbiTu(functions=[_entity("ns::f", "function", mangled="_ZN2ns1fEi")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN2ns1gEi"])
+    assert surface.mappings["source_decl_to_binary_symbol"]["_ZN2ns1fEi"] == ""
+
+
 def test_linker_excludes_non_public_entities() -> None:
     tu = SourceAbiTu(
         functions=[

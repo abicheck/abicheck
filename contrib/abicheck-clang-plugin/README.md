@@ -118,6 +118,35 @@ abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 `version=<v>`. `public-roots=` is repeatable.
 
+### `public-roots` must match how headers *resolve*, not where they are installed
+
+The plugin classifies a declaration as public by the **physical path the
+compiler resolved its header to**, then tests that path against `public-roots`.
+The trap: your public headers may be installed at `include/pvxs/…`, but if an
+earlier `-I` makes `<pvxs/data.h>` resolve to `src/pvxs/data.h`, then
+`public-roots=include` matches **nothing** and the pack comes back empty — even
+though everything "looks" configured. Include order decides the resolved path,
+not the install layout.
+
+Two ways to get it right:
+
+- **Check the resolution** — `clang++ <your -I flags> -H -fsyntax-only x.cpp`
+  prints the actual file each `#include` opened; point `public-roots=` at *that*
+  directory (e.g. `src/pvxs`), not the installed copy.
+- **Trust the diagnostic** — since ADR-038 Flow C the plugin no longer fails
+  silently: if `public-roots` matches zero declarations while header decls were
+  seen outside the roots, it prints
+
+  ```
+  abicheck-facts: public-roots matched 0 declarations for this TU
+  (799 header decl(s) were seen outside the root(s) [.../include],
+   e.g. .../epicsAssert.h). public-roots must be the directory the compiler
+   actually resolves the public headers from (verify with `clang -H`) …
+  ```
+
+  and records the same note in the pack's `diagnostics`. An empty pack is now a
+  loud error, not a 20-minute debug.
+
 ## Validation: differential conformance (ADR-038 C.6)
 
 The plugin is correct **iff** it is a drop-in for the **clang** backend. The gate

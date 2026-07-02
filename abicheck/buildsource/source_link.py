@@ -26,10 +26,75 @@ Linking is cheap relative to parsing, so it is recomputed rather than cached
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
+
+#: C++ Itanium ctor/dtor "ABI clone" tags. The compiler emits *several* object
+#: symbols for one source ctor/dtor — ``C1`` (complete), ``C2`` (base), ``C3``
+#: (allocating); ``D0`` (deleting), ``D1`` (complete), ``D2`` (base) — plus GCC's
+#: non-standard unified ``C4``/``D4`` marker seen in DWARF linkage names. A source
+#: extractor sees ONE ``Decl`` and emits one mangled name (usually ``C1``/``D1``,
+#: or ``C4``/``D4`` from DWARF). An exact-string match therefore attributes only
+#: *one* clone to the declaration and reports the siblings as "exported symbol
+#: with no source decl" — a systematic under-count for every class with exported
+#: ctors/dtors. Folding the tag to a canonical marker lets the single declaration
+#: claim all of its clone symbols (ADR-030 D5 symbol linking).
+_CTOR_DTOR_TAG_RE = re.compile(r"(?<=[A-Za-z])(C[1-4]|D[0-4])E")
+
+
+def _ctor_dtor_canonical(symbol: str) -> str:
+    """Fold C++ ctor/dtor ABI clone tags to a single canonical marker.
+
+    ``_ZN3FooC1Ev``/``_ZN3FooC2Ev``/``_ZN3FooC4Ev`` all fold to the same key, and
+    likewise for the ``D0``/``D1``/``D2``/``D4`` destructor variants. A no-op for
+    any name without such a tag, so non-ctor/dtor symbols keep exact-match
+    semantics and cannot be conflated.
+    """
+    return _CTOR_DTOR_TAG_RE.sub(lambda m: m.group(1)[0] + "@E", symbol)
+
+
+def _build_export_index(exported: set[str]) -> dict[str, list[str]]:
+    """Index ctor/dtor canonical forms → the concrete exported clone symbols.
+
+    Only names whose canonical form *differs* (i.e. actual ctor/dtor symbols) are
+    indexed, so the map stays small and a non-ctor symbol can never collide into
+    it — those still match exactly against ``exported``.
+    """
+    index: dict[str, list[str]] = {}
+    for sym in exported:
+        canon = _ctor_dtor_canonical(sym)
+        if canon != sym:
+            index.setdefault(canon, []).append(sym)
+    return index
+
+
+def _match_export(
+    export_sym: str, exported: set[str], ctor_dtor_index: dict[str, list[str]]
+) -> tuple[str, list[str]]:
+    """Resolve a decl's export name to ``(primary_symbol, all_clone_symbols)``.
+
+    Exact match wins; its ctor/dtor siblings (if any were also exported) are
+    folded in so none is orphaned. When there is no exact hit but the name is a
+    ctor/dtor, it is matched against the canonical index so a decl mangled as
+    ``C1``/``D1`` (or the DWARF ``C4``/``D4``) still claims the ``C2``/``D2``/…
+    clones the binary actually exports. Returns ``("", [])`` when nothing matches.
+    """
+    if not export_sym:
+        return "", []
+    canon = _ctor_dtor_canonical(export_sym)
+    clones = ctor_dtor_index.get(canon)
+    if export_sym in exported:
+        if clones:
+            return export_sym, sorted(set(clones) | {export_sym})
+        return export_sym, [export_sym]
+    if clones:
+        variants = sorted(clones)
+        return variants[0], variants
+    return "", []
+
 
 #: Entity kinds routed to each reachable bucket of the linked surface (D5).
 _TYPE_KINDS = frozenset({"record", "enum", "typedef", "union"})
@@ -80,6 +145,7 @@ def link_source_abi(
     surface.roots["forced_public"] = sorted(forced)
 
     state = _LinkState()
+    state.export_index = _build_export_index(exported)
     for tu in tus:
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (
@@ -132,6 +198,7 @@ def relink_surface_exports(
     """
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
+    export_index = _build_export_index(exported)
     mapping: dict[str, str] = {}
     matched: set[str] = set()
     # identity -> display name, so the recomputed decls_without_symbol carries the
@@ -143,9 +210,10 @@ def relink_surface_exports(
             continue
         identity_to_qname[key] = entity.qualified_name or key
         export_sym = entity.mangled_name or entity.qualified_name
-        if export_sym and export_sym in exported:
-            mapping[key] = export_sym
-            matched.add(export_sym)
+        primary, variants = _match_export(export_sym, exported, export_index)
+        if primary:
+            mapping[key] = primary
+            matched.update(variants)
         else:
             mapping.setdefault(key, "")
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
@@ -181,6 +249,8 @@ class _LinkState:
     odr_conflicts: list[dict[str, str]] = field(default_factory=list)
     public_decl_ids: list[str] = field(default_factory=list)
     matched_symbols: set[str] = field(default_factory=set)
+    #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
+    export_index: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _route_entity(
@@ -267,8 +337,9 @@ def _route_declaration(
         return
     state.identity_to_qname[key] = entity.qualified_name or key
     export_sym = entity.mangled_name or entity.qualified_name
-    if export_sym and export_sym in exported:
-        state.decl_to_symbol[key] = export_sym
-        state.matched_symbols.add(export_sym)
+    primary, variants = _match_export(export_sym, exported, state.export_index)
+    if primary:
+        state.decl_to_symbol[key] = primary
+        state.matched_symbols.update(variants)
     else:
         state.decl_to_symbol.setdefault(key, "")
