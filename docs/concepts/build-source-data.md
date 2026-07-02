@@ -220,13 +220,43 @@ or a parse error degrades to a warning. Set `ABICHECK_CC_DISABLE=1` for a pure
 pass-through. The wrapper reuses the castxml/clang extractors, so it is the
 **portable, supported producer**.
 
-The **Clang plugin** (`contrib/abicheck-clang-plugin/`) is an optional
-optimization that emits the *same* `source_facts` schema straight from the AST
-Clang already built, removing the second front-end pass — reach for it only when
-that cost is measurable and you control the toolchain image. GCC
-(`-fdump-lang-class`) and MSVC have documented fallbacks. In every case the output
-contract is identical, so `abicheck merge` ingests them the same way. The portable
-default remains `compile_commands.json` replay (`dump --sources`).
+#### Producing a pack — the Clang plugin (zero extra parse)
+
+The **Clang plugin** (`contrib/abicheck-clang-plugin/`) emits the *same*
+`source_facts` schema straight from the AST Clang already built during the real
+compile, so — unlike the wrapper's companion parse — it adds **no second
+front-end pass**. Reach for it on large/template-heavy builds where that cost is
+measurable and you own the toolchain image (the plugin links the loading clang's
+libraries, so it is ABI-locked to that LLVM major — build it once against your
+pinned `clang`).
+
+```bash
+# 1. Build the plugin against your toolchain's LLVM (once per image).
+cmake -S contrib/abicheck-clang-plugin -B build \
+  -DCMAKE_PREFIX_PATH="$(llvm-config --cmakedir)/.."
+cmake --build build                                   # -> build/libabicheck-facts.so
+
+# 2. Add it to the normal compile. Use the `-Xclang -plugin-arg-abicheck-facts`
+#    form (the `-fplugin-arg-` shorthand mis-parses the hyphenated plugin name).
+#    `public-roots=` is mandatory — it is the plugin's ABICHECK_CC_HEADERS.
+clang++ -std=c++17 -Iinclude \
+  -fplugin=./build/libabicheck-facts.so \
+  -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs \
+  -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
+  -c src/foo.cpp -o foo.o
+
+# 3. Fold the emitted pack in, exactly like the wrapper (no re-parse).
+abicheck dump libfoo.so -H include/ -o libfoo.bin.json
+abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
+```
+
+The plugin is validated as a drop-in for the clang backend by a differential
+conformance gate (ADR-038 C.6) that runs across LLVM/Clang 16, 17, and 18; its
+full contract, coverage, and limitations live in
+`contrib/abicheck-clang-plugin/README.md`. GCC (`-fdump-lang-class`) and MSVC
+have documented wrapper fallbacks. In every case the output contract is
+identical, so `abicheck merge` ingests them the same way; the portable default
+remains `compile_commands.json` replay (`dump --sources`).
 
 ### Choosing how much to collect — `dump --depth`
 

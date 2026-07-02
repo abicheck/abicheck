@@ -1,13 +1,23 @@
 # ADR-038: Working With Sources — Full-Scan and Two Build-Injection Flows, and the Clang Plugin Specification
 
 **Date:** 2026-07-01
-**Status:** Proposed. Formalizes and extends ADR-035 D5 (Flow 1 / Flow 2) into a
-complete, three-flow producer contract and pins the Clang-plugin specification.
-Flow A (full source scan / no injection) and Flow B (the `abicheck-cc` wrapper)
-already ship; Flow C (the Clang plugin) exists as a reference skeleton
-(`contrib/abicheck-clang-plugin/`) whose AST visitor is unimplemented — this ADR
-is its build-to spec.
-**Decision maker:** (pending)
+**Status:** Accepted — implemented. Formalizes and extends ADR-035 D5 (Flow 1 /
+Flow 2) into a complete, three-flow producer contract and pins the Clang-plugin
+specification. Flow A (full source scan / no injection) and Flow B (the
+`abicheck-cc` wrapper) already ship; Flow C (the Clang plugin,
+`contrib/abicheck-clang-plugin/`) now implements this spec —
+functions/mangled-name rule/signatures/default args,
+typedefs, constexpr, records/enums/templates **including the AST subtree hashes**
+(`type_hash`/`body_hash`), macros (in-compile `PPCallbacks`), and visibility. The
+subtree hashes are produced by serializing the in-memory AST with clang's own
+JSON dumper (`Decl::dump(…, ADOF_JSON)`) and porting `clang.py`'s
+canonicalization onto it, so parity holds by construction for a given clang
+version. The **C.6 differential-conformance gate runs green in CI across LLVM/Clang
+16, 17, and 18** (`.github/workflows/clang-plugin.yml`) — the plugin's public
+surface is entity-equivalent to the clang backend on each. The one documented
+residual is a floating-point literal's textual value inside a hashed subtree, plus
+the pragmatic visibility-classifier edge cases (C.7).
+**Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
 
@@ -63,7 +73,7 @@ only in *where the parse happens* and *how much the product build must change*.
 |------|------|--------------|-------------|------------|---------------|--------|
 | **A** | **Full source scan** (`dump --sources` / `collect`) | **None** | 1, post-build | **abicheck** | inline, or `collect` → `dump --build-info` | ✅ Shipped (Flow 1) |
 | **B** | **Wrapper injection** (`abicheck-cc`) | Set `CC`/`CXX` | 1 companion, in-build | The build (as a companion action) | `merge` an `abicheck_inputs/` pack | ✅ Shipped (Flow 2) |
-| **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚠️ Skeleton — spec below |
+| **C** | **Plugin injection** (`-fplugin`) | Add a clang flag | **0** — rides the compile's AST | The compile itself | `merge` an `abicheck_inputs/` pack | ⚙️ Reference — implemented (incl. subtree hashes); C.6 gate in CI matrix |
 
 **D0 — the shared-contract invariant.** A *comparison* is always old-vs-new
 produced by the **same** producer, and every producer is deterministic and
@@ -337,14 +347,17 @@ the contract:
 | template | `"template", qualified_name` | `body_hash = subtree_hash(node)`; do not descend into the templated pattern |
 | macro | `"macro", name, value` | captured **in-compile** via `PPCallbacks` (`MacroDefined`/`MacroUndefined`) — never a second `-E -dD` pass (C.3); public-header macros only, include guards dropped, value normalized to match `clang.py::macros_from_preprocessor` |
 
-- **`subtree_hash`** is the hard part: `clang.py` hashes an **alpha-renamed,
-  commutative-operator-normalized, build-root-stripped canonical form of clang's
-  *JSON* AST** (`_canonical`/`_alpha_rename_map`/`_subtree_hash`). Reproducing it
-  byte-for-byte from the in-memory AST means emitting the same canonical scalar
-  keys (`kind`/`name`/`value`/`opcode`/`castKind` + `type.qualType`), the same
-  local-binding placeholders (`$0`…), and the same commutative-operand sort. This
-  is why `type_hash`/`body_hash` parity is the plugin's genuine engineering risk
-  (see C.7).
+- **`subtree_hash`** was the hard part and is now **implemented**: `clang.py`
+  hashes an **alpha-renamed, commutative-operator-normalized, build-root-stripped
+  canonical form of clang's *JSON* AST** (`_canonical`/`_alpha_rename_map`/
+  `_subtree_hash`). Rather than hand-reproduce clang's JSON, the plugin
+  serializes the relevant subtree with **clang's own JSON dumper in-process** —
+  `Decl::dump(os, false, ADOF_JSON)`, the exact code path `-ast-dump=json` uses —
+  and ports `_alpha_rename_map`/`_canonical`/`_subtree_hash` (plus `_expr_value`/
+  `_default_arg_repr`) onto that JSON. Because the wrapper's clang backend
+  consumes the *same* clang JSON, the hashes match by construction for a given
+  clang version; cross-version drift is caught by the C.6 CI matrix (C.6). No
+  second parse is added — the dump reads the AST clang already built.
 - **Mangled-name rule:** take clang's `mangledName`; if it equals the plain
   `name` (e.g. some constructors), leave `mangled_name` **empty** so `identity()`
   falls back to `qualified_name#signature_hash` and keeps unmangled overloads
@@ -391,23 +404,46 @@ cmake --build build     # → libabicheck-facts.so
 The plugin is a CMake `MODULE` linked against the **loading clang's** symbols
 (`find_package(LLVM/Clang CONFIG)`, `cxx_std_17`, no bundled LLVM). It is
 therefore **ABI-locked to its LLVM major**: a plugin built against LLVM *N* only
-loads into that `clang`. This is why it is `contrib/` reference and **never gated
-in abicheck's own CI** — abicheck cannot ship one `.so` for every LLVM. A product
-build has a pinned toolchain image, so it builds the plugin once against that
-image and injects it.
+loads into that `clang`. abicheck cannot ship one `.so` for every LLVM, so the
+plugin is **not a required gate in the main abicheck CI**; a product build has a
+pinned toolchain image and builds the plugin once against that image. That
+ABI-lock is exactly why validation is *per-version*: the `clang-plugin` workflow
+(`.github/workflows/clang-plugin.yml`) builds the plugin against a **matrix of
+LLVM/Clang majors** and runs the C.6 conformance test on each (C.6). It is a
+standalone, non-blocking workflow, path-filtered to the plugin and the
+clang-recipe modules it mirrors — validation without gating merges, consistent
+with "not a required gate".
 
 ### C.6 — Validation: differential conformance
 
 The plugin is correct **iff** it is a drop-in for the **clang** backend. The gate
-is a differential test: compile a fixture header both ways — the plugin (with
+is a differential test (`contrib/abicheck-clang-plugin/tests/conformance.py`):
+compile one fixture TU both ways with the **same** clang — the plugin (with
 `public-roots=include`), and the wrapper pinned to clang with the same roots
 (`ABICHECK_CC_EXTRACTOR=clang`, *not* `auto`, plus `ABICHECK_CC_HEADERS=include`,
 so both sides use the recipe *and* the public surface the plugin targets) —
 ingest both packs, and assert the two surfaces are **entity-equivalent**: equal
 sets keyed by `SourceEntity.identity()`, with equal
 `signature_hash`/`type_hash`/`body_hash`/`value`/`visibility`/`api_relevant` per
-entity. It runs only where a matching clang is available (an
-`integration`/`libabigail`-style marker), never as a required abicheck-CI gate.
+entity. Non-macro entities are compared **strictly**; macro *values* are compared
+leniently (operator-adjacent spacing is the documented soft edge, C.7). The
+`clang-plugin` workflow runs this on a **matrix of LLVM/Clang majors** (pinning
+`clang`/`clang++` on `PATH` to each matrix version so the plugin and the wrapper's
+extractor use the identical clang — the precondition for byte-for-byte parity),
+and — because the plugin is a plain LLVM shared module — builds it with **both
+GCC and Clang as the host compiler** (LLVM 18 both ways; 16/17 on the distro
+default) to keep it host-toolchain-portable. It runs only where a matching clang
+is available and is never a required abicheck-CI gate.
+
+Beyond entity equivalence, each matrix leg also runs an **end-to-end scan
+validation** (`tests/scan_flow.py`): it compiles the fixture into a shared
+library *with the plugin active* (one build both links the `.so` and drops
+`abicheck_inputs/` beside it), then drives the real user pipeline — `abicheck
+dump` the binary (L0/L1), `abicheck merge` the plugin pack into the baseline
+(asserting the L4 source-ABI and L5 graph layers were ingested with a non-empty
+entity set), and `abicheck compare` the merged baseline against itself (asserting
+a clean verdict). This proves a plugin-emitted pack is *consumable by the
+ordinary scan*, not merely entity-equivalent to the clang backend.
 
 ### C.7 — Non-goals / limitations
 
@@ -415,14 +451,17 @@ entity. It runs only where a matching clang is available (an
   MSVC remain documented fallbacks via the wrapper; a small normalizer to
   `source_facts` is out of scope here.
 - **AST-subtree hashes:** `type_hash` (records/enums) and `body_hash`
-  (inline/template bodies) depend on reproducing `clang.py`'s JSON-AST
-  canonicalization from the in-memory AST (C.2) — the plugin's hardest part.
-  Declaration-level fields (`id`, `qualified_name`, `mangled_name`,
-  `signature_hash` from `qualType`, default-arg `value`, `visibility`) are
-  straightforward and match readily; where the plugin cannot yet reproduce a
-  subtree hash it emits the declaration without it (partial, never wrong) and
-  records a diagnostic — the clang wrapper/full-scan path stays the reference for
-  those fields until parity is proven by the C.6 gate.
+  (inline/template bodies) are **implemented** by dumping the subtree with
+  clang's own JSON dumper in-process and porting `clang.py`'s canonicalization
+  (C.2); the C.6 CI matrix proves parity per clang version. The one residual is a
+  **floating-point (or fixed-point) literal's textual value inside a hashed
+  subtree**: clang's JSON emits an *approximate* numeric `value`
+  (`getValueAsApproximateDouble()`) whose shortest-round-trip textual form the
+  plugin reproduces only best-effort. This is self-consistent within the producer,
+  so under D0 (both baselines produced the same way) it never yields a false
+  finding; only the cross-producer C.6 gate can surface it. Should a dump fail at
+  runtime, the entity is still emitted without the subtree hash (partial, never
+  wrong) plus a diagnostic.
 - **Macros:** macro parity must be delivered by in-compile `PPCallbacks` (C.2),
   never a second `-E -dD` pass — a companion preprocess would reintroduce exactly
   the extra front-end pass Flow C exists to avoid. Until the `PPCallbacks` path is
@@ -434,6 +473,36 @@ entity. It runs only where a matching clang is available (an
   entity-equivalent to the clang backend it substitutes (the C.6 gate covers
   macros) — the sanctioned plugin↔clang-backend equivalence of D0, not a licence
   to mix arbitrary producers.
+- **Public-surface classifier (pragmatic):** the plugin classifies a decl/macro
+  as public by matching its declaring file's path segments against the
+  `public-roots` set (with a `SourceManager::isInSystemHeader` guard so stdlib
+  headers reached through a coincidental path segment like `include` do not
+  leak). This is an approximation of `clang.py`'s include-spelling model
+  (`build_public_set`/`classify_origin`), not a byte-port. It agrees with the
+  backend for the common `-Iinclude` layout (the C.6 gate passes), but two
+  configurations are known to diverge until the full matcher is ported: public
+  headers reached via a **system include path** (`-isystem`, CMake
+  `SYSTEM PUBLIC`) are dropped by the system-header guard even though they are
+  explicitly public, and exact-file public roots given from a **different tree**
+  than the compile's are matched only by segment-subsequence. A project hitting
+  either runs Flow A/B for both sides of the comparison.
+- **Compiler-implicit special members:** the plugin does **not** emit
+  compiler-*implicit* (never user-declared) special members — the default/copy/
+  move constructors, destructor, and assignment operators a class gets for free.
+  `RecursiveASTVisitor::shouldVisitImplicitCode()` is left at its default
+  (false), so implicit members are not traversed. The clang backend, walking
+  clang's JSON, *does* emit those it finds materialized in the TU (e.g. a public
+  API that returns a record by value odr-uses its copy/move ctor), so a header
+  exposing such a record shows a benign cross-producer MISSING on the C.6 gate.
+  Matching it is a deliberate non-goal: it would require visiting all implicit
+  code and then filtering to exactly the set the wrapper's invocation
+  materialized — a set that depends on the capture point (the plugin runs
+  post-codegen, `AddAfterMainAction`; the wrapper does not), so parity would be
+  fragile rather than exact. Under D0 (same-producer baselines) the implicit
+  surface is identical on both sides, so it never yields a false finding; a
+  project needing implicit-member facts in a cross-producer comparison runs
+  Flow A/B for both sides. `= default`-ed members are user-declared (not
+  implicit) and *are* emitted normally.
 
 ---
 

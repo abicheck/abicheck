@@ -125,6 +125,16 @@ scan degrades gracefully and L0–L2 stay authoritative.
     to `text` with a warning. `merge` writes a `.abi.json` baseline to
     `output-file` (default `merged-baseline.json`).
 
+!!! tip "Consuming build-emitted source facts (wrapper / Clang plugin)"
+    If your **product build** emits its own `abicheck_inputs/` pack — via the
+    `abicheck-cc` compiler wrapper or the optional
+    [Clang plugin](../concepts/build-source-data.md) (both write the identical
+    schema) — the Action ingests it with **`mode: merge`**: pass the binary dump
+    plus the pack directory in `merge-inputs`. The Action does not run the
+    wrapper/plugin itself (that happens in your build); it folds the resulting
+    pack into a baseline with no re-parse, exactly like the local
+    `abicheck merge` flow.
+
 ### Output and policy
 
 | Input | Default | Description |
