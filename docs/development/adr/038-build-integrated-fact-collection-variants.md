@@ -495,6 +495,23 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
   reproduce that. Under D0 (both baselines produced the same way) this is never
   a false finding; it can only surface as a benign MISSING on the cross-producer
   C.6 gate, which the fixture does not trigger.
+- **Compiler-implicit special members:** the plugin does **not** emit
+  compiler-*implicit* (never user-declared) special members — the default/copy/
+  move constructors, destructor, and assignment operators a class gets for free.
+  `RecursiveASTVisitor::shouldVisitImplicitCode()` is left at its default
+  (false), so implicit members are not traversed. The clang backend, walking
+  clang's JSON, *does* emit those it finds materialized in the TU (e.g. a public
+  API that returns a record by value odr-uses its copy/move ctor), so a header
+  exposing such a record shows a benign cross-producer MISSING on the C.6 gate.
+  Matching it is a deliberate non-goal: it would require visiting all implicit
+  code and then filtering to exactly the set the wrapper's invocation
+  materialized — a set that depends on the capture point (the plugin runs
+  post-codegen, `AddAfterMainAction`; the wrapper does not), so parity would be
+  fragile rather than exact. Under D0 (same-producer baselines) the implicit
+  surface is identical on both sides, so it never yields a false finding; a
+  project needing implicit-member facts in a cross-producer comparison runs
+  Flow A/B for both sides. `= default`-ed members are user-declared (not
+  implicit) and *are* emitted normally.
 
 ---
 
