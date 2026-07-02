@@ -47,16 +47,18 @@ _CTOR_DTOR_TAGS = frozenset({"C1", "C2", "C3", "C4", "D0", "D1", "D2", "D4"})
 def _skip_e_terminated(symbol: str, i: int) -> int:
     """Return the index just past the ``E`` that closes the ``I``/``N`` at *i*.
 
-    Balances nested ``I`` (template-args) and ``N`` (nested-name) productions and
-    consumes length-prefixed ``<source-name>`` components *wholesale* — so their
-    interior characters (which can include ``I``/``N``/``E``) never miscount.
-    Without this, a nested type inside a template argument (e.g. the
-    ``NSt7__cxx11…E`` in ``std::vector<std::string>``) would close the balance
-    early and the real ctor tag that follows would be missed (Codex review).
+    Balances every nested ``E``-terminated production — ``I`` (template-args),
+    ``N`` (nested-name), and ``F`` (function type, e.g. a ``A<void(int)>`` arg
+    mangled ``FviE``) — and consumes length-prefixed ``<source-name>`` components
+    *wholesale* so their interior characters (which can include ``I``/``N``/``F``/
+    ``E``) never miscount. Without this, a nested type inside a template argument
+    (the ``NSt7__cxx11…E`` of ``std::vector<std::string>``, or the ``F…E`` of a
+    function-typed argument) would close the balance early and the real ctor tag
+    that follows would be missed (Codex review).
 
     Best-effort: on any unrecognized production it advances one character, so an
-    exotic tail (a non-type-template ``L…E`` literal, say) can only cause a
-    *missed* fold — never a wrong one, preserving the no-false-fold guarantee.
+    exotic tail can only cause a *missed* fold — never a wrong one, preserving
+    the no-false-fold guarantee.
     """
     n = len(symbol)
     depth = 1  # symbol[i] is the opener
@@ -68,14 +70,14 @@ def _skip_e_terminated(symbol: str, i: int) -> int:
             # digits (a non-type template parameter, e.g. `Fixed<3>` → `Li3E`),
             # NOT a length-prefixed source-name — so consume the literal to its
             # own matching E flatly (digits are literal chars here), only
-            # balancing any nested I/N/L in its type. Without this the digit
+            # balancing any nested I/N/F/L in its type. Without this the digit
             # would be misread as a length and swallow the trailing ctor tag
             # (Codex review).
             ldepth = 1
             i += 1
             while i < n and ldepth:
                 d = symbol[i]
-                if d in "INL":
+                if d in "INFL":
                     ldepth += 1
                 elif d == "E":
                     ldepth -= 1
@@ -87,7 +89,7 @@ def _skip_e_terminated(symbol: str, i: int) -> int:
                 j += 1
             i = j + int(symbol[i:j])
             continue
-        if c in "IN":
+        if c in "INF":
             depth += 1
         elif c == "E":
             depth -= 1
@@ -95,8 +97,67 @@ def _skip_e_terminated(symbol: str, i: int) -> int:
     return i
 
 
+#: Cheap pre-filter: a symbol can only carry a ctor/dtor special name if it holds
+#: one of these substrings. Lets the demangler backstop skip the ~all symbols that
+#: are obviously not ctors/dtors (no fork/parse) before paying for a demangle.
+_CTOR_DTOR_SUBSTR = tuple(t + "E" for t in _CTOR_DTOR_TAGS)
+
+
 def _ctor_dtor_canonical(symbol: str) -> str:
     """Fold a genuine Itanium ``<ctor-dtor-name>`` to a single canonical marker.
+
+    Primary path is the fast, dependency-free structural parser
+    (:func:`_ctor_dtor_structural`). When it cannot fold a symbol that *looks*
+    like it carries a ctor/dtor tag — an exotic Itanium production the hand-parser
+    doesn't model — fall back to a **demangler**-derived key (abicheck's demangler
+    is a full Itanium parser, so it collapses every C1/C2/C3 and D0/D1/D2 clone to
+    the same demangled ``Class::Class()`` / ``Class::~Class()`` form). The backstop
+    is best-effort: if no demangler is available the structural result stands (a
+    safe *missed* fold, never a wrong one). Both the export index and the decl
+    side run through this one function, so their keys stay in the same space.
+    """
+    folded = _ctor_dtor_structural(symbol)
+    if folded != symbol:
+        return folded
+    if any(sub in symbol for sub in _CTOR_DTOR_SUBSTR):
+        return _ctor_dtor_demangle_fallback(symbol)
+    return symbol
+
+
+def _ctor_dtor_demangle_fallback(symbol: str) -> str:
+    """Demangler-derived canonical key for a ctor/dtor the parser couldn't fold.
+
+    Returns a ``"ctordtor:<demangled>"`` key when *symbol* demangles to a
+    constructor (``Name::Name(``) or destructor (``Name::~Name(``) — the demangled
+    form already omits the C1/C2/D0/D1 variant number, so every clone maps to one
+    key. Returns *symbol* unchanged when a demangler is unavailable or the symbol
+    is not actually a ctor/dtor, keeping exact-match semantics.
+    """
+    try:
+        from ..demangle import demangle as _demangle
+
+        demangled = _demangle(symbol)
+    except Exception:  # noqa: BLE001 - demangling is a best-effort backstop
+        return symbol
+    if not demangled or "(" not in demangled:
+        return symbol
+    qualified = demangled.split("(", 1)[0].rstrip()
+    # Strip a trailing cv/ref qualifier list is unnecessary here (we cut at "(").
+    parts = qualified.rsplit("::", 1)
+    if len(parts) != 2:
+        return symbol
+    scope, name = parts
+    cls = scope.rsplit("::", 1)[-1]
+    # Constructor: leaf name == class name (ignoring template args on either).
+    base_cls = cls.split("<", 1)[0]
+    base_name = name.split("<", 1)[0]
+    if base_name == base_cls or base_name == "~" + base_cls:
+        return f"ctordtor:{qualified}"
+    return symbol
+
+
+def _ctor_dtor_structural(symbol: str) -> str:
+    """Fold a genuine Itanium ``<ctor-dtor-name>`` by structural parse (no deps).
 
     ``_ZN3FooC1Ev``/``_ZN3FooC2Ev``/``_ZN3FooC4Ev`` fold to one key (and likewise
     the ``D0``/``D1``/``D2``/``D4`` destructor variants), so a single source
@@ -113,10 +174,19 @@ def _ctor_dtor_canonical(symbol: str) -> str:
     — including any ``C1``/``D0`` — never reach the tag test. A no-op for any name
     without a genuine tag, so non-ctor/dtor symbols keep exact-match semantics.
     """
+    # Mach-O/Darwin prefixes every Itanium symbol with an extra leading
+    # underscore (`__ZN1AC1Ev`); strip it for parsing and restore it on the
+    # folded result so the clone index keys match on that platform too (Codex
+    # review). Parse a local ``body`` and offset all indexing into it.
+    prefix = ""
+    body = symbol
+    if body[:3] == "__Z":
+        prefix, body = "_", body[1:]
     # A ctor/dtor is always a class member → a nested name. Non-nested symbols
     # (plain ``_Z…``, vtables/typeinfo ``_ZTV``/``_ZTI``, data) have none.
-    if not symbol.startswith("_ZN"):
+    if not body.startswith("_ZN"):
         return symbol
+    symbol = body
     i, n = 3, len(symbol)
     # Leading CV-/ref-qualifiers on the implicit object parameter.
     while i < n and symbol[i] in "rVKRO":
@@ -152,12 +222,12 @@ def _ctor_dtor_canonical(symbol: str) -> str:
             boundary = True
             continue
         if boundary and c in "CD" and symbol[i : i + 2] in _CTOR_DTOR_TAGS:
-            return symbol[:i] + c + "@" + symbol[i + 2 :]
+            return prefix + symbol[:i] + c + "@" + symbol[i + 2 :]
         # Unknown production: advance without claiming a boundary, so a later
         # C1/D0 reached only by char-skip is never mistaken for a special name.
         boundary = False
         i += 1
-    return symbol
+    return prefix + symbol
 
 
 def _build_export_index(exported: set[str]) -> dict[str, list[str]]:
@@ -198,6 +268,93 @@ def _match_export(
         variants = sorted(clones)
         return variants[0], variants
     return "", []
+
+
+def _is_synthesized_symbol(symbol: str) -> bool:
+    """Whether *symbol* is a compiler-*synthesized* export that belongs to a type
+    or a function rather than a free declaration — a vtable/VTT/typeinfo/typeinfo-
+    name/thunk (``_ZT…``) or a guard variable (``_ZGV…``), optionally Mach-O
+    ``__``-prefixed. These never match a source decl by name, so they must be
+    attributed to their owner or they orphan into ``symbols_without_decl``."""
+    s = symbol[1:] if symbol.startswith("__Z") else symbol
+    return s.startswith("_ZT") or s.startswith("_ZGV")
+
+
+#: demangled-prefix → (finding kind, owner is a "type" or "func").
+_SYNTHESIZED_PREFIXES: tuple[tuple[str, str, str], ...] = (
+    ("vtable for ", "vtable", "type"),
+    ("VTT for ", "VTT", "type"),
+    ("construction vtable for ", "construction-vtable", "type"),
+    ("typeinfo for ", "typeinfo", "type"),
+    ("typeinfo name for ", "typeinfo-name", "type"),
+    ("non-virtual thunk to ", "thunk", "func"),
+    ("virtual thunk to ", "thunk", "func"),
+    ("covariant return thunk to ", "thunk", "func"),
+    ("guard variable for ", "guard", "func"),
+)
+
+
+def _synthesized_target(demangled: str) -> tuple[str, str, str] | None:
+    """Parse a demangled synthesized symbol into ``(kind, target, owner_kind)``.
+
+    ``"vtable for ns::Widget"`` → ``("vtable", "ns::Widget", "type")``;
+    ``"non-virtual thunk to ns::Widget::f()"`` → ``("thunk", "ns::Widget::f()",
+    "func")``. Returns ``None`` for anything not recognized.
+    """
+    for prefix, kind, owner in _SYNTHESIZED_PREFIXES:
+        if demangled.startswith(prefix):
+            return kind, demangled[len(prefix) :].strip(), owner
+    return None
+
+
+def _attribute_synthesized_exports(
+    surface: SourceAbiSurface, unmatched: set[str]
+) -> dict[str, tuple[str, str]]:
+    """Attribute exported vtable/typeinfo/RTTI/thunk/guard symbols to the public
+    type or function they belong to (ADR-030 D5 symbol linking).
+
+    Such symbols are emitted *for* a type (`_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`) or a
+    method (thunks, guard variables), never as a free declaration, so exact-name
+    matching always left them in ``symbols_without_decl`` — inflating the
+    "exported but no source decl" count for every polymorphic public class. This
+    demangles each still-unmatched synthesized symbol and, when its owning type or
+    function is present on the public surface, records it as attributed. Best
+    effort: a no-op when no demangler is available (the orphans simply remain, as
+    before), so it can only *improve* matching, never regress it.
+    """
+    candidates = [s for s in unmatched if _is_synthesized_symbol(s)]
+    if not candidates:
+        return {}
+    try:
+        from ..demangle import demangle as _demangle
+    except Exception:  # noqa: BLE001 - attribution is a best-effort enhancement
+        return {}
+    type_names = {t.qualified_name for t in surface.reachable_types if t.qualified_name}
+    type_bases = {n.split("<", 1)[0] for n in type_names}
+    func_names = {
+        d.qualified_name for d in surface.reachable_declarations if d.qualified_name
+    }
+    func_bases = {n.split("<", 1)[0] for n in func_names}
+    attributed: dict[str, tuple[str, str]] = {}
+    for sym in candidates:
+        try:
+            demangled = _demangle(sym)
+        except Exception:  # noqa: BLE001
+            continue
+        if not demangled:
+            continue
+        parsed = _synthesized_target(demangled)
+        if parsed is None:
+            continue
+        kind, target, owner = parsed
+        if owner == "type":
+            if target in type_names or target.split("<", 1)[0] in type_bases:
+                attributed[sym] = (kind, target)
+        else:  # func — cut the signature, match the qualified name
+            fname = target.split("(", 1)[0].strip()
+            if fname in func_names or fname.split("<", 1)[0] in func_bases:
+                attributed[sym] = (kind, fname)
+    return attributed
 
 
 #: Entity kinds routed to each reachable bucket of the linked surface (D5).
@@ -266,7 +423,21 @@ def link_source_abi(
         sorted(state.decl_to_symbol.items())
     )
     surface.odr_conflicts = state.odr_conflicts
-    surface.unmatched["symbols_without_decl"] = sorted(exported - state.matched_symbols)
+
+    # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
+    # owning public type/function so they are not miscounted as "exported but no
+    # source decl" (ADR-030 D5). These are matched to a *type/function*, not a
+    # free decl, so they are tracked separately from decl matches.
+    decl_matched = set(state.matched_symbols)
+    synthesized = _attribute_synthesized_exports(surface, exported - decl_matched)
+    if synthesized:
+        surface.mappings["synthesized_symbol_to_owner"] = {
+            sym: {"kind": kind, "owner": owner}
+            for sym, (kind, owner) in sorted(synthesized.items())
+        }
+    all_matched = decl_matched | set(synthesized)
+
+    surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
     surface.unmatched["decls_without_symbol"] = sorted(
         state.identity_to_qname.get(key, key)
         for key, sym in state.decl_to_symbol.items()
@@ -279,7 +450,11 @@ def link_source_abi(
         "reachable_templates": len(surface.reachable_templates),
         "reachable_inline_bodies": len(surface.reachable_inline_bodies),
         "exported_symbols": len(exported),
-        "matched_symbols": len(state.matched_symbols),
+        # Honest breakdown of the export denominator (ADR-030 D5): decl matches vs
+        # synthesized (RTTI/vtable/thunk) attributions vs the genuine remainder.
+        "matched_symbols": len(decl_matched),
+        "synthesized_symbols_matched": len(synthesized),
+        "unmatched_symbols": len(exported) - len(all_matched),
         "odr_conflicts": len(state.odr_conflicts),
     }
     return surface
@@ -321,7 +496,20 @@ def relink_surface_exports(
         else:
             mapping.setdefault(key, "")
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
-    surface.unmatched["symbols_without_decl"] = sorted(exported - matched)
+
+    # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
+    # owning public type/function — same as link_source_abi, so the merge/relink
+    # flow (used by `merge` on a plugin/wrapper pack) reports the same honest
+    # counts as `dump <binary> --sources`.
+    synthesized = _attribute_synthesized_exports(surface, exported - matched)
+    if synthesized:
+        surface.mappings["synthesized_symbol_to_owner"] = {
+            sym: {"kind": kind, "owner": owner}
+            for sym, (kind, owner) in sorted(synthesized.items())
+        }
+    all_matched = matched | set(synthesized)
+
+    surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
     # Recompute decls_without_symbol from the new mapping: declarations that now
     # resolve to an export must drop out of the unmatched list, or the merged
     # surface would serialize contradictory facts (mapping says foo->foo while
@@ -332,6 +520,8 @@ def relink_surface_exports(
     if isinstance(surface.coverage, dict):
         surface.coverage["exported_symbols"] = len(exported)
         surface.coverage["matched_symbols"] = len(matched)
+        surface.coverage["synthesized_symbols_matched"] = len(synthesized)
+        surface.coverage["unmatched_symbols"] = len(exported) - len(all_matched)
     return surface
 
 

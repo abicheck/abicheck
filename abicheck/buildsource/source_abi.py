@@ -376,6 +376,9 @@ class SourceAbiSurface:
                 "public_header_to_target": dict(
                     self.mappings.get("public_header_to_target", {})
                 ),
+                "synthesized_symbol_to_owner": dict(
+                    self.mappings.get("synthesized_symbol_to_owner", {})
+                ),
             },
             "odr_conflicts": list(self.odr_conflicts),
             "unmatched": {k: list(v) for k, v in self.unmatched.items()},
@@ -407,6 +410,9 @@ class SourceAbiSurface:
             ),
             "public_header_to_target": dict(
                 mappings_raw.get("public_header_to_target", {})
+            ),
+            "synthesized_symbol_to_owner": dict(
+                mappings_raw.get("synthesized_symbol_to_owner", {})
             ),
         }
         unmatched_raw = d.get("unmatched", {})
