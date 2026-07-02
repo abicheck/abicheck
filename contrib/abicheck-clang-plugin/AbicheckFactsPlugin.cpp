@@ -905,7 +905,9 @@ public:
                      SM.isInSystemHeader(loc);
     std::string file;
     if (!nonPublic) {
-      PresumedLoc pl = SM.getPresumedLoc(loc);
+      // Physical file, ignoring `#line` (UseLineDirectives=false), to match the
+      // decl classifier and the clang backend (Codex review).
+      PresumedLoc pl = SM.getPresumedLoc(loc, /*UseLineDirectives=*/false);
       if (pl.isInvalid() || llvm::StringRef(pl.getFilename()).empty() ||
           llvm::StringRef(pl.getFilename()).starts_with("<"))
         nonPublic = true;
@@ -1236,7 +1238,10 @@ private:
   }
 
   int presumedLine(const Decl *d) const {
-    PresumedLoc pl = SM.getPresumedLoc(SM.getExpansionLoc(d->getLocation()));
+    // UseLineDirectives=false → the physical line, ignoring `#line`, matching
+    // clang's JSON dumper (and clang.py, which reads that JSON loc).
+    PresumedLoc pl = SM.getPresumedLoc(SM.getExpansionLoc(d->getLocation()),
+                                       /*UseLineDirectives=*/false);
     return pl.isValid() ? static_cast<int>(pl.getLine()) : 0;
   }
 
@@ -1247,7 +1252,12 @@ private:
       return false;
     if (SM.isInSystemHeader(loc))
       return false;
-    PresumedLoc pl = SM.getPresumedLoc(loc);
+    // Classify from the PHYSICAL file, ignoring `#line` (UseLineDirectives=false):
+    // clang's JSON dumper reports the physical spelling file in loc.file, so the
+    // clang backend classifies by it. A `#line` directive in a generated or
+    // amalgamated public header would otherwise remap the presumed name out of
+    // the public roots and drop that decl AND every following one (Codex review).
+    PresumedLoc pl = SM.getPresumedLoc(loc, /*UseLineDirectives=*/false);
     if (pl.isInvalid())
       return false;
     file = pl.getFilename();

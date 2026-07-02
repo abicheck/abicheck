@@ -116,3 +116,13 @@ struct Q<int> {
   int b;
 };
 }  // namespace spec
+
+// A `#line` directive (as generated/amalgamated public headers emit) remaps the
+// PRESUMED filename; classification must use the PHYSICAL file
+// (UseLineDirectives=false) like the backend, or this decl — and everything
+// after it — would be dropped out of the public roots. Kept last so the remap
+// affects nothing else (regression guard).
+namespace ld {
+#line 900 "virtual_amalgamated.hpp"
+int remapped_public(int);
+}  // namespace ld
