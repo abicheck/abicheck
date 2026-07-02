@@ -429,9 +429,21 @@ entity. Non-macro entities are compared **strictly**; macro *values* are compare
 leniently (operator-adjacent spacing is the documented soft edge, C.7). The
 `clang-plugin` workflow runs this on a **matrix of LLVM/Clang majors** (pinning
 `clang`/`clang++` on `PATH` to each matrix version so the plugin and the wrapper's
-extractor use the identical clang — the precondition for byte-for-byte parity).
-It runs only where a matching clang is available and is never a required
-abicheck-CI gate.
+extractor use the identical clang — the precondition for byte-for-byte parity),
+and — because the plugin is a plain LLVM shared module — builds it with **both
+GCC and Clang as the host compiler** (LLVM 18 both ways; 16/17 on the distro
+default) to keep it host-toolchain-portable. It runs only where a matching clang
+is available and is never a required abicheck-CI gate.
+
+Beyond entity equivalence, each matrix leg also runs an **end-to-end scan
+validation** (`tests/scan_flow.py`): it compiles the fixture into a shared
+library *with the plugin active* (one build both links the `.so` and drops
+`abicheck_inputs/` beside it), then drives the real user pipeline — `abicheck
+dump` the binary (L0/L1), `abicheck merge` the plugin pack into the baseline
+(asserting the L4 source-ABI and L5 graph layers were ingested with a non-empty
+entity set), and `abicheck compare` the merged baseline against itself (asserting
+a clean verdict). This proves a plugin-emitted pack is *consumable by the
+ordinary scan*, not merely entity-equivalent to the clang backend.
 
 ### C.7 — Non-goals / limitations
 
@@ -474,6 +486,15 @@ abicheck-CI gate.
   explicitly public, and exact-file public roots given from a **different tree**
   than the compile's are matched only by segment-subsequence. A project hitting
   either runs Flow A/B for both sides of the comparison.
+- **Block-scope `constexpr`:** the plugin does **not** emit `constexpr`
+  variables declared inside a function body (it descends into a public inline
+  function's body to emit body-local *types*, matching the clang backend, but
+  stops short of local `constexpr`). Such locals are not part of the callable
+  ABI surface, and the clang backend's emission of them keys multiple distinct
+  locals on the same bare name; the plugin intentionally omits them rather than
+  reproduce that. Under D0 (both baselines produced the same way) this is never
+  a false finding; it can only surface as a benign MISSING on the cross-producer
+  C.6 gate, which the fixture does not trigger.
 
 ---
 
