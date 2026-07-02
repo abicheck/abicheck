@@ -1923,6 +1923,27 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
     assert "_ZN3FooC4Ev" not in exports
 
 
+def test_exported_symbols_from_snapshot_excludes_non_default_versions():
+    """A symbol that exists only as a non-default version alias (``foo@VER`` with
+    no default ``foo@@VER``) cannot be linked against by an unversioned consumer,
+    so it must NOT enter the relink export set — otherwise the L4 mapping marks a
+    header decl backed only by that alias as exported and the crosscheck's two-way
+    reconciliation wrongly suppresses ``public_not_exported`` (Codex review)."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    snap.elf = ElfMetadata()
+    snap.elf.symbols = [
+        ElfSymbol(name="_Z3foov", version="LIB_1", is_default=True),  # default → in
+        ElfSymbol(name="_Z3oldv", version="LIB_1", is_default=False),  # alias → out
+        ElfSymbol(name="_Z3barv"),  # unversioned (is_default defaults True) → in
+    ]
+    exports = _exported_symbols_from_snapshot(snap)
+    assert set(exports) == {"_Z3foov", "_Z3barv"}
+    assert "_Z3oldv" not in exports
+
+
 def test_merge_warns_on_empty_source_surface(capsys):
     """Project-level Caveat A: merging a pack whose whole source surface is empty
     while the binary exports symbols warns that public-roots was likely wrong."""

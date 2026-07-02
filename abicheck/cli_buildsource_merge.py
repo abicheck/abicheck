@@ -68,7 +68,20 @@ def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
     elf = getattr(snap, "elf", None)
     if elf is not None:
         have_raw_table = True
-        raw |= {s.name for s in getattr(elf, "symbols", ()) if getattr(s, "name", "")}
+        # Only DEFAULT-versioned ELF exports enter the relink set. A name that
+        # exists *solely* as a non-default version alias (`foo@VER` with no
+        # `foo@@VER`) cannot be linked against by an unversioned consumer, so
+        # including it would let the L4 mapping mark a header decl backed only by
+        # such an alias as "exported" — and the crosscheck's two-way reconciliation
+        # would then wrongly suppress the `public_not_exported` finding the consumer
+        # would actually hit as an undefined symbol (Codex review). Mirrors
+        # `crosscheck._exported_symbol_names`. `is_default` is True for unversioned
+        # symbols, so plain (non-versioned) libraries are unaffected.
+        raw |= {
+            s.name
+            for s in getattr(elf, "symbols", ())
+            if getattr(s, "name", "") and getattr(s, "is_default", True)
+        }
     pe = getattr(snap, "pe", None)
     if pe is not None:
         have_raw_table = True
