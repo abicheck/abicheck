@@ -1,21 +1,23 @@
 # ADR-038: Working With Sources — Full-Scan and Two Build-Injection Flows, and the Clang Plugin Specification
 
 **Date:** 2026-07-01
-**Status:** Proposed. Formalizes and extends ADR-035 D5 (Flow 1 / Flow 2) into a
-complete, three-flow producer contract and pins the Clang-plugin specification.
-Flow A (full source scan / no injection) and Flow B (the `abicheck-cc` wrapper)
-already ship; Flow C (the Clang plugin, `contrib/abicheck-clang-plugin/`) now
-implements this spec — functions/mangled-name rule/signatures/default args,
+**Status:** Accepted — implemented. Formalizes and extends ADR-035 D5 (Flow 1 /
+Flow 2) into a complete, three-flow producer contract and pins the Clang-plugin
+specification. Flow A (full source scan / no injection) and Flow B (the
+`abicheck-cc` wrapper) already ship; Flow C (the Clang plugin,
+`contrib/abicheck-clang-plugin/`) now implements this spec —
+functions/mangled-name rule/signatures/default args,
 typedefs, constexpr, records/enums/templates **including the AST subtree hashes**
 (`type_hash`/`body_hash`), macros (in-compile `PPCallbacks`), and visibility. The
 subtree hashes are produced by serializing the in-memory AST with clang's own
 JSON dumper (`Decl::dump(…, ADOF_JSON)`) and porting `clang.py`'s
 canonicalization onto it, so parity holds by construction for a given clang
-version. The **C.6 differential-conformance gate now runs in CI as a matrix over
-several LLVM/Clang majors** (`.github/workflows/clang-plugin.yml`). The one
-documented residual is a floating-point literal's textual value inside a hashed
-subtree (C.7).
-**Decision maker:** (pending)
+version. The **C.6 differential-conformance gate runs green in CI across LLVM/Clang
+16, 17, and 18** (`.github/workflows/clang-plugin.yml`) — the plugin's public
+surface is entity-equivalent to the clang backend on each. The one documented
+residual is a floating-point literal's textual value inside a hashed subtree, plus
+the pragmatic visibility-classifier edge cases (C.7).
+**Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
 

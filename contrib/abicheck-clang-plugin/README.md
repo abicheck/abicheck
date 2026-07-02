@@ -1,8 +1,10 @@
 # abicheck Clang plugin (`abicheck-facts`)
 
-> Status: **optional optimization**, reference implementation (ADR-038 Flow C).
-> Not built or gated in abicheck CI — it is ABI-locked to the loading clang's
-> LLVM major (ADR-038 C.5). The supported portable producers are Flow A
+> Status: **optional optimization**, implemented (ADR-038 Flow C). Built and
+> validated by the dedicated `clang-plugin` workflow across LLVM/Clang 16/17/18
+> (the C.6 differential-conformance test), but **never a required gate in the
+> main abicheck CI** — it is ABI-locked to the loading clang's LLVM major
+> (ADR-038 C.5). The supported portable producers remain Flow A
 > (`abicheck dump --sources` / `collect` + `compile_commands.json` replay) and
 > Flow B (the `abicheck-cc` compiler wrapper, `abicheck/cc_wrapper.py`). See
 > `docs/development/adr/038-build-integrated-fact-collection-variants.md`.
