@@ -1530,6 +1530,15 @@ public:
       preinc.push_back("i:" + absStr(f));
     for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
       preinc.push_back("m:" + absStr(f));
+    // VFS overlays (`-ivfsoverlay`) remap the virtual filesystem, so two builds
+    // of one source with different overlays can parse different header content
+    // under otherwise-identical flags. Fold the overlay files in (ordered,
+    // rooted to absolute like the other path inputs), or those variants collide
+    // on the facts filename and the later write truncates the earlier (Codex
+    // review). Predefines cannot capture this — it is a content change, not a
+    // macro change.
+    for (const auto &f : hso.VFSOverlayFiles)
+      preinc.push_back("v:" + absStr(f));
     // Root a relative sysroot too (but leave an unset one empty, so the cfg is
     // not made cwd-dependent when no sysroot is in play).
     std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);

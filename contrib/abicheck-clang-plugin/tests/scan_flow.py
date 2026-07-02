@@ -72,7 +72,7 @@ def _count_entities(obj: object) -> int:
 
 def _compile_shared_lib_with_plugin(work: Path, plugin: Path, clangxx: str) -> Path:
     """Build the fixture TU into a .so with the plugin active; return the .so."""
-    shutil.copytree(FIXTURES, work / "fx")
+    shutil.copytree(FIXTURES, work / "fx", dirs_exist_ok=True)
     src = work / "fx"
     so = work / "libwidget.so"
     _run(

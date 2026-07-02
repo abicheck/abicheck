@@ -66,12 +66,26 @@ jobs:
           python-version: "3.13"
 
       - name: Install LLVM/Clang ${{ matrix.llvm }}
+        env:
+          # apt.llvm.org archive signing key (Sylvestre Ledru / Debian LLVM).
+          # Pinned so the fetched key is verified before it is trusted — we set
+          # up the apt repo declaratively instead of piping the unversioned
+          # remote llvm.sh installer into `sudo` (a trusted package install
+          # path, per review).
+          LLVM_KEY_FPR: "6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
         run: |
-          set -eux
-          # apt.llvm.org installer reliably provides any recent major.
-          wget -q https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh ${{ matrix.llvm }}
+          set -euxo pipefail
+          key=/tmp/llvm-snapshot.gpg.key
+          wget -q -O "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+          # Verify the fetched key's fingerprint before trusting it.
+          got=$(gpg --show-keys --with-colons --with-fingerprint "$key" \
+                | awk -F: '/^fpr:/ {print $10; exit}')
+          test "$got" = "$LLVM_KEY_FPR"
+          sudo install -m 0644 "$key" /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          echo "deb http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${{ matrix.llvm }} main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update
           sudo apt-get install -y \
             llvm-${{ matrix.llvm }}-dev \
             libclang-${{ matrix.llvm }}-dev \
