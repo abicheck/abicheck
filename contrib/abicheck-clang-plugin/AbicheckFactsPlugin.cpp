@@ -964,7 +964,7 @@ public:
       return true;
     }
     const Object &o = *json->getAsObject();
-    std::string name = fd->getQualifiedNameAsString();
+    std::string name = scopedName(fd);
     std::string sig = qualTypeFromJson(o);
     std::string mangled = mangledFromJson(o);
     std::string key = mangled.empty() ? name : mangled;
@@ -983,17 +983,21 @@ public:
     e.visibility = visibility;
     Functions.push_back(e);
 
-    if (fd->doesThisDeclarationHaveABody() && fd->hasBody()) {
+    // Gate the whole inline entity on a CompoundStmt being present in the
+    // dumped JSON (clang.py::_has_body), NOT on the AST body predicate. Because
+    // this runs post-codegen (AddAfterMainAction), an implicit/defaulted
+    // special member that codegen defined reports hasBody()==true while its
+    // JSON dump carries no ordinary CompoundStmt; keying on the predicate would
+    // emit an `inline` entity (with an empty body_hash) that the wrapper's
+    // -fsyntax-only pass never produces (Codex/review).
+    if (const Value *body = bodyStmtJson(o)) {
       Entity ib;
       ib.id = H({"inline", key, sig});
       ib.kind = "inline";
       ib.qualified_name = name;
       ib.mangled_name = mangled;
       ib.signature_hash = H({"sig", sig});
-      if (const Value *body = bodyStmtJson(o))
-        ib.body_hash = subtreeHash(*body, paramIdsJson(o));
-      if (ib.body_hash.empty())
-        Diags.insert("inline body_hash unavailable (no CompoundStmt in JSON)");
+      ib.body_hash = subtreeHash(*body, paramIdsJson(o));
       ib.loc_path = file;
       ib.loc_line = line;
       ib.loc_origin = origin;
@@ -1010,14 +1014,14 @@ public:
       return true;
     if (!rd->isThisDeclarationADefinition())
       return true;
-    emitType(rd, rd->getQualifiedNameAsString(), "record");
+    emitType(rd, scopedName(rd), "record");
     return true;
   }
 
   bool VisitEnumDecl(EnumDecl *ed) {
     if (ed->isImplicit() || !ed->isThisDeclarationADefinition())
       return true;
-    emitType(ed, ed->getQualifiedNameAsString(), "enum");
+    emitType(ed, scopedName(ed), "enum");
     return true;
   }
 
@@ -1033,10 +1037,26 @@ public:
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
       return true;
-    std::string underlying = td->getUnderlyingType().getAsString(PP);
+    // Read the aliased spelling from clang's own JSON `type.qualType` (falling
+    // back to `desugaredQualType`), exactly as clang.py::_typedef_underlying
+    // does — NOT from getUnderlyingType().getAsString(PP). The pretty-printer
+    // and the JSON qualType can spell the same type differently (`_Bool` vs
+    // `bool`, elaborated `struct X` vs `X`, sugared aliases), which would make
+    // `value`/`type_hash`/`id` diverge from the clang backend (Codex review).
+    std::optional<Value> tjson = dumpDeclJson(td);
+    const Object *to = tjson ? tjson->getAsObject() : nullptr;
+    std::string underlying;
+    if (to)
+      if (const Object *t = to->getObject("type")) {
+        if (auto q = t->getString("qualType"))
+          underlying = q->str();
+        if (underlying.empty())
+          if (auto dq = t->getString("desugaredQualType"))
+            underlying = dq->str();
+      }
     if (underlying.empty())
       return true;
-    std::string name = td->getQualifiedNameAsString();
+    std::string name = scopedName(td);
     Entity e;
     e.id = H({"typedef", name, underlying});
     e.kind = "typedef";
@@ -1069,7 +1089,7 @@ public:
     const Object &o = *json->getAsObject();
     const Value *init = initExprJson(o);
     std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
-    std::string name = vd->getQualifiedNameAsString();
+    std::string name = scopedName(vd);
     Entity e;
     e.id = H({"constexpr", name, value});
     e.kind = "constexpr";
@@ -1128,6 +1148,36 @@ private:
       cur = Decl::castFromDeclContext(dc);
     }
     return true;
+  }
+
+  // Build the qualified name the way clang.py does: join only the *named*
+  // enclosing namespace and record/tag scopes (its _SCOPE_NODE_KINDS, which
+  // does NOT include functions), then the decl's own simple name. This
+  // deliberately differs from getQualifiedNameAsString(), which prepends
+  // function scopes ("n::f()::Local") for a body-local type and
+  // "(anonymous namespace)::" for an unnamed-namespace decl — spellings
+  // clang.py's scope stack never produces. Since qualified_name feeds the
+  // entity id (types/typedefs/constexpr/templates) and identity(), matching
+  // clang.py here keeps ids equal to the clang backend for those cases rather
+  // than reading as simultaneous add+remove (Codex review).
+  std::string scopedName(const NamedDecl *d) const {
+    std::vector<std::string> scopes;
+    for (const DeclContext *dc = d->getDeclContext(); dc; dc = dc->getParent()) {
+      if (const auto *ns = dyn_cast<NamespaceDecl>(dc)) {
+        if (!ns->isAnonymousNamespace() && !ns->getName().empty())
+          scopes.push_back(ns->getNameAsString());
+      } else if (const auto *rd = dyn_cast<RecordDecl>(dc)) {
+        if (!rd->getName().empty())
+          scopes.push_back(rd->getNameAsString());
+      }
+      // FunctionDecl / LinkageSpecDecl / the TU contribute nothing to the
+      // name, exactly like clang.py's _child_scope.
+    }
+    std::string out;
+    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
+      out += *it + "::";
+    out += d->getNameAsString();
+    return out;
   }
 
   int presumedLine(const Decl *d) const {
@@ -1196,7 +1246,7 @@ private:
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
       return;
-    std::string name = td->getQualifiedNameAsString();
+    std::string name = scopedName(td);
     Entity e;
     e.id = H({"template", name});
     e.kind = "template";
@@ -1483,20 +1533,21 @@ public:
     // Root a relative sysroot too (but leave an unset one empty, so the cfg is
     // not made cwd-dependent when no sysroot is in play).
     std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);
-    // Language ABI options that change the *declared* public surface via clang
-    // predefined macros (`-fexceptions`/`-fno-exceptions` → __EXCEPTIONS,
-    // `-frtti`/`-fno-rtti` → __GXX_RTTI). The wrapper's compile_unit_id hashes
-    // the full argv, so those variants of one source get distinct cfgs there;
-    // fold them in here too, or two variants collide on the facts filename and
-    // the later compile truncates the earlier one (Codex review, P2).
-    std::vector<std::string> langAbi = {
-        std::string("exc=") + (lo.Exceptions ? "1" : "0"),
-        std::string("cxxexc=") + (lo.CXXExceptions ? "1" : "0"),
-        std::string("rtti=") + (lo.RTTI ? "1" : "0"),
-    };
+    // Fold in the compiler's full predefined-macro buffer. Every language ABI
+    // mode that changes the *declared* public surface manifests as a predefined
+    // macro (-fexceptions → __EXCEPTIONS, -frtti → __GXX_RTTI, -fshort-wchar →
+    // __WCHAR_WIDTH__/__WCHAR_TYPE__, -fno-char8_t → __cpp_char8_t, fast-math →
+    // __FAST_MATH__, …), so hashing the whole buffer discriminates every such
+    // variant at once instead of chasing a hand-maintained flag allow-list one
+    // Codex review at a time — the wrapper's compile_unit_id hashes the full
+    // argv for the same reason. The buffer is deterministic for a given
+    // invocation (it excludes __DATE__/__TIME__), so it never spuriously
+    // differs; distinct clang majors legitimately differ, and the context hash
+    // is not compared in C.6 (Codex review, P2).
+    const std::string &predefines = ci.getPreprocessor().getPredefines();
     return H({"ctx", standard, to.Triple, sysroot, joinStrings(defs, ','),
               joinStrings(incs, ','), joinStrings(to.Features, ','),
-              joinStrings(preinc, ','), joinStrings(langAbi, ',')});
+              joinStrings(preinc, ','), predefines});
   }
 
   bool ParseArgs(const CompilerInstance &,

@@ -22,6 +22,8 @@ namespace demo {
 
 typedef int handle_t;
 using size_type = unsigned long;
+typedef const char *cstring_t;  // sugared/pointer target: underlying comes from
+                                // clang's JSON qualType, not the pretty-printer
 
 enum class Color { Red, Green, Blue };
 enum class EmptyEnum {};  // empty enum — clang backend skips it (no `inner`)
@@ -39,6 +41,17 @@ int add(int a, int b = 1);             // default arg (literal int)
 bool toggle(bool on = true);           // default arg (literal bool)
 
 inline int square(int n) { return n * n; }  // inline body -> body hash
+
+// A PUBLIC inline function whose body declares a local type. Both producers
+// descend into an accessible body, so both emit the local record — and both
+// name it `demo::Scaled` (clang.py's scope stack does not push function
+// scopes). The plugin must match via scopedName() rather than emitting
+// `demo::scaledResult()::Scaled` (Codex review, line ~1013).
+inline int scaledResult(int v) {
+  struct Scaled { int out; };
+  Scaled s{v * 2};
+  return s.out;
+}
 
 template <class T>
 T identity(T v) { return v; }               // function template -> body hash
