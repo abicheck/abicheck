@@ -852,27 +852,36 @@ public:
 
   void MacroDefined(const Token &nameTok, const MacroDirective *md) override {
     const MacroInfo *mi = md ? md->getMacroInfo() : nullptr;
-    if (!mi || mi->isBuiltinMacro())
-      return;
     const IdentifierInfo *ii = nameTok.getIdentifierInfo();
-    if (!ii)
+    if (!mi || !ii)
       return;
+    const std::string name = ii->getName().str();
+    // Determine whether this — the current (final so far) definition — is on the
+    // library's public surface. A non-public (re)definition must ERASE any prior
+    // public entry, not merely be skipped: clang's `-E -dD` backend tracks the
+    // final definition and then filters by its defining file, so a system header
+    // redefining a public macro (without an intervening #undef) drops it. Leaving
+    // the stale public value here would emit a phantom public macro.
+    // (stdlib/toolchain headers are never public; the path-only isPublicFile
+    // check downstream would otherwise accept /usr/include/... via its `include`
+    // segment, so the SourceManager::isInSystemHeader guard belongs here.)
     SourceLocation loc = mi->getDefinitionLoc();
-    if (loc.isInvalid())
+    bool nonPublic = mi->isBuiltinMacro() || loc.isInvalid() ||
+                     SM.isInSystemHeader(loc);
+    std::string file;
+    if (!nonPublic) {
+      PresumedLoc pl = SM.getPresumedLoc(loc);
+      if (pl.isInvalid() || llvm::StringRef(pl.getFilename()).empty() ||
+          llvm::StringRef(pl.getFilename()).starts_with("<"))
+        nonPublic = true;
+      else
+        file = pl.getFilename();
+    }
+    if (nonPublic) {
+      Defs->erase(name);
       return;
-    // stdlib/toolchain macros are never the library's public surface; the
-    // path-only isPublicFile check would otherwise accept /usr/include/... via
-    // its `include` segment. Filter system headers here, where we still have a
-    // SourceLocation, mirroring the decl classifier.
-    if (SM.isInSystemHeader(loc))
-      return;
-    PresumedLoc pl = SM.getPresumedLoc(loc);
-    if (pl.isInvalid())
-      return;
-    llvm::StringRef file = pl.getFilename();
-    if (file.empty() || file.starts_with("<"))
-      return;
-    (*Defs)[ii->getName().str()] = MacroRecord{macroValue(mi), file.str()};
+    }
+    (*Defs)[name] = MacroRecord{macroValue(mi), file};
   }
 
   void MacroUndefined(const Token &nameTok, const MacroDefinition &,
@@ -1424,14 +1433,22 @@ public:
     if (lo.LangStd != LangStandard::lang_unspecified)
       standard = LangStandard::getLangStandardForKind(lo.LangStd).getName();
     const TargetOptions &to = ci.getTargetOpts();
+    // Preserve command-line ORDER of -D/-U (do not sort): `-D FOO -U FOO` and
+    // `-U FOO -D FOO` yield different final macro state, so ordering is
+    // ABI-relevant and must change the hash.
     std::vector<std::string> defs;
     for (const auto &m : ci.getPreprocessorOpts().Macros)
       defs.push_back((m.second ? "U:" : "D:") + m.first);
-    std::sort(defs.begin(), defs.end());
     std::vector<std::string> incs;
     const HeaderSearchOptions &hso = ci.getHeaderSearchOpts();
-    for (const auto &e : hso.UserEntries)
-      incs.push_back(e.Path);
+    // Resolve include dirs to absolute paths: two build dirs both passing a
+    // relative `-Igenerated` see different physical headers but would otherwise
+    // hash identically and collide on the facts filename.
+    for (const auto &e : hso.UserEntries) {
+      llvm::SmallString<256> p(e.Path);
+      llvm::sys::fs::make_absolute(p);
+      incs.push_back(std::string(p.str()));
+    }
     // Forced preincludes (-include) and macro-includes (-imacros) also change the
     // TU's ABI-relevant context; keep their order (it is significant) so two
     // variants differing only by a forced config header get distinct hashes.
