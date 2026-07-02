@@ -1441,22 +1441,28 @@ public:
       defs.push_back((m.second ? "U:" : "D:") + m.first);
     std::vector<std::string> incs;
     const HeaderSearchOptions &hso = ci.getHeaderSearchOpts();
-    // Resolve include dirs to absolute paths: two build dirs both passing a
-    // relative `-Igenerated` see different physical headers but would otherwise
-    // hash identically and collide on the facts filename.
-    for (const auto &e : hso.UserEntries) {
-      llvm::SmallString<256> p(e.Path);
+    // Resolve include dirs to absolute paths and fold in the search-kind
+    // (Group): two build dirs both passing a relative `-Igenerated` see
+    // different physical headers, and `-I include` vs `-isystem include` yield a
+    // different public surface (via isInSystemHeader) — both must change the
+    // hash, so they cannot collide on the facts filename.
+    auto absStr = [](llvm::StringRef s) {
+      llvm::SmallString<256> p(s);
       llvm::sys::fs::make_absolute(p);
-      incs.push_back(std::string(p.str()));
-    }
+      return std::string(p.str());
+    };
+    for (const auto &e : hso.UserEntries)
+      incs.push_back(std::to_string(static_cast<int>(e.Group)) + ":" +
+                     absStr(e.Path));
     // Forced preincludes (-include) and macro-includes (-imacros) also change the
-    // TU's ABI-relevant context; keep their order (it is significant) so two
-    // variants differing only by a forced config header get distinct hashes.
+    // TU's ABI-relevant context; keep their order (significant) and root them to
+    // absolute paths so a relative `-include ./config.hpp` from two build dirs
+    // does not collide.
     std::vector<std::string> preinc;
     for (const auto &f : ci.getPreprocessorOpts().Includes)
-      preinc.push_back("i:" + f);
+      preinc.push_back("i:" + absStr(f));
     for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
-      preinc.push_back("m:" + f);
+      preinc.push_back("m:" + absStr(f));
     return H({"ctx", standard, to.Triple, hso.Sysroot, joinStrings(defs, ','),
               joinStrings(incs, ','), joinStrings(to.Features, ','),
               joinStrings(preinc, ',')});
