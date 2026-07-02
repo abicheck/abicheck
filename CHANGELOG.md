@@ -9,6 +9,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **Source→binary symbol matching now recovers ctor/dtor ABI clones.** The
+  linker (`link_source_abi` / `relink_surface_exports`) folds C++ Itanium
+  ctor/dtor clone tags (`C1`/`C2`/`C3`/`C4`, `D0`/`D1`/`D2`/`D4`) so one source
+  ctor/dtor declaration claims every clone the compiler exports, instead of
+  orphaning the siblings as "exported symbol with no source decl". Also bridges
+  GCC's non-standard unified `C4`/`D4` DWARF linkage tag to the real `C1`/`C2`
+  exports.
+- **`merge` no longer truncates the binary export set.**
+  `_exported_symbols_from_snapshot` unions the authoritative platform dynamic
+  export table (`elf.symbols` / `pe.exports` / `macho.exports`) instead of only
+  the DWARF-shaped `functions[].mangled` view. On a pvxs Flow-C merge this lifts
+  `matched_symbols` from 6 to 287 (`exported_symbols` 126 → 950).
+
+### Changed
+
+- **Clang facts plugin fails loud on a misconfigured `public-roots`** (ADR-038
+  Flow C, Caveat A): it now emits a diagnostic (and records it in the pack's
+  `diagnostics`) when `public-roots` matches zero declarations though header
+  decls were seen outside the roots, instead of silently producing an empty
+  pack with exit 0.
+
+### Added
+
+- New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
+  three source-fact producers, a selection tree, and the `public-roots`/
+  `ABICHECK_CC_HEADERS` header-resolution trap.
+
 ---
 
 ## [0.4.0] — 2026-07-01
