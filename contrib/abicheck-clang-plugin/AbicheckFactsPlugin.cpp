@@ -1168,7 +1168,14 @@ private:
   // than reading as simultaneous add+remove (Codex review).
   std::string scopedName(const NamedDecl *d) const {
     std::vector<std::string> scopes;
-    for (const DeclContext *dc = d->getDeclContext(); dc; dc = dc->getParent()) {
+    // Walk the LEXICAL context chain, not the semantic one: clang.py builds the
+    // scope from JSON AST nesting (where the decl is written), so an out-of-line
+    // qualified definition (`int n::f(){}` written at TU scope, esp. extern "C"
+    // where the mangled name is suppressed and identity falls back to the
+    // qualified name) is named `f`, not `n::f`. getLexicalDeclContext mirrors
+    // that; for the common in-place declaration lexical == semantic (Codex review).
+    for (const DeclContext *dc = d->getLexicalDeclContext(); dc;
+         dc = dc->getLexicalParent()) {
       if (const auto *ns = dyn_cast<NamespaceDecl>(dc)) {
         if (!ns->isAnonymousNamespace() && !ns->getName().empty())
           scopes.push_back(ns->getNameAsString());

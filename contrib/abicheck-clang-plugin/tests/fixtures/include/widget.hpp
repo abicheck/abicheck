@@ -96,3 +96,8 @@ inline int withLocalConst() {
 }
 
 }  // namespace demo
+
+// extern "C" out-of-line def: mangled name is suppressed, so identity falls
+// back to qualified_name#sig — the case where lexical vs semantic scope matters.
+namespace ec { extern "C" int cfn(int); }
+extern "C" inline int ec::cfn(int x) { return x; }
