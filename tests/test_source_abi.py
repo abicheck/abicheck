@@ -521,6 +521,46 @@ def test_relink_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
     )
 
 
+def test_norm_itanium_strips_only_macho_double_underscore() -> None:
+    from abicheck.buildsource.source_link import _norm_itanium
+
+    # `__Z…` loses exactly one leading underscore; every other spelling is byte-
+    # for-byte unchanged (a C symbol, an already-normalized `_Z…`, a bare name).
+    assert _norm_itanium("__ZN1A3fooEv") == "_ZN1A3fooEv"
+    assert _norm_itanium("_ZN1A3fooEv") == "_ZN1A3fooEv"
+    assert _norm_itanium("foo") == "foo"
+    assert _norm_itanium("") == ""
+
+
+def test_build_exact_index_prefers_canonical_spelling_on_collision() -> None:
+    from abicheck.buildsource.source_link import _build_exact_index
+
+    # If a binary somehow lists BOTH spellings of one Itanium name (practically
+    # impossible), the canonical `_Z…` form wins the normalized key so the returned
+    # real spelling is deterministic and genuinely in the export set.
+    idx = _build_exact_index({"__ZN1A3fooEv", "_ZN1A3fooEv"})
+    assert idx["_ZN1A3fooEv"] == "_ZN1A3fooEv"
+    # A lone Mach-O spelling maps its normalized key back to the real `__Z…` name.
+    idx2 = _build_exact_index({"__ZN1A3fooEv"})
+    assert idx2["_ZN1A3fooEv"] == "__ZN1A3fooEv"
+
+
+@needs_demangler
+def test_demangled_rematch_normalizes_macho_decl() -> None:
+    # The second-tier rematch must normalize a Mach-O `__Z…` decl before demangling
+    # (the shared demangler only accepts `_Z…`), so a drifted macOS decl still
+    # rescues against the `_Z…` export.
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    decl = _entity("N::f", "function", mangled="__ZN1N1fEN1N1TE")  # Mach-O spelling
+    mapping = {decl.identity(): ""}
+    matched: set[str] = set()
+    exported = {"_ZN1N1fENS_1TE"}  # substitution form, same demangled identity
+    new = _demangled_rematch([decl], mapping, matched, exported)
+    assert new == {decl.identity(): "_ZN1N1fENS_1TE"}
+    assert mapping[decl.identity()] == "_ZN1N1fENS_1TE"
+
+
 def test_ctor_dtor_fold_handles_function_type_template_args() -> None:
     # Codex review: a function-type template argument (`A<void(int)>` → `FviE`,
     # `std::function<void()>` → `FvvE`) is itself E-terminated; the balanced skip
