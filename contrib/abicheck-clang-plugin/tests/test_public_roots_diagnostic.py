@@ -262,6 +262,48 @@ def main(argv: list[str] | None = None) -> int:
                 f"the no-roots diagnostic (silent empty pack). stderr:\n{noinc.stderr}"
             )
 
+        # 7) INFERRED ROOT EXCLUDES SOURCE FILES: with `-I.` the inferred root is
+        # an ancestor of the .cpp, but a decl defined in the .cpp is implementation,
+        # not public API — it must be excluded from the surface (else `-I.` floods
+        # L4/L5 with private impl). The root IS inferred (note fires), yet the pack
+        # stays empty because the only decls live in the source file.
+        impl = work / "impldir"
+        impl.mkdir(exist_ok=True)
+        (impl / "impl.cpp").write_text(
+            "struct PubInImpl { int x; };\nint impl_fn() { return 0; }\n"
+        )
+        srcexcl = subprocess.run(
+            [
+                args.clangxx,
+                "-std=c++17",
+                "-I.",
+                f"-fplugin={plugin}",
+                "-Xclang",
+                "-plugin-arg-abicheck-facts",
+                "-Xclang",
+                f"out={impl / 'out'}",
+                "-c",
+                "impl.cpp",
+                "-o",
+                str(impl / "impl.o"),
+            ],
+            cwd=str(impl),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=True,
+        )
+        if "inferred 1 public root" not in srcexcl.stderr:
+            failures.append(
+                "with -I. a root should be inferred (the note must fire); "
+                f"stderr:\n{srcexcl.stderr}"
+            )
+        if _pack_entity_count(impl / "out") != 0:
+            failures.append(
+                "a decl defined in a .cpp under an inferred -I. root was emitted as "
+                "public surface; source-file decls must be excluded"
+            )
+
         if failures:
             print("CAVEAT-A DIAGNOSTIC TEST FAILED:", file=sys.stderr)
             for f in failures:

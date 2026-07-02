@@ -165,10 +165,16 @@ compile's -I/-iquote include dirs [/proj/include, /proj/gen]. Pass
 public-roots=<dir> to scope the public surface precisely.
 ```
 
-and records it in each TU's `diagnostics`. This is a convenience, not a
-replacement for scoping: the inferred surface can be broader than your true
-public API (it includes any header reachable through a `-I` dir), so for a
-precise baseline still pass an explicit `public-roots=`.
+and records it in each TU's `diagnostics`. Inference is scoped to keep the
+surface honest: only include dirs **at or below the build working directory** are
+used (a third-party `-I/opt/boost/include` is not a public root), and decls
+defined in a **translation-unit source** (`.cpp`/`.cc`/…) are excluded even when
+an inferred `-I.` root covers them — public API lives in headers. It is still a
+convenience, not a replacement for scoping: the inferred surface can be broader
+than your true public API (any header reachable through an in-tree `-I` dir), so
+for a precise baseline still pass an explicit `public-roots=`. (Explicit roots are
+taken verbatim — no source-file/locality filtering — to stay byte-identical to the
+`abicheck-cc` wrapper for the C.6 conformance gate.)
 
 ## Validation: differential conformance (ADR-038 C.6)
 

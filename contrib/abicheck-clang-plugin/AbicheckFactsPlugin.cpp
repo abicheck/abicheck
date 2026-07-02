@@ -1036,11 +1036,12 @@ public:
   FactsVisitor(ASTContext &ctx, const std::vector<std::string> &roots,
                std::vector<Entity> &functions, std::vector<Entity> &types,
                std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
-               std::vector<Entity> &constexprValues, std::set<std::string> &diags)
+               std::vector<Entity> &constexprValues, std::set<std::string> &diags,
+               bool inferredRoots = false)
       : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
         Functions(functions), Types(types), Templates(templates),
         InlineBodies(inlineBodies), ConstexprValues(constexprValues),
-        Diags(diags) {}
+        Diags(diags), InferredRoots(inferredRoots) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1327,6 +1328,15 @@ private:
       return false;
     file = pl.getFilename();
     if (pathUnderAnyRoot(file, Roots)) {
+      // With INFERRED roots (no explicit public-roots=), a root can be an ancestor
+      // of the translation-unit sources — e.g. `-I.`/`-I$repo` — so a decl in an
+      // implementation `.cpp` under the repo would be pulled onto the public
+      // surface, polluting L4/L5 with private API and possibly masking
+      // exported-not-public leaks. Public API lives in headers, so a source-file
+      // decl is never public when roots were inferred (Codex review). Explicit
+      // roots keep exact wrapper/C.6 parity (no extension filter).
+      if (InferredRoots && isSourceFileName(file))
+        return false;
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
@@ -1419,6 +1429,10 @@ private:
   std::vector<Entity> &InlineBodies;
   std::vector<Entity> &ConstexprValues;
   std::set<std::string> &Diags;
+  //: True when Roots were auto-derived (no explicit public-roots=); gates the
+  //: source-file exclusion so an inferred `-I.` root does not pull `.cpp` decls
+  //: onto the public surface.
+  bool InferredRoots = false;
   // Mutable: updated from the const `classify` gate while walking the AST.
   mutable size_t RejectedHeaderDecls = 0;
   mutable std::string ExampleRejectedHeader;
@@ -1446,7 +1460,7 @@ public:
     std::vector<Entity> functions, types, templates, inlineBodies, constexprValues;
     std::set<std::string> diags;
     FactsVisitor visitor(ctx, Roots, functions, types, templates, inlineBodies,
-                         constexprValues, diags);
+                         constexprValues, diags, InferredRootCount > 0);
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
@@ -1596,6 +1610,11 @@ private:
   bool isPublicFile(const std::string &file, std::string &origin,
                     std::string &visibility) const {
     if (pathUnderAnyRoot(file, Roots)) {
+      // Same source-file exclusion as FactsVisitor::classify for inferred roots:
+      // a macro defined in an implementation `.cpp` under an inferred `-I.` root
+      // is not public API (Codex review).
+      if (InferredRootCount > 0 && isSourceFileName(file))
+        return false;
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
