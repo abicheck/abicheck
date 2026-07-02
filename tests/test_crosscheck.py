@@ -315,6 +315,64 @@ def test_public_not_exported_flags_missing_symbol():
     assert hits[0].confidence == Confidence.HIGH
 
 
+def test_public_not_exported_reconciles_l4_variant_export():
+    # Two-way reconciliation: a public ctor decl mangled `_ZN6WidgetC1Ev` whose
+    # binary lists only the base-object clone `_ZN6WidgetC2Ev` is NOT missing — the
+    # L4 source-linker already tied the C1 decl to the exported C2 clone. Without
+    # the reconciliation set it would false-positive; with the L4 mapping attached
+    # it must stay silent. A genuinely-absent decl in the same snapshot still fires.
+    snap = _snap(elf=_elf("_ZN6WidgetC2Ev"))
+    snap.functions = [
+        Function(
+            name="Widget::Widget",
+            mangled="_ZN6WidgetC1Ev",  # complete-object ctor; binary lists only C2
+            return_type="",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="gone",
+            mangled="_Z4gonev",  # truly not exported, not reconciled
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "_ZN6WidgetC1Ev": "_ZN6WidgetC2Ev",  # linker reconciled the clone
+        "_Z4gonev": "",  # linker could not match it
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    # Only the genuinely-missing symbol is flagged; the reconciled ctor is exempt.
+    assert hits == ["_Z4gonev"]
+
+
+def test_public_not_exported_reconciles_macho_underscore_variant():
+    # Reconciliation keys are Mach-O-normalized: a plugin-recorded `__ZN…` decl key
+    # must still exempt the L2 `_ZN…` mangled decl (Codex Mach-O normalization).
+    snap = _snap(elf=_elf("_ZN1A3fooEv"))
+    snap.functions = [
+        Function(
+            name="A::foo",
+            mangled="_ZN1A3fooEv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    surface = SourceAbiSurface(library="libfoo.so")
+    # The L4 linker recorded the raw Mach-O key spelling.
+    surface.mappings["source_decl_to_binary_symbol"] = {
+        "__ZN1A3fooEv": "_ZN1A3fooEv",
+    }
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    # (This symbol IS exported here, so it would not flag anyway; the point is the
+    # normalized key builds without error and is present in the reconciled set.)
+    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+
+    assert "_ZN1A3fooEv" in _l4_reconciled_symbols(snap)
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
