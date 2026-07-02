@@ -64,19 +64,27 @@ def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
     whose export table did not parse).
     """
     raw: set[str] = set()
+    have_raw_table = False
     elf = getattr(snap, "elf", None)
     if elf is not None:
+        have_raw_table = True
         raw |= {s.name for s in getattr(elf, "symbols", ()) if getattr(s, "name", "")}
     pe = getattr(snap, "pe", None)
     if pe is not None:
+        have_raw_table = True
         raw |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
     macho = getattr(snap, "macho", None)
     if macho is not None:
+        have_raw_table = True
         raw |= {e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")}
     raw.discard("")
-    if raw:  # a raw dynamic table is authoritative — do not dilute it
+    if have_raw_table:
+        # A parsed platform table is authoritative EVEN WHEN EMPTY — a hidden-only
+        # library genuinely exports nothing, so its DWARF-modeled `functions` are
+        # *not* exports and must not be relinked as if they were (Codex review).
         return tuple(sorted(raw))
-    # No raw export table (source-only / unparsed): fall back to modeled names.
+    # No platform table parsed at all (a source-only snapshot): the modeled
+    # mangled names are the only available fallback.
     syms = {fn.mangled for fn in snap.functions if fn.mangled}
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     syms.discard("")

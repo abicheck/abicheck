@@ -175,17 +175,23 @@ def _ctor_dtor_structural(symbol: str) -> str:
     without a genuine tag, so non-ctor/dtor symbols keep exact-match semantics.
     """
     # Mach-O/Darwin prefixes every Itanium symbol with an extra leading
-    # underscore (`__ZN1AC1Ev`); strip it for parsing and restore it on the
-    # folded result so the clone index keys match on that platform too (Codex
-    # review). Parse a local ``body`` and offset all indexing into it.
-    prefix = ""
+    # underscore (`__ZN1AC1Ev`). NORMALIZE it away for the canonical key — do NOT
+    # restore it — because the two producers spell it differently: the binary
+    # export table (`macho_metadata`) already strips one underscore (`_ZN…`) while
+    # the Clang plugin emits the raw `__ZN…` mangled name. Restoring the prefix
+    # would keep those in different key spaces and the clones would never match on
+    # macOS Flow-C (Codex review). A folded ctor/dtor key is only a *grouping*
+    # key, so normalizing the spelling is safe; the actual matched symbols keep
+    # their real names. Non-ctor symbols still fall through to `return original`
+    # (their original spelling) for exact matching.
+    original = symbol
     body = symbol
     if body[:3] == "__Z":
-        prefix, body = "_", body[1:]
+        body = body[1:]
     # A ctor/dtor is always a class member → a nested name. Non-nested symbols
     # (plain ``_Z…``, vtables/typeinfo ``_ZTV``/``_ZTI``, data) have none.
     if not body.startswith("_ZN"):
-        return symbol
+        return original
     symbol = body
     i, n = 3, len(symbol)
     # Leading CV-/ref-qualifiers on the implicit object parameter.
@@ -222,12 +228,15 @@ def _ctor_dtor_structural(symbol: str) -> str:
             boundary = True
             continue
         if boundary and c in "CD" and symbol[i : i + 2] in _CTOR_DTOR_TAGS:
-            return prefix + symbol[:i] + c + "@" + symbol[i + 2 :]
+            # Normalized (prefix-stripped) canonical key — unifies `__ZN`/`_ZN`.
+            return symbol[:i] + c + "@" + symbol[i + 2 :]
         # Unknown production: advance without claiming a boundary, so a later
         # C1/D0 reached only by char-skip is never mistaken for a special name.
         boundary = False
         i += 1
-    return prefix + symbol
+    # No fold: return the ORIGINAL symbol (with its prefix) so non-ctor names keep
+    # exact-match semantics against the export set.
+    return original
 
 
 def _build_export_index(exported: set[str]) -> dict[str, list[str]]:

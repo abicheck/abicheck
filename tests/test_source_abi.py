@@ -464,15 +464,27 @@ def test_ctor_dtor_fold_handles_non_type_template_parameters() -> None:
 
 def test_ctor_dtor_fold_handles_macho_leading_underscore() -> None:
     # Codex review: Mach-O/Darwin prefixes every Itanium symbol with an extra
-    # leading underscore (`__ZN1AC1Ev`). The fold must strip it before parsing and
-    # restore it, or ctor clones on macOS never fold.
+    # leading underscore (`__ZN1AC1Ev`). The fold must NORMALIZE it away for the
+    # canonical key so it unifies with the export table's `_ZN…` spelling.
     from abicheck.buildsource.source_link import _ctor_dtor_canonical
 
     assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("__ZN1AC2Ev")
-    # The restored form keeps the Mach-O prefix (so it still matches the export).
-    assert _ctor_dtor_canonical("__ZN1AC1Ev").startswith("__ZN")
+    # The prefix is NORMALIZED away (not restored): the export table strips one
+    # underscore (`_ZN…`) while the plugin emits `__ZN…`, so the canonical key must
+    # unify both spellings or the clones never match on macOS Flow-C (Codex).
+    assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("_ZN1AC1Ev")
+    assert not _ctor_dtor_canonical("__ZN1AC1Ev").startswith("__ZN")
     # A Mach-O non-ctor symbol is returned byte-for-byte unchanged.
     assert _ctor_dtor_canonical("__ZN1N3barEv") == "__ZN1N3barEv"
+
+
+def test_linker_matches_macho_decl_against_stripped_exports() -> None:
+    # End-to-end macOS Flow-C: the plugin decl keeps the raw `__ZN…` mangling but
+    # the export table stores `_ZN…` (one underscore stripped). The ctor clones
+    # must still fold and match across the two spellings (Codex review).
+    tu = SourceAbiTu(functions=[_entity("A::A", "function", mangled="__ZN1AC1Ev")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1AC1Ev", "_ZN1AC2Ev"])
+    assert surface.unmatched["symbols_without_decl"] == []
 
 
 def test_ctor_dtor_fold_handles_function_type_template_args() -> None:
@@ -619,15 +631,31 @@ def test_linker_demangled_identity_rematch() -> None:
     assert surface.unmatched["decls_without_symbol"] == []
 
 
-def test_demangled_rematch_is_unambiguous_only() -> None:
-    # The rematch must never cross-match an overload set: two decls that demangle
-    # distinctly (f(int) vs f(double)) can only claim their own exact export, and
-    # a demangled form shared by >1 export is skipped (never a guess).
+@needs_demangler
+def test_demangled_rematch_skips_ambiguous_forms() -> None:
+    # The rematch must never *guess* when a demangled form maps to more than one
+    # export. `_ZN1N1fENS_1TE` (substitution form) and `_ZN1N1fEN1N1TE` (expanded)
+    # both demangle to `N::f(N::T)`; an unmatched decl demangling to that same
+    # form has two candidate exports, so neither may be claimed (CodeRabbit).
+    from abicheck.buildsource.source_link import _demangled_rematch
+
+    decl = _entity("N::f", "function", mangled="_ZN1N1fENS_1TE")
+    mapping = {decl.identity(): ""}  # unmatched
+    matched: set[str] = set()
+    exported = {"_ZN1N1fENS_1TE", "_ZN1N1fEN1N1TE"}  # both → "N::f(N::T)"
+    new = _demangled_rematch([decl], mapping, matched, exported)
+    # Ambiguous form → no claim; the decl stays unmatched and nothing is consumed.
+    assert new == {}
+    assert mapping[decl.identity()] == ""
+    assert matched == set()
+
+
+def test_demangled_rematch_is_noop_when_already_matched() -> None:
+    # Distinct overloads already exact-matched: the rematch has nothing to do.
     from abicheck.buildsource.source_link import _demangled_rematch
 
     fi = _entity("f", "function", mangled="_Z1fi")  # f(int)
     fd = _entity("f", "function", mangled="_Z1fd")  # f(double)
-    # Both exports present and exact — rematch has nothing to do, no misfire.
     mapping = {"_Z1fi": "_Z1fi", "_Z1fd": "_Z1fd"}
     matched = {"_Z1fi", "_Z1fd"}
     new = _demangled_rematch([fi, fd], mapping, matched, {"_Z1fi", "_Z1fd"})

@@ -46,18 +46,47 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _DIAG = "public-roots matched 0 declarations"
 
 
-def _compile(work: Path, plugin: Path, clangxx: str, public_root: str) -> str:
-    """Compile the widget fixture with *public_root*; return combined stderr."""
-    out = work / f"out_{public_root.replace('/', '_')}"
+def _compile(
+    work: Path,
+    plugin: Path,
+    clangxx: str,
+    public_root: str,
+    out_dir: Path | None = None,
+    obj: str = "widget.o",
+) -> str:
+    """Compile the widget fixture with *public_root*; return combined stderr.
+
+    *out_dir* overrides the pack output directory (default: one per root) so
+    several TUs can be pointed at a shared pack; *obj* names the object file so
+    two invocations don't clobber each other. Returns ``stderr + "@@PACK@@" +
+    out_dir`` — the single source of the plugin invocation contract.
+    """
+    out = (
+        out_dir
+        if out_dir is not None
+        else work / f"out_{public_root.replace('/', '_')}"
+    )
     argp = ["-Xclang", "-plugin-arg-abicheck-facts", "-Xclang"]
     proc = subprocess.run(
         [
-            clangxx, "-std=c++17", "-Iinclude", f"-fplugin={plugin}",
-            *argp, f"out={out}",
-            *argp, f"public-roots={public_root}",
-            "-c", "widget.cpp", "-o", str(work / "widget.o"),
+            clangxx,
+            "-std=c++17",
+            "-Iinclude",
+            f"-fplugin={plugin}",
+            *argp,
+            f"out={out}",
+            *argp,
+            f"public-roots={public_root}",
+            "-c",
+            "widget.cpp",
+            "-o",
+            str(work / obj),
         ],
-        cwd=str(work), capture_output=True, text=True, timeout=300, check=True,
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
     )
     return proc.stderr + "\n@@PACK@@" + str(out)
 
@@ -70,8 +99,15 @@ def _pack_entity_count(out_dir: Path) -> int:
                 if not line.strip():
                     continue
                 rec = json.loads(line)
-                for k in ("functions", "types", "templates", "inline_bodies",
-                          "constexpr_values", "macros", "variables"):
+                for k in (
+                    "functions",
+                    "types",
+                    "templates",
+                    "inline_bodies",
+                    "constexpr_values",
+                    "macros",
+                    "variables",
+                ):
                     total += len(rec.get(k) or [])
     return total
 
@@ -118,22 +154,21 @@ def main(argv: list[str] | None = None) -> int:
 
         # 3) De-dup: two TUs with the wrong root sharing one out dir must emit the
         # human-facing stderr line only ONCE (a big -j build must not spam), while
-        # each TU still records the note in its own pack diagnostics.
+        # each TU still records the note in its own pack diagnostics. Reuse
+        # _compile() (the single owner of the plugin invocation contract) with a
+        # shared out_dir and distinct object names.
         shared = work / "out_shared"
-        argp = ["-Xclang", "-plugin-arg-abicheck-facts", "-Xclang"]
         n_warn = 0
         for obj in ("a.o", "b.o"):
-            proc = subprocess.run(
-                [
-                    args.clangxx, "-std=c++17", "-Iinclude", f"-fplugin={plugin}",
-                    *argp, f"out={shared}",
-                    *argp, "public-roots=no-such-public-root",
-                    "-c", "widget.cpp", "-o", str(work / obj),
-                ],
-                cwd=str(work), capture_output=True, text=True, timeout=300,
-                check=True,
-            )
-            n_warn += proc.stderr.count(_DIAG)
+            stderr, _ = _compile(
+                work,
+                plugin,
+                args.clangxx,
+                "no-such-public-root",
+                out_dir=shared,
+                obj=obj,
+            ).split("\n@@PACK@@")
+            n_warn += stderr.count(_DIAG)
         if n_warn != 1:
             failures.append(
                 f"stderr warning not de-duplicated: emitted {n_warn} times across "

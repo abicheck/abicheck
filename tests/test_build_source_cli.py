@@ -2198,7 +2198,7 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     from abicheck.buildsource.model import BuildSourceManifest
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
     from abicheck.model import Function
 
     # Source-only snapshot: a surface with one public decl, no exports yet.
@@ -2216,6 +2216,9 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     # Binary snapshot exporting _Z3foov.
     bin_snap = AbiSnapshot(library="libfoo.so", version="1")
     bin_snap.elf = ElfMetadata()
+    # A realistic binary exports _Z3foov via its dynamic symbol table (the
+    # authoritative export set), not merely via the DWARF-modeled functions list.
+    bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
     bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
                                    return_type="void", params=[])]
     bin_path = tmp_path / "bin.json"
@@ -2244,7 +2247,7 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
     from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
     from abicheck.model import Function
 
     surf = SourceAbiSurface(library="libfoo.so", target_id="t")
@@ -2262,6 +2265,9 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
 
     bin_snap = AbiSnapshot(library="libfoo.so", version="1")
     bin_snap.elf = ElfMetadata()
+    # A realistic binary exports _Z3foov via its dynamic symbol table (the
+    # authoritative export set), not merely via the DWARF-modeled functions list.
+    bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
     bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
                                    return_type="void", params=[])]
     bin_path = tmp_path / "bin.json"

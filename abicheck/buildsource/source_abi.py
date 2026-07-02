@@ -339,6 +339,7 @@ class SourceAbiSurface:
             "source_decl_to_binary_symbol": {},
             "source_type_to_debug_type": {},
             "public_header_to_target": {},
+            "synthesized_symbol_to_owner": {},
         }
     )
     odr_conflicts: list[dict[str, Any]] = field(default_factory=list)
