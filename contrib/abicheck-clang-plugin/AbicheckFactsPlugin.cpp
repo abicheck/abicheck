@@ -1463,7 +1463,10 @@ public:
       preinc.push_back("i:" + absStr(f));
     for (const auto &f : ci.getPreprocessorOpts().MacroIncludes)
       preinc.push_back("m:" + absStr(f));
-    return H({"ctx", standard, to.Triple, hso.Sysroot, joinStrings(defs, ','),
+    // Root a relative sysroot too (but leave an unset one empty, so the cfg is
+    // not made cwd-dependent when no sysroot is in play).
+    std::string sysroot = hso.Sysroot.empty() ? std::string() : absStr(hso.Sysroot);
+    return H({"ctx", standard, to.Triple, sysroot, joinStrings(defs, ','),
               joinStrings(incs, ','), joinStrings(to.Features, ','),
               joinStrings(preinc, ',')});
   }
