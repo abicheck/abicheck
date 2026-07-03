@@ -74,7 +74,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   bitmask→scalar exit-code translation, an `abidiff`→`abicheck` flag-by-flag
   map, `abidw`/`abipkgdiff` equivalents, and INI→YAML suppression
   translation. The verdict-parity QA matrix it previously contained moved to
-  `docs/development/libabigail-parity.md`.
+  `docs/development/libabigail-parity.md`, refreshed against the current
+  `PARITY_CASES` in `tests/test_abidiff_parity.py` (the vtable/return/param/
+  struct-size gaps it still listed as open were closed by castxml
+  integration).
 - New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
   three source-fact producers, a selection tree, and the `public-roots`/
   `ABICHECK_CC_HEADERS` header-resolution trap.
