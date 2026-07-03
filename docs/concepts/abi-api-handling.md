@@ -128,6 +128,17 @@ is the source of truth).
 | Deployment risk (noexcept, ISA dispatch, version-require) | [15](../examples/case15_noexcept_change.md), [83](../examples/case83_cpu_dispatch_isa_dropped.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 4](abi-series/04-cpp-abi.md) |
 | Compatible additions & quality signals | [03](../examples/case03_compat_addition.md), [25](../examples/case25_enum_member_added.md), [26b](../examples/case26b_union_field_added_compatible.md), [27](../examples/case27_symbol_binding_weakened.md), [29](../examples/case29_ifunc_transition.md), [61](../examples/case61_var_added.md), [62](../examples/case62_type_field_added_compatible.md), [99](../examples/case99_experimental_graduated.md) | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
 | Scoped/non-public internal changes | [118](../examples/case118_internal_struct_field_added_scoped.md), [119](../examples/case119_internal_struct_field_removed_scoped.md), [120](../examples/case120_internal_struct_reordered_scoped.md) | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
+| Deployment & security-hardening risk (RELRO, canary, exec-stack, RUNPATH, `DT_NEEDED`, TLS model, object size, binding) | [127](../examples/case127_data_object_size_changed.md), [128](../examples/case128_symbol_binding_strengthened.md), [133](../examples/case133_tls_model_flip.md), [134](../examples/case134_relro_weakened.md), [135](../examples/case135_stack_canary_removed.md), [136](../examples/case136_executable_stack_removed.md), [137](../examples/case137_runpath_changed.md), [138](../examples/case138_needed_added.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 5](abi-series/05-linker-elf.md) |
+| **Build-flag & toolchain drift (L3)** — the flags the library was *built* with | [98](../examples/case98_cxx_standard_floor_raised.md), [103](../examples/case103_toolchain_flag_drift.md), [104](../examples/case104_glibcxx_dual_abi_flip.md), [130](../examples/case130_exceptions_mode_flip.md), [131](../examples/case131_rtti_mode_flip.md), [132](../examples/case132_threadsafe_statics_flip.md) | 🟡 risk (corroborating) | [Source & Build Data](build-source-data.md) |
+| **Source-only bodies (L4)** — macros, `constexpr`, inline/template *bodies*, uninstantiated templates | [122](../examples/case122_template_signature_uninstantiated.md), [124](../examples/case124_header_constant_value_changed.md) | mixed — 🟠 API_BREAK or 🟡 risk | [Source & Build Data](build-source-data.md) |
+| **Intra-version ABI hygiene / audit** — accidental export, private-header leak, unversioned export, RTTI leak (no baseline needed) | [143](../examples/case143_audit_accidental_export.md), [144](../examples/case144_audit_private_header_leak.md), [145](../examples/case145_audit_unversioned_export.md), [146](../examples/case146_audit_rtti_for_internal.md) | 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
+| **Cross-source validation** — one fact, two sources: header↔build mismatch, ODR variant, export↔decl pair | [148](../examples/case148_xcheck_header_build_mismatch.md), [149](../examples/case149_xcheck_odr_variant.md), [150](../examples/case150_xcheck_export_public_pair.md), [151](../examples/case151_xcheck_provider_matrix.md) | mixed — 🟠 API_BREAK or 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
+
+The last five rows are the families that **only a source scan (L3–L5)** or a
+cross-source check can reach — the coverage the artifact tiers (L0–L2) are
+structurally blind to. They are the subject of the
+[level-by-level walk-through](#what-each-level-actually-sees-a-level-by-level-walk-through)
+and the [source-scan section](#going-deeper-than-artifacts-the-source-scan) below.
 
 ---
 
@@ -295,7 +306,350 @@ signature changes; C symbols do not. ² A few source-only changes (e.g. enum/fie
 values) leave no binary trace and require headers. The authoritative per-change
 table is in [Limitations](limitations.md#source-only-changes-invisible-to-binaryobject-analysis).
 
-### Going deeper than artifacts: the source scan
+The table above stops at the three **artifact** inputs (L0–L2) — but three
+families in [Break families at a glance](#break-families-at-a-glance) live
+*entirely* beyond the shipped artifact and need the **source scan**. Here is the
+companion matrix for them: which source input a **build/source scan** (L3–L5)
+needs to detect each, and — crucially — the fact that these findings are
+**corroborating, never breaking on their own** (the [authority
+rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
+
+| Source-scan family | + Build data (L3) | + Sources (L4) | + Graph (L5, derived) | Emitted verdict | Common false negative |
+|---|:---:|:---:|:---:|---|------|
+| ABI-relevant build-flag / toolchain drift (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fexceptions`, `-frtti`) | ✅ | ✅ | ✅ | 🟡 risk | no compile DB — a command-string DB under-reports normalized flags |
+| Macro / `constexpr` / default-arg **value** change with no symbol move | ⚠️ flag only | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped |
+| Inline / template / uninstantiated **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it |
+| Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ✅ | ✅ | 🟡 risk | one source only — needs binary exports **and** the header AST to cross-check |
+| Cross-source disagreement: header↔build mismatch, ODR type variant, export↔decl pair | ✅ | ✅ | ✅ | 🟠 API_BREAK / 🟡 risk | evidence present on only one side — the check is reported *skipped*, never faked green |
+| Cross-symbol impact / reachability (what a changed internal reaches) | ⚠️ structural | ✅ | ✅ | 🟡 risk | `s4` graph has no call edges — call-impact needs the L4 pass (`s5`/`pr-deep`) |
+
+Two things this second matrix makes explicit that the first cannot:
+
+1. **The source scan reaches a *different* set of changes** — macros, bodies,
+   build flags, hygiene, cross-source conflicts — not a "better" version of the
+   artifact scan. It is additive, not a replacement.
+2. **None of these is `BREAKING` on its own.** A source/API change is `API_BREAK`
+   or risk; a shipped-binary `BREAKING` verdict is *only ever* proven by the
+   artifact tiers (L0–L2). That is the whole point of the authority rule — a
+   weaker source can add findings and confidence but can never overturn (or
+   silently manufacture) a proven binary break.
+
+Read the two matrices together as one staircase: L0→L1→L2 climb *up the artifact*
+(more of the same binary), and L3→L4→L5 step *off the artifact* into what the
+build and sources know. The next section walks a single release up that whole
+staircase so you can see the actual data each level produces.
+
+## What each level actually sees — a level-by-level walk-through
+
+The matrices above are the *summary*. This section is the *demonstration*: one
+tiny library, one real release, walked up every evidence level so you can see —
+concretely, with the actual data — **what each level knows, how the levels
+correlate, and exactly where each one goes blind.** If you have read
+[Evidence & Detectability](evidence-and-detectability.md) for the model, this is
+the worked example that makes it stick.
+
+### The running example
+
+`libcart` is a two-file C++ shared library. Here is the public header of **v1**:
+
+```cpp
+// cart.h  (v1) — the public contract
+#define CART_MAX_ITEMS 64                 // (a) a macro constant
+
+namespace cart {
+enum class Currency : int { USD = 0, EUR = 1 };
+
+struct Money {                            // (b) a public value type
+    long     cents;                       //   offset 0
+    Currency ccy;                         //   offset 8
+};
+
+constexpr double kTaxRate = 0.20;         // (c) a constexpr constant
+
+class Cart {
+public:
+    void  add(int sku, int qty = 1);      // (d) a default argument
+    Money total(bool with_tax = true) const;
+    int   size() const { return count_; } // (e) an inline body
+private:
+    int count_;
+};
+} // namespace cart
+```
+
+**v2** ships four independent changes, each chosen to land on a *different*
+evidence level:
+
+| # | Change | Lands on |
+|---|--------|----------|
+| ① | `struct Money` gains `int region;` **before** `ccy` — every following field shifts, `sizeof(Money)` grows 16→24 | **L1** (layout) |
+| ② | `add(int, int qty = 1)` → `qty = 0` — the *default value* changes; the mangled symbol does not | **L2** (header API) |
+| ③ | `#define CART_MAX_ITEMS 64` → `128` — a macro constant | **L4** (source only) |
+| ④ | v2 is built with `-D_GLIBCXX_USE_CXX11_ABI=0` (v1 used `=1`) — the std::string/std::list ABI flips | **L3** (build flag) |
+
+Watch the same four changes appear (or fail to appear) as we climb. The verdict
+is computed **worst-wins across every level**, so the final answer is `BREAKING`
+— but *which level proved it*, and what each other level added, is the whole
+lesson.
+
+### Level 0 — the shipped binary (symbols only)
+
+**What you feed it:** a stripped `libcart.so`, nothing else.
+**What abicheck extracts** (`abicheck dump libcart.so --show-data-sources`):
+
+```text
+L0 binary metadata   present  (ELF, SONAME=libcart.so.1, 4 exported symbols)
+L1 debug info        absent   (stripped)
+L2 public header AST  absent   (no -H)
+```
+
+The L0 view is just the exported, demangled symbol table:
+
+```text
+# nm -D --demangle libcart.so   (v1 and v2 — byte-for-byte identical)
+cart::Cart::add(int, int)
+cart::Cart::total(bool) const
+cart::Cart::size() const
+typeinfo for cart::Cart
+```
+
+**What L0 proves:** symbols present/absent, SONAME, versioning, visibility,
+binding, `DT_NEEDED`. If v2 had *removed* `add`, L0 alone would prove
+`func_deleted` → `BREAKING` ([case12](../examples/case12_function_removed.md)).
+
+**What L0 is blind to — and this is the punchline:** *none of ①②③④ touch a
+symbol name.* A struct field insertion, a default-argument change, a macro bump,
+and a build-flag flip are **all invisible at L0.** abicheck reports **`NO_CHANGE`**
+— a true statement about the symbol table and a dangerous falsehood about
+compatibility. This is exactly why a stripped-binary-only compare "passes" on
+real breaks (see [Limitations → Stripped binaries](limitations.md#stripped-production-binaries)).
+
+### Level 1 — + debug info (DWARF/PDB): layout ground truth
+
+**What you feed it:** the same libraries built `-g` (or a `-dbg`/`debuginfo`
+sidecar). **What L1 adds** is the *emitted layout* — the byte offsets the
+compiler actually baked into every caller:
+
+```text
+# abicheck's L1 view of `struct Money`
+              v1                         v2
+  struct Money  (size 16)      struct Money  (size 24)
+    +0   long      cents         +0   long      cents
+    +8   Currency  ccy           +8   int       region     ← inserted
+                                 +12  (padding)
+                                 +16  Currency  ccy        ← was +8
+```
+
+Now change ① is *undeniable*. abicheck emits:
+
+```text
+🔴 BREAKING  struct_size_changed        cart::Money   16 → 24 bytes
+🔴 BREAKING  struct_field_offset_changed cart::Money::ccy   +8 → +16
+```
+
+Any consumer compiled against v1 reads `ccy` at offset 8; in v2 that offset holds
+`region`. The loader raises no error — the caller just reads the wrong four bytes
+([case07](../examples/case07_struct_layout.md)). **L1 is where the real break is
+proven**, and its verdict is authoritative.
+
+**What L1 still cannot see:** the default-argument change ② (a default value is a
+*source* fact, not a layout fact — DWARF stores no default arguments), the macro
+③, and the build flag ④. L1 also has no notion of *public vs. internal* — if
+`Money` were a private type, L1 would still shout `BREAKING`; only L2 can tell it
+to relax ([case118](../examples/case118_internal_struct_field_added_scoped.md)).
+
+### Level 2 — + public headers: the source-level API
+
+**What you feed it:** `-H include/cart.h` (parsed by castxml or clang via
+`--ast-frontend`). **What L2 adds** is the *declared* API surface — the intent the
+binary cannot carry, plus the public/internal boundary:
+
+```text
+# abicheck's L2 view of Cart::add
+  v1:  void cart::Cart::add(int sku, int qty = 1)
+  v2:  void cart::Cart::add(int sku, int qty = 0)
+                                            └── default value changed
+```
+
+L2 proves change ②, which every lower level missed:
+
+```text
+🟠 API_BREAK  param_default_value_changed  cart::Cart::add  qty: 1 → 0
+```
+
+A recompiled caller that wrote `cart.add(42)` now silently passes `qty=0` — a
+source-level contract change with *no* binary trace. Only headers reach it
+([case123](../examples/case123_default_argument_removed.md)). L2 also supplies the
+**public-surface scoping** that keeps L1 honest: it tells abicheck that `Money`
+*is* public, so the L1 break stands, while an internal type's identical change
+would be demoted.
+
+**What L2 still cannot see:** the `#define` macro ③ — castxml emits no macros at
+all, and the clang backend models declarations, not `#define` bodies — and the
+build flag ④. It also cannot see an *inline body* change to `size()`: it has the
+declaration, not the compiled body.
+
+### Level 3 — + build data: the flags it was actually built with
+
+**What you feed it:** `-p build/` or `--build-info build/` (a
+`compile_commands.json` / CMake / Ninja / Bazel graph). **What L3 adds** is *how*
+the binary was compiled — the ABI-relevant flags that silently change layout and
+mangling without touching a single line of your source:
+
+```text
+# L3 build-flag delta abicheck normalizes out of the two compile DBs
+  -std                        c++17            c++17          (same)
+  -fvisibility                hidden           hidden         (same)
+  _GLIBCXX_USE_CXX11_ABI      1                0     ← flipped
+```
+
+L3 proves change ④:
+
+```text
+🟡 risk  abi_relevant_build_flag_changed  _GLIBCXX_USE_CXX11_ABI  1 → 0
+```
+
+This is the [dual-ABI flip](../examples/case104_glibcxx_dual_abi_flip.md): every
+`std::string`/`std::list` parameter now uses a *different* underlying type,
+mangled `__cxx11`. On its own L3 is a **risk**, not a break — but it *explains*
+why a wave of `func_deleted`/`func_added` pairs might show up at L0, and it tells
+you the two builds are not comparing like-for-like. Per the authority rule, L3
+never *manufactures* a `BREAKING`; it corroborates and localizes.
+
+**What L3 cannot see:** anything about *values* inside the source — it reads the
+build's flags and target graph, not the code. Macro ③ is still invisible.
+
+### Level 4 — + sources: the facts that never reach the binary
+
+**What you feed it:** `--sources ./libcart-src/` (needs clang; replays each TU
+under its real L3 flags). **What L4 adds** is the last mile — the source-only
+facts that are in *no* artifact: macro constants, `constexpr` values,
+default-argument *values*, and inline/template/uninstantiated **bodies**:
+
+```text
+# L4 source-fact delta (normalized source_facts, per public header)
+  macro   CART_MAX_ITEMS   64  → 128        (public header)
+  inline  cart::Cart::size body-fingerprint  a1b2… → a1b2…  (unchanged)
+```
+
+L4 proves change ③, which is invisible to *every* artifact level — L0, L1, and
+L2 all emit `NO_CHANGE` for a `#define`:
+
+```text
+🟠 API_BREAK  public_macro_value_changed  CART_MAX_ITEMS  64 → 128
+```
+
+If v2 had instead changed the *body* of the inline `size()` while keeping its
+signature, L4 would flag `inline_body_changed` (a mixed-build/ODR **risk**) — the
+one class of change that is neither a symbol, a layout, nor a declaration, and so
+reaches no lower level. This is the residual the whole source scan exists for
+([case122](../examples/case122_template_signature_uninstantiated.md),
+[case124](../examples/case124_header_constant_value_changed.md)).
+
+**What L4 cannot see:** it is only as good as the source checkout matching the
+binary. Point it at the wrong tag and it raises `source_binary_provenance_mismatch`
+rather than guessing. And it **never** upgrades a source-only finding to
+`BREAKING` — a macro change is `API_BREAK`, full stop.
+
+### Level 5 — the derived source/build graph: who reaches what
+
+L5 is not an input you hand over — abicheck **derives** it from L3 (and any L4
+surface). It answers *impact* questions the flat diffs cannot:
+
+```text
+# L5 reachability closure for the change to `struct Money`
+  target libcart  ──has-public-header──▶ cart.h
+    cart.h  ──declares──▶ cart::Money  ──maps-to-debug-type──▶ Money (DWARF)
+      cart::Money  ◀──by-value return──  cart::Cart::total(bool) const
+                                         └── exported symbol _ZNK4cart4Cart5totalEb
+```
+
+So the L1 layout break on `Money` is not an isolated struct change — the graph
+shows it **reaches an exported entry point** (`total` returns `Money` by value),
+which is why the break is consumer-visible and high-priority. L5 emits
+`public_reachability_changed` / `source_to_binary_mapping_changed` as **risk**
+findings that *rank and explain* impact; like L4 they never override the artifact
+verdict. (`abicheck graph explain --symbol _ZNK4cart4Cart5totalEb` prints exactly
+this closure for one finding.)
+
+**What L5 cannot see:** it is a *structural* graph. The cheap `s4` form has no
+call edges, so "what does this internal helper's change reach through the call
+graph" needs the L4 pass (`s5`/`pr-deep`). And a graph never proves a break — it
+prioritizes one.
+
+### Two orthogonal sources: app-swap and bundle scan
+
+The L-staircase is not the only evidence axis. Two *orthogonal* checks answer
+different questions and see different things:
+
+- **App-swap (`appcompat`)** — build a real consumer against v1, drop in v2, run
+  it. It **proves** actual loader/linker behavior for *that* app ("this app does
+  not import the removed symbol") but **cannot** speak for the whole contract:
+  untested API, future consumers, and silent layout corruption a test never
+  exercises stay invisible. It is *consumer-scoped*; library `compare` is
+  *contract-scoped*. (See [App-swap](#app-swap-asw-the-consumer-scoped-runtime-check)
+  above.)
+- **Bundle scan** — many libraries at once, cross-DSO. It catches provider/
+  dependency/entry-point problems *between* binaries that a single-library
+  compare cannot, and is blind to pure source compatibility.
+
+Neither is "higher" than L0–L5; they observe a different slice of reality. The
+full method-by-method comparison is in
+[Evidence & Detectability §2](evidence-and-detectability.md#2-methods-compared-by-the-evidence-they-use).
+
+### How the levels correlate on one release
+
+Here is the entire `libcart` v1→v2 release as one grid — every change against
+every level. Read *down* a column to see what that level alone would report; read
+*across* a row to see how many independent levels corroborate one change:
+
+| Change | L0 symbols | L1 DWARF | L2 headers | L3 build | L4 sources | L5 graph | abicheck ChangeKind | Verdict |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|---|---|
+| ① `Money` field inserted | ❌ | ✅ **proves** | ✅ (castxml layout) | — | ✅ | ✅ ranks | `struct_size_changed`, `struct_field_offset_changed` | 🔴 BREAKING |
+| ② default arg `qty` 1→0 | ❌ | ❌ | ✅ **proves** | — | ✅ | — | `param_default_value_changed` | 🟠 API_BREAK |
+| ③ macro `CART_MAX_ITEMS` | ❌ | ❌ | ❌ | ❌ | ✅ **proves** | — | `public_macro_value_changed` | 🟠 API_BREAK |
+| ④ `_GLIBCXX_USE_CXX11_ABI` | ⚠️ churn | ❌ | ❌ | ✅ **proves** | ✅ | ✅ | `abi_relevant_build_flag_changed` | 🟡 risk |
+| **Release verdict (worst-wins)** | NO_CHANGE | BREAKING | API_BREAK | risk | API_BREAK | risk | — | **🔴 BREAKING** |
+
+Three lessons fall straight out of the grid:
+
+1. **Each row is proven by exactly one level, but corroborated by several.** No
+   single level sees all four changes. The bottom "worst-wins" row shows a
+   stripped-binary compare (L0) would call this release **clean** — the single
+   most important reason to feed abicheck more than the `.so`.
+2. **Higher levels don't *replace* lower ones — they cover different rows.** L2
+   doesn't make L1 redundant; it proves a *different* change. The value is in the
+   overlay, which is why abicheck combines them instead of picking one.
+3. **Authority is not the same as coverage.** L4 proves the *most* rows here, but
+   only L1's authoritative layout finding sets the `BREAKING` gate. L3/L4/L5 add
+   two more real findings and the *explanation*, but a source-only finding tops
+   out at `API_BREAK`.
+
+### The one thing to remember: every level has a blind spot
+
+No level is complete; each is chosen to see one slice and is structurally blind
+to the rest. This is the ladder of what each level **cannot** catch, no matter how
+carefully you run it:
+
+| Level | Can prove | **Structurally cannot see** |
+|-------|-----------|------------------------------|
+| **L0** symbols | symbol add/remove/rename, SONAME, versioning, visibility | any change that keeps the symbol name — layout, default args, macros, flags |
+| **L1** debug info | struct/enum layout, offsets, vtables, calling convention | source intent (default args, `explicit`, access), macros, whether a type is *public* |
+| **L2** headers | signatures, access, `noexcept`, default-arg values, `const`/`constexpr` values, public scoping | `#define` macros, inline/template **bodies**, uninstantiated templates, what was actually compiled |
+| **L3** build data | ABI-relevant flags, toolchain, target/option graph | anything *inside* the source — values, bodies, layout |
+| **L4** sources | macros, `constexpr` values, inline/template/uninstantiated bodies | the layout actually *emitted* (that is L1's job); anything if the checkout ≠ the binary |
+| **L5** graph | reachability / impact ranking, cross-symbol closure | it proves *nothing* on its own — it prioritizes; call impact needs the L4 pass |
+| **app-swap** | real loader behavior for *one* app | unused API, future consumers, silent corruption a test misses, recompile breaks |
+
+> **The takeaway of the whole page:** *different levels observe different
+> evidence, and no single level detects every compatibility issue.* abicheck's
+> answer is not to pick the "best" level but to **overlay all of them** and let
+> the strongest evidence win under the authority rule — the artifact tiers
+> (L0–L2) set any `BREAKING` gate, and the build/source tiers (L3–L5) add the
+> findings and the explanation the artifact alone could never carry. Feed it as
+> many levels as you can; each one closes a blind spot the others have.
+
+## Going deeper than artifacts: the source scan
 
 Artifact comparison (L0–L2) proves what the *shipped binary* did. To recover the
 source-only facts it cannot see — `#define` macros, `constexpr` values,
