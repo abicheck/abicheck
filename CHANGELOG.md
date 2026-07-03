@@ -9,6 +9,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **14 new build/source-only `ChangeKind`s** for ABI/API failures no artifact
+  layer can observe (enum: 254 → 268). L3 build-context flag flips
+  (`enum_size_flag_changed`, `struct_packing_mode_changed`, `lto_mode_changed`,
+  `char_signedness_changed`, `whole_program_vtables_mode_changed`,
+  `sanitizer_mode_changed`, `float_abi_changed`, `stdlib_debug_mode_changed`),
+  L4 source-replay findings (`public_macro_removed`, `inline_function_removed`,
+  `public_typedef_removed`), and L5 version-over-version source-graph deltas
+  (`public_api_internal_dependency_added`, `target_dependency_added`,
+  `exported_symbol_source_owner_changed`). All default to `API_BREAK`/`RISK`
+  and are never `BREAKING` on their own (ADR-028 D3). The four flag-flip kinds
+  added last are covered by unit tests rather than separate example cases —
+  they are structurally identical to cases 152–155.
+- **Example cases 152–161** demonstrating each new kind. They ship hand-built
+  evidence-model fixture pairs (`old.json`/`new.json`) instead of compiled
+  binaries and are validated compiler-free (`scripts/gen_l3l4l5_examples.py`,
+  `tests/test_l3l4l5_examples.py`).
+
 ### Fixed
 
 - **Docs: the `scan --depth` ladder is now stated identically everywhere**

@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_16 case(s)._ [← back to all examples](../index.md)
+_23 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -20,6 +20,13 @@ _16 case(s)._ [← back to all examples](../index.md)
 | [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case152_enum_size_flag_flip](../case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case153_struct_packing_flip](../case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case154_lto_mode_flip](../case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case155_char_signedness_flip](../case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](../case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |

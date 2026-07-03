@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **152 cases** (147 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **162 cases** (157 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -21,8 +21,8 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 10 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 16 | `RISK_KINDS` | 🟡 |
+| API_BREAK | 13 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 23 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 6 | — | ✅ |
@@ -265,6 +265,16 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [149](case149_xcheck_odr_variant/README.md) | ODR type variant (cross-source, L4 layout ↔ layout) | API Break | 🟠 API_BREAK |
 | [150](case150_xcheck_export_public_pair/README.md) | Bidirectional export ↔ declaration pair | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [151](case151_xcheck_provider_matrix/README.md) | Provider-agreement matrix (corroboration grows with evidence) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [152](case152_enum_size_flag_flip/README.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [153](case153_struct_packing_flip/README.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [154](case154_lto_mode_flip/README.md) | _lto_mode_flip — LTO mode flip (`-flto`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [155](case155_char_signedness_flip/README.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [156](case156_public_macro_removed/README.md) | _public_macro_removed — Public macro removed | API Break | 🟠 API_BREAK |
+| [157](case157_inline_function_removed/README.md) | _inline_function_removed — Public inline function removed | API Break | 🟠 API_BREAK |
+| [158](case158_public_typedef_removed/README.md) | _public_typedef_removed — Public typedef removed | API Break | 🟠 API_BREAK |
+| [160](case160_public_api_internal_dep_added/README.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 <!-- END GENERATED: case-index -->
 
 ---

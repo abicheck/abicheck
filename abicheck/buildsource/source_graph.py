@@ -838,6 +838,74 @@ def _option_symbol_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
     }
 
 
+def _public_entry_internal_reach(graph: SourceGraphSummary) -> set[tuple[str, str]]:
+    """``(public_entry_decl, internal_decl)`` pairs the entry reaches by calls.
+
+    An *internal* decl is a ``source_decl`` reachable from an exported entry via
+    the ``DECL_CALLS_DECL`` closure that is **not** in the public-header
+    reachability set (:func:`_public_decls`). Returns ``set()`` when the graph
+    carries no call edges or no public closure, so the version diff skips rather
+    than flagging noise on an evidence-poor side.
+    """
+    reach = _public_entry_call_reachability(graph)
+    if not reach:
+        return set()
+    public = _public_decls(graph)
+    if not public:
+        return set()
+    kinds = _kind_map(graph)
+    out: set[tuple[str, str]] = set()
+    for entry, reachable in reach.items():
+        for target in reachable:
+            if kinds.get(target) == "source_decl" and target not in public:
+                out.add((entry, target))
+    return out
+
+
+def _target_dependency_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
+    """``(target, dependency_target)`` pairs from ``TARGET_DEPENDS_ON``."""
+    return {
+        (e.src, e.dst)
+        for e in graph.edges
+        if e.kind == "TARGET_DEPENDS_ON"
+    }
+
+
+#: Node kinds that represent a declaring file (the graph builder emits
+#: ``SOURCE_DECLARES`` from a ``header`` node — labelled with the declaration's
+#: ``source_location`` path, whose ``origin`` attr says whether it is a header
+#: or a source file — so accepting only ``source`` nodes would leave the owner
+#: map empty on every real graph (Codex review).
+_DECLARING_FILE_KINDS: frozenset[str] = frozenset({"source", "header", "generated_file"})
+
+
+def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
+    """Map each exported ``binary_symbol`` id → the file that declares it.
+
+    The owner is the file node that ``SOURCE_DECLARES`` the ``source_decl`` which
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` the symbol. Production graphs attach that edge
+    from a ``header`` node (``build_source_graph``/``header_declares``), so any
+    declaring-file node kind counts (:data:`_DECLARING_FILE_KINDS`), keyed to the
+    file's node id. A symbol with no unambiguous single declaring file is omitted,
+    so the version diff never guesses.
+    """
+    kinds = _kind_map(graph)
+    symbol_to_decls: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL":
+            symbol_to_decls.setdefault(e.dst, []).append(e.src)
+    decl_to_files: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECLARES" and kinds.get(e.src) in _DECLARING_FILE_KINDS:
+            decl_to_files.setdefault(e.dst, []).append(e.src)
+    out: dict[str, str] = {}
+    for symbol, decls in symbol_to_decls.items():
+        owners = {src for decl in decls for src in decl_to_files.get(decl, [])}
+        if len(owners) == 1:
+            out[symbol] = next(iter(owners))
+    return out
+
+
 def diff_source_graph_findings(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> list[Change]:
@@ -1011,5 +1079,89 @@ def diff_source_graph_findings(
             new_value=f"reaches {n_syms} public symbol(s)",
             source_location=boundary,
         ))
+
+    # 7) a public entry point that newly reaches an internal (non-public)
+    #    declaration through the call graph — the version-over-version analogue
+    #    of the intra-version public-to-internal cross-check. Gate on *both*
+    #    graphs carrying the two evidence kinds this diff subtracts over — call
+    #    edges (DECL_CALLS_DECL) AND a public-header closure (SOURCE_DECLARES) —
+    #    so an evidence-poor baseline (call edges but no public closure, or no
+    #    call pass) cannot make every pre-existing internal callee look newly
+    #    added (Codex review).
+    def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
+        return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
+
+    newly_internal = (
+        _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
+        if _has_internal_reach_coverage(old) and _has_internal_reach_coverage(new)
+        else set()
+    )
+    reached_by_entry: dict[str, list[str]] = {}
+    for entry, target in newly_internal:
+        reached_by_entry.setdefault(entry, []).append(target)
+    for entry in sorted(reached_by_entry):
+        label = new_labels.get(entry, entry)
+        targets = sorted(new_labels.get(t, t) for t in reached_by_entry[entry])
+        findings.append(Change(
+            kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            symbol=label,
+            description=(
+                f"Public entry {label!r} now reaches internal (non-public) "
+                f"declaration(s) {', '.join(targets)} that it did not before. The "
+                "public surface has taken on an undeclared dependency; a change to "
+                "that internal entity becomes a hidden risk. Source-graph evidence "
+                "to review."
+            ),
+            old_value="no internal dependency",
+            new_value=f"reaches {len(targets)} internal decl(s)",
+            source_location=boundary,
+        ))
+
+    # 8) a new inter-target build/link dependency (added TARGET_DEPENDS_ON edge).
+    added_target_deps = _target_dependency_edges(new) - _target_dependency_edges(old)
+    for target, dep in sorted(added_target_deps):
+        tlabel = new_labels.get(target, target)
+        dlabel = new_labels.get(dep, dep)
+        findings.append(Change(
+            kind=ChangeKind.TARGET_DEPENDENCY_ADDED,
+            symbol=tlabel,
+            description=(
+                f"Target {tlabel!r} gained a build/link dependency on {dlabel!r}. "
+                "The shipped artifact may now require an additional library at "
+                "load time and takes on that dependency's ABI transitively. "
+                "Source-graph evidence to review; the DT_NEEDED diff proves any "
+                "concrete new load-time dependency."
+            ),
+            old_value="no dependency",
+            new_value=dlabel,
+            source_location=boundary,
+        ))
+
+    # 9) an exported symbol whose *declaring* file moved (its public declaration
+    #    relocated to a different header / source file) although its
+    #    name/signature are unchanged. NB: this is the declaration owner, not the
+    #    definition TU — the call-graph `def_file` provenance cannot be used here
+    #    because add_node is first-writer-wins and the exported decl node is
+    #    always created by the source-ABI pass before the call-graph augmentation,
+    #    so its def_file attr is dropped (Codex review).
+    old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
+    for symbol in sorted(set(old_owner) & set(new_owner)):
+        if old_owner[symbol] != new_owner[symbol]:
+            label = new_labels.get(symbol, symbol)
+            findings.append(Change(
+                kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+                symbol=label,
+                description=(
+                    f"Exported symbol {label!r} is now declared by a different "
+                    f"file ({old_labels.get(old_owner[symbol], old_owner[symbol])} "
+                    f"→ {new_labels.get(new_owner[symbol], new_owner[symbol])}). The "
+                    "name and signature are unchanged, so the artifact diff is "
+                    "quiet, but the file owning the declaration moved — review for "
+                    "include-path, inlining, or ODR effects. Source-graph evidence."
+                ),
+                old_value=old_labels.get(old_owner[symbol], old_owner[symbol]),
+                new_value=new_labels.get(new_owner[symbol], new_owner[symbol]),
+                source_location=boundary,
+            ))
 
     return findings

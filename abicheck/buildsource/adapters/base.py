@@ -53,9 +53,10 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-march=", "-mtune=", "-mfloat-abi=", "-mfpmath=",
     "--sysroot", "-isysroot",
     "-fvisibility", "-fvisibility-inlines-hidden",
-    "-fpack-struct", "/Zp", "-fshort-enums", "-fshort-wchar",
+    "-fpack-struct", "/Zp", "-fshort-enums", "-fno-short-enums", "-fshort-wchar",
+    "-fsigned-char", "-funsigned-char",
     "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
-    "-flto", "-fno-lto", "-fwhole-program-vtables",
+    "-flto", "-fno-lto", "-fwhole-program-vtables", "-fno-whole-program-vtables",
     "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
     "-fno-threadsafe-statics", "-fthreadsafe-statics",
     "-freg-struct-return", "-fpcc-struct-return",
@@ -81,6 +82,23 @@ _RUNTIME_MODE_FLAGS: dict[str, tuple[str, str]] = {
     "-fno-extern-tls-init": ("tls_init", "local"),
     "-fthreadsafe-statics": ("threadsafe_statics", "on"),
     "-fno-threadsafe-statics": ("threadsafe_statics", "off"),
+    # Language-agnostic layout/codegen mode flips. Their compiler default is
+    # known and language-independent (int-sized enums / natural packing / no
+    # LTO), so the build-evidence diff can compare an explicit value against an
+    # omitted flag; char signedness is target-dependent and handled with a
+    # both-sides-explicit rule in build_diff. Keys are intentionally bare (not
+    # in _LANG_QUALIFIED_MODE_KEYS) so they are recorded unqualified.
+    "-fshort-enums": ("enum_size", "short"),
+    "-fno-short-enums": ("enum_size", "int"),
+    "-fsigned-char": ("char_signedness", "signed"),
+    "-funsigned-char": ("char_signedness", "unsigned"),
+    "-flto": ("lto", "on"),
+    "-fno-lto": ("lto", "off"),
+    # Whole-program devirtualization: enabling it lets the linker elide/rewrite
+    # vtable slots and typeinfo across TUs, so mixing a -fwhole-program-vtables
+    # build with one without it is ABI-risky. Default off (known).
+    "-fwhole-program-vtables": ("whole_program_vtables", "on"),
+    "-fno-whole-program-vtables": ("whole_program_vtables", "off"),
 }
 
 #: Runtime-mode keys whose compiler default depends on the source language
@@ -98,11 +116,25 @@ _LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
 # building a whole library half-and-half is rare. The common all-or-nothing
 # mode flip across versions is detected.
 
+#: ``-flto*`` spellings that only *tune* an existing LTO build (backend
+#: parallelism / partitioning / compression) rather than enabling LTO. They are
+#: not ABI-relevant on their own, but they share the ``-flto`` prefix, so they
+#: must be explicitly excluded from extraction or the generic option path would
+#: report a standalone tuning flag as ABI_RELEVANT_BUILD_FLAG_CHANGED (Codex).
+_NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
+    "-flto-partition=", "-flto-jobs=", "-flto-compression-level=", "-flto-incremental=",
+)
+
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
 _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
     "_GLIBCXX_USE_CXX11_ABI",
     "_ITERATOR_DEBUG_LEVEL",
     "_LIBCPP_ABI_VERSION",
+    # libstdc++ debug/hardening modes change std:: container layout & size, so a
+    # consumer built without them is ABI-incompatible with a library built with
+    # them (routed to STDLIB_DEBUG_MODE_CHANGED by build_diff).
+    "_GLIBCXX_DEBUG",
+    "_GLIBCXX_ASSERTIONS",
 )
 
 
@@ -391,7 +423,11 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
+        if arg.startswith(_NON_ABI_LTO_TUNING_PREFIXES):
+            # LTO backend-tuning flag (not enabling): not ABI-relevant, though it
+            # shares the -flto prefix. Skip so it never reaches option derivation.
+            pass
+        elif arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
             out.append(arg)
         elif arg in ("-D", "/D") and i + 1 < len(argv):
             # Split form: -D KEY[=VALUE]. Normalize to the combined token.
@@ -461,6 +497,43 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 # single option regardless of which model string is on each side.
                 model = flag.split("=", 1)[1] if "=" in flag else ""
                 mode_values["tls_model"] = (model, flag)
+            elif flag.startswith("/Zp"):
+                # MSVC struct-packing width (/Zp[N]). Its default is
+                # target-dependent (/Zp8 on x86/ARM, /Zp16 on x64), so it is keyed
+                # separately from the GNU flag and diffed only when both sides are
+                # explicit (build_diff), avoiding a false flip when a VS project
+                # merely records its platform default against an omitted side.
+                mode_values["struct_packing_msvc"] = (flag[len("/Zp"):] or "1", flag)
+            elif flag.startswith("-fpack-struct"):
+                # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
+                # is known (disabled → natural packing), so a one-sided add/remove
+                # is a real, reportable layout change. Bare flag packs to 1.
+                packing = flag.split("=", 1)[1] if "=" in flag else "1"
+                mode_values["struct_packing"] = (packing, flag)
+            elif flag.startswith("-flto="):
+                # -flto=<thin|auto|N>: an *enabling* spelling (bare -flto is caught
+                # by the _RUNTIME_MODE_FLAGS map above; -fno-lto too). Match only
+                # "-flto=" so LTO *tuning* flags that do not enable LTO
+                # (-flto-partition=, -flto-jobs=) fall through to the generic
+                # option path instead of falsely reporting lto off->on (Codex).
+                mode_values["lto"] = ("on", flag)
+            elif flag.startswith("-fsanitize="):
+                # -fsanitize=<list>: sanitizers change object layout (asan
+                # redzones), instrumentation and the runtime contract. Canonical
+                # key so a flip diffs as one option; default is "none" (known).
+                mode_values["sanitizer"] = (flag.split("=", 1)[1], flag)
+            elif flag.startswith("-fno-sanitize="):
+                # -fno-sanitize=<list> disables sanitizers. On its own it just
+                # spells the default (no sanitizer), so normalize to "none" rather
+                # than let it fall through to the generic ABI-flag finding — with
+                # last-one-wins it also correctly cancels an earlier -fsanitize=
+                # for the same set (Codex review).
+                mode_values["sanitizer"] = ("none", flag)
+            elif flag.startswith("-mfloat-abi="):
+                # -mfloat-abi=<soft|softfp|hard>: the float calling convention on
+                # ARM. Its default is target-dependent, so build_diff requires
+                # both sides explicit before reporting a flip.
+                mode_values["float_abi"] = (flag.split("=", 1)[1], flag)
             elif flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)

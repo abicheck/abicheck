@@ -1,0 +1,73 @@
+{
+  "coverage": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "sym:_ZN4demo4initEv",
+      "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "provenance": "",
+      "src": "decl:demo::init"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::init",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/legacy.h"
+    }
+  ],
+  "external_graph_refs": [],
+  "graph_id": "sha256:aa7c74fb919def5e3bd7d9d840cabfbe54ed9b4d3e8ef6a1ee6f0293bba3b8d5",
+  "indexes": {
+    "by_binary_symbol": {
+      "sym:_ZN4demo4initEv": [
+        "decl:demo::init"
+      ]
+    },
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::init": [
+        "hdr:include/demo/legacy.h",
+        "sym:_ZN4demo4initEv"
+      ]
+    },
+    "by_target": {}
+  },
+  "nodes": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "decl:demo::init",
+      "kind": "source_decl",
+      "label": "demo::init()",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "sym:_ZN4demo4initEv",
+      "kind": "binary_symbol",
+      "label": "demo::init",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/legacy.h",
+      "kind": "header",
+      "label": "include/demo/legacy.h",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/init.h",
+      "kind": "header",
+      "label": "include/demo/init.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

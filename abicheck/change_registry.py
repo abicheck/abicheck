@@ -1144,6 +1144,74 @@ REGISTRY = ChangeKindRegistry([
               "a function-local static, compiled in different modes across TUs, has "
               "mismatched guard expectations — a data race or double-init on "
               "concurrent first use."),
+    _E("enum_size_flag_changed", _R,
+       impact="The enum storage-size policy was toggled between builds "
+              "(-fshort-enums ↔ default). With -fshort-enums the compiler picks the "
+              "smallest integer type that holds an enum's range instead of a full "
+              "int, so an enum member of a public struct, an enum-typed parameter, "
+              "or an enum return value changes size and (as a struct member) shifts "
+              "every field after it. Symbol names are unchanged, so a symbol-only "
+              "check is blind; the artifact/type diff confirms any concrete layout "
+              "break. Build all consumers with the matching -fshort-enums setting."),
+    _E("struct_packing_mode_changed", _R,
+       impact="The default struct-packing/alignment policy changed between builds "
+              "(-fpack-struct / MSVC /Zp, or a differing pack width). Reducing the "
+              "packing alignment removes padding, so every member offset and the "
+              "type's size can change without any source or symbol change. Consumers "
+              "compiled against the old packing read fields at stale offsets. The "
+              "artifact/type diff proves the concrete offset break; this localizes "
+              "the flag that caused it. Build consumers with the matching packing."),
+    _E("lto_mode_changed", _R,
+       impact="Link-time optimization was toggled between builds (-flto ↔ no LTO, "
+              "or with -fwhole-program-vtables). LTO changes cross-TU inlining and "
+              "can devirtualize or drop vtable/typeinfo emission the linker would "
+              "otherwise keep, so the emitted symbol set and inlined public-inline "
+              "bodies can differ from a non-LTO build of the same source. A risk "
+              "signal to review; the artifact diff proves any concrete symbol/layout "
+              "break. Prefer a single LTO policy across the library and consumers."),
+    _E("char_signedness_changed", _R,
+       impact="The signedness of a plain `char` changed between builds "
+              "(-fsigned-char ↔ -funsigned-char; the default is target-dependent). "
+              "`char`, `signed char` and `unsigned char` are three distinct types, "
+              "so a plain-`char` parameter or member reinterprets the same bytes "
+              "with the opposite sign, silently changing comparisons and value "
+              "range in consumer code recompiled against the other setting. Symbol "
+              "names are unchanged, so only the captured build flag exposes it. "
+              "Build consumers with the matching char signedness."),
+    _E("whole_program_vtables_mode_changed", _R,
+       impact="Whole-program vtable optimization was toggled between builds "
+              "(-fwhole-program-vtables, typically with LTO). It lets the linker "
+              "devirtualize calls and elide or rewrite vtable/typeinfo emission "
+              "across translation units under a closed-world assumption, so mixing "
+              "a build that assumed whole-program visibility with a consumer that "
+              "extends a class or overrides a virtual can dispatch to the wrong "
+              "slot. If the public API exposes polymorphic types, build the library "
+              "and its consumers with the matching setting."),
+    _E("sanitizer_mode_changed", _R,
+       impact="The sanitizer set changed between builds (-fsanitize=). Sanitizers "
+              "instrument code and change object layout — AddressSanitizer adds "
+              "redzones around globals and stack objects and swaps in an "
+              "interceptor allocator, and the runtime must match — so a library "
+              "and a consumer built with different -fsanitize= settings are not "
+              "compatible. Ship sanitized builds only for testing, and match the "
+              "sanitizer set across the library and its consumers."),
+    _E("float_abi_changed", _R,
+       impact="The floating-point calling convention changed between builds "
+              "(-mfloat-abi=soft/softfp/hard; the default is target-dependent). On "
+              "ARM the float ABI decides whether floating-point arguments and "
+              "returns travel in FP registers (hard) or core registers/memory "
+              "(soft), so a function taking or returning a float/double is called "
+              "with an incompatible convention across the boundary — a silent "
+              "corruption or crash. Build the whole stack with one float ABI."),
+    _E("stdlib_debug_mode_changed", _R,
+       impact="A standard-library debug/hardening mode was toggled between builds "
+              "(_GLIBCXX_DEBUG / _GLIBCXX_ASSERTIONS for libstdc++, "
+              "_ITERATOR_DEBUG_LEVEL for the MSVC STL). These modes change the "
+              "layout and size of std:: containers (extra debug members / iterator "
+              "bookkeeping), so any public type embedding a std:: container by "
+              "value, or a function taking one across the boundary, is "
+              "ABI-incompatible between a debug-mode build and a normal one. Build "
+              "the library and its consumers with the matching setting."),
 
     # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
     # Produced by the source-replay diff over two linked source ABI surfaces.
@@ -1218,6 +1286,26 @@ REGISTRY = ChangeKindRegistry([
               "consumer-owned struct — can change meaning or fail to compile. "
               "Surfaced by source replay because a bare typedef leaves no exported "
               "symbol of its own; a source/API break until consumers recompile."),
+    _E("public_macro_removed", _A,
+       impact="A macro that was part of the public header surface was removed. "
+              "Macros never reach the binary, so no artifact layer can see the "
+              "removal — only source replay does. Source that referenced the macro "
+              "(a constant, a feature guard, or a function-like macro) no longer "
+              "compiles. A source/API break; provide a replacement or a deprecation "
+              "shim, or document the removal for consumers."),
+    _E("inline_function_removed", _A,
+       impact="A public header-only inline function was removed. Because it was "
+              "inline it had no exported binary symbol, so the artifact diff (L0) "
+              "sees nothing; only source replay observes the lost declaration. "
+              "Source that called the inline no longer compiles. A source/API "
+              "break — keep a compatible declaration or move the removal behind a "
+              "documented deprecation."),
+    _E("public_typedef_removed", _A,
+       impact="A public typedef/alias was removed from the headers. A bare typedef "
+              "emits no symbol of its own, so the artifact diff is blind; source "
+              "replay surfaces the removal. Consumer source that named the alias "
+              "(variables, casts, template arguments) no longer compiles. A "
+              "source/API break; retain the alias or provide a replacement name."),
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     _E("public_reachability_changed", _R,
@@ -1250,6 +1338,34 @@ REGISTRY = ChangeKindRegistry([
               "produces an exported public symbol (per the build/source graph). "
               "It localizes a flag-drift risk to the public surface it can affect; "
               "a risk to review, never on its own an artifact-proven ABI break."),
+    _E("public_api_internal_dependency_added", _R,
+       impact="A public/exported entry point newly reaches an internal "
+              "(non-public-header) declaration through the L5 source graph — a "
+              "public API now calls or references an entity that lives only in a "
+              "private header or source file, where it did not in the prior "
+              "version. The public surface has taken on an undeclared dependency, "
+              "so a later change to that internal entity becomes a hidden "
+              "behavioral risk to the API. The version-over-version analogue of the "
+              "intra-version public-to-internal cross-check; a risk to review, "
+              "never on its own an artifact-proven ABI break."),
+    _E("target_dependency_added", _R,
+       impact="The library gained an inter-target build/link dependency (a new "
+              "TARGET_DEPENDS_ON edge in the build graph). The shipped artifact may "
+              "now require an additional library at load time, so a deployment that "
+              "only shipped the old dependency set can fail to resolve at runtime, "
+              "and the added dependency's own ABI now transitively affects "
+              "consumers. A packaging/deployment risk to review; the artifact's "
+              "DT_NEEDED diff proves any concrete new load-time dependency."),
+    _E("exported_symbol_source_owner_changed", _R,
+       impact="An exported symbol present in both versions is now declared by a "
+              "different file (the file owning its declaration moved in the source "
+              "graph — e.g. a public declaration relocated to another header, or "
+              "its declaring translation unit changed). The symbol name and "
+              "signature are unchanged, so the artifact diff is quiet, but the "
+              "declaration behind a stable public symbol moved — a refactor that "
+              "can change consumers' include paths, inlining, or introduce an ODR "
+              "risk if the old location still declares it. A source-graph risk to "
+              "review, never on its own an artifact-proven ABI break."),
     # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
     # Produced by the intra-version cross-source engine (buildsource/crosscheck.py),
     # which diffs ONE merged snapshot's evidence sources against each other rather

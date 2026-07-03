@@ -1,0 +1,93 @@
+{
+  "coverage": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "sym:_ZN4demo5parseEv",
+      "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "provenance": "",
+      "src": "decl:demo::parse"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::parse",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::parse",
+      "edge": "DECL_CALLS_DECL",
+      "provenance": "",
+      "src": "decl:demo::parse"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:detail::validate",
+      "edge": "DECL_CALLS_DECL",
+      "provenance": "",
+      "src": "decl:demo::parse"
+    }
+  ],
+  "external_graph_refs": [],
+  "graph_id": "sha256:91ece28b07f5b6f16605267ade78f9d5df3037075199317fa16e18c07f41f38c",
+  "indexes": {
+    "by_binary_symbol": {
+      "sym:_ZN4demo5parseEv": [
+        "decl:demo::parse"
+      ]
+    },
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::parse": [
+        "decl:demo::parse",
+        "hdr:include/demo/api.h",
+        "sym:_ZN4demo5parseEv"
+      ],
+      "decl:detail::validate": [
+        "decl:demo::parse"
+      ]
+    },
+    "by_target": {}
+  },
+  "nodes": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "decl:demo::parse",
+      "kind": "source_decl",
+      "label": "demo::parse()",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "decl:detail::validate",
+      "kind": "source_decl",
+      "label": "detail::validate()",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "sym:_ZN4demo5parseEv",
+      "kind": "binary_symbol",
+      "label": "demo::parse",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/api.h",
+      "kind": "header",
+      "label": "demo/api.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

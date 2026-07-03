@@ -342,6 +342,31 @@ def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public typedef present old, gone new. A bare typedef emits no
+    # symbol, so the artifact diff is blind; consumer source that named the alias
+    # no longer compiles (a source/API break). Generated typedefs are reported as
+    # generated_header_changed by _diff_generated, so skip them here. Skip
+    # entirely when the new surface carries no facts (L4 extraction failed) so
+    # evidence absence is not read as removal.
+    for key in sorted(set(old_t) - set(new_t)) if _surface_has_facts(new) else []:
+        ov = old_t[key]
+        if _is_generated(ov):
+            continue
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public typedef {name!r} was removed from the headers. It "
+                    "emitted no symbol of its own, so only source replay sees the "
+                    "removal; source that named the alias no longer compiles."
+                ),
+                old_value=ov.value or ov.type_hash,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 
@@ -370,6 +395,28 @@ def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public macro present in the old surface but gone from the new
+    # one. Macros never reach the binary, so no artifact layer sees the removal —
+    # only the source-replay surface does. Source that referenced it no longer
+    # compiles (a source/API break). Skipped when the new surface carries no
+    # facts (L4 extraction failed) so evidence absence is not read as removal.
+    for key in sorted(set(old_m) - set(new_m)) if _surface_has_facts(new) else []:
+        ov = old_m[key]
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.PUBLIC_MACRO_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public macro {name!r} was removed from the headers. Source "
+                    "that referenced it no longer compiles; there is no binary "
+                    "footprint, so only source replay sees it."
+                ),
+                old_value=ov.value,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 
@@ -400,6 +447,11 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
                         source_location=_loc(nv),
                     )
                 )
+            # NB: a constexpr *function* body change is not distinguished here —
+            # the clang extractor emits constexpr functions as kind="inline"
+            # (their body rides in reachable_inline_bodies), so such a change is
+            # reported as inline_body_changed by _diff_inline_bodies. kind
+            # "constexpr" is reserved for constexpr *variables* / constants.
             continue
 
         # Generated entities are reported as generated_header_changed by
@@ -463,6 +515,34 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public inline function present old, gone new. Because it was
+    # inline it had no exported symbol, so the artifact diff is blind; source
+    # that called it no longer compiles (a source/API break). Guard against a
+    # safe inline→out-of-line refactor: if the same function still exists as a
+    # (non-inline) declaration or still backs an exported symbol on the new side,
+    # consumer source can still call it, so it is NOT a removal (Codex review).
+    new_decl_ids = {e.identity() for e in new.reachable_declarations if e.identity()}
+    new_exports = set(new.roots.get("exported_symbols", []))
+    inline_removals = sorted(set(old_i) - set(new_i)) if _surface_has_facts(new) else []
+    for key in inline_removals:
+        ov = old_i[key]
+        if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
+            continue
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.INLINE_FUNCTION_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public inline function {name!r} was removed. It had no "
+                    "exported binary symbol, so only source replay sees the loss; "
+                    "source that called it no longer compiles."
+                ),
+                old_value=ov.body_hash or ov.signature_hash,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 
@@ -599,6 +679,28 @@ def _diff_odr(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
 
 
 # -- helpers -----------------------------------------------------------------
+
+
+def _surface_has_facts(surface: SourceAbiSurface) -> bool:
+    """Whether *surface* carries any L4 evidence at all.
+
+    A surface with no *source* facts signals that L4 extraction did not run (the
+    inline collector returns a bare ``SourceAbiSurface()`` when the extractor is
+    missing), *not* a library whose public surface genuinely became empty. The
+    removal passes (macro/typedef/inline) must not fire against such a surface,
+    or evidence-absence would be reported as a wholesale source break (Codex
+    review). Only the source buckets count: ``roots['exported_symbols']`` can be
+    populated by ``relink_surface_exports()`` from the *binary's* export table
+    even when no source replay ran, so it is deliberately excluded here — a
+    relinked-but-source-empty surface is still evidence-absent for these checks.
+    """
+    return bool(
+        surface.reachable_declarations
+        or surface.reachable_types
+        or surface.reachable_macros
+        or surface.reachable_templates
+        or surface.reachable_inline_bodies
+    )
 
 
 def _is_generated(entity: SourceEntity) -> bool:

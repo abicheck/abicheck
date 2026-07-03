@@ -1,0 +1,67 @@
+{
+  "coverage": {},
+  "library": "libdemo.so",
+  "mappings": {
+    "public_header_to_target": {},
+    "source_decl_to_binary_symbol": {},
+    "source_type_to_debug_type": {},
+    "synthesized_symbol_to_owner": {}
+  },
+  "odr_conflicts": [],
+  "reachable_source_surface": {
+    "declarations": [
+      {
+        "api_relevant": true,
+        "body_hash": "",
+        "confidence": "unknown",
+        "id": "demo::keep",
+        "kind": "function",
+        "mangled_name": "_ZN4demo4keepEv",
+        "qualified_name": "demo::keep",
+        "signature_hash": "",
+        "source_location": {
+          "line": 3,
+          "origin": "UNKNOWN",
+          "path": "include/demo/keep.h"
+        },
+        "type_hash": "",
+        "value": "",
+        "visibility": "public_header"
+      }
+    ],
+    "inline_bodies": [
+      {
+        "api_relevant": true,
+        "body_hash": "sha256:clampv1",
+        "confidence": "unknown",
+        "id": "demo::clamp",
+        "kind": "inline",
+        "mangled_name": "",
+        "qualified_name": "demo::clamp",
+        "signature_hash": "",
+        "source_location": {
+          "line": 20,
+          "origin": "UNKNOWN",
+          "path": "include/demo/math.h"
+        },
+        "type_hash": "",
+        "value": "",
+        "visibility": "public_header"
+      }
+    ],
+    "macros": [],
+    "templates": [],
+    "types": []
+  },
+  "roots": {
+    "exported_symbols": [],
+    "forced_public": [],
+    "public_header_declarations": []
+  },
+  "schema_version": 1,
+  "target_id": "",
+  "unmatched": {
+    "decls_without_symbol": [],
+    "symbols_without_decl": []
+  }
+}
