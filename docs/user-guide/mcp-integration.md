@@ -62,7 +62,7 @@ Add to `.cursor/mcp.json` or VS Code MCP settings:
 
 ## Tools
 
-The MCP server exposes four tools. All return JSON-encoded strings.
+The MCP server exposes seven tools. All return JSON-encoded strings.
 
 **Response envelopes.** On failure, every tool returns the same error
 envelope: `{"status": "error", "error": "<message>"}`. On success the
@@ -74,6 +74,9 @@ shape differs by tool:
 | `abi_dump` | `{"status": "ok", "summary": ..., ...}` |
 | `abi_list_changes` | `{"count": ..., "change_kinds": [...]}` — no `status` field |
 | `abi_explain_change` | `{"kind": ..., "impact": ..., ...}` — no `status` field |
+| `abi_audit` | `{"status": "ok", "verdict": ..., "catalog": ..., "pattern_scan": ...}` |
+| `abi_estimate` | `{"status": "ok", "mode": ..., "estimate": [...], "total_est_seconds": ...}` |
+| `abi_scan` | `{"status": "ok", "verdict": ..., "layers": [...], ...}` |
 
 The simplest client check is: `status == "error"` ⇒ failure; otherwise
 treat as success and parse the tool-specific payload. See
@@ -275,6 +278,94 @@ Returns a detailed explanation of what a change kind means, why it's dangerous, 
 The `severity` field is either `"error"` (`BREAKING`) or `"warning"`
 (`API_BREAK`, `COMPATIBLE_WITH_RISK`, and `COMPATIBLE` kinds).
 
+---
+
+### `abi_audit` — Single-release ABI-hygiene audit
+
+The MCP counterpart of [`abicheck scan --audit`](scan-levels.md): runs the
+intra-version cross-source validation engine plus the compiler-free lexical
+pattern pre-scan over **one** build — no baseline or previous version needed.
+It returns a "bad ABI hygiene" catalog: accidental ABI surface
+(`exported_not_public`), public-but-not-exported declarations,
+header/build-context mismatch, and private-header leaks, plus advisory pattern
+facts. Per the authority rule these findings are never `BREAKING` on their own —
+they are advisory (`RISK`/`API_BREAK`).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `library_path` | string | yes | Path to `.so`/`.dll`/`.dylib` or a JSON snapshot |
+| `headers` | string[] | no | Public header files. Strongly recommended — most hygiene checks skip cleanly without public-header provenance |
+| `include_dirs` | string[] | no | Extra include directories for the C/C++ parser |
+| `language` | string | no | `"c++"` (default) or `"c"` |
+
+**Response fields:** `verdict` (`COMPATIBLE` or `API_BREAK`), `exit_code`
+(`0` or `2`), `catalog` (the cross-source findings), and `pattern_scan`
+(the advisory pattern facts).
+
+---
+
+### `abi_estimate` — Dry-run scan cost estimate
+
+The MCP counterpart of [`abicheck scan --estimate`](scan-levels.md):
+probes the project (TU count from the compile DB or source tree, public-header
+fan-out) and returns the **projected per-layer cost** of the chosen scan level
+without running any compiler or parsing any binary. Use it to pick a
+`depth`/`mode` on measured cost before spending on `abi_scan`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `binary_path` | string | yes | Library/artifact the scan would target (existence checked) |
+| `headers` | string[] | no | Public header files (for the L2 header-AST fan-out estimate) |
+| `include_dirs` | string[] | no | Extra include directories |
+| `sources` | string | no | Source tree (compile DB auto-discovered within it) |
+| `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
+| `mode` | string | no | Fixed (L,S) preset: `"pr"` (default), `"pr-deep"`, `"baseline"`, `"audit"` |
+| `source_method` | string | no | Precise S-axis level (`s0`…`s6` or `auto`); omit for the mode preset |
+| `depth` | string | no | Coarse L-axis selector: `binary`, `headers`, `build`, `source`, `full` |
+| `changed_paths` | string[] | no | Changed-path set for the focused replay-scope estimate |
+
+**Response fields:** `mode`, `estimate` (per-layer cost rows), and
+`total_est_seconds`.
+
+---
+
+### `abi_scan` — Source-intelligence scan
+
+The MCP counterpart of the [`scan` CLI](scan-levels.md): classify → always-on
+tier (compiler-free pattern pre-scan + intra-version cross-source checks) → the
+pinned evidence level — and, when `baseline` is given, a compare against it.
+Returns one coverage-/confidence-annotated scan result. The authority rule is
+preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
+`BREAKING` on their own. See [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)
+for the `mode`/`source_method`/`depth` model.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `binary_path` | string | yes | Library/artifact (or JSON snapshot) to scan |
+| `headers` | string[] | no | Public header files (provenance + pattern pre-scan) |
+| `include_dirs` | string[] | no | Extra include directories for the parser |
+| `public_header_dirs` | string[] | no | Directories whose headers are public; establishes the public/internal boundary so the leakage/RTTI/exported-vs-public cross-checks run instead of skipping. Must be existing directories |
+| `sources` | string | no | Source tree (compile DB auto-discovered within it) |
+| `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
+| `baseline` | string | no | Previous build's dump/library to compare against. Omit for a single-release run; use `mode="audit"` for the hygiene catalog |
+| `mode` | string | no | Fixed (L,S) preset: `"pr"` (default), `"pr-deep"`, `"baseline"`, `"audit"` |
+| `source_method` | string | no | Precise S-axis level (`s0`…`s6` or `auto`); omit for the mode preset |
+| `depth` | string | no | Coarse L-axis selector: `binary`, `headers`, `build`, `source`, `full` |
+| `changed_paths` | string[] | no | Changed-path set focusing the scan |
+| `language` | string | no | `"c++"` (default) or `"c"` |
+
+**Response fields:** `verdict`, `exit_code`, `findings` (count), `layers`
+(the per-layer evidence-coverage rows — always read these before trusting the
+verdict), `confidence` (the provider-agreement matrix), `estimate` (projected
+per-layer cost for comparison against the actual run), and `report` (the full
+report payload).
+
 ## Agent workflow examples
 
 ### Check a PR for ABI compatibility
@@ -315,6 +406,31 @@ Agent: "What kinds of ABI breaks can you detect?"
    → the breaking subset of the change-kind registry, with descriptions
 
 2. Agent summarizes the categories for the user
+```
+
+### Audit one build's ABI hygiene (no baseline)
+
+```text
+User: "Does this library leak anything it shouldn't?"
+
+1. abi_audit(library_path="build/libfoo.so", headers=["include/foo.h"])
+   → catalog: [{kind: "exported_not_public", ...}, ...]
+
+2. Agent reports the accidental exports and private-header leaks
+```
+
+### Estimate before a deep scan
+
+```text
+Agent: "Is a full source scan affordable here?"
+
+1. abi_estimate(binary_path="build/libfoo.so", sources=".", mode="pr")
+   → total_est_seconds: 42.5, estimate: [per-layer rows]
+
+2. abi_scan(binary_path="build/libfoo.so", headers=["include/foo.h"],
+            sources=".", baseline="artifacts/libfoo-main.abi.json",
+            changed_paths=["src/foo.cpp"])
+   → verdict + per-layer coverage rows (read them before trusting the verdict)
 ```
 
 ## Error responses
@@ -361,8 +477,8 @@ variables override defaults.
 
 | CLI flag | Environment variable | Default | Purpose |
 |---|---|---|---|
-| `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump` and `abi_compare`. On timeout the tool returns a structured error; the server stays up |
-| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input file (`library_path`, `old_input`, `new_input`) |
+| `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, and `abi_scan`. On timeout the tool returns a structured error; the server stays up |
+| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), and `binary_path`/`compile_db`/`baseline` (`abi_scan`) |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
 Example invocation tuned for large libraries:
@@ -463,6 +579,9 @@ The server uses **stdio** transport — the agent spawns `abicheck-mcp` as a loc
 │     abi_compare                  │
 │     abi_list_changes             │
 │     abi_explain_change           │
+│     abi_audit                    │
+│     abi_estimate                 │
+│     abi_scan                     │
 └──────────┬───────────────────────┘
            │ Python imports
            ▼
@@ -498,12 +617,15 @@ they follow the same access controls as the user running the MCP server.
 In addition to the write-path policy above, every tool call is bounded
 to keep one bad input from disabling the server:
 
-- **File-size cap**: input files larger than `--max-file-size` (default
-  500 MB) are rejected before any parsing begins.
-- **Per-call timeout**: `abi_dump` and `abi_compare` run in a worker
-  thread bounded by `--timeout` (default 120 s). On timeout the tool
-  returns a structured error and the server keeps serving subsequent
-  calls.
+- **File-size cap**: input artifacts larger than `--max-file-size` (default
+  500 MB) are rejected before any parsing begins — this covers
+  `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input`
+  (`abi_compare`), and `binary_path`/`compile_db`/`baseline` (`abi_scan`).
+- **Per-call timeout**: `abi_dump`, `abi_compare`, and `abi_audit` run in a
+  worker thread bounded by `--timeout` (default 120 s); `abi_scan` runs in a
+  killable child process bounded by the same timeout (so a hung deep scan is
+  terminated, not orphaned). On timeout the tool returns a structured error
+  and the server keeps serving subsequent calls.
 - **Sanitized errors**: filesystem paths and internal stack frames are
   scrubbed from error messages returned to the client. Full details
   remain in stderr logs for operators.
