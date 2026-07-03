@@ -23,7 +23,7 @@ relates them.
 |------|-------|---------|--------|-------------|
 | **L — evidence layer** | `L0`–`L5` | *What* abicheck sees, and **how much that evidence is trusted** (authority) | the **inputs you give** (binary, debug, headers, build dir, sources) | [Evidence & Detectability](evidence-and-detectability.md), [Build Info & Sources](build-source-data.md) |
 | **S — source-analysis method** | `s0`–`s6` (+`auto`) | *How* abicheck gathers the L3–L5 evidence, and the **granularity coverage is reported at** | `scan --source-method` | [`scan` command](../user-guide/scan-levels.md) |
-| **mode / depth — presets** | `pr`,`pr-deep`,`baseline`,`audit` / `headers`,`build`,`source`,`full`,`graph` | A convenient **fixed `(S, L)` selection** | `scan --mode` / `scan --depth` | [`scan` command](../user-guide/scan-levels.md) |
+| **mode / depth — presets** | `pr`,`pr-deep`,`baseline`,`audit` / `binary`,`headers`,`build`,`source`,`full` | A convenient **fixed `(S, L)` selection** | `scan --mode` / `scan --depth` | [`scan` command](../user-guide/scan-levels.md) |
 
 The two axes are **orthogonal**: `L` is a property of *evidence*, `S` is a
 property of the *process* that produced it. You can reach the same L-layer by
@@ -132,7 +132,7 @@ flowchart LR
 ```
 
 The mapping is **lossy in the `--depth` direction** (see §4): `--depth build`
-resolves to `s1`, and `s2`/`s3` have no `--depth` form at all — so
+resolves to `s1`, and `s2`/`s3`/`s4` have no `--depth` form at all — so
 `--source-method` is the precise knob and **wins if both are given**.
 
 ---
@@ -152,15 +152,22 @@ mode produces the same scan for the same inputs:
 | `audit` | `(s5, source)` *(intra-version)* | single-build hygiene lint, **no baseline** |
 
 **`--depth`** is a coarse, *lossy* L-axis selector — convenient but less precise
-than `--source-method`:
+than `--source-method`. Its five rungs are `binary`, `headers`, `build`,
+`source`, `full` (ADR-037 D5):
 
 | `--depth` | resolves to | reaches |
 |-----------|-------------|---------|
-| `headers` | `s0` | L0–L2 only (+ always-on scan) |
-| `build` | `s1` | L3 |
-| `graph` | `s4` | L5 (no L4) |
-| `source` | `s5` | L4 scoped + L5 edges |
+| `binary` | `s0` (no S-method) | L0 exported symbols + binary metadata + debug-info *presence* — no DWARF type expansion, no L2 AST (+ always-on pattern scan) |
+| `headers` | `s0` (no S-method — L2 is the intrinsic header AST) | L0–L2 (+ always-on pattern scan) |
+| `build` | `s1` | + L3 |
+| `source` | `s5` | + L4 scoped + L5 edges |
 | `full` | `s6` | L4 full-scope |
+
+There is **no `graph` rung** (ADR-037 D6): the L5 graph is an *internal
+consequence* of `--depth source`/`full`, never its own user-facing rung. To pin
+the graph-only level (`s4`, L5 without paying for L4) use `--source-method s4`;
+to fold the *full* L5 reachability graph into a PR scan use `--mode pr-deep`
+(= `(s5, graph)` internally).
 
 Precedence, highest first: **`--source-method` > `--depth` > `--mode`**.
 

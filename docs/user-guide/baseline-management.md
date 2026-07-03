@@ -4,6 +4,10 @@ ABI baselines are pre-computed snapshots of a library's ABI surface at a known-g
 point (typically a release). Comparing future builds against a baseline detects
 breaking changes before they ship.
 
+> The baseline is the input to the CI gating pipeline (classify → suppress →
+> severity → exit code) — see [CI Gating](ci-gating.md) for how it combines
+> with policies, suppressions, and severity.
+
 ## Creating a Baseline
 
 ```bash

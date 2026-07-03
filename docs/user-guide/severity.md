@@ -4,6 +4,12 @@ abicheck classifies every detected change into one of four **issue categories**,
 each with a configurable severity level that controls exit codes and report
 presentation.
 
+> Severity is the last step of the CI gating pipeline (classify → suppress →
+> severity → exit code), and any active severity setting — a `--severity-*`
+> flag or a severity value in `.abicheck.yml` — switches `compare` to the
+> severity-based exit-code scheme. See [CI Gating](ci-gating.md) for how it
+> combines with policies, suppressions, and baselines.
+
 ---
 
 ## Issue categories
@@ -77,8 +83,9 @@ Available flags:
 
 ## Exit codes
 
-When any `--severity-*` flag is provided, the exit code is computed from the
-severity configuration instead of the legacy verdict system:
+When any severity setting is active — a `--severity-*` flag or a severity
+value in `.abicheck.yml` — the exit code is computed from the severity
+configuration instead of the legacy verdict system:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -87,7 +94,8 @@ severity configuration instead of the legacy verdict system:
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
 
-The highest applicable code wins. Without any `--severity-*` flag, the legacy
+The highest applicable code wins. Without any active severity setting (no
+`--severity-*` flag and no config severity value), the legacy
 verdict-based exit codes apply (see [exit codes reference](../reference/exit-codes.md)).
 
 ## Report output

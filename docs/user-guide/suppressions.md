@@ -4,6 +4,11 @@
 
 Use suppressions to silence known/accepted changes while keeping detection enabled.
 
+> Suppressions are step 2 of the CI gating pipeline (classify → suppress →
+> severity → exit code): suppressed changes are removed *before* the verdict
+> and severity counts are computed. See [CI Gating](ci-gating.md) for how they
+> combine with policies, severity, and baselines.
+
 ---
 
 ## File format

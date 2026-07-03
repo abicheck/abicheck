@@ -47,6 +47,7 @@ nav:
       - Output Formats: user-guide/output-formats.md
       - Baseline Management: user-guide/baseline-management.md
     - CI & Gating:
+      - CI Gating Pipeline: user-guide/ci-gating.md
       - GitHub Action: user-guide/github-action.md
       - GitHub PR Annotations: user-guide/annotations.md
       - Severity Configuration: user-guide/severity.md
@@ -133,6 +134,7 @@ nav:
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
+      - libabigail Parity Matrix: development/libabigail-parity.md
       - Report Comparison: development/report-comparison.md
     - Implementation Plans:
       - Overview: development/plans/index.md

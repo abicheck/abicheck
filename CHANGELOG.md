@@ -11,6 +11,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Docs: the `scan --depth` ladder is now stated identically everywhere**
+  (`binary|headers|build|source|full`, no user-facing `graph` rung per
+  ADR-037 D6) — `concepts/scan-and-evidence-levels.md` listed a contradictory
+  rung set, the "cheap gate" worked example pinned the wrong rung for a
+  compiler-free scan, and two MCP tool docstrings carried the stale ladder.
+- **Docs: one evidence-layer story across the funnel** — the landing page
+  still pitched "three-layer analysis" while other pages teach the
+  five-source L0–L4 model; pages teaching L0–L4 now also forward-reference
+  the derived L5 code the scan docs use.
+- **Docs: `mcp-integration.md` covers all seven MCP tools** — `abi_audit`,
+  `abi_estimate`, and `abi_scan` were undocumented, and the
+  `--timeout`/`--max-file-size` scoping undercounted which tools they bound.
+- **Docs: README exit-code table no longer misstates exit `1`** (it exists
+  only under the severity scheme) and notes that exit `8` requires
+  `--fail-on-removed-library`.
+
 - **Source→binary symbol matching now recovers ctor/dtor ABI clones.** The
   linker (`link_source_abi` / `relink_surface_exports`) folds C++ Itanium
   ctor/dtor clone tags (`C1`/`C2`/`C3`/`C4`, `D0`/`D1`/`D2`/`D4`) so one source
@@ -50,6 +66,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- New user-guide page **CI Gating** (`docs/user-guide/ci-gating.md`) — the
+  missing hub explaining how baselines, policies, suppressions, and severity
+  combine into the exit code (order of operations + the two exit-code
+  schemes), cross-linked from the four detail pages.
+- **`from-libabigail.md` is now an actual migration guide** — command swap,
+  bitmask→scalar exit-code translation, an `abidiff`→`abicheck` flag-by-flag
+  map, `abidw`/`abipkgdiff` equivalents, and INI→YAML suppression
+  translation. The verdict-parity QA matrix it previously contained moved to
+  `docs/development/libabigail-parity.md`, refreshed against the current
+  `PARITY_CASES` in `tests/test_abidiff_parity.py` (the vtable/return/param/
+  struct-size gaps it still listed as open were closed by castxml
+  integration).
 - New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
   three source-fact producers, a selection tree, and the `public-roots`/
   `ABICHECK_CC_HEADERS` header-resolution trap.
