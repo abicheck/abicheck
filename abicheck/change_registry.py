@@ -1272,14 +1272,6 @@ REGISTRY = ChangeKindRegistry([
               "replay surfaces the removal. Consumer source that named the alias "
               "(variables, casts, template arguments) no longer compiles. A "
               "source/API break; retain the alias or provide a replacement name."),
-    _E("constexpr_function_body_changed", _R,
-       impact="The body of a public constexpr function changed while its signature "
-              "and any exported symbol did not. Consumers that evaluated the "
-              "function at compile time (array bounds, template arguments, static "
-              "asserts) bake in the old result until recompiled, so a mixed build "
-              "can compute two different compile-time values from the same call. A "
-              "deployment/ODR risk surfaced only by source replay, not a proven "
-              "binary break."),
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     _E("public_reachability_changed", _R,

@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **163 cases** (158 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **162 cases** (157 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -22,7 +22,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 13 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 24 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 23 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 6 | — | ✅ |
@@ -272,7 +272,6 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [156](case156_public_macro_removed/README.md) | _public_macro_removed — Public macro removed | API Break | 🟠 API_BREAK |
 | [157](case157_inline_function_removed/README.md) | _inline_function_removed — Public inline function removed | API Break | 🟠 API_BREAK |
 | [158](case158_public_typedef_removed/README.md) | _public_typedef_removed — Public typedef removed | API Break | 🟠 API_BREAK |
-| [159](case159_constexpr_function_body_changed/README.md) | _constexpr_function_body_changed — `constexpr` function body changed | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [160](case160_public_api_internal_dep_added/README.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |

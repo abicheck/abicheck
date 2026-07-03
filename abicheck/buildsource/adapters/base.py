@@ -485,10 +485,12 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 else:
                     packing = "1"
                 mode_values["struct_packing"] = (packing, flag)
-            elif flag.startswith("-flto"):
-                # -flto / -flto=<jobs|thin|auto>: presence is what matters (the
-                # exact -fno-lto spelling is handled by the _RUNTIME_MODE_FLAGS map
-                # above). Normalize any positive spelling to a single "on" value.
+            elif flag.startswith("-flto="):
+                # -flto=<thin|auto|N>: an *enabling* spelling (bare -flto is caught
+                # by the _RUNTIME_MODE_FLAGS map above; -fno-lto too). Match only
+                # "-flto=" so LTO *tuning* flags that do not enable LTO
+                # (-flto-partition=, -flto-jobs=) fall through to the generic
+                # option path instead of falsely reporting lto off->on (Codex).
                 mode_values["lto"] = ("on", flag)
             elif flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")

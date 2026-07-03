@@ -129,24 +129,6 @@ def test_l4_public_typedef_removed() -> None:
     assert ChangeKind.PUBLIC_TYPEDEF_REMOVED in API_BREAK_KINDS
 
 
-def test_l4_constexpr_function_body_changed() -> None:
-    old = _surf(reachable_declarations=[_ent("constexpr", "area", body_hash="b1")])
-    new = _surf(reachable_declarations=[_ent("constexpr", "area", body_hash="b2")])
-    changes = diff_source_abi(old, new)
-    assert ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED.value in _kinds(changes)
-    assert ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED in RISK_KINDS
-
-
-def test_l4_constexpr_constant_value_change_is_not_body_change() -> None:
-    # A bare constexpr *constant* carries a value, not a body — it must not trip
-    # the function-body kind (tri-state guard: both body hashes must be present).
-    old = _surf(reachable_declarations=[_ent("constexpr", "K", value="1")])
-    new = _surf(reachable_declarations=[_ent("constexpr", "K", value="2")])
-    kinds = _kinds(diff_source_abi(old, new))
-    assert ChangeKind.CONSTEXPR_VALUE_CHANGED.value in kinds
-    assert ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED.value not in kinds
-
-
 def test_l4_unchanged_surface_emits_nothing() -> None:
     surf = _surf(
         reachable_macros=[_ent("macro", "FOO", value="1")],

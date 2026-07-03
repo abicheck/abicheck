@@ -2825,25 +2825,6 @@
       ],
       "description": "The public typedef demo::handle_t is present in v1 and removed in v2. A bare typedef emits no symbol of its own, so the artifact diff cannot see the removal; source replay surfaces it. Consumer source that named the alias no longer compiles - a source/API break."
     },
-    "case159_constexpr_function_body_changed": {
-      "expected": "COMPATIBLE_WITH_RISK",
-      "category": "risk",
-      "min_evidence": "L4",
-      "platforms": [
-        "linux"
-      ],
-      "abi_break": false,
-      "api_break": false,
-      "bad_practice": false,
-      "expected_kinds": [
-        "constexpr_function_body_changed"
-      ],
-      "fixtures": [
-        "old.json",
-        "new.json"
-      ],
-      "description": "The public constexpr function demo::area keeps its signature and (absent) exported symbol but its body fingerprint changes between v1 and v2. Consumers that evaluated it at compile time bake in the old result until recompiled, so a mixed build can compute two different compile-time values. Invisible to any artifact; a deployment/ODR risk surfaced only by source replay."
-    },
     "case160_public_api_internal_dep_added": {
       "expected": "COMPATIBLE_WITH_RISK",
       "category": "risk",

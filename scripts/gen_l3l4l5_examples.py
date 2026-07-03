@@ -154,19 +154,6 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         ]),
         _surface(),
     )
-    cases["case159_constexpr_function_body_changed"] = (
-        "L4",
-        _surface(reachable_declarations=[
-            SourceEntity(id="demo::area", kind="constexpr", qualified_name="demo::area",
-                         signature_hash="sig:area", body_hash="sha256:areav1",
-                         visibility="public_header", source_location=_loc("include/demo/geom.h", 15)),
-        ]),
-        _surface(reachable_declarations=[
-            SourceEntity(id="demo::area", kind="constexpr", qualified_name="demo::area",
-                         signature_hash="sig:area", body_hash="sha256:areav2",
-                         visibility="public_header", source_location=_loc("include/demo/geom.h", 15)),
-        ]),
-    )
 
     # ---- L5 ----------------------------------------------------------------
     # case160: a public entry newly calls an internal (non-public) helper.

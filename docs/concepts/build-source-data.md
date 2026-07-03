@@ -626,8 +626,7 @@ Comparing two linked source surfaces emits these change kinds (ADR-030 D6):
 | `public_macro_removed` | API break | A public header macro was removed — source that referenced it no longer compiles ([case156](../examples/case156_public_macro_removed.md)) |
 | `inline_function_removed` | API break | A public header-only inline function was removed (no exported symbol) ([case157](../examples/case157_inline_function_removed.md)) |
 | `public_typedef_removed` | API break | A public typedef/alias was removed (no exported symbol of its own) ([case158](../examples/case158_public_typedef_removed.md)) |
-| `constexpr_function_body_changed` | risk | A public `constexpr` function body changed — compile-time results consumers baked in can differ ([case159](../examples/case159_constexpr_function_body_changed.md)) |
-| `inline_body_changed` | risk | A public inline body changed with no exported-symbol change (mixed-build/ODR risk) |
+| `inline_body_changed` | risk | A public inline body changed with no exported-symbol change — also covers a public `constexpr` *function* body change, which the extractor emits as an inline (mixed-build/ODR risk) |
 | `template_body_changed` | risk | An uninstantiated public template implementation changed (the ADR-026 `case122` residual) |
 | `source_decl_binary_symbol_mismatch` | risk | A public declaration no longer maps to an exported symbol |
 | `source_binary_provenance_mismatch` | risk | Most of the source tree's public declarations fail to map to any exported symbol — the source checkout likely does not correspond to the binary (wrong tag/commit) |

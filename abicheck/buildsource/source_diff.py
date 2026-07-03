@@ -444,28 +444,11 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
                         source_location=_loc(nv),
                     )
                 )
-            # A constexpr *function* carries a body fingerprint (its constant
-            # value is computed per call, not stored). A body change alters the
-            # compile-time result consumers bake in, invisible to any artifact.
-            # Tri-state: require a body fingerprint on *both* sides so an
-            # evidence-tier downgrade (body dropped on one side) never fabricates
-            # a finding, and a bare constexpr *constant* (no body) never trips it.
-            elif ov.body_hash and nv.body_hash and ov.body_hash != nv.body_hash:
-                changes.append(
-                    Change(
-                        kind=ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED,
-                        symbol=name,
-                        description=(
-                            f"Public constexpr function {name!r} body changed with "
-                            "no signature or exported-symbol change. Consumers that "
-                            "evaluated it at compile time keep the old result until "
-                            "recompiled — a mixed-build/ODR risk."
-                        ),
-                        old_value=ov.body_hash,
-                        new_value=nv.body_hash,
-                        source_location=_loc(nv),
-                    )
-                )
+            # NB: a constexpr *function* body change is not distinguished here —
+            # the clang extractor emits constexpr functions as kind="inline"
+            # (their body rides in reachable_inline_bodies), so such a change is
+            # reported as inline_body_changed by _diff_inline_bodies. kind
+            # "constexpr" is reserved for constexpr *variables* / constants.
             continue
 
         # Generated entities are reported as generated_header_changed by

@@ -201,7 +201,6 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "public_macro_removed": "L4",
     "inline_function_removed": "L4",
     "public_typedef_removed": "L4",
-    "constexpr_function_body_changed": "L4",
     # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
     # cleanly when no call-graph pass populated the graph), so its minimum
     # evidence is the graph tier, not the L4 replay surface that carries it. ──

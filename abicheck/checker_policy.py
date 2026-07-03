@@ -572,7 +572,6 @@ class ChangeKind(str, Enum):
     PUBLIC_MACRO_REMOVED = "public_macro_removed"  # public macro removed from the headers → API_BREAK
     INLINE_FUNCTION_REMOVED = "inline_function_removed"  # public header-only inline function removed (no exported symbol) → API_BREAK
     PUBLIC_TYPEDEF_REMOVED = "public_typedef_removed"  # public typedef/alias removed (no exported symbol) → API_BREAK
-    CONSTEXPR_FUNCTION_BODY_CHANGED = "constexpr_function_body_changed"  # public constexpr function body changed → compile-time eval may differ → RISK
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     # Emitted only by the source-graph diff over two L5 graph summaries

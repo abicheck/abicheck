@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (265 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
 |---|---|---|---|---|---|
@@ -38,7 +38,6 @@ One row per `ChangeKind` (265 total). Columns fuse the verdict partition (`check
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` |
 | `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` |
-| `constexpr_function_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `constexpr_function_body_changed` |
 | `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` |
 | `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` |
 | `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` |
