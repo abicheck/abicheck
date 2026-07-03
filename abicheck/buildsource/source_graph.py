@@ -1137,8 +1137,13 @@ def diff_source_graph_findings(
             source_location=boundary,
         ))
 
-    # 9) an exported symbol whose owning source file moved (implementation
-    #    relocated across TUs) although its name/signature are unchanged.
+    # 9) an exported symbol whose *declaring* file moved (its public declaration
+    #    relocated to a different header / source file) although its
+    #    name/signature are unchanged. NB: this is the declaration owner, not the
+    #    definition TU — the call-graph `def_file` provenance cannot be used here
+    #    because add_node is first-writer-wins and the exported decl node is
+    #    always created by the source-ABI pass before the call-graph augmentation,
+    #    so its def_file attr is dropped (Codex review).
     old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
     for symbol in sorted(set(old_owner) & set(new_owner)):
         if old_owner[symbol] != new_owner[symbol]:

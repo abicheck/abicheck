@@ -522,6 +522,13 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 # redzones), instrumentation and the runtime contract. Canonical
                 # key so a flip diffs as one option; default is "none" (known).
                 mode_values["sanitizer"] = (flag.split("=", 1)[1], flag)
+            elif flag.startswith("-fno-sanitize="):
+                # -fno-sanitize=<list> disables sanitizers. On its own it just
+                # spells the default (no sanitizer), so normalize to "none" rather
+                # than let it fall through to the generic ABI-flag finding — with
+                # last-one-wins it also correctly cancels an earlier -fsanitize=
+                # for the same set (Codex review).
+                mode_values["sanitizer"] = ("none", flag)
             elif flag.startswith("-mfloat-abi="):
                 # -mfloat-abi=<soft|softfp|hard>: the float calling convention on
                 # ARM. Its default is target-dependent, so build_diff requires

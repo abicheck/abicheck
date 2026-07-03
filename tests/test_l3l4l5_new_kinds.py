@@ -136,6 +136,13 @@ def test_l3_extra_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
     assert expected in RISK_KINDS
 
 
+@pytest.mark.parametrize("argv", [["-fno-sanitize=address"], ["-fsanitize=address", "-fno-sanitize=address"]])
+def test_l3_sanitizer_disabling_flag_is_the_default(argv) -> None:
+    # -fno-sanitize= on its own just spells the default (no sanitizer), and it
+    # cancels an earlier -fsanitize= for the same set — neither must report.
+    assert diff_build_evidence(_evf([]), _evf(argv)) == []
+
+
 def test_l3_float_abi_needs_both_sides_explicit() -> None:
     # Target-dependent default → a one-sided -mfloat-abi must not read as a flip.
     assert ChangeKind.FLOAT_ABI_CHANGED.value not in _kinds(
