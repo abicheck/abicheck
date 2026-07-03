@@ -323,7 +323,7 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 | Source-scan family | + Build data (L3) | + Sources (L4) | + Graph (L5, derived) | Emitted verdict | Common false negative |
 |---|:---:|:---:|:---:|---|------|
 | ABI-relevant build-flag / toolchain drift (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fexceptions`, `-frtti`) | ✅ | ✅ | ✅ | 🟡 risk | no compile DB — a command-string DB under-reports normalized flags |
-| Macro / `constexpr` / default-arg **value** change with no symbol move | ⚠️ flag only | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped |
+| Macro / `constexpr` value change, or default-arg **removal**, with no symbol move | ⚠️ flag only | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped |
 | Inline / template **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it — an *uninstantiated template signature* change ([case122](../examples/case122_template_signature_uninstantiated.md)) is a documented `NO_CHANGE` gap even at L4 |
 | Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ✅ | ✅ | 🟡 risk | one source only — needs binary exports **and** the header AST to cross-check |
 | Cross-source disagreement: header↔build mismatch, ODR type variant, export↔decl pair | ✅ | ✅ | ✅ | 🟠 API_BREAK / 🟡 risk | evidence present on only one side — the check is reported *skipped*, never faked green |
@@ -389,7 +389,7 @@ evidence level:
 | # | Change | Lands on |
 |---|--------|----------|
 | ① | `struct Money` gains `int region;` **before** `ccy` — every following field shifts, `sizeof(Money)` grows 16→24 | **L1** (layout) |
-| ② | `add(int, int qty = 1)` → `qty = 0` — the *default value* changes; the mangled symbol does not | **L2** (header API) |
+| ② | `add(int sku, int qty = 1)` → `add(int sku, int qty)` — the default argument is **removed**; the mangled symbol does not change | **L2** (header API) |
 | ③ | `#define CART_MAX_ITEMS 64` → `128` — a macro constant | **L4** (source only) |
 | ④ | v2 is built with `-D_GLIBCXX_USE_CXX11_ABI=0` (v1 used `=1`) — the std::string/std::list ABI flips | **L3** (build flag) |
 
@@ -424,7 +424,7 @@ binding, `DT_NEEDED`. If v2 had *removed* `add`, L0 alone would prove
 `func_deleted` → `BREAKING` ([case12](../examples/case12_function_removed.md)).
 
 **What L0 is blind to — and this is the punchline:** *none of ①②③④ touch a
-symbol name.* A struct field insertion, a default-argument change, a macro bump,
+symbol name.* A struct field insertion, a default-argument removal, a macro bump,
 and a build-flag flip are **all invisible at L0.** abicheck reports **`NO_CHANGE`**
 — a true statement about the symbol table and a dangerous falsehood about
 compatibility. This is exactly why a stripped-binary-only compare "passes" on
@@ -458,8 +458,8 @@ Any consumer compiled against v1 reads `ccy` at offset 8; in v2 that offset hold
 ([case07](../examples/case07_struct_layout.md)). **L1 is where the real break is
 proven**, and its verdict is authoritative.
 
-**What L1 still cannot see:** the default-argument change ② (a default value is a
-*source* fact, not a layout fact — DWARF stores no default arguments), the macro
+**What L1 still cannot see:** the default-argument removal ② (a default argument
+is a *source* fact, not a layout fact — DWARF stores no default arguments), the macro
 ③, and the build flag ④. L1 also has no notion of *public vs. internal* — if
 `Money` were a private type, L1 would still shout `BREAKING`; only L2 can tell it
 to relax ([case118](../examples/case118_internal_struct_field_added_scoped.md)).
@@ -473,19 +473,21 @@ binary cannot carry, plus the public/internal boundary:
 ```text
 # abicheck's L2 view of Cart::add
   v1:  void cart::Cart::add(int sku, int qty = 1)
-  v2:  void cart::Cart::add(int sku, int qty = 0)
-                                            └── default value changed
+  v2:  void cart::Cart::add(int sku, int qty)
+                                          └── default argument removed
 ```
 
 L2 proves change ②, which every lower level missed:
 
 ```text
-🟠 API_BREAK  param_default_value_changed  cart::Cart::add  qty: 1 → 0
+🟠 API_BREAK  param_default_value_removed  cart::Cart::add  qty: default `= 1` removed
 ```
 
-A recompiled caller that wrote `cart.add(42)` now silently passes `qty=0` — a
-source-level contract change with *no* binary trace. Only headers reach it
-([case123](../examples/case123_default_argument_removed.md)). L2 also supplies the
+A caller that wrote `cart.add(42)` **fails to recompile** — `qty` is now a
+required argument. That is a source-level contract break with *no* binary trace
+(a *changed* default value, by contrast, is only a `COMPATIBLE` quality signal —
+`param_default_value_changed`; the removal is the API break). Only headers reach
+it ([case123](../examples/case123_default_argument_removed.md)). L2 also supplies the
 **public-surface scoping** that keeps L1 honest: it tells abicheck that `Money`
 *is* public, so the L1 break stands, while an internal type's identical change
 would be demoted.
@@ -616,7 +618,7 @@ every level. Read *down* a column to see what that level alone would report; rea
 | Change | L0 symbols | L1 DWARF | L2 headers | L3 build | L4 sources | L5 graph | abicheck ChangeKind | Verdict |
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|---|---|
 | ① `Money` field inserted | ❌ | ✅ **proves** | ✅ (castxml layout) | — | ✅ | ✅ ranks | `struct_size_changed`, `struct_field_offset_changed` | 🔴 BREAKING |
-| ② default arg `qty` 1→0 | ❌ | ❌ | ✅ **proves** | — | ✅ | — | `param_default_value_changed` | 🟠 API_BREAK |
+| ② default arg `qty` removed | ❌ | ❌ | ✅ **proves** | — | ✅ | — | `param_default_value_removed` | 🟠 API_BREAK |
 | ③ macro `CART_MAX_ITEMS` | ❌ | ❌ | ❌ | ❌ | ✅ **proves** | — | `public_macro_value_changed` | 🟠 API_BREAK |
 | ④ `_GLIBCXX_USE_CXX11_ABI` | ⚠️ churn | ❌ | ❌ | ✅ **proves** | ✅ | ✅ | `abi_relevant_build_flag_changed` | 🟡 risk |
 | **Release verdict (worst-wins)** | NO_CHANGE | BREAKING | API_BREAK | risk | API_BREAK | risk | — | **🔴 BREAKING** |
