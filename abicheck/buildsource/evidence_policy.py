@@ -27,14 +27,12 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ..change_registry_types import Verdict
 from .model import CoverageStatus, DataLayer, LayerCoverage
 
 if TYPE_CHECKING:
     from ..checker_types import Change
     from ..policy_file import PolicyFile
     from .pack import BuildSourcePack
-    from .source_abi import SourceAbiSurface
 
 
 # ── D7 verdict modulation ────────────────────────────────────────────────────
@@ -77,95 +75,6 @@ def apply_evidence_policy(
         verdict = policy_file.evidence_verdict(category, abi_relevant=abi_relevant)
         if verdict is not None:
             change.effective_verdict = verdict
-
-
-# ── Automatic L4-proven "internal, non-exported" demotion ────────────────────
-
-# The verdict a source-only finding is demoted to once L4 evidence *proves* it
-# concerns an internal, non-exported declaration: still surfaced (it is a real
-# source-level observation) but no longer an API-break gate.
-_AUTO_DEMOTE_VERDICT = Verdict.COMPATIBLE_WITH_RISK
-
-# ``Verdict`` values that outrank the demote target, i.e. the ones worth lowering.
-# (Source-only findings are only ever API_BREAK / RISK per ADR-028 D3, never
-# BREAKING — so this never touches an artifact-proven break.)
-_ABOVE_DEMOTE: frozenset[Verdict] = frozenset({Verdict.API_BREAK, Verdict.BREAKING})
-
-# ``SourceEntity.visibility`` values that *positively* mark a declaration as
-# internal (not part of the public header surface). Demotion requires one of
-# these — an ``unknown``/``public_header`` visibility is never treated as proof
-# of internal, so a mangling-mismatch or wrong-checkout decl is never demoted.
-_INTERNAL_VISIBILITIES: frozenset[str] = frozenset(
-    {"source", "internal", "private_header", "hidden", "anonymous"}
-)
-
-
-def auto_demote_unexported_source_findings(
-    findings: list[Change], surface: SourceAbiSurface | None
-) -> int:
-    """Automatically demote L4 source-only findings that concern a declaration
-    the surface *proves* is internal and absent from the shipped export table.
-
-    This is the authority-rule's false-positive-removal path (ADR-028 D3):
-    corroborating L4 evidence may lower a source-only finding's verdict when it
-    can prove the finding does not touch the exported binary surface, but it can
-    never overturn an artifact-proven break. Safe by construction — it never
-    guesses:
-
-    * no-op unless the surface plumbs a **non-empty** exported-symbol set (so we
-      actually know the export table);
-    * only demotes a finding whose ``symbol`` resolves to a surface declaration
-      that (a) carries a real export symbol **absent** from that set *and*
-      (b) has a positively-internal ``visibility`` — both must hold, so a
-      public decl that merely failed to map (mangling gap / wrong checkout) is
-      left untouched;
-    * never demotes a declaration the policy explicitly forced onto the public
-      surface (``roots['forced_public']``): ``link_source_abi`` keeps such a
-      decl's original (internal) visibility while promoting it as public, so the
-      "internal + unexported" test would otherwise wrongly demote a symbol the
-      user deliberately declared part of the contract (Codex review #487);
-    * only ever **lowers** the verdict ceiling (never raises), and only touches
-      source-only findings (already API_BREAK/RISK, never BREAKING).
-
-    Returns the number of findings demoted (for D9 metrics / logging).
-    """
-    if not findings or surface is None:
-        return 0
-    exports = {s for s in surface.roots.get("exported_symbols", []) if s}
-    if not exports:
-        return 0
-    # Declarations the policy forced onto the public surface keep their internal
-    # visibility but are contract-public by user intent — never demote them.
-    forced_public = {s for s in surface.roots.get("forced_public", []) if s}
-
-    # qualified_name -> True when that decl is provably internal & non-exported.
-    internal_unexported: dict[str, bool] = {}
-    for decl in surface.reachable_declarations:
-        qn = decl.qualified_name
-        if not qn:
-            continue
-        if qn in forced_public:
-            internal_unexported[qn] = False
-            continue
-        sym = decl.mangled_name or decl.qualified_name
-        is_internal = decl.visibility in _INTERNAL_VISIBILITIES
-        proven = bool(sym) and sym not in exports and is_internal
-        # A qualified name can appear on several TUs; a single public/exported
-        # occurrence blocks demotion (conservative — never hide a real break).
-        internal_unexported[qn] = internal_unexported.get(qn, True) and proven
-
-    demoted = 0
-    for change in findings:
-        sym = change.symbol or ""
-        if not internal_unexported.get(sym, False):
-            continue
-        current = getattr(change, "effective_verdict", None)
-        # Only lower: skip if an explicit lower/equal ceiling is already set.
-        if current is not None and current not in _ABOVE_DEMOTE:
-            continue
-        change.effective_verdict = _AUTO_DEMOTE_VERDICT
-        demoted += 1
-    return demoted
 
 
 # ── D7 require_evidence gate ─────────────────────────────────────────────────
