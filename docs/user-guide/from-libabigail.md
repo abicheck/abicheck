@@ -46,10 +46,19 @@ Translate your gates:
 | Tool error | bit 0 set (`1`) | — (invalid invocation exits `64`) |
 | Usage error | bit 1 set (`2`) | `64` |
 
-The common `abidiff` CI gate `test $(($? & 8)) -ne 0` becomes simply
-`abicheck compare … ; test $? -ge 4` — or gate on `2` as well if a
-source-level break should also fail. See [Exit Codes](../reference/exit-codes.md)
-for the full matrix (including the severity-aware scheme).
+With `abidiff`, failing a pipeline on incompatible changes means testing the
+bitmask (`rc=$?; if [ $((rc & 8)) -ne 0 ]; then exit 1; fi`). With abicheck
+the exit code is already CI-shaped: a plain `abicheck compare …` step fails
+on any break (`2` or `4`). To fail **only** on binary ABI breaks and tolerate
+source-level ones:
+
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 -H include/
+test $? -lt 4   # succeeds for 0 (compatible) and 2 (API_BREAK); fails for 4 (BREAKING)
+```
+
+See [Exit Codes](../reference/exit-codes.md) for the full matrix (including
+the severity-aware scheme).
 
 ## Flag-by-flag map
 
@@ -104,7 +113,8 @@ re-dump each stored baseline once from the original binary (see
 abipkgdiff --d1 foo-debuginfo-1.rpm --d2 foo-debuginfo-2.rpm foo-1.rpm foo-2.rpm
 
 # After (abicheck — directory, archive, or package inputs):
-abicheck compare pkg-1.0/ pkg-2.0/ --debug-root1 dbg-1.0/ --debug-root2 dbg-2.0/
+abicheck compare foo-1.rpm foo-2.rpm \
+  --debug-info1 foo-debuginfo-1.rpm --debug-info2 foo-debuginfo-2.rpm
 ```
 
 Multi-library inputs are compared as a co-versioned bundle, with per-library

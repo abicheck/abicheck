@@ -24,7 +24,7 @@ you are switching from `abidiff` to abicheck, see
 ## Known Divergences (tracked gaps)
 
 | # | Case | abicheck | abidiff | Root cause |
-|---|------|----------|---------|------------|--------|
+|---|------|----------|---------|------------|
 | 1 | struct_size | NO_CHANGE | COMPATIBLE¹ | ELF-only: no type info without headers |
 | 2 | return_type | NO_CHANGE | COMPATIBLE¹ | ELF-only: same symbol name, no type diff |
 | 3 | param_type | NO_CHANGE | COMPATIBLE¹ | ELF-only: same symbol name, no type diff |
