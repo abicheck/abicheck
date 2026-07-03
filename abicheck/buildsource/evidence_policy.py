@@ -119,6 +119,11 @@ def auto_demote_unexported_source_findings(
       (b) has a positively-internal ``visibility`` — both must hold, so a
       public decl that merely failed to map (mangling gap / wrong checkout) is
       left untouched;
+    * never demotes a declaration the policy explicitly forced onto the public
+      surface (``roots['forced_public']``): ``link_source_abi`` keeps such a
+      decl's original (internal) visibility while promoting it as public, so the
+      "internal + unexported" test would otherwise wrongly demote a symbol the
+      user deliberately declared part of the contract (Codex review #487);
     * only ever **lowers** the verdict ceiling (never raises), and only touches
       source-only findings (already API_BREAK/RISK, never BREAKING).
 
@@ -129,12 +134,18 @@ def auto_demote_unexported_source_findings(
     exports = {s for s in surface.roots.get("exported_symbols", []) if s}
     if not exports:
         return 0
+    # Declarations the policy forced onto the public surface keep their internal
+    # visibility but are contract-public by user intent — never demote them.
+    forced_public = {s for s in surface.roots.get("forced_public", []) if s}
 
     # qualified_name -> True when that decl is provably internal & non-exported.
     internal_unexported: dict[str, bool] = {}
     for decl in surface.reachable_declarations:
         qn = decl.qualified_name
         if not qn:
+            continue
+        if qn in forced_public:
+            internal_unexported[qn] = False
             continue
         sym = decl.mangled_name or decl.qualified_name
         is_internal = decl.visibility in _INTERNAL_VISIBILITIES

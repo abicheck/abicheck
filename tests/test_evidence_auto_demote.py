@@ -40,10 +40,13 @@ def _decl(qn, *, mangled="", visibility="unknown") -> SourceEntity:
     )
 
 
-def _surface(decls, exports) -> SourceAbiSurface:
+def _surface(decls, exports, forced_public=()) -> SourceAbiSurface:
     return SourceAbiSurface(
         reachable_declarations=list(decls),
-        roots={"exported_symbols": list(exports)},
+        roots={
+            "exported_symbols": list(exports),
+            "forced_public": list(forced_public),
+        },
     )
 
 
@@ -132,6 +135,21 @@ def test_lowers_an_api_break_ceiling():
     f.effective_verdict = Verdict.API_BREAK
     assert auto_demote_unexported_source_findings([f], surface) == 1
     assert f.effective_verdict == _AUTO_DEMOTE_VERDICT
+
+
+def test_forced_public_decl_is_never_demoted():
+    # `helper` has internal visibility and no export, but the policy explicitly
+    # forced it onto the public surface (roots['forced_public']). The user
+    # declared it part of the contract, so its source-only finding must NOT be
+    # demoted even though it looks internal + unexported (Codex review #487).
+    surface = _surface(
+        [_decl("helper", mangled="_Z6helperv", visibility="source")],
+        exports=["_Z3apiv"],
+        forced_public=["helper"],
+    )
+    findings = [_finding("helper")]
+    assert auto_demote_unexported_source_findings(findings, surface) == 0
+    assert findings[0].effective_verdict is None
 
 
 def test_decl_without_qualified_name_is_skipped():
