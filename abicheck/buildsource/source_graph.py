@@ -1083,14 +1083,17 @@ def diff_source_graph_findings(
     # 7) a public entry point that newly reaches an internal (non-public)
     #    declaration through the call graph — the version-over-version analogue
     #    of the intra-version public-to-internal cross-check. Gate on *both*
-    #    graphs carrying call edges: if only the new pack ran the optional
-    #    call-graph pass, the baseline's reach set is empty and every pre-existing
-    #    internal call would look newly added (Codex review).
-    has_calls_old = any(e.kind == "DECL_CALLS_DECL" for e in old.edges)
-    has_calls_new = any(e.kind == "DECL_CALLS_DECL" for e in new.edges)
+    #    graphs carrying the two evidence kinds this diff subtracts over — call
+    #    edges (DECL_CALLS_DECL) AND a public-header closure (SOURCE_DECLARES) —
+    #    so an evidence-poor baseline (call edges but no public closure, or no
+    #    call pass) cannot make every pre-existing internal callee look newly
+    #    added (Codex review).
+    def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
+        return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
+
     newly_internal = (
         _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
-        if has_calls_old and has_calls_new
+        if _has_internal_reach_coverage(old) and _has_internal_reach_coverage(new)
         else set()
     )
     reached_by_entry: dict[str, list[str]] = {}

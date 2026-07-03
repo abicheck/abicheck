@@ -96,6 +96,24 @@ def test_l3_identical_flags_emit_nothing() -> None:
     assert diff_build_evidence(_ev(["-fshort-enums"]), _ev(["-fshort-enums"])) == []
 
 
+@pytest.mark.parametrize("tuning_flag", ["-flto-jobs=8", "-flto-partition=one"])
+def test_l3_lto_tuning_flags_are_not_abi_relevant(tuning_flag) -> None:
+    # A standalone LTO backend-tuning flag (no -flto) does not enable LTO and is
+    # not ABI-relevant, so it must emit nothing — neither lto_mode_changed nor
+    # the generic abi_relevant_build_flag_changed.
+    from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    def evf(argv):
+        cu = CompileUnit(
+            id="t", source="a.cpp", language="CXX",
+            abi_relevant_flags=extract_abi_relevant_flags(argv),
+        )
+        return BuildEvidence(build_options=derive_build_options([cu]))
+
+    assert diff_build_evidence(evf([]), evf([tuning_flag])) == []
+
+
 # ---------------------------------------------------------------------------
 # L4 — source-replay removals / constexpr body (source_diff)
 # ---------------------------------------------------------------------------
@@ -107,17 +125,22 @@ def _ent(kind: str, name: str, **kw) -> SourceEntity:
     return SourceEntity(id=name, kind=kind, qualified_name=name, **kw)
 
 
+#: A minimal "the library still has surface" fact so a removal is unambiguous
+#: (an entirely empty new surface reads as failed L4 extraction, not removal).
+_KEEPER_ROOTS = {"exported_symbols": ["_Z4keepv"]}
+
+
 def test_l4_public_macro_removed() -> None:
-    old = _surf(reachable_macros=[_ent("macro", "FOO_MAX", value="64")])
-    new = _surf()
+    old = _surf(reachable_macros=[_ent("macro", "FOO_MAX", value="64")], roots=_KEEPER_ROOTS)
+    new = _surf(roots=_KEEPER_ROOTS)
     changes = diff_source_abi(old, new)
     assert ChangeKind.PUBLIC_MACRO_REMOVED.value in _kinds(changes)
     assert ChangeKind.PUBLIC_MACRO_REMOVED in API_BREAK_KINDS
 
 
 def test_l4_inline_function_removed() -> None:
-    old = _surf(reachable_inline_bodies=[_ent("inline", "clamp", body_hash="h1")])
-    new = _surf()
+    old = _surf(reachable_inline_bodies=[_ent("inline", "clamp", body_hash="h1")], roots=_KEEPER_ROOTS)
+    new = _surf(roots=_KEEPER_ROOTS)
     changes = diff_source_abi(old, new)
     assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(changes)
     assert ChangeKind.INLINE_FUNCTION_REMOVED in API_BREAK_KINDS
@@ -134,11 +157,25 @@ def test_l4_inline_to_out_of_line_is_not_a_removal() -> None:
 
 
 def test_l4_public_typedef_removed() -> None:
-    old = _surf(reachable_types=[_ent("typedef", "handle_t", type_hash="t1", value="int")])
-    new = _surf()
+    old = _surf(
+        reachable_types=[_ent("typedef", "handle_t", type_hash="t1", value="int")],
+        roots=_KEEPER_ROOTS,
+    )
+    new = _surf(roots=_KEEPER_ROOTS)
     changes = diff_source_abi(old, new)
     assert ChangeKind.PUBLIC_TYPEDEF_REMOVED.value in _kinds(changes)
     assert ChangeKind.PUBLIC_TYPEDEF_REMOVED in API_BREAK_KINDS
+
+
+def test_l4_removals_suppressed_when_new_surface_empty() -> None:
+    # An empty new surface means L4 extraction did not run (missing extractor),
+    # not that every macro/typedef/inline was removed — no findings should fire.
+    old = _surf(
+        reachable_macros=[_ent("macro", "FOO", value="1")],
+        reachable_types=[_ent("typedef", "t", type_hash="x", value="int")],
+        reachable_inline_bodies=[_ent("inline", "f", body_hash="h")],
+    )
+    assert diff_source_abi(old, _surf()) == []
 
 
 def test_l4_unchanged_surface_emits_nothing() -> None:
@@ -202,6 +239,25 @@ def test_l5_internal_dep_skipped_without_baseline_call_coverage() -> None:
     new = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
         _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "intn", "DECL_CALLS_DECL"),
+    ])
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_skipped_without_baseline_public_closure() -> None:
+    # Baseline has call edges but no SOURCE_DECLARES public closure (evidence-poor
+    # older graph): its internal-reach set is empty for lack of a closure, so the
+    # new graph's pre-existing internal calls must NOT look newly added.
+    nodes = [_N("pub", "source_decl"), _N("intn", "source_decl"), _N("sym", "binary_symbol")]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),  # call edges present, but no SOURCE_DECLARES
+    ])
+    new = SourceGraphSummary(nodes=nodes + [_N("hdr", "header")], edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),
         _E("pub", "intn", "DECL_CALLS_DECL"),
     ])
     kinds = _graph_kinds(old, new)

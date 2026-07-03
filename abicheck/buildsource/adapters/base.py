@@ -111,6 +111,15 @@ _LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
 # building a whole library half-and-half is rare. The common all-or-nothing
 # mode flip across versions is detected.
 
+#: ``-flto*`` spellings that only *tune* an existing LTO build (backend
+#: parallelism / partitioning / compression) rather than enabling LTO. They are
+#: not ABI-relevant on their own, but they share the ``-flto`` prefix, so they
+#: must be explicitly excluded from extraction or the generic option path would
+#: report a standalone tuning flag as ABI_RELEVANT_BUILD_FLAG_CHANGED (Codex).
+_NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
+    "-flto-partition=", "-flto-jobs=", "-flto-compression-level=", "-flto-incremental=",
+)
+
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
 _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
     "_GLIBCXX_USE_CXX11_ABI",
@@ -404,7 +413,11 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
+        if arg.startswith(_NON_ABI_LTO_TUNING_PREFIXES):
+            # LTO backend-tuning flag (not enabling): not ABI-relevant, though it
+            # shares the -flto prefix. Skip so it never reaches option derivation.
+            pass
+        elif arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
             out.append(arg)
         elif arg in ("-D", "/D") and i + 1 < len(argv):
             # Split form: -D KEY[=VALUE]. Normalize to the combined token.

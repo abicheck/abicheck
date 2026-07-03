@@ -35,9 +35,9 @@
     "types": []
   },
   "roots": {
-    "exported_symbols": [],
-    "forced_public": [],
-    "public_header_declarations": []
+    "exported_symbols": [
+      "_ZN4demo4keepEv"
+    ]
   },
   "schema_version": 1,
   "target_id": "",

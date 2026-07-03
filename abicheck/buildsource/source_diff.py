@@ -345,8 +345,10 @@ def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
     # Removal: a public typedef present old, gone new. A bare typedef emits no
     # symbol, so the artifact diff is blind; consumer source that named the alias
     # no longer compiles (a source/API break). Generated typedefs are reported as
-    # generated_header_changed by _diff_generated, so skip them here.
-    for key in sorted(set(old_t) - set(new_t)):
+    # generated_header_changed by _diff_generated, so skip them here. Skip
+    # entirely when the new surface carries no facts (L4 extraction failed) so
+    # evidence absence is not read as removal.
+    for key in sorted(set(old_t) - set(new_t)) if _surface_has_facts(new) else []:
         ov = old_t[key]
         if _is_generated(ov):
             continue
@@ -396,8 +398,9 @@ def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     # Removal: a public macro present in the old surface but gone from the new
     # one. Macros never reach the binary, so no artifact layer sees the removal —
     # only the source-replay surface does. Source that referenced it no longer
-    # compiles (a source/API break).
-    for key in sorted(set(old_m) - set(new_m)):
+    # compiles (a source/API break). Skipped when the new surface carries no
+    # facts (L4 extraction failed) so evidence absence is not read as removal.
+    for key in sorted(set(old_m) - set(new_m)) if _surface_has_facts(new) else []:
         ov = old_m[key]
         name = ov.qualified_name
         changes.append(
@@ -520,7 +523,8 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     # consumer source can still call it, so it is NOT a removal (Codex review).
     new_decl_ids = {e.identity() for e in new.reachable_declarations if e.identity()}
     new_exports = set(new.roots.get("exported_symbols", []))
-    for key in sorted(set(old_i) - set(new_i)):
+    inline_removals = sorted(set(old_i) - set(new_i)) if _surface_has_facts(new) else []
+    for key in inline_removals:
         ov = old_i[key]
         if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
             continue
@@ -675,6 +679,26 @@ def _diff_odr(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
 
 
 # -- helpers -----------------------------------------------------------------
+
+
+def _surface_has_facts(surface: SourceAbiSurface) -> bool:
+    """Whether *surface* carries any L4 evidence at all.
+
+    An entirely empty surface signals that L4 extraction did not run (the inline
+    collector returns a bare ``SourceAbiSurface()`` when the extractor is
+    missing), *not* a library whose public surface genuinely became empty. The
+    removal passes (macro/typedef/inline) must not fire against such a surface,
+    or evidence-absence would be reported as a wholesale source break (Codex
+    review). A real replayed library always carries at least one fact.
+    """
+    return bool(
+        surface.reachable_declarations
+        or surface.reachable_types
+        or surface.reachable_macros
+        or surface.reachable_templates
+        or surface.reachable_inline_bodies
+        or surface.roots.get("exported_symbols")
+    )
 
 
 def _is_generated(entity: SourceEntity) -> bool:

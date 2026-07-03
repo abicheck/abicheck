@@ -84,8 +84,15 @@ def _loc(path: str, line: int) -> SourceLocation:
     return SourceLocation(path=path, line=line)
 
 
-def _surface(**buckets: list[SourceEntity]) -> dict[str, Any]:
-    return SourceAbiSurface(library="libdemo.so", **buckets).to_dict()
+#: A persisting exported symbol so a *removal* case's new surface is a real
+#: (non-empty) replayed library that lost one entity — not an empty surface,
+#: which the source diff treats as failed L4 extraction and skips.
+_KEEPER_ROOTS = {"exported_symbols": ["_ZN4demo4keepEv"]}
+
+
+def _surface(*, keeper: bool = False, **buckets: list[SourceEntity]) -> dict[str, Any]:
+    roots = dict(_KEEPER_ROOTS) if keeper else {}
+    return SourceAbiSurface(library="libdemo.so", roots=roots, **buckets).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -130,29 +137,29 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     hdr = "include/demo/config.h"
     cases["case156_public_macro_removed"] = (
         "L4",
-        _surface(reachable_macros=[
+        _surface(keeper=True, reachable_macros=[
             SourceEntity(id="DEMO_MAX_ITEMS", kind="macro", qualified_name="DEMO_MAX_ITEMS",
                          value="64", visibility="public_header", source_location=_loc(hdr, 12)),
         ]),
-        _surface(),
+        _surface(keeper=True),
     )
     cases["case157_inline_function_removed"] = (
         "L4",
-        _surface(reachable_inline_bodies=[
+        _surface(keeper=True, reachable_inline_bodies=[
             SourceEntity(id="demo::clamp", kind="inline", qualified_name="demo::clamp",
                          body_hash="sha256:clampv1", visibility="public_header",
                          source_location=_loc("include/demo/math.h", 20)),
         ]),
-        _surface(),
+        _surface(keeper=True),
     )
     cases["case158_public_typedef_removed"] = (
         "L4",
-        _surface(reachable_types=[
+        _surface(keeper=True, reachable_types=[
             SourceEntity(id="demo::handle_t", kind="typedef", qualified_name="demo::handle_t",
                          type_hash="sha256:h1", value="int", visibility="public_header",
                          source_location=_loc("include/demo/handle.h", 8)),
         ]),
-        _surface(),
+        _surface(keeper=True),
     )
 
     # ---- L5 ----------------------------------------------------------------
