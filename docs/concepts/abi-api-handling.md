@@ -389,7 +389,7 @@ evidence level:
 
 | # | Change | Lands on |
 |---|--------|----------|
-| ① | `struct Money` gains `int region;` **before** `ccy` — every following field shifts, `sizeof(Money)` grows 16→24 | **L1** (layout) |
+| ① | `struct Money` gains `long region;` **before** `ccy` — every following field shifts, `sizeof(Money)` grows 16→24 | **L1** (layout) |
 | ② | `add(int sku, int qty = 1)` → `add(int sku, int qty)` — the default argument is **removed**; the mangled symbol does not change | **L2** (header API) |
 | ③ | `#define CART_MAX_ITEMS 64` → `128` — a macro constant | **L4** (source only) |
 | ④ | v2 is built with `-D_GLIBCXX_USE_CXX11_ABI=0` (v1 used `=1`) — the std::string/std::list ABI flips | **L3** (build flag) |
@@ -442,9 +442,9 @@ compiler actually baked into every caller:
               v1                         v2
   struct Money  (size 16)      struct Money  (size 24)
     +0   long      cents         +0   long      cents
-    +8   Currency  ccy           +8   int       region     ← inserted
-                                 +12  (padding)
+    +8   Currency  ccy           +8   long      region    ← inserted (8 bytes)
                                  +16  Currency  ccy        ← was +8
+                                 +20  (4 bytes padding → size 24)
 ```
 
 Now change ① is *undeniable*. abicheck emits:
@@ -582,11 +582,15 @@ surface). It answers *impact* questions the flat diffs cannot:
 
 So the L1 layout break on `Money` is not an isolated struct change — the graph
 shows it **reaches an exported entry point** (`total` returns `Money` by value),
-which is why the break is consumer-visible and high-priority. L5 emits
-`public_reachability_changed` / `source_to_binary_mapping_changed` as **risk**
-findings that *rank and explain* impact; like L4 they never override the artifact
-verdict. (`abicheck graph explain --symbol _ZNK4cart4Cart5totalEb` prints exactly
-this closure for one finding.)
+which is why the break is consumer-visible and high-priority. Here L5's whole job
+is **explanation and localization**: `Money` stays reachable and `total` maps to
+the same symbol on both sides — only the layout changed — so *no* reachability
+delta fires. The dedicated L5 risk findings are emitted only when those
+relationships actually change: `public_reachability_changed` when a declaration
+*enters or leaves* the public closure, and `source_to_binary_mapping_changed`
+when a declaration now maps to a *different* exported symbol. Like L4 they never
+override the artifact verdict. (`abicheck graph explain --symbol
+_ZNK4cart4Cart5totalEb` prints exactly this closure to localize the L1 break.)
 
 **What L5 cannot see:** it is a *structural* graph. The cheap `s4` form has no
 call edges, so "what does this internal helper's change reach through the call
