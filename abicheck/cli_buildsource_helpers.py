@@ -31,6 +31,7 @@ import click
 
 from .buildsource.evidence_policy import (
     apply_evidence_policy,
+    auto_demote_unexported_source_findings,
     echo_evidence_metrics,
     evidence_coverage_metrics,
     finding_bucket_counts,
@@ -193,6 +194,12 @@ def diff_embedded_build_source(
 
         _src = diff_source_abi(old_surface, new_surface)
         tag_evidence_category(_src, "source_only")
+        # Authority-rule FP removal (ADR-028 D3): auto-demote source-only findings
+        # the target surface proves concern an internal, non-exported decl. Runs
+        # before the policy knob so an explicit user ceiling still wins, and only
+        # ever lowers a verdict — it can remove a false positive, never overturn
+        # an artifact-proven break.
+        auto_demote_unexported_source_findings(_src, new_surface)
         apply_evidence_policy(_src, "source_only", policy_file)
         changes.extend(_src)
 

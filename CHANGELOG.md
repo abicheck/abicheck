@@ -85,6 +85,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Automatic L4-proven demotion of internal source-only findings** (ADR-028
+  D3 authority rule): when the L4 source surface *proves* a source-only
+  finding concerns an internal declaration absent from the shipped
+  `exported_symbols`, it is lowered to `COMPATIBLE_WITH_RISK` automatically
+  (`evidence_policy.auto_demote_unexported_source_findings`). Safe by
+  construction — no-op unless a non-empty export table is plumbed, requires a
+  positively-internal visibility, only ever lowers a verdict, never touches an
+  artifact-proven break, and an explicit policy knob still wins.
+- **Per-axis FP-rate trend reporting** — the public-surface FP-rate gate
+  (`scripts/check_fp_rate.py`) tags each corpus case with its scoping axis;
+  `--json` now carries a `by_category` breakdown and `--markdown` renders a
+  per-axis accuracy table for a CI step-summary / release-over-release trend.
+- **FP-rate corpus now guards enum-reachability and pointer/opaque precision**
+  — nine cases (both polarities each) lock in that internal (unreferenced)
+  enum value/appended-member/underlying-size changes and pointer-only *opaque*
+  handle size changes scope out, while public-reachable enums and pointer-only
+  *fully-defined* type size changes stay breaking. Baselines remain 0/0.
 - New user-guide page **CI Gating** (`docs/user-guide/ci-gating.md`) — the
   missing hub explaining how baselines, policies, suppressions, and severity
   combine into the exit code (order of operations + the two exit-code

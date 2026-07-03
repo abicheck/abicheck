@@ -116,3 +116,40 @@ def test_json_mode_emits_metrics(capsys):
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert "false_positive_delta_vs_baseline" in out
+    # The per-axis trend breakdown rides along in the JSON for archiving.
+    assert "by_category" in out
+    assert out["by_category"]  # non-empty
+
+
+def test_every_case_carries_a_category_tag():
+    """The import-time guard: no corpus case is silently 'uncategorized'."""
+    tagged = set(fp_gate.CASE_CATEGORY)
+    corpus = {c.name for c in fp_gate.CORPUS}
+    assert corpus <= tagged, corpus - tagged
+    assert all(fp_gate._category_of(c.name) != "uncategorized" for c in fp_gate.CORPUS)
+
+
+def test_category_breakdown_partitions_the_corpus():
+    """Per-axis case counts sum back to the full corpus, and (on a clean build)
+    every axis carries zero FP/FN so a regression is attributable to one axis."""
+    breakdown = fp_gate.category_breakdown()
+    assert sum(row["cases"] for row in breakdown.values()) == len(fp_gate.CORPUS)
+    for axis, row in breakdown.items():
+        assert row["cases"] == row["internal_noise"] + row["real_break"], axis
+        assert row["false_positives"] == 0, axis
+        assert row["false_negatives"] == 0, axis
+    # The enum-reachability and pointer-opaque axes are represented with both
+    # polarities (an internal-noise FP sentinel and a real-break FN sentinel).
+    for axis in ("enum-reachability", "pointer-opaque"):
+        assert breakdown[axis]["internal_noise"] >= 1, axis
+        assert breakdown[axis]["real_break"] >= 1, axis
+
+
+def test_markdown_mode_renders_axis_table(capsys):
+    """`--markdown` renders a per-axis table for the CI step summary / trend."""
+    rc = fp_gate.main(["--markdown"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "| Axis | Cases |" in out
+    assert "enum-reachability" in out
+    assert "pointer-opaque" in out

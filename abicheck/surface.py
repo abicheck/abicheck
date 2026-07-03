@@ -24,8 +24,22 @@ The surface is computed from two facts that the dumper already records:
    parameter types, data members, base classes, or typedef targets. The
    closure deliberately follows *all* data members (including private and
    pointer-typed ones): this over-keeps rather than risks hiding a layout
-   dependency, and precise by-value-vs-pointer reachability is left to a
-   later phase (ADR-024 §D3).
+   dependency. The closure follows enum references (as struct-field types,
+   typedef targets, or signature types) exactly as it follows record
+   references, so an unreferenced internal enum is scoped out while a
+   public-reachable one is kept (locked in by the ``enum-reachability`` axis
+   of the ``scripts/check_fp_rate.py`` corpus).
+
+   Precise by-value-vs-pointer reachability (ADR-024 §D3) is intentionally
+   *not* done here: a pointer-reached type whose full definition is public
+   is still layout-observable (a consumer can dereference/allocate it by
+   value), so demoting it at this stage would hide a real break. The safe
+   half of that precision — a pointer-only-reached *opaque* handle whose
+   layout consumers cannot see — is delivered downstream by the opaque
+   filter (``diff_filtering._filter_opaque_size_changes`` /
+   ``_downgrade_opaque_type_changes``), which acts on the layout-observability
+   axis rather than the public/private axis. Both polarities are locked in by
+   the ``pointer-opaque`` axis of the FP-rate corpus.
 
 This module performs *no* deletion on its own; it only answers "is this
 finding about the public surface?".  The pipeline step that consumes it
