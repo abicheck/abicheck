@@ -94,7 +94,8 @@ configuration instead of the legacy verdict system:
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
 
-The highest applicable code wins. Without any `--severity-*` flag, the legacy
+The highest applicable code wins. Without any active severity setting (no
+`--severity-*` flag and no config severity value), the legacy
 verdict-based exit codes apply (see [exit codes reference](../reference/exit-codes.md)).
 
 ## Report output

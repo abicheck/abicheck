@@ -43,8 +43,8 @@ Translate your gates:
 | Compatible changes only | bit 2 set (`4`) | `0` (`COMPATIBLE` / `COMPATIBLE_WITH_RISK`) |
 | Source-level (recompile-needed) break | — *(folded into bit 3)* | `2` (`API_BREAK`) |
 | Incompatible ABI change | bit 3 set (`8`, or `12` with bit 2) | `4` (`BREAKING`) |
-| Tool error | bit 0 set (`1`) | — (invalid invocation exits `64`) |
-| Usage error | bit 1 set (`2`) | `64` |
+| Tool/runtime error (e.g. malformed input that exists) | bit 0 set (`1`) | `1` |
+| Usage error (bad arguments/options, unreadable input) | bit 1 set (`2`) | `64` |
 
 With `abidiff`, failing a pipeline on incompatible changes means testing the
 bitmask (`rc=$?; if [ $((rc & 8)) -ne 0 ]; then exit 1; fi`). With abicheck

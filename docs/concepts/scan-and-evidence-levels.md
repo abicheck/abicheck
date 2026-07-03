@@ -23,7 +23,7 @@ relates them.
 |------|-------|---------|--------|-------------|
 | **L — evidence layer** | `L0`–`L5` | *What* abicheck sees, and **how much that evidence is trusted** (authority) | the **inputs you give** (binary, debug, headers, build dir, sources) | [Evidence & Detectability](evidence-and-detectability.md), [Build Info & Sources](build-source-data.md) |
 | **S — source-analysis method** | `s0`–`s6` (+`auto`) | *How* abicheck gathers the L3–L5 evidence, and the **granularity coverage is reported at** | `scan --source-method` | [`scan` command](../user-guide/scan-levels.md) |
-| **mode / depth — presets** | `pr`,`pr-deep`,`baseline`,`audit` / `headers`,`build`,`source`,`full`,`graph` | A convenient **fixed `(S, L)` selection** | `scan --mode` / `scan --depth` | [`scan` command](../user-guide/scan-levels.md) |
+| **mode / depth — presets** | `pr`,`pr-deep`,`baseline`,`audit` / `binary`,`headers`,`build`,`source`,`full` | A convenient **fixed `(S, L)` selection** | `scan --mode` / `scan --depth` | [`scan` command](../user-guide/scan-levels.md) |
 
 The two axes are **orthogonal**: `L` is a property of *evidence*, `S` is a
 property of the *process* that produced it. You can reach the same L-layer by

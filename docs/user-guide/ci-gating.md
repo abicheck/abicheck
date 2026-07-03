@@ -59,7 +59,7 @@ when wiring up CI:
 
 In both schemes `0` passes and `4` is worst — but under the severity scheme
 exit `1` means an error-level *finding*, whereas under the legacy scheme `1`
-is not used for verdicts at all (invalid invocations exit `64`). Pin the
+is a tool/runtime error, never a verdict (usage errors exit `64`). Pin the
 regime explicitly with `--exit-code-scheme legacy|severity` (or the
 `exit_code_scheme` config key) so a later flag change can't silently flip it.
 Full matrix, including `appcompat`/`deps`/`compat` and multi-library codes:
