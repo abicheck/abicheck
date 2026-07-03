@@ -128,15 +128,19 @@ is the source of truth).
 | Deployment risk (noexcept, ISA dispatch, version-require) | [15](../examples/case15_noexcept_change.md), [83](../examples/case83_cpu_dispatch_isa_dropped.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 4](abi-series/04-cpp-abi.md) |
 | Compatible additions & quality signals | [03](../examples/case03_compat_addition.md), [25](../examples/case25_enum_member_added.md), [26b](../examples/case26b_union_field_added_compatible.md), [27](../examples/case27_symbol_binding_weakened.md), [29](../examples/case29_ifunc_transition.md), [61](../examples/case61_var_added.md), [62](../examples/case62_type_field_added_compatible.md), [99](../examples/case99_experimental_graduated.md) | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
 | Scoped/non-public internal changes | [118](../examples/case118_internal_struct_field_added_scoped.md), [119](../examples/case119_internal_struct_field_removed_scoped.md), [120](../examples/case120_internal_struct_reordered_scoped.md) | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
-| Deployment & security-hardening risk (RELRO, canary, exec-stack, RUNPATH, `DT_NEEDED`, TLS model, object size, binding) | [127](../examples/case127_data_object_size_changed.md), [128](../examples/case128_symbol_binding_strengthened.md), [133](../examples/case133_tls_model_flip.md), [134](../examples/case134_relro_weakened.md), [135](../examples/case135_stack_canary_removed.md), [136](../examples/case136_executable_stack_removed.md), [137](../examples/case137_runpath_changed.md), [138](../examples/case138_needed_added.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 5](abi-series/05-linker-elf.md) |
+| Security-hardening & deployment metadata (RELRO, canary, exec-stack, RUNPATH, `DT_NEEDED`, TLS model, symbol binding) — artifact/linker facts (L0/L3) | [128](../examples/case128_symbol_binding_strengthened.md), [133](../examples/case133_tls_model_flip.md), [134](../examples/case134_relro_weakened.md), [135](../examples/case135_stack_canary_removed.md), [136](../examples/case136_executable_stack_removed.md), [137](../examples/case137_runpath_changed.md), [138](../examples/case138_needed_added.md) | mixed — 🟡 risk (RELRO/canary/TLS) or 🟢 COMPATIBLE (exec-stack/RUNPATH/`DT_NEEDED`/binding) | [Part 5](abi-series/05-linker-elf.md) |
 | **Build-flag & toolchain drift (L3)** — the flags the library was *built* with | [98](../examples/case98_cxx_standard_floor_raised.md), [103](../examples/case103_toolchain_flag_drift.md), [104](../examples/case104_glibcxx_dual_abi_flip.md), [130](../examples/case130_exceptions_mode_flip.md), [131](../examples/case131_rtti_mode_flip.md), [132](../examples/case132_threadsafe_statics_flip.md) | 🟡 risk (corroborating) | [Source & Build Data](build-source-data.md) |
-| **Source-only bodies (L4)** — macros, `constexpr`, inline/template *bodies*, uninstantiated templates | [122](../examples/case122_template_signature_uninstantiated.md), [124](../examples/case124_header_constant_value_changed.md) | mixed — 🟠 API_BREAK or 🟡 risk | [Source & Build Data](build-source-data.md) |
+| **Source-only values & bodies (L4)** — macro / `constexpr` / default-arg **values**; inline/template bodies; uninstantiated templates | [124](../examples/case124_header_constant_value_changed.md) *(detected → API_BREAK)* · [122](../examples/case122_template_signature_uninstantiated.md) *(documented `NO_CHANGE` gap — L4 still can't close it)* | mixed — 🟠 API_BREAK or ✅ NO_CHANGE (residual gap) | [Source & Build Data](build-source-data.md) |
 | **Intra-version ABI hygiene / audit** — accidental export, private-header leak, unversioned export, RTTI leak (no baseline needed) | [143](../examples/case143_audit_accidental_export.md), [144](../examples/case144_audit_private_header_leak.md), [145](../examples/case145_audit_unversioned_export.md), [146](../examples/case146_audit_rtti_for_internal.md) | 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
 | **Cross-source validation** — one fact, two sources: header↔build mismatch, ODR variant, export↔decl pair | [148](../examples/case148_xcheck_header_build_mismatch.md), [149](../examples/case149_xcheck_odr_variant.md), [150](../examples/case150_xcheck_export_public_pair.md), [151](../examples/case151_xcheck_provider_matrix.md) | mixed — 🟠 API_BREAK or 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
 
-The last five rows are the families that **only a source scan (L3–L5)** or a
-cross-source check can reach — the coverage the artifact tiers (L0–L2) are
-structurally blind to. They are the subject of the
+Of these rows the **security-hardening & deployment** row is *artifact/linker*
+coverage (L0/L3, mixed verdicts — an object-size change like
+[case127](../examples/case127_data_object_size_changed.md) is a separate 🔴
+BREAKING layout finding, not a hardening risk). The **last four rows** are the
+families that **only a source scan (L3–L5)** or a cross-source check can reach —
+coverage the artifact tiers (L0–L2) are structurally blind to. All six are the
+subject of the
 [level-by-level walk-through](#what-each-level-actually-sees-a-level-by-level-walk-through)
 and the [source-scan section](#going-deeper-than-artifacts-the-source-scan) below.
 
@@ -306,9 +310,11 @@ signature changes; C symbols do not. ² A few source-only changes (e.g. enum/fie
 values) leave no binary trace and require headers. The authoritative per-change
 table is in [Limitations](limitations.md#source-only-changes-invisible-to-binaryobject-analysis).
 
-The table above stops at the three **artifact** inputs (L0–L2) — but three
+The table above stops at the three **artifact** inputs (L0–L2) — but four
 families in [Break families at a glance](#break-families-at-a-glance) live
-*entirely* beyond the shipped artifact and need the **source scan**. Here is the
+*entirely* beyond the shipped artifact and need the **source scan** (build-flag
+drift, source-only values/bodies, intra-version hygiene, and cross-source
+validation). Here is the
 companion matrix for them: which source input a **build/source scan** (L3–L5)
 needs to detect each, and — crucially — the fact that these findings are
 **corroborating, never breaking on their own** (the [authority
@@ -318,7 +324,7 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 |---|:---:|:---:|:---:|---|------|
 | ABI-relevant build-flag / toolchain drift (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fexceptions`, `-frtti`) | ✅ | ✅ | ✅ | 🟡 risk | no compile DB — a command-string DB under-reports normalized flags |
 | Macro / `constexpr` / default-arg **value** change with no symbol move | ⚠️ flag only | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped |
-| Inline / template / uninstantiated **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it |
+| Inline / template **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it — an *uninstantiated template signature* change ([case122](../examples/case122_template_signature_uninstantiated.md)) is a documented `NO_CHANGE` gap even at L4 |
 | Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ✅ | ✅ | 🟡 risk | one source only — needs binary exports **and** the header AST to cross-check |
 | Cross-source disagreement: header↔build mismatch, ODR type variant, export↔decl pair | ✅ | ✅ | ✅ | 🟠 API_BREAK / 🟡 risk | evidence present on only one side — the check is reported *skipped*, never faked green |
 | Cross-symbol impact / reachability (what a changed internal reaches) | ⚠️ structural | ✅ | ✅ | 🟡 risk | `s4` graph has no call edges — call-impact needs the L4 pass (`s5`/`pr-deep`) |
@@ -542,9 +548,13 @@ L2 all emit `NO_CHANGE` for a `#define`:
 If v2 had instead changed the *body* of the inline `size()` while keeping its
 signature, L4 would flag `inline_body_changed` (a mixed-build/ODR **risk**) — the
 one class of change that is neither a symbol, a layout, nor a declaration, and so
-reaches no lower level. This is the residual the whole source scan exists for
-([case122](../examples/case122_template_signature_uninstantiated.md),
-[case124](../examples/case124_header_constant_value_changed.md)).
+reaches no lower level. This is the residual the whole source scan exists for:
+[case124](../examples/case124_header_constant_value_changed.md) (a header
+constant value change) is *detected* as `API_BREAK`, while
+[case122](../examples/case122_template_signature_uninstantiated.md) (an
+uninstantiated template *signature* change) is the documented `NO_CHANGE` **gap**
+that even L4 cannot close — a reminder that the top of the ladder still has a
+blind spot.
 
 **What L4 cannot see:** it is only as good as the source checkout matching the
 binary. Point it at the wrong tag and it raises `source_binary_provenance_mismatch`
