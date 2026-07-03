@@ -9,7 +9,9 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
     axes** (`S` = the method, `L` = the evidence) plus presets over them. If they
     look like they overlap, read [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)
     for the mental model first — this page is the practical flag reference and the
-    [worked examples](#worked-examples) below.
+    [worked examples](#worked-examples) below. To *see the actual data* each level
+    (L0→L5) extracts on one running example, and where each goes blind, read the
+    [level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through).
 
 **One dial selects how deep it goes — `--depth`, named by the evidence you get:**
 
