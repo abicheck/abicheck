@@ -129,8 +129,8 @@ is the source of truth).
 | Compatible additions & quality signals | [03](../examples/case03_compat_addition.md), [25](../examples/case25_enum_member_added.md), [26b](../examples/case26b_union_field_added_compatible.md), [27](../examples/case27_symbol_binding_weakened.md), [29](../examples/case29_ifunc_transition.md), [61](../examples/case61_var_added.md), [62](../examples/case62_type_field_added_compatible.md), [99](../examples/case99_experimental_graduated.md) | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
 | Scoped/non-public internal changes | [118](../examples/case118_internal_struct_field_added_scoped.md), [119](../examples/case119_internal_struct_field_removed_scoped.md), [120](../examples/case120_internal_struct_reordered_scoped.md) | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
 | Security-hardening & deployment metadata (RELRO, canary, exec-stack, RUNPATH, `DT_NEEDED`, TLS model, symbol binding) — artifact/linker facts (L0/L3) | [128](../examples/case128_symbol_binding_strengthened.md), [133](../examples/case133_tls_model_flip.md), [134](../examples/case134_relro_weakened.md), [135](../examples/case135_stack_canary_removed.md), [136](../examples/case136_executable_stack_removed.md), [137](../examples/case137_runpath_changed.md), [138](../examples/case138_needed_added.md) | mixed — 🟡 risk (RELRO/canary/TLS) or 🟢 COMPATIBLE (exec-stack/RUNPATH/`DT_NEEDED`/binding) | [Part 5](abi-series/05-linker-elf.md) |
-| **Build-flag & toolchain drift (L3)** — the flags the library was *built* with | [98](../examples/case98_cxx_standard_floor_raised.md), [103](../examples/case103_toolchain_flag_drift.md), [104](../examples/case104_glibcxx_dual_abi_flip.md), [130](../examples/case130_exceptions_mode_flip.md), [131](../examples/case131_rtti_mode_flip.md), [132](../examples/case132_threadsafe_statics_flip.md) | 🟡 risk (corroborating) | [Source & Build Data](build-source-data.md) |
-| **Source-only values & bodies (L4)** — macro / `constexpr` / default-arg **values**; inline/template bodies; uninstantiated templates | [124](../examples/case124_header_constant_value_changed.md) *(detected → API_BREAK)* · [122](../examples/case122_template_signature_uninstantiated.md) *(documented `NO_CHANGE` gap — L4 still can't close it)* | mixed — 🟠 API_BREAK or ✅ NO_CHANGE (residual gap) | [Source & Build Data](build-source-data.md) |
+| **Build-flag & toolchain drift (L3)** — the flags the library was *built* with, as a finding on their own | [130](../examples/case130_exceptions_mode_flip.md), [131](../examples/case131_rtti_mode_flip.md), [132](../examples/case132_threadsafe_statics_flip.md) | 🟡 COMPATIBLE_WITH_RISK | [Source & Build Data](build-source-data.md) |
+| **Source-only bodies & macros (L4)** — `#define` macro values, inline/template/`constexpr` **bodies**, uninstantiated templates (none header-reachable) | [122](../examples/case122_template_signature_uninstantiated.md) *(the documented `NO_CHANGE` gap — even L4 can't close it; a detected macro/body change is 🟠 API_BREAK / 🟡 risk)* | mixed — 🟠 API_BREAK / 🟡 risk, or ✅ NO_CHANGE (residual gap) | [Source & Build Data](build-source-data.md) |
 | **Intra-version ABI hygiene / audit** — accidental export, private-header leak, unversioned export, RTTI leak (no baseline needed) | [143](../examples/case143_audit_accidental_export.md), [144](../examples/case144_audit_private_header_leak.md), [145](../examples/case145_audit_unversioned_export.md), [146](../examples/case146_audit_rtti_for_internal.md) | 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
 | **Cross-source validation** — one fact, two sources: header↔build mismatch, ODR variant, export↔decl pair | [148](../examples/case148_xcheck_header_build_mismatch.md), [149](../examples/case149_xcheck_odr_variant.md), [150](../examples/case150_xcheck_export_public_pair.md), [151](../examples/case151_xcheck_provider_matrix.md) | mixed — 🟠 API_BREAK or 🟡 risk | [§ source scan](#going-deeper-than-artifacts-the-source-scan) |
 
@@ -138,9 +138,9 @@ Of these rows the **security-hardening & deployment** row is *artifact/linker*
 coverage (L0/L3, mixed verdicts — an object-size change like
 [case127](../examples/case127_data_object_size_changed.md) is a separate 🔴
 BREAKING layout finding, not a hardening risk). The **last four rows** are the
-families that **only a source scan (L3–L5)** or a cross-source check can reach —
-coverage the artifact tiers (L0–L2) are structurally blind to. All six are the
-subject of the
+families a plain artifact `compare` (L0–L2) does **not** produce on its own —
+they need the build data (L3), the sources (L4/L5), or the scan's cross-source
+pass to surface. All five new rows are the subject of the
 [level-by-level walk-through](#what-each-level-actually-sees-a-level-by-level-walk-through)
 and the [source-scan section](#going-deeper-than-artifacts-the-source-scan) below.
 
@@ -313,17 +313,18 @@ table is in [Limitations](limitations.md#source-only-changes-invisible-to-binary
 The table above stops at the three **artifact** inputs (L0–L2) — but four
 families in [Break families at a glance](#break-families-at-a-glance) live
 *entirely* beyond the shipped artifact and need the **source scan** (build-flag
-drift, source-only values/bodies, intra-version hygiene, and cross-source
+drift, source-only bodies & macros, intra-version hygiene, and cross-source
 validation). Here is the
-companion matrix for them: which source input a **build/source scan** (L3–L5)
-needs to detect each, and — crucially — the fact that these findings are
+companion matrix for the **source-scan layers (L3–L5)**: which source input each
+such family (plus the derived L5 reachability layer) needs, and — crucially — the
+fact that these findings are
 **corroborating, never breaking on their own** (the [authority
 rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 
 | Source-scan family | + Build data (L3) | + Sources (L4) | + Graph (L5, derived) | Emitted verdict | Common false negative |
 |---|:---:|:---:|:---:|---|------|
 | ABI-relevant build-flag / toolchain drift (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fexceptions`, `-frtti`) | ✅ | ✅ | ✅ | 🟡 risk | no compile DB — a command-string DB under-reports normalized flags |
-| Macro / `constexpr` value change, or default-arg **removal**, with no symbol move | ⚠️ flag only | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped |
+| Macro (`#define`) value change with no symbol move | ❌ | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped (a `const`/`constexpr`/default-arg **value** change is L2, already caught by `compare -H`) |
 | Inline / template **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it — an *uninstantiated template signature* change ([case122](../examples/case122_template_signature_uninstantiated.md)) is a documented `NO_CHANGE` gap even at L4 |
 | Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ✅ | ✅ | 🟡 risk | one source only — needs binary exports **and** the header AST to cross-check |
 | Cross-source disagreement: header↔build mismatch, ODR type variant, export↔decl pair | ✅ | ✅ | ✅ | 🟠 API_BREAK / 🟡 risk | evidence present on only one side — the check is reported *skipped*, never faked green |
@@ -517,12 +518,15 @@ L3 proves change ④:
 🟡 risk  abi_relevant_build_flag_changed  _GLIBCXX_USE_CXX11_ABI  1 → 0
 ```
 
-This is the [dual-ABI flip](../examples/case104_glibcxx_dual_abi_flip.md): every
-`std::string`/`std::list` parameter now uses a *different* underlying type,
-mangled `__cxx11`. On its own L3 is a **risk**, not a break — but it *explains*
-why a wave of `func_deleted`/`func_added` pairs might show up at L0, and it tells
-you the two builds are not comparing like-for-like. Per the authority rule, L3
-never *manufactures* a `BREAKING`; it corroborates and localizes.
+This is the [dual-ABI flip](../examples/case104_glibcxx_dual_abi_flip.md): any
+`std::string`/`std::list` parameter would now use a *different* underlying type,
+mangled `__cxx11`. `libcart`'s exported functions take no such types, so here the
+flip causes **no** L0 symbol churn (which is why L0 stays silent above) — but in a
+library that *does* expose them, this same flag flip renames symbols and the L0
+diff proves a `func_deleted`/`func_added` `BREAKING` on its own. On its own L3 is a
+**risk**, not a break; it *explains* and localizes that churn and tells you the two
+builds are not comparing like-for-like. Per the authority rule, L3 never
+*manufactures* a `BREAKING`; it corroborates.
 
 **What L3 cannot see:** anything about *values* inside the source — it reads the
 build's flags and target graph, not the code. Macro ③ is still invisible.
@@ -620,22 +624,25 @@ every level. Read *down* a column to see what that level alone would report; rea
 | ① `Money` field inserted | ❌ | ✅ **proves** | ✅ (castxml layout) | — | ✅ | ✅ ranks | `struct_size_changed`, `struct_field_offset_changed` | 🔴 BREAKING |
 | ② default arg `qty` removed | ❌ | ❌ | ✅ **proves** | — | ✅ | — | `param_default_value_removed` | 🟠 API_BREAK |
 | ③ macro `CART_MAX_ITEMS` | ❌ | ❌ | ❌ | ❌ | ✅ **proves** | — | `public_macro_value_changed` | 🟠 API_BREAK |
-| ④ `_GLIBCXX_USE_CXX11_ABI` | ⚠️ churn | ❌ | ❌ | ✅ **proves** | ✅ | ✅ | `abi_relevant_build_flag_changed` | 🟡 risk |
-| **Release verdict (worst-wins)** | NO_CHANGE | BREAKING | API_BREAK | risk | API_BREAK | risk | — | **🔴 BREAKING** |
+| ④ `_GLIBCXX_USE_CXX11_ABI` | ❌ | ❌ | ❌ | ✅ **proves** | ✅ | ✅ | `abi_relevant_build_flag_changed` | 🟡 risk |
+| **Release verdict (worst-wins)** | NO_CHANGE | BREAKING | BREAKING | risk | API_BREAK | risk | — | **🔴 BREAKING** |
 
 Three lessons fall straight out of the grid:
 
-1. **Each row is proven by exactly one level, but corroborated by several.** No
-   single level sees all four changes. The bottom "worst-wins" row shows a
-   stripped-binary compare (L0) would call this release **clean** — the single
-   most important reason to feed abicheck more than the `.so`.
+1. **No single level sees all four changes.** Each change is proven where its
+   evidence first appears (some, like ①, by two levels at once). The bottom
+   "worst-wins" row shows a stripped-binary compare (L0) would call this release
+   **clean** — the single most important reason to feed abicheck more than the
+   `.so`.
 2. **Higher levels don't *replace* lower ones — they cover different rows.** L2
-   doesn't make L1 redundant; it proves a *different* change. The value is in the
-   overlay, which is why abicheck combines them instead of picking one.
-3. **Authority is not the same as coverage.** L4 proves the *most* rows here, but
-   only L1's authoritative layout finding sets the `BREAKING` gate. L3/L4/L5 add
-   two more real findings and the *explanation*, but a source-only finding tops
-   out at `API_BREAK`.
+   proves ②'s default-arg break that L1 can't, while L1's DWARF layout and L2's
+   castxml layout *both* catch ①. The value is in the overlay, which is why
+   abicheck combines them instead of picking one.
+3. **Authority is not the same as coverage.** L4 corroborates the *most* rows
+   here, but the `BREAKING` gate is set by the authoritative artifact tiers —
+   here L1's DWARF layout, with L2's castxml layout agreeing. L3/L4/L5 add real
+   findings and the *explanation*, but a source-only finding tops out at
+   `API_BREAK`.
 
 ### The one thing to remember: every level has a blind spot
 
