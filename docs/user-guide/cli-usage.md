@@ -676,9 +676,10 @@ The parser handles the full Debian symbols tag syntax:
 ## High-level architecture
 
 ```text
-CLI
+CLI  (core commands; see `abicheck --help` for the full list)
   dump                         — dump ABI snapshot to JSON
-  compare                      — compare two ABI surfaces
+  compare                      — compare two ABI surfaces (also directory/package inputs)
+  scan                         — one-shot source-intelligence scan (dump + compare + evidence)
   deps tree                    — show dependency tree + binding status (Linux ELF)
   deps compare                 — full-stack comparison across environments (Linux ELF)
   debian-symbols generate      — generate Debian symbols file from shared library

@@ -177,7 +177,7 @@ checking.
 > **A sixth code you may meet later:** the `scan` docs also use **`L5`** — the
 > source *reachability graph* abicheck **derives** from L3/L4 evidence. You
 > provide five sources (L0–L4); L5 is computed, never an input. See
-> [Scan Levels (S vs L)](concepts/scan-and-evidence-levels.md).
+> [Evidence Layers & Scan Depth](concepts/scan-and-evidence-levels.md).
 
 Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
 found for a binary. For the full picture see [Evidence &
@@ -299,9 +299,9 @@ By default, `abicheck compare` exits with the verdict:
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
 | `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe — no binary ABI break |
-| `1` | — | Tool/runtime error |
 | `2` | `API_BREAK` | Source-level API break (binary still works) |
 | `4` | `BREAKING` | Binary ABI break |
+| `64` | — | Invalid invocation (bad args/options, unreadable input) — outside the verdict space |
 
 > **Note:** passing any `--severity-*` flag (as the recipes below do) switches
 > `compare` to **severity-aware** exit codes: `0` = no error-level findings,
@@ -363,7 +363,7 @@ upload SARIF — all in a few lines of YAML:
 ```
 
 See the [GitHub Action reference](user-guide/github-action.md) for every input,
-baseline workflows, package/`compare-release` mode, and multi-platform matrices.
+baseline workflows, package/bundle compare mode, and multi-platform matrices.
 
 ### GitHub Actions — raw CLI
 

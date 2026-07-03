@@ -11,21 +11,21 @@ proved and what it could not** — never a bare "scan failed".
 
 `connect()` takes `detail::SessionState&`, a private-header type.
 
-| Depth | Method | What it proves | What it cannot |
-|-------|--------|----------------|----------------|
-| **S3** | lexical pattern pre-scan (no compiler) | flags a risky construct: a public signature mentions a `detail::` name | cannot confirm the type is actually private — only a textual hint |
-| **S2** | preprocessor (if a compile DB is present) | resolves the `#include` graph | does not parse the AST |
-| **S5** | source replay + L5 source graph | **confirms** `detail::SessionState` originates in a private header and is reached from a public decl → `PRIVATE_HEADER_LEAK`, corroborated by the `source_index` provider | (the deepest answer) |
+| `--depth` | Method | What it proves | What it cannot |
+|-----------|--------|----------------|----------------|
+| **`headers`** | lexical pattern pre-scan + L2 header AST | flags a risky construct: a public signature mentions a `detail::` name | cannot confirm the type is actually private — only a textual/AST hint |
+| **`build`** | + preprocessor (if a compile DB is present) | resolves the `#include` graph | does not replay the source ABI |
+| **`source`** | + source replay + L5 source graph | **confirms** `detail::SessionState` originates in a private header and is reached from a public decl → `PRIVATE_HEADER_LEAK`, corroborated by the `source_index` provider | (the deepest answer) |
 
 The committed `snapshot.abi.json` carries the L2 header provenance **and** the L5
 source graph, so the cross-check fires with the `source_index` corroboration the
-S5 pass would add — the endpoint of the ladder.
+`--depth source` pass would add — the endpoint of the ladder.
 
 ## Reproduce the ladder
 
 ```bash
-abicheck scan --binary libdemo.so -H include/ --audit --source-method s3   # pattern only
-abicheck scan --binary libdemo.so -H include/ --audit --sources . --source-method s5  # S5 replay + graph
+abicheck scan --binary libdemo.so -H include/ --audit --depth headers   # pattern + AST
+abicheck scan --binary libdemo.so -H include/ --audit --sources . --depth source  # replay + L5 graph
 ```
 
 ## Fix

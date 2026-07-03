@@ -22,19 +22,19 @@ wires together the three ADR-035 pieces into one coverage-annotated report:
 2. run the **always-on tier** — the compiler-free lexical pattern pre-scan
    (``pattern_scan.py``, S3) and the intra-version cross-source checks
    (``crosscheck.py``, D4) — every time;
-3. run the **pinned** evidence level (the ``--mode`` preset or an explicit
-   ``--source-method``/``--depth``, resolved by ``scan_levels.py``), POI-scoped to
-   the changed paths, by collecting L3/L4/L5 inline at the matching ADR-033 D2
-   evidence mode;
+3. run the **pinned** evidence level (the ``--depth`` dial, resolved by
+   ``scan_levels.py``; the deprecated ``--mode``/``--source-method`` aliases map
+   onto it), POI-scoped to the changed paths, by collecting L3/L4/L5 inline at the
+   matching ADR-033 D2 evidence mode;
 4. if a ``--baseline`` is given, ``compare`` against it and fold the cross-source
    findings in as ``extra_changes``;
 5. emit **one** report stating, per layer/method, what ran vs. skipped (never a
    bare "source scan failed").
 
-Determinism (ADR-035 D3): the level is fixed by the pinned ``--mode``/``--source-
-method``/``--depth``; the risk score escalates the level **only** under
-``--source-method auto`` (opt-in). ``--budget`` is a failure guard on the chosen
-level — it never silently shrinks scope.
+Determinism (ADR-035 D3): the level is fixed by the pinned ``--depth`` (or its
+deprecated ``--mode``/``--source-method`` aliases); the risk score escalates the
+level **only** when ``--depth`` is omitted (the ``auto`` default). ``--budget`` is
+a failure guard on the chosen level — it never silently shrinks scope.
 
 The authority rule (ADR-028 D3 / ADR-035 D1) is preserved: ``scan`` adds no new
 authority — cross-source and pattern findings are ``RISK``/``API_BREAK`` only,
@@ -818,8 +818,8 @@ def scan_cmd(
 
     One orchestrator over `dump`/`compare`: classifies the PR's changed paths,
     runs the always-on compiler-free pattern pre-scan and the intra-version
-    cross-source checks, then runs the pinned evidence level (the `--mode` preset
-    or an explicit `--source-method`/`--depth`) and — when `--baseline` is given —
+    cross-source checks, then runs the pinned evidence level (the `--depth` dial,
+    or `auto` when omitted) and — when `--baseline` is given —
     compares against it. Emits one coverage-annotated report.
 
     \b
@@ -834,7 +834,7 @@ def scan_cmd(
       abicheck scan --binary new/libfoo.so --headers new/include \\
                     --sources . --baseline old/libfoo.abi.json
       abicheck scan --binary libfoo.so --headers include/ --audit
-      abicheck scan --binary new.so -H include/ --source-method auto --since origin/main
+      abicheck scan --binary new.so -H include/ --depth source --since origin/main
     """
     _setup_verbosity(verbose)
     start = time.monotonic()

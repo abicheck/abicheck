@@ -42,7 +42,7 @@ nav:
       - 'Scanning a Conda-Forge Package': user-guide/scanning-conda-packages.md
     - Everyday Use:
       - CLI Usage: user-guide/cli-usage.md
-      - Source-Scan Levels: user-guide/scan-levels.md
+      - Source-Scan Depth: user-guide/scan-levels.md
       - Producing Source Facts: user-guide/producing-source-facts.md
       - Output Formats: user-guide/output-formats.md
       - Baseline Management: user-guide/baseline-management.md
@@ -72,7 +72,7 @@ nav:
     - Evidence & Detectability: concepts/evidence-and-detectability.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
-    - Scan Levels (S vs L): concepts/scan-and-evidence-levels.md
+    - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
     - API Surface Intelligence: concepts/api-surface-intelligence.md
     - Class Layout ABI & API: concepts/class-layout-abi.md
     - Limitations: concepts/limitations.md

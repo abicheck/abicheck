@@ -96,5 +96,5 @@ pre-scan runs. On a large tree, scope that pre-scan with `--since <ref>` /
 ## See also
 
 - [Worked Example: Scanning a Library](real-world-example.md) — the full flow and reports
-- [Source-Scan Levels](scan-levels.md) — what L0–L5 collect and cost
+- [Source-Scan Depth](scan-levels.md) — what L0–L5 collect and cost
 - [CLI Usage](cli-usage.md) — every flag

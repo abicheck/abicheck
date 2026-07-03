@@ -689,13 +689,13 @@ source-only facts it cannot see — `#define` macros, `constexpr` values,
 default-argument values, inline/template **bodies**, uninstantiated templates —
 abicheck can read the build's compile database (**L3**) and replay the sources
 (**L4**), and fold a source/build reachability graph (**L5**). The one-shot
-driver is `abicheck scan`. It exposes two orthogonal "level" axes — the `L0`–`L5`
-*evidence layers* (what it sees + authority) and the `s0`–`s6` *source-analysis
-methods* (how it gathers L3–L5) — fully explained in
-[Scan Levels (S vs L)](scan-and-evidence-levels.md). The governing **authority
-rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes, or raises
-its own source-/API-level findings, but **never deletes an artifact-proven
-break**.
+driver is `abicheck scan`. It has one evidence dial — `--depth`
+(`binary|headers|build|source|full`) — that selects how far down the `L0`–`L5`
+*evidence layers* (what it sees + authority) to collect; fully explained in
+[Evidence Layers & Scan Depth](scan-and-evidence-levels.md). The governing
+**authority rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes,
+or raises its own source-/API-level findings, but **never deletes an
+artifact-proven break**.
 
 **Who produces the source facts.** The default is a post-build
 `compile_commands.json` replay — nothing in your build changes (`abicheck scan`
@@ -706,10 +706,11 @@ builds where a companion parse hurts — an optional **Clang plugin** that rides
 the compile's own AST (zero extra parse). The three are one interchangeable
 family; see [Build & Source data](build-source-data.md) for enable steps.
 
-`scan --mode` picks a fixed depth: `pr` (the cheap per-PR gate, diff-seeded L4),
-`pr-deep` (PR + the full L5 graph), `baseline` (a full-depth release snapshot),
-and `audit` — an **intra-version single-build hygiene lint that needs no previous
-version**. Audit surfaces "bad ABI hygiene" visible from one build: accidental
+`scan --depth` picks the evidence level: `source` (the per-PR gate — diff-seeded
+L4 replay + the L5 graph) and `full` (a full-depth release snapshot). Orthogonal
+to depth, `scan --audit` is an **intra-version single-build hygiene lint that
+needs no previous version**. Audit surfaces "bad ABI hygiene" visible from one
+build: accidental
 exports, private-header leaks, unversioned symbols, exported RTTI for internal
 types, and cross-source mismatches. Worked example cases:
 
@@ -737,19 +738,18 @@ project, the tool-track guides carry the exact commands, flags, and CI YAML:
 | You want to… | Go to |
 |--------------|-------|
 | Pick the right command for your situation (binary compare → full source scan → merge → plugin) | [Choose Your Workflow](../user-guide/choose-your-workflow.md) |
-| Run `abicheck scan` and pin a depth / S-method / mode | [Source-Scan Levels](../user-guide/scan-levels.md) |
+| Run `abicheck scan` and pin a depth | [Source-Scan Depth](../user-guide/scan-levels.md) |
 | *Produce* the source facts — post-build replay (Flow A), `abicheck-cc` wrapper (Flow B), or the Clang plugin (Flow C) | [Producing Source Facts](../user-guide/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
-| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`/`source-method`/`scan-mode`, audit, estimate, cross-check gating | [GitHub Action § Source scans](../user-guide/github-action.md#source-scans-build-source-evidence) |
+| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action § Source scans](../user-guide/github-action.md#source-scans-build-source-evidence) |
 | Check a host↔plugin ABI contract | [Plugin Systems](../user-guide/plugin-systems.md) |
 | Gate CI on the right verdict tier (binary break vs. source/API break) | [CI Gating](../user-guide/ci-gating.md) |
 
 The CI recipes there go beyond the binary-only compare: a minimal PR scan is
 four inputs (binary + headers + `sources: .` + `baseline`), and the same guide
 shows enabling each source layer independently — `depth: build` for cheap L3
-build-flag drift, `source-method: s5` for full L4 replay, `scan-mode: pr-deep`
-for the L5 graph, and `mode: merge` for build-emitted (`abicheck-cc` / Clang
-plugin) packs.
+build-flag drift, `depth: source` for full L4 replay plus the change-scoped L5
+graph, and `mode: merge` for build-emitted (`abicheck-cc` / Clang plugin) packs.
 
 ## Detection coverage and roadmap
 

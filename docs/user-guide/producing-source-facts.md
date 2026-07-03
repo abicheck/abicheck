@@ -10,7 +10,7 @@ evidence. For what the layers mean, see
 worked example of the concrete L4/L5 data these producers yield (and what the
 lower levels miss), see the
 [level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through).
-For how a scan *consumes* it, see [Source-scan levels](scan-levels.md).
+For how a scan *consumes* it, see [Source-scan depth](scan-levels.md).
 
 Whichever producer you pick, the **output contract is identical** — an
 `abicheck_inputs/` pack (or an inline `--sources` collection) that

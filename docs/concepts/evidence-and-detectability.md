@@ -61,12 +61,14 @@ struct is non-public ([case118](../examples/case118_internal_struct_field_added_
 > prioritize cross-symbol impact. It is covered with the other build/source
 > layers in [Build Info & Sources](build-source-data.md).
 >
-> **Layers (`L`) vs. scan levels (`S`).** The `L0`–`L5` codes name *evidence
+> **Layers (`L`) vs. the depth dial.** The `L0`–`L5` codes name *evidence
 > layers* — *what* abicheck sees and how much that evidence is trusted. The
-> `abicheck scan` command has a **separate** `s0`–`s6` axis naming the *method*
-> used to gather the L3–L5 evidence — a different meaning of the word "level".
-> [Scan Levels (S vs L)](scan-and-evidence-levels.md) explains both axes and how
-> they map onto each other.
+> `abicheck scan` command has one knob, `--depth`
+> (`binary|headers|build|source|full`), that selects **how far down** these
+> layers to collect. (Earlier releases exposed a separate `s0`–`s6` "method"
+> axis; it is now a deprecated alias of `--depth`.)
+> [Evidence Layers & Scan Depth](scan-and-evidence-levels.md) explains the model
+> and the `s0…s6` → `--depth` mapping.
 
 ### How they combine
 

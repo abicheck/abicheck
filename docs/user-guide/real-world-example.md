@@ -155,7 +155,7 @@ reuse a `compile:` block).
     with.
 
 Every field and the CLI-vs-config precedence are in
-[Source-Scan Levels](scan-levels.md#where-each-setting-belongs-cli-vs-config).
+[Source-Scan Depth](scan-levels.md#where-each-setting-belongs-cli-vs-config).
 
 ---
 
@@ -182,8 +182,8 @@ abicheck scan --binary build/libfoo.so -H include/ --sources . --since origin/ma
     query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
   ```
 - `--since origin/main` (or `--changed-path …`) — which files changed, so it
-  replays only the changed translation units. Without a seed, `s5` falls back to
-  a headers-only replay.
+  replays only the changed translation units. Without a seed, `--depth source`
+  falls back to a headers-only replay.
 
 !!! note "Cross-release body-change diff needs a source-aware baseline"
     The inline/template/macro/default-argument **body**-change comparison runs
@@ -196,8 +196,8 @@ The depth knob is `--depth {binary,headers,build,source,full}` (`binary` =
 binary-only, up to `full` = whole-library replay); leave it off and abicheck
 **auto**-picks by changed-path risk. **How each depth works, how to produce a
 compile database for `make`/`cmake`/`bazel`/`meson`, and the per-level input
-table live in [Source-Scan Levels](scan-levels.md)** — that's the home for the
-build-system details (and the precise `--source-method s0…s6` expert axis), kept
+table live in [Source-Scan Depth](scan-levels.md)** — that's the home for the
+build-system details (and the deprecated `--source-method s0…s6` axis), kept
 out of this walkthrough on purpose.
 
 ---
@@ -313,6 +313,6 @@ Other formats — **HTML**, SARIF, JUnit — are in [Output Formats](output-form
    as a CI gate).
 3. **Go deeper** (recommended) with `abicheck scan --sources . --since … --depth source`
    when you can give it your sources and build command — see
-   [Source-Scan Levels](scan-levels.md).
+   [Source-Scan Depth](scan-levels.md).
 4. **Read** the verdict + confidence: headers give a high-confidence,
    public-API-scoped result that names the changes that matter.

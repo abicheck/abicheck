@@ -83,12 +83,12 @@ abicheck operates in **symbol-table mode**:
 ✅ **Detected:**
 - Function added / removed (`func_added`, `func_removed`)
 - SONAME changed (`soname_changed`)
-- Symbol visibility changed (`symbol_visibility_changed`)
+- Symbol visibility changed (`func_visibility_changed`)
 - Variable added / removed
 
 ❌ **Not detected** (requires type information from headers + castxml):
 - Parameter type changes (`func_params_changed`)
-- Return type changes (`func_return_type_changed`)
+- Return type changes (`func_return_changed`)
 - Struct/class layout changes (`type_size_changed`, `type_field_*`)
 - vtable changes (`type_vtable_changed`)
 - Inline/noexcept changes
@@ -156,8 +156,7 @@ jobs:
           # brew install castxml              # macOS
       - name: ABI check
         run: |
-          abicheck compare -lib mylib \
-            -old old/libmylib.so -new new/libmylib.so \
+          abicheck compare old/libmylib.so new/libmylib.so \
             -H include/
 ```
 
