@@ -203,9 +203,10 @@ For `abicheck compare`, exit codes are the same for all policies — only the ve
 | `2` | `API_BREAK` (source-level break) |
 | `4` | `BREAKING` (binary ABI break) |
 
-> This is the **legacy (verdict-based) scheme**. Passing any `--severity-*`
-> flag switches `compare` to severity-based exit codes, where `1` means an
-> error-level finding — see [CI Gating → the two exit-code schemes](ci-gating.md#the-two-exit-code-schemes)
+> This is the **legacy (verdict-based) scheme**. Any active severity setting
+> (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches
+> `compare` to severity-based exit codes, where `1` means an error-level
+> finding — see [CI Gating → the two exit-code schemes](ci-gating.md#the-two-exit-code-schemes)
 > and the canonical [exit code reference](../reference/exit-codes.md).
 
 For `abicheck compat`, policy still affects verdict classification, but command-level

@@ -47,14 +47,15 @@ verdict or the exit code.
 
 ## The two exit-code schemes
 
-`compare` has two exit-code regimes, and **passing any `--severity-*` flag
-silently switches from the first to the second** — the most common source of
-confusion when wiring up CI:
+`compare` has two exit-code regimes, and **any active severity setting — a
+`--severity-*` flag *or* a severity value in `.abicheck.yml` — silently
+switches from the first to the second** — the most common source of confusion
+when wiring up CI:
 
 | Scheme | Active when | Codes |
 |---|---|---|
-| **Legacy (verdict-based)** | No `--severity-*` flag given | `0` compatible / `2` `API_BREAK` / `4` `BREAKING` |
-| **Severity-based** | Any `--severity-*` flag given | `0` no error-level findings / `1` error in `addition`·`quality_issues` only / `2` error in `potential_breaking` / `4` error in `abi_breaking` |
+| **Legacy (verdict-based)** | No severity setting active (neither a `--severity-*` flag nor a config severity value) | `0` compatible / `2` `API_BREAK` / `4` `BREAKING` |
+| **Severity-based** | Any severity setting active (CLI flag or `.abicheck.yml` value) | `0` no error-level findings / `1` error in `addition`·`quality_issues` only / `2` error in `potential_breaking` / `4` error in `abi_breaking` |
 
 In both schemes `0` passes and `4` is worst — but under the severity scheme
 exit `1` means an error-level *finding*, whereas under the legacy scheme `1`

@@ -114,7 +114,7 @@ Use these to gate CI pipelines.
 | `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
 | `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library compare with `--fail-on-removed-library`) |
 
-Passing any `--severity-*` flag switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `appcompat`, `deps compare`, and `compat` add per-mode codes. The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how baselines, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
+Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `appcompat`, `deps compare`, and `compat` add per-mode codes. The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how baselines, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
 
 ---
 

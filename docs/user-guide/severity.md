@@ -5,10 +5,10 @@ each with a configurable severity level that controls exit codes and report
 presentation.
 
 > Severity is the last step of the CI gating pipeline (classify → suppress →
-> severity → exit code), and passing any `--severity-*` flag switches
-> `compare` to the severity-based exit-code scheme. See
-> [CI Gating](ci-gating.md) for how it combines with policies, suppressions,
-> and baselines.
+> severity → exit code), and any active severity setting — a `--severity-*`
+> flag or a severity value in `.abicheck.yml` — switches `compare` to the
+> severity-based exit-code scheme. See [CI Gating](ci-gating.md) for how it
+> combines with policies, suppressions, and baselines.
 
 ---
 
@@ -83,8 +83,9 @@ Available flags:
 
 ## Exit codes
 
-When any `--severity-*` flag is provided, the exit code is computed from the
-severity configuration instead of the legacy verdict system:
+When any severity setting is active — a `--severity-*` flag or a severity
+value in `.abicheck.yml` — the exit code is computed from the severity
+configuration instead of the legacy verdict system:
 
 | Exit code | Meaning |
 |-----------|---------|

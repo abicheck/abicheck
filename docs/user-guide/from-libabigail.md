@@ -53,8 +53,11 @@ on any break (`2` or `4`). To fail **only** on binary ABI breaks and tolerate
 source-level ones:
 
 ```bash
-abicheck compare libfoo.so.1 libfoo.so.2 -H include/
-test $? -lt 4   # succeeds for 0 (compatible) and 2 (API_BREAK); fails for 4 (BREAKING)
+# capture the status first — under `set -e` (GitHub Actions' default shell
+# options) a bare compare exiting 2 would kill the step before the test runs
+rc=0
+abicheck compare libfoo.so.1 libfoo.so.2 -H include/ || rc=$?
+test "$rc" -lt 4   # succeeds for 0 (compatible) and 2 (API_BREAK); fails for 4 (BREAKING)
 ```
 
 See [Exit Codes](../reference/exit-codes.md) for the full matrix (including
