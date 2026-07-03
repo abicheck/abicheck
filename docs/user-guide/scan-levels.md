@@ -75,6 +75,25 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
   library, not just the changed TUs — the most thorough and the most expensive
   (the one real cost cliff). Use it for an amortized release baseline.
 
+### Benefits and cost at a glance
+
+Each rung *adds* to the one below it — the benefit column is what that rung newly
+catches, the cost/implication column is what it asks of you in return.
+
+| `--depth` | What it newly catches (benefit) | Cost & implication | Pin it when |
+|-----------|--------------------------------|--------------------|-------------|
+| `binary` | removed/changed exports, SONAME, dependency & version changes, no-DWARF vtable/RTTI size shifts | cheapest, flat with project size; **no** source-only API changes, and every exported symbol is treated as ABI (public/internal churn not separated) | you only have the two binaries, or want a fast pre-check |
+| `headers` | the **public/internal boundary** → separates real API breaks from internal churn; signature / type-layout / enum / `noexcept` changes | still cheap; needs public headers **and** a C/C++ frontend on `PATH`, else it falls back to binary-strict scope and over-reports | you have the public headers — this is the floor for a *trustworthy* verdict |
+| `build` | build-flag / toolchain / `-std` / visibility **drift**; macro-value & include-graph divergence | cheap (~0.3–0.5s more); needs a compile DB / build dir — without one L3 is `not_collected` (reported, not a pass) | the two builds may differ in flags, standard, or visibility |
+| `source` | inline / template / macro / default-argument / `constexpr` **body** changes, **plus** the L5 reachability graph that localizes and scopes findings | **the one cost cliff (L4)** — scales with C++ template depth; needs `--sources` + `clang` + a `--since` seed to stay cheap (unseeded, it replays every TU = `full` cost) | a per-PR gate that must catch source-body changes or wants per-symbol impact |
+| `full` | the same as `source`, but over the **whole** library rather than the changed TUs | most expensive (no seed scoping) | producing an amortized release baseline |
+
+**The one rule that ties it together:** the binary diff (`binary`/`headers`) sets
+the pass/fail **gate**; `build`/`source`/`full` mostly *localize and explain* and
+add their own source-/API-level findings — they rarely flip the verdict. So spend
+on L4 (`source`/`full`) for humans reviewing a PR or a release, and stay in the
+cheap tier for a fast CI gate.
+
 ## What input each depth needs — and how to get it
 
 Every depth needs a specific **input**; without it the matching coverage row is
