@@ -229,6 +229,7 @@ def _merge_attach_combined(
         and not (combined.source_abi.roots.get("exported_symbols"))
     ):
         from .buildsource.build_evidence import BuildEvidence
+        from .buildsource.inline import build_inline_coverage
         from .buildsource.source_graph import build_source_graph
         from .buildsource.source_link import relink_surface_exports
 
@@ -239,6 +240,30 @@ def _merge_attach_combined(
                 combined.build_evidence or BuildEvidence(),
                 source_abi=combined.source_abi,
             )
+        extractors = tuple(combined.manifest.extractors)
+        has_build = combined.build_evidence is not None and bool(
+            combined.build_evidence.compile_units or combined.build_evidence.targets
+        )
+        managed_layers = {
+            DataLayer.L3_BUILD.value,
+            DataLayer.L4_SOURCE_ABI.value,
+            DataLayer.L5_SOURCE_GRAPH.value,
+        }
+        preserved = [
+            cov
+            for cov in combined.manifest.coverage
+            if _layer_value(cov.layer) not in managed_layers
+        ]
+        combined.manifest.coverage = [
+            *preserved,
+            *build_inline_coverage(
+                combined.build_evidence or BuildEvidence(),
+                has_build,
+                combined.source_abi,
+                combined.source_graph,
+                extractors,
+            ),
+        ]
         # Mutating payloads invalidates precomputed artifact digests; clear them.
         combined.manifest.artifacts = []
     _warn_if_source_surface_empty(combined, base_exports)
@@ -249,7 +274,7 @@ def _merge_attach_combined(
 def _warn_if_source_surface_empty(
     combined: BuildSourcePack, base_exports: tuple[str, ...]
 ) -> None:
-    """Project-level ``public-roots`` misconfiguration signal (ADR-038 Caveat A).
+    """Project-level source-pack usefulness signal (ADR-038 Caveat A).
 
     The Clang facts plugin can only detect an empty public surface *per TU*, and
     a single internal-only TU legitimately produces none — so the per-TU
@@ -271,6 +296,12 @@ def _warn_if_source_surface_empty(
         + len(surface.reachable_templates)
         + len(surface.reachable_inline_bodies)
     )
+    decls = len(surface.reachable_declarations)
+    cov = surface.coverage or {}
+    matched = int(cov.get("matched_symbols", 0) or 0) + int(
+        cov.get("synthesized_symbols_matched", 0) or 0
+    )
+    exported = int(cov.get("exported_symbols", 0) or 0)
     if entities == 0:
         click.echo(
             "warning: merged source pack carries no public entities though the "
@@ -278,6 +309,23 @@ def _warn_if_source_surface_empty(
             "public-roots / ABICHECK_CC_HEADERS likely did not match how the "
             "public headers resolve (verify with `clang -H`); the baseline has no "
             "L4/L5 source evidence. See docs: user-guide/producing-source-facts.",
+            err=True,
+        )
+    elif decls == 0:
+        click.echo(
+            "warning: merged source pack carries public macros/types but no public "
+            f"function/variable declarations while the binary exports {len(base_exports)} "
+            "symbol(s). This usually means the selected compile unit did not include "
+            "the library's public API declarations, or public-roots is too broad/narrow; "
+            "symbol matching will be ineffective.",
+            err=True,
+        )
+    elif exported > 0 and matched == 0:
+        click.echo(
+            "warning: merged source pack carries public declarations but matched "
+            f"0/{exported} exported symbol(s). Check that the facts pack was built "
+            "from the same target/configuration as the binary and that public-roots "
+            "points at the headers used by that target.",
             err=True,
         )
 
@@ -300,4 +348,5 @@ def _merge_print_summary(
                 DataLayer.L4_SOURCE_ABI.value,
                 DataLayer.L5_SOURCE_GRAPH.value,
             }:
-                click.echo(f"  {cov.layer}: {cov.status.value}", err=True)
+                detail = f" ({cov.detail})" if cov.detail else ""
+                click.echo(f"  {cov.layer}: {cov.status.value}{detail}", err=True)

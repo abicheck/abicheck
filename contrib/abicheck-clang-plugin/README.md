@@ -88,7 +88,16 @@ them (ADR-035 D5); the plugin normalizes to `source_facts` itself.
 
 ## Build
 
+The CMake build needs the Clang development package for the same LLVM major as
+the `clang` that will load the plugin. On Debian/Ubuntu that means the full
+`libclang-XX-dev` package in addition to `clang-XX`/`llvm-XX-dev`; otherwise
+CMake can find `ClangTargets.cmake` but fail on missing libraries such as
+`libclangBasic.a`.
+
 ```bash
+# Debian/Ubuntu example for LLVM 18:
+sudo apt-get install clang-18 llvm-18-dev libclang-18-dev
+
 cmake -S . -B build -DCMAKE_PREFIX_PATH="$(llvm-config --cmakedir)/.."
 cmake --build build            # -> libabicheck-facts.so
 ```
@@ -122,6 +131,18 @@ abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 `version=<v>`. `public-roots=` is repeatable.
 
+After `merge`, read stderr's L4 coverage line. A healthy pack should report
+non-zero public declarations and, when the binary exports symbols, non-zero
+symbol matches. `merge` now warns when a pack technically ingests but is unlikely
+to help matching, for example:
+
+- public macros/types but no public function or variable declarations;
+- public declarations present, but `0/N` exported symbols matched.
+
+Those warnings usually mean the compile unit was internal-only, the pack was
+produced for a different target/configuration than the binary, or
+`public-roots=` does not match the headers the compiler actually resolved.
+
 ### `public-roots` must match how headers *resolve*, not where they are installed
 
 The plugin classifies a declaration as public by the **physical path the
@@ -149,7 +170,8 @@ Two ways to get it right:
   ```
 
   and records the same note in the pack's `diagnostics`. An empty pack is now a
-  loud error, not a 20-minute debug.
+  loud error, not a 20-minute debug. A non-empty-but-useless pack is also called
+  out later by `abicheck merge` when it has binary exports to match against.
 
 ### Auto-derived public roots (when `public-roots=` is omitted)
 

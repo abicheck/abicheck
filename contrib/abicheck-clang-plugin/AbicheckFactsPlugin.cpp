@@ -94,7 +94,7 @@ namespace {
 
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe.
-constexpr const char *kPluginVersion = "0.1";
+constexpr const char *kPluginVersion = "0.2";
 
 // ---------------------------------------------------------------------------
 // Hashing — mirrors clang.py::_hash exactly:
@@ -911,6 +911,48 @@ std::string upperStrippedStem(llvm::StringRef file) {
   return collapsed;
 }
 
+std::string macroGuardToken(llvm::StringRef text) {
+  std::string raw;
+  for (char c : text) {
+    if (std::isalnum(static_cast<unsigned char>(c)))
+      raw.push_back(
+          static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    else
+      raw.push_back('_');
+  }
+  std::string out;
+  bool underscore = true;
+  for (char c : raw) {
+    if (c == '_') {
+      if (!underscore)
+        out.push_back('_');
+      underscore = true;
+      continue;
+    }
+    out.push_back(c);
+    underscore = false;
+  }
+  while (!out.empty() && out.back() == '_')
+    out.pop_back();
+  return out;
+}
+
+bool looksLikeIncludeGuard(llvm::StringRef name, llvm::StringRef file) {
+  std::string macro = macroGuardToken(name);
+  std::string stem = macroGuardToken(llvm::sys::path::stem(file));
+  if (macro.empty() || stem.empty())
+    return false;
+  if (macro == stem)
+    return true;
+  size_t pos = macro.rfind(stem);
+  if (pos == std::string::npos)
+    return false;
+  llvm::StringRef tail(macro.data() + pos + stem.size(),
+                       macro.size() - pos - stem.size());
+  return tail == "_H" || tail == "_HH" || tail == "_HPP" ||
+         tail == "_HXX";
+}
+
 std::string joinStrings(const std::vector<std::string> &v, char sep) {
   std::string out;
   for (size_t i = 0; i < v.size(); ++i) {
@@ -1574,6 +1616,9 @@ private:
       const std::string &name = kv.first;
       const std::string &value = kv.second.value;
       const std::string &file = kv.second.file;
+      if (looksLikeIncludeGuard(name, file) &&
+          (value.empty() || value == "1"))
+        continue;
       if (value.empty()) {
         std::string up = name;
         for (char &c : up)
@@ -1736,7 +1781,7 @@ private:
         jsonStr(nowIso8601Utc()) + ",\n  \"created_by\": " + jsonStr(createdBy) +
         ",\n  \"exported_symbols\": [],\n  \"headers\": [],\n"
         "  \"kind\": \"abicheck_inputs\",\n  \"library\": " + jsonStr(Library) +
-        ",\n  \"source_facts\": [],\n  \"version\": " + jsonStr(Version) +
+        ",\n  \"source_facts\": [\"source_facts\"],\n  \"version\": " + jsonStr(Version) +
         "\n}\n";
 
     llvm::SmallString<128> tmp;

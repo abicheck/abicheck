@@ -41,7 +41,7 @@ from abicheck.buildsource.inputs_pack import (
     InputsManifest,
     load_inputs_manifest,
 )
-from abicheck.buildsource.model import CoverageStatus, DataLayer
+from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from abicheck.cli import main
 from abicheck.serialization import load_snapshot
 
@@ -65,6 +65,24 @@ def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:
         source=source,
         public_header_roots=[f"include/{name}.h"],
         functions=[ent],
+    )
+
+
+def _macro_tu(name: str = "FOO_H") -> SourceAbiTu:
+    ent = SourceEntity(
+        id=f"macro://{name}",
+        kind="macro",
+        qualified_name=name,
+        value="",
+        source_location=SourceLocation(path="include/foo.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+    )
+    return SourceAbiTu(
+        tu_id="cu://src/foo.cpp#cfg:abc",
+        target_id="target://libfoo",
+        source="src/foo.cpp",
+        public_header_roots=["include/foo.h"],
+        macros=[ent],
     )
 
 
@@ -482,6 +500,52 @@ def test_merge_relinks_surface_against_base_exports(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     surface = load_snapshot(out).build_source.source_abi
     assert "_Z3foov" in surface.roots["exported_symbols"]
+
+
+def test_merge_rebuilds_l4_coverage_after_relink(tmp_path: Path) -> None:
+    bin_json = _artifact_snapshot(tmp_path)
+    pack = _write_inputs_pack(tmp_path, [_tu("bar", mangled="_Z3barv")])
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    assert "matched 0/1 exported symbol" in result.output
+    assert "L4_source_abi: partial (0/1 symbols matched)" in result.output
+    baseline = load_snapshot(out)
+    surface = baseline.build_source.source_abi
+    assert surface.coverage["exported_symbols"] == 1
+    assert surface.coverage["matched_symbols"] == 0
+    l4 = baseline.build_source.manifest.coverage_for(DataLayer.L4_SOURCE_ABI)
+    assert l4 is not None
+    assert l4.status == CoverageStatus.PARTIAL
+    assert "0/1 symbols matched" in l4.detail
+
+
+def test_merge_relink_preserves_non_managed_coverage_rows(tmp_path: Path) -> None:
+    from abicheck.cli_buildsource_merge import _merge_attach_combined
+
+    base = load_snapshot(_artifact_snapshot(tmp_path))
+    pack = _write_inputs_pack(tmp_path, [_tu("bar", mangled="_Z3barv")])
+    ingested = ingest_inputs_pack(pack)
+    ingested.pack.manifest.coverage.append(
+        LayerCoverage(
+            layer="custom_plugin_diagnostics",
+            status=CoverageStatus.PRESENT,
+            detail="keep me",
+        )
+    )
+    _merge_attach_combined(ingested.pack, base, tmp_path / "baseline.json")
+    kept = base.build_source.manifest.coverage_for("custom_plugin_diagnostics")
+    assert kept is not None
+    assert kept.detail == "keep me"
+
+
+def test_merge_warns_for_macro_only_pack_with_exports(tmp_path: Path) -> None:
+    bin_json = _artifact_snapshot(tmp_path)
+    pack = _write_inputs_pack(tmp_path, [_macro_tu()])
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    assert "public macros/types but no public function/variable declarations" in result.output
 
 
 def test_merge_rejects_plain_directory(tmp_path: Path) -> None:

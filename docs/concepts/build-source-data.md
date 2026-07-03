@@ -232,13 +232,14 @@ pinned `clang`).
 
 ```bash
 # 1. Build the plugin against your toolchain's LLVM (once per image).
+#    Debian/Ubuntu needs the matching libclang-XX-dev package, not only clang-XX.
 cmake -S contrib/abicheck-clang-plugin -B build \
   -DCMAKE_PREFIX_PATH="$(llvm-config --cmakedir)/.."
 cmake --build build                                   # -> build/libabicheck-facts.so
 
 # 2. Add it to the normal compile. Use the `-Xclang -plugin-arg-abicheck-facts`
 #    form (the `-fplugin-arg-` shorthand mis-parses the hyphenated plugin name).
-#    `public-roots=` is mandatory — it is the plugin's ABICHECK_CC_HEADERS.
+#    `public-roots=` is strongly recommended — it is the plugin's ABICHECK_CC_HEADERS.
 clang++ -std=c++17 -Iinclude \
   -fplugin=./build/libabicheck-facts.so \
   -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs \
@@ -249,6 +250,11 @@ clang++ -std=c++17 -Iinclude \
 abicheck dump libfoo.so -H include/ -o libfoo.bin.json
 abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
 ```
+
+Treat `merge` warnings about zero public declarations or `0/N` matched exported
+symbols as a pack-quality problem, not as a clean success: choose a compile unit
+that includes the public API for the library target, and point `public-roots=` at
+the physical header path printed by `clang -H`.
 
 The plugin is validated as a drop-in for the clang backend by a differential
 conformance gate (ADR-038 C.6) that runs across LLVM/Clang 16, 17, and 18; its
