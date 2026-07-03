@@ -329,8 +329,8 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 | ABI-relevant build-flag / toolchain drift (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fexceptions`, `-frtti`) | ✅ | ✅ | ✅ | 🟡 risk | no compile DB — a command-string DB under-reports normalized flags |
 | Macro (`#define`) value change with no symbol move | ❌ | ✅ | ✅ | 🟠 API_BREAK | no sources **or** no clang — L4 disabled, silently skipped (a `const`/`constexpr`/default-arg **value** change is L2, already caught by `compare -H`) |
 | Inline / template **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it — an *uninstantiated template signature* change ([case122](../examples/case122_template_signature_uninstantiated.md)) is a documented `NO_CHANGE` gap even at L4 |
-| Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ✅ | ✅ | 🟡 risk | one source only — needs binary exports **and** the header AST to cross-check |
-| Cross-source disagreement: header↔build mismatch, ODR type variant, export↔decl pair | ✅ | ✅ | ✅ | 🟠 API_BREAK / 🟡 risk | evidence present on only one side — the check is reported *skipped*, never faked green |
+| Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ❌ | ✅ localizes | 🟡 risk | resolves at L0+L2 (binary exports **and** the header AST); the scan's cross-source pass computes it — no L4 replay needed |
+| Cross-source disagreement — *minimum evidence varies by check* | ⚠️ header↔build | ⚠️ ODR only | ✅ | 🟠 API_BREAK / 🟡 risk | evidence on only one side → the check is *skipped*, never faked green. Export↔decl & provider checks need only L0+L2; header↔build needs L3; ODR variant needs L4 |
 | Cross-symbol impact / reachability (what a changed internal reaches) | ⚠️ structural | ✅ | ✅ | 🟡 risk | `s4` graph has no call edges — call-impact needs the L4 pass (`s5`/`pr-deep`) |
 
 Two things this second matrix makes explicit that the first cannot:
@@ -631,11 +631,15 @@ every level. Read *down* a column to see what that level alone would report; rea
 
 | Change | L0 symbols | L1 DWARF | L2 headers | L3 build | L4 sources | L5 graph | abicheck ChangeKind | Verdict |
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|---|---|
-| ① `Money` field inserted | ❌ | ✅ **proves** | ✅ (castxml layout) | — | ✅ | ✅ ranks | `struct_size_changed`, `struct_field_offset_changed` | 🔴 BREAKING |
+| ① `Money` field inserted | ❌ | ✅ **proves** | ✅ (castxml layout) | — | — ¹ | ✅ ranks | `struct_size_changed`, `struct_field_offset_changed` | 🔴 BREAKING |
 | ② default arg `qty` removed | ❌ | ❌ | ✅ **proves** | — | ✅ | — | `param_default_value_removed` | 🟠 API_BREAK |
 | ③ macro `CART_MAX_ITEMS` | ❌ | ❌ | ❌ | ❌ | ✅ **proves** | — | `public_macro_value_changed` | 🟠 API_BREAK |
 | ④ `_GLIBCXX_USE_CXX11_ABI` | ❌ | ❌ | ❌ | ✅ **proves** | ✅ | ✅ | `abi_relevant_build_flag_changed` | 🟡 risk |
 | **Release verdict (worst-wins)** | NO_CHANGE | BREAKING | BREAKING | risk | API_BREAK | risk | — | **🔴 BREAKING** |
+
+¹ L4 source replay emits source-surface findings (macros, `constexpr`/default-arg
+values, inline/template bodies, typedefs, ODR/mapping) — **not** emitted binary
+layout; a record-layout edit like ① is L1/L2's job, so L4 adds nothing for it.
 
 Three lessons fall straight out of the grid:
 
