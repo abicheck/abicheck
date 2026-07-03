@@ -6,8 +6,11 @@ graph: call/include/dependency edges) — is derived from your **source**, not f
 the shipped binary. This page is the practical guide to *producing* that source
 evidence. For what the layers mean, see
 [Build Info & Sources](../concepts/build-source-data.md) and
-[Evidence & Detectability](../concepts/evidence-and-detectability.md); for how a
-scan *consumes* it, see [Source-scan levels](scan-levels.md).
+[Evidence & Detectability](../concepts/evidence-and-detectability.md); for a
+worked example of the concrete L4/L5 data these producers yield (and what the
+lower levels miss), see the
+[level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through).
+For how a scan *consumes* it, see [Source-scan levels](scan-levels.md).
 
 Whichever producer you pick, the **output contract is identical** — an
 `abicheck_inputs/` pack (or an inline `--sources` collection) that

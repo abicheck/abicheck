@@ -695,7 +695,28 @@ types, and cross-source mismatches. Worked example cases:
 The throughline of the cross-source cases: a finding invisible or ambiguous to
 **any single source** resolves only by crosschecking two — and `case147` shows
 the scan stating the depth it *actually reached*, never a bare "scan failed".
-Practical recipes are in the [Source-Scan Levels guide](../user-guide/scan-levels.md).
+
+### Now run it — the practical flow, plugin, and CI guides
+
+This page is the *concept*. When you are ready to enable a source scan on a real
+project, the tool-track guides carry the exact commands, flags, and CI YAML:
+
+| You want to… | Go to |
+|--------------|-------|
+| Pick the right command for your situation (binary compare → full source scan → merge → plugin) | [Choose Your Workflow](../user-guide/choose-your-workflow.md) |
+| Run `abicheck scan` and pin a depth / S-method / mode | [Source-Scan Levels](../user-guide/scan-levels.md) |
+| *Produce* the source facts — post-build replay (Flow A), `abicheck-cc` wrapper (Flow B), or the Clang plugin (Flow C) | [Producing Source Facts](../user-guide/producing-source-facts.md) |
+| Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
+| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`/`source-method`/`scan-mode`, audit, estimate, cross-check gating | [GitHub Action § Source scans](../user-guide/github-action.md#source-scans-build-source-evidence) |
+| Check a host↔plugin ABI contract | [Plugin Systems](../user-guide/plugin-systems.md) |
+| Gate CI on the right verdict tier (binary break vs. source/API break) | [CI Gating](../user-guide/ci-gating.md) |
+
+The CI recipes there go beyond the binary-only compare: a minimal PR scan is
+four inputs (binary + headers + `sources: .` + `baseline`), and the same guide
+shows enabling each source layer independently — `depth: build` for cheap L3
+build-flag drift, `source-method: s5` for full L4 replay, `scan-mode: pr-deep`
+for the L5 graph, and `mode: merge` for build-emitted (`abicheck-cc` / Clang
+plugin) packs.
 
 ## Detection coverage and roadmap
 

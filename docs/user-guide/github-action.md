@@ -278,6 +278,11 @@ intra-version cross-source checks, then runs the pinned evidence level
 `baseline` is given — compares against it. It emits a single
 coverage-annotated report saying, per layer, what ran versus what was skipped.
 
+> **New to what these layers see?** The concept-track
+> [level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through)
+> shows, on one running example, the concrete data each level (L0→L5) produces
+> and where each goes blind — the "why" behind the inputs below.
+
 The common case needs four inputs — the built binary, its public headers, the
 source tree, and a baseline:
 
