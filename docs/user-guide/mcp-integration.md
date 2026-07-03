@@ -323,9 +323,9 @@ without running any compiler or parsing any binary. Use it to pick a
 | `include_dirs` | string[] | no | Extra include directories |
 | `sources` | string | no | Source tree (compile DB auto-discovered within it) |
 | `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `mode` | string | no | Fixed (L,S) preset: `"pr"` (default), `"pr-deep"`, `"baseline"`, `"audit"` |
-| `source_method` | string | no | Precise S-axis level (`s0`…`s6` or `auto`); omit for the mode preset |
-| `depth` | string | no | Coarse L-axis selector: `binary`, `headers`, `build`, `source`, `full` |
+| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, `source`, `full`; omit for `auto` |
+| `mode` | string | no | Preset (`"pr"` default, `"pr-deep"`, `"baseline"`, `"audit"`). Deprecated alias of `depth` on the CLI (ADR-037 D5) |
+| `source_method` | string | no | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto` |
 | `changed_paths` | string[] | no | Changed-path set for the focused replay-scope estimate |
 
 **Response fields:** `mode`, `estimate` (per-layer cost rows), and
@@ -340,8 +340,8 @@ tier (compiler-free pattern pre-scan + intra-version cross-source checks) → th
 pinned evidence level — and, when `baseline` is given, a compare against it.
 Returns one coverage-/confidence-annotated scan result. The authority rule is
 preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
-`BREAKING` on their own. See [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)
-for the `mode`/`source_method`/`depth` model.
+`BREAKING` on their own. See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)
+for the `depth` model (`mode`/`source_method` are deprecated aliases).
 
 **Parameters:**
 
@@ -353,10 +353,10 @@ for the `mode`/`source_method`/`depth` model.
 | `public_header_dirs` | string[] | no | Directories whose headers are public; establishes the public/internal boundary so the leakage/RTTI/exported-vs-public cross-checks run instead of skipping. Must be existing directories |
 | `sources` | string | no | Source tree (compile DB auto-discovered within it) |
 | `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `baseline` | string | no | Previous build's dump/library to compare against. Omit for a single-release run; use `mode="audit"` for the hygiene catalog |
-| `mode` | string | no | Fixed (L,S) preset: `"pr"` (default), `"pr-deep"`, `"baseline"`, `"audit"` |
-| `source_method` | string | no | Precise S-axis level (`s0`…`s6` or `auto`); omit for the mode preset |
-| `depth` | string | no | Coarse L-axis selector: `binary`, `headers`, `build`, `source`, `full` |
+| `baseline` | string | no | Previous build's dump/library to compare against. Omit for a single-release run; pass `mode="audit"` for the hygiene catalog (the MCP tool has no `--audit` switch of its own) |
+| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, `source`, `full`; omit for `auto` |
+| `mode` | string | no | Preset (`"pr"` default, `"pr-deep"`, `"baseline"`, `"audit"`). Deprecated alias of `depth` on the CLI (ADR-037 D5); still the way to select the audit lint via MCP |
+| `source_method` | string | no | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto` |
 | `changed_paths` | string[] | no | Changed-path set focusing the scan |
 | `language` | string | no | `"c++"` (default) or `"c"` |
 

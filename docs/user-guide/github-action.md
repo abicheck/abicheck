@@ -74,7 +74,7 @@ automatically, then runs ABI comparison and reports results.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `castxml` (`auto`) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
+| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
 | `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
 | `gcc-options` | — | Extra flags for castxml (dump mode only) |
@@ -108,8 +108,8 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
 | `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. (scan can also derive this from the level inputs below.) |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
-| `scan-mode` | scan | Fixed `(L,S)` preset: `pr` (default), `pr-deep`, `baseline`, `audit`. |
-| `source-method` | scan | Precise S-axis: `s0`…`s6`, or `auto` (risk-driven, opt-in). |
+| `scan-mode` | scan | **Deprecated alias of `depth`** (ADR-037 D5): `pr`, `pr-deep`, `baseline`, `audit`. Prefer `depth` (or `audit`); this input still defaults to `pr` and emits a deprecation warning. |
+| `source-method` | scan | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto`. Prefer `depth`; emits a deprecation warning when set. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
@@ -117,7 +117,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
 | `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
-| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Flow-2 `abicheck_inputs/` pack directory to combine. |
+| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Flow B `abicheck_inputs/` pack directory to combine. |
 | `on-conflict` | merge | `warn` (default, first-wins + diagnostic) or `error` (exit non-zero) when two inputs supply the same layer with differing facts. |
 
 !!! note "format in scan mode"
@@ -319,8 +319,10 @@ base ref is available.
 
 ### Pin the scan depth
 
-By default `scan` runs the `pr` preset. Pin a precise level for reproducible CI
-with `source-method` (S-axis) or the coarser `depth` (L-axis):
+The Action's `scan-mode` input still defaults to `pr` (a deprecated alias), so an
+unset `depth` currently runs the `pr` preset **and emits a deprecation warning** —
+it is not the CLI's `auto`. Pin the modern `depth` dial for reproducible CI (and to
+silence the warning); the raw CLI resolves `auto` only when nothing is passed:
 
 ```yaml
       - uses: abicheck/abicheck@v0.3.0
@@ -330,17 +332,25 @@ with `source-method` (S-axis) or the coarser `depth` (L-axis):
           new-header: include/
           sources: .
           baseline: abi-baseline.json
-          source-method: s5     # full source-ABI replay (deterministic)
+          depth: source         # source-ABI replay of changed TUs (deterministic)
+          since: origin/main    # scope the L4 replay to the PR's changed TUs
           budget: 15m           # fail (BUDGET_OVERFLOW) rather than overrun
 ```
 
 | Want… | Set |
 |-------|-----|
 | Cheap build-flag drift only (L3) | `depth: build` |
-| Source semantics on changed TUs | `source-method: s4` + `since:` |
-| Full source-ABI replay | `source-method: s5` |
-| Source graph / localization (L5) | `source-method: s4` or `scan-mode: pr-deep` |
-| Risk-driven (dev/local, opt-in) | `source-method: auto` + `since:` |
+| Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
+| Full source-ABI replay of the whole library | `depth: full` |
+| Risk-driven (dev/local, opt-in) | omit `depth` (→ `auto`) + `since:` |
+
+!!! note "`scan-mode`/`source-method` are deprecated (ADR-037 D5)"
+    The older `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and `source-method`
+    (`s0…s6`) inputs still work but map onto `depth` and print a deprecation
+    warning. `scan-mode` currently defaults to `pr`, so leaving both new inputs
+    unset still emits that warning — set `depth` (or `audit: 'true'`) to pin the
+    modern dial. The mapping is in the
+    [Deprecated axes appendix](../concepts/scan-and-evidence-levels.md#appendix-deprecated-scan-axes-s0s6-and-mode).
 
 ### Single-release audit (no baseline)
 
@@ -370,7 +380,7 @@ for a large repo:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          source-method: s5
+          depth: source
           estimate: 'true'
 ```
 

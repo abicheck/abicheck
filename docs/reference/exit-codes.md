@@ -2,7 +2,7 @@
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface with a wider exit code range (0/1/2/4) that distinguishes tool errors from API breaks from binary breaks. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes.
 
 ---
 
@@ -15,6 +15,7 @@
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
+| `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
 > to distinguish them (e.g. warn on deployment risk), use `--format json` and
@@ -117,6 +118,24 @@ gating on: with an effective severity map, a release whose worst verdict is
 `BREAKING` can still exit `0` if that map downgrades ABI breaks (e.g.
 `abi_breaking: warning`) — parse the `verdict` from JSON output if you need
 scheme-independent CI behaviour.
+
+---
+
+## `abicheck scan`
+
+The one-shot source-intelligence scan has its own contract (it may compare
+against a `--baseline` and adds a budget guard):
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Compatible (or advisory-only findings) |
+| `2` | Source-level / API break (incl. `API_BREAK` cross-source findings) |
+| `4` | ABI break (from the `--baseline` comparison) |
+| `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
+
+> Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than
+> quietly dropping evidence. With `--estimate` (dry-run cost probe) `scan` always
+> exits `0`.
 
 ---
 
@@ -270,14 +289,17 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 | `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | — | `1` |
 | Missing symbols | — | — | — | — | — | `2` | — |
 | Load failure | — | — | — | `1` | `4` | — | — |
-| Tool error | `2`† | `2`† | `1` | — | — | `1` | `3/4/5/6/7/8/10/11` |
+| Invalid invocation / tool error | `64`† | `64`† | `1` | — | — | `1` | `3/4/5/6/7/8/10/11` |
 
 \* Severity exit codes depend on the configuration. For example, with
 `--severity-addition error`, additions exit `1`; with `--severity-preset
 info-only`, everything exits `0`.
 
-† Click uses exit code `2` for argument/usage errors. To reliably distinguish
-verdicts from tool errors, use `--format json` and read the `verdict` field.
+† `compare` (and `appcompat`) exit `64` for an invalid invocation — bad
+arguments/options or an unreadable/unrecognised input — deliberately outside the
+`0/2/4` verdict space so a usage error is never mistaken for an ABI verdict. To
+reliably distinguish verdicts from errors in a script, use `--format json` and
+read the `verdict` field.
 
 ---
 

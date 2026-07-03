@@ -360,7 +360,7 @@ suppression:               # suppression hygiene (a project rule, inherited by C
   strict: true
   require_justification: true
 source:
-  method: s4               # precise S-axis for power users (CLI exposes coarse --depth)
+  method: s4               # legacy S-axis escape hatch (deprecated; prefer the --depth dial)
   graph: summary           # summary | full — L5 graph replay scope
 exit_code_scheme: auto     # auto | legacy | severity (ADR-037 D12)
 ```
@@ -816,11 +816,13 @@ itself, pass the command on the CLI (no config file needed):
 ```bash
 abicheck dump libfoo.so --sources ./src \
   --build-query 'cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON' \
-  --build-compile-db build/compile_commands.json --allow-build-query
+  --build-compile-db build/compile_commands.json
 ```
 
-(or set `build.query` / `build.compile_db` in `.abicheck.yml`). It is gated by
-`--allow-build-query` and still never runs `make all` / `cmake --build`.
+(or set `build.query` / `build.compile_db` in `.abicheck.yml`). An
+operator-supplied `--build-query` (or a trusted `--config`) runs on its own — the
+old `--allow-build-query` gate is now a deprecated no-op — and it still never runs
+`make all` / `cmake --build`.
 
 ### Time & resource model
 

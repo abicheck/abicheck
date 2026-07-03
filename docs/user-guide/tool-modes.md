@@ -118,7 +118,7 @@ quantifies the cumulative gain across the example catalog (32% → 81% → 99% �
 100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
 keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
 (and the `L5` source graph abicheck derives from them — see
-[Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)) explain, scope,
+[Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)) explain, scope,
 and add their own source-/API-level findings.
 
 > **Quick decision.** Stripped production binary → **L0**. Debug build, no

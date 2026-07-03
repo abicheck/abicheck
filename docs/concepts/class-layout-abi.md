@@ -11,7 +11,7 @@ It complements two neighbouring pages:
 - [Type Layout](abi-series/03-type-layout.md) and [C++ ABI](abi-series/04-cpp-abi.md)
   — the tutorial walk-throughs.
 - [Change Kinds](../reference/change-kinds.md) — the exhaustive catalog.
-- [Evidence & Detectability](evidence-and-detectability.md) — the L0–L4 model.
+- [Evidence & Detectability](evidence-and-detectability.md) — the L0–L5 model.
 
 ---
 
@@ -83,7 +83,7 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 | **A base subobject *moves* (e.g. EBO lost)** | BREAKING | **`base_class_offset_changed`** | L1 | **[case140](../examples/case140_empty_base_optimization_lost.md)** |
 | Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
 | Add / remove / reorder a virtual function | BREAKING | `virtual_method_added`, `func_virtual_added`/`func_virtual_removed`, `type_vtable_changed` | L1 | [case38](../examples/case38_virtual_methods.md), [case68](../examples/case68_virtual_method_added.md) |
-| **Vtable slot count changes — from a *stripped* binary** | BREAKING | **`vtable_slot_count_changed`** | **L0 (ELF symbol size)** | **[case141](../examples/case142_vtable_slot_count_binary_only.md)** |
+| **Vtable slot count changes — from a *stripped* binary** | BREAKING | **`vtable_slot_count_changed`** | **L0 (ELF symbol size)** | **[case142](../examples/case142_vtable_slot_count_binary_only.md)** |
 | Inheritance *shape* changes — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested (`test_diff_elf_layout.py`) |
 | Type stops being trivially-copyable → by-value calling conv. flips | BREAKING | `trivially_copyable_lost`, `value_abi_trait_changed` | L2 *(descriptor)* / L1 | [case69](../examples/case69_trivial_to_nontrivial.md) |
 | Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
@@ -154,7 +154,7 @@ encode layout facts otherwise visible only in DWARF:
 
 This means a virtual-method change or a base-class change is observable from
 `.dynsym` **alone** — no debug info, no headers — which is exactly what
-[case141](../examples/case142_vtable_slot_count_binary_only.md) demonstrates on
+[case142](../examples/case142_vtable_slot_count_binary_only.md) demonstrates on
 a stripped `.so`. Because the slot count is *inferred* from size, these findings
 are labelled `MEDIUM` confidence.
 

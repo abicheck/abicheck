@@ -30,7 +30,7 @@ command** when you need more confidence or a CI gate.
 | Stripped production binaries | `abicheck compare old.so new.so --debug-root1 old-debug --debug-root2 new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
 | A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --new-header include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck scan --binary build/libfoo.so -H include/ --sources . --baseline baseline.json --since origin/main` | One orchestrator over dump/compare: always-on pattern + cross-source checks plus the pinned L3/L4/L5 level — see [Source & Build Data](../concepts/build-source-data.md) and the [GitHub Action](github-action.md#source-scans-build-source-evidence) |
-| Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow-2 `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
+| Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow B `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
 | Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
 | RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
@@ -59,7 +59,7 @@ inputs you give it — its five additive evidence layers, **L0–L4**. More
 evidence catches more breaks. Start at the layer your artifacts allow, and add
 more when you need more confidence. (The `scan` docs also use a sixth code,
 **`L5`** — the source graph abicheck *derives* from L3/L4; you never provide it.
-See [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md).) For a
+See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md).) For a
 concrete, side-by-side look at *what each layer actually sees* on one example —
 and where each one goes blind — see the
 [level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through).
