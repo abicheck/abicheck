@@ -545,6 +545,10 @@ class ChangeKind(str, Enum):
     STRUCT_PACKING_MODE_CHANGED = "struct_packing_mode_changed"  # -fpack-struct / /Zp flip → member offsets shift → RISK
     LTO_MODE_CHANGED = "lto_mode_changed"  # -flto ↔ no-LTO flip → cross-TU codegen/vtable emission differs → RISK
     CHAR_SIGNEDNESS_CHANGED = "char_signedness_changed"  # -fsigned-char ↔ -funsigned-char flip → plain-char sign flips → RISK
+    WHOLE_PROGRAM_VTABLES_MODE_CHANGED = "whole_program_vtables_mode_changed"  # -fwhole-program-vtables flip → vtable/typeinfo elision differs → RISK
+    SANITIZER_MODE_CHANGED = "sanitizer_mode_changed"  # -fsanitize= flip → object layout/instrumentation/runtime contract differs → RISK
+    FLOAT_ABI_CHANGED = "float_abi_changed"  # -mfloat-abi= flip → float calling convention differs (ARM) → RISK
+    STDLIB_DEBUG_MODE_CHANGED = "stdlib_debug_mode_changed"  # _GLIBCXX_DEBUG / _ITERATOR_DEBUG_LEVEL flip → std container layout differs → RISK
     # Struct-return convention (-freg-struct-return / -fpcc-struct-return). Unlike
     # the flag-only RISK kinds above this is artifact-proven from DWARF/ABI facts,
     # so it defaults to BREAKING; the flag-only signal stays as the generic

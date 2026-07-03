@@ -56,7 +56,7 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-fpack-struct", "/Zp", "-fshort-enums", "-fno-short-enums", "-fshort-wchar",
     "-fsigned-char", "-funsigned-char",
     "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
-    "-flto", "-fno-lto", "-fwhole-program-vtables",
+    "-flto", "-fno-lto", "-fwhole-program-vtables", "-fno-whole-program-vtables",
     "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
     "-fno-threadsafe-statics", "-fthreadsafe-statics",
     "-freg-struct-return", "-fpcc-struct-return",
@@ -94,6 +94,11 @@ _RUNTIME_MODE_FLAGS: dict[str, tuple[str, str]] = {
     "-funsigned-char": ("char_signedness", "unsigned"),
     "-flto": ("lto", "on"),
     "-fno-lto": ("lto", "off"),
+    # Whole-program devirtualization: enabling it lets the linker elide/rewrite
+    # vtable slots and typeinfo across TUs, so mixing a -fwhole-program-vtables
+    # build with one without it is ABI-risky. Default off (known).
+    "-fwhole-program-vtables": ("whole_program_vtables", "on"),
+    "-fno-whole-program-vtables": ("whole_program_vtables", "off"),
 }
 
 #: Runtime-mode keys whose compiler default depends on the source language
@@ -125,6 +130,11 @@ _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
     "_GLIBCXX_USE_CXX11_ABI",
     "_ITERATOR_DEBUG_LEVEL",
     "_LIBCPP_ABI_VERSION",
+    # libstdc++ debug/hardening modes change std:: container layout & size, so a
+    # consumer built without them is ABI-incompatible with a library built with
+    # them (routed to STDLIB_DEBUG_MODE_CHANGED by build_diff).
+    "_GLIBCXX_DEBUG",
+    "_GLIBCXX_ASSERTIONS",
 )
 
 
@@ -507,6 +517,16 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 # (-flto-partition=, -flto-jobs=) fall through to the generic
                 # option path instead of falsely reporting lto off->on (Codex).
                 mode_values["lto"] = ("on", flag)
+            elif flag.startswith("-fsanitize="):
+                # -fsanitize=<list>: sanitizers change object layout (asan
+                # redzones), instrumentation and the runtime contract. Canonical
+                # key so a flip diffs as one option; default is "none" (known).
+                mode_values["sanitizer"] = (flag.split("=", 1)[1], flag)
+            elif flag.startswith("-mfloat-abi="):
+                # -mfloat-abi=<soft|softfp|hard>: the float calling convention on
+                # ARM. Its default is target-dependent, so build_diff requires
+                # both sides explicit before reporting a flip.
+                mode_values["float_abi"] = (flag.split("=", 1)[1], flag)
             elif flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)

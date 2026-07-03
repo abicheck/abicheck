@@ -84,15 +84,25 @@ def _loc(path: str, line: int) -> SourceLocation:
     return SourceLocation(path=path, line=line)
 
 
-#: A persisting exported symbol so a *removal* case's new surface is a real
-#: (non-empty) replayed library that lost one entity — not an empty surface,
-#: which the source diff treats as failed L4 extraction and skips.
-_KEEPER_ROOTS = {"exported_symbols": ["_ZN4demo4keepEv"]}
+#: A persisting public *source* declaration so a *removal* case's new surface is
+#: a real (non-empty) replayed library that lost one entity — not an empty
+#: surface, which the source diff treats as failed L4 extraction and skips. A
+#: source bucket (not a relinked exported-symbol root) is what marks L4 coverage.
+def _keeper_decl() -> SourceEntity:
+    return SourceEntity(
+        id="demo::keep", kind="function", qualified_name="demo::keep",
+        mangled_name="_ZN4demo4keepEv", visibility="public_header",
+        source_location=_loc("include/demo/keep.h", 3),
+    )
 
 
 def _surface(*, keeper: bool = False, **buckets: list[SourceEntity]) -> dict[str, Any]:
-    roots = dict(_KEEPER_ROOTS) if keeper else {}
-    return SourceAbiSurface(library="libdemo.so", roots=roots, **buckets).to_dict()
+    decls = list(buckets.pop("reachable_declarations", []))
+    if keeper:
+        decls = decls + [_keeper_decl()]
+    return SourceAbiSurface(
+        library="libdemo.so", reachable_declarations=decls, **buckets
+    ).to_dict()
 
 
 # ---------------------------------------------------------------------------

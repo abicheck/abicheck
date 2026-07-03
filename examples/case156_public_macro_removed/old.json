@@ -9,7 +9,26 @@
   },
   "odr_conflicts": [],
   "reachable_source_surface": {
-    "declarations": [],
+    "declarations": [
+      {
+        "api_relevant": true,
+        "body_hash": "",
+        "confidence": "unknown",
+        "id": "demo::keep",
+        "kind": "function",
+        "mangled_name": "_ZN4demo4keepEv",
+        "qualified_name": "demo::keep",
+        "signature_hash": "",
+        "source_location": {
+          "line": 3,
+          "origin": "UNKNOWN",
+          "path": "include/demo/keep.h"
+        },
+        "type_hash": "",
+        "value": "",
+        "visibility": "public_header"
+      }
+    ],
     "inline_bodies": [],
     "macros": [
       {
@@ -35,9 +54,9 @@
     "types": []
   },
   "roots": {
-    "exported_symbols": [
-      "_ZN4demo4keepEv"
-    ]
+    "exported_symbols": [],
+    "forced_public": [],
+    "public_header_declarations": []
   },
   "schema_version": 1,
   "target_id": "",

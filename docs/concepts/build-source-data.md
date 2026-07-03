@@ -597,6 +597,10 @@ emits these change kinds (ADR-029 D9):
 | `struct_packing_mode_changed` | risk | Default struct packing changed (`-fpack-struct` / `/Zp`) — member offsets shift ([case153](../examples/case153_struct_packing_flip.md)) |
 | `lto_mode_changed` | risk | LTO was toggled — cross-TU inlining, devirtualization and vtable/typeinfo emission can differ ([case154](../examples/case154_lto_mode_flip.md)) |
 | `char_signedness_changed` | risk | Plain-`char` signedness flipped (`-fsigned-char` ↔ `-funsigned-char`); both sides must be explicit ([case155](../examples/case155_char_signedness_flip.md)) |
+| `whole_program_vtables_mode_changed` | risk | `-fwhole-program-vtables` was toggled — cross-TU devirtualization / vtable-slot elision differs |
+| `sanitizer_mode_changed` | risk | The `-fsanitize=` set changed — object layout (ASan redzones), instrumentation and the runtime allocator differ |
+| `float_abi_changed` | risk | `-mfloat-abi=` changed the float calling convention (ARM soft/softfp/hard); both sides must be explicit |
+| `stdlib_debug_mode_changed` | risk | A stdlib debug/hardening mode was toggled (`_GLIBCXX_DEBUG` / `_GLIBCXX_ASSERTIONS` / `_ITERATOR_DEBUG_LEVEL`) — std:: container layout differs |
 
 The runtime-model flips also live here: `exceptions_mode_changed`,
 `rtti_mode_changed`, `tls_model_changed`, `threadsafe_statics_mode_changed`

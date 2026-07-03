@@ -81,12 +81,34 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     "struct_packing_msvc": (ChangeKind.STRUCT_PACKING_MODE_CHANGED, {}),
     "lto": (ChangeKind.LTO_MODE_CHANGED, {"": "off"}),
     "char_signedness": (ChangeKind.CHAR_SIGNEDNESS_CHANGED, {}),
+    # whole-program-vtables / sanitizers have a known default (off / none), so a
+    # one-sided flip is a real change; float-abi is target-dependent and needs
+    # both sides explicit.
+    "whole_program_vtables": (ChangeKind.WHOLE_PROGRAM_VTABLES_MODE_CHANGED, {"": "off"}),
+    "sanitizer": (ChangeKind.SANITIZER_MODE_CHANGED, {"": "none"}),
+    "float_abi": (ChangeKind.FLOAT_ABI_CHANGED, {}),
 }
 
-#: TLS models that are *never* the compiler auto-default (the default is always
-#: global-dynamic with -fpic or initial-exec without it). An omitted -ftls-model
-#: changing to one of these is therefore always a deliberate, reportable change.
-_NEVER_DEFAULT_TLS_MODELS: frozenset[str] = frozenset({"local-dynamic", "local-exec"})
+#: Macro-define option keys (``define:<NAME>``) whose drift is a standard-library
+#: debug/hardening mode flip — routed to a dedicated finding rather than the
+#: generic ABI-flag one, because it changes std:: container layout specifically.
+_STDLIB_DEBUG_DEFINE_KEYS: frozenset[str] = frozenset({
+    "define:_GLIBCXX_DEBUG",
+    "define:_GLIBCXX_ASSERTIONS",
+    "define:_ITERATOR_DEBUG_LEVEL",
+})
+
+#: For a target-dependent-default mode (``default is None``), the values its
+#: explicit side may name that are *never* the platform default — so an
+#: omitted↔explicit flip to one of them is still a deliberate, reportable change
+#: (the rest stay suppressed one-sided to avoid a false positive). TLS: the
+#: default is always global-dynamic (with -fpic) or initial-exec (without), so
+#: local-* is never it. MSVC packing: /Zp8 and /Zp16 are the platform defaults,
+#: so any *other* width (/Zp1, /Zp2, /Zp4) is never the default (Codex review).
+_NEVER_DEFAULT_MODE_VALUES: dict[str, frozenset[str]] = {
+    "tls_model": frozenset({"local-dynamic", "local-exec"}),
+    "struct_packing_msvc": frozenset({"1", "2", "4"}),
+}
 
 
 def check_header_parse_drift(
@@ -205,7 +227,8 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
                 # (ov != nv already guaranteed by the outer loop.)
                 if not ov or not nv:
                     explicit = nv or ov
-                    if mode_base != "tls_model" or not (explicit & _NEVER_DEFAULT_TLS_MODELS):
+                    never_default = _NEVER_DEFAULT_MODE_VALUES.get(mode_base, frozenset())
+                    if not (explicit & never_default):
                         continue
                     old_eff = ov or {"(default)"}
                     new_eff = nv or {"(default)"}
@@ -228,6 +251,25 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
                     ),
                     old_value=_fmt_values(old_eff),
                     new_value=_fmt_values(new_eff),
+                )
+            )
+            continue
+
+        # Standard-library debug/hardening define flips route to their dedicated
+        # finding (they change std:: container layout, not just generic ABI risk).
+        if key in _STDLIB_DEBUG_DEFINE_KEYS:
+            changes.append(
+                Change(
+                    kind=ChangeKind.STDLIB_DEBUG_MODE_CHANGED,
+                    symbol=f"build-option:{key}",
+                    description=(
+                        f"Standard-library debug/hardening mode {key!r} changed: "
+                        f"{old_disp!r} -> {new_disp!r}. std:: container layout and "
+                        "size differ between the two builds; rebuild consumers with "
+                        "the matching setting."
+                    ),
+                    old_value=old_disp,
+                    new_value=new_disp,
                 )
             )
             continue

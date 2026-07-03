@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (268 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
 |---|---|---|---|---|---|
@@ -72,6 +72,7 @@ One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`check
 | `field_lost_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_volatile` |
 | `field_renamed` | api_break | `API_BREAK` | `warning` | L1 | `field_renamed` |
 | `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` |
+| `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` |
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` |
 | `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` |
 | `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` |
@@ -165,6 +166,7 @@ One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`check
 | `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` |
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` |
+| `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` |
 | `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` |
 | `soname_bump_recommended` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_recommended` |
 | `soname_bump_unnecessary` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_unnecessary` |
@@ -177,6 +179,7 @@ One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`check
 | `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` |
 | `standard_layout_lost` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `standard_layout_lost` |
 | `std_reexport_removed` | api_break | `API_BREAK` | `warning` | unspecified | `std_reexport_removed` |
+| `stdlib_debug_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `stdlib_debug_mode_changed` |
 | `stdlib_implementation_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `stdlib_implementation_changed` |
 | `struct_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_alignment_changed` |
 | `struct_field_offset_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_offset_changed` |
@@ -269,4 +272,5 @@ One row per `ChangeKind` (264 total). Columns fuse the verdict partition (`check
 | `vptr_introduced` | breaking | `BREAKING` | `error` | unspecified | `vptr_introduced` |
 | `vtable_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_slot_count_changed` |
 | `vtable_symbol_identity_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `vtable_symbol_identity_changed` |
+| `whole_program_vtables_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `whole_program_vtables_mode_changed` |
 | `writable_executable_segment` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `writable_executable_segment` |

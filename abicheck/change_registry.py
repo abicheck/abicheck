@@ -1178,6 +1178,40 @@ REGISTRY = ChangeKindRegistry([
               "range in consumer code recompiled against the other setting. Symbol "
               "names are unchanged, so only the captured build flag exposes it. "
               "Build consumers with the matching char signedness."),
+    _E("whole_program_vtables_mode_changed", _R,
+       impact="Whole-program vtable optimization was toggled between builds "
+              "(-fwhole-program-vtables, typically with LTO). It lets the linker "
+              "devirtualize calls and elide or rewrite vtable/typeinfo emission "
+              "across translation units under a closed-world assumption, so mixing "
+              "a build that assumed whole-program visibility with a consumer that "
+              "extends a class or overrides a virtual can dispatch to the wrong "
+              "slot. If the public API exposes polymorphic types, build the library "
+              "and its consumers with the matching setting."),
+    _E("sanitizer_mode_changed", _R,
+       impact="The sanitizer set changed between builds (-fsanitize=). Sanitizers "
+              "instrument code and change object layout — AddressSanitizer adds "
+              "redzones around globals and stack objects and swaps in an "
+              "interceptor allocator, and the runtime must match — so a library "
+              "and a consumer built with different -fsanitize= settings are not "
+              "compatible. Ship sanitized builds only for testing, and match the "
+              "sanitizer set across the library and its consumers."),
+    _E("float_abi_changed", _R,
+       impact="The floating-point calling convention changed between builds "
+              "(-mfloat-abi=soft/softfp/hard; the default is target-dependent). On "
+              "ARM the float ABI decides whether floating-point arguments and "
+              "returns travel in FP registers (hard) or core registers/memory "
+              "(soft), so a function taking or returning a float/double is called "
+              "with an incompatible convention across the boundary — a silent "
+              "corruption or crash. Build the whole stack with one float ABI."),
+    _E("stdlib_debug_mode_changed", _R,
+       impact="A standard-library debug/hardening mode was toggled between builds "
+              "(_GLIBCXX_DEBUG / _GLIBCXX_ASSERTIONS for libstdc++, "
+              "_ITERATOR_DEBUG_LEVEL for the MSVC STL). These modes change the "
+              "layout and size of std:: containers (extra debug members / iterator "
+              "bookkeeping), so any public type embedding a std:: container by "
+              "value, or a function taking one across the boundary, is "
+              "ABI-incompatible between a debug-mode build and a normal one. Build "
+              "the library and its consumers with the matching setting."),
 
     # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
     # Produced by the source-replay diff over two linked source ABI surfaces.

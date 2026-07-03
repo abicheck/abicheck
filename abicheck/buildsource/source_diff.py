@@ -684,12 +684,15 @@ def _diff_odr(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
 def _surface_has_facts(surface: SourceAbiSurface) -> bool:
     """Whether *surface* carries any L4 evidence at all.
 
-    An entirely empty surface signals that L4 extraction did not run (the inline
-    collector returns a bare ``SourceAbiSurface()`` when the extractor is
+    A surface with no *source* facts signals that L4 extraction did not run (the
+    inline collector returns a bare ``SourceAbiSurface()`` when the extractor is
     missing), *not* a library whose public surface genuinely became empty. The
     removal passes (macro/typedef/inline) must not fire against such a surface,
     or evidence-absence would be reported as a wholesale source break (Codex
-    review). A real replayed library always carries at least one fact.
+    review). Only the source buckets count: ``roots['exported_symbols']`` can be
+    populated by ``relink_surface_exports()`` from the *binary's* export table
+    even when no source replay ran, so it is deliberately excluded here — a
+    relinked-but-source-empty surface is still evidence-absent for these checks.
     """
     return bool(
         surface.reachable_declarations
@@ -697,7 +700,6 @@ def _surface_has_facts(surface: SourceAbiSurface) -> bool:
         or surface.reachable_macros
         or surface.reachable_templates
         or surface.reachable_inline_bodies
-        or surface.roots.get("exported_symbols")
     )
 
 

@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 264,
+  "count": 268,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -529,6 +529,14 @@
       "severity": "warning",
       "min_evidence": "L1",
       "doc_slug": "flexible_array_member_changed"
+    },
+    {
+      "kind": "float_abi_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "float_abi_changed"
     },
     {
       "kind": "fortify_source_weakened",
@@ -1275,6 +1283,14 @@
       "doc_slug": "runpath_changed"
     },
     {
+      "kind": "sanitizer_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "sanitizer_mode_changed"
+    },
+    {
       "kind": "serialization_tag_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1369,6 +1385,14 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "std_reexport_removed"
+    },
+    {
+      "kind": "stdlib_debug_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "stdlib_debug_mode_changed"
     },
     {
       "kind": "stdlib_implementation_changed",
@@ -2105,6 +2129,14 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "vtable_symbol_identity_changed"
+    },
+    {
+      "kind": "whole_program_vtables_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "whole_program_vtables_mode_changed"
     },
     {
       "kind": "writable_executable_segment",

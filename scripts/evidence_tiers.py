@@ -188,6 +188,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "struct_packing_mode_changed": "L3",
     "lto_mode_changed": "L3",
     "char_signedness_changed": "L3",
+    "whole_program_vtables_mode_changed": "L3",
+    "sanitizer_mode_changed": "L3",
+    "float_abi_changed": "L3",
+    "stdlib_debug_mode_changed": "L3",
     # ADR-035 D4 cross-source check that compares L2 header context against the
     # L3 build flags — only visible once the build evidence is present.
     "header_build_context_mismatch": "L3",
