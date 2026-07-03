@@ -66,19 +66,19 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # TLS model default is -fpic-dependent — always require both sides explicit
     # (with the local-* exception handled below).
     "tls_model": (ChangeKind.TLS_MODEL_CHANGED, {}),
-    # Language-agnostic layout/codegen flips (ADR-028 L3 follow-up). enum-size
-    # and LTO have a known, language-independent compiler default (int-sized
-    # enums / no LTO), so an omitted→explicit flip is a real change. Struct
-    # packing and char signedness are *target*-dependent (GCC/Clang default to
-    # natural packing while MSVC's default is /Zp8 or /Zp16; char signedness is
+    # Language-agnostic layout/codegen flips (ADR-028 L3 follow-up). enum-size,
+    # LTO and GNU struct packing have a known, target-independent compiler
+    # default (int-sized enums / no LTO / natural packing), so an omitted→explicit
+    # flip is a real change. MSVC struct packing (/Zp) and char signedness are
+    # *target*-dependent (MSVC's default is /Zp8 or /Zp16; char signedness is
     # signed on x86 and unsigned on ARM), so their default is unknown and both
     # sides must be explicit before a flip is reported (the empty-dict →
-    # default-None → both-explicit path, like tls_model but without the
-    # never-default carve-out). Requiring both explicit avoids a false
-    # STRUCT_PACKING_MODE_CHANGED when a Visual Studio project merely records its
-    # platform-default /Zp value against an omitted side (Codex review).
+    # default-None → both-explicit path). This keeps a real GNU no-flag →
+    # -fpack-struct regression visible while avoiding a false flip when a Visual
+    # Studio project merely records its platform-default /Zp value (Codex review).
     "enum_size": (ChangeKind.ENUM_SIZE_FLAG_CHANGED, {"": "int"}),
-    "struct_packing": (ChangeKind.STRUCT_PACKING_MODE_CHANGED, {}),
+    "struct_packing": (ChangeKind.STRUCT_PACKING_MODE_CHANGED, {"": "natural"}),
+    "struct_packing_msvc": (ChangeKind.STRUCT_PACKING_MODE_CHANGED, {}),
     "lto": (ChangeKind.LTO_MODE_CHANGED, {"": "off"}),
     "char_signedness": (ChangeKind.CHAR_SIGNEDNESS_CHANGED, {}),
 }

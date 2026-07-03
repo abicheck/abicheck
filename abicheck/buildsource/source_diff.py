@@ -514,9 +514,16 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
             )
     # Removal: a public inline function present old, gone new. Because it was
     # inline it had no exported symbol, so the artifact diff is blind; source
-    # that called it no longer compiles (a source/API break).
+    # that called it no longer compiles (a source/API break). Guard against a
+    # safe inline→out-of-line refactor: if the same function still exists as a
+    # (non-inline) declaration or still backs an exported symbol on the new side,
+    # consumer source can still call it, so it is NOT a removal (Codex review).
+    new_decl_ids = {e.identity() for e in new.reachable_declarations if e.identity()}
+    new_exports = set(new.roots.get("exported_symbols", []))
     for key in sorted(set(old_i) - set(new_i)):
         ov = old_i[key]
+        if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
+            continue
         name = ov.qualified_name
         changes.append(
             Change(

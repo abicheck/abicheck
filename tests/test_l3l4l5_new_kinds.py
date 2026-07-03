@@ -55,8 +55,10 @@ def _kinds(changes) -> list[str]:
     [
         ([], ["-fshort-enums"], ChangeKind.ENUM_SIZE_FLAG_CHANGED),
         (["-fshort-enums"], [], ChangeKind.ENUM_SIZE_FLAG_CHANGED),
-        # Struct packing is target-dependent, so both sides must be explicit.
+        # GNU packing default is known (natural), so a one-sided flip fires.
+        ([], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
         (["-fpack-struct=8"], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
+        # MSVC packing default is target-dependent, so it needs both sides.
         (["/Zp8"], ["/Zp1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
         ([], ["-flto"], ChangeKind.LTO_MODE_CHANGED),
         (["-flto=thin"], [], ChangeKind.LTO_MODE_CHANGED),
@@ -75,7 +77,7 @@ def test_l3_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
         # Target-dependent defaults: an omitted side is unknown, so a one-sided
         # flag must NOT read as a flip (avoids MSVC-default / ARM-default FPs).
         (ChangeKind.CHAR_SIGNEDNESS_CHANGED, "-funsigned-char"),
-        (ChangeKind.STRUCT_PACKING_MODE_CHANGED, "/Zp8"),
+        (ChangeKind.STRUCT_PACKING_MODE_CHANGED, "/Zp8"),  # MSVC only; GNU one-sided does fire
     ],
 )
 def test_l3_target_dependent_flags_need_both_sides_explicit(kind, one_sided_flag) -> None:
@@ -119,6 +121,16 @@ def test_l4_inline_function_removed() -> None:
     changes = diff_source_abi(old, new)
     assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(changes)
     assert ChangeKind.INLINE_FUNCTION_REMOVED in API_BREAK_KINDS
+
+
+def test_l4_inline_to_out_of_line_is_not_a_removal() -> None:
+    # A header inline turned into an out-of-line exported function leaves the
+    # inline bucket but stays a callable declaration — not a source break.
+    old = _surf(reachable_inline_bodies=[_ent("inline", "demo::f", body_hash="h1")])
+    new = _surf(reachable_declarations=[
+        SourceEntity(id="demo::f", kind="function", qualified_name="demo::f")
+    ])
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value not in _kinds(diff_source_abi(old, new))
 
 
 def test_l4_public_typedef_removed() -> None:

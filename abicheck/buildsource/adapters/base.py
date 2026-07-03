@@ -474,16 +474,18 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 # single option regardless of which model string is on each side.
                 model = flag.split("=", 1)[1] if "=" in flag else ""
                 mode_values["tls_model"] = (model, flag)
-            elif flag.startswith("-fpack-struct") or flag.startswith("/Zp"):
-                # Struct-packing width (-fpack-struct[=N] / MSVC /Zp[N]). Canonical
-                # key so any packing change diffs as one option; a bare flag means
-                # pack to 1. Recorded unqualified — packing is language-agnostic.
-                if flag.startswith("/Zp"):
-                    packing = flag[len("/Zp"):] or "1"
-                elif "=" in flag:
-                    packing = flag.split("=", 1)[1]
-                else:
-                    packing = "1"
+            elif flag.startswith("/Zp"):
+                # MSVC struct-packing width (/Zp[N]). Its default is
+                # target-dependent (/Zp8 on x86/ARM, /Zp16 on x64), so it is keyed
+                # separately from the GNU flag and diffed only when both sides are
+                # explicit (build_diff), avoiding a false flip when a VS project
+                # merely records its platform default against an omitted side.
+                mode_values["struct_packing_msvc"] = (flag[len("/Zp"):] or "1", flag)
+            elif flag.startswith("-fpack-struct"):
+                # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
+                # is known (disabled → natural packing), so a one-sided add/remove
+                # is a real, reportable layout change. Bare flag packs to 1.
+                packing = flag.split("=", 1)[1] if "=" in flag else "1"
                 mode_values["struct_packing"] = (packing, flag)
             elif flag.startswith("-flto="):
                 # -flto=<thin|auto|N>: an *enabling* spelling (bare -flto is caught
