@@ -4,6 +4,12 @@ abicheck classifies every detected change into one of four **issue categories**,
 each with a configurable severity level that controls exit codes and report
 presentation.
 
+> Severity is the last step of the CI gating pipeline (classify → suppress →
+> severity → exit code), and passing any `--severity-*` flag switches
+> `compare` to the severity-based exit-code scheme. See
+> [CI Gating](ci-gating.md) for how it combines with policies, suppressions,
+> and baselines.
+
 ---
 
 ## Issue categories

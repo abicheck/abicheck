@@ -2,6 +2,10 @@
 
 `abicheck compare` supports policy-based verdict classification.
 
+> Policies are step 1 of the CI gating pipeline (classify → suppress →
+> severity → exit code) — see [CI Gating](ci-gating.md) for how they combine
+> with suppressions, severity, and baselines.
+
 - Built-in profiles: `--policy strict_abi|sdk_vendor|plugin_abi`
 - Custom profile file: `--policy-file <yaml>`
 
@@ -198,6 +202,11 @@ For `abicheck compare`, exit codes are the same for all policies — only the ve
 | `0` | `COMPATIBLE_WITH_RISK` (deployment risk, inspect output) |
 | `2` | `API_BREAK` (source-level break) |
 | `4` | `BREAKING` (binary ABI break) |
+
+> This is the **legacy (verdict-based) scheme**. Passing any `--severity-*`
+> flag switches `compare` to severity-based exit codes, where `1` means an
+> error-level finding — see [CI Gating → the two exit-code schemes](ci-gating.md#the-two-exit-code-schemes)
+> and the canonical [exit code reference](../reference/exit-codes.md).
 
 For `abicheck compat`, policy still affects verdict classification, but command-level
 options (`-strict`, `--strict-mode`, legacy compatibility behavior) can additionally
