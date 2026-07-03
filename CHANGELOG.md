@@ -85,6 +85,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Per-evidence-tier accuracy gate** (`scripts/check_tier_accuracy.py`, mirrored
+  in `tests/test_tier_accuracy_gate.py`, wired into CI with a step-summary
+  matrix) — measures *what each evidence level buys*. One labelled logical
+  change per case is projected down to what each tier observes (L0 symbols → L1
+  debug → L2 headers → L3 build) and run through `compare`; verdicts collapse to
+  a 3-band ordinal (non-breaking / risk / breaking). It quantifies, per tier,
+  **over-calls (false positives)** and **under-calls (false negatives)** and
+  which transition removes each — so "each higher level reduces false positives"
+  (the L1→L2 scoping layer) and "lower levels are insufficient to catch some
+  real breaks" (L0/L1 under-calls that only headers or build context reveal)
+  become tracked, gated facts rather than assertions. Gates on top-tier
+  correctness + under-call monotonicity (more evidence never hides a break an
+  earlier tier caught — the authority rule, ADR-028 D3).
 - **Per-axis FP-rate trend reporting** — the public-surface FP-rate gate
   (`scripts/check_fp_rate.py`) tags each corpus case with its scoping axis;
   `--json` now carries a `by_category` breakdown and `--markdown` renders a

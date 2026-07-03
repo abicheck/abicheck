@@ -30,6 +30,11 @@ jobs:
         run: pip install -e .
       - name: Scoping FP-rate gate (ADR-024 §7 — false positives/negatives vs baseline)
         run: python scripts/check_fp_rate.py
+      - name: Per-tier accuracy gate (what each evidence level buys — FP-reduction + low-level insufficiency)
+        run: python scripts/check_tier_accuracy.py
+      - name: Per-tier accuracy matrix (step-summary artifact)
+        if: always()
+        run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"
 
   lint-and-types:
     runs-on: ubuntu-latest
