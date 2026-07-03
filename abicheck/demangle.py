@@ -53,17 +53,20 @@ def demangle(symbol: str) -> str | None:
         return str(cxxfilt.demangle(symbol))
     except Exception:  # noqa: BLE001
         _log.debug("cxxfilt demangling failed for %s", symbol)
-    try:
-        result = subprocess.run(
-            ["c++filt", symbol],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            out = result.stdout.strip()
-            if out and out != symbol:
-                return out
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    for cmd in _cppfilt_single_commands(symbol):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                out = result.stdout.strip()
+                if out and out != symbol:
+                    return out
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
 
     global _warned_no_demangler  # noqa: PLW0603
     if not _warned_no_demangler:
@@ -132,32 +135,48 @@ def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[s
     return remaining
 
 
+def _cppfilt_single_commands(symbol: str) -> tuple[list[str], ...]:
+    return (["c++filt", symbol], ["c++filt", "--no-strip-underscore", symbol])
+
+
+def _cppfilt_batch_commands() -> tuple[list[str], ...]:
+    return (["c++filt"], ["c++filt", "--no-strip-underscore"])
+
+
 def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
     """Fall back to a single batched ``c++filt`` subprocess call."""
-    success_set: set[str] = set()
-    cppfilt_succeeded = False
-    try:
-        proc = subprocess.run(
-            ["c++filt"],
-            input="\n".join(remaining),
-            capture_output=True, text=True, timeout=30,
-        )
-        if proc.returncode == 0:
-            cppfilt_succeeded = True
+    unresolved = list(remaining)
+    any_cppfilt_succeeded = False
+    for cmd in _cppfilt_batch_commands():
+        if not unresolved:
+            break
+        success_set: set[str] = set()
+        try:
+            proc = subprocess.run(
+                cmd,
+                input="\n".join(unresolved),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                continue
+            any_cppfilt_succeeded = True
             lines = proc.stdout.strip().split("\n")
-            for mangled, demangled in zip(remaining, lines):
+            for mangled, demangled in zip(unresolved, lines):
                 if demangled and demangled != mangled:
                     result[mangled] = demangled
                     _batch_cache_record_ok(mangled, demangled)
                     success_set.add(mangled)
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        pass
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        unresolved = [s for s in unresolved if s not in success_set]
     # Only cache permanent FAILs when c++filt actually ran to completion
     # (returncode 0). If the binary is missing, timed out, raised OSError,
     # or returned non-zero, leave the symbols un-cached so a future call
     # (e.g. after c++filt becomes available) can retry them.
-    if cppfilt_succeeded:
-        for s in remaining:
+    if any_cppfilt_succeeded:
+        for s in unresolved:
             if s not in success_set:
                 _batch_cache_record_fail(s)
 

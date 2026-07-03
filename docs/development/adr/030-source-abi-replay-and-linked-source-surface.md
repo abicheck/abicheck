@@ -141,6 +141,9 @@ Entity fields:
   "signature_hash": "sha256:...",
   "body_hash": "sha256:...",
   "type_hash": "sha256:...",
+  "names": {"source_qualified": "foo::Bar::baz", "mangled": "_ZN3foo3Bar3bazEv", "usr": "c:..."},
+  "relations": {"template_owner": "foo::Bar<T>", "declaration_role": "class_template_member_pattern"},
+  "ownership": {"visibility": "public_header", "origin": "PUBLIC_HEADER", "role": "own_api_candidate"},
   "source_location": {"path": "include/foo/bar.h", "line": 42, "origin": "PUBLIC_HEADER"},
   "visibility": "public_header|private_header|system_header|generated|unknown",
   "api_relevant": true,
@@ -184,13 +187,52 @@ Output:
   "mappings": {
     "source_decl_to_binary_symbol": [],
     "source_type_to_debug_type": [],
-    "public_header_to_target": []
+    "public_header_to_target": [],
+    "non_public_symbol_to_reason": []
   },
   "odr_conflicts": [],
   "unmatched": [],
   "coverage": {}
 }
 ```
+
+#### Dependency-owned exports are not own-API matches
+
+The source linker must keep three ownership buckets distinct:
+
+- **own public API**: an export backed by a declaration in this library's public
+  source surface;
+- **dependency export**: an exported symbol whose implementation/source owner is
+  a dependency namespace or provider (for example a bundled TBB internal symbol
+  emitted by a oneDAL support library);
+- **internal export**: an exported symbol from the project itself that is not
+  backed by public-header evidence.
+
+Do not "fix" dependency noise by matching it to a nearby own declaration. That
+would hide real compatibility hazards: a dependency can still break consumers if
+the library exports it, documents it, or lets consumers bind to it. The correct
+model is an explicit ownership axis. The policy choices are:
+
+- **strict surface**: dependency exports remain reported as exported-but-not-own
+  API and are compatibility-significant if they change;
+- **scoped dependency**: dependency exports are grouped under a provider
+  (`dependency_symbol_to_provider`) and reported separately from own API, but
+  additions/removals still appear in the binary diff;
+- **bundle/manifest contract**: for co-versioned bundles, a manifest or bundle
+  resolution graph decides which dependency symbols are promised externally and
+  which are private implementation details.
+
+The first production-safe step is to emit better source evidence for own API
+(for example class-template member patterns) so the remaining unmatched set is
+clean enough to classify by ownership. Provider attribution without an explicit
+rule or manifest must be narrow and visible in coverage, not a silent match.
+
+The linked surface therefore has an accounting-only mapping,
+`non_public_symbol_to_reason`. Symbols in this bucket count as accounted exports
+but not as public declaration matches. Reasons are intentionally explicit, such
+as `dependency:stdlib`, `dependency:tbb`, `internal_or_private_export`,
+`own_export_without_public_source_decl`, or
+`cpp_export_without_public_source_decl`.
 
 ### D6. Source replay findings
 

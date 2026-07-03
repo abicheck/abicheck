@@ -1006,6 +1006,110 @@ def test_ast_mapping_template_not_double_counted_as_function() -> None:
     assert "ns::maxv" not in {e.qualified_name for e in tu.functions}
 
 
+def test_class_template_public_member_patterns_are_emitted() -> None:
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "ClassTemplateDecl",
+                        "name": "Box",
+                        "loc": {"line": 2},
+                        "inner": [
+                            {"kind": "TemplateTypeParmDecl", "name": "T"},
+                            "non-dict-template-child",
+                            {
+                                "kind": "CXXRecordDecl",
+                                "name": "Box",
+                                "tagUsed": "class",
+                                "loc": {"line": 3},
+                                "inner": [
+                                    "non-dict-record-child",
+                                    {"kind": "AccessSpecDecl", "access": "public"},
+                                    {
+                                        "kind": "CXXMethodDecl",
+                                        "name": "get",
+                                        "loc": {"line": 5},
+                                        "type": {"qualType": "T () const"},
+                                        "inner": [
+                                            {
+                                                "kind": "CompoundStmt",
+                                                "inner": [],
+                                            }
+                                        ],
+                                    },
+                                    {"kind": "AccessSpecDecl", "access": "private"},
+                                    {
+                                        "kind": "CXXMethodDecl",
+                                        "name": "secret",
+                                        "loc": {"line": 6},
+                                        "type": {"qualType": "void ()"},
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "kind": "ClassTemplateDecl",
+                        "name": "Indexed",
+                        "loc": {"line": 8},
+                        "inner": [
+                            {"kind": "TemplateTypeParmDecl"},
+                            {"kind": "NonTypeTemplateParmDecl"},
+                            {
+                                "kind": "CXXRecordDecl",
+                                "name": "Indexed",
+                                "tagUsed": "struct",
+                                "loc": {"line": 9},
+                                "inner": [
+                                    {
+                                        "kind": "CXXMethodDecl",
+                                        "name": "at",
+                                        "loc": {"line": 10},
+                                        "type": {"qualType": "int ()"},
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "kind": "ClassTemplateDecl",
+                        "name": "NoRecord",
+                        "loc": {"line": 12},
+                        "inner": [{"kind": "TemplateTypeParmDecl", "name": "U"}],
+                    },
+                ],
+            }
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    assert {e.qualified_name for e in tu.templates} == {
+        "ns::Box",
+        "ns::Indexed",
+        "ns::NoRecord",
+    }
+    function_names = {e.qualified_name for e in tu.functions}
+    assert "ns::Box<T>::get" in function_names
+    assert "ns::Indexed<T0,N1>::at" in function_names
+    assert "ns::Box<T>::secret" not in function_names
+    assert "ns::Box<T>::get" not in {e.qualified_name for e in tu.inline_bodies}
+    get = next(e for e in tu.functions if e.qualified_name == "ns::Box<T>::get")
+    assert get.names == {"source_qualified": "ns::Box<T>::get"}
+    assert get.relations == {
+        "template_owner": "ns::Box<T>",
+        "template_parameters": "T",
+        "declaration_role": "class_template_member_pattern",
+    }
+    assert get.ownership["role"] == "own_api_candidate"
+    surface = link_source_abi([tu], exported_symbols=["_ZN2ns3BoxIiE3getEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["template_instantiation_symbols_matched"] == 1
+
+
 def test_ast_body_hash_is_stable_and_change_detected() -> None:
     base = source_abi_from_clang_ast(_ast(), _cu(), ["include/foo.h"], "t")
     # Same AST again → identical body hash (build-root independent / deterministic).

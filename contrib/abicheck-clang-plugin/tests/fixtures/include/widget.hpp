@@ -65,7 +65,7 @@ using Ptr = T *;                            // alias template -> typedef `Ptr`
 template <class T>
 struct Box {                                 // class template -> body hash
   T value;
-  T get() const { return value; }            // NOT emitted (no descent)
+  T get() const { return value; }            // member pattern -> Box<T>::get
 };
 
 class Widget {

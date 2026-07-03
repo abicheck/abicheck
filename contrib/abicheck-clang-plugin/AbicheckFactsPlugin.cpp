@@ -53,6 +53,7 @@
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+#include "clang/Index/USRGeneration.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/MacroInfo.h"
 #include "clang/Lex/PPCallbacks.h"
@@ -94,7 +95,7 @@ namespace {
 
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe.
-constexpr const char *kPluginVersion = "0.2";
+constexpr const char *kPluginVersion = "0.4";
 
 // ---------------------------------------------------------------------------
 // Hashing — mirrors clang.py::_hash exactly:
@@ -186,6 +187,19 @@ std::string jsonRawArray(const std::vector<std::string> &items) {
     out += items[i];
   }
   out += "]";
+  return out;
+}
+
+std::string jsonStrMap(const std::map<std::string, std::string> &items) {
+  std::string out = "{";
+  bool first = true;
+  for (const auto &kv : items) {
+    if (!first)
+      out += ",";
+    first = false;
+    out += jsonStr(kv.first) + ":" + jsonStr(kv.second);
+  }
+  out += "}";
   return out;
 }
 
@@ -676,6 +690,9 @@ struct Entity {
   std::string body_hash;
   std::string type_hash;
   std::string value;
+  std::map<std::string, std::string> names;
+  std::map<std::string, std::string> relations;
+  std::map<std::string, std::string> ownership;
   std::string loc_path;
   int loc_line = 0;
   std::string loc_origin = "UNKNOWN";
@@ -692,12 +709,52 @@ struct Entity {
            ",\"signature_hash\":" + jsonStr(signature_hash) +
            ",\"body_hash\":" + jsonStr(body_hash) +
            ",\"type_hash\":" + jsonStr(type_hash) +
-           ",\"value\":" + jsonStr(value) + ",\"source_location\":" + loc +
+           ",\"value\":" + jsonStr(value) +
+           ",\"names\":" + jsonStrMap(names) +
+           ",\"relations\":" + jsonStrMap(relations) +
+           ",\"ownership\":" + jsonStrMap(ownership) +
+           ",\"source_location\":" + loc +
            ",\"visibility\":" + jsonStr(visibility) +
            ",\"api_relevant\":" + (api_relevant ? "true" : "false") +
            ",\"confidence\":\"high\"}";
   }
 };
+
+std::string usrForDecl(const Decl *d) {
+  if (!d)
+    return "";
+  llvm::SmallString<128> usr;
+  if (clang::index::generateUSRForDecl(d, usr))
+    return "";
+  return std::string(usr.str());
+}
+
+std::string ownershipRole(llvm::StringRef visibility) {
+  if (visibility == "public_header")
+    return "own_api_candidate";
+  if (visibility == "generated")
+    return "generated_api_candidate";
+  if (visibility == "system_header")
+    return "dependency_candidate";
+  if (visibility == "private_header")
+    return "internal_candidate";
+  return "unknown";
+}
+
+void stampDeclEvidence(Entity &e, const NamedDecl *d) {
+  e.names["source_qualified"] = e.qualified_name;
+  if (!e.mangled_name.empty())
+    e.names["mangled"] = e.mangled_name;
+  std::string usr = usrForDecl(d);
+  if (!usr.empty())
+    e.names["usr"] = usr;
+  std::string canonical = usrForDecl(d ? d->getCanonicalDecl() : nullptr);
+  if (!canonical.empty())
+    e.names["canonical_usr"] = canonical;
+  e.ownership["visibility"] = e.visibility;
+  e.ownership["origin"] = e.loc_origin;
+  e.ownership["role"] = ownershipRole(e.visibility);
+}
 
 // ---------------------------------------------------------------------------
 // Path helpers for public-surface classification (ADR-038 C.2 visibility).
@@ -963,6 +1020,23 @@ std::string joinStrings(const std::vector<std::string> &v, char sep) {
   return out;
 }
 
+std::string templateParamName(const NamedDecl *param, unsigned index) {
+  if (!param->getName().empty())
+    return param->getNameAsString();
+  if (isa<NonTypeTemplateParmDecl>(param))
+    return "N" + std::to_string(index);
+  return "T" + std::to_string(index);
+}
+
+std::vector<std::string> templateParamNames(const TemplateParameterList *params) {
+  std::vector<std::string> out;
+  if (!params)
+    return out;
+  for (unsigned i = 0; i < params->size(); ++i)
+    out.push_back(templateParamName(params->getParam(i), i));
+  return out;
+}
+
 std::string nowIso8601Utc() {
   std::time_t t = std::time(nullptr);
   std::tm tm{};
@@ -1126,6 +1200,7 @@ public:
     e.loc_line = line;
     e.loc_origin = origin;
     e.visibility = visibility;
+    stampDeclEvidence(e, fd);
     Functions.push_back(e);
 
     // Gate the whole inline entity on a CompoundStmt being present in the
@@ -1147,6 +1222,7 @@ public:
       ib.loc_line = line;
       ib.loc_origin = origin;
       ib.visibility = visibility;
+      stampDeclEvidence(ib, fd);
       InlineBodies.push_back(ib);
     }
     return true;
@@ -1212,6 +1288,7 @@ public:
     e.loc_line = presumedLine(td);
     e.loc_origin = origin;
     e.visibility = visibility;
+    stampDeclEvidence(e, td);
     Types.push_back(e);
     return true;
   }
@@ -1251,6 +1328,7 @@ public:
     e.loc_line = presumedLine(vd);
     e.loc_origin = origin;
     e.visibility = visibility;
+    stampDeclEvidence(e, vd);
     ConstexprValues.push_back(e);
     return true;
   }
@@ -1266,6 +1344,7 @@ public:
 
   bool TraverseClassTemplateDecl(ClassTemplateDecl *td) {
     emitTemplate(td);
+    emitClassTemplateMemberPatterns(td);
     return true;
   }
 
@@ -1437,6 +1516,7 @@ private:
     e.loc_line = presumedLine(td);
     e.loc_origin = origin;
     e.visibility = visibility;
+    stampDeclEvidence(e, td);
     Types.push_back(e);
   }
 
@@ -1459,7 +1539,62 @@ private:
     e.loc_line = presumedLine(td);
     e.loc_origin = origin;
     e.visibility = visibility;
+    e.relations["template_kind"] = std::string(td->getDeclKindName());
+    if (const TemplateParameterList *params = td->getTemplateParameters())
+      e.relations["template_parameters"] =
+          joinStrings(templateParamNames(params), ',');
+    stampDeclEvidence(e, td);
     Templates.push_back(e);
+  }
+
+  std::string classTemplatePatternName(const ClassTemplateDecl *td) const {
+    std::string name = scopedName(td);
+    std::vector<std::string> params = templateParamNames(td->getTemplateParameters());
+    if (!params.empty())
+      name += "<" + joinStrings(params, ',') + ">";
+    return name;
+  }
+
+  void emitClassTemplateMemberPatterns(const ClassTemplateDecl *td) {
+    if (td->isImplicit() || !isAccessible(td) || td->getNameAsString().empty())
+      return;
+    CXXRecordDecl *rd = td->getTemplatedDecl();
+    if (!rd)
+      return;
+    std::string owner = classTemplatePatternName(td);
+    for (Decl *member : rd->decls()) {
+      auto *fd = dyn_cast<FunctionDecl>(member);
+      if (!fd || fd->isImplicit() || fd->getNameAsString().empty() ||
+          !isAccessible(fd))
+        continue;
+      std::string file, origin, visibility;
+      if (!classify(fd, file, origin, visibility))
+        continue;
+      std::optional<Value> json = dumpDeclJson(fd);
+      if (!json || !json->getAsObject()) {
+        Diags.insert("class-template member facts unavailable (JSON dump failed)");
+        continue;
+      }
+      const Object &o = *json->getAsObject();
+      std::string sig = qualTypeFromJson(o);
+      std::string name = owner + "::" + fd->getNameAsString();
+      Entity e;
+      e.id = H({"function", name, sig});
+      e.kind = "function";
+      e.qualified_name = name;
+      e.signature_hash = H({"sig", sig});
+      e.value = defaultArgReprJson(o);
+      e.loc_path = file;
+      e.loc_line = presumedLine(fd);
+      e.loc_origin = origin;
+      e.visibility = visibility;
+      e.relations["template_owner"] = owner;
+      e.relations["template_parameters"] =
+          joinStrings(templateParamNames(td->getTemplateParameters()), ',');
+      e.relations["declaration_role"] = "class_template_member_pattern";
+      stampDeclEvidence(e, fd);
+      Functions.push_back(e);
+    }
   }
 
   SourceManager &SM;
@@ -1642,6 +1777,10 @@ private:
       m.loc_line = 0;
       m.loc_origin = origin;
       m.visibility = visibility;
+      m.names["source_qualified"] = name;
+      m.ownership["visibility"] = visibility;
+      m.ownership["origin"] = origin;
+      m.ownership["role"] = ownershipRole(visibility);
       out.push_back(m);
       any = true;
     }
