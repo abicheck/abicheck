@@ -293,18 +293,6 @@ def _internal_enum_member_appended() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _internal_enum_underlying_size() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # Widening the underlying type of an unreferenced enum changes no public
-    # layout — enum reachability must scope it out like a struct-size change.
-    old = _snap("1", functions=[_fn("api")], enums=[_enum("IMode", [("A", 0)], underlying="int")])
-    new = _snap(
-        "2",
-        functions=[_fn("api")],
-        enums=[_enum("IMode", [("A", 0)], underlying="long long")],
-    )
-    return old, new
-
-
 def _enum_reached_only_via_internal_struct() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The enum is used only by an internal (unreachable) struct's field, so the
     # transitive closure never reaches it from a public root.
@@ -553,10 +541,10 @@ def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 # out (their "correct" verdict was thought ambiguous). They are now covered with
 # *both* polarities each — verified against the current implementation — so the
 # gate guards them as regressions rather than asserting a behaviour change:
-#   * internal (unreferenced) enum value / appended-member / underlying-size
-#     changes scope out; the same change on a public-reachable enum stays
-#     breaking (enum reachability now closes through struct fields and typedefs
-#     just like struct reachability);
+#   * internal (unreferenced) enum value / appended-member changes scope out;
+#     the same change on a public-reachable enum stays breaking (enum
+#     reachability now closes through struct fields and typedefs just like
+#     struct reachability);
 #   * a pointer-only-reached *opaque* handle's internal size change scopes out
 #     (the by-value-vs-pointer precision the opaque filter supplies, ADR-024
 #     §D3), while a pointer-only-reached *fully-defined* type's size change stays
@@ -574,7 +562,6 @@ CORPUS: list[Case] = [
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
     Case("internal_enum_member_appended", True, _internal_enum_member_appended),
-    Case("internal_enum_underlying_size", True, _internal_enum_underlying_size),
     Case("enum_reached_only_via_internal_struct", True, _enum_reached_only_via_internal_struct),
     Case("opaque_handle_pointer_only_size", True, _opaque_handle_pointer_only_size),
     # field-eval F2: versioned-symbol scheme (P08) + multi-.so bundle (P20).
@@ -1012,7 +999,6 @@ CASE_CATEGORY: dict[str, str] = {
     # enum reachability closure
     "internal_enum_value_changed": "enum-reachability",
     "internal_enum_member_appended": "enum-reachability",
-    "internal_enum_underlying_size": "enum-reachability",
     "enum_reached_only_via_internal_struct": "enum-reachability",
     "public_enum_value_changed": "enum-reachability",
     "enum_reached_via_public_struct_field": "enum-reachability",

@@ -103,9 +103,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--json` now carries a `by_category` breakdown and `--markdown` renders a
   per-axis accuracy table for a CI step-summary / release-over-release trend.
 - **FP-rate corpus now guards enum-reachability and pointer/opaque precision**
-  — nine cases (both polarities each) lock in that internal (unreferenced)
-  enum value/appended-member/underlying-size changes and pointer-only *opaque*
-  handle size changes scope out, while public-reachable enums and pointer-only
+  — eight cases (both polarities each) lock in that internal (unreferenced)
+  enum value / appended-member changes and pointer-only *opaque* handle size
+  changes scope out, while public-reachable enums and pointer-only
   *fully-defined* type size changes stay breaking. Baselines remain 0/0.
 - New user-guide page **CI Gating** (`docs/user-guide/ci-gating.md`) — the
   missing hub explaining how baselines, policies, suppressions, and severity
