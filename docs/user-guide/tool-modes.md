@@ -117,7 +117,9 @@ positives by scoping to the public surface. The
 quantifies the cumulative gain across the example catalog (32% → 81% → 99% →
 100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
 keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
-explain, scope, and add their own source-/API-level findings.
+(and the `L5` source graph abicheck derives from them — see
+[Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)) explain, scope,
+and add their own source-/API-level findings.
 
 > **Quick decision.** Stripped production binary → **L0**. Debug build, no
 > headers handy → **L1**. Have the public headers → **L2** (do this whenever you

@@ -976,7 +976,7 @@ def abi_estimate(
         compile_db: Explicit compile_commands.json (else discovered in sources).
         mode: Fixed (L,S) preset — "pr" (default), "pr-deep", "baseline", "audit".
         source_method: Precise S-axis level (s0..s6 or auto); None = mode preset.
-        depth: Coarse L-axis selector (headers|build|source|full|graph).
+        depth: Coarse L-axis selector (binary|headers|build|source|full).
         changed_paths: Changed-path set for the focused (D7) replay-scope estimate.
     """
     t0 = _time.monotonic()
@@ -1071,7 +1071,7 @@ def abi_scan(
             single-release run; use ``mode="audit"`` for the hygiene catalog).
         mode: Fixed (L,S) preset — "pr" (default), "pr-deep", "baseline", "audit".
         source_method: Precise S-axis level (s0..s6 or auto); None = mode preset.
-        depth: Coarse L-axis selector (headers|build|source|full|graph).
+        depth: Coarse L-axis selector (binary|headers|build|source|full).
         changed_paths: Changed-path set focusing the scan (ADR-035 D7).
         language: Language mode — "c++" (default) or "c".
     """

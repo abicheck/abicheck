@@ -44,6 +44,8 @@ abicheck treats compatibility analysis as a question of **evidence**: the more i
 
 The layers are **independent and additive, not a fallback chain** — abicheck overlays every source you give it and computes one worst-wins verdict, under the *authority rule*: artifact-backed evidence (L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source evidence (L3/L4) *explains, localizes, scopes, or adds confidence* to a finding (and can raise its own source-/API-level findings) but never silently deletes an artifact-proven break.
 
+> **A sixth code you may see in the docs:** `L5` is the source *reachability graph* abicheck **derives** from L3/L4 evidence — you provide five sources (L0–L4); L5 is computed, never an input. It appears in the [`scan` documentation](https://abicheck.github.io/abicheck/concepts/scan-and-evidence-levels/).
+
 With less input, abicheck degrades gracefully *down the staircase* rather than failing — a stripped binary with no headers collapses toward symbol-only checking — and `abicheck dump --show-data-sources` reports exactly which layers it found. The best input you can give it is **old library + new library + matching public headers + debug info + build data**. See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source can and cannot see, and [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) for how the layers are reconciled.
 
 ---
@@ -108,12 +110,11 @@ Use these to gate CI pipelines.
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
 | `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe — no binary ABI break |
-| `1` | `SEVERITY_ERROR` | Severity-driven error (with `--severity-*` flags) |
 | `2` | `API_BREAK` | Source-level break (recompile needed, binary may still work) |
 | `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
-| `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library/bundle compare only) |
+| `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library compare with `--fail-on-removed-library`) |
 
-`appcompat`, `deps compare`, and `compat` use the same scheme with per-mode additions — see the [full exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/).
+Passing any `--severity-*` flag switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `appcompat`, `deps compare`, and `compat` add per-mode codes. The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how baselines, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
 
 ---
 

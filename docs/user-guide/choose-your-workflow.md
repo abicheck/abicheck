@@ -57,7 +57,9 @@ and **which report** to produce (§4).
 The single biggest lever on what abicheck can *prove* is the quality of the
 inputs you give it — its five additive evidence layers, **L0–L4**. More
 evidence catches more breaks. Start at the layer your artifacts allow, and add
-more when you need more confidence.
+more when you need more confidence. (The `scan` docs also use a sixth code,
+**`L5`** — the source graph abicheck *derives* from L3/L4; you never provide it.
+See [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md).)
 
 | Layer | Inputs | Confidence | What it newly catches |
 |:--:|---|---|---|

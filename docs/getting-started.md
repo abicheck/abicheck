@@ -173,6 +173,11 @@ With less input, abicheck degrades gracefully *down the staircase* rather than
 failing — a stripped binary with no headers collapses toward symbol-only
 checking.
 
+> **A sixth code you may meet later:** the `scan` docs also use **`L5`** — the
+> source *reachability graph* abicheck **derives** from L3/L4 evidence. You
+> provide five sources (L0–L4); L5 is computed, never an input. See
+> [Scan Levels (S vs L)](concepts/scan-and-evidence-levels.md).
+
 Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
 found for a binary. For the full picture see [Evidence &
 Detectability](concepts/evidence-and-detectability.md) and the per-layer
@@ -309,6 +314,8 @@ Full reference (including `compat` mode): [Exit Codes](reference/exit-codes.md)
 
 abicheck separates *what fails CI* (severity → exit code) from *what shows up in
 the report* (display filtering). These three recipes cover the common cases; the
+[CI Gating](user-guide/ci-gating.md) page explains how baselines, policies,
+suppressions, and severity fit together, and the
 [Choose Your Workflow → policy recipes](user-guide/choose-your-workflow.md#3-how-should-ci-behave-policy-recipes)
 and [Severity Configuration](user-guide/severity.md) pages have the rest.
 
