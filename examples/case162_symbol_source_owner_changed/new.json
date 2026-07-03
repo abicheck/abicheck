@@ -15,11 +15,11 @@
       "dst": "decl:demo::init",
       "edge": "SOURCE_DECLARES",
       "provenance": "",
-      "src": "src:src/init.cpp"
+      "src": "hdr:include/demo/init.h"
     }
   ],
   "external_graph_refs": [],
-  "graph_id": "sha256:a32eb873a3ec158c8ce7a1614aba496da91e71c08a7cc1d899d02d67f38d2ef1",
+  "graph_id": "sha256:75334b891e232da1880fbb7049a9f12b5827e7345ee8af98cff858e3672ec429",
   "indexes": {
     "by_binary_symbol": {
       "sym:_ZN4demo4initEv": [
@@ -29,7 +29,7 @@
     "by_file": {},
     "by_source_decl": {
       "decl:demo::init": [
-        "src:src/init.cpp",
+        "hdr:include/demo/init.h",
         "sym:_ZN4demo4initEv"
       ]
     },
@@ -55,17 +55,17 @@
     {
       "attrs": {},
       "confidence": "unknown",
-      "id": "src:src/init_legacy.cpp",
-      "kind": "source",
-      "label": "src/init_legacy.cpp",
+      "id": "hdr:include/demo/legacy.h",
+      "kind": "header",
+      "label": "include/demo/legacy.h",
       "provenance": ""
     },
     {
       "attrs": {},
       "confidence": "unknown",
-      "id": "src:src/init.cpp",
-      "kind": "source",
-      "label": "src/init.cpp",
+      "id": "hdr:include/demo/init.h",
+      "kind": "header",
+      "label": "include/demo/init.h",
       "provenance": ""
     }
   ],

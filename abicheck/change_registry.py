@@ -1331,14 +1331,15 @@ REGISTRY = ChangeKindRegistry([
               "consumers. A packaging/deployment risk to review; the artifact's "
               "DT_NEEDED diff proves any concrete new load-time dependency."),
     _E("exported_symbol_source_owner_changed", _R,
-       impact="An exported symbol present in both versions is now produced by a "
-              "different source file / translation unit (its owning source moved in "
-              "the build graph). The symbol name and signature are unchanged, so "
-              "the artifact diff is quiet, but the implementation behind a stable "
-              "public symbol relocated — a refactor that can change inlining, "
-              "static-initialization order, or introduce an ODR risk if the old "
-              "location still defines it. A source-graph risk to review, never on "
-              "its own an artifact-proven ABI break."),
+       impact="An exported symbol present in both versions is now declared by a "
+              "different file (the file owning its declaration moved in the source "
+              "graph — e.g. a public declaration relocated to another header, or "
+              "its declaring translation unit changed). The symbol name and "
+              "signature are unchanged, so the artifact diff is quiet, but the "
+              "declaration behind a stable public symbol moved — a refactor that "
+              "can change consumers' include paths, inlining, or introduce an ODR "
+              "risk if the old location still declares it. A source-graph risk to "
+              "review, never on its own an artifact-proven ABI break."),
     # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
     # Produced by the intra-version cross-source engine (buildsource/crosscheck.py),
     # which diffs ONE merged snapshot's evidence sources against each other rather

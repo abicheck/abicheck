@@ -1,9 +1,19 @@
 {
-  "build_options": [],
+  "build_options": [
+    {
+      "abi_relevant": true,
+      "key": "struct_packing",
+      "raw": "-fpack-struct=8",
+      "scope": "global",
+      "value": "8"
+    }
+  ],
   "build_root": "",
   "compile_units": [
     {
-      "abi_relevant_flags": [],
+      "abi_relevant_flags": [
+        "-fpack-struct=8"
+      ],
       "argv": [],
       "compiler": "",
       "defines": {},

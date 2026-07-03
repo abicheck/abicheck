@@ -275,7 +275,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [159](case159_constexpr_function_body_changed/README.md) | _constexpr_function_body_changed — `constexpr` function body changed | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [160](case160_public_api_internal_dep_added/README.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's owning source file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 <!-- END GENERATED: case-index -->
 
 ---

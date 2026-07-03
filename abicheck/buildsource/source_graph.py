@@ -871,26 +871,36 @@ def _target_dependency_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
     }
 
 
-def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
-    """Map each exported ``binary_symbol`` id → the ``source`` file that owns it.
+#: Node kinds that represent a declaring file (the graph builder emits
+#: ``SOURCE_DECLARES`` from a ``header`` node — labelled with the declaration's
+#: ``source_location`` path, whose ``origin`` attr says whether it is a header
+#: or a source file — so accepting only ``source`` nodes would leave the owner
+#: map empty on every real graph (Codex review).
+_DECLARING_FILE_KINDS: frozenset[str] = frozenset({"source", "header", "generated_file"})
 
-    The owner is the source node that ``SOURCE_DECLARES`` the ``source_decl``
-    which ``SOURCE_DECL_MAPS_TO_SYMBOL`` the symbol. Only ``source`` (not
-    ``header``) declaring nodes count as the implementation owner. A symbol with
-    no unambiguous single owner is omitted, so the version diff never guesses.
+
+def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
+    """Map each exported ``binary_symbol`` id → the file that declares it.
+
+    The owner is the file node that ``SOURCE_DECLARES`` the ``source_decl`` which
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` the symbol. Production graphs attach that edge
+    from a ``header`` node (``build_source_graph``/``header_declares``), so any
+    declaring-file node kind counts (:data:`_DECLARING_FILE_KINDS`), keyed to the
+    file's node id. A symbol with no unambiguous single declaring file is omitted,
+    so the version diff never guesses.
     """
     kinds = _kind_map(graph)
     symbol_to_decls: dict[str, list[str]] = {}
     for e in graph.edges:
         if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL":
             symbol_to_decls.setdefault(e.dst, []).append(e.src)
-    decl_to_sources: dict[str, list[str]] = {}
+    decl_to_files: dict[str, list[str]] = {}
     for e in graph.edges:
-        if e.kind == "SOURCE_DECLARES" and kinds.get(e.src) == "source":
-            decl_to_sources.setdefault(e.dst, []).append(e.src)
+        if e.kind == "SOURCE_DECLARES" and kinds.get(e.src) in _DECLARING_FILE_KINDS:
+            decl_to_files.setdefault(e.dst, []).append(e.src)
     out: dict[str, str] = {}
     for symbol, decls in symbol_to_decls.items():
-        owners = {src for decl in decls for src in decl_to_sources.get(decl, [])}
+        owners = {src for decl in decls for src in decl_to_files.get(decl, [])}
         if len(owners) == 1:
             out[symbol] = next(iter(owners))
     return out
@@ -1072,8 +1082,17 @@ def diff_source_graph_findings(
 
     # 7) a public entry point that newly reaches an internal (non-public)
     #    declaration through the call graph — the version-over-version analogue
-    #    of the intra-version public-to-internal cross-check.
-    newly_internal = _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
+    #    of the intra-version public-to-internal cross-check. Gate on *both*
+    #    graphs carrying call edges: if only the new pack ran the optional
+    #    call-graph pass, the baseline's reach set is empty and every pre-existing
+    #    internal call would look newly added (Codex review).
+    has_calls_old = any(e.kind == "DECL_CALLS_DECL" for e in old.edges)
+    has_calls_new = any(e.kind == "DECL_CALLS_DECL" for e in new.edges)
+    newly_internal = (
+        _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
+        if has_calls_old and has_calls_new
+        else set()
+    )
     reached_by_entry: dict[str, list[str]] = {}
     for entry, target in newly_internal:
         reached_by_entry.setdefault(entry, []).append(target)
@@ -1125,12 +1144,12 @@ def diff_source_graph_findings(
                 kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
                 symbol=label,
                 description=(
-                    f"Exported symbol {label!r} is now produced by a different "
-                    f"source file ({old_labels.get(old_owner[symbol], old_owner[symbol])} "
+                    f"Exported symbol {label!r} is now declared by a different "
+                    f"file ({old_labels.get(old_owner[symbol], old_owner[symbol])} "
                     f"→ {new_labels.get(new_owner[symbol], new_owner[symbol])}). The "
                     "name and signature are unchanged, so the artifact diff is "
-                    "quiet, but the implementation relocated — review for inlining, "
-                    "init-order, or ODR effects. Source-graph evidence."
+                    "quiet, but the file owning the declaration moved — review for "
+                    "include-path, inlining, or ODR effects. Source-graph evidence."
                 ),
                 old_value=old_labels.get(old_owner[symbol], old_owner[symbol]),
                 new_value=new_labels.get(new_owner[symbol], new_owner[symbol]),

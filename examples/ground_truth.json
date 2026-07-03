@@ -2728,7 +2728,7 @@
         "old.json",
         "new.json"
       ],
-      "description": "Same source, same symbols, built once with natural packing (v1) and once with -fpack-struct=1 (v2). The L3 build-evidence diff routes the packing flag to struct_packing_mode_changed. Reduced packing removes padding, so every member offset and the type size can change with no source or symbol change; consumers compiled against the old packing read fields at stale offsets. A risk signal; the artifact/type diff proves the concrete offset break."
+      "description": "Same source, same symbols, built once with -fpack-struct=8 (v1) and once with -fpack-struct=1 (v2). Struct packing's compiler default is target-dependent (GCC/Clang natural vs MSVC /Zp8), so a flip is reported only when both sides are explicit; the L3 build-evidence diff then routes the packing flag to struct_packing_mode_changed. Reduced packing removes padding, so every member offset and the type size can change with no source or symbol change; consumers compiled against the old packing read fields at stale offsets. A risk signal; the artifact/type diff proves the concrete offset break."
     },
     "case154_lto_mode_flip": {
       "expected": "COMPATIBLE_WITH_RISK",
@@ -2899,7 +2899,7 @@
         "old.json",
         "new.json"
       ],
-      "description": "The exported symbol demo::init is produced by src/init_legacy.cpp in v1 and by src/init.cpp in v2, per the L5 source graph, while its name and signature are unchanged. The artifact diff is quiet, but the implementation behind a stable public symbol relocated across TUs - review for inlining, init-order, or ODR effects. A source-graph risk, never on its own an artifact-proven break."
+      "description": "The exported symbol demo::init is declared by include/demo/legacy.h in v1 and by include/demo/init.h in v2, per the L5 source graph's SOURCE_DECLARES edge, while its name and signature are unchanged. The artifact diff is quiet, but the file owning the declaration behind a stable public symbol moved - review for include-path, inlining, or ODR effects. A source-graph risk, never on its own an artifact-proven break."
     }
   }
 }

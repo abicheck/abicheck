@@ -113,8 +113,11 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     cases["case152_enum_size_flag_flip"] = (
         "L3", _build_evidence([]), _build_evidence(["-fshort-enums"]),
     )
+    # Struct packing's compiler default is target-dependent (GCC/Clang natural
+    # vs MSVC /Zp8), so a flip is only reported when both sides are explicit —
+    # here pack width 8 vs 1.
     cases["case153_struct_packing_flip"] = (
-        "L3", _build_evidence([]), _build_evidence(["-fpack-struct=1"]),
+        "L3", _build_evidence(["-fpack-struct=8"]), _build_evidence(["-fpack-struct=1"]),
     )
     cases["case154_lto_mode_flip"] = (
         "L3", _build_evidence([]), _build_evidence(["-flto"]),
@@ -197,18 +200,20 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         _graph(l5b_nodes, [_E("target:libdemo", "target:libcrypto", "TARGET_DEPENDS_ON")]),
     )
 
-    # case162: an exported symbol's owning source file moved (impl relocated).
+    # case162: an exported symbol's declaring file moved. Production graphs attach
+    # SOURCE_DECLARES from a `header`-kind node (build_source_graph.header_declares),
+    # so the fixture mirrors that: the declaration relocates from legacy.h to init.h.
     l5c_nodes = [
         _N("decl:demo::init", "source_decl", "demo::init()"),
         _N("sym:_ZN4demo4initEv", "binary_symbol", "demo::init"),
-        _N("src:src/init_legacy.cpp", "source", "src/init_legacy.cpp"),
-        _N("src:src/init.cpp", "source", "src/init.cpp"),
+        _N("hdr:include/demo/legacy.h", "header", "include/demo/legacy.h"),
+        _N("hdr:include/demo/init.h", "header", "include/demo/init.h"),
     ]
     l5c_map = _E("decl:demo::init", "sym:_ZN4demo4initEv", "SOURCE_DECL_MAPS_TO_SYMBOL")
     cases["case162_symbol_source_owner_changed"] = (
         "L5",
-        _graph(l5c_nodes, [l5c_map, _E("src:src/init_legacy.cpp", "decl:demo::init", "SOURCE_DECLARES")]),
-        _graph(l5c_nodes, [l5c_map, _E("src:src/init.cpp", "decl:demo::init", "SOURCE_DECLARES")]),
+        _graph(l5c_nodes, [l5c_map, _E("hdr:include/demo/legacy.h", "decl:demo::init", "SOURCE_DECLARES")]),
+        _graph(l5c_nodes, [l5c_map, _E("hdr:include/demo/init.h", "decl:demo::init", "SOURCE_DECLARES")]),
     )
 
     return cases

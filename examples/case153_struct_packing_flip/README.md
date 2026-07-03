@@ -9,7 +9,9 @@
 
 ## What it demonstrates
 
-v1 uses natural alignment, v2 adds `-fpack-struct=1`. Reduced packing removes inter-member padding, so every member offset and the type's `sizeof` can change with no source or symbol change. Consumers compiled against the old packing read fields at stale offsets.
+v1 builds with `-fpack-struct=8`, v2 with `-fpack-struct=1`. Reduced packing removes inter-member padding, so every member offset and the type's `sizeof` can change with no source or symbol change. Consumers compiled against the old packing read fields at stale offsets.
+
+Struct packing's compiler default is *target*-dependent (GCC/Clang use natural packing; MSVC's default is `/Zp8` or `/Zp16`), so abicheck reports a flip only when **both** sides state the packing explicitly — an omitted side vs. a platform-default `/Zp` value is not treated as a change, to avoid a false finding on Visual Studio projects that merely record their default.
 
 ## Why no single artifact layer sees it
 

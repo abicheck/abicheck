@@ -907,6 +907,14 @@ def _check_case_preconditions(
         return CaseResult(name, "SKIP", expected_raw, None,
                           "G20 audit/cross-source case — validated by tests/test_g20_catalog.py")
 
+    # L3/L4/L5 build/source-only cases (152-162) ship a hand-built evidence-model
+    # fixture pair (old.json/new.json) instead of a compilable v1/v2 source pair;
+    # they are validated compiler-free by tests/test_l3l4l5_examples.py.
+    if "old.json" in (entry.get("fixtures") or []):
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "L3/L4/L5 build/source-only case — validated by "
+                          "tests/test_l3l4l5_examples.py")
+
     # Bundle cases (ADR-023) are multi-library and use a different layout
     # (per-side dirs under examples/<case>/{old,new}/<libname>.cpp).
     # The v1/v2-pair compile path in this script can't build them; they

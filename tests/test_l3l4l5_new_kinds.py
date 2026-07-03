@@ -55,8 +55,9 @@ def _kinds(changes) -> list[str]:
     [
         ([], ["-fshort-enums"], ChangeKind.ENUM_SIZE_FLAG_CHANGED),
         (["-fshort-enums"], [], ChangeKind.ENUM_SIZE_FLAG_CHANGED),
-        ([], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
-        ([], ["/Zp1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
+        # Struct packing is target-dependent, so both sides must be explicit.
+        (["-fpack-struct=8"], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
+        (["/Zp8"], ["/Zp1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
         ([], ["-flto"], ChangeKind.LTO_MODE_CHANGED),
         (["-flto=thin"], [], ChangeKind.LTO_MODE_CHANGED),
         (["-fsigned-char"], ["-funsigned-char"], ChangeKind.CHAR_SIGNEDNESS_CHANGED),
@@ -68,11 +69,18 @@ def test_l3_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
     assert expected in RISK_KINDS
 
 
-def test_l3_char_signedness_needs_both_sides_explicit() -> None:
-    # Default char signedness is target-dependent, so an omitted side is unknown
-    # — a one-sided flag must NOT be read as a flip (avoids false positives).
-    changes = diff_build_evidence(_ev([]), _ev(["-funsigned-char"]))
-    assert ChangeKind.CHAR_SIGNEDNESS_CHANGED.value not in _kinds(changes)
+@pytest.mark.parametrize(
+    "kind,one_sided_flag",
+    [
+        # Target-dependent defaults: an omitted side is unknown, so a one-sided
+        # flag must NOT read as a flip (avoids MSVC-default / ARM-default FPs).
+        (ChangeKind.CHAR_SIGNEDNESS_CHANGED, "-funsigned-char"),
+        (ChangeKind.STRUCT_PACKING_MODE_CHANGED, "/Zp8"),
+    ],
+)
+def test_l3_target_dependent_flags_need_both_sides_explicit(kind, one_sided_flag) -> None:
+    changes = diff_build_evidence(_ev([]), _ev([one_sided_flag]))
+    assert kind.value not in _kinds(changes)
 
 
 def test_l3_enum_size_explicit_default_is_noop() -> None:
@@ -182,6 +190,46 @@ def test_l5_public_api_internal_dependency_added() -> None:
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED in RISK_KINDS
+
+
+def test_l5_internal_dep_skipped_without_baseline_call_coverage() -> None:
+    # If only the NEW graph ran the call-graph pass, the baseline has no call
+    # edges — every internal callee would look newly-added. The check must skip.
+    nodes = [
+        _N("pub", "source_decl", "pub()"),
+        _N("intn", "source_decl", "intn()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("hdr", "header", "api.h"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ])  # no DECL_CALLS_DECL edges at all
+    new = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "intn", "DECL_CALLS_DECL"),
+    ])
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_owner_changed_reads_header_declaring_nodes() -> None:
+    # Production graphs attach SOURCE_DECLARES from a `header`-kind node
+    # (build_source_graph.header_declares), so the owner map must read those.
+    nodes = [
+        _N("d", "source_decl", "d()"),
+        _N("s", "binary_symbol", "d"),
+        _N("hdr:a.h", "header", "a.h"),
+        _N("hdr:b.h", "header", "b.h"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("hdr:a.h", "d", "SOURCE_DECLARES"),
+    ])
+    new = SourceGraphSummary(nodes=nodes, edges=[
+        _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("hdr:b.h", "d", "SOURCE_DECLARES"),
+    ])
+    assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value in _graph_kinds(old, new)
 
 
 def test_l5_target_dependency_added() -> None:
