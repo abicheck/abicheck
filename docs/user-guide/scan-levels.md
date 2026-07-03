@@ -271,8 +271,10 @@ abicheck scan \
   it explicitly if you want a fixed rung.
 - **Exit code:** `0` compatible, `2` source/API break, `4` ABI break (from the
   baseline compare), `5` `--budget` overflow.
-- `--depth source` already folds the full L5 reachability graph when you want
-  cross-symbol impact in the report.
+- `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
+  for cross-symbol impact in the report. The *whole-library* reachability graph
+  is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung — reach it
+  only via the deprecated `--mode pr-deep`.
 
 ### Single-build audit — no baseline
 

@@ -319,9 +319,10 @@ base ref is available.
 
 ### Pin the scan depth
 
-Left unpinned, `scan` resolves the depth automatically (`auto`: risk-driven with
-a `since:` seed, else a sensible default). Pin a precise level for reproducible CI
-with the single `depth` dial:
+The Action's `scan-mode` input still defaults to `pr` (a deprecated alias), so an
+unset `depth` currently runs the `pr` preset **and emits a deprecation warning** —
+it is not the CLI's `auto`. Pin the modern `depth` dial for reproducible CI (and to
+silence the warning); the raw CLI resolves `auto` only when nothing is passed:
 
 ```yaml
       - uses: abicheck/abicheck@v0.3.0

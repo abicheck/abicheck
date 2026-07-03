@@ -297,9 +297,9 @@ Each case in [`examples/ground_truth.json`](https://github.com/abicheck/abicheck
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
 [`scripts/evidence_tiers.py`](https://github.com/abicheck/abicheck/blob/main/scripts/evidence_tiers.py)
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the 129-case
-catalog, that yields the cumulative coverage the `--evidence-tiers` summary
-prints:
+and validated by `tests/test_evidence_tiers.py`. Aggregated over the
+`ground_truth.json` cases, that yields the cumulative coverage the
+`--evidence-tiers` summary prints:
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|

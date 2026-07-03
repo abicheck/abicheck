@@ -204,7 +204,7 @@ line.
 | `s0` / `s3` | diff classifier / lexical pattern scan (compiler-free) | `--depth binary` (or `headers` for +L2) |
 | `s1` | compile-DB / build-flag scan (L3) | `--depth build` |
 | `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
-| `s4` | symbol/reference index → L5 graph (no L4) | reached internally by `--depth source`; there is no user-facing graph rung (D6) |
+| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung** (D6): the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
 | `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
 | `s6` | full AST replay of all TUs (L4) | `--depth full` |
 
@@ -213,7 +213,7 @@ line.
 | Deprecated | Was | Use instead |
 |------------|-----|-------------|
 | `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
-| `pr-deep` | `pr` + full L5 reachability | `--depth source` (the L5 graph is folded in) |
+| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only (D6). `--depth source` gives the change-scoped edges; keep `--mode pr-deep` if you need the full graph |
 | `baseline` | whole-library replay of a release | `--depth full` |
 | `audit` | intra-version hygiene lint, no baseline | the `--audit` switch |
 
