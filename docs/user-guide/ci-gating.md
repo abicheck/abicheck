@@ -19,24 +19,27 @@ flowchart LR
 
 ## The order of operations
 
-1. **Detect.** `abicheck compare BASELINE NEW` diffs the two ABI surfaces and
-   produces raw changes. The baseline side is a snapshot, library, or registry
-   entry — see [Baseline Management](baseline-management.md).
-2. **Classify (policy).** The active [policy profile](policies.md)
+It starts with detection: `abicheck compare BASELINE NEW` diffs the two ABI
+surfaces and produces raw changes. The baseline side is a snapshot, library,
+or registry entry — see [Baseline Management](baseline-management.md). The
+detected changes then flow through four stages (the numbers match the diagram
+above):
+
+1. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
    `--policy-file`) maps each change kind to its impact — the same change can
    be `API_BREAK` under `strict_abi` but `COMPATIBLE` under `sdk_vendor`.
-3. **Waive (suppressions).** [Suppression rules](suppressions.md)
+2. **Waive (suppressions).** [Suppression rules](suppressions.md)
    (`--suppress FILE`) remove matching changes **before** the verdict and
    severity counts are computed. A suppressed breaking change does not fail
    the build; it is tallied separately (`suppressed_count` in the JSON
    output).
-4. **Score (verdict + severity).** The surviving changes produce the overall
+3. **Score (verdict + severity).** The surviving changes produce the overall
    verdict (`NO_CHANGE` … `BREAKING`) and, when
    [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
    severity levels.
-5. **Exit.** The exit code comes from one of the two schemes below.
+4. **Exit.** The exit code comes from one of the two schemes below.
 
 **Display filtering is outside the pipeline.** `--show-only`, `--stat`,
 `--report-mode`, and `--format` change what the report *renders*, never the
@@ -101,10 +104,15 @@ abicheck compare baseline.json build/libfoo.so --new-header include/ \
   --exit-code-scheme legacy    # 0 / 2 (API_BREAK) / 4 (BREAKING)
 ```
 
-**Strict API-surface governance** — also fail when new public API appears:
+**Strict API-surface governance** — also fail when new public API appears.
+Note that any `--severity-*` flag switches to the severity scheme, where
+`potential_breaking` (which covers `API_BREAK`) defaults to `warning` — raise
+it to `error` too, or a source-level break that failed under the legacy
+scheme would now exit `0`:
 
 ```bash
 abicheck compare baseline.json build/libfoo.so --new-header include/ \
+  --severity-potential-breaking error \
   --severity-addition error
 ```
 

@@ -327,8 +327,12 @@ abicheck compare baseline.json build/libfoo.so \
   --severity-abi-breaking error
 
 # Strict API-surface governance: also fail on new public ABI/API additions
+# (--severity-potential-breaking keeps source-level API breaks failing too —
+# any --severity-* flag switches to the severity scheme, where that category
+# is only a warning by default)
 abicheck compare baseline.json build/libfoo.so \
   --new-header include/ \
+  --severity-potential-breaking error \
   --severity-addition error
 
 # Show only additions in a review report — verdict and exit code unchanged

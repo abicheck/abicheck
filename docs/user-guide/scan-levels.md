@@ -311,10 +311,11 @@ level. `--depth build` (`s1`) adds build-flag/toolchain drift, but only when you
 also give it a build input to read — a compile DB or build dir via
 `--build-info`/`--compile-db` (or a `--sources` tree); without one, L3 is
 reported `not_collected` and no drift is checked. `--depth binary` stays on the
-artifact tiers (L0/L1) and the always-on pattern scan only — no compiler, no
-headers, no sources needed. (`--depth headers` is the next rung up: it adds the
-L2 header AST, which needs a header directory via `--headers` and a C/C++
-frontend on `PATH`.)
+exported-symbol surface (L0) plus cheap debug-info *presence* and the always-on
+pattern scan — it skips the deep DWARF type walk, so no compiler, headers, or
+sources are needed (and no L1 layout evidence is collected). (`--depth headers`
+is the next rung up: it adds the L2 header AST, which needs a header directory
+via `--headers` and a C/C++ frontend on `PATH`.)
 
 ```bash
 # build-flag drift only, flat ~0.3–0.5s regardless of project size
@@ -322,7 +323,8 @@ frontend on `PATH`.)
 abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json \
   --build-info build/compile_commands.json --depth build
 
-# artifact + always-on lexical scan only (no L2 AST, no L3/L4/L5; no compiler needed)
+# exported symbols + always-on lexical scan only (no DWARF walk, no L2 AST,
+# no L3/L4/L5; no compiler needed)
 abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json --depth binary
 ```
 

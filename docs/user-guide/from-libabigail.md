@@ -179,5 +179,6 @@ for ver in 1.0 1.1 1.2; do
 done
 ```
 
-Where the tools disagree, the parity matrix above documents the known,
+Where the tools disagree, the
+[parity matrix](../development/libabigail-parity.md) documents the known,
 intentional differences.

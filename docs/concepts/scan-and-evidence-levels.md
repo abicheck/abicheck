@@ -157,7 +157,7 @@ than `--source-method`. Its five rungs are `binary`, `headers`, `build`,
 
 | `--depth` | resolves to | reaches |
 |-----------|-------------|---------|
-| `binary` | `s0` (no S-method) | L0/L1 only — no L2 AST (+ always-on pattern scan) |
+| `binary` | `s0` (no S-method) | L0 exported symbols + binary metadata + debug-info *presence* — no DWARF type expansion, no L2 AST (+ always-on pattern scan) |
 | `headers` | `s0` (no S-method — L2 is the intrinsic header AST) | L0–L2 (+ always-on pattern scan) |
 | `build` | `s1` | + L3 |
 | `source` | `s5` | + L4 scoped + L5 edges |
