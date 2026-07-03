@@ -138,9 +138,12 @@ Of these rows the **security-hardening & deployment** row is *artifact/linker*
 coverage (L0/L3, mixed verdicts — an object-size change like
 [case127](../examples/case127_data_object_size_changed.md) is a separate 🔴
 BREAKING layout finding, not a hardening risk). The **last four rows** are the
-families a plain artifact `compare` (L0–L2) does **not** produce on its own —
-they need the build data (L3), the sources (L4/L5), or the scan's cross-source
-pass to surface. All five new rows are the subject of the
+families a plain two-version `compare` of L0–L2 artifacts does **not** produce on
+its own — build-flag drift needs the build data (L3), source-only bodies & macros
+need the sources (L4), and the intra-version hygiene and cross-source families
+need the scan's cross-source pass (which reads L0/L1/L2 evidence — no L4 source
+replay required; the audit fixtures resolve at L0/L2). All five new rows are the
+subject of the
 [level-by-level walk-through](#what-each-level-actually-sees-a-level-by-level-walk-through)
 and the [source-scan section](#going-deeper-than-artifacts-the-source-scan) below.
 
@@ -518,12 +521,15 @@ L3 proves change ④:
 🟡 risk  abi_relevant_build_flag_changed  _GLIBCXX_USE_CXX11_ABI  1 → 0
 ```
 
-This is the [dual-ABI flip](../examples/case104_glibcxx_dual_abi_flip.md): any
-`std::string`/`std::list` parameter would now use a *different* underlying type,
-mangled `__cxx11`. `libcart`'s exported functions take no such types, so here the
-flip causes **no** L0 symbol churn (which is why L0 stays silent above) — but in a
-library that *does* expose them, this same flag flip renames symbols and the L0
-diff proves a `func_deleted`/`func_added` `BREAKING` on its own. On its own L3 is a
+This is the [dual-ABI flip](../examples/case104_glibcxx_dual_abi_flip.md):
+`_GLIBCXX_USE_CXX11_ABI=1` (v1) selects the `std::__cxx11` string/list ABI, and
+`=0` (v2) reverts to the legacy pre-C++11 ABI — so any `std::string`/`std::list`
+parameter changes its underlying type and mangled name, and **v2 drops the
+`__cxx11` symbol variants v1 exported**. `libcart`'s exported functions take no
+such types, so here the flip causes **no** L0 symbol churn (which is why L0 stays
+silent above) — but in a library that *does* expose them, this same flag flip
+renames those symbols and the L0 diff proves a `func_deleted`/`func_added`
+`BREAKING` on its own. On its own L3 is a
 **risk**, not a break; it *explains* and localizes that churn and tells you the two
 builds are not comparing like-for-like. Per the authority rule, L3 never
 *manufactures* a `BREAKING`; it corroborates.
