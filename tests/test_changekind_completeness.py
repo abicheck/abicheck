@@ -55,6 +55,11 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.RTTI_MODE_CHANGED,
     ChangeKind.TLS_MODEL_CHANGED,
     ChangeKind.THREADSAFE_STATICS_MODE_CHANGED,
+    # L3 layout/codegen flag flips — exercised in tests/test_l3l4l5_new_kinds.py.
+    ChangeKind.ENUM_SIZE_FLAG_CHANGED,
+    ChangeKind.STRUCT_PACKING_MODE_CHANGED,
+    ChangeKind.LTO_MODE_CHANGED,
+    ChangeKind.CHAR_SIGNEDNESS_CHANGED,
     ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
     ChangeKind.FIELD_ACCESS_CHANGED,
     ChangeKind.FIELD_BECAME_CONST,
@@ -97,6 +102,11 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.ODR_SOURCE_CONFLICT,
     ChangeKind.GENERATED_HEADER_CHANGED,
     ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+    # L4 source-replay removals / constexpr body — tests/test_l3l4l5_new_kinds.py.
+    ChangeKind.PUBLIC_MACRO_REMOVED,
+    ChangeKind.INLINE_FUNCTION_REMOVED,
+    ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+    ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED,
     # Source graph (ADR-031 D6) — exercised in tests/test_source_graph.py.
     ChangeKind.PUBLIC_REACHABILITY_CHANGED,
     ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
@@ -104,6 +114,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
     ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
     ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
+    # L5 version-over-version graph deltas — tests/test_l3l4l5_new_kinds.py.
+    ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+    ChangeKind.TARGET_DEPENDENCY_ADDED,
+    ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
     # Intra-version cross-source validation (tests/test_crosscheck.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,

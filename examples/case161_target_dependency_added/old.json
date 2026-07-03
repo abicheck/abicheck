@@ -1,0 +1,31 @@
+{
+  "coverage": {},
+  "edges": [],
+  "external_graph_refs": [],
+  "graph_id": "sha256:205d3e7344a506dda28e34c87084af03750e05fd0f7282571d4216ecc263e3cd",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "nodes": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "target:libdemo",
+      "kind": "target",
+      "label": "libdemo",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "target:libcrypto",
+      "kind": "target",
+      "label": "libcrypto",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

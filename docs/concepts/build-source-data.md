@@ -593,8 +593,14 @@ emits these change kinds (ADR-029 D9):
 | `toolchain_version_changed` | risk | Compiler/stdlib/sysroot changed |
 | `generated_file_dependency_unstable` | risk | Build graph indicates generated-file dependency risk |
 | `link_export_policy_changed` | risk | Version script / export map / `.def` file changed |
+| `enum_size_flag_changed` | risk | `-fshort-enums` was toggled — enum storage size (and struct layout using it) changes ([case152](../examples/case152_enum_size_flag_flip.md)) |
+| `struct_packing_mode_changed` | risk | Default struct packing changed (`-fpack-struct` / `/Zp`) — member offsets shift ([case153](../examples/case153_struct_packing_flip.md)) |
+| `lto_mode_changed` | risk | LTO was toggled — cross-TU inlining, devirtualization and vtable/typeinfo emission can differ ([case154](../examples/case154_lto_mode_flip.md)) |
+| `char_signedness_changed` | risk | Plain-`char` signedness flipped (`-fsigned-char` ↔ `-funsigned-char`); both sides must be explicit ([case155](../examples/case155_char_signedness_flip.md)) |
 
-None of these escalate to *breaking* on their own. When an export-policy change
+The runtime-model flips also live here: `exceptions_mode_changed`,
+`rtti_mode_changed`, `tls_model_changed`, `threadsafe_statics_mode_changed`
+(cases 130–133). None of these escalate to *breaking* on their own. When an export-policy change
 actually removes exported symbols, the artifact diff (L0) emits the breaking
 `symbol_removed` finding separately; `link_export_policy_changed` explains and
 localizes it.
@@ -617,6 +623,10 @@ Comparing two linked source surfaces emits these change kinds (ADR-030 D6):
 | `constexpr_value_changed` | API break | A public `constexpr` constant changed value |
 | `uninstantiated_template_removed` | API break | A public template was removed without any binary presence |
 | `public_typedef_target_changed` | API break | A public typedef/alias now resolves to a different underlying type (clang backend) |
+| `public_macro_removed` | API break | A public header macro was removed — source that referenced it no longer compiles ([case156](../examples/case156_public_macro_removed.md)) |
+| `inline_function_removed` | API break | A public header-only inline function was removed (no exported symbol) ([case157](../examples/case157_inline_function_removed.md)) |
+| `public_typedef_removed` | API break | A public typedef/alias was removed (no exported symbol of its own) ([case158](../examples/case158_public_typedef_removed.md)) |
+| `constexpr_function_body_changed` | risk | A public `constexpr` function body changed — compile-time results consumers baked in can differ ([case159](../examples/case159_constexpr_function_body_changed.md)) |
 | `inline_body_changed` | risk | A public inline body changed with no exported-symbol change (mixed-build/ODR risk) |
 | `template_body_changed` | risk | An uninstantiated public template implementation changed (the ADR-026 `case122` residual) |
 | `source_decl_binary_symbol_mismatch` | risk | A public declaration no longer maps to an exported symbol |
@@ -645,6 +655,9 @@ graph-derived **risk** findings (ADR-031 D6):
 | `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--call-graph`) |
 | `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--include-graph`) |
 | `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
+| `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration via the call graph ([case160](../examples/case160_public_api_internal_dep_added.md)) |
+| `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../examples/case161_target_dependency_added.md)) |
+| `exported_symbol_source_owner_changed` | risk | An exported symbol's owning source file/TU moved — implementation relocated behind a stable symbol ([case162](../examples/case162_symbol_source_owner_changed.md)) |
 
 These **explain and prioritize** impact; like the L4 findings they are never
 `breaking` on their own. Each carries the `L5_SOURCE_GRAPH` evidence-tier

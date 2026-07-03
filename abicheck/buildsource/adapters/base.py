@@ -53,7 +53,8 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-march=", "-mtune=", "-mfloat-abi=", "-mfpmath=",
     "--sysroot", "-isysroot",
     "-fvisibility", "-fvisibility-inlines-hidden",
-    "-fpack-struct", "/Zp", "-fshort-enums", "-fshort-wchar",
+    "-fpack-struct", "/Zp", "-fshort-enums", "-fno-short-enums", "-fshort-wchar",
+    "-fsigned-char", "-funsigned-char",
     "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
     "-flto", "-fno-lto", "-fwhole-program-vtables",
     "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
@@ -81,6 +82,18 @@ _RUNTIME_MODE_FLAGS: dict[str, tuple[str, str]] = {
     "-fno-extern-tls-init": ("tls_init", "local"),
     "-fthreadsafe-statics": ("threadsafe_statics", "on"),
     "-fno-threadsafe-statics": ("threadsafe_statics", "off"),
+    # Language-agnostic layout/codegen mode flips. Their compiler default is
+    # known and language-independent (int-sized enums / natural packing / no
+    # LTO), so the build-evidence diff can compare an explicit value against an
+    # omitted flag; char signedness is target-dependent and handled with a
+    # both-sides-explicit rule in build_diff. Keys are intentionally bare (not
+    # in _LANG_QUALIFIED_MODE_KEYS) so they are recorded unqualified.
+    "-fshort-enums": ("enum_size", "short"),
+    "-fno-short-enums": ("enum_size", "int"),
+    "-fsigned-char": ("char_signedness", "signed"),
+    "-funsigned-char": ("char_signedness", "unsigned"),
+    "-flto": ("lto", "on"),
+    "-fno-lto": ("lto", "off"),
 }
 
 #: Runtime-mode keys whose compiler default depends on the source language
@@ -461,6 +474,22 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 # single option regardless of which model string is on each side.
                 model = flag.split("=", 1)[1] if "=" in flag else ""
                 mode_values["tls_model"] = (model, flag)
+            elif flag.startswith("-fpack-struct") or flag.startswith("/Zp"):
+                # Struct-packing width (-fpack-struct[=N] / MSVC /Zp[N]). Canonical
+                # key so any packing change diffs as one option; a bare flag means
+                # pack to 1. Recorded unqualified — packing is language-agnostic.
+                if flag.startswith("/Zp"):
+                    packing = flag[len("/Zp"):] or "1"
+                elif "=" in flag:
+                    packing = flag.split("=", 1)[1]
+                else:
+                    packing = "1"
+                mode_values["struct_packing"] = (packing, flag)
+            elif flag.startswith("-flto"):
+                # -flto / -flto=<jobs|thin|auto>: presence is what matters (the
+                # exact -fno-lto spelling is handled by the _RUNTIME_MODE_FLAGS map
+                # above). Normalize any positive spelling to a single "on" value.
+                mode_values["lto"] = ("on", flag)
             elif flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)

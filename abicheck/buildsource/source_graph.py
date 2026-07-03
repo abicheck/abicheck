@@ -838,6 +838,64 @@ def _option_symbol_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
     }
 
 
+def _public_entry_internal_reach(graph: SourceGraphSummary) -> set[tuple[str, str]]:
+    """``(public_entry_decl, internal_decl)`` pairs the entry reaches by calls.
+
+    An *internal* decl is a ``source_decl`` reachable from an exported entry via
+    the ``DECL_CALLS_DECL`` closure that is **not** in the public-header
+    reachability set (:func:`_public_decls`). Returns ``set()`` when the graph
+    carries no call edges or no public closure, so the version diff skips rather
+    than flagging noise on an evidence-poor side.
+    """
+    reach = _public_entry_call_reachability(graph)
+    if not reach:
+        return set()
+    public = _public_decls(graph)
+    if not public:
+        return set()
+    kinds = _kind_map(graph)
+    out: set[tuple[str, str]] = set()
+    for entry, reachable in reach.items():
+        for target in reachable:
+            if kinds.get(target) == "source_decl" and target not in public:
+                out.add((entry, target))
+    return out
+
+
+def _target_dependency_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
+    """``(target, dependency_target)`` pairs from ``TARGET_DEPENDS_ON``."""
+    return {
+        (e.src, e.dst)
+        for e in graph.edges
+        if e.kind == "TARGET_DEPENDS_ON"
+    }
+
+
+def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
+    """Map each exported ``binary_symbol`` id → the ``source`` file that owns it.
+
+    The owner is the source node that ``SOURCE_DECLARES`` the ``source_decl``
+    which ``SOURCE_DECL_MAPS_TO_SYMBOL`` the symbol. Only ``source`` (not
+    ``header``) declaring nodes count as the implementation owner. A symbol with
+    no unambiguous single owner is omitted, so the version diff never guesses.
+    """
+    kinds = _kind_map(graph)
+    symbol_to_decls: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL":
+            symbol_to_decls.setdefault(e.dst, []).append(e.src)
+    decl_to_sources: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECLARES" and kinds.get(e.src) == "source":
+            decl_to_sources.setdefault(e.dst, []).append(e.src)
+    out: dict[str, str] = {}
+    for symbol, decls in symbol_to_decls.items():
+        owners = {src for decl in decls for src in decl_to_sources.get(decl, [])}
+        if len(owners) == 1:
+            out[symbol] = next(iter(owners))
+    return out
+
+
 def diff_source_graph_findings(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> list[Change]:
@@ -1011,5 +1069,72 @@ def diff_source_graph_findings(
             new_value=f"reaches {n_syms} public symbol(s)",
             source_location=boundary,
         ))
+
+    # 7) a public entry point that newly reaches an internal (non-public)
+    #    declaration through the call graph — the version-over-version analogue
+    #    of the intra-version public-to-internal cross-check.
+    newly_internal = _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
+    reached_by_entry: dict[str, list[str]] = {}
+    for entry, target in newly_internal:
+        reached_by_entry.setdefault(entry, []).append(target)
+    for entry in sorted(reached_by_entry):
+        label = new_labels.get(entry, entry)
+        targets = sorted(new_labels.get(t, t) for t in reached_by_entry[entry])
+        findings.append(Change(
+            kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            symbol=label,
+            description=(
+                f"Public entry {label!r} now reaches internal (non-public) "
+                f"declaration(s) {', '.join(targets)} that it did not before. The "
+                "public surface has taken on an undeclared dependency; a change to "
+                "that internal entity becomes a hidden risk. Source-graph evidence "
+                "to review."
+            ),
+            old_value="no internal dependency",
+            new_value=f"reaches {len(targets)} internal decl(s)",
+            source_location=boundary,
+        ))
+
+    # 8) a new inter-target build/link dependency (added TARGET_DEPENDS_ON edge).
+    added_target_deps = _target_dependency_edges(new) - _target_dependency_edges(old)
+    for target, dep in sorted(added_target_deps):
+        tlabel = new_labels.get(target, target)
+        dlabel = new_labels.get(dep, dep)
+        findings.append(Change(
+            kind=ChangeKind.TARGET_DEPENDENCY_ADDED,
+            symbol=tlabel,
+            description=(
+                f"Target {tlabel!r} gained a build/link dependency on {dlabel!r}. "
+                "The shipped artifact may now require an additional library at "
+                "load time and takes on that dependency's ABI transitively. "
+                "Source-graph evidence to review; the DT_NEEDED diff proves any "
+                "concrete new load-time dependency."
+            ),
+            old_value="no dependency",
+            new_value=dlabel,
+            source_location=boundary,
+        ))
+
+    # 9) an exported symbol whose owning source file moved (implementation
+    #    relocated across TUs) although its name/signature are unchanged.
+    old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
+    for symbol in sorted(set(old_owner) & set(new_owner)):
+        if old_owner[symbol] != new_owner[symbol]:
+            label = new_labels.get(symbol, symbol)
+            findings.append(Change(
+                kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+                symbol=label,
+                description=(
+                    f"Exported symbol {label!r} is now produced by a different "
+                    f"source file ({old_labels.get(old_owner[symbol], old_owner[symbol])} "
+                    f"→ {new_labels.get(new_owner[symbol], new_owner[symbol])}). The "
+                    "name and signature are unchanged, so the artifact diff is "
+                    "quiet, but the implementation relocated — review for inlining, "
+                    "init-order, or ODR effects. Source-graph evidence."
+                ),
+                old_value=old_labels.get(old_owner[symbol], old_owner[symbol]),
+                new_value=new_labels.get(new_owner[symbol], new_owner[symbol]),
+                source_location=boundary,
+            ))
 
     return findings

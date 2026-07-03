@@ -66,6 +66,16 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # TLS model default is -fpic-dependent — always require both sides explicit
     # (with the local-* exception handled below).
     "tls_model": (ChangeKind.TLS_MODEL_CHANGED, {}),
+    # Language-agnostic layout/codegen flips (ADR-028 L3 follow-up). enum-size /
+    # struct-packing / LTO have a known, language-independent compiler default,
+    # so an omitted→explicit flip is a real change; char signedness is
+    # target-dependent, so its default is unknown and both sides must be
+    # explicit (the empty-dict → default-None → both-explicit path, like
+    # tls_model but without the never-default carve-out).
+    "enum_size": (ChangeKind.ENUM_SIZE_FLAG_CHANGED, {"": "int"}),
+    "struct_packing": (ChangeKind.STRUCT_PACKING_MODE_CHANGED, {"": "natural"}),
+    "lto": (ChangeKind.LTO_MODE_CHANGED, {"": "off"}),
+    "char_signedness": (ChangeKind.CHAR_SIGNEDNESS_CHANGED, {}),
 }
 
 #: TLS models that are *never* the compiler auto-default (the default is always

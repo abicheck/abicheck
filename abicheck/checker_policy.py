@@ -541,6 +541,10 @@ class ChangeKind(str, Enum):
     RTTI_MODE_CHANGED = "rtti_mode_changed"  # -frtti ↔ -fno-rtti flip → RISK
     TLS_MODEL_CHANGED = "tls_model_changed"  # -ftls-model / -fextern-tls-init flip → RISK
     THREADSAFE_STATICS_MODE_CHANGED = "threadsafe_statics_mode_changed"  # -fno-threadsafe-statics flip → RISK
+    ENUM_SIZE_FLAG_CHANGED = "enum_size_flag_changed"  # -fshort-enums flip → enum storage size changes → RISK
+    STRUCT_PACKING_MODE_CHANGED = "struct_packing_mode_changed"  # -fpack-struct / /Zp flip → member offsets shift → RISK
+    LTO_MODE_CHANGED = "lto_mode_changed"  # -flto ↔ no-LTO flip → cross-TU codegen/vtable emission differs → RISK
+    CHAR_SIGNEDNESS_CHANGED = "char_signedness_changed"  # -fsigned-char ↔ -funsigned-char flip → plain-char sign flips → RISK
     # Struct-return convention (-freg-struct-return / -fpcc-struct-return). Unlike
     # the flag-only RISK kinds above this is artifact-proven from DWARF/ABI facts,
     # so it defaults to BREAKING; the flag-only signal stays as the generic
@@ -565,6 +569,10 @@ class ChangeKind(str, Enum):
     ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
     GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
     PUBLIC_TYPEDEF_TARGET_CHANGED = "public_typedef_target_changed"  # public typedef/alias underlying type changed → API_BREAK
+    PUBLIC_MACRO_REMOVED = "public_macro_removed"  # public macro removed from the headers → API_BREAK
+    INLINE_FUNCTION_REMOVED = "inline_function_removed"  # public header-only inline function removed (no exported symbol) → API_BREAK
+    PUBLIC_TYPEDEF_REMOVED = "public_typedef_removed"  # public typedef/alias removed (no exported symbol) → API_BREAK
+    CONSTEXPR_FUNCTION_BODY_CHANGED = "constexpr_function_body_changed"  # public constexpr function body changed → compile-time eval may differ → RISK
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     # Emitted only by the source-graph diff over two L5 graph summaries
@@ -577,6 +585,9 @@ class ChangeKind(str, Enum):
     CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = "call_graph_public_entry_reachability_changed"  # impl reachable from an exported entry changed → COMPATIBLE (quality)
     INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT = "include_graph_public_header_drift"  # the include closure of a public header changed → RISK
     BUILD_OPTION_REACHES_PUBLIC_SYMBOL = "build_option_reaches_public_symbol"  # a changed ABI-relevant option reaches a public symbol → RISK
+    PUBLIC_API_INTERNAL_DEPENDENCY_ADDED = "public_api_internal_dependency_added"  # a public entry newly reaches an internal (non-public) decl via the L5 graph → RISK
+    TARGET_DEPENDENCY_ADDED = "target_dependency_added"  # the library gained an inter-target build/link dependency → RISK
+    EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED = "exported_symbol_source_owner_changed"  # an exported symbol's owning source/TU changed (implementation relocated) → RISK
 
     # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
     # Emitted by the intra-version cross-source engine (buildsource/crosscheck.py)

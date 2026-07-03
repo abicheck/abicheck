@@ -2691,6 +2691,215 @@
         "thin.abi.json"
       ],
       "description": "Provider-agreement matrix: the same PRIVATE_HEADER_LEAK finding corroborated by two providers in the rich fixture (public_header_ast + source_index, with an L5 source graph present) vs one provider in the thin fixture (public_header_ast only). Demonstrates that better corroboration comes from the combination of sources - the provider list ScanResult records grows with the evidence."
+    },
+    "case152_enum_size_flag_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "enum_size_flag_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "Identical source and exported symbols built once without -fshort-enums (v1) and once with it (v2). The captured L3 build options carry the flag; the build-evidence diff normalizes it to the canonical 'enum_size' option and reports enum_size_flag_changed. -fshort-enums shrinks every enum to the smallest integer that holds its range, so an enum member/parameter/return changes size and (as a struct member) shifts later fields. Symbol-only checks are blind; per ADR-028 D3 this is a risk signal, the artifact/type diff proves any concrete layout break."
+    },
+    "case153_struct_packing_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "struct_packing_mode_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "Same source, same symbols, built once with natural packing (v1) and once with -fpack-struct=1 (v2). The L3 build-evidence diff routes the packing flag to struct_packing_mode_changed. Reduced packing removes padding, so every member offset and the type size can change with no source or symbol change; consumers compiled against the old packing read fields at stale offsets. A risk signal; the artifact/type diff proves the concrete offset break."
+    },
+    "case154_lto_mode_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "lto_mode_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "Identical source built once without LTO (v1) and once with -flto (v2). The build-evidence diff reports lto_mode_changed. LTO changes cross-TU inlining and can devirtualize or drop vtable/typeinfo emission, so the emitted symbol set and inlined public-inline bodies can differ from a non-LTO build. A risk signal to review; the artifact diff proves any concrete symbol/layout break."
+    },
+    "case155_char_signedness_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "char_signedness_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "Same source, same symbols, built once with -fsigned-char (v1) and once with -funsigned-char (v2). Because the default char signedness is target-dependent, both sides must be explicit; the build-evidence diff then reports char_signedness_changed. A plain-char parameter or member reinterprets the same bytes with the opposite sign, silently changing comparisons and value range in recompiled consumers. Only the captured build flag exposes it."
+    },
+    "case156_public_macro_removed": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "min_evidence": "L4",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "public_macro_removed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The public header macro DEMO_MAX_ITEMS is present in the v1 source-replay surface and gone from v2. Macros never reach the binary, so no artifact layer sees the removal; only the L4 source surface does. Source that referenced the macro no longer compiles - a source/API break."
+    },
+    "case157_inline_function_removed": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "min_evidence": "L4",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "inline_function_removed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The public header-only inline function demo::clamp is present in the v1 source-replay surface and removed in v2. Being inline it had no exported binary symbol, so the artifact diff (L0) is blind; only the L4 surface observes the lost declaration. Source that called the inline no longer compiles - a source/API break."
+    },
+    "case158_public_typedef_removed": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "min_evidence": "L4",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "public_typedef_removed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The public typedef demo::handle_t is present in v1 and removed in v2. A bare typedef emits no symbol of its own, so the artifact diff cannot see the removal; source replay surfaces it. Consumer source that named the alias no longer compiles - a source/API break."
+    },
+    "case159_constexpr_function_body_changed": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L4",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "constexpr_function_body_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The public constexpr function demo::area keeps its signature and (absent) exported symbol but its body fingerprint changes between v1 and v2. Consumers that evaluated it at compile time bake in the old result until recompiled, so a mixed build can compute two different compile-time values. Invisible to any artifact; a deployment/ODR risk surfaced only by source replay."
+    },
+    "case160_public_api_internal_dep_added": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L5",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "public_api_internal_dependency_added"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "In the derived L5 source graph the exported entry demo::parse newly calls the internal (non-public-header) helper detail::validate that it did not reach in v1. The public surface takes on an undeclared dependency, so a later change to the internal entity becomes a hidden risk to the API. The version-over-version analogue of the intra-version public-to-internal cross-check; a source-graph risk, never on its own an artifact-proven break."
+    },
+    "case161_target_dependency_added": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L5",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "target_dependency_added"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The L5 build graph gains a TARGET_DEPENDS_ON edge from libdemo to libcrypto between v1 and v2. The shipped artifact may now require an additional library at load time and takes on that dependency's ABI transitively, so a deployment that only shipped the old dependency set can fail to resolve at runtime. A packaging/deployment risk; the DT_NEEDED diff proves any concrete new load-time dependency."
+    },
+    "case162_symbol_source_owner_changed": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L5",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "exported_symbol_source_owner_changed"
+      ],
+      "fixtures": [
+        "old.json",
+        "new.json"
+      ],
+      "description": "The exported symbol demo::init is produced by src/init_legacy.cpp in v1 and by src/init.cpp in v2, per the L5 source graph, while its name and signature are unchanged. The artifact diff is quiet, but the implementation behind a stable public symbol relocated across TUs - review for inlining, init-order, or ODR effects. A source-graph risk, never on its own an artifact-proven break."
     }
   }
 }

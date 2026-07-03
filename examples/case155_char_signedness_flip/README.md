@@ -1,0 +1,30 @@
+# case155_char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`)
+
+**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `char_signedness_changed` · **Evidence tier:** L3
+
+> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
+> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
+> compiler-free by `tests/test_l3l4l5_examples.py`. See
+> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+
+## What it demonstrates
+
+v1 builds with `-fsigned-char`, v2 with `-funsigned-char`. `char`, `signed char` and `unsigned char` are three distinct types; a plain-`char` parameter or struct member reinterprets the same bytes with the opposite sign, silently changing comparisons and value range in consumer code recompiled against the other setting. Because the default is target-dependent, abicheck requires **both** sides to state the flag explicitly before reporting a flip.
+
+## Why no single artifact layer sees it
+
+| Source | What it sees alone |
+|--------|--------------------|
+| Binary (L0/L1) | one self-consistent build — the flag is not in the artifact |
+| Header AST (L2) | the declarations, but not the flags the library was built with |
+| **Build context (L3)** | the captured compile options — the flag flip → the finding |
+
+Signedness of plain `char` never appears in the symbol table and is not distinguished in most layout dumps. Only the captured build flag exposes it.
+
+Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
+on its own — the artifact diff proves any concrete break; this finding flags the
+elevated risk (or source/API break) and localizes the cause for review.
+
+## How to fix
+
+Pin one char signedness across the library and consumers, or use explicit `signed char` / `unsigned char` (or `int8_t` / `uint8_t`) in public interfaces.

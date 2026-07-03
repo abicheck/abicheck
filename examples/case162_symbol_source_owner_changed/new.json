@@ -1,0 +1,73 @@
+{
+  "coverage": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "sym:_ZN4demo4initEv",
+      "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "provenance": "",
+      "src": "decl:demo::init"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::init",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "src:src/init.cpp"
+    }
+  ],
+  "external_graph_refs": [],
+  "graph_id": "sha256:a32eb873a3ec158c8ce7a1614aba496da91e71c08a7cc1d899d02d67f38d2ef1",
+  "indexes": {
+    "by_binary_symbol": {
+      "sym:_ZN4demo4initEv": [
+        "decl:demo::init"
+      ]
+    },
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::init": [
+        "src:src/init.cpp",
+        "sym:_ZN4demo4initEv"
+      ]
+    },
+    "by_target": {}
+  },
+  "nodes": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "decl:demo::init",
+      "kind": "source_decl",
+      "label": "demo::init()",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "sym:_ZN4demo4initEv",
+      "kind": "binary_symbol",
+      "label": "demo::init",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "src:src/init_legacy.cpp",
+      "kind": "source",
+      "label": "src/init_legacy.cpp",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "src:src/init.cpp",
+      "kind": "source",
+      "label": "src/init.cpp",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

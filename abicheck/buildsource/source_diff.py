@@ -342,6 +342,29 @@ def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public typedef present old, gone new. A bare typedef emits no
+    # symbol, so the artifact diff is blind; consumer source that named the alias
+    # no longer compiles (a source/API break). Generated typedefs are reported as
+    # generated_header_changed by _diff_generated, so skip them here.
+    for key in sorted(set(old_t) - set(new_t)):
+        ov = old_t[key]
+        if _is_generated(ov):
+            continue
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public typedef {name!r} was removed from the headers. It "
+                    "emitted no symbol of its own, so only source replay sees the "
+                    "removal; source that named the alias no longer compiles."
+                ),
+                old_value=ov.value or ov.type_hash,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 
@@ -370,6 +393,27 @@ def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public macro present in the old surface but gone from the new
+    # one. Macros never reach the binary, so no artifact layer sees the removal —
+    # only the source-replay surface does. Source that referenced it no longer
+    # compiles (a source/API break).
+    for key in sorted(set(old_m) - set(new_m)):
+        ov = old_m[key]
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.PUBLIC_MACRO_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public macro {name!r} was removed from the headers. Source "
+                    "that referenced it no longer compiles; there is no binary "
+                    "footprint, so only source replay sees it."
+                ),
+                old_value=ov.value,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 
@@ -397,6 +441,28 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
                         ),
                         old_value=ov.value,
                         new_value=nv.value,
+                        source_location=_loc(nv),
+                    )
+                )
+            # A constexpr *function* carries a body fingerprint (its constant
+            # value is computed per call, not stored). A body change alters the
+            # compile-time result consumers bake in, invisible to any artifact.
+            # Tri-state: require a body fingerprint on *both* sides so an
+            # evidence-tier downgrade (body dropped on one side) never fabricates
+            # a finding, and a bare constexpr *constant* (no body) never trips it.
+            elif ov.body_hash and nv.body_hash and ov.body_hash != nv.body_hash:
+                changes.append(
+                    Change(
+                        kind=ChangeKind.CONSTEXPR_FUNCTION_BODY_CHANGED,
+                        symbol=name,
+                        description=(
+                            f"Public constexpr function {name!r} body changed with "
+                            "no signature or exported-symbol change. Consumers that "
+                            "evaluated it at compile time keep the old result until "
+                            "recompiled — a mixed-build/ODR risk."
+                        ),
+                        old_value=ov.body_hash,
+                        new_value=nv.body_hash,
                         source_location=_loc(nv),
                     )
                 )
@@ -463,6 +529,26 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
                     source_location=_loc(nv),
                 )
             )
+    # Removal: a public inline function present old, gone new. Because it was
+    # inline it had no exported symbol, so the artifact diff is blind; source
+    # that called it no longer compiles (a source/API break).
+    for key in sorted(set(old_i) - set(new_i)):
+        ov = old_i[key]
+        name = ov.qualified_name
+        changes.append(
+            Change(
+                kind=ChangeKind.INLINE_FUNCTION_REMOVED,
+                symbol=name,
+                description=(
+                    f"Public inline function {name!r} was removed. It had no "
+                    "exported binary symbol, so only source replay sees the loss; "
+                    "source that called it no longer compiles."
+                ),
+                old_value=ov.body_hash or ov.signature_hash,
+                new_value="",
+                source_location=_loc(ov),
+            )
+        )
     return changes
 
 

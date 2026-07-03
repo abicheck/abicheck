@@ -182,6 +182,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "rtti_mode_changed": "L3",
     "tls_model_changed": "L3",
     "threadsafe_statics_mode_changed": "L3",
+    # Language-agnostic layout/codegen flag flips (ADR-028 L3 follow-up): each is
+    # proven only from the captured build options, not from any artifact.
+    "enum_size_flag_changed": "L3",
+    "struct_packing_mode_changed": "L3",
+    "lto_mode_changed": "L3",
+    "char_signedness_changed": "L3",
     # ADR-035 D4 cross-source check that compares L2 header context against the
     # L3 build flags — only visible once the build evidence is present.
     "header_build_context_mismatch": "L3",
@@ -189,10 +195,23 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # source graph carried in a BuildSourcePack (no artifact layer sees them) ──
     # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts.
     "odr_type_variant": "L4",
+    # Source-replay removals / constexpr body change (ADR-030 L4): a removed
+    # macro/inline/typedef leaves no artifact footprint, and a constexpr function
+    # body change alters only compile-time evaluation — all L4-only.
+    "public_macro_removed": "L4",
+    "inline_function_removed": "L4",
+    "public_typedef_removed": "L4",
+    "constexpr_function_body_changed": "L4",
     # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
     # cleanly when no call-graph pass populated the graph), so its minimum
     # evidence is the graph tier, not the L4 replay surface that carries it. ──
     "public_to_internal_dependency": "L5",
+    # Version-over-version source-graph deltas (ADR-031 L5): a public entry newly
+    # reaching an internal decl, a new inter-target dependency, or an exported
+    # symbol's owning source moving are all derived from the L5 graph.
+    "public_api_internal_dependency_added": "L5",
+    "target_dependency_added": "L5",
+    "exported_symbol_source_owner_changed": "L5",
     # ── ADR-035 D8 single-release hygiene audit ──
     # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
     # rtti_for_internal_type needs header provenance to know a type is internal.

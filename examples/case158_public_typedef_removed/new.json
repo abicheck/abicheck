@@ -1,0 +1,29 @@
+{
+  "coverage": {},
+  "library": "libdemo.so",
+  "mappings": {
+    "public_header_to_target": {},
+    "source_decl_to_binary_symbol": {},
+    "source_type_to_debug_type": {},
+    "synthesized_symbol_to_owner": {}
+  },
+  "odr_conflicts": [],
+  "reachable_source_surface": {
+    "declarations": [],
+    "inline_bodies": [],
+    "macros": [],
+    "templates": [],
+    "types": []
+  },
+  "roots": {
+    "exported_symbols": [],
+    "forced_public": [],
+    "public_header_declarations": []
+  },
+  "schema_version": 1,
+  "target_id": "",
+  "unmatched": {
+    "decls_without_symbol": [],
+    "symbols_without_decl": []
+  }
+}

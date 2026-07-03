@@ -3,7 +3,7 @@
 
 Listed in `API_BREAK_KINDS` — source/API-level break.
 
-_10 case(s)._ [← back to all examples](../index.md)
+_13 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -13,6 +13,9 @@ _10 case(s)._ [← back to all examples](../index.md)
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
 | [case148_xcheck_header_build_mismatch](../case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
 | [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
+| [case156_public_macro_removed](../case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
+| [case157_inline_function_removed](../case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
+| [case158_public_typedef_removed](../case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](../case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case34_access_level](../case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |

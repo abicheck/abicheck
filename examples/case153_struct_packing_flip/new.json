@@ -1,0 +1,59 @@
+{
+  "build_options": [
+    {
+      "abi_relevant": true,
+      "key": "struct_packing",
+      "raw": "-fpack-struct=1",
+      "scope": "global",
+      "value": "1"
+    }
+  ],
+  "build_root": "",
+  "compile_units": [
+    {
+      "abi_relevant_flags": [
+        "-fpack-struct=1"
+      ],
+      "argv": [],
+      "compiler": "",
+      "defines": {},
+      "directory": "",
+      "id": "tu0",
+      "include_paths": [],
+      "input_files": [],
+      "language": "CXX",
+      "output": "",
+      "raw_ref": "",
+      "source": "src/lib.cpp",
+      "standard": "",
+      "sysroot": null,
+      "system_include_paths": [],
+      "target_id": "",
+      "target_triple": "",
+      "undefines": []
+    }
+  ],
+  "diagnostics": [],
+  "generated_files": [],
+  "generators": [],
+  "link_units": [],
+  "raw_artifacts": [],
+  "schema_version": 1,
+  "source_root": "",
+  "targets": [
+    {
+      "build_system": "generic",
+      "confidence": "unknown",
+      "dependencies": [],
+      "id": "libdemo",
+      "kind": "shared_library",
+      "name": "demo",
+      "outputs": [],
+      "private_headers": [],
+      "public_headers": [],
+      "source_files": [],
+      "visibility": "unknown"
+    }
+  ],
+  "toolchains": []
+}
