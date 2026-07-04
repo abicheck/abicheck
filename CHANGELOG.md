@@ -28,6 +28,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   binaries and are validated compiler-free (`scripts/gen_l3l4l5_examples.py`,
   `tests/test_l3l4l5_examples.py`).
 
+### Documentation
+
+- **Explained *what each evidence layer buys* for accuracy** — a new
+  "What each layer buys: fewer false negatives *and* fewer false positives"
+  section in `concepts/evidence-and-detectability.md` with the tracked per-tier
+  (L0–L3) matrix, plus a "layering principle" callout in the ABI/API handling
+  guide. Makes explicit that adding a layer cuts *both* error kinds (not a
+  trade-off), why L1 transiently introduces false positives that L2 scoping
+  removes, and how L4/L5 extend the same story to source-only breaks no artifact
+  tier can see.
+
 ### Fixed
 
 - **Docs: the `scan --depth` ladder is now stated identically everywhere**
