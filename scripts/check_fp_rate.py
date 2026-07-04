@@ -189,8 +189,11 @@ def _elf_only_function_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _internal_field_reordered() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # A struct nobody public reaches: reordering its fields is invisible to ABI.
+def _internal_field_type_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A struct nobody public reaches: a field type change is BREAKING before
+    # scoping (type_field_type_changed) and scoping is what makes it
+    # non-breaking. (A same-size field *reorder* emits no finding at all — even
+    # unscoped, even public — so it guards no scoping regression; Codex #487.)
     old = _snap(
         "1",
         functions=[_fn("api")],
@@ -199,7 +202,7 @@ def _internal_field_reordered() -> tuple[AbiSnapshot, AbiSnapshot]:
     new = _snap(
         "2",
         functions=[_fn("api")],
-        types=[_rec("InternalCache", size=128, fields=[("b", "long"), ("a", "int")])],
+        types=[_rec("InternalCache", size=128, fields=[("a", "long long"), ("b", "long")])],
     )
     return old, new
 
@@ -559,7 +562,7 @@ def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
-    Case("internal_field_reordered", True, _internal_field_reordered),
+    Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
@@ -981,7 +984,7 @@ def evaluate(corpus: list[Case] = CORPUS) -> Outcome:
 CASE_CATEGORY: dict[str, str] = {
     # struct/record layout reachability
     "internal_struct_size": "struct-layout",
-    "internal_field_reordered": "struct-layout",
+    "internal_field_type_changed": "struct-layout",
     "public_struct_size": "struct-layout",
     "leaked_internal_via_public_api": "struct-layout",
     # symbol linkage / visibility
