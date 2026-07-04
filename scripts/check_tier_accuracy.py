@@ -462,7 +462,11 @@ def under_call_monotonicity_violations(trajs: list[CaseTrajectory]) -> list[str]
             if oc == "under" and seen_ok:
                 bad.append(t.name)
                 break
-            if oc != "under":
+            # Arm only on a *genuinely correct* call — an over-call was wrong in
+            # the opposite direction, not a break the tier "caught right", so a
+            # later over→under swing (possible only for risk-band cases) is a
+            # distinct pair of errors, not evidence being hidden.
+            if oc == "correct":
                 seen_ok = True
     return bad
 

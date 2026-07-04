@@ -68,6 +68,28 @@ def test_under_call_monotonicity(trajectories):
     assert tier_gate.under_call_monotonicity_violations(trajectories) == []
 
 
+def test_monotonicity_arms_only_on_correct_not_over_call():
+    """A lower-tier *over*-call must not arm the under-call check — only a
+    genuinely *correct* call counts as a break the tier caught (CodeRabbit)."""
+    Traj = tier_gate.CaseTrajectory
+    # expected=risk(1): L0 over-calls (2), L1 under-calls (0) — an over→under
+    # swing is two distinct errors, NOT a hidden correctly-caught break.
+    over_then_under = Traj(
+        "over_then_under", "x", 1, Tier.L3,
+        {Tier.L0: 2, Tier.L1: 0, Tier.L2: 1, Tier.L3: 1},
+    )
+    assert tier_gate.under_call_monotonicity_violations([over_then_under]) == []
+    # expected=breaking(2): L0 correct (2), L1 under (0) — a real break the tier
+    # caught, then hidden. This IS an authority-rule violation.
+    correct_then_under = Traj(
+        "correct_then_under", "x", 2, Tier.L3,
+        {Tier.L0: 2, Tier.L1: 0, Tier.L2: 2, Tier.L3: 2},
+    )
+    assert tier_gate.under_call_monotonicity_violations([correct_then_under]) == [
+        "correct_then_under"
+    ]
+
+
 def test_lower_levels_are_demonstrably_insufficient(trajectories):
     """The representative-example guarantee: some real breaks are invisible to a
     stripped binary (L0 under-calls at least one true break)."""

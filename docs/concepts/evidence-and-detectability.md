@@ -57,8 +57,12 @@ struct is non-public ([case118](../examples/case118_internal_struct_field_added_
 
 ### What each layer buys: fewer false negatives *and* fewer false positives
 
-Adding a layer improves accuracy on **both** error axes at once — it is not a
-trade-off between missing breaks and crying wolf. abicheck tracks this as a CI
+Across the full staircase, adding evidence drives **both** error axes down — it
+is not a trade-off where you must choose between missing breaks and crying wolf.
+The gain is not perfectly monotonic at *every single* step (a middle layer can
+see a change before it has the context to scope it — L1 below is exactly that),
+but each higher layer either recovers a false negative or removes a false
+positive the layer beneath could not. abicheck tracks this as a CI
 gate (`scripts/check_tier_accuracy.py`): it runs one labelled change per case at
 each evidence level and records, per level, whether the tool *under-calls* it
 (a **false negative** — the layer is structurally *blind* to a real break) or
@@ -111,7 +115,7 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > `exported_not_public`, `private_header_leak`). Their accuracy is tracked
 > separately: by the cross-check FP/FN corpus (also in `check_fp_rate.py`) and by
 > each example's `min_evidence` tier in `examples/ground_truth.json`.
-
+>
 > **The derived sixth layer, `L5`.** Beyond the five sources above, abicheck
 > *derives* an `L5` source/build graph (include/type/call reachability, ADR-031)
 > from L3 (and any L4 surface) to **localize and explain** findings and
