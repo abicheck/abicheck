@@ -122,10 +122,9 @@ def test_json_mode_emits_metrics(capsys):
 
 
 def test_every_case_carries_a_category_tag():
-    """The import-time guard: no corpus case is silently 'uncategorized'."""
-    tagged = set(fp_gate.CASE_CATEGORY)
-    corpus = {c.name for c in fp_gate.CORPUS}
-    assert corpus <= tagged, corpus - tagged
+    """No corpus case is silently 'uncategorized' (enforced from main() via
+    uncategorized_cases(), not an import-time assert)."""
+    assert fp_gate.uncategorized_cases() == []
     assert all(fp_gate._category_of(c.name) != "uncategorized" for c in fp_gate.CORPUS)
 
 

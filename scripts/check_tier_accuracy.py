@@ -396,7 +396,7 @@ class CaseTrajectory:
     axis: str
     expected_band: int
     top_tier: Tier
-    bands: dict[Tier, int]  # tier -> observed band (only tiers <= top_tier)
+    bands: dict[Tier, int]  # tier -> observed band, for *every* tier in ALL_TIERS
 
     def outcome(self, tier: Tier) -> str:
         """``correct`` / ``under`` (FN family) / ``over`` (FP family) at *tier*."""
@@ -406,14 +406,18 @@ class CaseTrajectory:
         return "under" if b < self.expected_band else "over"
 
     def tiers(self) -> list[Tier]:
-        return [t for t in ALL_TIERS if t <= self.top_tier]
+        return list(ALL_TIERS)
 
 
 def evaluate(corpus: list[TierCase] = CORPUS) -> list[CaseTrajectory]:
     out: list[CaseTrajectory] = []
     for case in corpus:
         old, new = case.build()
-        bands = {t: band_at(old, new, t) for t in ALL_TIERS if t <= case.top_tier}
+        # Evaluate every case at *every* tier — L3 is a superset projection of
+        # L2 for these snapshots, so an L2-top case must still be correct at L3;
+        # capping at top_tier would omit it from the L3 gate and let a future
+        # build-context regression slip through (Codex review #487).
+        bands = {t: band_at(old, new, t) for t in ALL_TIERS}
         out.append(
             CaseTrajectory(case.name, case.axis, case.expected_band, case.top_tier, bands)
         )
@@ -421,8 +425,19 @@ def evaluate(corpus: list[TierCase] = CORPUS) -> list[CaseTrajectory]:
 
 
 def top_tier_mismatches(trajs: list[CaseTrajectory]) -> list[str]:
-    """Cases the tool gets wrong even with full (top-tier) evidence."""
-    return [t.name for t in trajs if t.outcome(t.top_tier) != "correct"]
+    """Cases the tool gets wrong at their top tier *or any tier above it*.
+
+    A case must reach its ground-truth band once it has ``top_tier`` evidence and
+    keep it with any additional evidence (a superset projection cannot lose a
+    verdict). Checking every tier >= top_tier — not just top_tier itself —
+    guarantees an L2-correct case is also verified at L3."""
+    bad: list[str] = []
+    for t in trajs:
+        if any(
+            tier >= t.top_tier and t.outcome(tier) != "correct" for tier in ALL_TIERS
+        ):
+            bad.append(t.name)
+    return bad
 
 
 def under_call_monotonicity_violations(trajs: list[CaseTrajectory]) -> list[str]:
@@ -442,17 +457,17 @@ def under_call_monotonicity_violations(trajs: list[CaseTrajectory]) -> list[str]
 
 
 def per_tier_counts(trajs: list[CaseTrajectory]) -> dict[str, dict[str, int]]:
-    """Per-tier {over, under, correct, n} over cases that reach that tier."""
+    """Per-tier {over, under, correct, n} over the whole corpus (every case is
+    evaluated at every tier)."""
     out: dict[str, dict[str, int]] = {}
     for tier in ALL_TIERS:
-        rows = [t for t in trajs if tier <= t.top_tier]
-        if not rows:
+        if not trajs:
             continue
         out[tier.name] = {
-            "n": len(rows),
-            "correct": sum(1 for t in rows if t.outcome(tier) == "correct"),
-            "over": sum(1 for t in rows if t.outcome(tier) == "over"),
-            "under": sum(1 for t in rows if t.outcome(tier) == "under"),
+            "n": len(trajs),
+            "correct": sum(1 for t in trajs if t.outcome(tier) == "correct"),
+            "over": sum(1 for t in trajs if t.outcome(tier) == "over"),
+            "under": sum(1 for t in trajs if t.outcome(tier) == "under"),
         }
     return out
 
@@ -467,8 +482,6 @@ def resolved_by_transition(trajs: list[CaseTrajectory]) -> dict[str, dict[str, l
         fp: list[str] = []
         fn: list[str] = []
         for t in trajs:
-            if hi > t.top_tier:
-                continue
             lo_oc, hi_oc = t.outcome(lo), t.outcome(hi)
             if lo_oc == "over" and hi_oc == "correct":
                 fp.append(t.name)
@@ -499,15 +512,14 @@ def render_markdown(trajs: list[CaseTrajectory] | None = None) -> str:
         "### Per-tier accuracy — what each evidence level buys",
         "",
         "`FN` = tier under-calls the truth (layer insufficient); "
-        "`FP` = tier over-calls (layer lacks scope). `·` = tier not modelled.",
+        "`FP` = tier over-calls (layer lacks scope). Every case is evaluated at "
+        "every tier.",
         "",
         "| Case | Axis | Truth | L0 | L1 | L2 | L3 |",
         "|------|------|-------|:--:|:--:|:--:|:--:|",
     ]
     for t in trajs:
-        cells = []
-        for tier in ALL_TIERS:
-            cells.append(_CELL[t.outcome(tier)] if tier <= t.top_tier else "·")
+        cells = [_CELL[t.outcome(tier)] for tier in ALL_TIERS]
         lines.append(
             f"| {t.name} | {t.axis} | {_BAND_NAME[t.expected_band]} | "
             + " | ".join(cells)

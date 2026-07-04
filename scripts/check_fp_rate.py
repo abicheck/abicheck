@@ -1009,12 +1009,13 @@ CASE_CATEGORY: dict[str, str] = {
 }
 
 
-# Guard: every corpus case must carry an axis tag so the trend breakdown never
-# silently buckets a new case as "uncategorized".
-assert {c.name for c in CORPUS} <= set(CASE_CATEGORY), (
-    "FP-rate corpus cases missing a CASE_CATEGORY axis tag: "
-    f"{sorted({c.name for c in CORPUS} - set(CASE_CATEGORY))}"
-)
+def uncategorized_cases() -> list[str]:
+    """Corpus cases lacking a CASE_CATEGORY axis tag (would fall into the
+    ``uncategorized`` bucket in the trend breakdown). Enforced from ``main()``
+    and mirrored by ``test_every_case_carries_a_category_tag`` — not an
+    import-time ``assert`` (a module side effect, stripped under ``python -O``;
+    scripts/CLAUDE.md forbids import-time behaviour)."""
+    return sorted({c.name for c in CORPUS} - set(CASE_CATEGORY))
 
 
 def _category_of(name: str) -> str:
@@ -1125,6 +1126,14 @@ def main(argv: list[str] | None = None) -> int:
         "(for a CI step summary / release-over-release trend).",
     )
     args = parser.parse_args(argv)
+
+    missing_axis = uncategorized_cases()
+    if missing_axis:
+        print(
+            f"ERROR: FP-rate corpus cases missing a CASE_CATEGORY axis tag: {missing_axis}",
+            file=sys.stderr,
+        )
+        return 1
 
     outcome = evaluate()
     cc_outcome = evaluate_crosschecks()

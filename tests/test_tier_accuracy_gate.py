@@ -38,6 +38,12 @@ _spec.loader.exec_module(tier_gate)
 Tier = tier_gate.Tier
 
 
+def _case(name):
+    """Look a corpus case up by name — never by position, so reordering or
+    inserting CORPUS entries can't silently repoint a test at a different case."""
+    return next(c for c in tier_gate.CORPUS if c.name == name)
+
+
 @pytest.fixture(scope="module")
 def trajectories():
     return tier_gate.evaluate()
@@ -97,7 +103,7 @@ def test_build_context_catches_what_artifacts_cannot(trajectories):
 
 
 def test_l0_projection_strips_types_and_signatures():
-    old, _ = tier_gate.CORPUS[0].build()
+    old, _ = _case("public_struct_size_changed").build()
     p = tier_gate.project(old, Tier.L0)
     assert p.types == [] and p.enums == []
     assert p.elf_only_mode is True and p.from_headers is False
@@ -141,7 +147,7 @@ def test_l0_projection_degrades_variables_to_bare_symbols():
 
 
 def test_l1_projection_keeps_layout_but_drops_header_scope():
-    old, _ = tier_gate.CORPUS[0].build()
+    old, _ = _case("public_struct_size_changed").build()
     p = tier_gate.project(old, Tier.L1)
     assert p.types, "L1 must retain type layout"
     assert p.from_headers is False
@@ -152,7 +158,7 @@ def test_l1_projection_keeps_layout_but_drops_header_scope():
 
 
 def test_l3_projection_retains_build_mode():
-    old, _ = tier_gate.CORPUS[-1].build()  # cross_stdlib case carries build_mode
+    old, _ = _case("cross_stdlib_same_size").build()  # carries build_mode
     assert tier_gate.project(old, Tier.L2).build_mode is None
     assert tier_gate.project(old, Tier.L3).build_mode is not None
 
