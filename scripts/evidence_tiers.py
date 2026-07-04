@@ -205,6 +205,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "public_macro_removed": "L4",
     "inline_function_removed": "L4",
     "public_typedef_removed": "L4",
+    "concept_tightened": "L4",
     # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
     # cleanly when no call-graph pass populated the graph), so its minimum
     # evidence is the graph tier, not the L4 replay surface that carries it. ──
@@ -258,7 +259,6 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     "case52_rpath_leak": "L0",
     "case60_base_class_position_changed": "L1",
     "case98_cxx_standard_floor_raised": "L0",
-    "case105_concept_tightening": "L2",
     "case118_internal_struct_field_added_scoped": "L2",
     "case119_internal_struct_field_removed_scoped": "L2",
     "case120_internal_struct_reordered_scoped": "L2",

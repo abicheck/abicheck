@@ -3,14 +3,13 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_23 case(s)._ [← back to all examples](../index.md)
+_22 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case03_compat_addition](../case03_compat_addition.md) | Compatible Addition (New Export) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case05_soname](../case05_soname.md) | Missing SONAME | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |

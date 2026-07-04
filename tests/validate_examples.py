@@ -37,6 +37,8 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
+
 REPO_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = REPO_DIR / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
@@ -979,6 +981,33 @@ def _handle_build_error(
     return CaseResult(name, "ERROR", expected_raw, None, build_err)
 
 
+
+def _run_source_smoke(
+    name: str,
+    entry: dict,
+    case_dir: Path,
+    tmp_base: Path,
+    expected_raw: str | None,
+) -> CaseResult | None:
+    """Run optional consumer-source compile/link smoke declared by ground_truth."""
+    smoke = entry.get("source_smoke")
+    if not smoke:
+        return None
+
+    compiler = _find_compiler(True)
+    if compiler is None:
+        return CaseResult(name, "SKIP", expected_raw, None, "no C++ compiler for source smoke")
+
+    result = run_source_smoke(
+        SourceSmokeSpec.from_dict(smoke),
+        case_dir=case_dir,
+        work_dir=tmp_base / f"{name}__source_smoke",
+        compiler=compiler,
+    )
+    if not result.ok:
+        return CaseResult(name, "FAIL", expected_raw, None, "; ".join(result.failures))
+    return CaseResult(name, "PASS", expected_raw, entry.get("expected"), result.proof)
+
 def run_case(
     name: str,
     entry: dict,
@@ -997,6 +1026,10 @@ def run_case(
     if isinstance(resolved, CaseResult):
         return resolved._replace(variant=variant)
     case_dir, (v1_src, v2_src, v1_hdr, v2_hdr) = resolved
+
+    smoke_result = _run_source_smoke(name, entry, case_dir, tmp_base, expected_raw)
+    if smoke_result is not None:
+        return smoke_result._replace(variant=variant)
 
     # A producer-scoped known_gap only excuses a mismatch under the producer that
     # actually built the case (resolved per source language); on other producers

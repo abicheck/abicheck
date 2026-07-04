@@ -938,6 +938,9 @@ REGISTRY = ChangeKindRegistry([
               "type fails to compile."),
 
     # ── Build-config / probe-harness patterns (PR-C) ────────────────────
+    _E("concept_tightened", _A,
+       impact="A public C++20 concept became more constrained; consumer templates or calls that satisfied the old constraint may no longer compile against the new headers.",
+       description_template="Concept constraint tightened: {name}"),
     _E("api_depends_on_consumer_env", _R,
        impact="A public declaration is present under one consumer build "
               "configuration (compiler, language standard, macro set) "
