@@ -37,11 +37,18 @@ ABICC/libabigail on a stable cross-tool corpus?"
 |------|:-----:|-----------|--------|----------------|
 | Catalog metadata | 162 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 153 compare / 9 audit-cross-source | Single source of truth for examples, verdicts, expected kinds, and minimum evidence |
 | Build/autodiscovery | 161 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` in CI | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
-| Default/debug verdicts | 162 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | gcc: 132 PASS / 4 XFAIL / 26 SKIP; clang: 133 PASS / 4 XFAIL / 25 SKIP | Green default/debug verdict lane; XFAIL and SKIP are explicit known gaps or non-default catalog classes |
+| Full example proof matrix | 162 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | 159 COVERED / 3 UNRESOLVED | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
+| Default/debug verdicts | 162 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | gcc: 132 PASS / 4 XFAIL / 26 SKIP; clang: 133 PASS / 4 XFAIL / 25 SKIP | Single-library debug lane only; XFAIL is not green full-catalog coverage |
+| Bundle release verdicts | 5 bundle cases | `PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json` | 5 PASS | Runs the ADR-023 multi-library examples through `abicheck compare old/ new/` |
 | Runtime smoke | 162 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
 | Release headers | 162 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | 132 PASS / 4 XFAIL / 26 SKIP | Reduced-evidence informational lane; false-positive guard passed |
 | Stripped headers | 162 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | 127 PASS / 3 FAIL / 6 XFAIL / 26 SKIP | Reduced-evidence informational lane; three expected signal-loss backlogs remain |
 | Build/source smoke | 7 representative cases | `validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 7 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
+
+Current unresolved full-example cases: `case97_api_depends_on_consumer_env`,
+`case105_concept_tightening`, and
+`case111_enumerable_thread_specific_lambda_ambiguity`. These remain blockers for
+claiming full-catalog expected-behavior coverage.
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, and `case129_struct_return_convention`.

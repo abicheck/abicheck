@@ -198,3 +198,86 @@ jobs:
             test -f "$f" && echo "### $mode" >> $GITHUB_STEP_SUMMARY && \
               python -c "import json;d=json.load(open('$f'));print('summary:',json.dumps(d['summary']))" >> $GITHUB_STEP_SUMMARY || true
           done
+
+  full-example-matrix:
+    name: Full example matrix
+    runs-on: ubuntu-latest
+    needs: [validate-examples, artifact-modes]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create results dir
+        run: mkdir -p results downloaded
+
+      - name: Download validation artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: downloaded
+          pattern: examples-validation-*
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y castxml gcc g++ clang cmake binutils
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Validate non-default example owners
+        run: |
+          PYTHONPATH=. pytest \
+            tests/test_g20_catalog.py \
+            tests/test_l3l4l5_examples.py \
+            tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
+            -q
+
+      - name: Validate bundle examples
+        run: |
+          PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json \
+            > results/bundle-examples.json
+
+      - name: Build full example matrix
+        run: |
+          PYTHONPATH=. python validation/scripts/collect_full_example_matrix.py \
+            --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
+            --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
+            --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
+            --bundle results/bundle-examples.json \
+            --proof-g20 \
+            --proof-l3l4l5 \
+            --proof-btf \
+            --out results/full-example-matrix.json
+
+      - name: Upload full matrix
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples-full-matrix
+          path: results/
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Full Example Matrix" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          test -f results/full-example-matrix.json && \
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d=json.load(open("results/full-example-matrix.json"))
+          print("summary:", json.dumps(d["summary"], sort_keys=True))
+          if d["unresolved_cases"]:
+              print("unresolved:", ", ".join(d["unresolved_cases"]))
+          if d["failed_cases"]:
+              print("failed:", ", ".join(d["failed_cases"]))
+          PY
