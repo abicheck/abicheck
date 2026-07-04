@@ -304,7 +304,12 @@ def _internal_struct_size_changed():
     return old, new
 
 
-def _internal_field_reordered():
+def _internal_field_type_changed():
+    # An internal struct's field type changes (int -> long long): a real layout
+    # change that L1 sees and over-calls (FP), and L2 scopes out as internal —
+    # the non-breaking counterpart that exercises the L1->L2 scoping guard on the
+    # struct-layout axis. (A same-size field *reorder* emits no finding at all, so
+    # it would be correct at every tier and guard nothing — Codex review #487.)
     old = _snap(
         "1",
         functions=[_fn("api")],
@@ -313,7 +318,7 @@ def _internal_field_reordered():
     new = _snap(
         "2",
         functions=[_fn("api")],
-        types=[_rec("Internal", size=128, fields=[("b", "long"), ("a", "int")])],
+        types=[_rec("Internal", size=128, fields=[("a", "long long"), ("b", "long")])],
     )
     return old, new
 
@@ -379,7 +384,7 @@ CORPUS: list[TierCase] = [
     TierCase("public_enum_value_changed", "enum-reachability", 2, Tier.L2, _public_enum_value_changed),
     # non-breaking — false positive removed by the scoping layer (L2)
     TierCase("internal_struct_size_changed", "struct-layout", 0, Tier.L2, _internal_struct_size_changed),
-    TierCase("internal_field_reordered", "struct-layout", 0, Tier.L2, _internal_field_reordered),
+    TierCase("internal_field_type_changed", "struct-layout", 0, Tier.L2, _internal_field_type_changed),
     TierCase("elf_only_helper_param_changed", "symbol-signature", 0, Tier.L2, _elf_only_helper_param_changed),
     TierCase("internal_enum_value_changed", "enum-reachability", 0, Tier.L2, _internal_enum_value_changed),
     # risk — only build context (L3) surfaces any signal
