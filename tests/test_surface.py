@@ -189,6 +189,34 @@ class TestComputePublicSurface:
         assert "ns::Mode" in surf.all_types
         assert "ns::Mode" not in surf.public_types
 
+    def test_ambiguous_enum_tail_keeps_all_matches_public(self):
+        # Two namespaces define an enum with the same tail (``Mode``). A public
+        # signature spelled unqualified ``Mode`` has lost its namespace context,
+        # so which enum it meant is genuinely ambiguous. Conservatively mark
+        # *both* canonical names public (over-keep) rather than resolving to the
+        # first by snapshot order — else a member change on the later enum is
+        # silently scoped out (Codex review #487).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", params=("Mode",))],
+            enums=[_enum("ns1::Mode"), _enum("ns2::Mode")],
+        )
+        surf = compute_public_surface(snap)
+        assert {"ns1::Mode", "ns2::Mode"} <= surf.public_types
+
+    def test_ambiguous_record_tail_keeps_all_matches_public(self):
+        # Same ambiguity for records: an unqualified ``Impl`` reference must keep
+        # both ``ns1::Impl`` and ``ns2::Impl`` public.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", params=("Impl *",))],
+            types=[_rec("ns1::Impl"), _rec("ns2::Impl")],
+        )
+        surf = compute_public_surface(snap)
+        assert {"ns1::Impl", "ns2::Impl"} <= surf.public_types
+
 
 # ── change_in_public_surface ────────────────────────────────────────────────
 
