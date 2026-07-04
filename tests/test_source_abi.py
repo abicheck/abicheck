@@ -105,7 +105,25 @@ def test_source_abi_tu_roundtrip() -> None:
         source="src/foo.cpp",
         public_header_roots=["include/foo.h"],
         macros=[_entity("FOO_SIZE", "macro", value="16")],
-        functions=[_entity("foo::bar", "function", mangled="_ZN3foo3barEv")],
+        functions=[
+            SourceEntity(
+                id="decl://foo::bar",
+                kind="function",
+                qualified_name="foo::bar",
+                mangled_name="_ZN3foo3barEv",
+                names={
+                    "source_qualified": "foo::bar",
+                    "mangled": "_ZN3foo3barEv",
+                    "usr": "c:@N@foo@F@bar#",
+                },
+                relations={"template_owner": "foo::Box<T>"},
+                ownership={
+                    "visibility": "public_header",
+                    "origin": "PUBLIC_HEADER",
+                    "role": "own_api_candidate",
+                },
+            )
+        ],
     )
     restored = SourceAbiTu.from_dict(tu.to_dict())
     assert restored.schema_version == SOURCE_ABI_VERSION
@@ -113,6 +131,9 @@ def test_source_abi_tu_roundtrip() -> None:
     assert restored.extractor == {"name": "castxml", "version": "0.6"}
     assert [e.qualified_name for e in restored.macros] == ["FOO_SIZE"]
     assert restored.functions[0].mangled_name == "_ZN3foo3barEv"
+    assert restored.functions[0].names["usr"] == "c:@N@foo@F@bar#"
+    assert restored.functions[0].relations["template_owner"] == "foo::Box<T>"
+    assert restored.functions[0].ownership["role"] == "own_api_candidate"
     # all_entities flattens every bucket
     assert {e.qualified_name for e in restored.all_entities()} == {
         "FOO_SIZE",
@@ -142,6 +163,15 @@ def test_source_entity_from_dict_boolean_safe_api_relevant() -> None:
     assert (
         SourceEntity.from_dict({"id": "x", "api_relevant": False}).api_relevant is False
     )
+
+
+def test_source_entity_from_dict_tolerates_null_evidence_dicts() -> None:
+    ent = SourceEntity.from_dict(
+        {"id": "x", "names": None, "relations": "bad", "ownership": []}
+    )
+    assert ent.names == {}
+    assert ent.relations == {}
+    assert ent.ownership == {}
 
 
 def test_source_abi_surface_roundtrip() -> None:
@@ -899,6 +929,264 @@ def test_demangled_rematch_is_noop_when_already_matched() -> None:
     matched = {"_Z1fi", "_Z1fd"}
     new = _demangled_rematch([fi, fd], mapping, matched, {"_Z1fi", "_Z1fd"})
     assert new == {}
+
+
+@needs_demangler
+def test_template_instantiation_exports_attribute_to_public_pattern() -> None:
+    # oneDAL-like Flow-2 shape: source replay sees a public template pattern, but
+    # the binary exports concrete instantiations. Exact mangled matching cannot
+    # connect `Box<T>::get` with `_ZN2ns3BoxIiE3getEv`; the template-pattern tier
+    # attributes the concrete export without pretending it was an exact decl match.
+    tu = SourceAbiTu(
+        functions=[_entity("ns::Box<T>::get", "function", mangled="")],
+    )
+    surface = link_source_abi(
+        [tu],
+        exported_symbols=["_ZN2ns3BoxIiE3getEv", "_ZN2ns3BoxIdE3getEv"],
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["matched_symbols"] == 0
+    assert surface.coverage["template_instantiation_symbols_matched"] == 2
+    assert surface.mappings["template_instantiation_symbol_to_decl"] == {
+        "_ZN2ns3BoxIdE3getEv": "ns::Box<T>::get",
+        "_ZN2ns3BoxIiE3getEv": "ns::Box<T>::get",
+    }
+    # The evidence must survive baseline serialization.
+    restored = SourceAbiSurface.from_dict(surface.to_dict())
+    assert restored.mappings["template_instantiation_symbol_to_decl"] == (
+        surface.mappings["template_instantiation_symbol_to_decl"]
+    )
+
+
+@needs_demangler
+def test_relink_attributes_template_instantiation_exports() -> None:
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    tu = SourceAbiTu(
+        functions=[_entity("ns::Box<T>::get", "function", mangled="")],
+    )
+    surface = link_source_abi([tu])  # source-only pack, later merged with binary
+    relink_surface_exports(surface, ["_ZN2ns3BoxIiE3getEv"])
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["template_instantiation_symbols_matched"] == 1
+    assert surface.mappings["template_instantiation_symbol_to_decl"] == {
+        "_ZN2ns3BoxIiE3getEv": "ns::Box<T>::get",
+    }
+
+
+@needs_demangler
+def test_template_instantiation_attribution_skips_ambiguous_source_patterns() -> None:
+    # Two source declarations erase to the same `ns::Box<>::get` pattern (e.g.
+    # overloads whose extractor could not provide a mangled identity). Claiming a
+    # concrete export would hide an overload ambiguity, so leave it unmatched.
+    tu = SourceAbiTu(
+        functions=[
+            _entity("ns::Box<T>::get", "function", signature_hash="sig:int"),
+            _entity("ns::Box<U>::get", "function", signature_hash="sig:double"),
+        ],
+    )
+    surface = link_source_abi([tu], exported_symbols=["_ZN2ns3BoxIiE3getEv"])
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN2ns3BoxIiE3getEv"]
+    assert surface.mappings.get("template_instantiation_symbol_to_decl", {}) == {}
+
+
+@needs_demangler
+def test_template_pattern_key_does_not_match_missing_member_name() -> None:
+    # Guard for the oneDAL `compute_input<Task>` shape observed in the scan: a
+    # class-template pattern without the member name must not claim arbitrary
+    # exported methods such as `compute_input<task::compute>::set_data()`.
+    tu = SourceAbiTu(
+        functions=[_entity("ns::Box<T>", "function", mangled="")],
+    )
+    surface = link_source_abi([tu], exported_symbols=["_ZN2ns3BoxIiE3getEv"])
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN2ns3BoxIiE3getEv"]
+
+
+@needs_demangler
+def test_template_special_members_need_only_public_class_template_pattern() -> None:
+    tu = SourceAbiTu(
+        templates=[
+            _entity("", "template", mangled=""),
+            _entity("ns::Box", "template", mangled=""),
+        ],
+    )
+    exports = [
+        "_ZN2ns3BoxIiEC1Ev",
+        "_ZN2ns3BoxIiED1Ev",
+        "_ZN2ns3BoxIiEaSERKS1_",
+        "_ZN2ns3BoxIiE3getEv",
+    ]
+    surface = link_source_abi([tu], exported_symbols=exports)
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN2ns3BoxIiE3getEv"]
+    assert surface.coverage["template_instantiation_symbols_matched"] == 3
+    assert surface.mappings["template_instantiation_symbol_to_decl"] == {
+        "_ZN2ns3BoxIiEC1Ev": "ns::Box",
+        "_ZN2ns3BoxIiED1Ev": "ns::Box",
+        "_ZN2ns3BoxIiEaSERKS1_": "ns::Box",
+    }
+
+
+@needs_demangler
+def test_template_special_members_attribute_to_public_owner_pattern() -> None:
+    # oneDAL-like shape: source facts contain only the public class-template
+    # pattern, while the binary exports concrete ctor/dtor/assignment symbols.
+    # Those special members are owned by the class pattern; arbitrary methods are
+    # still left unmatched by the guard above.
+    tu = SourceAbiTu(
+        functions=[_entity("ns::Box<T>", "function", mangled="")],
+        templates=[_entity("ns::Box", "template", mangled="")],
+    )
+    exports = [
+        "_ZN2ns3BoxIiEC1Ev",
+        "_ZN2ns3BoxIiEC2Ev",
+        "_ZN2ns3BoxIiED1Ev",
+        "_ZN2ns3BoxIiED2Ev",
+        "_ZN2ns3BoxIiEaSERKS1_",
+        "_ZN2ns3BoxIiE3getEv",
+    ]
+    surface = link_source_abi([tu], exported_symbols=exports)
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN2ns3BoxIiE3getEv"]
+    assert surface.coverage["template_instantiation_symbols_matched"] == 5
+    assert surface.mappings["template_instantiation_symbol_to_decl"] == {
+        "_ZN2ns3BoxIiEC1Ev": "ns::Box",
+        "_ZN2ns3BoxIiEC2Ev": "ns::Box",
+        "_ZN2ns3BoxIiED1Ev": "ns::Box",
+        "_ZN2ns3BoxIiED2Ev": "ns::Box",
+        "_ZN2ns3BoxIiEaSERKS1_": "ns::Box",
+    }
+
+
+def test_allocator_interposer_exports_attribute_only_with_tbb_proxy_marker() -> None:
+    exports = [
+        "__TBB_malloc_proxy",
+        "malloc",
+        "free",
+        "__libc_malloc",
+        "_Znwm",
+        "_ZdlPv",
+        "unrelated",
+    ]
+    surface = link_source_abi([SourceAbiTu()], exported_symbols=exports)
+    assert surface.unmatched["symbols_without_decl"] == ["unrelated"]
+    assert surface.coverage["allocator_interposer_symbols_matched"] == 6
+    assert surface.mappings["allocator_interposer_symbol_to_owner"] == {
+        "__TBB_malloc_proxy": "__TBB_malloc_proxy",
+        "malloc": "__TBB_malloc_proxy",
+        "free": "__TBB_malloc_proxy",
+        "__libc_malloc": "__TBB_malloc_proxy",
+        "_Znwm": "__TBB_malloc_proxy",
+        "_ZdlPv": "__TBB_malloc_proxy",
+    }
+
+    no_marker = link_source_abi([SourceAbiTu()], exported_symbols=["malloc", "_Znwm"])
+    assert no_marker.unmatched["symbols_without_decl"] == ["_Znwm", "malloc"]
+    assert no_marker.mappings.get("allocator_interposer_symbol_to_owner", {}) == {}
+
+
+@needs_demangler
+def test_non_public_export_accounting_keeps_reasons_separate_from_decl_matches() -> None:
+    exports = [
+        "_ZNSt6vectorIiSaIiEEC1Ev",
+        "_ZN3tbb6detail2r13fooEv",
+        "_ZN2ns6detail3barEv",
+        "_ZN2ns3Api8set_implEv",
+        "_ZN2ns3Api3pubEv",
+        "_ZN12LocalStorage3getEv",
+        "_private_c",
+        "IMPL",
+    ]
+    surface = link_source_abi(
+        [SourceAbiTu(types=[_entity("ns::Api", "record")])],
+        exported_symbols=exports,
+        library="libfoo",
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["matched_symbols"] == 0
+    assert surface.coverage["non_public_symbols_classified"] == len(exports)
+    assert surface.mappings["non_public_symbol_to_reason"] == {
+        "_ZNSt6vectorIiSaIiEEC1Ev": "dependency:stdlib",
+        "_ZN3tbb6detail2r13fooEv": "dependency:tbb",
+        "_ZN2ns6detail3barEv": "internal_or_private_export",
+        "_ZN2ns3Api8set_implEv": "internal_or_private_export",
+        "_ZN2ns3Api3pubEv": "own_export_without_public_source_decl",
+        "_ZN12LocalStorage3getEv": "cpp_export_without_public_source_decl",
+        "_private_c": "internal_or_private_export",
+        "IMPL": "c_export_without_public_source_decl",
+    }
+
+
+def test_non_public_export_accounting_does_not_hide_arbitrary_unowned_symbols() -> None:
+    surface = link_source_abi([SourceAbiTu()], exported_symbols=["plain_c_symbol"])
+    assert surface.unmatched["symbols_without_decl"] == ["plain_c_symbol"]
+    assert surface.coverage["non_public_symbols_classified"] == 0
+    assert surface.mappings.get("non_public_symbol_to_reason", {}) == {}
+
+
+def test_non_public_export_accounting_tolerates_demangler_failure(monkeypatch) -> None:
+    import abicheck.demangle as demangle_mod
+
+    def _boom(_symbol: str) -> str:
+        raise RuntimeError("demangler crashed")
+
+    monkeypatch.setattr(demangle_mod, "demangle", _boom)
+    surface = link_source_abi(
+        [SourceAbiTu(types=[_entity("ns::Api", "record")])],
+        exported_symbols=["_ZN2ns3Api3pubEv"],
+        library="libfoo",
+    )
+    assert surface.unmatched["symbols_without_decl"] == ["_ZN2ns3Api3pubEv"]
+    assert surface.coverage["non_public_symbols_classified"] == 0
+
+
+def test_non_public_export_accounting_without_surface_roots_stays_conservative() -> None:
+    from abicheck.buildsource.source_link import (
+        _classify_non_public_exports,
+        _source_namespace_roots,
+    )
+
+    assert _source_namespace_roots(None) == set()
+    assert _classify_non_public_exports({"plain_c_symbol"}, library="libfoo") == {}
+
+
+def test_template_pattern_key_edge_cases() -> None:
+    from abicheck.buildsource.source_link import _template_pattern_key
+
+    assert _template_pattern_key("ns::Map<std::vector<int>>::get") == (
+        "ns::Map<>::get"
+    )
+    assert _template_pattern_key("ns::Box<T>::operator<") == "ns::Box<>::operator<"
+    assert _template_pattern_key("ns::Broken<T") == ""
+    assert _template_pattern_key("plain") == ""
+
+
+def test_template_owner_helper_edge_cases() -> None:
+    import abicheck.buildsource.source_link as sl
+
+    assert sl._split_qualified_scope("Box") == ("", "Box")
+    assert sl._drop_demangled_return_type("Box") == "Box"
+    assert sl._template_special_member_owner_key("ns::Box::Box") == ""
+
+
+@needs_demangler
+def test_template_instantiation_attribution_noop_edges(monkeypatch) -> None:
+    import abicheck.buildsource.source_link as sl
+
+    surface = SourceAbiSurface()
+    assert sl._template_instantiation_attribution(surface, [], set(), set()) == {}
+    empty_name = SourceEntity(id="empty", kind="function", qualified_name="")
+    assert sl._template_instantiation_attribution(
+        surface, [empty_name], set(), {"_ZN2ns3BoxIiE3getEv"}
+    ) == {}
+    pattern = _entity("ns::Box<T>::get", "function", mangled="")
+    assert sl._template_instantiation_attribution(
+        surface, [pattern], {"_ZN2ns3BoxIiE3getEv"}, {"_ZN2ns3BoxIiE3getEv"}
+    ) == {}
+    monkeypatch.setattr(
+        sl, "_norm_itanium", lambda _s: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    assert sl._template_instantiation_attribution(
+        surface, [pattern], set(), {"_ZN2ns3BoxIiE3getEv"}
+    ) == {}
 
 
 def test_linker_excludes_non_public_entities() -> None:

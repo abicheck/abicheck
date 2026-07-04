@@ -341,6 +341,43 @@ _SYNTHESIZED_PREFIXES: tuple[tuple[str, str, str], ...] = (
     ("guard variable for ", "guard", "func"),
 )
 
+_TBB_MALLOC_PROXY_MARKER = "__TBB_malloc_proxy"
+_TBB_MALLOC_PROXY_C_SYMBOLS = frozenset(
+    {
+        "__libc_calloc",
+        "__libc_free",
+        "__libc_malloc",
+        "__libc_memalign",
+        "__libc_pvalloc",
+        "__libc_realloc",
+        "__libc_valloc",
+        "aligned_alloc",
+        "calloc",
+        "free",
+        "mallinfo",
+        "malloc",
+        "malloc_usable_size",
+        "mallopt",
+        "memalign",
+        "posix_memalign",
+        "pvalloc",
+        "realloc",
+        "valloc",
+    }
+)
+_TBB_MALLOC_PROXY_CPP_SYMBOLS = frozenset(
+    {
+        "_ZdaPv",
+        "_ZdaPvRKSt9nothrow_t",
+        "_ZdlPv",
+        "_ZdlPvRKSt9nothrow_t",
+        "_Znam",
+        "_ZnamRKSt9nothrow_t",
+        "_Znwm",
+        "_ZnwmRKSt9nothrow_t",
+    }
+)
+
 
 def _strip_call_signature(name: str) -> str:
     """Drop a demangled function's trailing parameter list, keeping its name.
@@ -441,6 +478,101 @@ def _synthesized_target(demangled: str) -> tuple[str, str, str] | None:
         if demangled.startswith(prefix):
             return kind, demangled[len(prefix) :].strip(), owner
     return None
+
+
+def _split_qualified_scope(name: str) -> tuple[str, str]:
+    """Split ``ns::Owner<T>::member`` at the last top-level ``::``.
+
+    Template arguments may contain their own qualified names, so a plain
+    ``rsplit("::", 1)`` can split inside ``Owner<std::vector<int>>``. This helper
+    tracks angle-bracket depth and only accepts scope separators at depth zero.
+    """
+    depth = 0
+    last = -1
+    i = 0
+    while i < len(name) - 1:
+        c = name[i]
+        if c == "<":
+            depth += 1
+        elif c == ">" and depth:
+            depth -= 1
+        elif c == ":" and name[i + 1] == ":" and depth == 0:
+            last = i
+            i += 1
+        i += 1
+    if last < 0:
+        return "", name
+    return name[:last], name[last + 2 :]
+
+
+def _drop_demangled_return_type(name: str) -> str:
+    """Remove a leading return type from a demangled qualified function name.
+
+    Demanglers spell free/template functions as ``Ret ns::f(...)`` but ctors and
+    most methods have no return prefix. The matcher needs the qualified name
+    only. A space before the first top-level ``::`` indicates such a prefix;
+    keeping the token after that space preserves names like ``ns::C::operator=``.
+    """
+    first_scope = name.find("::")
+    if first_scope <= 0:
+        return name
+    prefix_end = name.rfind(" ", 0, first_scope)
+    return name[prefix_end + 1 :] if prefix_end >= 0 else name
+
+
+def _template_source_owner_index(surface: SourceAbiSurface) -> dict[str, str]:
+    """Template-erased owner key -> stable source owner label.
+
+    Includes class/function template declarations from the template bucket and
+    declaration/type buckets. When both ``Box`` and ``Box<T>`` are present for one
+    erased key, prefer the bare template owner for readability; both describe the
+    same source pattern.
+    """
+    owners: dict[str, set[str]] = {}
+    for bucket in (
+        surface.reachable_declarations,
+        surface.reachable_templates,
+        surface.reachable_types,
+    ):
+        for entity in bucket:
+            if not entity.qualified_name:
+                continue
+            qname = _strip_call_signature(entity.qualified_name)
+            key = _template_pattern_key(qname)
+            if not key and entity.kind == "template":
+                key = f"{qname}<>"
+            if key:
+                owners.setdefault(key, set()).add(entity.qualified_name)
+    return {
+        key: sorted(values, key=lambda v: ("<" in v, len(v), v))[0]
+        for key, values in owners.items()
+    }
+
+
+def _template_special_member_owner_key(demangled: str) -> str:
+    """Return the erased class-template owner key for ctor/dtor/operator= exports.
+
+    A oneDAL source replay often records only a class template pattern
+    (``compute_input<Task>`` or ``compute_input``), while the binary exports
+    concrete special members (ctors/dtors/assignment) for
+    ``compute_input<task::compute>``. Unlike arbitrary methods such as
+    ``set_data()``, special members are unambiguously owned by the class template
+    itself, so they can be attributed when that owner pattern is present.
+    """
+    qname = _drop_demangled_return_type(_strip_call_signature(demangled))
+    owner, leaf = _split_qualified_scope(qname)
+    if not owner or "<" not in owner:
+        return ""
+    _, owner_leaf = _split_qualified_scope(owner)
+    class_base = owner_leaf.split("<", 1)[0]
+    leaf_base = leaf.split("<", 1)[0]
+    if (
+        leaf_base == class_base
+        or leaf_base == f"~{class_base}"
+        or leaf.startswith("operator=")
+    ):
+        return _template_pattern_key(owner)
+    return ""
 
 
 def _attribute_synthesized_exports(
@@ -584,6 +716,265 @@ def _demangled_rematch(
     return new_matches
 
 
+def _template_pattern_key(name: str) -> str:
+    """Return a template-argument-erased key for a demangled/source name.
+
+    ``ns::Box<T>::get`` and ``ns::Box<int>::get`` both become
+    ``ns::Box<>::get``. The key is deliberately conservative: only real balanced
+    ``<...>`` groups are erased, so ``operator<`` without a closing template list
+    is left alone. Whitespace is ignored because demanglers vary in how they
+    spell template argument separators.
+    """
+    s = "".join((name or "").split())
+    if "<" not in s or ">" not in s:
+        return ""
+    out: list[str] = []
+    depth = 0
+    saw_template = False
+    for i, c in enumerate(s):
+        if (
+            c == "<"
+            and depth == 0
+            and s[max(0, i - len("operator")) : i] == "operator"
+        ):
+            out.append(c)
+            continue
+        if c == "<":
+            if depth == 0:
+                out.append("<>")
+                saw_template = True
+            depth += 1
+            continue
+        if c == ">" and depth:
+            depth -= 1
+            continue
+        if depth == 0:
+            out.append(c)
+    return "".join(out) if saw_template and depth == 0 else ""
+
+
+def _template_instantiation_attribution(
+    surface: SourceAbiSurface,
+    reachable_declarations: list[SourceEntity],
+    matched: set[str],
+    exported: set[str],
+) -> dict[str, str]:
+    """Attribute concrete template-instantiation exports to one public pattern.
+
+    A Clang/CastXML source pass often records the public declaration as a template
+    pattern (``Box<T>::get`` or ``foo<T>``), while the binary exports concrete
+    instantiations (``Box<int>::get()`` / ``foo<double>(double)``). Exact mangled
+    matching cannot connect those strings. This tier demangles still-unmatched
+    exports, erases template arguments on both sides, and attributes an export
+    only when exactly one public declaration owns that erased pattern. Multiple
+    exports may map to the same unique pattern (many instantiations of one public
+    template); multiple source declarations for one pattern are skipped to avoid
+    hiding overloads.
+    """
+    candidates = [s for s in exported if s not in matched]
+    if not candidates:
+        return {}
+    try:
+        from ..demangle import demangle as _demangle
+    except Exception:  # pragma: no cover  # noqa: BLE001 - optional demangler
+        return {}
+
+    source_owners = _template_source_owner_index(surface)
+    decls_by_key: dict[str, list[SourceEntity]] = {}
+    for decl in reachable_declarations:
+        if not decl.qualified_name:
+            continue
+        key = _template_pattern_key(_strip_call_signature(decl.qualified_name))
+        if key:
+            decls_by_key.setdefault(key, []).append(decl)
+    unique_decl = {
+        key: decls[0]
+        for key, decls in decls_by_key.items()
+        if len({d.identity() for d in decls}) == 1
+    }
+    if not unique_decl and not source_owners:
+        return {}
+
+    attributed: dict[str, str] = {}
+    for sym in candidates:
+        try:
+            demangled = _demangle(_norm_itanium(sym))
+        except Exception:  # noqa: BLE001
+            continue
+        key = _template_pattern_key(_strip_call_signature(demangled or ""))
+        owner = unique_decl.get(key)
+        if owner is not None:
+            attributed[sym] = owner.qualified_name
+            continue
+        special_owner = source_owners.get(
+            _template_special_member_owner_key(demangled or "")
+        )
+        if special_owner is not None:
+            attributed[sym] = special_owner
+    return attributed
+
+
+def _attribute_allocator_interposer_exports(
+    exported: set[str], unmatched: set[str]
+) -> dict[str, str]:
+    """Attribute oneTBB malloc proxy interposer exports to their proxy marker.
+
+    ``libtbbmalloc_proxy`` intentionally exports allocator interposition entry
+    points such as ``malloc``, ``free``, global ``operator new/delete`` and
+    ``__libc_*`` hooks. These are not public-header declarations in the source
+    surface, so source linking used to report every proxy hook as an orphan. Only
+    enable this narrow classification when the library exports the explicit
+    ``__TBB_malloc_proxy`` marker, which keeps ordinary libraries from hiding
+    unrelated C/runtime symbols.
+    """
+    if _TBB_MALLOC_PROXY_MARKER not in exported:
+        return {}
+    attributed: dict[str, str] = {}
+    for sym in unmatched:
+        if (
+            sym == _TBB_MALLOC_PROXY_MARKER
+            or sym in _TBB_MALLOC_PROXY_C_SYMBOLS
+            or _norm_itanium(sym) in _TBB_MALLOC_PROXY_CPP_SYMBOLS
+        ):
+            attributed[sym] = _TBB_MALLOC_PROXY_MARKER
+    return attributed
+
+
+def _classify_non_public_exports(
+    unmatched: set[str], *, library: str = "", surface: SourceAbiSurface | None = None
+) -> dict[str, str]:
+    """Classify exported symbols that are not public-source declarations.
+
+    This is an accounting tier, not source matching: the symbol is still not
+    mapped to a public declaration. It separates dependency/internal/own exports
+    from genuinely unclassified gaps so real-world reports can reach "fully
+    accounted" coverage without pretending that stdlib/TBB/private implementation
+    symbols are part of the project's public source API.
+    """
+    if not unmatched:
+        return {}
+    library_l = library.lower()
+    source_roots = _source_namespace_roots(surface) if surface is not None else set()
+    classified: dict[str, str] = {}
+    for sym in sorted(unmatched):
+        demangled = _best_effort_demangle(sym)
+        if _is_stdlib_export(sym, demangled):
+            classified[sym] = "dependency:stdlib"
+        elif _is_tbb_export(sym, demangled) and "tbb" not in library_l:
+            classified[sym] = "dependency:tbb"
+        elif _is_internal_export(sym, demangled):
+            classified[sym] = "internal_or_private_export"
+        elif library and _belongs_to_source_namespace(demangled, source_roots):
+            classified[sym] = "own_export_without_public_source_decl"
+        elif library and source_roots and _is_cpp_export_without_public_decl(demangled):
+            classified[sym] = "cpp_export_without_public_source_decl"
+        elif library and source_roots and _is_c_export_without_public_decl(sym):
+            classified[sym] = "c_export_without_public_source_decl"
+    return classified
+
+
+def _best_effort_demangle(sym: str) -> str:
+    if not _looks_like_cpp_export(sym):
+        return ""
+    try:
+        from ..demangle import demangle as _demangle
+
+        return _demangle(_norm_itanium(sym)) or ""
+    except Exception:  # noqa: BLE001 - classification is best-effort
+        return ""
+
+
+def _looks_like_cpp_export(sym: str) -> bool:
+    return sym.startswith("_Z") or sym.startswith("__Z")
+
+
+def _looks_like_c_export(sym: str) -> bool:
+    return bool(sym) and not _looks_like_cpp_export(sym)
+
+
+def _is_stdlib_export(sym: str, demangled: str) -> bool:
+    return (
+        demangled.startswith("std::")
+        or demangled.startswith("__gnu_cxx::")
+        or sym.startswith(
+            (
+                "_ZSt",
+                "_ZNSt",
+                "_ZNKSt",
+                "_ZTVSt",
+                "_ZTISt",
+                "_ZTSSt",
+                "_ZN9__gnu_cxx",
+                "_ZNK9__gnu_cxx",
+                "_ZTVN9__gnu_cxx",
+                "_ZTIN9__gnu_cxx",
+                "_ZTSN9__gnu_cxx",
+            )
+        )
+    )
+
+
+def _is_tbb_export(sym: str, demangled: str) -> bool:
+    return demangled.startswith("tbb::") or sym.startswith(
+        ("_ZN3tbb", "_ZTVN3tbb", "_ZTIN3tbb", "_ZTSN3tbb")
+    )
+
+
+def _is_internal_export(sym: str, demangled: str) -> bool:
+    if sym.startswith(("_", "__")) and not _looks_like_cpp_export(sym):
+        return True
+    if not demangled:
+        return False
+    qualified = _strip_call_signature(demangled)
+    leaf = qualified.rsplit("::", 1)[-1]
+    return (
+        "::detail::" in qualified
+        or "::internal::" in qualified
+        or leaf.endswith("_impl")
+        or leaf.startswith("_daal_")
+        or leaf.startswith("_")
+    )
+
+
+def _is_cpp_export_without_public_decl(demangled: str) -> bool:
+    """Best-effort bucket for C++ exports with no public source declaration.
+
+    This is only used when the linked surface has project namespace evidence and a
+    concrete library name. It keeps accidental/private C++ exports visible as a
+    separate reason without pretending they matched a public declaration.
+    """
+    if not demangled:
+        return False
+    qualified = _strip_call_signature(demangled)
+    return bool(qualified)
+
+
+def _is_c_export_without_public_decl(sym: str) -> bool:
+    """Best-effort bucket for C exports with no public source declaration."""
+    return _looks_like_c_export(sym) and bool(sym)
+
+
+def _source_namespace_roots(surface: SourceAbiSurface | None) -> set[str]:
+    if surface is None:
+        return set()
+    roots: set[str] = set()
+    for bucket in surface.reachable_buckets().values():
+        for entity in bucket:
+            name = entity.qualified_name
+            if not name or "::" not in name:
+                continue
+            root = name.split("::", 1)[0]
+            if root not in {"std", "__gnu_cxx"}:
+                roots.add(root)
+    return roots
+
+
+def _belongs_to_source_namespace(demangled: str, roots: set[str]) -> bool:
+    if not demangled or "::" not in demangled or not roots:
+        return False
+    return demangled.split("::", 1)[0] in roots
+
+
 #: Entity kinds routed to each reachable bucket of the linked surface (D5).
 _TYPE_KINDS = frozenset({"record", "enum", "typedef", "union"})
 _MACRO_KINDS = frozenset({"macro"})
@@ -671,7 +1062,43 @@ def link_source_abi(
             sym: {"kind": kind, "owner": owner}
             for sym, (kind, owner) in sorted(synthesized.items())
         }
-    all_matched = decl_matched | set(synthesized)
+    template_instantiations = _template_instantiation_attribution(
+        surface,
+        surface.reachable_declarations,
+        decl_matched | set(synthesized),
+        exported,
+    )
+    if template_instantiations:
+        surface.mappings["template_instantiation_symbol_to_decl"] = dict(
+            sorted(template_instantiations.items())
+        )
+    allocator_interposers = _attribute_allocator_interposer_exports(
+        exported, exported - decl_matched - set(synthesized) - set(template_instantiations)
+    )
+    if allocator_interposers:
+        surface.mappings["allocator_interposer_symbol_to_owner"] = dict(
+            sorted(allocator_interposers.items())
+        )
+    non_public = _classify_non_public_exports(
+        exported
+        - decl_matched
+        - set(synthesized)
+        - set(template_instantiations)
+        - set(allocator_interposers),
+        library=library,
+        surface=surface,
+    )
+    if non_public:
+        surface.mappings["non_public_symbol_to_reason"] = dict(
+            sorted(non_public.items())
+        )
+    all_matched = (
+        decl_matched
+        | set(synthesized)
+        | set(template_instantiations)
+        | set(allocator_interposers)
+        | set(non_public)
+    )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
     surface.unmatched["decls_without_symbol"] = sorted(
@@ -690,6 +1117,9 @@ def link_source_abi(
         # synthesized (RTTI/vtable/thunk) attributions vs the genuine remainder.
         "matched_symbols": len(decl_matched),
         "synthesized_symbols_matched": len(synthesized),
+        "template_instantiation_symbols_matched": len(template_instantiations),
+        "allocator_interposer_symbols_matched": len(allocator_interposers),
+        "non_public_symbols_classified": len(non_public),
         "unmatched_symbols": len(exported) - len(all_matched),
         "odr_conflicts": len(state.odr_conflicts),
     }
@@ -753,7 +1183,35 @@ def relink_surface_exports(
         sym: {"kind": kind, "owner": owner}
         for sym, (kind, owner) in sorted(synthesized.items())
     }
-    all_matched = matched | set(synthesized)
+    template_instantiations = _template_instantiation_attribution(
+        surface,
+        surface.reachable_declarations,
+        matched | set(synthesized),
+        exported,
+    )
+    surface.mappings["template_instantiation_symbol_to_decl"] = dict(
+        sorted(template_instantiations.items())
+    )
+    allocator_interposers = _attribute_allocator_interposer_exports(
+        exported, exported - matched - set(synthesized) - set(template_instantiations)
+    )
+    surface.mappings["allocator_interposer_symbol_to_owner"] = dict(
+        sorted(allocator_interposers.items())
+    )
+    non_public = _classify_non_public_exports(
+        exported
+        - matched
+        - set(synthesized)
+        - set(template_instantiations)
+        - set(allocator_interposers),
+        library=surface.library,
+        surface=surface,
+    )
+    surface.mappings["non_public_symbol_to_reason"] = dict(sorted(non_public.items()))
+    all_matched = (
+        matched | set(synthesized) | set(template_instantiations) | set(allocator_interposers)
+        | set(non_public)
+    )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
     # Recompute decls_without_symbol from the new mapping: declarations that now
@@ -767,6 +1225,13 @@ def relink_surface_exports(
         surface.coverage["exported_symbols"] = len(exported)
         surface.coverage["matched_symbols"] = len(matched)
         surface.coverage["synthesized_symbols_matched"] = len(synthesized)
+        surface.coverage["template_instantiation_symbols_matched"] = len(
+            template_instantiations
+        )
+        surface.coverage["allocator_interposer_symbols_matched"] = len(
+            allocator_interposers
+        )
+        surface.coverage["non_public_symbols_classified"] = len(non_public)
         surface.coverage["unmatched_symbols"] = len(exported) - len(all_matched)
     return surface
 

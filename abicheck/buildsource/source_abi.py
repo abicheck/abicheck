@@ -73,6 +73,12 @@ def _as_bool(raw: Any, default: bool) -> bool:
     return default
 
 
+def _string_dict(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
 @dataclass
 class SourceLocation:
     """Where a source entity was declared, with provenance origin (ADR-030 D4)."""
@@ -114,6 +120,14 @@ class SourceEntity:
     body_hash: str = ""
     type_hash: str = ""
     value: str = ""
+    #: Stable/producer-specific identity names observed for this declaration.
+    #: Examples: source_qualified, mangled, usr, canonical_usr.
+    names: dict[str, str] = field(default_factory=dict)
+    #: Source-side semantic relationships, such as template pattern ownership.
+    relations: dict[str, str] = field(default_factory=dict)
+    #: Provenance/ownership hints observed at extraction time. Policy layers
+    #: decide how to classify these; producers only emit evidence.
+    ownership: dict[str, str] = field(default_factory=dict)
     source_location: SourceLocation | None = None
     #: public_header|private_header|system_header|generated|unknown
     visibility: str = "unknown"
@@ -168,6 +182,9 @@ class SourceEntity:
             "body_hash": self.body_hash,
             "type_hash": self.type_hash,
             "value": self.value,
+            "names": dict(self.names),
+            "relations": dict(self.relations),
+            "ownership": dict(self.ownership),
             "source_location": (
                 self.source_location.to_dict() if self.source_location else None
             ),
@@ -188,6 +205,9 @@ class SourceEntity:
             body_hash=str(d.get("body_hash", "")),
             type_hash=str(d.get("type_hash", "")),
             value=str(d.get("value", "")),
+            names=_string_dict(d.get("names")),
+            relations=_string_dict(d.get("relations")),
+            ownership=_string_dict(d.get("ownership")),
             source_location=SourceLocation.from_dict(loc)
             if isinstance(loc, dict)
             else None,
@@ -340,6 +360,9 @@ class SourceAbiSurface:
             "source_type_to_debug_type": {},
             "public_header_to_target": {},
             "synthesized_symbol_to_owner": {},
+            "template_instantiation_symbol_to_decl": {},
+            "allocator_interposer_symbol_to_owner": {},
+            "non_public_symbol_to_reason": {},
         }
     )
     odr_conflicts: list[dict[str, Any]] = field(default_factory=list)
@@ -380,6 +403,15 @@ class SourceAbiSurface:
                 "synthesized_symbol_to_owner": dict(
                     self.mappings.get("synthesized_symbol_to_owner", {})
                 ),
+                "template_instantiation_symbol_to_decl": dict(
+                    self.mappings.get("template_instantiation_symbol_to_decl", {})
+                ),
+                "allocator_interposer_symbol_to_owner": dict(
+                    self.mappings.get("allocator_interposer_symbol_to_owner", {})
+                ),
+                "non_public_symbol_to_reason": dict(
+                    self.mappings.get("non_public_symbol_to_reason", {})
+                ),
             },
             "odr_conflicts": list(self.odr_conflicts),
             "unmatched": {k: list(v) for k, v in self.unmatched.items()},
@@ -414,6 +446,15 @@ class SourceAbiSurface:
             ),
             "synthesized_symbol_to_owner": dict(
                 mappings_raw.get("synthesized_symbol_to_owner", {})
+            ),
+            "template_instantiation_symbol_to_decl": dict(
+                mappings_raw.get("template_instantiation_symbol_to_decl", {})
+            ),
+            "allocator_interposer_symbol_to_owner": dict(
+                mappings_raw.get("allocator_interposer_symbol_to_owner", {})
+            ),
+            "non_public_symbol_to_reason": dict(
+                mappings_raw.get("non_public_symbol_to_reason", {})
             ),
         }
         unmatched_raw = d.get("unmatched", {})

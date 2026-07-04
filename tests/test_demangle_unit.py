@@ -86,6 +86,29 @@ class TestDemangle:
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
+    def test_cppfilt_no_strip_underscore_fallback(self):
+        """Darwin c++filt may strip the leading underscore unless told not to."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    subprocess.CompletedProcess(
+                        args=["c++filt"],
+                        returncode=0,
+                        stdout="_ZN3foo3barEv\n",
+                        stderr="",
+                    ),
+                    subprocess.CompletedProcess(
+                        args=["c++filt", "--no-strip-underscore"],
+                        returncode=0,
+                        stdout="foo::bar()\n",
+                        stderr="",
+                    ),
+                ]
+                result = _mod.demangle("_ZN3foo3barEv")
+        assert result == "foo::bar()"
+
     def test_cppfilt_empty_output(self):
         """If c++filt returns empty stdout, treat as failed."""
         mock_cxxfilt = MagicMock()
@@ -216,6 +239,27 @@ class TestDemangleBatch:
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
+
+    def test_cppfilt_batch_no_strip_underscore_fallback(self):
+        """Batch demangling also retries with --no-strip-underscore for Darwin."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    subprocess.CompletedProcess(
+                        args=["c++filt"],
+                        returncode=0,
+                        stdout="_ZN3foo3barEv\n",
+                        stderr="",
+                    ),
+                    subprocess.CompletedProcess(
+                        args=["c++filt", "--no-strip-underscore"],
+                        returncode=0,
+                        stdout="foo::bar()\n",
+                        stderr="",
+                    ),
+                ]
+                result = _mod.demangle_batch(["_ZN3foo3barEv"])
+        assert result == {"_ZN3foo3barEv": "foo::bar()"}
 
     def test_cxxfilt_returns_same_as_input(self):
         """When cxxfilt.demangle returns the same string, push to remaining."""

@@ -55,7 +55,13 @@ Implemented and matching `clang.py`, validated by the C.6 CI matrix:
 - **inline bodies** — `body_hash` = subtree hash of the `CompoundStmt`;
 - **records / enums** — `type_hash` = subtree hash (definitions only);
 - **function / class templates** — `body_hash` = subtree hash of the whole
-  template node (members of a class template are *not* re-emitted — no descent);
+  template node; public class-template member methods are also emitted as
+  declaration patterns such as `Box<T>::get`, so concrete binary instantiations
+  can link back to source evidence without guessing;
+- **identity/provenance evidence** — entities carry additive `names`,
+  `relations`, and `ownership` dictionaries; the plugin fills Clang USR /
+  canonical USR when available, and both producer paths stamp template-owner and
+  public-root ownership hints for later policy/matching layers;
 - **typedefs / type-aliases** — `type_hash = _hash("typedef-target",
   underlying)`, `value = underlying`;
 - **constexpr variables** — literal *and* computed initializers (a computed

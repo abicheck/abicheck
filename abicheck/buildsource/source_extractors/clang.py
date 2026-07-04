@@ -97,7 +97,7 @@ from .clang_public_roots import (  # noqa: F401
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8).
-CLANG_EXTRACTOR_VERSION = "0.3"
+CLANG_EXTRACTOR_VERSION = "0.5"
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -609,6 +609,45 @@ def _qualified(scope: list[str], name: str) -> str:
     return "::".join([*scope, name]) if scope else name
 
 
+def _entity_names(name: str, mangled: str = "") -> dict[str, str]:
+    names = {"source_qualified": name}
+    if mangled:
+        names["mangled"] = mangled
+    return names
+
+
+def _entity_ownership(visibility: str, origin: str) -> dict[str, str]:
+    role = {
+        "public_header": "own_api_candidate",
+        "generated": "generated_api_candidate",
+        "system_header": "dependency_candidate",
+        "private_header": "internal_candidate",
+    }.get(visibility, "unknown")
+    return {"visibility": visibility, "origin": origin, "role": role}
+
+
+def _template_param_name(node: dict[str, Any], position: int) -> str:
+    name = str(node.get("name") or "")
+    if name:
+        return name
+    kind = str(node.get("kind") or "")
+    return "N" + str(position) if kind == "NonTypeTemplateParmDecl" else "T" + str(position)
+
+
+def _template_params(node: dict[str, Any]) -> list[str]:
+    params: list[str] = []
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        if child.get("kind") in (
+            "TemplateTypeParmDecl",
+            "NonTypeTemplateParmDecl",
+            "TemplateTemplateParmDecl",
+        ):
+            params.append(_template_param_name(child, len(params)))
+    return params
+
+
 class _ClassifyContext:
     """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
 
@@ -792,6 +831,8 @@ def macros_from_preprocessor(
                 kind="macro",
                 qualified_name=name,
                 value=value,
+                names=_entity_names(name),
+                ownership=_entity_ownership(visibility, origin),
                 source_location=_location(file, 0, origin),
                 visibility=visibility,
                 api_relevant=True,
@@ -1073,6 +1114,8 @@ def _emit_function(
     tu: SourceAbiTu,
     scope: list[str],
     file: str,
+    *,
+    emit_inline_body: bool = True,
 ) -> None:
     visibility, origin, public = ctx.classify(file)
     if not public:
@@ -1081,6 +1124,10 @@ def _emit_function(
     sig = _signature(node)
     mangled = _mangled(node)
     loc = _location(file, _node_line(node), origin)
+    relations = {
+        str(k): str(v)
+        for k, v in dict(node.get("_abicheck_relations", {})).items()
+    }
     # A function entity always carries the signature + default-argument value so
     # default_argument_changed fires; a body present in a public header
     # additionally yields an inline-body fingerprint for inline_body_changed.
@@ -1092,6 +1139,9 @@ def _emit_function(
             mangled_name=mangled,
             signature_hash=_hash("sig", sig),
             value=_default_arg_repr(node),
+            names=_entity_names(name, mangled),
+            relations=relations,
+            ownership=_entity_ownership(visibility, origin),
             source_location=loc,
             visibility=visibility,
             api_relevant=True,
@@ -1104,7 +1154,7 @@ def _emit_function(
     # a header out-of-line definition. Fingerprint the body whenever one is
     # present, so an implicitly-inline method body change fires inline_body_changed
     # (Codex review #339, P2).
-    if _has_body(node):
+    if emit_inline_body and _has_body(node):
         body = next(
             c
             for c in node["inner"]
@@ -1117,6 +1167,9 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
+                names=_entity_names(name, mangled),
+                relations=relations,
+                ownership=_entity_ownership(visibility, origin),
                 # Alpha-rename the function's parameters together with the body so
                 # a parameter rename does not flip the fingerprint (ADR-030 #6).
                 body_hash=_subtree_hash(body, _param_ids(node)),
@@ -1139,18 +1192,83 @@ def _emit_template(
     if not public:
         return
     name = _qualified(scope, str(node.get("name", "")))
+    params = _template_params(node)
     tu.templates.append(
         SourceEntity(
             id=_hash("template", name),
             kind="template",
             qualified_name=name,
             body_hash=_subtree_hash(node),
+            names=_entity_names(name),
+            relations={
+                "template_kind": str(node.get("kind", "")),
+                "template_parameters": ",".join(params),
+            },
+            ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,
             confidence=LayerConfidence.HIGH,
         )
     )
+    _emit_class_template_member_patterns(node, ctx, tu, scope, file)
+
+
+def _emit_class_template_member_patterns(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    """Emit public member-function patterns from a class template declaration.
+
+    The template entity records the whole template body, but the source↔binary
+    linker also needs method-shaped declarations such as ``Box<T>::get`` to
+    attribute concrete instantiations like ``Box<int>::get()``. Without this
+    evidence the matcher must leave ordinary template methods unmatched.
+    """
+    if node.get("kind") != "ClassTemplateDecl":
+        return
+    name = str(node.get("name", "") or "")
+    params = _template_params(node)
+    owner = f"{name}<{','.join(params)}>" if params else name
+    record = next(
+        (
+            child
+            for child in node.get("inner", []) or []
+            if isinstance(child, dict) and child.get("kind") == "CXXRecordDecl"
+        ),
+        None,
+    )
+    if record is None:
+        return
+    owner_scope = [*scope, owner]
+    running_access = _default_member_access(record)
+    for child in record.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        if child.get("kind") == "AccessSpecDecl":
+            running_access = child.get("access", running_access)
+            continue
+        child_access = child.get("access", running_access)
+        kind = child.get("kind")
+        name = str(child.get("name", "") or "")
+        if _is_function_node(kind, name, _is_accessible(child_access)):
+            child_file = _node_file(child, file)
+            child["_abicheck_relations"] = {
+                "template_owner": _qualified(scope, owner),
+                "template_parameters": ",".join(params),
+                "declaration_role": "class_template_member_pattern",
+            }
+            _emit_function(
+                child,
+                ctx,
+                tu,
+                owner_scope,
+                child_file,
+                emit_inline_body=False,
+            )
 
 
 def _emit_constexpr(
@@ -1166,13 +1284,16 @@ def _emit_constexpr(
     name = _qualified(scope, str(node.get("name", "")))
     init = _init_expr(node)
     value = _expr_value(init) if init is not None else _subtree_hash(node)
+    mangled = _mangled(node)
     tu.constexpr_values.append(
         SourceEntity(
             id=_hash("constexpr", name, value),
             kind="constexpr",
             qualified_name=name,
-            mangled_name=_mangled(node),
+            mangled_name=mangled,
             value=value,
+            names=_entity_names(name, mangled),
+            ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,
@@ -1204,6 +1325,8 @@ def _emit_type(
             kind=kind,
             qualified_name=name,
             type_hash=_subtree_hash(node),
+            names=_entity_names(name),
+            ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,
@@ -1255,6 +1378,8 @@ def _emit_typedef(
             qualified_name=name,
             type_hash=_hash("typedef-target", underlying),
             value=underlying,
+            names=_entity_names(name),
+            ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,
