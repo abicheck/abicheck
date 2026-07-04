@@ -15,6 +15,8 @@ from abicheck.checker_types import Change
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
+    EnumMember,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -54,6 +56,14 @@ def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
         size_bits=size,
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
+        origin=origin,
+    )
+
+
+def _enum(name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN):
+    return EnumType(
+        name=name,
+        members=[EnumMember(name=n, value=v) for n, v in members],
         origin=origin,
     )
 
@@ -139,6 +149,45 @@ class TestComputePublicSurface:
         assert "public_api" in surf.public_symbols
         assert "internal_helper" not in surf.public_symbols
         assert "internal_helper" in surf.all_symbols
+
+    def test_namespaced_enum_reached_via_unqualified_ref_is_public(self):
+        # A public API references a namespaced enum by its unqualified short name
+        # (``Mode`` for ``ns::Mode``) — as C++ inside ``namespace ns`` spells it.
+        # The closure must resolve the tail alias to the canonical enum, exactly
+        # as it does for records, else a scoped enum-member finding is hidden.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", params=("Mode",))],
+            enums=[_enum("ns::Mode")],
+        )
+        surf = compute_public_surface(snap)
+        # The *canonical* name is what downstream member findings scope against.
+        assert "ns::Mode" in surf.public_types
+
+    def test_namespaced_enum_reached_via_qualified_ref_is_public(self):
+        # The already-working direction: a fully-qualified reference stays public.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", params=("ns::Mode",))],
+            enums=[_enum("ns::Mode")],
+        )
+        surf = compute_public_surface(snap)
+        assert "ns::Mode" in surf.public_types
+
+    def test_unreferenced_namespaced_enum_stays_out_of_surface(self):
+        # Scoping still works: an enum no public API reaches is not public, so the
+        # tail-alias indexing does not over-keep.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api")],
+            enums=[_enum("ns::Mode")],
+        )
+        surf = compute_public_surface(snap)
+        assert "ns::Mode" in surf.all_types
+        assert "ns::Mode" not in surf.public_types
 
 
 # ── change_in_public_surface ────────────────────────────────────────────────

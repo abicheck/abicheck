@@ -468,6 +468,25 @@ def _enum_reached_via_public_typedef() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _namespaced_enum_reached_unqualified() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public API references a *namespaced* enum by its unqualified short name
+    # (``Mode`` for ``ns::Mode``) — exactly how C++ inside ``namespace ns`` spells
+    # it. The surface closure must resolve the short alias to the canonical enum
+    # the way it already does for records, else re-valuing a member is wrongly
+    # scoped out as NO_CHANGE. Regression guard for the enum tail-alias fix.
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("Mode",))],
+        enums=[_enum("ns::Mode", [("A", 0), ("B", 1)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("Mode",))],
+        enums=[_enum("ns::Mode", [("A", 0), ("B", 5)])],
+    )
+    return old, new
+
+
 def _defined_pointer_only_type_size() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The counterpart to the opaque handle: the pointed-to type is *fully
     # defined* in the public surface, so a consumer can dereference/allocate it
@@ -595,6 +614,7 @@ CORPUS: list[Case] = [
     Case("public_enum_value_changed", False, _public_enum_value_changed),
     Case("enum_reached_via_public_struct_field", False, _enum_reached_via_public_struct_field),
     Case("enum_reached_via_public_typedef", False, _enum_reached_via_public_typedef),
+    Case("namespaced_enum_reached_unqualified", False, _namespaced_enum_reached_unqualified),
     Case("defined_pointer_only_type_size", False, _defined_pointer_only_type_size),
 ]
 
@@ -1010,6 +1030,7 @@ CASE_CATEGORY: dict[str, str] = {
     "public_enum_value_changed": "enum-reachability",
     "enum_reached_via_public_struct_field": "enum-reachability",
     "enum_reached_via_public_typedef": "enum-reachability",
+    "namespaced_enum_reached_unqualified": "enum-reachability",
     # by-value-vs-pointer / opaque-handle precision
     "opaque_handle_pointer_only_size": "pointer-opaque",
     "defined_pointer_only_type_size": "pointer-opaque",

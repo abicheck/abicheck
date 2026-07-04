@@ -26,9 +26,11 @@ The surface is computed from two facts that the dumper already records:
    pointer-typed ones): this over-keeps rather than risks hiding a layout
    dependency. The closure follows enum references (as struct-field types,
    typedef targets, or signature types) exactly as it follows record
-   references, so an unreferenced internal enum is scoped out while a
-   public-reachable one is kept (locked in by the ``enum-reachability`` axis
-   of the ``scripts/check_fp_rate.py`` corpus).
+   references — including resolving a namespaced enum referenced by its
+   unqualified short name (``Mode`` for ``ns::Mode``) via the same trailing-``::``
+   alias index records use — so an unreferenced internal enum is scoped out
+   while a public-reachable one is kept (locked in by the ``enum-reachability``
+   axis of the ``scripts/check_fp_rate.py`` corpus).
 
    Precise by-value-vs-pointer reachability (ADR-024 §D3) is intentionally
    *not* done here: a pointer-reached type whose full definition is public
@@ -67,7 +69,7 @@ from .model import ScopeOrigin, Visibility
 
 if TYPE_CHECKING:
     from .checker_types import Change
-    from .model import AbiSnapshot, RecordType
+    from .model import AbiSnapshot, EnumType, RecordType
 
 # Findings whose whole purpose is to surface a *private* entity leaking into
 # the public ABI. Scoping must never filter these (ADR-024 §D5.2).
@@ -301,11 +303,14 @@ def _record_origin(surface: PublicSurface, keys: set[str], origin: ScopeOrigin) 
 
 def _index_surface_types(
     snap: AbiSnapshot, surface: PublicSurface
-) -> dict[str, RecordType]:
-    """Populate ``surface.all_types`` and return a name -> record index.
+) -> tuple[dict[str, RecordType], dict[str, EnumType]]:
+    """Populate ``surface.all_types`` and return name -> record / enum indexes.
 
-    Records are indexed by both their full name and (for namespaced types) the
-    trailing ``::`` segment, so the closure walk can match either encoding.
+    Records *and* enums are indexed by both their full name and (for namespaced
+    types) the trailing ``::`` segment, so the closure walk can resolve either
+    encoding — a namespaced enum referenced unqualified from a public signature
+    or field (``Mode`` for ``ns::Mode``) must still be marked public, exactly as
+    records are.
     """
     record_by_name: dict[str, RecordType] = {}
     for rec in snap.types:
@@ -317,12 +322,19 @@ def _index_surface_types(
             record_by_name.setdefault(tail, rec)
             keys.add(tail)
         _record_origin(surface, keys, getattr(rec, "origin", ScopeOrigin.UNKNOWN))
+    enum_by_name: dict[str, EnumType] = {}
     for en in snap.enums:
         surface.all_types.add(en.name)
-        _record_origin(surface, {en.name}, getattr(en, "origin", ScopeOrigin.UNKNOWN))
+        enum_by_name[en.name] = en
+        keys = {en.name}
+        if "::" in en.name:
+            tail = en.name.rsplit("::", 1)[1]
+            enum_by_name.setdefault(tail, en)
+            keys.add(tail)
+        _record_origin(surface, keys, getattr(en, "origin", ScopeOrigin.UNKNOWN))
     for alias in snap.typedefs:
         surface.all_types.add(alias)
-    return record_by_name
+    return record_by_name, enum_by_name
 
 
 def _seed_public_roots(
@@ -364,6 +376,7 @@ def _walk_type_closure(
     snap: AbiSnapshot,
     surface: PublicSurface,
     record_by_name: dict[str, RecordType],
+    enum_by_name: dict[str, EnumType],
     seed_types: set[str],
 ) -> None:
     """Transitive closure over the record/typedef graph; fills public_types.
@@ -386,6 +399,13 @@ def _walk_type_closure(
             for ident in _type_identifiers(target):
                 if ident not in seen:
                     queue.append(ident)
+        # A short/qualified enum alias (``Mode``) reached from a public signature
+        # or field resolves here to its canonical namespaced name (``ns::Mode``),
+        # so a scoped enum-member finding is not hidden (mirrors the record alias
+        # handling below). Enums have no fields or bases, so nothing is queued.
+        en_node = enum_by_name.get(name)
+        if en_node is not None:
+            surface.public_types.add(en_node.name)
         rec_node = record_by_name.get(name)
         if rec_node is None:
             continue
@@ -417,8 +437,8 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     """
     surface = PublicSurface()
 
-    # Build the type universe and a name -> record index for closure walks.
-    record_by_name = _index_surface_types(snap, surface)
+    # Build the type universe and name -> record / enum indexes for closure walks.
+    record_by_name, enum_by_name = _index_surface_types(snap, surface)
 
     # Seed roots from public symbols; collect the type names they touch.
     seed_types, has_public = _seed_public_roots(snap, surface)
@@ -438,7 +458,7 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
         return surface
 
     # Transitive closure over the record/typedef graph.
-    _walk_type_closure(snap, surface, record_by_name, seed_types)
+    _walk_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
     return surface
 
 
