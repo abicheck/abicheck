@@ -104,6 +104,19 @@ def test_l0_projection_strips_types_and_signatures():
     assert all(f.return_type == "?" and not f.params for f in p.functions)
 
 
+def test_l0_projection_clears_typedefs():
+    """A stripped binary (L0) carries no typedef evidence — the projection must
+    drop `typedefs` too, else the typedef detector would overstate L0 for a
+    typedef-axis case (Codex review #487)."""
+    from abicheck.model import AbiSnapshot
+
+    snap = AbiSnapshot(library="lib", version="1", from_headers=True)
+    snap.typedefs = {"Handle": "int"}
+    assert tier_gate.project(snap, Tier.L0).typedefs == {}
+    # L1+ (debug/headers) may legitimately retain typedef evidence.
+    assert tier_gate.project(snap, Tier.L1).typedefs == {"Handle": "int"}
+
+
 def test_l1_projection_keeps_layout_but_drops_header_scope():
     old, _ = tier_gate.CORPUS[0].build()
     p = tier_gate.project(old, Tier.L1)

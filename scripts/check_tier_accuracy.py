@@ -191,9 +191,12 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         s.from_headers = False
     if tier == Tier.L0:
         # Stripped binary: only symbol identity survives — no layout, no
-        # signatures, no types/enums at all.
+        # signatures, no types/enums/typedefs at all. (Typedefs must be cleared
+        # too, else compare() would run the typedef detector and overstate what a
+        # stripped binary can see for a typedef-axis case — Codex review #487.)
         s.types = []
         s.enums = []
+        s.typedefs = {}
         for f in s.functions:
             f.return_type = "?"
             f.params = []
