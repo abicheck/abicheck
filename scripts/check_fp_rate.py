@@ -56,6 +56,8 @@ from abicheck.checker_policy import ChangeKind  # noqa: E402
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
+    EnumMember,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -98,10 +100,33 @@ def _rec(name, *, size=64, fields=(), origin=ScopeOrigin.UNKNOWN) -> RecordType:
     )
 
 
+def _opaque(name, *, size=64) -> RecordType:
+    """An opaque handle: forward-declared to consumers, so its (internal) layout
+    is not observable through a pointer — the by-value-vs-pointer precision axis
+    that scoping delegates to the downstream opaque filter (ADR-024 §D3)."""
+    return RecordType(name=name, kind="struct", size_bits=size, is_opaque=True)
+
+
+def _enum(name, members, *, underlying="int", origin=ScopeOrigin.UNKNOWN) -> EnumType:
+    return EnumType(
+        name=name,
+        members=[EnumMember(name=n, value=v) for n, v in members],
+        underlying_type=underlying,
+        origin=origin,
+    )
+
+
 def _snap(
-    version, *, functions=(), types=(), enums=(), variables=(), build_mode=None
+    version,
+    *,
+    functions=(),
+    types=(),
+    enums=(),
+    variables=(),
+    typedefs=None,
+    build_mode=None,
 ) -> AbiSnapshot:
-    return AbiSnapshot(
+    snap = AbiSnapshot(
         library="libfp",
         version=version,
         functions=list(functions),
@@ -110,6 +135,9 @@ def _snap(
         variables=list(variables),
         build_mode=build_mode,
     )
+    if typedefs:
+        snap.typedefs = dict(typedefs)
+    return snap
 
 
 def _bm(stdlib: StdlibFamily) -> BuildMode:
@@ -161,8 +189,11 @@ def _elf_only_function_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _internal_field_reordered() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # A struct nobody public reaches: reordering its fields is invisible to ABI.
+def _internal_field_type_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A struct nobody public reaches: a field type change is BREAKING before
+    # scoping (type_field_type_changed) and scoping is what makes it
+    # non-breaking. (A same-size field *reorder* emits no finding at all — even
+    # unscoped, even public — so it guards no scoping regression; Codex #487.)
     old = _snap(
         "1",
         functions=[_fn("api")],
@@ -171,7 +202,7 @@ def _internal_field_reordered() -> tuple[AbiSnapshot, AbiSnapshot]:
     new = _snap(
         "2",
         functions=[_fn("api")],
-        types=[_rec("InternalCache", size=128, fields=[("b", "long"), ("a", "int")])],
+        types=[_rec("InternalCache", size=128, fields=[("a", "long long"), ("b", "long")])],
     )
     return old, new
 
@@ -236,6 +267,63 @@ def _same_stdlib_internal_stl_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
         types=[_rec("InternalCache", size=256, fields=[("data", "std::vector<int>")])],
         build_mode=_bm(StdlibFamily.LIBSTDCXX),
     )
+    return old, new
+
+
+# --- enum-reachability + pointer/opaque precision (internal-noise) ------------
+# These lock in the by-value-vs-pointer (ADR-024 §D3) and enum/typedef
+# reachability behaviour the corpus previously left uncovered (see the NOTE
+# below). Each is a change the current implementation already scopes correctly;
+# they guard against a future regression, not assert a behaviour change.
+
+
+def _internal_enum_value_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # An enum no public API references: re-valuing a member is invisible to the
+    # exported surface, so it must not raise a public break.
+    old = _snap("1", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
+    new = _snap("2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 5)])])
+    return old, new
+
+
+def _internal_enum_member_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # Removing a member from an enum is BREAKING *before* scoping
+    # (enum_member_removed); on an unreferenced internal enum, scoping is what
+    # makes it non-breaking. (An appended member would be COMPATIBLE even
+    # unscoped, so it could not catch a scoping regression — Codex review #487.)
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        enums=[_enum("InternalMode", [("A", 0), ("B", 1), ("C", 2)])],
+    )
+    new = _snap("2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
+    return old, new
+
+
+def _enum_reached_only_via_internal_struct() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The enum is used only by an internal (unreachable) struct's field, so the
+    # transitive closure never reaches it from a public root.
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        types=[_rec("InternalCfg", size=64, fields=[("mode", "Mode")])],
+        enums=[_enum("Mode", [("A", 0), ("B", 1)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api")],
+        types=[_rec("InternalCfg", size=64, fields=[("mode", "Mode")])],
+        enums=[_enum("Mode", [("A", 0), ("B", 9)])],
+    )
+    return old, new
+
+
+def _opaque_handle_pointer_only_size() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public API returns a pointer to an *opaque* handle whose internal size
+    # changes. Consumers only ever hold the pointer (they cannot see the layout),
+    # so this is not a public break — the by-value-vs-pointer precision the
+    # opaque filter supplies (ADR-024 §D3).
+    old = _snap("1", functions=[_fn("api", ret="OpaqueH *")], types=[_opaque("OpaqueH", size=64)])
+    new = _snap("2", functions=[_fn("api", ret="OpaqueH *")], types=[_opaque("OpaqueH", size=128)])
     return old, new
 
 
@@ -322,6 +410,101 @@ def _cross_stdlib_embedded_layout_diverges() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+# --- enum-reachability + pointer precision (real-break counterparts) ----------
+# The FN sentinels for the same axes: a change that *is* observable through the
+# public surface must stay breaking, so the internal-noise cases above can never
+# be widened into hiding a real break.
+
+
+def _public_enum_value_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public API takes the enum by value: re-valuing a member changes the
+    # meaning of the argument every caller passes — a real API break.
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("PublicMode",))],
+        enums=[_enum("PublicMode", [("A", 0), ("B", 1)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("PublicMode",))],
+        enums=[_enum("PublicMode", [("A", 0), ("B", 5)])],
+    )
+    return old, new
+
+
+def _enum_reached_via_public_struct_field() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The enum is a field of a public (returned-by-pointer) struct, so it is
+    # reachable through the closure and its value change stays breaking.
+    old = _snap(
+        "1",
+        functions=[_fn("api", ret="Cfg *")],
+        types=[_rec("Cfg", size=64, fields=[("mode", "Mode")])],
+        enums=[_enum("Mode", [("A", 0), ("B", 1)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", ret="Cfg *")],
+        types=[_rec("Cfg", size=64, fields=[("mode", "Mode")])],
+        enums=[_enum("Mode", [("A", 0), ("B", 9)])],
+    )
+    return old, new
+
+
+def _enum_reached_via_public_typedef() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public API references the enum through a typedef alias; the closure
+    # follows typedef targets, so the value change stays in-surface.
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("ModeAlias",))],
+        enums=[_enum("Mode", [("A", 0), ("B", 1)])],
+        typedefs={"ModeAlias": "Mode"},
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("ModeAlias",))],
+        enums=[_enum("Mode", [("A", 0), ("B", 9)])],
+        typedefs={"ModeAlias": "Mode"},
+    )
+    return old, new
+
+
+def _namespaced_enum_reached_unqualified() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public API references a *namespaced* enum by its unqualified short name
+    # (``Mode`` for ``ns::Mode``) — exactly how C++ inside ``namespace ns`` spells
+    # it. The surface closure must resolve the short alias to the canonical enum
+    # the way it already does for records, else re-valuing a member is wrongly
+    # scoped out as NO_CHANGE. Regression guard for the enum tail-alias fix.
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("Mode",))],
+        enums=[_enum("ns::Mode", [("A", 0), ("B", 1)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("Mode",))],
+        enums=[_enum("ns::Mode", [("A", 0), ("B", 5)])],
+    )
+    return old, new
+
+
+def _defined_pointer_only_type_size() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The counterpart to the opaque handle: the pointed-to type is *fully
+    # defined* in the public surface, so a consumer can dereference/allocate it
+    # by value — its size change is observable and must stay breaking. This is
+    # why scoping must NOT blanket-demote pointer-only-reached types.
+    old = _snap(
+        "1",
+        functions=[_fn("api", ret="Defined *")],
+        types=[_rec("Defined", size=64, fields=[("x", "int")])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", ret="Defined *")],
+        types=[_rec("Defined", size=128, fields=[("x", "int")])],
+    )
+    return old, new
+
+
 # --- versioned-symbol-scheme + multi-.so-bundle shapes (field-eval F2) --------
 # The eval surfaced two real-world shapes the gate didn't cover: the
 # versioned-symbol scheme (ICU `u_*_75`->`_78`, P08) and multi-.so bundles whose
@@ -377,21 +560,36 @@ def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 
 # NOTE on corpus scope: every case here is one the *current* implementation
 # already gets right, so a correct build keeps a clean 0/0 sheet (the gate's
-# core invariant). Two tempting cases were deliberately left out because their
-# "correct" verdict is genuinely ambiguous and would make this gate assert a
-# behaviour change rather than guard a regression:
-#   * an internal (unreferenced) enum value change — enum reachability scoping
-#     is coarser than struct reachability;
-#   * appending a field to a public struct — often a *compatible* extension, so
-#     it is not an unambiguous real-break.
-# Track those as detector/scoping work, not as FP-gate corpus entries.
+# core invariant).
+#
+# The enum-reachability and pointer/opaque-precision cases below were once left
+# out (their "correct" verdict was thought ambiguous). They are now covered with
+# *both* polarities each — verified against the current implementation — so the
+# gate guards them as regressions rather than asserting a behaviour change:
+#   * internal (unreferenced) enum value-change / member-removal changes (both
+#     breaking before scoping) scope out;
+#     the same change on a public-reachable enum stays breaking (enum
+#     reachability now closes through struct fields and typedefs just like
+#     struct reachability);
+#   * a pointer-only-reached *opaque* handle's internal size change scopes out
+#     (the by-value-vs-pointer precision the opaque filter supplies, ADR-024
+#     §D3), while a pointer-only-reached *fully-defined* type's size change stays
+#     breaking (a consumer can dereference/allocate it by value).
+# One tempting case is still deliberately excluded: appending a field to a public
+# struct is often a *compatible* extension, so it is not an unambiguous
+# real-break — track it as detector/scoping work, not an FP-gate corpus entry.
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
-    Case("internal_field_reordered", True, _internal_field_reordered),
+    Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
+    # enum reachability + pointer/opaque precision — internal-noise polarity.
+    Case("internal_enum_value_changed", True, _internal_enum_value_changed),
+    Case("internal_enum_member_removed", True, _internal_enum_member_removed),
+    Case("enum_reached_only_via_internal_struct", True, _enum_reached_only_via_internal_struct),
+    Case("opaque_handle_pointer_only_size", True, _opaque_handle_pointer_only_size),
     # field-eval F2: versioned-symbol scheme (P08) + multi-.so bundle (P20).
     Case("versioned_scheme_internal_churn", True, _versioned_scheme_internal_churn),
     Case("bundle_sibling_soname_churn", True, _bundle_sibling_soname_churn),
@@ -412,6 +610,12 @@ CORPUS: list[Case] = [
     Case("public_variable_removed", False, _public_variable_removed),
     Case("leaked_internal_via_public_api", False, _leaked_internal_via_public_api),
     Case("versioned_scheme_public_churn", False, _versioned_scheme_public_churn),
+    # enum reachability + pointer precision — real-break (FN sentinel) polarity.
+    Case("public_enum_value_changed", False, _public_enum_value_changed),
+    Case("enum_reached_via_public_struct_field", False, _enum_reached_via_public_struct_field),
+    Case("enum_reached_via_public_typedef", False, _enum_reached_via_public_typedef),
+    Case("namespaced_enum_reached_unqualified", False, _namespaced_enum_reached_unqualified),
+    Case("defined_pointer_only_type_size", False, _defined_pointer_only_type_size),
 ]
 
 
@@ -787,11 +991,106 @@ def evaluate(corpus: list[Case] = CORPUS) -> Outcome:
     return Outcome(false_positives=fp, false_negatives=fn)
 
 
-def metrics(outcome: Outcome | None = None) -> dict[str, int]:
+# --------------------------------------------------------------------------- #
+# Per-axis accuracy breakdown (trend reporting).
+#
+# The single 0/0 headline proves "no regression" but hides *which* accuracy axis
+# a higher evidence layer bought. Tagging each case with the scoping axis it
+# exercises lets CI archive the per-axis case counts (like ``eval/`` archives its
+# results) and read the trend over releases: when a new layer/detector removes a
+# class of false positive, the matching axis grows a covered case here.
+# --------------------------------------------------------------------------- #
+
+CASE_CATEGORY: dict[str, str] = {
+    # struct/record layout reachability
+    "internal_struct_size": "struct-layout",
+    "internal_field_type_changed": "struct-layout",
+    "public_struct_size": "struct-layout",
+    "leaked_internal_via_public_api": "struct-layout",
+    # symbol linkage / visibility
+    "elf_only_function_removed": "symbol-linkage",
+    "hidden_function_signature_changed": "symbol-linkage",
+    "public_function_removed": "symbol-linkage",
+    "public_param_type_changed": "symbol-linkage",
+    "public_return_type_changed": "symbol-linkage",
+    "public_variable_removed": "symbol-linkage",
+    # declaration provenance (private/system header)
+    "private_header_type_change": "provenance-header",
+    # stdlib implementation attribution
+    "same_stdlib_internal_stl_churn": "stdlib-impl",
+    "cross_stdlib_embedded_layout_diverges": "stdlib-impl",
+    # versioned-symbol scheme / multi-.so bundle
+    "versioned_scheme_internal_churn": "versioned-scheme",
+    "bundle_sibling_soname_churn": "versioned-scheme",
+    "versioned_scheme_public_churn": "versioned-scheme",
+    # enum reachability closure
+    "internal_enum_value_changed": "enum-reachability",
+    "internal_enum_member_removed": "enum-reachability",
+    "enum_reached_only_via_internal_struct": "enum-reachability",
+    "public_enum_value_changed": "enum-reachability",
+    "enum_reached_via_public_struct_field": "enum-reachability",
+    "enum_reached_via_public_typedef": "enum-reachability",
+    "namespaced_enum_reached_unqualified": "enum-reachability",
+    # by-value-vs-pointer / opaque-handle precision
+    "opaque_handle_pointer_only_size": "pointer-opaque",
+    "defined_pointer_only_type_size": "pointer-opaque",
+}
+
+
+def uncategorized_cases() -> list[str]:
+    """Corpus cases lacking a CASE_CATEGORY axis tag (would fall into the
+    ``uncategorized`` bucket in the trend breakdown). Enforced from ``main()``
+    and mirrored by ``test_every_case_carries_a_category_tag`` — not an
+    import-time ``assert`` (a module side effect, stripped under ``python -O``;
+    scripts/CLAUDE.md forbids import-time behaviour)."""
+    return sorted({c.name for c in CORPUS} - set(CASE_CATEGORY))
+
+
+def _category_of(name: str) -> str:
+    return CASE_CATEGORY.get(name, "uncategorized")
+
+
+def category_breakdown(
+    outcome: Outcome | None = None, corpus: list[Case] = CORPUS
+) -> dict[str, dict[str, int]]:
+    """Per-axis case counts + FP/FN tally for trend archiving.
+
+    Each axis maps to ``{cases, internal_noise, real_break, false_positives,
+    false_negatives}``. Sorted by axis name so the JSON is diff-stable across
+    runs (CI can archive it and compare release-over-release).
+    """
+    outcome = outcome or evaluate(corpus)
+    fp_set = set(outcome.false_positives)
+    fn_set = set(outcome.false_negatives)
+    out: dict[str, dict[str, int]] = {}
+    for case in corpus:
+        cat = _category_of(case.name)
+        row = out.setdefault(
+            cat,
+            {
+                "cases": 0,
+                "internal_noise": 0,
+                "real_break": 0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            },
+        )
+        row["cases"] += 1
+        row["internal_noise" if case.internal_noise else "real_break"] += 1
+        if case.name in fp_set:
+            row["false_positives"] += 1
+        if case.name in fn_set:
+            row["false_negatives"] += 1
+    return dict(sorted(out.items()))
+
+
+def metrics(outcome: Outcome | None = None) -> dict[str, object]:
     """ADR-033 D9 metrics for the FP-rate gate — counts and deltas vs baseline.
 
     ``false_positive_delta_vs_baseline`` / ``false_negative_delta_vs_baseline``
     are the ADR-033 D9 signals: 0 means on-baseline, positive means a regression.
+    ``by_category`` is the per-axis breakdown for trend archiving (see
+    :func:`category_breakdown`).
     """
     outcome = outcome or evaluate()
     n_fp, n_fn = len(outcome.false_positives), len(outcome.false_negatives)
@@ -808,7 +1107,34 @@ def metrics(outcome: Outcome | None = None) -> dict[str, int]:
         "crosscheck_false_negatives": cc_fn,
         "crosscheck_false_positive_delta_vs_baseline": cc_fp - CC_FP_BASELINE,
         "crosscheck_false_negative_delta_vs_baseline": cc_fn - CC_FN_BASELINE,
+        "by_category": category_breakdown(outcome),
     }
+
+
+def render_markdown(m: dict[str, object]) -> str:
+    """Render the per-axis accuracy breakdown as a Markdown table.
+
+    Suitable for a GitHub step summary so the FP/FN trend can be read per axis
+    over releases, not just as a single pass/fail. The headline line carries the
+    delta-vs-baseline so a regression is legible at a glance.
+    """
+    by_cat = m["by_category"]
+    assert isinstance(by_cat, dict)
+    lines = [
+        f"### FP-rate gate — {m['cases']} cases, "
+        f"{m['false_positives']} FP / {m['false_negatives']} FN "
+        f"(Δ baseline: {m['false_positive_delta_vs_baseline']:+d} FP, "
+        f"{m['false_negative_delta_vs_baseline']:+d} FN)",
+        "",
+        "| Axis | Cases | Internal-noise | Real-break | FP | FN |",
+        "|------|------:|---------------:|-----------:|---:|---:|",
+    ]
+    for axis, row in by_cat.items():
+        lines.append(
+            f"| {axis} | {row['cases']} | {row['internal_noise']} | "
+            f"{row['real_break']} | {row['false_positives']} | {row['false_negatives']} |"
+        )
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -818,9 +1144,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit the ADR-033 D9 metrics (counts + delta-vs-baseline) as JSON.",
+        help="Emit the ADR-033 D9 metrics (counts + delta-vs-baseline + "
+        "per-axis by_category breakdown) as JSON — archive it for trend tracking.",
+    )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Print the per-axis accuracy breakdown as a Markdown table "
+        "(for a CI step summary / release-over-release trend).",
     )
     args = parser.parse_args(argv)
+
+    missing_axis = uncategorized_cases()
+    if missing_axis:
+        print(
+            f"ERROR: FP-rate corpus cases missing a CASE_CATEGORY axis tag: {missing_axis}",
+            file=sys.stderr,
+        )
+        return 1
 
     outcome = evaluate()
     cc_outcome = evaluate_crosschecks()
@@ -832,6 +1173,8 @@ def main(argv: list[str] | None = None) -> int:
         import json
 
         print(json.dumps(m, indent=2))
+    elif args.markdown:
+        print(render_markdown(m))
     else:
         print(
             f"FP-rate gate: {len(CORPUS)} cases — {n_fp} false positive(s), {n_fn} false negative(s)"

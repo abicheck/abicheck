@@ -289,6 +289,20 @@ packs recover several of the otherwise-invisible source-only facts above
 (macro/`constexpr` values, uninstantiated templates). See [Build & Source Packs](build-source-data.md) and the full [L0–L4
 model](evidence-and-detectability.md).
 
+> **The layering principle — more evidence cuts *both* error kinds.** Each layer
+> you add reduces **false negatives** (breaks a weaker input is blind to) **and**
+> **false positives** (internal churn a weaker input cannot scope) — not one at
+> the expense of the other. Symbols-only is blind to layout; add DWARF and it
+> sees layout but *over-reports* internal-type churn; add headers and that churn
+> is scoped out while every real break stays; add build context and it catches a
+> cross-toolchain break no artifact tier could see; add source (L4) and it
+> catches macro/`constexpr`/inline-body breaks **no artifact tier can *ever* see**.
+> The one rule that never bends: more evidence may *scope away* a false positive
+> but must never *hide* an artifact-proven break (the *authority rule*). abicheck
+> tracks each layer's FP/FN contribution as a CI gate — see
+> [Evidence & Detectability → What each layer buys](evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives)
+> for the tracked per-tier matrix.
+
 #### Which input proves which family
 
 The minimum input needed to *detect* each family — and the most common reason a

@@ -28,6 +28,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   binaries and are validated compiler-free (`scripts/gen_l3l4l5_examples.py`,
   `tests/test_l3l4l5_examples.py`).
 
+### Documentation
+
+- **Explained *what each evidence layer buys* for accuracy** — a new
+  "What each layer buys: fewer false negatives *and* fewer false positives"
+  section in `concepts/evidence-and-detectability.md` with the tracked per-tier
+  (L0–L3) matrix, plus a "layering principle" callout in the ABI/API handling
+  guide. Makes explicit that adding a layer cuts *both* error kinds (not a
+  trade-off), why L1 transiently introduces false positives that L2 scoping
+  removes, and how L4/L5 extend the same story to source-only breaks no artifact
+  tier can see.
+
 ### Fixed
 
 - **Docs: the `scan --depth` ladder is now stated identically everywhere**
@@ -85,6 +96,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Per-evidence-tier accuracy gate** (`scripts/check_tier_accuracy.py`, mirrored
+  in `tests/test_tier_accuracy_gate.py`, wired into CI with a step-summary
+  matrix) — measures *what each evidence level buys*. One labelled logical
+  change per case is projected down to what each tier observes (L0 symbols → L1
+  debug → L2 headers → L3 build) and run through `compare`; verdicts collapse to
+  a 3-band ordinal (non-breaking / risk / breaking). It quantifies, per tier,
+  **over-calls (false positives)** and **under-calls (false negatives)** and
+  which transition removes each — so "each higher level reduces false positives"
+  (the L1→L2 scoping layer) and "lower levels are insufficient to catch some
+  real breaks" (L0/L1 under-calls that only headers or build context reveal)
+  become tracked, gated facts rather than assertions. Gates on top-tier
+  correctness + under-call monotonicity (more evidence never hides a break an
+  earlier tier caught — the authority rule, ADR-028 D3).
+- **Per-axis FP-rate trend reporting** — the public-surface FP-rate gate
+  (`scripts/check_fp_rate.py`) tags each corpus case with its scoping axis;
+  `--json` now carries a `by_category` breakdown and `--markdown` renders a
+  per-axis accuracy table for a CI step-summary / release-over-release trend.
+- **FP-rate corpus now guards enum-reachability and pointer/opaque precision**
+  — eight cases (both polarities each) lock in that internal (unreferenced)
+  enum value-change / member-removal changes and pointer-only *opaque* handle size
+  changes scope out, while public-reachable enums and pointer-only
+  *fully-defined* type size changes stay breaking. Baselines remain 0/0.
 - New user-guide page **CI Gating** (`docs/user-guide/ci-gating.md`) — the
   missing hub explaining how baselines, policies, suppressions, and severity
   combine into the exit code (order of operations + the two exit-code

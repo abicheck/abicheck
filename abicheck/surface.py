@@ -24,8 +24,24 @@ The surface is computed from two facts that the dumper already records:
    parameter types, data members, base classes, or typedef targets. The
    closure deliberately follows *all* data members (including private and
    pointer-typed ones): this over-keeps rather than risks hiding a layout
-   dependency, and precise by-value-vs-pointer reachability is left to a
-   later phase (ADR-024 §D3).
+   dependency. The closure follows enum references (as struct-field types,
+   typedef targets, or signature types) exactly as it follows record
+   references — including resolving a namespaced enum referenced by its
+   unqualified short name (``Mode`` for ``ns::Mode``) via the same trailing-``::``
+   alias index records use — so an unreferenced internal enum is scoped out
+   while a public-reachable one is kept (locked in by the ``enum-reachability``
+   axis of the ``scripts/check_fp_rate.py`` corpus).
+
+   Precise by-value-vs-pointer reachability (ADR-024 §D3) is intentionally
+   *not* done here: a pointer-reached type whose full definition is public
+   is still layout-observable (a consumer can dereference/allocate it by
+   value), so demoting it at this stage would hide a real break. The safe
+   half of that precision — a pointer-only-reached *opaque* handle whose
+   layout consumers cannot see — is delivered downstream by the opaque
+   filter (``diff_filtering._filter_opaque_size_changes`` /
+   ``_downgrade_opaque_type_changes``), which acts on the layout-observability
+   axis rather than the public/private axis. Both polarities are locked in by
+   the ``pointer-opaque`` axis of the FP-rate corpus.
 
 This module performs *no* deletion on its own; it only answers "is this
 finding about the public surface?".  The pipeline step that consumes it
@@ -53,7 +69,7 @@ from .model import ScopeOrigin, Visibility
 
 if TYPE_CHECKING:
     from .checker_types import Change
-    from .model import AbiSnapshot, RecordType
+    from .model import AbiSnapshot, EnumType, RecordType
 
 # Findings whose whole purpose is to surface a *private* entity leaking into
 # the public ABI. Scoping must never filter these (ADR-024 §D5.2).
@@ -287,28 +303,44 @@ def _record_origin(surface: PublicSurface, keys: set[str], origin: ScopeOrigin) 
 
 def _index_surface_types(
     snap: AbiSnapshot, surface: PublicSurface
-) -> dict[str, RecordType]:
-    """Populate ``surface.all_types`` and return a name -> record index.
+) -> tuple[dict[str, list[RecordType]], dict[str, list[EnumType]]]:
+    """Populate ``surface.all_types`` and return name -> record / enum indexes.
 
-    Records are indexed by both their full name and (for namespaced types) the
-    trailing ``::`` segment, so the closure walk can match either encoding.
+    Records *and* enums are indexed by both their full name and (for namespaced
+    types) the trailing ``::`` segment, so the closure walk can resolve either
+    encoding — a namespaced enum referenced unqualified from a public signature
+    or field (``Mode`` for ``ns::Mode``) must still be marked public, exactly as
+    records are.
+
+    A tail segment can be *ambiguous*: two namespaces may both define
+    ``ns1::Mode`` and ``ns2::Mode``. Without namespace context on the reference
+    we cannot tell which the public API meant, so each name maps to a *list* of
+    all matching types and the closure marks every one public — over-keeping is
+    the safe direction (never hide a real break behind snapshot order).
     """
-    record_by_name: dict[str, RecordType] = {}
+    record_by_name: dict[str, list[RecordType]] = {}
     for rec in snap.types:
         surface.all_types.add(rec.name)
-        record_by_name[rec.name] = rec
         keys = {rec.name}
+        record_by_name.setdefault(rec.name, []).append(rec)
         if "::" in rec.name:
             tail = rec.name.rsplit("::", 1)[1]
-            record_by_name.setdefault(tail, rec)
+            record_by_name.setdefault(tail, []).append(rec)
             keys.add(tail)
         _record_origin(surface, keys, getattr(rec, "origin", ScopeOrigin.UNKNOWN))
+    enum_by_name: dict[str, list[EnumType]] = {}
     for en in snap.enums:
         surface.all_types.add(en.name)
-        _record_origin(surface, {en.name}, getattr(en, "origin", ScopeOrigin.UNKNOWN))
+        keys = {en.name}
+        enum_by_name.setdefault(en.name, []).append(en)
+        if "::" in en.name:
+            tail = en.name.rsplit("::", 1)[1]
+            enum_by_name.setdefault(tail, []).append(en)
+            keys.add(tail)
+        _record_origin(surface, keys, getattr(en, "origin", ScopeOrigin.UNKNOWN))
     for alias in snap.typedefs:
         surface.all_types.add(alias)
-    return record_by_name
+    return record_by_name, enum_by_name
 
 
 def _seed_public_roots(
@@ -349,13 +381,16 @@ def _seed_public_roots(
 def _walk_type_closure(
     snap: AbiSnapshot,
     surface: PublicSurface,
-    record_by_name: dict[str, RecordType],
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
     seed_types: set[str],
 ) -> None:
     """Transitive closure over the record/typedef graph; fills public_types.
 
     Follows typedef targets, record fields, and base classes from each seed
     type, marking every reachable known type as part of the public surface.
+    A name may resolve to *several* types (an ambiguous ``::`` tail shared by
+    two namespaces); every match is marked public and walked.
     """
     queue = list(seed_types)
     seen: set[str] = set()
@@ -372,26 +407,35 @@ def _walk_type_closure(
             for ident in _type_identifiers(target):
                 if ident not in seen:
                     queue.append(ident)
-        rec_node = record_by_name.get(name)
-        if rec_node is None:
+        # A short/qualified enum alias (``Mode``) reached from a public signature
+        # or field resolves here to its canonical namespaced name (``ns::Mode``),
+        # so a scoped enum-member finding is not hidden (mirrors the record alias
+        # handling below). Enums have no fields or bases, so nothing is queued.
+        # An ambiguous tail may match enums in several namespaces — mark them all.
+        for en_node in enum_by_name.get(name, ()):
+            surface.public_types.add(en_node.name)
+        rec_nodes = record_by_name.get(name)
+        if not rec_nodes:
             continue
         # A short alias (``A``) reached inside its namespace resolves here to the
         # namespaced record (``ns::A``); record the *canonical* full name as
         # public so callers that count/scope by ``RecordType.name`` see it
         # (otherwise a reachable namespaced type is silently missed — ADR-027
-        # review). ``rec_node.name`` is always in ``all_types``.
-        surface.public_types.add(rec_node.name)
-        for f in rec_node.fields:
-            for ident in _type_identifiers(f.type):
-                if ident not in seen:
-                    queue.append(ident)
-        # Both direct and virtual bases are ABI-reachable through the derived
-        # type (virtual inheritance still embeds the base subobject + vtable
-        # path), so the public closure must follow both (ADR-025 A3 review).
-        for base in (*rec_node.bases, *rec_node.virtual_bases):
-            for ident in _type_identifiers(base):
-                if ident not in seen:
-                    queue.append(ident)
+        # review). ``rec_node.name`` is always in ``all_types``. An ambiguous
+        # tail shared by two namespaces resolves to several records — walk each.
+        for rec_node in rec_nodes:
+            surface.public_types.add(rec_node.name)
+            for f in rec_node.fields:
+                for ident in _type_identifiers(f.type):
+                    if ident not in seen:
+                        queue.append(ident)
+            # Both direct and virtual bases are ABI-reachable through the derived
+            # type (virtual inheritance still embeds the base subobject + vtable
+            # path), so the public closure must follow both (ADR-025 A3 review).
+            for base in (*rec_node.bases, *rec_node.virtual_bases):
+                for ident in _type_identifiers(base):
+                    if ident not in seen:
+                        queue.append(ident)
 
 
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
@@ -403,8 +447,8 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     """
     surface = PublicSurface()
 
-    # Build the type universe and a name -> record index for closure walks.
-    record_by_name = _index_surface_types(snap, surface)
+    # Build the type universe and name -> record / enum indexes for closure walks.
+    record_by_name, enum_by_name = _index_surface_types(snap, surface)
 
     # Seed roots from public symbols; collect the type names they touch.
     seed_types, has_public = _seed_public_roots(snap, surface)
@@ -424,7 +468,7 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
         return surface
 
     # Transitive closure over the record/typedef graph.
-    _walk_type_closure(snap, surface, record_by_name, seed_types)
+    _walk_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
     return surface
 
 

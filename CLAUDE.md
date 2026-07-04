@@ -167,13 +167,26 @@ Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print
 ## Test-quality gates (beyond line coverage)
 
 Line coverage measures *reach*, not whether a test actually checks the result.
-Four mechanisms guard test quality so coverage can't be "filled" without verifying behaviour:
+Several mechanisms guard test quality so coverage can't be "filled" without verifying behaviour:
 
 - **FP-rate gate** — `scripts/check_fp_rate.py` (mirrored in `tests/test_fp_rate_gate.py`).
   A labelled corpus of `(old, new)` snapshot pairs run under public-surface scoping:
   internal-noise cases must stay non-breaking (no false positives), real-break cases
   must stay breaking (no false negatives). Both baselines are 0; grow the corpus only
-  with cases the correct implementation already passes.
+  with cases the correct implementation already passes. Cases carry a scoping *axis*
+  tag (`CASE_CATEGORY`); `--markdown`/`--json` emit a per-axis FP/FN breakdown for trend
+  tracking.
+- **Per-tier accuracy gate** — `scripts/check_tier_accuracy.py` (mirrored in
+  `tests/test_tier_accuracy_gate.py`). Complements the FP-rate gate by measuring *what
+  each evidence level buys*: one labelled change per case is projected down to what each
+  tier observes (L0 symbols → L1 debug → L2 headers → L3 build) and run through `compare`;
+  verdicts collapse to a 3-band ordinal (non-breaking/risk/breaking). It records, per
+  tier, over-calls (false positives) vs under-calls (false negatives) — encoding the
+  principle that **adding a layer reduces both** (L1 sees layout but over-calls internal
+  churn; L2 scoping removes it; L0/L1 under-call breaks only headers/build see). Gates on
+  top-tier correctness + under-call monotonicity (more evidence never hides a break an
+  earlier tier caught — authority rule). CI posts the matrix to the step summary. User
+  docs: `docs/concepts/evidence-and-detectability.md` § "What each layer buys".
 - **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
   `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
   is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a

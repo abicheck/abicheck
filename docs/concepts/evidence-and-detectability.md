@@ -55,6 +55,67 @@ raise.** A struct-field insertion is invisible at L0 but obvious at L1
 *looks* like a break at L1 is correctly dismissed once L2 headers reveal the
 struct is non-public ([case118](../examples/case118_internal_struct_field_added_scoped.md)).
 
+### What each layer buys: fewer false negatives *and* fewer false positives
+
+Across the full staircase, adding evidence drives **both** error axes down — it
+is not a trade-off where you must choose between missing breaks and crying wolf.
+The gain is not perfectly monotonic at *every single* step (a middle layer can
+see a change before it has the context to scope it — L1 below is exactly that),
+but each higher layer either recovers a false negative or removes a false
+positive the layer beneath could not. abicheck tracks this as a CI
+gate (`scripts/check_tier_accuracy.py`): it runs one labelled change per case at
+each evidence level and records, per level, whether the tool *under-calls* it
+(a **false negative** — the layer is structurally *blind* to a real break) or
+*over-calls* it (a **false positive** — the layer sees the change but lacks the
+*context* to tell public from internal):
+
+| Change (ground truth)                       | L0 | L1 | L2 | L3 |
+|---------------------------------------------|:--:|:--:|:--:|:--:|
+| public struct grew — *breaking*             | ❌ FN | ✅ | ✅ | ✅ |
+| C function parameter widened — *breaking*   | ❌ FN | ✅ | ✅ | ✅ |
+| public enum value changed — *breaking*      | ❌ FN | ✅ | ✅ | ✅ |
+| internal struct grew — *non-breaking*       | ✅ | ❌ FP | ✅ | ✅ |
+| internal enum value changed — *non-breaking*| ✅ | ❌ FP | ✅ | ✅ |
+| cross-stdlib embed, same size — *risk*      | ❌ FN | ❌ FN | ❌ FN | ✅ |
+
+Read the columns as a story:
+
+- **L0 (symbols only)** is *blind*: it misses every layout / signature / enum
+  break (false negatives) — yet raises *no* layout false positives, precisely
+  because it sees no layout at all. Low false positives here are an artefact of
+  blindness, not of accuracy.
+- **L1 (+ debug info)** *catches the real breaks* L0 missed — and, seeing layout
+  for the first time, now **over-calls** internal-type churn it cannot tell
+  apart from public churn (false positives *appear*).
+- **L2 (+ public headers)** knows the public/private boundary, so it **removes
+  those false positives** by scoping internal churn out — while keeping every
+  real break. This is the single biggest false-positive reduction.
+- **L3 (+ build context)** catches a last class of break no artifact tier can
+  see: a public type embedding `std::` by value across two *different* stdlib
+  implementations at the *same* size — invisible until the build flags reveal
+  the mismatch.
+
+So the honest shape is not "false positives fall monotonically" — L1 actually
+*introduces* false positives that L0 was too blind to raise, and L2 clears them.
+What holds monotonically, and what the gate enforces, is the **false-negative**
+side: **more evidence never hides a break a weaker tier already caught** (the
+[*authority rule*](build-source-data.md), ADR-028 — corroborating evidence may
+scope away a false positive, but never delete an artifact-proven break). With
+full evidence every case is correct (0 FP, 0 FN); CI publishes this matrix on
+every run, so each layer's contribution is a tracked number, not a claim.
+
+> **What about L4/L5?** The tracked matrix stops at L3 because L4 (source replay)
+> and the derived L5 graph cannot be projected from a synthetic binary snapshot
+> — they need real source. But they move **both** axes just as strongly. L4 is
+> the *only* layer that can catch a macro / `constexpr` / default-argument /
+> inline- or template-body change — a false negative invisible to **every**
+> artifact tier L0–L3 (a stripped binary, its debug info, and its headers all
+> compile the same emitted ABI). And L4/L5 cut false positives by proving which
+> declarations are genuinely reachable and exported (the cross-source checks —
+> `exported_not_public`, `private_header_leak`). Their accuracy is tracked
+> separately: by the cross-check FP/FN corpus (also in `check_fp_rate.py`) and by
+> each example's `min_evidence` tier in `examples/ground_truth.json`.
+>
 > **The derived sixth layer, `L5`.** Beyond the five sources above, abicheck
 > *derives* an `L5` source/build graph (include/type/call reachability, ADR-031)
 > from L3 (and any L4 surface) to **localize and explain** findings and
