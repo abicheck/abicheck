@@ -5,9 +5,11 @@ benchmark results across real-world test cases, and why the numbers come out the
 
 > **Note:** abicheck detects 269 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
-> `examples/` catalog (`case01`-`case73` + `case26b`); the full catalog now has
-> 162 cases (157 single-library cases + 5 multi-library bundle cases). The
-> subset is pinned so accuracy numbers stay reproducible across releases.
+> `examples/` catalog (`case01`-`case73` + `case26b`); the full
+> `examples/ground_truth.json` catalog now has 162 entries (153 compare-mode
+> cases plus 9 single-build audit/cross-source cases), split as 157
+> single-library cases plus 5 multi-library bundle cases. The subset is pinned
+> so accuracy numbers stay reproducible across releases.
 >
 > **Which denominator is which.** Several case counts appear below because each
 > lane measures a different slice: **162** = the whole catalog (157 single-library
@@ -25,20 +27,29 @@ benchmark results across real-world test cases, and why the numbers come out the
 
 ## Current scan-quality snapshot
 
-`Examples Validation` is the CI workflow for the full catalog. It validates the
-current abicheck scan quality separately from the pinned vendor benchmark below:
-the full catalog answers "what does abicheck currently cover?", while the pinned
-74-case subset answers "how does abicheck compare to ABICC/libabigail on a stable
-cross-tool corpus?"
+`Examples Validation` is the workflow for the runnable compare-mode catalog. It
+validates the current abicheck scan quality separately from the pinned vendor
+benchmark below: the catalog lanes answer "what does abicheck currently cover?",
+while the pinned 74-case subset answers "how does abicheck compare to
+ABICC/libabigail on a stable cross-tool corpus?"
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Build/autodiscovery | 129 runnable single-library cases | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` in CI | 118 passed / 5 xfailed / 6 skipped | CMake/build harness is healthy for all runnable single-library examples |
-| Default/debug verdicts | 134 catalog cases | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` in CI | 122 PASS / 5 XFAIL / 7 SKIP | Blocking verdict gate; no FAIL/ERROR bucket |
-| Runtime smoke | 134 catalog cases | `python validation/scripts/run_example_runtime_smoke.py --json` in CI artifact | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
+| Catalog metadata | 162 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 153 compare / 9 audit-cross-source | Single source of truth for examples, verdicts, expected kinds, and minimum evidence |
+| Build/autodiscovery | 161 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | 121 passed / 11 failed / 25 skipped / 4 xfailed | Current build-system lane is failing; the failed cases return `NO_CHANGE` instead of the expected change |
+| Default/debug verdicts | 162 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --json` | 121 PASS / 11 FAIL / 4 XFAIL / 26 SKIP | Current full-catalog verdict lane is failing on the same `NO_CHANGE` under-detections |
+| Runtime smoke | 162 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
 | Release headers smoke | 7 representative cases | `validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` in CI artifact | 7 PASS | Release/header mode matches ground truth on the representative smoke set |
 | Stripped headers smoke | 7 representative cases | same case set with `--artifact-variant stripped-headers` | 6 PASS / 1 FAIL | `case129_struct_return_convention` is the current stripped-mode signal-loss backlog |
 | Build/source smoke | 7 representative cases | same case set with `--artifact-variant build-source` | 7 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
+
+Current failing default/debug cases: `case01_symbol_removal`,
+`case02_param_type_change`, `case03_compat_addition`, `case10_return_type`,
+`case12_function_removed`, `case33_pointer_level`,
+`case46_pointer_chain_type_change`, `case59_func_became_inline`,
+`case66_language_linkage_changed`,
+`case102_frozen_runtime_signature_changed`, and
+`case141_versioned_symbol_scheme`.
 
 The full release/stripped/build-source mode matrix is intentionally not a
 blocking CI gate. It remains a manual extended-scan path because it is much
@@ -267,8 +278,9 @@ when each is given its best input?"* A second, orthogonal benchmark answers
 — i.e. how detection grows as you feed abicheck more of the
 [five sources](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information).
 
-This is run with a dedicated mode that scans every case at progressively richer
-evidence levels:
+This is tracked in two layers: `examples/ground_truth.json` records the minimum
+evidence layer for each case, while a dedicated benchmark mode empirically scans
+the runnable cases at progressively richer artifact layers:
 
 ```bash
 python3 scripts/benchmark_comparison.py --evidence-tiers
@@ -277,8 +289,8 @@ python3 scripts/benchmark_comparison.py --evidence-tiers --cases case01 case07 c
 ```
 
 > This is the **slow path**: it builds each case once and then runs the full
-> `dump`+`compare` pipeline up to four times per case (one per tier), so scope it
-> with `--cases`/`--suite` for quick iteration.
+> `dump`+`compare` pipeline up to four times per case (L0-L3), so scope it with
+> `--cases`/`--suite` for quick iteration.
 
 For each case it builds the libraries once, then runs the full `dump`+`compare`
 pipeline four times:
@@ -290,13 +302,10 @@ pipeline four times:
 | **L2** + public headers | `-g` `.so`, `-H include/` | Full (AST + DWARF) | 30 / 30 |
 | **L3** + build context | L2 plus `-p build/` (when a compile DB exists) | Full + build evidence | 30 / 30 + L3 |
 
-> **L4 (source ABI replay)** uses the build/source pack produced by `collect`;
-> the tiered benchmark runner does not exercise that mode yet, so it reports L4
-> as `n/a`.
-> The one catalog case that *only* L4 could see
-> ([case122](../examples/case122_template_signature_uninstantiated.md), an
-> uninstantiated-template change) is a documented gap whose correct verdict is
-> `NO_CHANGE` anyway.
+> **L4 (source ABI replay)** uses the build/source pack produced by `collect`.
+> The tiered benchmark runner does not exercise that mode yet, so the empirical
+> L0-L3 run still reports L4-only cases as not reached until source-pack support
+> is added. The table below includes the L4 minimum from `ground_truth.json`.
 
 ### Which source discovers what
 
@@ -304,28 +313,27 @@ Each case in [`examples/ground_truth.json`](https://github.com/abicheck/abicheck
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
 [`scripts/evidence_tiers.py`](https://github.com/abicheck/abicheck/blob/main/scripts/evidence_tiers.py)
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the
-`ground_truth.json` cases, that yields the cumulative coverage the
-`--evidence-tiers` summary prints:
+and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153-case
+compare-mode catalog, that yields the cumulative minimum-evidence coverage:
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
-| Just the binary | L0 | 42 | **42 / 129 (33%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
-| + Debug symbols | L1 | 63 | **105 / 129 (81%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
-| + Public headers | L2 | 23 | **128 / 129 (99%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 0 | **128 / 129 (99%)** | *(no catalog case requires L3 alone yet — see note)* |
-| + Sources | L4 | 1 | **129 / 129 (100%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md), documented gap) |
+| Just the binary | L0 | 50 | **50 / 153 (33%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
+| + Debug symbols | L1 | 65 | **115 / 153 (75%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
+| + Public headers | L2 | 23 | **138 / 153 (90%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 8 | **146 / 153 (95%)** | build-mode flips: exceptions ([130](../examples/case130_exceptions_mode_flip.md)), RTTI ([131](../examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](../examples/case132_threadsafe_statics_flip.md)), TLS model ([133](../examples/case133_tls_model_flip.md)), enum size ([152](../examples/case152_enum_size_flag_flip.md)), struct packing ([153](../examples/case153_struct_packing_flip.md)), LTO ([154](../examples/case154_lto_mode_flip.md)), char signedness ([155](../examples/case155_char_signedness_flip.md)) |
+| + Sources | L4 | 4 | **150 / 153 (98%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](../examples/case156_public_macro_removed.md)), inline function removed ([157](../examples/case157_inline_function_removed.md)), public typedef removed ([158](../examples/case158_public_typedef_removed.md)) |
+| + Source graph | L5 | 3 | **153 / 153 (100%)** | public API internal dependency ([160](../examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](../examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](../examples/case162_symbol_source_owner_changed.md)) |
 
-> **Why L3 adds 0 here.** Build-flag drift *is* an L3 concern, but compilers
-> record their flags redundantly in debug info (`DW_AT_producer` /
-> `.GCC.command.line`), so the catalog's flag-drift case
-> ([103](../examples/case103_toolchain_flag_drift.md)) is already discoverable at
-> **L1** from a `-g` build — the `--evidence-tiers` run confirms it emits
-> `toolchain_flag_drift` at L1. A compile database (L3) becomes *necessary* only
-> when debug info is stripped, or for the broader build-evidence kinds
-> (`abi_relevant_build_flag_changed`, `link_export_policy_changed`) that aren't
-> recorded in any artifact — none of which is represented as a standalone catalog
-> case yet.
+> **Why L3 now matters.** Earlier snapshots had no standalone L3-only catalog
+> cases. The current compare-mode catalog includes build-mode flips whose
+> relevant facts come from build context when artifact metadata is insufficient:
+> exceptions, RTTI, thread-safe statics, TLS model, enum size, struct packing,
+> LTO, and char signedness policy.
+>
+> **Why L5 is listed.** L5 is a derived source graph, not a sixth input. It is
+> included here because `ground_truth.json` uses it as the minimum evidence for
+> source-to-symbol reachability cases.
 >
 > **Crediting rule.** A tier only counts as *discovering* a case when it emits
 > the cataloged change **kind** with the right verdict, not merely a matching

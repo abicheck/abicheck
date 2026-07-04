@@ -183,7 +183,7 @@ for AI-agent workflows.
 
 The [`examples/`](examples/README.md) directory contains **162 real-world ABI/API scenarios** (157 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
-Current `Examples Validation` CI runs the full 134-case default/debug catalog and produces **122 PASS / 5 XFAIL / 7 SKIP** with no FAIL/ERROR bucket. The same workflow uploads full runtime-smoke results (**70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP**) and representative release/stripped/build-source mode-smoke artifacts. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known stripped-mode backlog.
+Current full-catalog default/debug validation over 162 selected cases produces **121 PASS / 11 FAIL / 4 XFAIL / 26 SKIP**; the failing cases currently under-detect changes as `NO_CHANGE`. Runtime smoke over the same 162-case catalog produces **73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP**. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known backlog.
 
 ---
 
@@ -205,7 +205,7 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The `--evidence-tiers` mode scans the catalog at each level so you can measure what every source unlocks:
+The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from `examples/ground_truth.json` minimum-evidence labels. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers
@@ -213,10 +213,12 @@ python scripts/benchmark_comparison.py --evidence-tiers
 
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 42 / 129 (33%) |
-| + Debug symbols (`L1`) | 105 / 129 (81%) |
-| + Public headers (`L2`) | 128 / 129 (99%) |
-| + Build data / sources (`L3`/`L4`) | 129 / 129 (100%) |
+| Just the binary (`L0`) | 50 / 153 (33%) |
+| + Debug symbols (`L1`) | 115 / 153 (75%) |
+| + Public headers (`L2`) | 138 / 153 (90%) |
+| + Build data (`L3`) | 146 / 153 (95%) |
+| + Sources (`L4`) | 150 / 153 (98%) |
+| + Source graph (`L5`) | 153 / 153 (100%) |
 
 More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 

@@ -75,12 +75,20 @@ Commands below use `PYTHONPATH=.`.
 
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
-| Build/autodiscovery | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, Python 3.14 | 129 runnable single-library cases | 118 passed / 5 xfailed / 6 skipped | Passing |
-| Default/debug verdicts | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` | CI Linux, blocking gate | 134 catalog cases | 122 PASS / 5 XFAIL / 7 SKIP | Passing; no FAIL/ERROR |
-| Runtime smoke | `python validation/scripts/run_example_runtime_smoke.py --json` | CI Linux artifact | 134 catalog cases | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | Linux proof run | 161 integration items | 121 passed / 11 failed / 25 skipped / 4 xfailed | Failing; see current failing cases below |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --json` | Linux proof run | 162 catalog cases | 121 PASS / 11 FAIL / 4 XFAIL / 26 SKIP | Failing; same `NO_CHANGE` under-detections |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 162 catalog cases | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
 | Release headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
 | Stripped headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant stripped-headers --json` | CI Linux artifact | 7 representative cases | 6 PASS / 1 FAIL | Informational; `case129` loses stripped-only signal |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+
+Current failing default/debug cases: `case01_symbol_removal`,
+`case02_param_type_change`, `case03_compat_addition`, `case10_return_type`,
+`case12_function_removed`, `case33_pointer_level`,
+`case46_pointer_chain_type_change`, `case59_func_became_inline`,
+`case66_language_linkage_changed`,
+`case102_frozen_runtime_signature_changed`, and
+`case141_versioned_symbol_scheme`.
 
 The full release/stripped/build-source matrix is not a blocking CI gate; CI
 keeps those modes to the representative smoke set so catalog changes do not make
