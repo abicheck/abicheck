@@ -282,14 +282,17 @@ def _internal_enum_value_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _internal_enum_member_appended() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # Appending a member to an unreferenced internal enum is non-observable.
-    old = _snap("1", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
-    new = _snap(
-        "2",
+def _internal_enum_member_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # Removing a member from an enum is BREAKING *before* scoping
+    # (enum_member_removed); on an unreferenced internal enum, scoping is what
+    # makes it non-breaking. (An appended member would be COMPATIBLE even
+    # unscoped, so it could not catch a scoping regression — Codex review #487.)
+    old = _snap(
+        "1",
         functions=[_fn("api")],
         enums=[_enum("InternalMode", [("A", 0), ("B", 1), ("C", 2)])],
     )
+    new = _snap("2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
     return old, new
 
 
@@ -541,7 +544,8 @@ def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 # out (their "correct" verdict was thought ambiguous). They are now covered with
 # *both* polarities each — verified against the current implementation — so the
 # gate guards them as regressions rather than asserting a behaviour change:
-#   * internal (unreferenced) enum value / appended-member changes scope out;
+#   * internal (unreferenced) enum value-change / member-removal changes (both
+#     breaking before scoping) scope out;
 #     the same change on a public-reachable enum stays breaking (enum
 #     reachability now closes through struct fields and typedefs just like
 #     struct reachability);
@@ -561,7 +565,7 @@ CORPUS: list[Case] = [
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
-    Case("internal_enum_member_appended", True, _internal_enum_member_appended),
+    Case("internal_enum_member_removed", True, _internal_enum_member_removed),
     Case("enum_reached_only_via_internal_struct", True, _enum_reached_only_via_internal_struct),
     Case("opaque_handle_pointer_only_size", True, _opaque_handle_pointer_only_size),
     # field-eval F2: versioned-symbol scheme (P08) + multi-.so bundle (P20).
@@ -998,7 +1002,7 @@ CASE_CATEGORY: dict[str, str] = {
     "versioned_scheme_public_churn": "versioned-scheme",
     # enum reachability closure
     "internal_enum_value_changed": "enum-reachability",
-    "internal_enum_member_appended": "enum-reachability",
+    "internal_enum_member_removed": "enum-reachability",
     "enum_reached_only_via_internal_struct": "enum-reachability",
     "public_enum_value_changed": "enum-reachability",
     "enum_reached_via_public_struct_field": "enum-reachability",
