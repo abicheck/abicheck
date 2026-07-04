@@ -110,6 +110,21 @@ def test_l0_projection_strips_types_and_signatures():
     assert all(f.return_type == "?" and not f.params for f in p.functions)
 
 
+def test_projection_clears_header_constants_below_l2():
+    """Macro/constexpr constants are a header (L2) fact — no stripped binary or
+    DWARF carries them. L0/L1 must clear `constants`, else the serialization-tag
+    detector (reads `constants` directly) would overstate a constant-axis case
+    (Codex review #487)."""
+    from abicheck.model import AbiSnapshot
+
+    snap = AbiSnapshot(library="lib", version="1", from_headers=True)
+    snap.constants = {"SCHEMA_TAG": "7"}
+    assert tier_gate.project(snap, Tier.L0).constants == {}
+    assert tier_gate.project(snap, Tier.L1).constants == {}
+    # L2+ retains header constants.
+    assert tier_gate.project(snap, Tier.L2).constants == {"SCHEMA_TAG": "7"}
+
+
 def test_l0_projection_clears_typedefs():
     """A stripped binary (L0) carries no typedef evidence — the projection must
     drop `typedefs` too, else the typedef detector would overstate L0 for a

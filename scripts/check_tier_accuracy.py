@@ -191,6 +191,12 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
             t.origin = ScopeOrigin.UNKNOWN
         for e in s.enums:
             e.origin = ScopeOrigin.UNKNOWN
+        # Macro/constexpr constants are a header (L2) fact — a stripped binary
+        # and its DWARF carry no macro/constexpr values. Clear them below L2, else
+        # DetectCppPatterns.detect_serialization_tag_changes (which reads
+        # `constants` directly, not via from_headers) would report a constant
+        # change at L0/L1 and overstate a constant-axis case (Codex review #487).
+        s.constants = {}
         s.from_headers = False
     if tier == Tier.L0:
         # Stripped binary: only symbol identity survives — no layout, no
