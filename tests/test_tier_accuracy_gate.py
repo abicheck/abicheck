@@ -117,6 +117,29 @@ def test_l0_projection_clears_typedefs():
     assert tier_gate.project(snap, Tier.L1).typedefs == {"Handle": "int"}
 
 
+def test_l0_projection_degrades_variables_to_bare_symbols():
+    """A stripped binary sees a data symbol's name only — not its type, const-ness
+    or value. L0 must degrade variables accordingly (Codex review #487)."""
+    from abicheck.model import AbiSnapshot, ScopeOrigin, Variable, Visibility
+
+    snap = AbiSnapshot(
+        library="lib",
+        version="1",
+        from_headers=True,
+        variables=[
+            Variable(name="g", mangled="g", type="int", is_const=True, value="5",
+                     visibility=Visibility.PUBLIC, origin=ScopeOrigin.PUBLIC_HEADER)
+        ],
+    )
+    l0 = tier_gate.project(snap, Tier.L0)
+    v = l0.variables[0]
+    assert v.type == "?" and v.is_const is False and v.value is None
+    assert v.visibility == Visibility.ELF_ONLY and v.origin == ScopeOrigin.UNKNOWN
+    # L1 keeps the type (DWARF carries it) but still no header scoping.
+    v1 = tier_gate.project(snap, Tier.L1).variables[0]
+    assert v1.type == "int" and v1.visibility == Visibility.ELF_ONLY
+
+
 def test_l1_projection_keeps_layout_but_drops_header_scope():
     old, _ = tier_gate.CORPUS[0].build()
     p = tier_gate.project(old, Tier.L1)

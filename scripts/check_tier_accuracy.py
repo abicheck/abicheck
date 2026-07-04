@@ -184,6 +184,9 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         for f in s.functions:
             f.visibility = Visibility.ELF_ONLY
             f.origin = ScopeOrigin.UNKNOWN
+        for v in s.variables:
+            v.visibility = Visibility.ELF_ONLY
+            v.origin = ScopeOrigin.UNKNOWN
         for t in s.types:
             t.origin = ScopeOrigin.UNKNOWN
         for e in s.enums:
@@ -191,15 +194,20 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         s.from_headers = False
     if tier == Tier.L0:
         # Stripped binary: only symbol identity survives — no layout, no
-        # signatures, no types/enums/typedefs at all. (Typedefs must be cleared
-        # too, else compare() would run the typedef detector and overstate what a
-        # stripped binary can see for a typedef-axis case — Codex review #487.)
+        # signatures, no types/enums/typedefs, and variables degrade to a bare
+        # symbol (no type/const/value evidence). Anything richer would let
+        # compare() overstate what a stripped binary can see for a type-, enum-,
+        # typedef- or variable-axis case (Codex review #487).
         s.types = []
         s.enums = []
         s.typedefs = {}
         for f in s.functions:
             f.return_type = "?"
             f.params = []
+        for v in s.variables:
+            v.type = "?"
+            v.is_const = False
+            v.value = None
         s.elf_only_mode = True
     if tier < Tier.L3:
         # Build context (stdlib/toolchain/flags) only exists at L3.
