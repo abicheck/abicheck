@@ -168,10 +168,17 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         abi_relevant_only=True,
         filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
     )
+    name_counts: dict[str, int] = {}
+    for f in funcs.values():
+        name_counts[f.name] = name_counts.get(f.name, 0) + 1
     return {
         k: v
         for k, v in funcs.items()
-        if k in exported or (v.is_deleted and not v.deleted_from_dwarf)
+        if (
+            k in exported
+            or (v.name in exported and name_counts.get(v.name) == 1)
+            or (v.is_deleted and not v.deleted_from_dwarf)
+        )
     }
 
 

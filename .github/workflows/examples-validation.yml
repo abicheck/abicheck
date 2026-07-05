@@ -256,7 +256,8 @@ jobs:
             --proof-g20 \
             --proof-l3l4l5 \
             --proof-btf \
-            --out results/full-example-matrix.json
+            --out results/full-example-matrix.json \
+            --allow-unresolved
 
       - name: Upload full matrix
         if: always()

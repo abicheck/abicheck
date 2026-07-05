@@ -23,17 +23,23 @@ Finding B — _detect_newly_deleted_functions must NOT emit FUNC_DELETED for
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import AbiSnapshot, Function, Visibility
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _snap(functions: list[Function] | None = None) -> AbiSnapshot:
+def _snap(
+    functions: list[Function] | None = None,
+    *,
+    elf: ElfMetadata | None = None,
+) -> AbiSnapshot:
     return AbiSnapshot(
         library="libtest.so.1",
         version="1.0",
         functions=functions or [],
+        elf=elf,
     )
 
 
@@ -142,6 +148,32 @@ class TestExternCFallbackMultimap:
         # Old C++ function has no mangled match and no unique extern-C peer —
         # must be reported removed.
         assert ChangeKind.FUNC_REMOVED in _kinds(r)
+
+
+# ---------------------------------------------------------------------------
+# Finding C — ELF export gate accepts C-linkage symbol names
+# ---------------------------------------------------------------------------
+
+class TestCLinkageExportGate:
+    """Public CastXML functions must survive ELF filtering when ELF has C names."""
+
+    def test_cpp_mangled_function_kept_when_elf_exports_plain_c_name(self) -> None:
+        """ELF may export `helper` while CastXML records `_Z6helperv`.
+
+        The ELF export gate must not drop both sides as non-public, or a real
+        signature change becomes an overall NO_CHANGE in example validation.
+        """
+        old_func = _func("helper", "_Z6helperv", return_type="void")
+        new_func = _func("helper", "_Z6helperv", return_type="int")
+        c_export = ElfMetadata(symbols=[ElfSymbol("helper", sym_type=SymbolType.FUNC)])
+
+        r = compare(
+            _snap(functions=[old_func], elf=c_export),
+            _snap(functions=[new_func], elf=c_export),
+        )
+
+        assert ChangeKind.FUNC_RETURN_CHANGED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
 
 
 # ---------------------------------------------------------------------------
