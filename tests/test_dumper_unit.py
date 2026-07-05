@@ -860,3 +860,22 @@ class TestCastxmlParserTypedefs:
         root = _xml_root(ft, td)
         p = _CastxmlParser(root, set(), set())
         assert p.parse_typedefs() == {}
+
+
+def test_castxml_unmangled_overloaded_constructors_get_distinct_snapshot_keys():
+    root = Element("GCC_XML")
+    root.append(Element("Class", id="cls", name="Widget"))
+    root.append(Element("FundamentalType", id="t_int", name="int"))
+    root.append(Element("FundamentalType", id="t_double", name="double"))
+    c1 = Element("Constructor", id="c1", name="Widget", context="cls")
+    c1.append(Element("Argument", type="t_int"))
+    c2 = Element("Constructor", id="c2", name="Widget", context="cls")
+    c2.append(Element("Argument", type="t_double"))
+    root.extend([c1, c2])
+
+    funcs = _CastxmlParser(root, set(), set()).parse_functions()
+    mangled = {f.mangled for f in funcs}
+
+    assert "__abicheck_ctor__Widget(int)" in mangled
+    assert "__abicheck_ctor__Widget(double)" in mangled
+    assert len(mangled) == 2

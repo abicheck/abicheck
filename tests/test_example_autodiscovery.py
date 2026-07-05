@@ -117,6 +117,12 @@ KNOWN_GAP_PLATFORMS: dict[str, list[str]] = {
     for k, v in _gt_data["verdicts"].items()
     if v.get("known_gap_platforms")
 }
+# source_smoke: case_name → consumer compile/link proof declared in ground_truth.
+# These cases intentionally need validate_examples.py because plain dump+compare
+# cannot observe downstream source-only compile/link failures.
+SOURCE_SMOKE_CASES: frozenset[str] = frozenset(
+    k for k, v in _gt_data["verdicts"].items() if v.get("source_smoke")
+)
 # architectures: case_name → machine tags where the fixture can run.
 ARCHITECTURES: dict[str, list[str]] = {
     k: list(v["architectures"])
@@ -614,6 +620,12 @@ def test_example_pipeline(
             "does not run the build-evidence diff; the CLI path does)"
         )
 
+    if case_name in SOURCE_SMOKE_CASES:
+        pytest.skip(
+            f"{case_name}: consumer source-smoke case — exercised by "
+            "test_example_source_smoke (plain dump+compare cannot observe it)"
+        )
+
     if not shutil.which("castxml"):
         pytest.skip("castxml not found in PATH")
 
@@ -674,6 +686,27 @@ def _load_validate_examples():
     finally:
         sys.path.remove(str(path.parent))
     return mod
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case_name", sorted(SOURCE_SMOKE_CASES))
+def test_example_source_smoke(case_name: str, tmp_path: Path) -> None:
+    """Run consumer compile/link smoke proofs declared in ground_truth.json."""
+    entry = _gt_data["verdicts"][case_name]
+
+    case_platforms = entry.get("platforms", ["linux", "macos", "windows"])
+    if CURRENT_PLATFORM not in case_platforms:
+        pytest.skip(f"{case_name} not supported on {CURRENT_PLATFORM}")
+
+    ve = _load_validate_examples()
+    result = ve.run_case(case_name, entry, tmp_path)
+
+    if result.status == "SKIP":
+        pytest.skip(f"{case_name}: {result.message}")
+    assert result.status == "PASS", (
+        f"{case_name}: source-smoke validation {result.status} — "
+        f"expected={result.expected!r} got={result.got!r} ({result.message})"
+    )
 
 
 @pytest.mark.integration

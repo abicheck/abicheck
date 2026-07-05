@@ -17,9 +17,9 @@ Use this catalog to:
 | Verdict | Count | What it means |
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 92 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 13 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 14 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
 | 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 23 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 23 | Backward-compatible changes (additions or quality-only). |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 22 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 6 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
@@ -40,9 +40,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | Category | Cases | What it covers |
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 92 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 13 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [API Break](by-category/api_break.md) | 14 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 23 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
-| [Addition (Compatible)](by-category/addition.md) | 10 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
+| [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 13 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 6 | Identical ABI/API — sanity-check baselines. |
 
@@ -64,7 +64,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
 | [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
-| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |

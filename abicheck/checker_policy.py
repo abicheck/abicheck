@@ -479,6 +479,7 @@ class ChangeKind(str, Enum):
     # ── Build-configuration / probe-harness patterns (PR-C) ──────────────
     # See examples/case97_api_depends_on_consumer_env/README.md
     API_DEPENDS_ON_CONSUMER_ENV = "api_depends_on_consumer_env"
+    CONCEPT_TIGHTENED = "concept_tightened"
     CXX_STANDARD_FLOOR_RAISED = "cxx_standard_floor_raised"
     BEHAVIOURAL_DEFAULT_CHANGED = "behavioural_default_changed"
 

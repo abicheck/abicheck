@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟢 **COMPATIBLE** |
-| **Category** | Addition (Compatible) |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Platforms** | Linux, macOS |
-| **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Flags** | API break |
+| **Detected `ChangeKind`s** | `concept_tightened` |
 | **Source files** | `examples/case105_concept_tightening/` |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
@@ -117,4 +117,4 @@ g++ -std=c++20 -I. app.cpp -L. -lv2 -o app
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

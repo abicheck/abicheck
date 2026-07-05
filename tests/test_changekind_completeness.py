@@ -317,6 +317,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
     # Build-config / probe-harness patterns — exercised in tests/test_diff_build_config.py
     ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
+    ChangeKind.CONCEPT_TIGHTENED,
     ChangeKind.CXX_STANDARD_FLOOR_RAISED,
     ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
     # Hidden friend transitions — exercised in tests/test_hidden_friends.py

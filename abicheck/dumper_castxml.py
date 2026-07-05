@@ -304,7 +304,7 @@ class _CastxmlParser:
             # Skip compiler built-ins and command-line synthetic declarations
             if self._is_builtin_element(el):
                 continue
-            mangled = el.get("mangled", "") or name  # C functions: use plain name
+            raw_mangled = el.get("mangled", "")
             ret_id = el.get("returns", "")
             ret_type = self._type_name(ret_id) if ret_id else "void"
             ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
@@ -330,7 +330,22 @@ class _CastxmlParser:
                         )
                     )
 
-            vis = self._visibility(el.get("mangled", ""), name)
+            if raw_mangled:
+                mangled = raw_mangled
+            elif el.tag == "Constructor":
+                # CastXML may omit constructor mangled names even for public
+                # user-declared overloaded constructors.  Using the bare class
+                # name would collapse all overloads in AbiSnapshot.function_map,
+                # hiding constructor additions such as case111.  Synthesize a
+                # deterministic internal identity from the display name and
+                # normalized parameter types; it is intentionally not an ABI
+                # symbol, only a stable snapshot key for source-level overloads.
+                param_sig = ",".join(p.type for p in params)
+                mangled = f"__abicheck_ctor__{name}({param_sig})"
+            else:
+                mangled = name  # C functions: use plain name
+
+            vis = self._visibility(raw_mangled, name)
             is_virtual = el.get("virtual") == "1"
             noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
             vtable_index = (
@@ -338,10 +353,9 @@ class _CastxmlParser:
             )
 
             # Detect extern "C": explicit extern attribute OR no mangled name (C linkage)
-            raw_mangled = el.get("mangled", "")
             is_extern_c = (
                 el.get("extern") == "1"
-                or not raw_mangled  # C functions have no mangled name
+                or (not raw_mangled and el.tag == "Function")  # C functions have no mangled name
             )
 
             # CastXML may store source location two ways:

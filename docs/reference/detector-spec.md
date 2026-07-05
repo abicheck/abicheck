@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (268 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (269 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
 |---|---|---|---|---|---|
@@ -35,6 +35,7 @@ One row per `ChangeKind` (268 total). Columns fuse the verdict partition (`check
 | `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` |
 | `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` |
 | `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` |
+| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` |
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` |
 | `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` |

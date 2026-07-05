@@ -963,6 +963,11 @@ def _is_typedef_node(kind: str | None, name: str, accessible: bool) -> bool:
     return kind in ("TypedefDecl", "TypeAliasDecl") and bool(name) and accessible
 
 
+def _is_concept_node(kind: str | None, name: str, accessible: bool) -> bool:
+    """Return ``True`` for a named, accessible C++20 concept declaration."""
+    return kind == "ConceptDecl" and bool(name) and accessible
+
+
 def _emit_node(
     node: dict[str, Any],
     ctx: _ClassifyContext,
@@ -985,7 +990,9 @@ def _emit_node(
         if accessible:
             _emit_template(node, ctx, tu, scope, file)
         return True
-    if _is_function_node(kind, name, accessible):
+    if _is_concept_node(kind, name, accessible):
+        _emit_concept(node, ctx, tu, scope, file)
+    elif _is_function_node(kind, name, accessible):
         _emit_function(node, ctx, tu, scope, file)
     elif _is_constexpr_var_node(kind, name, node, accessible):
         _emit_constexpr(node, ctx, tu, scope, file)
@@ -1106,6 +1113,37 @@ def _walk(
 
 def _location(file: str, line: int, origin_label: str) -> SourceLocation:
     return SourceLocation(path=file, line=line, origin=origin_label)
+
+
+def _emit_concept(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    constraint_hash = _subtree_hash(node)
+    loc = _location(file, _node_line(node), origin)
+    tu.functions.append(
+        SourceEntity(
+            id=_hash("concept", name, constraint_hash),
+            kind="concept",
+            qualified_name=name,
+            signature_hash=_hash("concept-signature", name),
+            body_hash=constraint_hash,
+            value=constraint_hash,
+            names=_entity_names(name),
+            ownership=_entity_ownership(visibility, origin),
+            source_location=loc,
+            visibility=visibility,
+            api_relevant=True,
+            confidence=LayerConfidence.HIGH,
+        )
+    )
 
 
 def _emit_function(
