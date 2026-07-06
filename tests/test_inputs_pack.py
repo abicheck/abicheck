@@ -509,7 +509,10 @@ def test_merge_rebuilds_l4_coverage_after_relink(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
     assert result.exit_code == 0, result.output
     assert "matched 0/1 exported symbol" in result.output
-    assert "L4_source_abi: partial (0/1 symbols matched)" in result.output
+    assert (
+        "L4_source_abi: partial (0/1 symbols matched, 0/1 accounted, 1 unmatched)"
+        in result.output
+    )
     baseline = load_snapshot(out)
     surface = baseline.build_source.source_abi
     assert surface.coverage["exported_symbols"] == 1

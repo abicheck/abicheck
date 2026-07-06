@@ -1411,6 +1411,39 @@ def test_l4_coverage_detail_partial_and_empty():
     assert "symbols matched" not in detail and "cache" not in detail
 
 
+def test_l4_coverage_detail_reports_full_accounting():
+    # When exports are attributed (synthesized/template) or classified
+    # (non-public) rather than directly matched, the detail must surface the
+    # accounted/unmatched totals so a low "matched" ratio doesn't read as a gap.
+    from abicheck.buildsource.inline import _l4_coverage_detail
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+
+    surface = SourceAbiSurface(
+        coverage={
+            "matched_symbols": 4,
+            "exported_symbols": 10,
+            "synthesized_symbols_matched": 3,
+            "non_public_symbols_classified": 3,
+            "unmatched_symbols": 0,
+        }
+    )
+    detail = _l4_coverage_detail(surface)
+    assert "4/10 symbols matched" in detail
+    assert "10/10 accounted, 0 unmatched" in detail
+
+    # unmatched absent → derive it from exported minus accounted (no crash)
+    derived = _l4_coverage_detail(
+        SourceAbiSurface(
+            coverage={
+                "matched_symbols": 4,
+                "exported_symbols": 10,
+                "synthesized_symbols_matched": 2,
+            }
+        )
+    )
+    assert "6/10 accounted, 4 unmatched" in derived
+
+
 def test_l4_include_map_uses_depfile_not_recorded_inputs_for_headers_only(
     monkeypatch,
 ) -> None:

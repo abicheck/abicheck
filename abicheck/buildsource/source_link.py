@@ -892,10 +892,29 @@ def _looks_like_c_export(sym: str) -> bool:
     return bool(sym) and not _looks_like_cpp_export(sym)
 
 
+def _strip_synthesized_descriptor(demangled: str) -> str:
+    """Strip a leading RTTI/vtable/thunk/guard descriptor so the *underlying*
+    entity name can be origin-classified.
+
+    A compiler-synthesized export demangles with a human descriptor prefix —
+    ``"typeinfo for std::__detail::_AnyMatcher<...>"``, ``"guard variable for
+    std::..."`` — so a naive ``startswith("std::")`` origin test misses it and the
+    symbol lands in the generic ``cpp_export_without_public_source_decl`` bucket
+    instead of ``dependency:stdlib``. Stripping the descriptor (``"typeinfo for
+    std::..."`` -> ``"std::..."``) lets the stdlib/TBB origin checks see through
+    the RTTI wrapper. A plain declaration (no descriptor) is returned unchanged.
+    """
+    for prefix, _kind, _owner in _SYNTHESIZED_PREFIXES:
+        if demangled.startswith(prefix):
+            return demangled[len(prefix) :]
+    return demangled
+
+
 def _is_stdlib_export(sym: str, demangled: str) -> bool:
+    base = _strip_synthesized_descriptor(demangled)
     return (
-        demangled.startswith("std::")
-        or demangled.startswith("__gnu_cxx::")
+        base.startswith("std::")
+        or base.startswith("__gnu_cxx::")
         or sym.startswith(
             (
                 "_ZSt",
@@ -904,6 +923,17 @@ def _is_stdlib_export(sym: str, demangled: str) -> bool:
                 "_ZTVSt",
                 "_ZTISt",
                 "_ZTSSt",
+                # RTTI/VTT for *nested* std types mangle as ``_ZT?NSt...`` (the
+                # top-level ``_ZT?St...`` forms above only catch ``std::`` at the
+                # outermost level); these back up the demangled check above when
+                # the demangler is unavailable. Guard variables have too many
+                # mangled shapes (``_ZGVN...``/``_ZGVZN...``/``_ZGVZNK...``) to
+                # enumerate reliably, so they ride the demangled ``guard variable
+                # for std::...`` path above.
+                "_ZTVNSt",
+                "_ZTINSt",
+                "_ZTSNSt",
+                "_ZTTNSt",
                 "_ZN9__gnu_cxx",
                 "_ZNK9__gnu_cxx",
                 "_ZTVN9__gnu_cxx",
@@ -915,8 +945,9 @@ def _is_stdlib_export(sym: str, demangled: str) -> bool:
 
 
 def _is_tbb_export(sym: str, demangled: str) -> bool:
-    return demangled.startswith("tbb::") or sym.startswith(
-        ("_ZN3tbb", "_ZTVN3tbb", "_ZTIN3tbb", "_ZTSN3tbb")
+    base = _strip_synthesized_descriptor(demangled)
+    return base.startswith("tbb::") or sym.startswith(
+        ("_ZN3tbb", "_ZTVN3tbb", "_ZTIN3tbb", "_ZTSN3tbb", "_ZTTN3tbb")
     )
 
 
