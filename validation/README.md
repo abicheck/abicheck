@@ -13,12 +13,6 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
 - `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
   live against the ABICC abi-laboratory oracle across 60 libraries / 185
   comparable pairs (94.1 % agreement, 0 confirmed defects).
-- `pvxs-source-scan-mapping-2026-07.md` — **source→binary mapping completeness**
-  on `epics-base/pvxs`: the `abicheck-cc` wrapper (Flow B, clang extractor)
-  captured source facts during a normal EPICS `make`; `merge` accounted for
-  **all 834** exported symbols of `libpvxs.so` (0 unmatched) — 471 direct decl
-  matches, 86 synthesized attributions, 277 classified non-public. Raw data:
-  `data/pvxs_source_scan_mapping_2026-07.json`.
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;

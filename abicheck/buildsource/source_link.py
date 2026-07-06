@@ -947,7 +947,7 @@ def _is_stdlib_export(sym: str, demangled: str) -> bool:
 def _is_tbb_export(sym: str, demangled: str) -> bool:
     base = _strip_synthesized_descriptor(demangled)
     return base.startswith("tbb::") or sym.startswith(
-        ("_ZN3tbb", "_ZTVN3tbb", "_ZTIN3tbb", "_ZTSN3tbb")
+        ("_ZN3tbb", "_ZTVN3tbb", "_ZTIN3tbb", "_ZTSN3tbb", "_ZTTN3tbb")
     )
 
 

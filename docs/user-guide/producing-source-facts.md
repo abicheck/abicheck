@@ -81,8 +81,10 @@ make CC="abicheck-cc gcc" CXX="abicheck-cc g++"
 # EPICS / other make systems that name the C++ compiler CCC:
 make CC="abicheck-cc gcc" CCC="abicheck-cc g++"
 
-# CMake — set the launcher (no need to reconfigure the compiler itself):
-cmake -DCMAKE_CXX_COMPILER_LAUNCHER="abicheck-cc" -S . -B build && cmake --build build
+# CMake — set the launcher (no need to reconfigure the compiler itself). Set it
+# for every language your targets use — CXX and, for C or mixed C/C++ targets, C:
+cmake -DCMAKE_CXX_COMPILER_LAUNCHER="abicheck-cc" \
+      -DCMAKE_C_COMPILER_LAUNCHER="abicheck-cc" -S . -B build && cmake --build build
 ```
 
 The `ABICHECK_CC_*` variables above are read from the environment, so `export`
@@ -104,7 +106,7 @@ On a host without castxml, `auto` already falls back to clang; set
 `ABICHECK_CC_EXTRACTOR=clang` explicitly when you want to pin it.
 
 !!! warning "Extraction concurrency is bound by your build's `-jN`, not by `ABICHECK_L4_JOBS`"
-    Each `abicheck-cc` invocation extracts its one TU synchronously, so a
+    Each `abicheck-cc` invocation extracts its source TUs synchronously, so a
     parallel `make -jN` / `cmake --build -jN` runs **up to N** clang/castxml
     front-ends at once. `ABICHECK_L4_JOBS` only throttles the Flow-A
     `dump --sources` replay path — the wrapper does **not** read it. A
@@ -205,10 +207,6 @@ python -c "import json,sys; \
 c=json.load(open('libfoo.baseline.json'))['build_source']['source_abi']['coverage']; \
 print(json.dumps(c, indent=2))"
 ```
-
-A worked, real-library example (EPICS pvxs: 471 matched, 86 synthesized, 277
-classified, **0 unmatched**) is in
-[`validation/pvxs-source-scan-mapping-2026-07.md`](https://github.com/abicheck/abicheck/blob/main/validation/pvxs-source-scan-mapping-2026-07.md).
 
 If instead you see a warning that the pack carries **no public entities** or
 matched **0/N** exports, that is the `public-roots` / `ABICHECK_CC_HEADERS`

@@ -38,9 +38,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   host note), a caveat that extraction concurrency is bound by the build's
   `-jN` (not `ABICHECK_L4_JOBS`), and a "reading the L4 coverage line" section
   distinguishing `matched` from `accounted`/`unmatched`.
-- **Real-library source-scan mapping validation** (`validation/pvxs-source-scan-mapping-2026-07.md`):
-  the `abicheck-cc` wrapper folded onto a from-scratch pvxs build accounts for
-  all 834 exported symbols (0 unmatched).
 
 ### Added
 

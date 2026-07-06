@@ -1160,6 +1160,7 @@ def test_stdlib_rtti_and_guard_exports_classified_as_stdlib() -> None:
     from abicheck.buildsource.source_link import (
         _classify_non_public_exports,
         _is_stdlib_export,
+        _is_tbb_export,
         _strip_synthesized_descriptor,
     )
 
@@ -1179,6 +1180,12 @@ def test_stdlib_rtti_and_guard_exports_classified_as_stdlib() -> None:
     assert _is_stdlib_export("_ZTVNSt7__cxx1112basic_stringE", "")
     # a non-std nested RTTI symbol must NOT be swept into stdlib
     assert not _is_stdlib_export("_ZTIN2ns3FooE", "typeinfo for ns::Foo")
+
+    # the same descriptor-stripping applies to the TBB origin check, whose
+    # mangled fallback also covers the nested construction-vtable (_ZTTN3tbb)
+    assert _is_tbb_export("x", "typeinfo for tbb::detail::d1::task")
+    assert _is_tbb_export("_ZTTN3tbb6detail2d14taskE", "")
+    assert not _is_tbb_export("_ZTIN2ns3FooE", "typeinfo for ns::Foo")
 
     # end-to-end: a real nested-std typeinfo lands in dependency:stdlib
     sym = "_ZTINSt8__detail11_AnyMatcherINSt7__cxx1112regex_traitsIcEELb0ELb0ELb0EEE"
