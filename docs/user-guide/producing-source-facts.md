@@ -67,6 +67,51 @@ export ABICHECK_CC_LIBRARY=foo
 abicheck-cc c++ -std=c++17 -Iinclude -c src/foo.cpp -o foo.o
 ```
 
+### Wiring it into a real build system
+
+You rarely invoke the compiler by hand — point the build system's compiler
+variable at the wrapper so *every* TU is captured during a normal build. The
+wrapper is argv-transparent (it prepends nothing and preserves the exit code),
+so it drops in wherever the compiler name is configured:
+
+```bash
+# GNU make / autotools — override CC/CXX on the command line:
+make CC="abicheck-cc gcc" CXX="abicheck-cc g++"
+
+# EPICS / other make systems that name the C++ compiler CCC:
+make CC="abicheck-cc gcc" CCC="abicheck-cc g++"
+
+# CMake — set the launcher (no need to reconfigure the compiler itself):
+cmake -DCMAKE_CXX_COMPILER_LAUNCHER="abicheck-cc" -S . -B build && cmake --build build
+```
+
+The `ABICHECK_CC_*` variables above are read from the environment, so `export`
+them once before the build. Set `ABICHECK_CC_HEADERS` to the public-header root
+**as the compiler resolves it** (see the trap below).
+
+### Picking the extractor (`ABICHECK_CC_EXTRACTOR`)
+
+The wrapper runs a second front-end to extract facts. `ABICHECK_CC_EXTRACTOR`
+selects which:
+
+| Value | Uses |
+|-------|------|
+| `auto` *(default)* | castxml if present, else clang |
+| `castxml` | castxml (the default L2 backend) |
+| `clang` | `clang -ast-dump=json` — **set this on a clang-only host** where castxml is not installed |
+
+On a host without castxml, `auto` already falls back to clang; set
+`ABICHECK_CC_EXTRACTOR=clang` explicitly when you want to pin it.
+
+!!! warning "Extraction concurrency is bound by your build's `-jN`, not by `ABICHECK_L4_JOBS`"
+    Each `abicheck-cc` invocation extracts its one TU synchronously, so a
+    parallel `make -jN` / `cmake --build -jN` runs **up to N** clang/castxml
+    front-ends at once. `ABICHECK_L4_JOBS` only throttles the Flow-A
+    `dump --sources` replay path — the wrapper does **not** read it. A
+    template-heavy TU's clang JSON AST can need several GiB, so on a
+    memory-constrained host cap the build parallelism (`-j1`/`-j2`) rather than
+    reaching for `ABICHECK_L4_JOBS`.
+
 ## Flow C — the Clang facts plugin
 
 A compiled plugin that emits the same facts from the AST Clang already built —
@@ -129,3 +174,42 @@ ctor/dtor ABI clone variants — `C1`/`C2`/`C3`, `D0`/`D1`/`D2` — so one sourc
 constructor claims all of its exported symbols). The result is a single
 self-contained `.baseline.json` carrying L0–L5, ready for
 [`compare`](local-compare.md) or [`scan --baseline`](scan-levels.md).
+
+### Reading the L4 coverage line
+
+`merge` prints an L4 coverage summary to stderr:
+
+```text
+  L4_source_abi: present (471/834 symbols matched, 834/834 accounted, 0 unmatched)
+```
+
+Read it as **two different numbers**:
+
+- **`matched`** — exports that map *directly* to a public source declaration.
+  For a real C++ library this is often only ~50 %: the rest of the export table
+  is compiler-synthesized (vtables/typeinfo/thunks) or stdlib/internal, which
+  never carry a source declaration of their own. A low `matched` ratio is
+  **not** a coverage gap.
+- **`accounted` / `unmatched`** — the completeness number. Every export is
+  either matched, *attributed* to its owner (synthesized RTTI/vtable, template
+  instantiation, allocator interposer), or *classified* (stdlib/TBB dependency,
+  internal/private export). `unmatched` is what's genuinely unexplained — aim
+  for **0**.
+
+The full breakdown lives in the merged snapshot under
+`build_source.source_abi.coverage` (and the per-symbol reasons under
+`…mappings.non_public_symbol_to_reason` / `…synthesized_symbol_to_owner`):
+
+```bash
+python -c "import json,sys; \
+c=json.load(open('libfoo.baseline.json'))['build_source']['source_abi']['coverage']; \
+print(json.dumps(c, indent=2))"
+```
+
+A worked, real-library example (EPICS pvxs: 471 matched, 86 synthesized, 277
+classified, **0 unmatched**) is in
+[`validation/pvxs-source-scan-mapping-2026-07.md`](https://github.com/abicheck/abicheck/blob/main/validation/pvxs-source-scan-mapping-2026-07.md).
+
+If instead you see a warning that the pack carries **no public entities** or
+matched **0/N** exports, that is the `public-roots` / `ABICHECK_CC_HEADERS`
+resolution trap above — not an empty API.

@@ -1640,7 +1640,25 @@ def _l4_coverage_detail(surface: SourceAbiSurface) -> str:
     matched = cov.get("matched_symbols")
     exported = cov.get("exported_symbols")
     if matched is not None or exported is not None:
-        parts.append(f"{int(matched or 0)}/{int(exported or 0)} symbols matched")
+        m = int(matched or 0)
+        e = int(exported or 0)
+        parts.append(f"{m}/{e} symbols matched")
+        # A bare "matched/exported" ratio reads like a coverage gap: for a real
+        # C++ library most exports are RTTI/vtable/thunk (synthesized) or
+        # stdlib/internal (classified), not direct decl matches, so "matched"
+        # alone can look ~50% while every symbol is in fact accounted for.
+        # Surface the full accounting so 100% coverage is visible, not hidden.
+        attributed = (
+            int(cov.get("synthesized_symbols_matched", 0) or 0)
+            + int(cov.get("template_instantiation_symbols_matched", 0) or 0)
+            + int(cov.get("allocator_interposer_symbols_matched", 0) or 0)
+            + int(cov.get("non_public_symbols_classified", 0) or 0)
+        )
+        unmatched = cov.get("unmatched_symbols")
+        if attributed or unmatched is not None:
+            accounted = m + attributed
+            u = int(unmatched if unmatched is not None else max(e - accounted, 0))
+            parts.append(f"{accounted}/{e} accounted, {u} unmatched")
     if "cache_hits" in cov or "cache_misses" in cov:
         hits = int(cov.get("cache_hits", 0) or 0)
         misses = int(cov.get("cache_misses", 0) or 0)

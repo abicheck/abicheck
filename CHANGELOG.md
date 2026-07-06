@@ -9,6 +9,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- **`merge` L4 coverage line now reports full accounting.** The stderr summary
+  gained an `accounted/unmatched` clause — `L4_source_abi: present (471/834
+  symbols matched, 834/834 accounted, 0 unmatched)` — so 100 % symbol accounting
+  is visible. The bare `matched/exported` ratio undersold coverage (it counts
+  only direct decl matches; RTTI/vtable/thunk are attributed and stdlib/internal
+  are classified separately).
+
+### Fixed
+
+- **Stdlib RTTI/guard classification.** Exported `typeinfo`/`vtable`/`guard
+  variable` symbols for *nested* std types (`std::__detail::_AnyMatcher<…>`, …)
+  demangle as `"typeinfo for std::…"`, so the `startswith("std::")` origin test
+  missed them and they fell into the generic
+  `cpp_export_without_public_source_decl` bucket instead of `dependency:stdlib`.
+  `_is_stdlib_export`/`_is_tbb_export` now strip the RTTI/guard descriptor before
+  the origin check (with nested-std mangled prefixes as a demangler-free
+  fallback). Accounting totals are unchanged (both are non-public); only the
+  reason label is now correct.
+
+### Documentation
+
+- **Producing source facts — wiring Flow B into a real build.** The
+  `producing-source-facts.md` guide gained a make/CMake injection recipe for the
+  `abicheck-cc` wrapper, an `ABICHECK_CC_EXTRACTOR` table (with the clang-only
+  host note), a caveat that extraction concurrency is bound by the build's
+  `-jN` (not `ABICHECK_L4_JOBS`), and a "reading the L4 coverage line" section
+  distinguishing `matched` from `accounted`/`unmatched`.
+- **Real-library source-scan mapping validation** (`validation/pvxs-source-scan-mapping-2026-07.md`):
+  the `abicheck-cc` wrapper folded onto a from-scratch pvxs build accounts for
+  all 834 exported symbols (0 unmatched).
+
 ### Added
 
 - **14 new build/source-only `ChangeKind`s** for ABI/API failures no artifact

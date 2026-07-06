@@ -55,15 +55,23 @@ they count as accounted rather than unmatched.
 
 | Reason | Count | Example |
 |---|---:|---|
-| `dependency:stdlib` | 217 | `std::__cxx11::regex_traits<char>::lookup_classname…` |
-| `cpp_export_without_public_source_decl` | 52 | `_ZGVZNKSt8__detail11_AnyMatcher…` (function-local static guard) |
+| `dependency:stdlib` | 254 | `std::__cxx11::regex_traits<char>::lookup_classname…`; `typeinfo for std::__detail::_AnyMatcher<…>` |
+| `cpp_export_without_public_source_decl` | 15 | `typeinfo for pvxs::SigInt::Pvt` (RTTI for an internal type) |
 | `own_export_without_public_source_decl` | 8 | `pvxs::impl::UDPListener::cnt_UDPListener` (internal counter) |
 
-The 217 `dependency:stdlib` symbols are libstdc++ template instantiations
-(`std::regex`, `std::basic_string`, …) emitted into the `.so` — correctly held
-*out* of pvxs's public API. The 8 `own_export_*` are `pvxs::impl` internal
-symbols that leak as exports but originate from non-public sources; they surface
-as classified evidence rather than as public-ABI matches.
+The 254 `dependency:stdlib` symbols are libstdc++ template instantiations
+(`std::regex`, `std::basic_string`, …) and their RTTI/guard variables emitted
+into the `.so` — correctly held *out* of pvxs's public API. The 15 remaining
+`cpp_export_*` are RTTI for pvxs-internal `::Pvt`/`::Impl` types. The 8
+`own_export_*` are `pvxs::impl` internal symbols that leak as exports but
+originate from non-public sources; all surface as classified evidence rather
+than as public-ABI matches.
+
+> The stdlib count includes 37 RTTI/guard-variable symbols for *nested* std
+> types (`std::__detail::_AnyMatcher/_CharMatcher/_BracketMatcher<…>`) that an
+> earlier build of this run labelled generically; sharpening that classification
+> (`_is_stdlib_export` now sees through the `typeinfo for …` descriptor) is part
+> of this change set, so the numbers here are post-fix.
 
 ### Surface reached (source side)
 
@@ -133,14 +141,16 @@ Merged baseline written to libpvxs.baseline.json
   base ABI surface: libpvxs.so.json
   build_source contributors: 1/2
   L3_build: not_collected
-  L4_source_abi: present (471/834 symbols matched)
+  L4_source_abi: present (471/834 symbols matched, 834/834 accounted, 0 unmatched)
   L5_source_graph: present
 ```
 
-The headline `471/834` counts **direct decl matches only**; the full
-`coverage` dict on the merged surface (extracted into the data artifact) shows
-the remaining 363 are all accounted via synthesized attribution (86) and
-non-public classification (277), leaving `unmatched_symbols: 0`.
+The `matched` figure counts **direct decl matches only** (~56 %); the
+`accounted`/`unmatched` figures are the completeness number — the remaining 363
+exports are all accounted via synthesized attribution (86) and non-public
+classification (277), leaving `unmatched_symbols: 0`. (The coverage line gained
+the `accounted/unmatched` clause in this change set — previously it printed only
+the `matched` ratio, which read like a 56 % gap.)
 
 ## Notes / caveats
 

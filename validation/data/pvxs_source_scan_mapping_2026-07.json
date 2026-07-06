@@ -17,10 +17,11 @@
     "unmatched_symbols": 0
   },
   "epics_base_commit": "cf85a1a5eb86928323d4c62d4d3c553f362a7d04",
+  "host_toolchain": "GCC 13.3.0 / glibc 2.39",
   "library": "libpvxs.so.1.5",
   "non_public_reasons": {
-    "cpp_export_without_public_source_decl": 52,
-    "dependency:stdlib": 217,
+    "cpp_export_without_public_source_decl": 15,
+    "dependency:stdlib": 254,
     "own_export_without_public_source_decl": 8
   },
   "producer": "abicheck-cc wrapper (Flow B), clang extractor, LLVM 18.1.3",
@@ -33,7 +34,7 @@
     "vtable": 24
   },
   "unmatched": {
-    "symbols_without_decl": 0,
-    "decls_without_symbol": 1535
+    "decls_without_symbol": 1535,
+    "symbols_without_decl": 0
   }
 }

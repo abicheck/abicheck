@@ -1148,6 +1148,43 @@ def test_non_public_export_accounting_without_surface_roots_stays_conservative()
     assert _classify_non_public_exports({"plain_c_symbol"}, library="libfoo") == {}
 
 
+def test_stdlib_rtti_and_guard_exports_classified_as_stdlib() -> None:
+    """RTTI/vtable/guard exports for *nested* std types must classify as
+    ``dependency:stdlib``, not the generic ``cpp_export`` bucket.
+
+    A naive ``startswith("std::")`` origin check misses them because they
+    demangle with a descriptor prefix (``"typeinfo for std::..."``); the fix
+    strips the descriptor before the origin test (and backs it with the
+    nested-std mangled prefixes when the demangler is unavailable).
+    """
+    from abicheck.buildsource.source_link import (
+        _classify_non_public_exports,
+        _is_stdlib_export,
+        _strip_synthesized_descriptor,
+    )
+
+    # descriptor stripping exposes the underlying entity name
+    assert (
+        _strip_synthesized_descriptor("typeinfo for std::__detail::X")
+        == "std::__detail::X"
+    )
+    assert _strip_synthesized_descriptor("ns::Api::pub()") == "ns::Api::pub()"
+
+    # via the demangled form (descriptor + nested std) — incl. guard variables,
+    # whose many mangled shapes are handled by demangling rather than prefixes
+    assert _is_stdlib_export("x", "typeinfo name for std::__detail::_AnyMatcher<c>")
+    assert _is_stdlib_export("x", "guard variable for std::__cxx11::basic_string<c>::f")
+    # via the RTTI mangled fallback when the demangler yields nothing
+    assert _is_stdlib_export("_ZTINSt8__detail11_AnyMatcherE", "")
+    assert _is_stdlib_export("_ZTVNSt7__cxx1112basic_stringE", "")
+    # a non-std nested RTTI symbol must NOT be swept into stdlib
+    assert not _is_stdlib_export("_ZTIN2ns3FooE", "typeinfo for ns::Foo")
+
+    # end-to-end: a real nested-std typeinfo lands in dependency:stdlib
+    sym = "_ZTINSt8__detail11_AnyMatcherINSt7__cxx1112regex_traitsIcEELb0ELb0ELb0EEE"
+    assert _classify_non_public_exports({sym}) == {sym: "dependency:stdlib"}
+
+
 def test_template_pattern_key_edge_cases() -> None:
     from abicheck.buildsource.source_link import _template_pattern_key
 
