@@ -31,5 +31,9 @@
     "typeinfo": 29,
     "typeinfo-name": 29,
     "vtable": 24
+  },
+  "unmatched": {
+    "symbols_without_decl": 0,
+    "decls_without_symbol": 1535
   }
 }

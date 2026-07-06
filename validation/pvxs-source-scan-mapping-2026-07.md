@@ -73,6 +73,12 @@ as classified evidence rather than as public-ABI matches.
 `odr_conflicts: 578` — expected for a template-heavy library whose types appear
 in many TUs; recorded as L4 evidence, not a verdict.
 
+The mapping direction that matters for completeness is *export → declaration*
+(`symbols_without_decl: 0`). The reverse, `decls_without_symbol: 1535`, is large
+and expected: most public declarations are inline/header-only or otherwise not
+emitted as exported symbols, so they legitimately have no binary counterpart —
+it is not an unmapped-export gap.
+
 ## Method (reproducible)
 
 Toolchain: LLVM/clang **18.1.3**, abicheck **0.4.0**, EPICS Base **7.0**
@@ -80,12 +86,16 @@ Toolchain: LLVM/clang **18.1.3**, abicheck **0.4.0**, EPICS Base **7.0**
 the clang AST backend (`ABICHECK_CC_EXTRACTOR=clang`).
 
 ```bash
-# 1. Build EPICS Base 7.0 (provides libCom, ca)
-git clone --depth 1 --branch 7.0 https://github.com/epics-base/epics-base.git
+# 1. Build EPICS Base 7.0 (provides libCom, ca). Pin the exact commit so the
+#    export set stays reproducible (fetch-by-SHA needs a full, non-shallow clone).
+git clone https://github.com/epics-base/epics-base.git
+git -C epics-base checkout cf85a1a5eb86928323d4c62d4d3c553f362a7d04
 make -C epics-base -j"$(nproc)"
 
-# 2. Point pvxs at it, use system libevent
-git clone --depth 1 https://github.com/epics-base/pvxs.git
+# 2. Point pvxs at it, use system libevent. Pin the pvxs commit too — the report's
+#    834-symbol accounting is specific to this checkout, not to moving HEAD.
+git clone https://github.com/epics-base/pvxs.git
+git -C pvxs checkout 0b3fcca1fae2c33934c55a20011797fee2637daa
 cd pvxs
 echo "EPICS_BASE=$PWD/../epics-base" > configure/RELEASE.local
 echo "CHECK_RELEASE = NO"          > configure/CONFIG_SITE.local
@@ -107,7 +117,7 @@ abicheck merge libpvxs.so.json ./abicheck_inputs/ -o libpvxs.baseline.json
 
 `merge` stderr:
 
-```
+```text
 Merged baseline written to libpvxs.baseline.json
   base ABI surface: libpvxs.so.json
   build_source contributors: 1/2
