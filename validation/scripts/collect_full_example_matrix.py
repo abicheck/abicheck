@@ -46,7 +46,11 @@ SPECIAL_PROOFS = {
 def _load_json(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"warning: failed to load {path}: {exc}", file=sys.stderr)
+        return None
 
 
 def _results_by_case(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -243,8 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.out:
         print(text)
 
-    bad = bool(matrix["unresolved_cases"] or matrix["failed_cases"])
-    return 1 if bad and not args.allow_unresolved else 0
+    if matrix["failed_cases"]:
+        return 1
+    if matrix["unresolved_cases"] and not args.allow_unresolved:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

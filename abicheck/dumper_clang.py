@@ -323,7 +323,10 @@ class _ClangAstParser:
             # Foo;`` emits an unnamed RecordDecl that carries the fields, recovered
             # under the typedef name in parse_types (Codex/CodeRabbit review).
             self._records.append(entry)
-        elif kind == "EnumDecl" and name:
+        elif kind == "EnumDecl":
+            # Anonymous enums are kept too: a ``typedef enum {…} Foo;`` emits an
+            # unnamed EnumDecl that carries the enumerators, recovered under the
+            # typedef name in parse_enums.
             self._enums.append(entry)
         elif kind in ("TypedefDecl", "TypeAliasDecl") and name:
             self._typedefs.append(entry)
@@ -658,11 +661,26 @@ class _ClangAstParser:
 
     def parse_enums(self) -> list[EnumType]:
         enums: list[EnumType] = []
+        typedef_names_by_enum_id: dict[str, str] = {}
+        for entry in self._typedefs:
+            node = entry.node
+            if _is_builtin_file(entry.file):
+                continue
+            typedef_name = str(node.get("name", ""))
+            if not typedef_name:
+                continue
+            for child in node.get("inner", []) or []:
+                if not isinstance(child, dict):
+                    continue
+                owned = child.get("ownedTagDecl") or {}
+                if owned.get("kind") == "EnumDecl" and owned.get("id"):
+                    typedef_names_by_enum_id[str(owned["id"])] = typedef_name
+
         for entry in self._enums:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
-            name = str(node.get("name", ""))
+            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(str(node.get("id", "")), "")
             if not name or name.startswith("__"):
                 continue
             members: list[EnumMember] = []

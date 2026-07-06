@@ -397,6 +397,45 @@ def test_parse_enums_auto_increment_and_explicit() -> None:
     ]
 
 
+def test_parse_anonymous_typedef_enum_uses_typedef_name() -> None:
+    root = _tu(
+        {
+            "kind": "EnumDecl",
+            "id": "0xenum",
+            "name": "",
+            "loc": {"file": "include/log.h", "line": 3},
+            "inner": [
+                {"kind": "EnumConstantDecl", "name": "LOG_NONE"},
+                {"kind": "EnumConstantDecl", "name": "LOG_ERR"},
+                {"kind": "EnumConstantDecl", "name": "LOG_WARN"},
+            ],
+        },
+        {
+            "kind": "TypedefDecl",
+            "name": "log_level_t",
+            "loc": {"file": "include/log.h", "line": 7},
+            "type": {"qualType": "enum log_level_t"},
+            "inner": [
+                {
+                    "kind": "ElaboratedType",
+                    "ownedTagDecl": {
+                        "kind": "EnumDecl",
+                        "id": "0xenum",
+                        "name": "",
+                    },
+                }
+            ],
+        },
+    )
+    (enum,) = _ClangAstParser(root, set(), set()).parse_enums()
+    assert enum.name == "log_level_t"
+    assert [(m.name, m.value) for m in enum.members] == [
+        ("LOG_NONE", 0),
+        ("LOG_ERR", 1),
+        ("LOG_WARN", 2),
+    ]
+
+
 def test_parse_typedefs() -> None:
     root = _tu(
         {

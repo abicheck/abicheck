@@ -6,6 +6,7 @@
 struct Session {
     char name[64];
     int timeout;
+    int _reserved0;
 };
 
 Session* session_open(const char *name) {

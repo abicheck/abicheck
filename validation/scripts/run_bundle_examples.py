@@ -35,14 +35,28 @@ def _run(
     cwd: Path | None = None,
     timeout: int = 120,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env={**os.environ, "PYTHONPATH": str(REPO_DIR)},
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "PYTHONPATH": str(REPO_DIR)},
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        return subprocess.CompletedProcess(
+            cmd,
+            124,
+            stdout=str(stdout),
+            stderr=(str(stderr) + f"\ntimeout after {timeout}s").strip(),
+        )
 
 
 def _load_bundle_cases() -> dict[str, dict]:
@@ -166,6 +180,71 @@ def _compare_release(build_dir: Path, case_name: str) -> tuple[dict | None, str 
         return None, result.stdout[:1000]
 
 
+
+
+def _change_kinds(entry: dict) -> set[str]:
+    kinds: set[str] = set()
+    for key in ("changes", "findings", "bundle_findings"):
+        for item in entry.get(key) or []:
+            if isinstance(item, dict) and item.get("kind"):
+                kinds.add(str(item["kind"]))
+    return kinds
+
+
+def _library_name(entry: dict) -> str:
+    for key in ("library", "name", "path", "old", "new", "old_path", "new_path"):
+        value = entry.get(key)
+        if value:
+            return Path(str(value)).name
+    return ""
+
+
+def _validate_expected_libraries(payload: dict, expected_libraries: dict) -> list[str]:
+    if not expected_libraries:
+        return []
+    actual = payload.get("libraries") or payload.get("library_results") or []
+    if not isinstance(actual, list):
+        return ["payload has no per-library result list"]
+
+    errors: list[str] = []
+    for expected_name, expected in expected_libraries.items():
+        if isinstance(expected, str):
+            expected = {"verdict": expected}
+        if not isinstance(expected, dict):
+            errors.append(f"{expected_name}: malformed expected_libraries entry")
+            continue
+        matches = [
+            item for item in actual
+            if isinstance(item, dict) and (
+                _library_name(item) == expected_name
+                or str(expected_name) in str(item.get("library", ""))
+                or str(expected_name) in str(item.get("name", ""))
+                or str(expected_name) in str(item.get("path", ""))
+            )
+        ]
+        if not matches:
+            errors.append(f"{expected_name}: missing per-library result")
+            continue
+        item = matches[0]
+        expected_verdict = expected.get("verdict") or expected.get("expected")
+        if expected_verdict and item.get("verdict") != expected_verdict:
+            errors.append(
+                f"{expected_name}: expected verdict {expected_verdict!r}, "
+                f"got {item.get('verdict')!r}"
+            )
+        expected_kinds = set(expected.get("kinds") or expected.get("expected_kinds") or [])
+        if expected_kinds:
+            got = _change_kinds(item)
+            missing = expected_kinds - got
+            unexpected = got - expected_kinds
+            if missing or unexpected:
+                errors.append(
+                    f"{expected_name}: expected kinds {sorted(expected_kinds)!r}, "
+                    f"got {sorted(got)!r}, missing={sorted(missing)!r}, "
+                    f"unexpected={sorted(unexpected)!r}"
+                )
+    return errors
+
 def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
     started = time.perf_counter()
     expected_verdict = entry.get("expected_bundle_verdict")
@@ -195,8 +274,13 @@ def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
 
     got_verdict = payload.get("bundle_verdict") or payload.get("verdict")
     got_kinds = {f.get("kind") for f in payload.get("bundle_findings", [])}
+    got_kinds.discard(None)
     missing = expected_kinds - got_kinds
-    if got_verdict == expected_verdict and not missing:
+    unexpected = got_kinds - expected_kinds
+    if entry.get("allow_extra_bundle_kinds", True):
+        unexpected = set()
+    library_errors = _validate_expected_libraries(payload, entry.get("expected_libraries") or {})
+    if got_verdict == expected_verdict and not missing and not unexpected and not library_errors:
         status = "PASS"
         message = ""
     else:
@@ -204,7 +288,8 @@ def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
         message = (
             f"expected verdict={expected_verdict!r} kinds={sorted(expected_kinds)!r}; "
             f"got verdict={got_verdict!r} kinds={sorted(got_kinds)!r}; "
-            f"missing={sorted(missing)!r}"
+            f"missing={sorted(missing)!r}; unexpected={sorted(unexpected)!r}; "
+            f"library_errors={library_errors!r}"
         )
 
     return {

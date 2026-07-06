@@ -311,10 +311,10 @@ pipeline four times:
 
 ### Which source discovers what
 
-Each case in [`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
+Each case in [`examples/ground_truth.json`](../../examples/ground_truth.json)
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
-[`scripts/evidence_tiers.py`](https://github.com/abicheck/abicheck/blob/main/scripts/evidence_tiers.py)
+[`scripts/evidence_tiers.py`](../../scripts/evidence_tiers.py)
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153-case
 compare-mode catalog, that yields the cumulative minimum-evidence coverage:
 
@@ -322,9 +322,9 @@ compare-mode catalog, that yields the cumulative minimum-evidence coverage:
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
 | Just the binary | L0 | 50 | **50 / 153 (33%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
 | + Debug symbols | L1 | 65 | **115 / 153 (75%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
-| + Public headers | L2 | 23 | **138 / 153 (90%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 8 | **146 / 153 (95%)** | build-mode flips: exceptions ([130](../examples/case130_exceptions_mode_flip.md)), RTTI ([131](../examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](../examples/case132_threadsafe_statics_flip.md)), TLS model ([133](../examples/case133_tls_model_flip.md)), enum size ([152](../examples/case152_enum_size_flag_flip.md)), struct packing ([153](../examples/case153_struct_packing_flip.md)), LTO ([154](../examples/case154_lto_mode_flip.md)), char signedness ([155](../examples/case155_char_signedness_flip.md)) |
-| + Sources | L4 | 4 | **150 / 153 (98%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](../examples/case156_public_macro_removed.md)), inline function removed ([157](../examples/case157_inline_function_removed.md)), public typedef removed ([158](../examples/case158_public_typedef_removed.md)) |
+| + Public headers | L2 | 22 | **137 / 153 (90%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 8 | **145 / 153 (95%)** | build-mode flips: exceptions ([130](../examples/case130_exceptions_mode_flip.md)), RTTI ([131](../examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](../examples/case132_threadsafe_statics_flip.md)), TLS model ([133](../examples/case133_tls_model_flip.md)), enum size ([152](../examples/case152_enum_size_flag_flip.md)), struct packing ([153](../examples/case153_struct_packing_flip.md)), LTO ([154](../examples/case154_lto_mode_flip.md)), char signedness ([155](../examples/case155_char_signedness_flip.md)) |
+| + Sources | L4 | 5 | **150 / 153 (98%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](../examples/case156_public_macro_removed.md)), inline function removed ([157](../examples/case157_inline_function_removed.md)), concept tightening ([105](../examples/case105_concept_tightening.md)), public typedef removed ([158](../examples/case158_public_typedef_removed.md)) |
 | + Source graph | L5 | 3 | **153 / 153 (100%)** | public API internal dependency ([160](../examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](../examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](../examples/case162_symbol_source_owner_changed.md)) |
 
 > **Why L3 now matters.** Earlier snapshots had no standalone L3-only catalog
