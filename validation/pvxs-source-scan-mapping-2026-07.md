@@ -113,7 +113,12 @@ export ABICHECK_CC_EXTRACTOR=clang
 export ABICHECK_CC_HEADERS="$PWD/include"   # public-header root (how <pvxs/*.h> resolves)
 export ABICHECK_INPUTS_DIR="$PWD/abicheck_inputs"
 export ABICHECK_CC_LIBRARY=pvxs
-export ABICHECK_L4_JOBS=1                    # serial extraction; RAM-safe on large TUs
+# Concurrency of fact extraction in Flow B is bound by `make -jN`, NOT by
+# ABICHECK_L4_JOBS (that env var only throttles the Flow-A source-replay path,
+# which the wrapper does not use). Each `abicheck-cc` invocation extracts its one
+# TU synchronously, so `-jN` = up to N concurrent clang AST dumps. Template-heavy
+# TUs can each need multiple GiB; use `-j1` for strict serialization on
+# memory-constrained hosts. This run used `-j2`.
 make -C src -j2 CC="abicheck-cc gcc" CCC="abicheck-cc g++"
 
 # 4. Dump the binary side, then fold in the captured source facts.
