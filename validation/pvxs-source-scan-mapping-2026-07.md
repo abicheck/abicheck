@@ -81,9 +81,15 @@ it is not an unmapped-export gap.
 
 ## Method (reproducible)
 
-Toolchain: LLVM/clang **18.1.3**, abicheck **0.4.0**, EPICS Base **7.0**
-(`cf85a1a`), pvxs `0b3fcca`. `castxml` was **not** installed — the wrapper used
-the clang AST backend (`ABICHECK_CC_EXTRACTOR=clang`).
+Toolchain: host compiler **GCC 13.3.0** / **libstdc++ (GLIBCXX up to 3.4.32)** /
+**glibc 2.39** (the wrapper passes the compile through to `g++`, so the binary and
+its export table — including the 217 `dependency:stdlib` symbols — are produced by
+the *host* toolchain); source-fact extractor **LLVM/clang 18.1.3**; abicheck
+**0.4.0**; EPICS Base **7.0** (`cf85a1a`); pvxs `0b3fcca`. `castxml` was **not**
+installed — the wrapper used the clang AST backend (`ABICHECK_CC_EXTRACTOR=clang`).
+A different host libstdc++ can emit a different STL-instantiation export set, so
+the exact 834 total is toolchain-specific even though the *accounting* (0
+unmatched) is not.
 
 ```bash
 # 1. Build EPICS Base 7.0 (provides libCom, ca). Pin the exact commit so the
