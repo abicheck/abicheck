@@ -26,8 +26,8 @@ wires together the three ADR-035 pieces into one coverage-annotated report:
    ``scan_levels.py``; the deprecated ``--mode``/``--source-method`` aliases map
    onto it), POI-scoped to the changed paths, by collecting L3/L4/L5 inline at the
    matching ADR-033 D2 evidence mode;
-4. if a ``--baseline`` is given, ``compare`` against it and fold the cross-source
-   findings in as ``extra_changes``;
+4. if a ``--baseline`` is given, ``compare`` against it while keeping
+   single-version cross-source checks advisory unless explicitly promoted;
 5. emit **one** report stating, per layer/method, what ran vs. skipped (never a
    bare "source scan failed").
 
@@ -1500,8 +1500,9 @@ def run_scan_core(
         _stage = time.monotonic()
         verdict, exit_code, diff_summary = _run_baseline_compare(
             baseline,
+            binary,
             new_snap,
-            cc.findings,
+            [],
             lang,
             collect_mode,
             list(headers),
@@ -1745,6 +1746,7 @@ def _baseline_is_native_library(path: Path) -> bool:
 
 def _run_baseline_compare(
     baseline: Path,
+    binary: Path,
     new_snap: Any,
     extra_changes: list[Any],
     lang: str,
@@ -1759,12 +1761,16 @@ def _run_baseline_compare(
     symbols_only: bool = False,
     debug_presence_only: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
-    """Compare *new_snap* against *baseline*, folding cross-source findings in.
+    """Compare *new_snap* against *baseline*, preserving scan authority.
 
-    The cross-source findings ride in as ``extra_changes`` so they appear in the
-    diff and the verdict reflects them — but, being partitioned into
-    ``RISK``/``API_BREAK`` only, they can never push the verdict to ``BREAKING``
-    (ADR-035 D1 authority rule).
+    Single-version cross-source findings are reported in the scan's dedicated
+    ``crosscheck`` block and stay advisory for baseline comparisons unless the
+    maintainer explicitly promotes one with ``--crosscheck KEY=error``. They are
+    not folded into ``extra_changes`` by default: doing so lets a candidate-side
+    evidence hygiene finding such as ``header_build_context_mismatch`` turn a
+    clean old/new artifact diff into an ``API_BREAK`` false positive. Real
+    old/new embedded build/source drift is still diffed below via
+    ``prepare_embedded_build_source``.
 
     *headers*/*includes* are the same scan header inputs used to build the
     candidate, threaded into the baseline parse so a native ``--baseline``
@@ -1826,6 +1832,47 @@ def _run_baseline_compare(
         raise click.ClickException(
             f"Failed to load --baseline {baseline}: {exc}"
         ) from exc
+
+    # Preserve hard L0 removals even when the richer header/source view cannot
+    # prove public-header ownership for the removed entity.  A source/full scan
+    # may parse both sides' headers through different consumer macro contexts;
+    # in fixtures such as case97 the old library exported a function that the
+    # old header exposes only under a consumer macro, so the final public-surface
+    # comparison can otherwise filter the old-only ELF fact away.  Re-reading the
+    # already-loaded snapshots without public-surface scoping and carrying only
+    # the hard ELF-only removal kind keeps the L0 authority while avoiding the
+    # older false-positive class where advisory cross-check findings were folded
+    # into the verdict wholesale.
+    l0_hard_removals: list[Any] = []
+    if not symbols_only:
+        l0_old_snap = resolve_input(
+            baseline,
+            [],
+            [],
+            version="",
+            lang=lang,
+            symbols_only=True,
+        )
+        l0_new_snap = resolve_input(
+            binary,
+            [],
+            [],
+            version="",
+            lang=lang,
+            symbols_only=True,
+        )
+        l0_diff = compare_snapshots(
+            l0_old_snap,
+            l0_new_snap,
+            extra_changes=[],
+            scope_to_public_surface=False,
+        )
+        l0_hard_removals = [
+            change
+            for change in getattr(l0_diff, "breaking", ())
+            if getattr(getattr(change, "kind", None), "value", None)
+            == "func_removed_elf_only"
+        ]
     # Fold embedded build-info/source (L3/L4/L5) diff findings into extra_changes
     # before comparing — mirrors the compare command (Codex review). Only engage
     # when a snapshot actually carries an embedded pack; otherwise pass
@@ -1838,7 +1885,7 @@ def _run_baseline_compare(
         old_snap,
         new_snap,
         collect_mode if has_embedded else "off",
-        list(extra_changes),
+        [*extra_changes, *l0_hard_removals],
         None,
         None,
         None,

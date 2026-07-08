@@ -286,7 +286,29 @@
         "linux",
         "macos",
         "windows"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "syntax",
+        "proof": "consumer explicit-conversion smoke: old implicit conversion compiles, new explicit conversion rejects it",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success"
+        },
+        "v2": {
+          "expect": "failure",
+          "replace": [
+            [
+              "\"v1.h\"",
+              "\"v2.h\""
+            ],
+            [
+              "<v1.h>",
+              "<v2.h>"
+            ]
+          ]
+        }
+      }
     },
     "case107_task_scheduler_init_removed": {
       "abi_break": true,
@@ -664,7 +686,29 @@
         "linux",
         "macos",
         "windows"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "syntax",
+        "proof": "consumer final-class smoke: old derived class compiles, new final base rejects derivation",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success"
+        },
+        "v2": {
+          "expect": "failure",
+          "replace": [
+            [
+              "\"v1.h\"",
+              "\"v2.h\""
+            ],
+            [
+              "<v1.h>",
+              "<v2.h>"
+            ]
+          ]
+        }
+      }
     },
     "case126_sycl_device_impl_ptr": {
       "abi_break": true,
@@ -1427,7 +1471,21 @@
       "min_evidence": "L1",
       "platforms": [
         "linux"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "run",
+        "proof": "consumer runtime smoke: app compiled against v1 template layout fails when linked with v2 library",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success",
+          "lib_source": "v1.cpp"
+        },
+        "v2": {
+          "expect": "failure",
+          "lib_source": "v2.cpp"
+        }
+      }
     },
     "case18_dependency_leak": {
       "abi_break": true,
@@ -1471,7 +1529,21 @@
         "macos",
         "windows"
       ],
-      "reason": "regular enum member value changes remain breaking; only named sentinel patterns are downgraded"
+      "reason": "regular enum member value changes remain breaking; only named sentinel patterns are downgraded",
+      "source_smoke": {
+        "mode": "run",
+        "proof": "consumer runtime smoke: app compiled against old enum values fails with new library behavior",
+        "source": "app.c",
+        "standard": "c17",
+        "v1": {
+          "expect": "success",
+          "lib_source": "old/lib.c"
+        },
+        "v2": {
+          "expect": "failure",
+          "lib_source": "new/lib.c"
+        }
+      }
     },
     "case21_method_became_static": {
       "abi_break": true,
@@ -1743,7 +1815,21 @@
         "linux",
         "macos",
         "windows"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "run",
+        "proof": "consumer runtime smoke: app compiled against v1 base-class layout fails with v2 library",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success",
+          "lib_source": "v1.cpp"
+        },
+        "v2": {
+          "expect": "failure",
+          "lib_source": "v2.cpp"
+        }
+      }
     },
     "case38_virtual_methods": {
       "abi_break": true,
@@ -1829,7 +1915,21 @@
         "linux",
         "macos",
         "windows"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "run",
+        "proof": "consumer runtime smoke: app compiled against v1 derived/base layout fails with v2 library",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success",
+          "lib_source": "v1.cpp"
+        },
+        "v2": {
+          "expect": "failure",
+          "lib_source": "v2.cpp"
+        }
+      }
     },
     "case44_cyclic_type_member_added": {
       "abi_break": true,
@@ -2585,7 +2685,21 @@
       "platforms": [
         "linux",
         "macos"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "run",
+        "proof": "consumer runtime smoke: app compiled against v1 inline accessor fails with v2 pimpl layout",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success",
+          "lib_source": "v1.cpp"
+        },
+        "v2": {
+          "expect": "failure",
+          "lib_source": "v2.cpp"
+        }
+      }
     },
     "case90_bundle_intra_dep_removed": {
       "abi_break": true,
@@ -2760,7 +2874,29 @@
         "linux",
         "macos",
         "windows"
-      ]
+      ],
+      "source_smoke": {
+        "mode": "syntax",
+        "proof": "consumer hidden-friend smoke: old equality expression compiles, new header removes hidden friend",
+        "source": "app.cpp",
+        "standard": "c++17",
+        "v1": {
+          "expect": "success"
+        },
+        "v2": {
+          "expect": "failure",
+          "replace": [
+            [
+              "\"v1.h\"",
+              "\"v2.h\""
+            ],
+            [
+              "<v1.h>",
+              "<v2.h>"
+            ]
+          ]
+        }
+      }
     },
     "case97_api_depends_on_consumer_env": {
       "abi_break": true,

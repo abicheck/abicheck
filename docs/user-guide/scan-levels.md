@@ -94,6 +94,29 @@ add their own source-/API-level findings — they rarely flip the verdict. So sp
 on L4 (`source`/`full`) for humans reviewing a PR or a release, and stay in the
 cheap tier for a fast CI gate.
 
+### Example-catalog status
+
+The scan-depth table is scoped to the comparable v1/v2 shared-library targets.
+That scope is complete: **141/141 targets scanned at every pinned depth**. The
+full catalog has 162 cases, but audit, cross-source, bundle, BTF, and snapshot
+cases run through their dedicated proof lanes rather than this compare-style
+scan matrix. `Eval targets` now covers that whole comparable-target scope: the
+`NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes, and the
+bundle cases are checked against their per-library expected verdicts.
+
+| `--depth` | Comparable targets | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `binary` | 141 | 141 | 79 | 56.0% | 1 | 61 | Fast artifact gate; intentionally misses header/source-only breaks. |
+| `headers` | 141 | 141 | 115 | 81.6% | 0 | 26 | Best low-cost CI gate when public headers are available. |
+| `build` | 141 | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no false positives in this matrix after advisory-crosscheck fix. |
+| `source` | 141 | 141 | 141 | 100.0% | 0 | 0 | Highest recall in this matrix; source-smoke proofs cover consumer-only API hazards. |
+| `full` | 141 | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
+
+False positives and false negatives are listed directly. Bundle targets are scored
+against their per-library expected verdicts, so the 141-target FP/FN denominator
+keeps the full comparable scope while the dedicated bundle lane still proves
+whole-bundle findings such as dangling intra-bundle imports and provider drift.
+
 ## What input each depth needs — and how to get it
 
 Every depth needs a specific **input**; without it the matching coverage row is

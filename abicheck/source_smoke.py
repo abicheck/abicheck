@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
-SmokeMode = Literal["syntax", "link"]
+SmokeMode = Literal["syntax", "link", "run"]
 SmokeExpectation = Literal["success", "failure"]
 
 
@@ -108,16 +108,17 @@ def run_source_smoke(
 
     work_dir.mkdir(parents=True, exist_ok=True)
     failures: list[str] = []
+    source_suffix = ".cpp" if spec.standard.startswith("c++") else ".c"
     for label, side in (("v1", spec.v1), ("v2", spec.v2)):
         code = _side_code(spec, side, case_dir)
-        src = work_dir / f"{label}.cpp"
+        src = work_dir / f"{label}{source_suffix}"
         src.write_text(code, encoding="utf-8")
         mode = side.mode or spec.mode
+        exe = work_dir / f"{label}.out"
         if mode == "syntax":
             cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), "-fsyntax-only", str(src)]
-        elif mode == "link":
+        elif mode in {"link", "run"}:
             lib_source = case_dir / (side.lib_source or f"{label}.cpp")
-            exe = work_dir / f"{label}.out"
             cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), str(lib_source), str(src), "-o", str(exe)]
         else:
             raise ValueError(f"unsupported source_smoke mode: {mode}")
@@ -126,6 +127,10 @@ def run_source_smoke(
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             compiled = proc.returncode == 0
             detail = (proc.stderr or proc.stdout or "").strip().splitlines()[:4]
+            if compiled and mode == "run":
+                run_proc = subprocess.run([str(exe)], capture_output=True, text=True, timeout=timeout)
+                compiled = run_proc.returncode == 0
+                detail = (run_proc.stderr or run_proc.stdout or "").strip().splitlines()[:4]
         except subprocess.TimeoutExpired as exc:
             compiled = False
             detail = [f"timed out after {exc.timeout}s"]

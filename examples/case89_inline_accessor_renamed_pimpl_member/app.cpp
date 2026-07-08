@@ -8,6 +8,7 @@
 
 int main() {
     mylib::descriptor d;
-    std::printf("class_count = %d\n", d.get_class_count());
-    return 0;
+    int count = d.get_class_count();
+    std::printf("class_count = %d\n", count);
+    return count == 2 ? 0 : 1;
 }

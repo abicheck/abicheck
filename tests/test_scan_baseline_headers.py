@@ -96,10 +96,11 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     captured: dict[str, object] = {}
 
     def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
-        captured["headers"] = list(headers)
-        captured["includes"] = list(includes)
-        captured["public_headers"] = list(kw.get("public_headers") or [])
-        captured["public_header_dirs"] = list(kw.get("public_header_dirs") or [])
+        if "headers" not in captured:
+            captured["headers"] = list(headers)
+            captured["includes"] = list(includes)
+            captured["public_headers"] = list(kw.get("public_headers") or [])
+            captured["public_header_dirs"] = list(kw.get("public_header_dirs") or [])
         return _FakeSnap()
 
     monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
@@ -115,6 +116,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 def _run(**kw: object) -> None:
     base = dict(
         baseline=Path("old/libfoo.so.2"),
+        binary=Path("new/libfoo.so.3"),
         new_snap=_FakeSnap(),
         extra_changes=[],
         lang="c++",

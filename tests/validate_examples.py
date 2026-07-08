@@ -994,12 +994,13 @@ def _run_source_smoke(
     if not smoke:
         return None
 
-    compiler = _find_compiler(True)
+    spec = SourceSmokeSpec.from_dict(smoke)
+    compiler = _find_compiler(spec.standard.startswith("c++"))
     if compiler is None:
-        return CaseResult(name, "SKIP", expected_raw, None, "no C++ compiler for source smoke")
+        return CaseResult(name, "SKIP", expected_raw, None, "no compiler for source smoke")
 
     result = run_source_smoke(
-        SourceSmokeSpec.from_dict(smoke),
+        spec,
         case_dir=case_dir,
         work_dir=tmp_base / f"{name}__source_smoke",
         compiler=compiler,
