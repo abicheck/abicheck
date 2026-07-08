@@ -48,6 +48,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 ## All cases
 
+> **Gaps in the numbering are expected.** Some case numbers (e.g. 84, 90–93) are **multi-library bundle cases** that are not part of this single-library catalog; they are documented in the repository under `examples/` and indexed in `examples/README.md`. The list below is sorted by case number.
+
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case01_symbol_removal](case01_symbol_removal.md) | Symbol Removal | 🔴 BREAKING | Breaking |
@@ -59,74 +61,12 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case07_struct_layout](case07_struct_layout.md) | Struct Layout Change | 🔴 BREAKING | Breaking |
 | [case08_enum_value_change](case08_enum_value_change.md) | Enum Value Change | 🔴 BREAKING | Breaking |
 | [case09_cpp_vtable](case09_cpp_vtable.md) | C++ Vtable Change | 🔴 BREAKING | Breaking |
-| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
-| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
-| [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
-| [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
-| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
-| [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
-| [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
-| [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
-| [case109_flow_graph_policy_renames](case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case10_return_type](case10_return_type.md) | Return Type Change | 🔴 BREAKING | Breaking |
-| [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
-| [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
-| [case114_char8t_migration](case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
-| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 64 → 128) | 🔴 BREAKING | Breaking |
-| [case116_atomic_qualifier_changed](case116_atomic_qualifier_changed.md) | _Atomic qualifier added (C11) | 🔴 BREAKING | Breaking |
-| [case117_no_unique_address](case117_no_unique_address.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | 🔴 BREAKING | Breaking |
-| [case118_internal_struct_field_added_scoped](case118_internal_struct_field_added_scoped.md) | Internal struct gains a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case11_global_var_type](case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
-| [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
-| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change (documented gap) | ✅ NO_CHANGE | No Change |
-| [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
-| [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
-| [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
-| [case126_sycl_device_impl_ptr](case126_sycl_device_impl_ptr.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | 🔴 BREAKING | Breaking |
-| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
-| [case128_symbol_binding_strengthened](case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case129_struct_return_convention](case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
-| [case130_exceptions_mode_flip](case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case131_rtti_mode_flip](case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case132_threadsafe_statics_flip](case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case133_tls_model_flip](case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case134_relro_weakened](case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case135_stack_canary_removed](case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case136_executable_stack_removed](case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case137_runpath_changed](case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case138_needed_added](case138_needed_added.md) | DT_NEEDED Added | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case139_symbol_version_node_removed](case139_symbol_version_node_removed.md) | Symbol Version Node Removed | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case140_empty_base_optimization_lost](case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
-| [case141_versioned_symbol_scheme](case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
-| [case142_vtable_slot_count_binary_only](case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
-| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
-| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
-| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case152_enum_size_flag_flip](case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case153_struct_packing_flip](case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case155_char_signedness_flip](case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case156_public_macro_removed](case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
-| [case157_inline_function_removed](case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
-| [case158_public_typedef_removed](case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
 | [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case161_target_dependency_added](case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case17_template_abi](case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |
@@ -207,3 +147,65 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
 | [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (per-binary: NO_CHANGE) | ✅ NO_CHANGE | No Change |
 | [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
+| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
+| [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
+| [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
+| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
+| [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
+| [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
+| [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
+| [case109_flow_graph_policy_renames](case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
+| [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
+| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
+| [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
+| [case114_char8t_migration](case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
+| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 64 → 128) | 🔴 BREAKING | Breaking |
+| [case116_atomic_qualifier_changed](case116_atomic_qualifier_changed.md) | _Atomic qualifier added (C11) | 🔴 BREAKING | Breaking |
+| [case117_no_unique_address](case117_no_unique_address.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | 🔴 BREAKING | Breaking |
+| [case118_internal_struct_field_added_scoped](case118_internal_struct_field_added_scoped.md) | Internal struct gains a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
+| [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
+| [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
+| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
+| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change (documented gap) | ✅ NO_CHANGE | No Change |
+| [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
+| [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
+| [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
+| [case126_sycl_device_impl_ptr](case126_sycl_device_impl_ptr.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | 🔴 BREAKING | Breaking |
+| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
+| [case128_symbol_binding_strengthened](case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case129_struct_return_convention](case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
+| [case130_exceptions_mode_flip](case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case131_rtti_mode_flip](case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case132_threadsafe_statics_flip](case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case133_tls_model_flip](case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case134_relro_weakened](case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case135_stack_canary_removed](case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case136_executable_stack_removed](case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case137_runpath_changed](case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case138_needed_added](case138_needed_added.md) | DT_NEEDED Added | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case139_symbol_version_node_removed](case139_symbol_version_node_removed.md) | Symbol Version Node Removed | 🔴 BREAKING | Breaking |
+| [case140_empty_base_optimization_lost](case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
+| [case141_versioned_symbol_scheme](case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
+| [case142_vtable_slot_count_binary_only](case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
+| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
+| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
+| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case152_enum_size_flag_flip](case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case153_struct_packing_flip](case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case155_char_signedness_flip](case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case156_public_macro_removed](case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
+| [case157_inline_function_removed](case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
+| [case158_public_typedef_removed](case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
+| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
