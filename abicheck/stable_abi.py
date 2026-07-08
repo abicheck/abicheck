@@ -151,7 +151,11 @@ def format_version(v: tuple[int, int]) -> str:
 def parse_abi3_version(text: str) -> tuple[int, int] | None:
     """Parse an ``--abi3`` argument like ``"3.9"`` / ``"3"`` into a tuple.
 
-    Returns ``None`` when *text* is not a recognisable ``major[.minor]`` string.
+    Returns ``None`` when *text* is not a valid ``Py_LIMITED_API`` floor. Only
+    the documented ``3`` / ``3.x`` forms are accepted — there is no Limited API
+    outside the CPython 3 line, so a non-3 major (a mistyped ``39`` for ``3.9``,
+    or ``4``) is rejected rather than silently treated as an unreachably-high
+    floor that would suppress every ``ABOVE_FLOOR`` violation.
 
     The bare-major form ``"3"`` is the documented ``Py_LIMITED_API=3`` spelling,
     which CPython treats as the **3.2** Stable-ABI baseline (the Limited API did
@@ -165,7 +169,10 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
         minor = int(parts[1]) if len(parts) > 1 else 0
     except (ValueError, IndexError):
         return None
-    if major == 3 and minor < 2:
+    if major != 3:
+        # No Limited API outside the CPython 3 line (rejects `39`, `4`, `2.7`).
+        return None
+    if minor < 2:
         # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.
         minor = 2
     return (major, minor)
