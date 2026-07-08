@@ -431,7 +431,8 @@ abicheck compare ./build-old/libfoo.so new-release.json \
 ### 4) ABICC-compatible invocation (for migration)
 
 For teams migrating from `abi-compliance-checker` — same flags, same XML descriptors.
-See [ABICC compatibility reference](from-abicc.md) for the full flag list.
+See the [Migrating from ABICC](from-abicc.md) guide and the
+[ABICC Flag Reference](../reference/abicc-flags.md) for the full flag list.
 
 ```bash
 # Minimal (identical to abi-compliance-checker):
