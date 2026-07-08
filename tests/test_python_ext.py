@@ -163,6 +163,17 @@ def test_classify(
     assert status is expected
 
 
+@pytest.mark.parametrize(
+    "name", ["_Py_NoneStruct", "_Py_TrueStruct", "_Py_FalseStruct"]
+)
+def test_stable_abi_singleton_data_symbols_are_not_private(name: str) -> None:
+    # The ABI-only structs behind Py_None/Py_True/Py_False are `_Py`-prefixed but
+    # part of the Limited API — they must not be flagged as private violations.
+    assert stable_abi.is_private_symbol(name) is False
+    status, _ = stable_abi.classify(name, (3, 9))
+    assert status is StableAbiStatus.STABLE
+
+
 def test_min_required_abi3_ignores_private_and_unknown() -> None:
     floor = stable_abi.min_required_abi3(
         ["PyList_New", "PyType_GetName", "_PyPrivate", "PyMadeUp"]
@@ -234,6 +245,30 @@ def test_added_stable_import_is_not_flagged_as_floor_raise() -> None:
 def test_no_finding_when_import_surface_unchanged() -> None:
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong"])
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
+
+
+def test_retag_to_abi3_flags_carried_over_private_import() -> None:
+    # Retagging foo.cpython-311.so → foo.abi3.so makes a NEW cross-interpreter
+    # promise; a private import carried over unchanged is now a violation even
+    # though it is not newly gained.
+    old = _ext_snapshot(
+        "1.0",
+        ["PyList_New", "_PyObject_GC_New"],
+        source_path="foo.cpython-311-x86_64-linux-gnu.so",
+        library="foo.cpython-311-x86_64-linux-gnu.so",
+    )
+    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_GC_New"])  # foo.abi3.so
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
+
+
+def test_abi3_module_using_py_none_is_clean() -> None:
+    # A clean Limited-API module that uses Py_None (imports _Py_NoneStruct) must
+    # not be flagged as a stable-ABI violation.
+    old = _ext_snapshot("1.0", ["PyList_New"])
+    new = _ext_snapshot("2.0", ["PyList_New", "_Py_NoneStruct"])
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
 

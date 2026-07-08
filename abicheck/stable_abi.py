@@ -60,6 +60,25 @@ from enum import Enum
 #: prefix test so it stays correct as CPython grows new private symbols.
 _PRIVATE_PREFIXES: tuple[str, ...] = ("_Py", "_PyRuntime")
 
+#: ABI-only Stable-ABI *data* symbols that begin with ``_Py`` but ARE part of
+#: the Limited API: they back the singleton macros (``Py_None`` →
+#: ``&_Py_NoneStruct``, ``Py_True``/``Py_False`` → ``&_Py_TrueStruct`` /
+#: ``&_Py_FalseStruct``, ``Py_NotImplemented`` → ``&_Py_NotImplementedStruct``,
+#: ``Py_Ellipsis`` → ``&_Py_EllipsisObject``). Before CPython 3.13 an abi3
+#: extension that uses these constants imports the underlying struct symbol
+#: directly, so they must be exempted from the ``_Py*``-is-private rule to avoid
+#: false violations on clean Limited-API modules. Part of the Stable ABI since
+#: 3.2.
+_STABLE_ABI_PRIVATE_EXCEPTIONS: frozenset[str] = frozenset(
+    {
+        "_Py_NoneStruct",
+        "_Py_TrueStruct",
+        "_Py_FalseStruct",
+        "_Py_NotImplementedStruct",
+        "_Py_EllipsisObject",
+    }
+)
+
 #: Prefixes that mark a symbol as belonging to the CPython C-API surface at all
 #: (public or private). Anything not matching is "not CPython" and ignored by
 #: the stable-ABI check (e.g. libc, libstdc++, or the module's own helpers).
@@ -186,6 +205,13 @@ LIMITED_API_ADDED: dict[str, tuple[int, int]] = {
     "PyType_GenericNew": _V32,
     "PyCapsule_New": _V32,
     "PyCapsule_GetPointer": _V32,
+    # ABI-only singleton data symbols (see _STABLE_ABI_PRIVATE_EXCEPTIONS) — the
+    # structs behind Py_None/Py_True/Py_False/Py_NotImplemented/Py_Ellipsis.
+    "_Py_NoneStruct": _V32,
+    "_Py_TrueStruct": _V32,
+    "_Py_FalseStruct": _V32,
+    "_Py_NotImplementedStruct": _V32,
+    "_Py_EllipsisObject": _V32,
     # --- later Stable-ABI additions ---
     # IMPORTANT: the value is the release the symbol entered the *Stable ABI*
     # (Limited API), which can be LATER than the CPython version that first
@@ -217,7 +243,14 @@ def is_cpython_symbol(name: str) -> bool:
 
 
 def is_private_symbol(name: str) -> bool:
-    """True if *name* is CPython *private* API (``_Py*``) — never stable."""
+    """True if *name* is CPython *private* API (``_Py*``) — never stable.
+
+    The ABI-only Stable-ABI singleton data symbols (:data:`_STABLE_ABI_PRIVATE_EXCEPTIONS`,
+    e.g. ``_Py_NoneStruct``) are ``_Py``-prefixed but part of the Limited API, so
+    they are explicitly exempted here.
+    """
+    if name in _STABLE_ABI_PRIVATE_EXCEPTIONS:
+        return False
     return name.startswith(_PRIVATE_PREFIXES)
 
 

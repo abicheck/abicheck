@@ -72,12 +72,21 @@ def _module_symbol(new: PythonExtMetadata, old: PythonExtMetadata) -> str:
 def _diff_stable_abi_violations(
     old: PythonExtMetadata, new: PythonExtMetadata
 ) -> list[Change]:
-    """Newly-imported CPython *private* (``_Py*``) symbols in an abi3 module."""
-    old_imports = set(old.cpython_imports)
+    """Private (``_Py*``) imports that violate the NEW build's abi3 promise.
+
+    When the old build was *also* abi3, only *newly-gained* private imports are a
+    change this version introduced. But when the old build was version-specific
+    and the new one is retagged to abi3 (``foo.cpython-311.so`` → ``foo.abi3.so``),
+    the cross-interpreter promise is brand new, so **every** private import in the
+    new build is now a violation — even one carried over unchanged. The baseline
+    to diff against is therefore the old imports only if the old build already
+    made the abi3 promise, else empty.
+    """
+    baseline = set(old.cpython_imports) if _is_abi3(old) else set()
     gained_private = sorted(
         s
         for s in new.cpython_imports
-        if s not in old_imports and stable_abi.is_private_symbol(s)
+        if s not in baseline and stable_abi.is_private_symbol(s)
     )
     if not gained_private:
         return []
@@ -119,10 +128,13 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     n = new.python_ext
     assert o is not None and n is not None  # guaranteed by requires_support
 
-    # Only stable-ABI (abi3) modules carry this contract. A version-specific
-    # extension legitimately uses private CPython API and is rebuilt per
-    # interpreter, so it has no cross-interpreter import promise to break.
-    if not (_is_abi3(n) and _is_abi3(o)):
+    # The contract is the NEW artifact's: only a stable-ABI (abi3) new build
+    # makes the cross-interpreter promise a private import breaks. The old build
+    # need not be abi3 — a retag from a version-specific build to abi3 newly
+    # subjects its imports to the promise (handled in _diff_stable_abi_violations).
+    # A version-specific new build legitimately uses private CPython API and is
+    # rebuilt per interpreter, so it has no such promise.
+    if not _is_abi3(n):
         return []
 
     return _diff_stable_abi_violations(o, n)
