@@ -166,6 +166,5 @@ contract and its stability policy, see
 
 ## See also
 
-- [Local Compare](../user-guide/local-compare.md) — producing and comparing snapshots locally.
+- [Baseline Management](../user-guide/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
 - [Output Formats](../user-guide/output-formats.md) — the comparison-report JSON and `report_schema_version`.
-- [Baseline Management](../user-guide/baseline-management.md) — storing snapshots as ABI baselines.

@@ -186,7 +186,7 @@ changes under their root cause. Full reference:
 | Release-quality baseline | Generate the baseline at release time and upload it as a release asset — see [Baseline Management](baseline-management.md). |
 | GitHub-native | Use the [GitHub Action](github-action.md); upload SARIF for the Security tab and inline annotations. |
 | GitLab / Jenkins / Azure | Emit `--format junit`; publish it to the native test dashboard (see [Output Formats → JUnit](output-formats.md#junit-xml-output)). |
-| Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [Local Compare](local-compare.md). |
+| Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [CLI Usage](cli-usage.md) and [Baseline Management](baseline-management.md). |
 | Offline / air-gapped | Pre-dump snapshots, then `abicheck compare old.json new.json` — no castxml or network needed. |
 | Multi-platform project | Matrix over Linux/macOS/Windows, emit JSON per platform, aggregate in a final gate job — see [GitHub Action](github-action.md). |
 | Package / release validation | `compare` on RPM/Deb/tar/conda/wheel directory/package inputs, with debug/devel packages where available. |

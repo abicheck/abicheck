@@ -104,7 +104,7 @@ If you only have file paths and don't want to pre-load them, call `run_compare`
 (or `run_compare_request`) instead — it accepts `suppress=`/`policy_file_path=`
 as paths and does the loading for you. Snapshots are serialised as `.abi.json`
 (`schema_version` `8`); see [Output Formats](output-formats.md) for the on-disk
-contract and [Local Compare](local-compare.md) for the baseline workflow.
+contract and [Baseline Management](baseline-management.md) for the baseline workflow.
 
 ## Render results
 

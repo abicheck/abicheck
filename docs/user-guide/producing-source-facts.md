@@ -175,7 +175,7 @@ abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
 ctor/dtor ABI clone variants — `C1`/`C2`/`C3`, `D0`/`D1`/`D2` — so one source
 constructor claims all of its exported symbols). The result is a single
 self-contained `.baseline.json` carrying L0–L5, ready for
-[`compare`](local-compare.md) or [`scan --baseline`](scan-levels.md).
+[`compare`](cli-usage.md) or [`scan --baseline`](scan-levels.md).
 
 ### Reading the L4 coverage line
 

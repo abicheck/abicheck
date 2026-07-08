@@ -37,7 +37,6 @@ nav:
     - Start Here:
       - Getting Started: getting-started.md
       - Choose Your Workflow: user-guide/choose-your-workflow.md
-      - Local Compare: user-guide/local-compare.md
       - 'Worked Example: Real Library': user-guide/real-world-example.md
       - 'Scanning a Conda-Forge Package': user-guide/scanning-conda-packages.md
     - Everyday Use:
