@@ -57,6 +57,7 @@ nav:
       - Multi-Binary Releases: user-guide/multi-binary.md
       - Application Compatibility: user-guide/appcompat.md
       - Plugin Systems: user-guide/plugin-systems.md
+      - API Surface Intelligence: concepts/api-surface-intelligence.md
       - Kernel & eBPF (BTF): user-guide/kernel-btf.md
       - Security Hardening: user-guide/security-hardening.md
       - Probe Harness: user-guide/probe-harness.md
@@ -75,7 +76,6 @@ nav:
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
-    - API Surface Intelligence: concepts/api-surface-intelligence.md
     - Class Layout ABI & API: concepts/class-layout-abi.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
