@@ -121,6 +121,46 @@ def test_detect_windows_pyd_tag() -> None:
     assert snap.python_ext.declared_abi3 == (3, 12)
 
 
+def test_detect_windows_abi3_tag_with_floor() -> None:
+    # A Windows stable-ABI artifact whose name carries the `cpXY-abi3` wheel tag
+    # is recognised as abi3 AND its floor recovered.
+    snap = _ext_snapshot(
+        "1.0",
+        ["PyList_New"],
+        source_path="foo.cp39-abi3-win_amd64.pyd",
+        library="foo.cp39-abi3-win_amd64.pyd",
+    )
+    assert snap.python_ext is not None
+    assert snap.python_ext.limited_api is True
+    assert snap.python_ext.declared_abi3 == (3, 9)
+
+
+def test_abi3_tag_variants_recognised() -> None:
+    from abicheck.python_ext import _detect_soabi
+
+    # bare `.abi3.` suffix (no floor)
+    assert _detect_soabi("foo.abi3.so", None)[:2] == ("abi3", True)
+    # `-abi3-` token embedded (no cp floor)
+    assert _detect_soabi("foo-abi3-linux.so", None)[:2] == ("abi3", True)
+    # version-specific tags stay non-abi3
+    assert _detect_soabi("foo.cp312-win_amd64.pyd", None) == (
+        "cpython-312",
+        False,
+        (3, 12),
+    )
+
+
+def test_windows_abi3_pyd_compare_flags_new_private_import() -> None:
+    # Two cp39-abi3 Windows builds; the new one gains a private import → flagged.
+    src = "foo.cp39-abi3-win_amd64.pyd"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "_PyObject_New"], source_path=src, library=src
+    )
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
+
+
 def test_plain_library_is_not_an_extension() -> None:
     elf = ElfMetadata()
     elf.symbols = [

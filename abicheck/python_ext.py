@@ -50,7 +50,12 @@ if TYPE_CHECKING:
 #: (stable-ABI); Windows uses ``foo.cp311-win_amd64.pyd`` / ``foo.pyd``.
 _CPYTHON_TAG_RE = re.compile(r"\.cpython-(\d)(\d+)-")
 _CP_WIN_TAG_RE = re.compile(r"\.cp(\d)(\d+)-")
-_ABI3_TAG_RE = re.compile(r"\.abi3\.")
+#: ``cpXY-abi3`` — the wheel/SOABI stable-ABI tag that also carries the floor
+#: (e.g. ``foo.cp39-abi3-win_amd64.pyd`` → abi3, floor 3.9). Checked before the
+#: version-specific ``cpXY`` tag so a stable-ABI Windows artifact is recognised.
+_CP_ABI3_RE = re.compile(r"cp(\d)(\d+)-abi3")
+#: A bare ``abi3`` token anywhere in the name (``foo.abi3.so``, ``…-abi3-…``).
+_ABI3_TAG_RE = re.compile(r"(?:^|[._-])abi3(?:[._-]|$)")
 
 #: ``PyInit_<mod>`` (Py3) / ``init<mod>`` (Py2) module init export.
 _PYINIT3_RE = re.compile(r"^PyInit_(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
@@ -74,8 +79,11 @@ class PythonExtMetadata:
     #: Raw SOABI / suffix tag from the filename, e.g. ``cpython-311`` / ``abi3``.
     soabi_tag: str | None = None
     #: True when the module is a stable-ABI (``abi3`` / ``Py_LIMITED_API``) build
-    #: — inferred from an ``.abi3.`` suffix. Such a module promises it uses only
-    #: the Limited API and must load on every interpreter at/above its floor.
+    #: — inferred from an ``abi3`` token in the filename (``.abi3.`` or a
+    #: ``cpXY-abi3`` wheel tag). Such a module promises it uses only the Limited
+    #: API and must load on every interpreter at/above its floor. A tagless
+    #: ``foo.pyd`` cannot be recognised as abi3 from the file alone (see
+    #: :func:`_detect_soabi`).
     limited_api: bool = False
     #: Declared / inferred ``Py_LIMITED_API`` floor as ``(major, minor)`` when
     #: known (e.g. an ``abi3`` tag pins the module to that minor). ``None`` when
@@ -143,11 +151,26 @@ def _detect_soabi(
     """Parse the filename for an SOABI/abi3 tag.
 
     Returns ``(soabi_tag, limited_api, declared_abi3)``.
+
+    LIMITATION: the stable-ABI promise lives in the *wheel* tag
+    (``…-cp39-abi3-win_amd64.whl``), not always in the extension filename.
+    A Windows abi3 module is frequently installed as a bare ``foo.pyd`` with no
+    tag, which is indistinguishable from a version-specific build — it cannot be
+    recognised as abi3 from the file alone. When the ``cpXY-abi3`` tag *is*
+    present in the name (it often is), it is honoured here and its floor
+    recovered. For a tagless artifact, run ``stable-abi --abi3 <floor>`` (which
+    flags private imports regardless of the limited-api flag) or give the tagged
+    filename.
     """
     for candidate in (source_path, library):
         if not candidate:
             continue
         base = candidate.replace("\\", "/").rsplit("/", 1)[-1]
+        # `cpXY-abi3` — abi3 promise WITH a declared floor (Windows/wheel tag).
+        m = _CP_ABI3_RE.search(base)
+        if m:
+            return "abi3", True, (int(m.group(1)), int(m.group(2)))
+        # A bare `abi3` token — abi3 promise, floor undeclared (`foo.abi3.so`).
         if _ABI3_TAG_RE.search(base):
             return "abi3", True, None
         m = _CPYTHON_TAG_RE.search(base) or _CP_WIN_TAG_RE.search(base)
