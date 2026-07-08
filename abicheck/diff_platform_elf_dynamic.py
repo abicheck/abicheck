@@ -259,7 +259,15 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
 
     old_machine = getattr(old_elf, "machine", "")
     new_machine = getattr(new_elf, "machine", "")
-    if old_machine and new_machine and old_machine != new_machine:
+    # Require BOTH sides to have captured ELF identity before comparing any of
+    # it. A real parsed ELF always sets `machine`; a default / header-only /
+    # parse-failed `ElfMetadata()` has machine="" but still carries the
+    # `elf_class=64` default — comparing that against a real 32-bit ELF would
+    # false-positive elf_class_changed. An unknown side is not a change.
+    if not (old_machine and new_machine):
+        return changes
+
+    if old_machine != new_machine:
         changes.append(
             make_change(
                 ChangeKind.ELF_MACHINE_CHANGED,
@@ -288,17 +296,7 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
 
-    old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
-    new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
-    if old_abi != new_abi and (old_abi or new_abi):
-        changes.append(
-            make_change(
-                ChangeKind.ELF_ABI_FLAGS_CHANGED,
-                symbol="ELF_HEADER",
-                old=", ".join(sorted(old_abi)) or "(none)",
-                new=", ".join(sorted(new_abi)) or "(none)",
-            )
-        )
+    changes.extend(_diff_abi_flags(old_elf, new_elf))
 
     old_osabi = getattr(old_elf, "osabi", "")
     new_osabi = getattr(new_elf, "osabi", "")
@@ -320,6 +318,44 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
         )
 
     return changes
+
+
+def _diff_abi_flags(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Compare the ABI-selecting e_flags bits (same-machine caller guarantee).
+
+    For architectures the metadata parser knows how to decode (ARM/RISC-V/MIPS)
+    the decoded ``abi_flags`` token set is diffed. For any other architecture
+    both decoded sets are empty, so fall back to the raw ``e_flags`` word — e.g.
+    PPC64 encodes its ELFv1/ELFv2 ABI version there — otherwise ABI-selecting
+    drift on undecoded arches would never surface.
+    """
+    old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
+    new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
+    if old_abi or new_abi:
+        if old_abi != new_abi:
+            return [
+                make_change(
+                    ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                    symbol="ELF_HEADER",
+                    old=", ".join(sorted(old_abi)) or "(none)",
+                    new=", ".join(sorted(new_abi)) or "(none)",
+                )
+            ]
+        return []
+
+    # Undecoded architecture: diff the raw e_flags word.
+    old_ef = getattr(old_elf, "e_flags", 0)
+    new_ef = getattr(new_elf, "e_flags", 0)
+    if old_ef != new_ef:
+        return [
+            make_change(
+                ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                symbol="ELF_HEADER",
+                old=hex(old_ef),
+                new=hex(new_ef),
+            )
+        ]
+    return []
 
 
 #: OS-ABI values that are interchangeable on Linux. The GNU toolchain stamps a

@@ -352,12 +352,14 @@ _GNU_PROPERTY_AARCH64_FEATURE_1_BTI = 0x1
 _GNU_PROPERTY_AARCH64_FEATURE_1_PAC = 0x2
 
 
-def _decode_gnu_property_desc(desc: bytes, little_endian: bool) -> frozenset[str]:
+def _decode_gnu_property_desc(desc: bytes, little_endian: bool, align: int = 8) -> frozenset[str]:
     """Parse a NT_GNU_PROPERTY_TYPE_0 note description into feature tokens.
 
     The description is a sequence of properties, each laid out as
-    ``pr_type (u32) | pr_datasz (u32) | pr_data[pr_datasz] | pad-to-8``.
-    Only the x86 and AArch64 control-flow-protection AND-features are decoded.
+    ``pr_type (u32) | pr_datasz (u32) | pr_data[pr_datasz] | pad``. Each
+    property is padded up to *align* bytes — 8 for ELFCLASS64, **4** for
+    ELFCLASS32 — so a wrong alignment skips or misreads later properties. Only
+    the x86 and AArch64 control-flow-protection AND-features are decoded.
     """
     endian = "<" if little_endian else ">"
     tokens: set[str] = set()
@@ -381,8 +383,8 @@ def _decode_gnu_property_desc(desc: bytes, little_endian: bool) -> frozenset[str
                 tokens.add("BTI")
             if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_PAC:
                 tokens.add("PAC")
-        # Advance past pr_data, padded up to 8-byte alignment.
-        off += (pr_datasz + 7) & ~7
+        # Advance past pr_data, padded up to the class alignment.
+        off += (pr_datasz + align - 1) & ~(align - 1)
     return frozenset(tokens)
 
 
@@ -392,6 +394,9 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         section = elf.get_section_by_name(".note.gnu.property")
         if section is None or not hasattr(section, "iter_notes"):
             return
+        # GNU property entries are padded to the ELF class word size: 8 bytes
+        # for ELFCLASS64, 4 bytes for ELFCLASS32.
+        align = 4 if elf.elfclass == 32 else 8
         features: set[str] = set()
         for note in section.iter_notes():
             if note.get("n_type") not in _NT_GNU_PROPERTY_TYPE_0_NAMES:
@@ -401,7 +406,7 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
                 desc = desc.encode("latin-1", "replace")
             if not isinstance(desc, (bytes, bytearray)):
                 continue
-            features |= _decode_gnu_property_desc(bytes(desc), elf.little_endian)
+            features |= _decode_gnu_property_desc(bytes(desc), elf.little_endian, align)
         meta.gnu_properties = frozenset(features)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read .note.gnu.property from %s: %s", so_path, exc)

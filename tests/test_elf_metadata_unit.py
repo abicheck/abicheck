@@ -188,6 +188,22 @@ class TestParseGnuProperty:
         _parse_gnu_property(elf, meta, Path("x.so"))
         assert meta.gnu_properties == frozenset()
 
+    def test_elf32_alignment_decodes_cet_after_preceding_property(self):
+        # ELFCLASS32 pads each property to 4 bytes, not 8. A preceding property
+        # with a 4-byte payload occupies exactly 12 bytes; with 8-byte alignment
+        # the walk would land at offset 16 and misread the CET property. Verify
+        # the 4-byte-aligned decode still finds IBT|SHSTK.
+        import struct
+
+        from abicheck.elf_metadata import _decode_gnu_property_desc
+        # Property 1: some other pr_type (0xC0008000), datasz=4, data=0 → 12 bytes.
+        desc = struct.pack("<III", 0xC0008000, 4, 0)
+        # Property 2: X86_FEATURE_1_AND (0xC0000002), datasz=4, bits=IBT|SHSTK(3).
+        desc += struct.pack("<III", 0xC0000002, 4, 0x3)
+        # 8-byte alignment would skip the second property; 4-byte finds it.
+        assert _decode_gnu_property_desc(desc, True, align=4) == frozenset({"IBT", "SHSTK"})
+        assert _decode_gnu_property_desc(desc, True, align=8) != frozenset({"IBT", "SHSTK"})
+
 
 # ── _finalize_hardening ──────────────────────────────────────────────────
 

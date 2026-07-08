@@ -208,6 +208,31 @@ class TestElfIdentity:
         assert ChangeKind.ELF_MACHINE_CHANGED not in ks
         assert ChangeKind.ELF_OSABI_CHANGED not in ks
 
+    def test_missing_elf_side_does_not_fabricate_class_change(self):
+        # A metadata-less side keeps the elf_class=64 default; comparing it to a
+        # real 32-bit ELF must NOT emit elf_class_changed (machine is unknown on
+        # the empty side, so no identity is compared at all).
+        old = ElfMetadata()  # header-only / parse-failed: machine="", elf_class=64
+        new = ElfMetadata(machine="EM_386", elf_class=32)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_CLASS_CHANGED not in _kinds(r)
+
+    def test_undecoded_arch_raw_eflags_diff_is_breaking(self):
+        # PPC64 encodes its ELFv1/ELFv2 ABI version in e_flags, which the
+        # metadata parser does not decode into abi_flags — the raw e_flags diff
+        # must still surface as elf_abi_flags_changed.
+        old = ElfMetadata(machine="EM_PPC64", e_flags=1)  # ELFv1
+        new = ElfMetadata(machine="EM_PPC64", e_flags=2)  # ELFv2
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
+    def test_undecoded_arch_same_eflags_no_change(self):
+        old = ElfMetadata(machine="EM_PPC64", e_flags=2)
+        new = ElfMetadata(machine="EM_PPC64", e_flags=2)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
+
 
 # ── A4: STB_GNU_UNIQUE binding transitions ──────────────────────────────────
 
