@@ -22,7 +22,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   deployment-`RISK` change kind for
   `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
   ABI, e.g. an internal `_Py*` symbol). Classification uses a vendored,
-  authoritative copy of CPython's `Misc/stable_abi.toml` (≈900 symbols), so the
+  authoritative copy of CPython's `Misc/stable_abi.toml` (≈970 symbols), so the
   `abi_only` `_Py*` symbols the Limited-API macros expand to (`_Py_Dealloc`,
   `_PyObject_GC_New`, `_PyArg_*_SizeT`, `_Py_NoneStruct`, …) are correctly
   treated as stable rather than flagged, while `PyUnstable_*` (PEP 689) is

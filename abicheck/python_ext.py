@@ -103,7 +103,7 @@ class PythonExtMetadata:
     #: free-threaded build targets a *different* CPython ABI than the regular
     #: (GIL) build of the same minor: the two are not interchangeable, and a
     #: free-threaded build **cannot** be ``abi3`` (``Py_LIMITED_API`` is
-    #: incompatible with ``Py_GIL_DISABLED`` as of CPython 3.13/3.14), so
+    #: incompatible with ``Py_GIL_DISABLED`` as of CPython 3.13–3.15), so
     #: :attr:`limited_api` is always ``False`` when this is set.
     free_threaded: bool = False
     #: Imported CPython C-API symbols (``Py*`` / ``_Py*``), sorted & de-duped.

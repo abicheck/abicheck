@@ -75,7 +75,7 @@ _MAX_KNOWN_MINOR: int = max(minor for _major, minor in STABLE_ABI_SYMBOLS.values
 
 #: Headroom above the vendored data version for accepting an ``--abi3`` floor. A
 #: floor can legitimately target a CPython *newer* than the vendored data (e.g.
-#: ``--abi3 3.15`` while the data is 3.14) — such a module simply uses only
+#: ``--abi3 3.16`` while the data is 3.15) — such a module simply uses only
 #: symbols the data already knows, so it audits cleanly. We accept a generous
 #: margin of future minors so real/near-future interpreters are never rejected,
 #: while still catching implausible typos (``3.99``, ``3.999``) that would
@@ -195,8 +195,8 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
     — to ``(3, 2)`` so ordinary stable symbols (``PyList_New`` etc., floor 3.2)
     are not wrongly reported as above-floor.
 
-    A floor may target a CPython newer than the vendored data (``--abi3 3.15``
-    while the data is 3.14) — that is accepted, since such a module only uses
+    A floor may target a CPython newer than the vendored data (``--abi3 3.16``
+    while the data is 3.15) — that is accepted, since such a module only uses
     symbols the data already knows. Only an *implausible* minor beyond a generous
     future margin (:data:`_MAX_ABI3_MINOR`, e.g. ``3.99``) is rejected: it would
     sort above every vendored symbol, silently suppressing all ``ABOVE_FLOOR``

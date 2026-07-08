@@ -144,7 +144,7 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
 
 Classification is driven by a **vendored, authoritative** copy of CPython's
 [`Misc/stable_abi.toml`](https://github.com/python/cpython/blob/main/Misc/stable_abi.toml)
-— every linkable `[function.*]`/`[data.*]` entry (≈900 symbols) mapped to the
+— every linkable `[function.*]`/`[data.*]` entry (≈970 symbols) mapped to the
 release it entered the Limited API, including the `abi_only` `_Py*` symbols the
 public macros expand to. Membership in this set — not a name prefix — decides
 whether an import is stable, so `_Py`-prefixed `abi_only` symbols are handled

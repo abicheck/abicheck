@@ -29,8 +29,8 @@ Usage::
 
     # or straight from a CPython branch/tag (needs network)
     python scripts/gen_stable_abi_data.py \\
-        --url https://raw.githubusercontent.com/python/cpython/3.14/Misc/stable_abi.toml \\
-        --version 3.14
+        --url https://raw.githubusercontent.com/python/cpython/3.15/Misc/stable_abi.toml \\
+        --version 3.15
 
 The extraction is deterministic: every ``[function.*]`` and ``[data.*]`` entry
 (these are the linkable symbols — macros/consts/typedefs/structs are not) is
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--version",
         required=True,
-        help="CPython branch/tag the data is from (e.g. 3.14) — recorded in the header",
+        help="CPython branch/tag the data is from (e.g. 3.15) — recorded in the header",
     )
     args = parser.parse_args(argv)
 
