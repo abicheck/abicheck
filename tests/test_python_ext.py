@@ -1053,6 +1053,48 @@ def test_derive_on_load_when_key_absent() -> None:
     assert "_PyObject_LookupSpecial" in snap.python_ext.cpython_imports
 
 
+def test_legacy_macho_without_imports_not_rederived() -> None:
+    # A Mach-O snapshot written before G14 added ``imported_symbols`` carries no
+    # import table. Deriving an extension from the empty default would silently
+    # certify a `scan --abi3` audit as clean (zero imports audited) and make
+    # `compare` treat every re-captured import as newly gained. The absence must
+    # be preserved (python_ext stays None → re-dump required), not read as "no
+    # imports". The PyInit export alone must not trigger derivation here.
+    macho = {
+        "exports": [{"name": "PyInit_foo", "sym_type": "exported"}],
+        # note: no "imported_symbols" key — this is the legacy shape
+    }
+    d = {
+        "library": "foo.abi3.so",
+        "version": "1.0",
+        "source_path": "foo.abi3.so",
+        "macho": macho,
+    }
+    snap = snapshot_from_dict(d)
+    assert snap.python_ext is None
+
+
+def test_macho_with_empty_imports_key_still_derives() -> None:
+    # A *new* dump always writes the ``imported_symbols`` key. When it is present
+    # (even as an explicit empty list) the import table WAS captured, so
+    # derivation proceeds normally — the guard keys off key-absence, not
+    # emptiness, so a genuinely import-free Mach-O is not confused with a legacy
+    # one.
+    macho = {
+        "exports": [{"name": "PyInit_foo", "sym_type": "exported"}],
+        "imported_symbols": ["PyList_New", "_PyObject_LookupSpecial"],
+    }
+    d = {
+        "library": "foo.abi3.so",
+        "version": "1.0",
+        "source_path": "foo.abi3.so",
+        "macho": macho,
+    }
+    snap = snapshot_from_dict(d)
+    assert snap.python_ext is not None
+    assert "_PyObject_LookupSpecial" in snap.python_ext.cpython_imports
+
+
 def test_explicit_null_python_ext_not_rederived() -> None:
     # An explicit null means the dumper checked and found no extension; a bare
     # ELF library with a Py-free surface must stay None (not re-derived to a

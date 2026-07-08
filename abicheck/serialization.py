@@ -633,7 +633,24 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
     # still checked at compare time. Skip when the key was present (the dumper
     # already answered, including an explicit "not an extension" null).
-    if snap.python_ext is None and _python_ext_key_absent:
+    #
+    # Mach-O caveat: the ``imported_symbols`` table is itself new in G14. A
+    # legacy Mach-O ``.abi.json`` written before it existed has no import data;
+    # ``_macho_from_dict`` defaults the absent key to ``[]``. Deriving an
+    # extension from that empty set would be actively misleading: `scan --abi3`
+    # would audit *zero* CPython imports and certify the module clean, and
+    # `compare` would treat every import re-captured from the new binary as
+    # newly gained. So when a Mach-O snapshot never recorded its imports, leave
+    # ``python_ext`` as ``None`` (unknown) — `--abi3` then honestly reports the
+    # artifact must be re-dumped rather than silently passing.
+    _macho_imports_uncaptured = (
+        isinstance(macho_data, dict) and "imported_symbols" not in macho_data
+    )
+    if (
+        snap.python_ext is None
+        and _python_ext_key_absent
+        and not _macho_imports_uncaptured
+    ):
         if snap.elf is not None or snap.pe is not None or snap.macho is not None:
             from .python_ext import detect_python_extension
 
