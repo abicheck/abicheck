@@ -86,25 +86,10 @@ Both sides use pre-saved snapshots. No headers or compilation toolchain needed.
 
 ## Snapshot File Format
 
-`abicheck dump` produces a JSON file containing the full ABI surface:
-
-```json
-{
-  "schema_version": 8,
-  "library": "libfoo.so.1",
-  "version": "2.0.0",
-  "platform": "elf",
-  "functions": [...],
-  "variables": [...],
-  "types": [...],
-  "enums": [...]
-}
-```
-
-Key properties:
-- **Self-contained**: includes all type, function, and variable information
-- **Platform-agnostic**: snapshots from ELF, PE, and Mach-O binaries use the same schema
-- **Deterministic**: sets are serialized as sorted lists for reproducible output
+`abicheck dump` produces a self-contained, platform-agnostic `.abi.json`
+snapshot of the full ABI surface. The on-disk contract — its `schema_version`,
+top-level structure, and forward/backward-compatibility rules — is documented in
+the [Snapshot Format reference](../reference/snapshot-format.md).
 
 ---
 
