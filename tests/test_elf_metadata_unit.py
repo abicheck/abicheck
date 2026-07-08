@@ -227,6 +227,103 @@ class TestParseGnuProperty:
         assert _decode_gnu_property_desc(desc, True, align=8) != frozenset({"IBT", "SHSTK"})
 
 
+# ── _decode_abi_flags (G23-A3) ────────────────────────────────────────────
+
+class TestDecodeAbiFlags:
+    def test_arm_hard_float_and_eabi(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        # EF_ARM_ABI_FLOAT_HARD (0x400) | EABI version 5 (5 << 24).
+        flags = _decode_abi_flags("EM_ARM", 0x400 | (5 << 24))
+        assert flags == frozenset({"float-hard", "eabi5"})
+
+    def test_arm_soft_float(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        assert _decode_abi_flags("EM_ARM", 0x200) == frozenset({"float-soft"})
+
+    def test_riscv_double_float_with_compressed(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        # float-abi double (0x4) | RVC (0x1).
+        assert _decode_abi_flags("EM_RISCV", 0x4 | 0x1) == frozenset({"float-double", "rvc"})
+
+    def test_riscv_soft_float_and_rve(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        assert _decode_abi_flags("EM_RISCV", 0x0 | 0x8) == frozenset({"float-soft", "rve"})
+
+    def test_mips_abi_bits(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        assert _decode_abi_flags("EM_MIPS", 0x1000) == frozenset({"mips-abi-0x1000"})
+
+    def test_unknown_arch_is_empty(self):
+        from abicheck.elf_metadata import _decode_abi_flags
+        # PPC64's ABI version lives in e_flags but is not decoded → empty set
+        # (the raw e_flags fallback in the diff handles it).
+        assert _decode_abi_flags("EM_PPC64", 0x2) == frozenset()
+
+
+# ── _read_identity (G23-A3) ───────────────────────────────────────────────
+
+class TestReadIdentity:
+    def test_reads_header_fields(self):
+        from abicheck.elf_metadata import _read_identity
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.elfclass = 64
+        elf.__getitem__.side_effect = lambda k: {
+            "e_machine": "EM_ARM",
+            "e_flags": 0x400 | (5 << 24),
+            "e_ident": {"EI_OSABI": "ELFOSABI_LINUX"},
+        }[k]
+        _read_identity(elf, meta, Path("x.so"))
+        assert meta.machine == "EM_ARM"
+        assert meta.elf_class == 64
+        assert meta.osabi == "ELFOSABI_LINUX"
+        assert meta.abi_flags == frozenset({"float-hard", "eabi5"})
+
+    def test_parse_failure_is_swallowed(self):
+        from abicheck.elf_metadata import _read_identity
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.__getitem__.side_effect = KeyError("e_machine")
+        _read_identity(elf, meta, Path("x.so"))  # must not raise
+        assert meta.machine == ""
+
+
+# ── _iter_gnu_property_descs segment fallback (G23-A2) ────────────────────
+
+class TestGnuPropertySegmentFallback:
+    _IBT_SHSTK_DESC = b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+
+    def _note_bytes(self):
+        import struct
+        return struct.pack("<III", 4, len(self._IBT_SHSTK_DESC), 5) + b"GNU\x00" + self._IBT_SHSTK_DESC
+
+    def test_falls_back_to_pt_gnu_property_segment(self):
+        # Section headers stripped → no .note.gnu.property section, but the
+        # loadable PT_GNU_PROPERTY segment still carries the note.
+        from abicheck.elf_metadata import _parse_gnu_property
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.elfclass = 64
+        elf.little_endian = True
+        elf.get_section_by_name.return_value = None
+        seg = MagicMock()
+        seg.header.p_type = "PT_GNU_PROPERTY"
+        seg.data.return_value = self._note_bytes()
+        elf.iter_segments.return_value = [seg]
+        _parse_gnu_property(elf, meta, Path("x.so"))
+        assert meta.gnu_properties == frozenset({"IBT", "SHSTK"})
+
+    def test_no_segment_and_no_section_is_empty(self):
+        from abicheck.elf_metadata import _parse_gnu_property
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.elfclass = 64
+        elf.get_section_by_name.return_value = None
+        elf.iter_segments.return_value = []
+        _parse_gnu_property(elf, meta, Path("x.so"))
+        assert meta.gnu_properties == frozenset()
+
+
 # ── _finalize_hardening ──────────────────────────────────────────────────
 
 class TestFinalizeHardening:
