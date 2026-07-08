@@ -56,8 +56,11 @@ L3 signal `TLS_MODEL_CHANGED` (RISK, build-evidence-only) exists; the fact is
 **artifact-provable** from the binary itself and should not require an L3 pack.
 
 **Detection.** Read `DT_FLAGS` for `DF_STATIC_TLS` (and record whether the
-library defines `STT_TLS` symbols at all, to suppress the finding for TLS-free
-libraries). Diff the tri-state in `diff_platform.py`.
+dynamic symbol table carries *any* `STT_TLS` entries — defined **or
+undefined** — to suppress the finding for TLS-free libraries; an initial-exec
+reference to an external `extern __thread` variable sets `DF_STATIC_TLS` with
+no TLS definitions of its own, and that import-only case is exactly as
+dlopen-hostile). Diff the tri-state in `diff_platform.py`.
 
 **Kinds.**
 
@@ -303,8 +306,12 @@ genksyms/`Module.symvers`, the thing distro kABI guarantees are built on — has
 no support.
 
 **Design.** New adapter `symvers_metadata.py` parsing `Module.symvers` (TSV:
-CRC, symbol, module, export type). Accept a symvers file as a compare input
-side (precedent: `debian_symbols.py` adapter). Diff:
+CRC, symbol, module, export type, **namespace** — the fifth column may be
+empty, and pre-5.4 kernels omit it entirely, so the parser accepts both the
+4- and 5-field forms; see
+[kbuild/modules](https://docs.kernel.org/kbuild/modules.html)). Accept a
+symvers file as a compare input side (precedent: `debian_symbols.py`
+adapter). Diff:
 
 - `KABI_SYMBOL_REMOVED` → **BREAKING** (out-of-tree modules fail to load).
 - `KABI_CRC_CHANGED` → **BREAKING** (modversions reject the module even though
@@ -312,6 +319,10 @@ side (precedent: `debian_symbols.py` adapter). Diff:
 - `KABI_EXPORT_TYPE_CHANGED` (`EXPORT_SYMBOL` ↔ `EXPORT_SYMBOL_GPL`) →
   **API_BREAK** (license-gated availability change; loads fail only for
   non-GPL consumers).
+- `KABI_SYMBOL_NAMESPACE_CHANGED` (symbol gained/moved its export namespace,
+  `EXPORT_SYMBOL_NS*`) → **BREAKING** for gain/move (modules without the
+  matching `MODULE_IMPORT_NS` fail to load); dropping the namespace is
+  **COMPATIBLE**.
 - `KABI_SYMBOL_ADDED` → **COMPATIBLE**.
 
 Where BTF is also supplied, cross-reference the CRC finding with the BTF type
@@ -370,11 +381,11 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 
 | Milestone | Contents | New kinds | Effort |
 |---|---|---|---|
-| M1 | A1–A4 (ELF facts) | ~10 | 4 × S–M, independently landable |
+| M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable |
 | M2 | B1 (L0 thunk/VTT diff) | 3 | M |
 | M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L |
 | M4 | C (clang flag extraction) | 0 | M |
-| M5 | D1–D3 (kABI, long double, unnamed types) | ~7 | M + S–M + S |
+| M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S |
 
 Every milestone leaves the gates green: partition assertion, detector/docs
 coverage, doc-count-sync headline counts, FP-rate and tier-accuracy corpora
