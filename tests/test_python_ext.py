@@ -283,9 +283,12 @@ def test_min_required_abi3_none_when_no_recognised_stable() -> None:
         ("4", None),
         ("2.7", None),
         ("4.0", None),
-        # unreachable floors above the newest vendored CPython minor: an
-        # arbitrarily high minor (typo like `3.99`) would sort above every
-        # vendored symbol and silently suppress all ABOVE_FLOOR violations.
+        # a floor newer than the vendored data is a real/near-future
+        # interpreter (e.g. --abi3 3.14 while data is 3.13) → accepted.
+        ("3.14", (3, 14)),
+        # implausible minors well beyond the future margin (typo like `3.99`)
+        # would sort above every vendored symbol and silently suppress all
+        # ABOVE_FLOOR violations → rejected.
         ("3.99", None),
         ("3.999", None),
         # trailing junk / extra version components are not valid floors.
@@ -296,12 +299,15 @@ def test_parse_abi3_version(text: str, expected: tuple[int, int] | None) -> None
     assert stable_abi.parse_abi3_version(text) == expected
 
 
-def test_parse_abi3_version_accepts_newest_vendored_minor() -> None:
-    # The floor cap tracks the vendored data, so the newest known minor is
-    # accepted verbatim while the next one up is rejected as unreachable.
-    top = stable_abi._MAX_KNOWN_MINOR
-    assert stable_abi.parse_abi3_version(f"3.{top}") == (3, top)
-    assert stable_abi.parse_abi3_version(f"3.{top + 1}") is None
+def test_parse_abi3_version_accepts_near_future_minor_rejects_typos() -> None:
+    # A floor above the vendored data version but within the future margin is a
+    # legitimate current/near-future interpreter; only an implausible minor past
+    # the margin is rejected as a typo. Both bounds track the vendored data so a
+    # refresh raises them automatically (typo rejection is decoupled from it).
+    ceiling = stable_abi._MAX_ABI3_MINOR
+    assert stable_abi._MAX_KNOWN_MINOR < ceiling  # there is real headroom
+    assert stable_abi.parse_abi3_version(f"3.{ceiling}") == (3, ceiling)
+    assert stable_abi.parse_abi3_version(f"3.{ceiling + 1}") is None
 
 
 def test_stable_abi_since_differs_from_added_version() -> None:

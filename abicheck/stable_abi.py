@@ -70,12 +70,19 @@ _CPYTHON_PREFIXES: tuple[str, ...] = ("Py", "_Py")
 LIMITED_API_ADDED: dict[str, tuple[int, int]] = STABLE_ABI_SYMBOLS
 
 #: Newest CPython 3.x minor the vendored stable-ABI data tracks. Derived from the
-#: data so it advances automatically on a refresh. A requested ``--abi3`` floor
-#: above this is unreachable (a typo like ``3.99``): every vendored symbol would
-#: sort below it, silently suppressing all ``ABOVE_FLOOR`` violations — so
-#: :func:`parse_abi3_version` rejects it rather than certifying against a floor
-#: no interpreter provides.
+#: data so it advances automatically on a refresh.
 _MAX_KNOWN_MINOR: int = max(minor for _major, minor in STABLE_ABI_SYMBOLS.values())
+
+#: Headroom above the vendored data version for accepting an ``--abi3`` floor. A
+#: floor can legitimately target a CPython *newer* than the vendored data (e.g.
+#: ``--abi3 3.14`` while the data is 3.13) — such a module simply uses only
+#: symbols the data already knows, so it audits cleanly. We accept a generous
+#: margin of future minors so real/near-future interpreters are never rejected,
+#: while still catching implausible typos (``3.99``, ``3.999``) that would
+#: otherwise sort above every vendored symbol and silently suppress all
+#: ``ABOVE_FLOOR`` violations. This separates *typo rejection* from the
+#: vendored-data ceiling (a refresh raises both automatically).
+_MAX_ABI3_MINOR: int = _MAX_KNOWN_MINOR + 10
 
 
 class StableAbiStatus(str, Enum):
@@ -188,11 +195,13 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
     — to ``(3, 2)`` so ordinary stable symbols (``PyList_New`` etc., floor 3.2)
     are not wrongly reported as above-floor.
 
-    A minor above the newest CPython the vendored data tracks
-    (:data:`_MAX_KNOWN_MINOR`) is rejected: an unreachable floor like ``3.99``
-    sorts above every vendored symbol, which would silently suppress all
-    ``ABOVE_FLOOR`` violations and let a CI typo certify a wheel that actually
-    targets a much lower floor.
+    A floor may target a CPython newer than the vendored data (``--abi3 3.14``
+    while the data is 3.13) — that is accepted, since such a module only uses
+    symbols the data already knows. Only an *implausible* minor beyond a generous
+    future margin (:data:`_MAX_ABI3_MINOR`, e.g. ``3.99``) is rejected: it would
+    sort above every vendored symbol, silently suppressing all ``ABOVE_FLOOR``
+    violations and letting a CI typo certify a wheel that targets a much lower
+    floor.
     """
     parts = text.strip().split(".")
     if len(parts) > 2:
@@ -206,9 +215,10 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
     if major != 3:
         # No Limited API outside the CPython 3 line (rejects `39`, `4`, `2.7`).
         return None
-    if minor > _MAX_KNOWN_MINOR:
-        # Unreachable floor (e.g. `3.99`) — reject rather than certify against a
-        # floor no interpreter provides and the vendored data cannot audit.
+    if minor > _MAX_ABI3_MINOR:
+        # Implausible floor (e.g. `3.99`) — a typo, not a real/near-future
+        # interpreter. Reject rather than certify against a floor no interpreter
+        # provides and the vendored data cannot audit.
         return None
     if minor < 2:
         # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.
