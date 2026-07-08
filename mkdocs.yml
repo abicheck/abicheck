@@ -56,6 +56,7 @@ nav:
       - Multi-Binary Releases: user-guide/multi-binary.md
       - Application Compatibility: user-guide/appcompat.md
       - Plugin Systems: user-guide/plugin-systems.md
+      - Build Evidence Setup: user-guide/build-evidence-setup.md
       - API Surface Intelligence: concepts/api-surface-intelligence.md
       - Kernel & eBPF (BTF): user-guide/kernel-btf.md
       - Security Hardening: user-guide/security-hardening.md

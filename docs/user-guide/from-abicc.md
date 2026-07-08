@@ -68,7 +68,7 @@ Most migrations only touch a handful of flags. See the
 | `-old PATH` | `-d1` | Old version XML descriptor or ABI dump (required) |
 | `-new PATH` | `-d2`, `-n` | New version XML descriptor or ABI dump (required) |
 | `-report-path PATH` | | Output report path |
-| `-report-format FMT` | | `html` (default), `json`, `md` |
+| `-report-format FMT` | | `html` (default), `htm`, `xml`, `json`, `md` |
 | `-source` | `-src`, `-api` | Source/API compatibility only (see below) |
 | `-s` | `-strict` | Any change is BREAKING → exit 1 (see below) |
 | `-warn-newsym` | | Treat new symbols as breaks (see below) |

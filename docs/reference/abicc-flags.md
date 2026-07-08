@@ -2,8 +2,11 @@
 
 `abicheck compat check` and `abicheck compat dump` accept the same single-hyphen
 flags as `abi-compliance-checker` (ABICC), so existing ABICC command lines work
-unchanged. This page is the exhaustive parity reference: every ABICC flag abicheck
-recognises, its aliases, and whether it is functional or accepted-but-inert.
+with one exception: the `-o` alias for `-old` is **removed** (it collides with
+`-o`/`--output`), so a job passing `-o <old-descriptor>` must switch to `-old`
+(or `-d1`). This page is the exhaustive parity reference: every ABICC flag
+abicheck recognises, its aliases, and whether it is functional or
+accepted-but-inert.
 
 For the migration walkthrough (why migrate, before/after invocations, exit-code
 mapping), see [Migrating from ABICC](../user-guide/from-abicc.md).
@@ -16,7 +19,7 @@ mapping), see [Migrating from ABICC](../user-guide/from-abicc.md).
 | `-old PATH` | `-d1` | ✅ | Path to old version XML descriptor or ABI dump (the `-o` alias is removed to avoid collision with `-o`/`--output`) |
 | `-new PATH` | `-d2`, `-n` | ✅ | Path to new version XML descriptor or ABI dump |
 | `-report-path PATH` | | | Output report path (default: `compat_reports/<lib>/<v1>_to_<v2>/report.html`) |
-| `-report-format FMT` | | | Report format: `html` (default), `json`, `md` (ABICC used `htm`/`xml`; `htm` is accepted as an alias for `html`) |
+| `-report-format FMT` | | | Report format: `html` (default), `htm`, `xml`, `json`, `md` (`htm` is accepted as an alias for `html`; `xml` emits an ABICC-compatible XML report) |
 | `-bin-report-path PATH` | | | Separate binary-mode report output path |
 | `-src-report-path PATH` | | | Separate source-mode report output path |
 
