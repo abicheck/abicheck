@@ -282,12 +282,17 @@ Every JSON report carries a top-level `report_schema_version` field
 (`MAJOR.MINOR`) so consumers can detect the contract version they are reading.
 
 > **Two version numbers, two contracts.** `report_schema_version` (above)
-> versions the **comparison report** emitted by `compare`/`scan`. It is
-> distinct from the `schema_version` integer inside a **snapshot** (`.abi.json`)
-> produced by `dump` — that one versions the on-disk ABI surface and is
-> currently `8`. A report and a snapshot can carry different version numbers at
-> the same time; consumers should read whichever field belongs to the file they
-> loaded.
+> versions the **comparison report** emitted by `compare` (and the JSON form of
+> a `dump`). It is distinct from the `schema_version` integer inside a
+> **snapshot** (`.abi.json`) produced by `dump` — that one versions the on-disk
+> ABI surface and is currently `8`. A report and a snapshot can carry different
+> version numbers at the same time; consumers should read whichever field
+> belongs to the file they loaded.
+>
+> `scan --format json` is a **third, separate shape**: it emits a `ScanOutcome`
+> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …) and does **not**
+> currently carry a `report_schema_version` field, so do not key scan-output
+> consumers off it.
 
 ```json
 {
