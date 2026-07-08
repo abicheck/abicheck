@@ -283,10 +283,25 @@ def test_min_required_abi3_none_when_no_recognised_stable() -> None:
         ("4", None),
         ("2.7", None),
         ("4.0", None),
+        # unreachable floors above the newest vendored CPython minor: an
+        # arbitrarily high minor (typo like `3.99`) would sort above every
+        # vendored symbol and silently suppress all ABOVE_FLOOR violations.
+        ("3.99", None),
+        ("3.999", None),
+        # trailing junk / extra version components are not valid floors.
+        ("3.9.1", None),
     ],
 )
 def test_parse_abi3_version(text: str, expected: tuple[int, int] | None) -> None:
     assert stable_abi.parse_abi3_version(text) == expected
+
+
+def test_parse_abi3_version_accepts_newest_vendored_minor() -> None:
+    # The floor cap tracks the vendored data, so the newest known minor is
+    # accepted verbatim while the next one up is rejected as unreachable.
+    top = stable_abi._MAX_KNOWN_MINOR
+    assert stable_abi.parse_abi3_version(f"3.{top}") == (3, top)
+    assert stable_abi.parse_abi3_version(f"3.{top + 1}") is None
 
 
 def test_stable_abi_since_differs_from_added_version() -> None:

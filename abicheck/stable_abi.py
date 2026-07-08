@@ -69,6 +69,14 @@ _CPYTHON_PREFIXES: tuple[str, ...] = ("Py", "_Py")
 #: authoritative vendored table; kept as a module name for back-compat.
 LIMITED_API_ADDED: dict[str, tuple[int, int]] = STABLE_ABI_SYMBOLS
 
+#: Newest CPython 3.x minor the vendored stable-ABI data tracks. Derived from the
+#: data so it advances automatically on a refresh. A requested ``--abi3`` floor
+#: above this is unreachable (a typo like ``3.99``): every vendored symbol would
+#: sort below it, silently suppressing all ``ABOVE_FLOOR`` violations — so
+#: :func:`parse_abi3_version` rejects it rather than certifying against a floor
+#: no interpreter provides.
+_MAX_KNOWN_MINOR: int = max(minor for _major, minor in STABLE_ABI_SYMBOLS.values())
+
 
 class StableAbiStatus(str, Enum):
     """Classification of one imported CPython symbol against the Limited API."""
@@ -179,8 +187,17 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
     not exist before 3.2). We therefore normalise ``3`` — and any ``3.0``/``3.1``
     — to ``(3, 2)`` so ordinary stable symbols (``PyList_New`` etc., floor 3.2)
     are not wrongly reported as above-floor.
+
+    A minor above the newest CPython the vendored data tracks
+    (:data:`_MAX_KNOWN_MINOR`) is rejected: an unreachable floor like ``3.99``
+    sorts above every vendored symbol, which would silently suppress all
+    ``ABOVE_FLOOR`` violations and let a CI typo certify a wheel that actually
+    targets a much lower floor.
     """
     parts = text.strip().split(".")
+    if len(parts) > 2:
+        # Reject `3.9.1` / trailing junk — only `3` or `3.x` are valid floors.
+        return None
     try:
         major = int(parts[0])
         minor = int(parts[1]) if len(parts) > 1 else 0
@@ -188,6 +205,10 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
         return None
     if major != 3:
         # No Limited API outside the CPython 3 line (rejects `39`, `4`, `2.7`).
+        return None
+    if minor > _MAX_KNOWN_MINOR:
+        # Unreachable floor (e.g. `3.99`) — reject rather than certify against a
+        # floor no interpreter provides and the vendored data cannot audit.
         return None
     if minor < 2:
         # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.

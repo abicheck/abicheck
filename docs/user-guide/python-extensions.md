@@ -86,7 +86,7 @@ stable-ABI (`abi3`) builds:
 
 | ChangeKind | Fires when |
 |---|---|
-| `python_stable_abi_violation` | the new build gained a **private/unstable** import (a `_Py*` symbol outside the Stable ABI, or a `PyUnstable_*` symbol) — outside the Limited API regardless of interpreter version |
+| `python_stable_abi_violation` | the new build gained a **non-stable** import — a private `_Py*`/`PyUnstable_*` symbol outside the Stable ABI, or a public `Py*` symbol never added to the Limited API (e.g. `PyUnicode_AsUTF8`) — outside the Limited API regardless of interpreter version |
 | `python_abi3_dropped` | the module was an `abi3` build (loadable on every interpreter at/above its floor) but the new build is **version-specific** — it drops every other interpreter it used to support |
 
 Both are classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
@@ -120,5 +120,9 @@ correctly and a genuinely-internal `_Py*` import is a real violation.
 
 The dataset is refreshable: re-run the extraction over a newer
 `Misc/stable_abi.toml` (see `abicheck/stable_abi_data.py`). A public `Py*`
-symbol not in the vendored set is reported as advisory, never as a hard break,
-so lag against a brand-new CPython release can never cause a false positive.
+symbol not in the vendored set is a **violation** — the vendored set is
+authoritative, so absence means the symbol is not `abi3`. The sole benign case
+is a symbol from a CPython release *newer* than the vendored data: the audit
+still flags it, but notes to refresh the dataset to confirm, so lag against a
+brand-new CPython release surfaces as a flagged import to double-check rather
+than a silent pass.
