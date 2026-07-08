@@ -1559,4 +1559,14 @@ REGISTRY = ChangeKindRegistry([
               "deployment RISK: whether it breaks depends on the target "
               "interpreter, not on the module's own consumers.",
        description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}"),
+    _E("python_abi3_dropped", _R,
+       impact="A CPython extension module that was previously a stable-ABI "
+              "(`abi3` / `Py_LIMITED_API`) build — loadable on every interpreter "
+              "at or above its floor — is now a version-specific build (its SOABI "
+              "tag pins it to a single `cpython-3XX`). Consumers running any other "
+              "interpreter in the module's former supported range can no longer "
+              "import it. Nothing in the export table reveals the narrowed "
+              "support; the promise lived in the wheel/SOABI tag. A deployment "
+              "RISK for anyone not on the exact new interpreter.",
+       description_template="extension '{name}' dropped its abi3 promise: {old} → {new}"),
 ])

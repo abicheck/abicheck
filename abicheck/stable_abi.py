@@ -140,11 +140,9 @@ def min_required_abi3(names: list[str]) -> tuple[int, int] | None:
     floors — they are outright violations — so they do not participate here.
     """
     floors = [
-        v
+        STABLE_ABI_SYMBOLS[n]
         for n in names
-        if not is_private_symbol(n)
-        for v in (STABLE_ABI_SYMBOLS.get(n),)
-        if v is not None
+        if not is_private_symbol(n) and n in STABLE_ABI_SYMBOLS
     ]
     return max(floors) if floors else None
 

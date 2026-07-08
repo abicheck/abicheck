@@ -340,6 +340,31 @@ def test_unstable_api_import_flagged() -> None:
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
 
+def test_abi3_dropped_flagged_when_new_is_version_specific() -> None:
+    # Old is cp39-abi3 (loads on all 3.9+); new is a version-specific
+    # cpython-312 build → drops every other interpreter → risk flagged.
+    old = _ext_snapshot(
+        "1.0",
+        ["PyList_New"],
+        source_path="foo.cp39-abi3-win_amd64.pyd",
+        library="foo.cp39-abi3-win_amd64.pyd",
+    )
+    new_src = "foo.cpython-312-x86_64-linux-gnu.so"
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_ABI3_DROPPED in _kinds(result)
+
+
+def test_abi3_dropped_not_flagged_when_old_was_not_abi3() -> None:
+    # Two version-specific builds: no abi3 promise existed to drop.
+    old_src = "foo.cpython-311-x86_64-linux-gnu.so"
+    new_src = "foo.cpython-312-x86_64-linux-gnu.so"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=old_src, library=old_src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_ABI3_DROPPED not in _kinds(result)
+
+
 def test_no_finding_when_import_surface_unchanged() -> None:
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong"])

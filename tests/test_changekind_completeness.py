@@ -252,6 +252,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.RTTI_INHERITANCE_CHANGED,
     # CPython extension modules (abi3 / Py_LIMITED_API) — tests/test_python_ext.py
     ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+    ChangeKind.PYTHON_ABI3_DROPPED,
     ChangeKind.ABI_SURFACE_EXPLOSION,
     # SYCL Plugin Interface (ADR-020b)
     ChangeKind.SYCL_IMPLEMENTATION_CHANGED,

@@ -22,11 +22,14 @@ version-specific (``cpython-311``) module is *expected* to use private CPython
 API and rebuild per interpreter, so applying these checks to it would be a false
 positive. The gate is therefore strict on the abi3 tag.
 
-One finding:
+Two findings:
 
-* :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` — the new build gained an
-  import of a CPython *private* symbol (``_Py*``), which is outside the Limited
-  API. This is the always-correct signal (no allowlist, no floor needed).
+* :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` — an ``abi3`` build gained an
+  import outside the Stable ABI (a private ``_Py*`` symbol or a ``PyUnstable_*``
+  symbol). Membership in the authoritative stable set decides; no floor needed.
+* :data:`ChangeKind.PYTHON_ABI3_DROPPED` — the module was an ``abi3`` build and
+  the new build is version-specific, dropping every other interpreter it
+  supported.
 
 Interpreter-*floor* conformance (a stable symbol newer than the declared
 ``Py_LIMITED_API``) is intentionally NOT diffed here — see
@@ -136,9 +139,30 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # makes the cross-interpreter promise a private import breaks. The old build
     # need not be abi3 — a retag from a version-specific build to abi3 newly
     # subjects its imports to the promise (handled in _diff_stable_abi_violations).
-    # A version-specific new build legitimately uses private CPython API and is
-    # rebuilt per interpreter, so it has no such promise.
     if not _is_abi3(n):
+        # New build is version-specific. If the OLD build was abi3, the module
+        # just dropped its Limited-API promise: it used to load on every
+        # interpreter at/above its floor, now only on one. That is a deployment
+        # regression even though the new build uses private API legitimately.
+        if _is_abi3(o):
+            return _diff_abi3_dropped(o, n)
         return []
 
     return _diff_stable_abi_violations(o, n)
+
+
+def _diff_abi3_dropped(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Change]:
+    """The module was abi3 and the new build is version-specific → promise lost."""
+    module = _module_symbol(new, old)
+    name = new.module_name or old.module_name or "<extension>"
+    old_tag = old.soabi_tag or "abi3"
+    new_tag = new.soabi_tag or "version-specific"
+    return [
+        make_change(
+            ChangeKind.PYTHON_ABI3_DROPPED,
+            symbol=module,
+            name=name,
+            old=old_tag,
+            new=new_tag,
+        )
+    ]

@@ -83,9 +83,10 @@ stable-ABI (`abi3`) builds:
 
 | ChangeKind | Fires when |
 |---|---|
-| `python_stable_abi_violation` | the new build gained a **private** `_Py*` import that the old build did not have — always outside the Limited API, regardless of interpreter version |
+| `python_stable_abi_violation` | the new build gained a **private/unstable** import (a `_Py*` symbol outside the Stable ABI, or a `PyUnstable_*` symbol) — outside the Limited API regardless of interpreter version |
+| `python_abi3_dropped` | the module was an `abi3` build (loadable on every interpreter at/above its floor) but the new build is **version-specific** — it drops every other interpreter it used to support |
 
-It is classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
+Both are classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
 depends on the *target interpreter*, not on the module's own consumers.
 
 !!! note "Interpreter-*floor* drift is checked by `stable-abi`, not `compare`"

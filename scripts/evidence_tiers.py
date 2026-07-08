@@ -94,6 +94,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # PyInit_* export are both readable from the binary alone — no debug info or
     # headers needed to see the stable-ABI contract (G14).
     "python_stable_abi_violation": "L0",
+    "python_abi3_dropped": "L0",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",

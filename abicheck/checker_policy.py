@@ -650,6 +650,7 @@ class ChangeKind(str, Enum):
     # extension module. The compatibility contract for such a module is the set
     # of CPython C-API symbols it IMPORTS from libpython, not its exports (G14).
     PYTHON_STABLE_ABI_VIOLATION = "python_stable_abi_violation"  # abi3 module gained an import outside the stable ABI (e.g. a private _Py* symbol) → won't load on a Limited-API interpreter → RISK
+    PYTHON_ABI3_DROPPED = "python_abi3_dropped"  # module was abi3 (loads on all interpreters ≥ its floor) but the new build is version-specific → drops every other interpreter it used to support → RISK
 
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:

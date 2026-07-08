@@ -25,7 +25,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   authoritative copy of CPython's `Misc/stable_abi.toml` (≈900 symbols), so the
   `abi_only` `_Py*` symbols the Limited-API macros expand to (`_Py_Dealloc`,
   `_PyObject_GC_New`, `_PyArg_*_SizeT`, `_Py_NoneStruct`, …) are correctly
-  treated as stable rather than flagged. Interpreter-*floor* conformance is checked
+  treated as stable rather than flagged, while `PyUnstable_*` (PEP 689) is
+  flagged. `compare` also raises `python_abi3_dropped` when a module that was an
+  `abi3` build becomes version-specific (dropping every other interpreter it
+  used to support). Interpreter-*floor* conformance is checked
   by the `stable-abi` command (where the user supplies the floor via `--abi3`),
   not at compare time, since a bare `.abi3.so` carries no declared floor to
   judge against. Version-specific (`cpython-3XX`) modules are deliberately not

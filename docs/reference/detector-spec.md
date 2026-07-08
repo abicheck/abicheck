@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (270 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (271 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
 |---|---|---|---|---|---|
@@ -159,6 +159,7 @@ One row per `ChangeKind` (270 total). Columns fuse the verdict partition (`check
 | `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` |
 | `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` |
+| `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` |
 | `python_stable_abi_violation` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_stable_abi_violation` |
 | `relro_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `relro_weakened` |
 | `removed_const_overload` | api_break | `API_BREAK` | `warning` | unspecified | `removed_const_overload` |
