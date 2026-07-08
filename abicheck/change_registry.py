@@ -1581,4 +1581,16 @@ REGISTRY = ChangeKindRegistry([
               "free-threaded build can never be `abi3`). A deployment RISK: "
               "whether it breaks depends on which interpreter the consumer runs.",
        description_template="extension '{name}' changed GIL/free-threaded ABI: {old} → {new}"),
+    _E("python_abi3_floor_raised", _R,
+       impact="Both builds of a CPython extension are stable-ABI (`abi3`) and both "
+              "carry an explicit `cpXY-abi3` wheel/SOABI tag, but the new build's "
+              "declared `Py_LIMITED_API` floor is higher than the old one's "
+              "(e.g. `cp39-abi3` → `cp310-abi3`). Every interpreter in the dropped "
+              "range — CPython at or above the old floor but below the new one — "
+              "can no longer import the module, even though its exported and "
+              "imported symbols may be unchanged. Because the floor is read from "
+              "the explicit tag on *both* sides, this is exact (no heuristic "
+              "min-of-imports inference). A deployment RISK: whether it breaks "
+              "depends on which interpreters the consumer must support.",
+       description_template="abi3 extension '{name}' raised its Py_LIMITED_API floor: {old} → {new}"),
 ])

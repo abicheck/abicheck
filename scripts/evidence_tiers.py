@@ -96,6 +96,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "python_stable_abi_violation": "L0",
     "python_abi3_dropped": "L0",
     "python_gil_abi_changed": "L0",
+    "python_abi3_floor_raised": "L0",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",

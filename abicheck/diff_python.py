@@ -257,7 +257,37 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return changes
 
     changes.extend(_diff_stable_abi_violations(o, n))
+    changes.extend(_diff_abi3_floor_raised(o, n))
     return changes
+
+
+def _diff_abi3_floor_raised(
+    old: PythonExtMetadata, new: PythonExtMetadata
+) -> list[Change]:
+    """Both builds are abi3 but the new declared cpXY-abi3 floor is higher.
+
+    Uses the floor read from the explicit ``cpXY-abi3`` tag on *both* sides
+    (``declared_abi3``), so it is exact — no min-of-imports inference (the
+    false-positive trap that kept interpreter-floor drift out of ``compare``).
+    Requires both sides to be abi3 with a declared floor; a bare ``.abi3.so``
+    (floor ``None``) carries no tag to compare, so it is skipped.
+    """
+    if not _is_abi3(old):
+        return []
+    old_floor, new_floor = old.declared_abi3, new.declared_abi3
+    if old_floor is None or new_floor is None or new_floor <= old_floor:
+        return []
+    module = _module_symbol(new, old)
+    name = new.module_name or old.module_name or "<extension>"
+    return [
+        make_change(
+            ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
+            symbol=module,
+            name=name,
+            old=stable_abi.format_version(old_floor),
+            new=stable_abi.format_version(new_floor),
+        )
+    ]
 
 
 def _diff_gil_abi(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Change]:

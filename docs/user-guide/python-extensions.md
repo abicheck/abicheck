@@ -93,7 +93,7 @@ the build. Exit `0` = clean or advisory-only; a usage error (bad `--abi3`, or
 
 ### 2. Compare two versions — `compare`
 
-A normal `compare` of two extension modules adds up to three deployment-risk
+A normal `compare` of two extension modules adds up to four deployment-risk
 findings:
 
 | ChangeKind | Fires when |
@@ -101,8 +101,9 @@ findings:
 | `python_stable_abi_violation` | the new build gained a **non-stable** import — a private `_Py*`/`PyUnstable_*` symbol outside the Stable ABI, or a public `Py*` symbol never added to the Limited API (e.g. `PyUnicode_AsUTF8`) — outside the Limited API regardless of interpreter version |
 | `python_abi3_dropped` | the module was an `abi3` build (loadable on every interpreter at/above its floor) but the new build is **version-specific** — it drops every other interpreter it used to support |
 | `python_gil_abi_changed` | the module switched between the regular (GIL) and **free-threaded** (PEP 703, `Py_GIL_DISABLED`) CPython ABI — its SOABI tag gained or lost the `t` marker (`cpython-3XX` ↔ `cpython-3XXt`). The two builds target different, non-interchangeable interpreter ABIs |
+| `python_abi3_floor_raised` | both builds are `abi3` and carry an explicit `cpXY-abi3` tag, but the new build's **declared floor is higher** (`cp39-abi3` → `cp310-abi3`) — dropping every interpreter in the abandoned range. Exact (read from the tag on both sides), so no min-of-imports guessing |
 
-All three are classified `COMPATIBLE_WITH_RISK`: whether the module actually
+All four are classified `COMPATIBLE_WITH_RISK`: whether the module actually
 breaks depends on the *target interpreter*, not on the module's own consumers.
 
 !!! note "Free-threaded (no-GIL) builds are never `abi3`"
@@ -124,14 +125,15 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     `python_stable_abi_violation` (in both `scan --abi3` and `compare`), even
     when every imported symbol is in the stable set.
 
-!!! note "Interpreter-*floor* drift is checked by `scan --abi3`, not `compare`"
-    Proving that a raised interpreter floor drops a *supported* interpreter
-    needs the module's declared `Py_LIMITED_API` floor — and a bare `.abi3.so`
-    doesn't carry its minor. Comparing the minimum-imported-symbol version across
-    two builds would false-positive (a `cp39-abi3` build adding a 3.5 symbol
-    drops no 3.9+ user), so `compare` deliberately does **not** flag floor drift.
-    Use `scan --abi3 <floor>` — where you supply the target floor — to catch
-    stable symbols newer than it.
+!!! note "Floor drift: exact when declared, otherwise deferred to `scan --abi3`"
+    `compare` flags `python_abi3_floor_raised` only from the **explicit
+    `cpXY-abi3` tag** on *both* builds (e.g. `cp39-abi3` → `cp310-abi3`) — that is
+    exact. It deliberately does **not** *infer* a floor from the imported-symbol
+    versions: a bare `.abi3.so` carries no declared minor, and the min-of-imports
+    heuristic false-positives (a `cp39-abi3` build adding a 3.5 symbol drops no
+    3.9+ user). When the floor isn't declared in the tag, use
+    `scan --abi3 <floor>` — where you supply the target floor — to catch stable
+    symbols newer than it.
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private

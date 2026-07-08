@@ -387,6 +387,38 @@ def test_abi3_dropped_not_flagged_when_old_was_not_abi3() -> None:
     assert ChangeKind.PYTHON_ABI3_DROPPED not in _kinds(result)
 
 
+def test_abi3_floor_raised_flagged_from_declared_tags() -> None:
+    # Both cpXY-abi3 with the same stable imports, but the declared floor rose
+    # 3.9 → 3.10: CPython 3.9 users are dropped. Exact (declared tag on both).
+    old_src = "foo.cp39-abi3-win_amd64.pyd"
+    new_src = "foo.cp310-abi3-win_amd64.pyd"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=old_src, library=old_src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    assert old.python_ext.declared_abi3 == (3, 9)
+    assert new.python_ext.declared_abi3 == (3, 10)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_ABI3_FLOOR_RAISED in _kinds(result)
+
+
+def test_abi3_floor_lowered_not_flagged() -> None:
+    # Lowering the floor (3.10 → 3.9) supports *more* interpreters → no finding.
+    old_src = "foo.cp310-abi3-win_amd64.pyd"
+    new_src = "foo.cp39-abi3-win_amd64.pyd"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=old_src, library=old_src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_ABI3_FLOOR_RAISED not in _kinds(result)
+
+
+def test_abi3_floor_raise_skipped_without_declared_floor() -> None:
+    # A bare `.abi3.so` carries no declared floor → nothing exact to compare, so
+    # no floor-raise finding (avoids the min-of-imports false-positive trap).
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path="foo.abi3.so")
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path="foo.abi3.so")
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_ABI3_FLOOR_RAISED not in _kinds(result)
+
+
 def test_no_finding_when_import_surface_unchanged() -> None:
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong"])

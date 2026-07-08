@@ -652,6 +652,7 @@ class ChangeKind(str, Enum):
     PYTHON_STABLE_ABI_VIOLATION = "python_stable_abi_violation"  # abi3 module gained an import outside the stable ABI (e.g. a private _Py* symbol) → won't load on a Limited-API interpreter → RISK
     PYTHON_ABI3_DROPPED = "python_abi3_dropped"  # module was abi3 (loads on all interpreters ≥ its floor) but the new build is version-specific → drops every other interpreter it used to support → RISK
     PYTHON_GIL_ABI_CHANGED = "python_gil_abi_changed"  # extension switched between the regular (GIL) and free-threaded (PEP 703, Py_GIL_DISABLED) CPython ABI → the two builds are not interchangeable, a consumer on the other interpreter can't load it → RISK
+    PYTHON_ABI3_FLOOR_RAISED = "python_abi3_floor_raised"  # both builds are abi3 but the new one's declared cpXY-abi3 tag floor is higher (e.g. cp39-abi3 → cp310-abi3) → interpreters in the dropped range can no longer load it → RISK
 
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:

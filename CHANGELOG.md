@@ -37,8 +37,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   treated as version-specific (never `abi3`, since `Py_LIMITED_API` is
   incompatible with `Py_GIL_DISABLED`), and `compare` raises
   `python_gil_abi_changed` when a module crosses the GIL/no-GIL boundary between
-  builds. Cross-platform (ELF/PE imports, plus new Mach-O undefined-symbol
-  capture). See the
+  builds, and `python_abi3_floor_raised` when both builds carry an explicit
+  `cpXY-abi3` tag but the new declared floor is higher (`cp39-abi3` → `cp310-abi3`
+  drops CPython 3.9 users) — exact, read from the tag on both sides, no
+  min-of-imports inference. Cross-platform (ELF/PE imports, plus new Mach-O
+  undefined-symbol capture; on Windows a version-specific `pythonXY.dll` import
+  under `abi3` is flagged). See the
   [Python Extensions](docs/user-guide/python-extensions.md) guide.
 
 ### Changed
