@@ -302,7 +302,12 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
 
     old_osabi = getattr(old_elf, "osabi", "")
     new_osabi = getattr(new_elf, "osabi", "")
-    if old_osabi and new_osabi and old_osabi != new_osabi:
+    if (
+        old_osabi
+        and new_osabi
+        and old_osabi != new_osabi
+        and not (old_osabi in _BENIGN_OSABI and new_osabi in _BENIGN_OSABI)
+    ):
         changes.append(
             make_change(
                 ChangeKind.ELF_OSABI_CHANGED,
@@ -315,6 +320,20 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
         )
 
     return changes
+
+
+#: OS-ABI values that are interchangeable on Linux. The GNU toolchain stamps a
+#: binary ELFOSABI_GNU/LINUX (3) instead of ELFOSABI_SYSV/NONE (0) as a side
+#: effect of using any GNU extension (IFUNC, STB_GNU_UNIQUE, …), so a SYSV↔GNU
+#: transition is benign and must not be flagged (it routinely rides along with a
+#: compatible change like adding an ifunc). Genuinely different OS ABIs
+#: (FreeBSD, Solaris, …) still report.
+_BENIGN_OSABI = frozenset({
+    "ELFOSABI_SYSV",
+    "ELFOSABI_NONE",
+    "ELFOSABI_GNU",
+    "ELFOSABI_LINUX",
+})
 
 
 def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:

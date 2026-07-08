@@ -172,10 +172,20 @@ class TestElfIdentity:
         assert r.verdict == Verdict.BREAKING
 
     def test_osabi_changed_is_risk(self):
+        # A genuinely different OS ABI (SYSV → FreeBSD) is flagged.
+        old = ElfMetadata(machine="EM_X86_64", osabi="ELFOSABI_SYSV")
+        new = ElfMetadata(machine="EM_X86_64", osabi="ELFOSABI_FREEBSD")
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_OSABI_CHANGED in _kinds(r)
+
+    def test_sysv_to_gnu_osabi_is_benign(self):
+        # The GNU toolchain stamps ELFOSABI_GNU/LINUX when a GNU extension (IFUNC,
+        # STB_GNU_UNIQUE, …) is used, so SYSV↔GNU rides along with compatible
+        # changes and must NOT be flagged (regression: case29_ifunc_transition).
         old = ElfMetadata(machine="EM_X86_64", osabi="ELFOSABI_SYSV")
         new = ElfMetadata(machine="EM_X86_64", osabi="ELFOSABI_LINUX")
         r = compare(_snap(old), _snap(new))
-        assert ChangeKind.ELF_OSABI_CHANGED in _kinds(r)
+        assert ChangeKind.ELF_OSABI_CHANGED not in _kinds(r)
 
     def test_no_change_when_identity_stable(self):
         elf = ElfMetadata(
