@@ -389,6 +389,39 @@ def test_abi3_floor_raised_flagged_from_declared_tags() -> None:
     assert ChangeKind.PYTHON_ABI3_FLOOR_RAISED in _kinds(result)
 
 
+def test_compare_flags_stable_import_above_declared_floor() -> None:
+    # Both builds stay cp39-abi3, but the new one gains PyType_GetName (stable
+    # since 3.11): it advertises floor 3.9 yet can no longer load on 3.9/3.10.
+    # Exact — the floor is the declared cp39-abi3 tag, not inferred.
+    src = "foo.cp39-abi3-win_amd64.pyd"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    )
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
+
+
+def test_compare_stable_import_within_declared_floor_not_flagged() -> None:
+    # Same symbol under a cp312-abi3 floor: PyType_GetName (3.11) ≤ 3.12 → fine.
+    src = "foo.cp312-abi3-win_amd64.pyd"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    )
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
+
+
+def test_compare_no_above_floor_check_without_declared_floor() -> None:
+    # A bare `.abi3.so` carries no declared floor → no inference (avoids the
+    # min-of-imports false positive); a stable import is not flagged.
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path="foo.abi3.so")
+    new = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"], source_path="foo.abi3.so")
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
+
+
 def test_abi3_floor_lowered_not_flagged() -> None:
     # Lowering the floor (3.10 → 3.9) supports *more* interpreters → no finding.
     old_src = "foo.cp310-abi3-win_amd64.pyd"

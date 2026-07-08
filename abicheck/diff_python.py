@@ -199,6 +199,41 @@ def _diff_stable_abi_violations(
                 new_value=gained,
             )
         )
+    # When the NEW build carries an explicit declared floor (a `cpXY-abi3` tag),
+    # a newly-gained *stable* symbol newer than that floor is also a violation:
+    # the artifact advertises a floor it can no longer meet (a `cp39-abi3` build
+    # importing `PyType_GetName`, stable since 3.11, fails to load on 3.9/3.10).
+    # This is exact — the floor is the declared tag, not a min-of-imports guess —
+    # so it complements `_diff_abi3_floor_raised` (which needs the floor to have
+    # *risen*). Baselined like the imports: only symbols not already present on
+    # an abi3 old build count as this version's change.
+    floor = new.declared_abi3
+    if floor is not None:
+        above_floor: list[str] = []
+        for sym in new.cpython_imports:
+            if sym in baseline:
+                continue
+            status, added = stable_abi.classify(sym, floor)
+            if status is StableAbiStatus.ABOVE_FLOOR:
+                above_floor.append(
+                    f"{sym} (added {stable_abi.format_version(added)})"
+                    if added is not None
+                    else sym
+                )
+        if above_floor:
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                    symbol=module,
+                    name=name,
+                    detail=(
+                        "stable symbols newer than the declared abi3 floor "
+                        f"{stable_abi.format_version(floor)}: "
+                        + ", ".join(sorted(above_floor))
+                    ),
+                    new_value=sorted(above_floor),
+                )
+            )
     # Windows: the abi3 build must link the version-neutral `python3.dll`. A
     # newly version-specific `pythonXY.dll` breaks the cross-interpreter promise
     # even if every imported symbol name is stable. Baselined like the imports:
