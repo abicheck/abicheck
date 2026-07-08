@@ -155,6 +155,10 @@ def _build_case84(build_dir: Path) -> str | None:
 def _compare_release(build_dir: Path, case_name: str) -> tuple[dict | None, str | None]:
     old_dir = build_dir / case_name / "old"
     new_dir = build_dir / case_name / "new"
+    report_dir = build_dir / case_name / "reports"
+    shutil.rmtree(report_dir, ignore_errors=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
     cmd = [
         sys.executable,
         "-m",
@@ -164,23 +168,30 @@ def _compare_release(build_dir: Path, case_name: str) -> tuple[dict | None, str 
         str(new_dir),
         "--format",
         "json",
+        "--output-dir",
+        str(report_dir),
     ]
-    manifest = EXAMPLES_DIR / case_name / "manifest.yaml"
-    if manifest.exists():
-        cmd.extend(["--manifest", str(manifest)])
-    if case_name == "case84_bundle_soname_skew":
-        cmd.extend(["--bundle-cohort", "libonedal_"])
-
-    result = _run(cmd, timeout=120)
-    if result.returncode not in (0, 1, 2, 3, 4):
-        return None, (result.stderr or result.stdout)[:1000]
+    result = _run(cmd, cwd=REPO_DIR, timeout=240)
+    if not result.stdout.strip():
+        return None, result.stderr[:1000]
     try:
-        return json.loads(result.stdout), None
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None, result.stdout[:1000]
 
+    for item in payload.get("libraries") or []:
+        lib = item.get("library")
+        if not lib:
+            continue
+        report = report_dir / f"{Path(str(lib)).stem}.json"
+        if not report.exists():
+            continue
+        data = json.loads(report.read_text(encoding="utf-8"))
+        for key in ("changes", "findings"):
+            if key in data:
+                item[key] = data[key]
 
-
+    return payload, None
 
 def _change_kinds(entry: dict) -> set[str]:
     kinds: set[str] = set()

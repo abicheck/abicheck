@@ -311,10 +311,10 @@ pipeline four times:
 
 ### Which source discovers what
 
-Each case in [`examples/ground_truth.json`](../../examples/ground_truth.json)
+Each case in `examples/ground_truth.json`
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
-[`scripts/evidence_tiers.py`](../../scripts/evidence_tiers.py)
+`scripts/evidence_tiers.py`
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153-case
 compare-mode catalog, that yields the cumulative minimum-evidence coverage:
 
