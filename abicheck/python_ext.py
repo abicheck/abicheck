@@ -71,6 +71,19 @@ _PYINIT2_RE = re.compile(r"^init(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 #: this exact name is a violation.
 _STABLE_PYTHON_DLL = "python3.dll"
 
+#: A CPython runtime import DLL, by name: ``python3.dll`` / ``python311.dll`` /
+#: ``python313t.dll`` / ``python311_d.dll``. Requires a digit right after
+#: ``python`` so a third-party library using the ``Py`` C-API convention
+#: (``numpy.dll`` exporting ``PyArray_*``, a companion ``pythonmagic.dll``) is
+#: NOT mistaken for the interpreter runtime. On Windows we therefore only treat
+#: ``Py*`` symbols imported *from such a DLL* as CPython C-API imports.
+_CPYTHON_DLL_RE = re.compile(r"^python\d\w*\.dll$", re.IGNORECASE)
+
+
+def _is_cpython_dll(name: str) -> bool:
+    """True if *name* is a CPython runtime import DLL (not a third-party ``Py*`` lib)."""
+    return bool(_CPYTHON_DLL_RE.match(name))
+
 
 @dataclass
 class PythonExtMetadata:
@@ -158,35 +171,55 @@ def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
     return names
 
 
-def _iter_imported_names(snap: AbiSnapshot) -> list[str]:
-    """All imported (undefined) symbol names across present binary metadata."""
+def _collect_cpython_imports(snap: AbiSnapshot) -> list[str]:
+    """Imported CPython C-API symbols (``Py*`` / ``_Py*``), sorted & de-duped.
+
+    On **PE** the provider DLL is known, so only ``Py*`` symbols imported from an
+    actual CPython runtime DLL (:func:`_is_cpython_dll`) are counted — a
+    third-party library that follows the ``Py`` C-API convention (``numpy.dll``
+    exporting ``PyArray_*``, a companion ``PyFoo_*`` lib) is excluded, so it never
+    produces a false stable-ABI violation.
+
+    On **ELF/Mach-O** the undefined-symbol table carries no per-symbol provider
+    (``libpython`` is resolved at load time), so recognition falls back to the
+    CPython ``Py``/``_Py`` naming convention. In practice the dominant
+    third-party C-API (NumPy) is exposed through a runtime *capsule*, not direct
+    symbol linkage, so those names do not appear as undefined imports; a
+    companion library that *directly* exports ``Py*`` symbols and is linked
+    remains a known edge case on these platforms.
+    """
     names: list[str] = []
     if snap.elf is not None:
-        names.extend(i.name for i in snap.elf.imports if i.name)
-    if snap.pe is not None:
-        for funcs in snap.pe.imports.values():
-            names.extend(f for f in funcs if f)
+        names.extend(
+            i.name for i in snap.elf.imports if i.name and stable_abi.is_cpython_symbol(i.name)
+        )
     if snap.macho is not None:
-        names.extend(getattr(snap.macho, "imported_symbols", []) or [])
-    return names
+        names.extend(
+            n
+            for n in (getattr(snap.macho, "imported_symbols", []) or [])
+            if stable_abi.is_cpython_symbol(n)
+        )
+    if snap.pe is not None:
+        for dll_name, funcs in snap.pe.imports.items():
+            if _is_cpython_dll(dll_name):
+                names.extend(
+                    f for f in funcs if f and stable_abi.is_cpython_symbol(f)
+                )
+    return sorted(set(names))
 
 
 def _iter_cpython_dlls(snap: AbiSnapshot) -> list[str]:
-    """Windows import DLL(s) that provide CPython C-API symbols (PE only).
+    """Windows CPython runtime import DLL(s) the module links (PE only).
 
-    Reads the PE import map (``dll_name -> [funcs]``) and returns each DLL that
-    supplies at least one ``Py*`` / ``_Py*`` symbol. Empty for ELF/Mach-O, whose
-    ``libpython`` dependency is not a named import library in the same way.
+    Identified by DLL *name* (:func:`_is_cpython_dll`), NOT by whether the DLL
+    happens to export a ``Py*`` symbol — otherwise a third-party ``numpy.dll``
+    (which exports ``PyArray_*``) would be misread as the interpreter runtime.
+    Empty for ELF/Mach-O, whose ``libpython`` dependency is not a named import
+    library in the same way.
     """
     if snap.pe is None:
         return []
-    dlls: list[str] = []
-    for dll_name, funcs in snap.pe.imports.items():
-        if not dll_name:
-            continue
-        if any(f and stable_abi.is_cpython_symbol(f) for f in funcs):
-            dlls.append(dll_name)
-    return sorted(set(dlls))
+    return sorted({d for d in snap.pe.imports if d and _is_cpython_dll(d)})
 
 
 def _detect_init_export(names: list[str]) -> tuple[str | None, str | None, int | None]:
@@ -257,8 +290,7 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
     extensions in scope while never matching a non-Python library that merely
     has an ``init`` export and no CPython imports.
     """
-    imported = _iter_imported_names(snap)
-    cpython_imports = sorted({n for n in imported if stable_abi.is_cpython_symbol(n)})
+    cpython_imports = _collect_cpython_imports(snap)
     init_symbol, module_name, python_major = _detect_init_export(
         _iter_exported_names(snap)
     )

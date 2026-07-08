@@ -825,6 +825,45 @@ def test_compare_flags_switch_to_versioned_python_dll() -> None:
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in kinds
 
 
+def test_pe_third_party_py_prefixed_dll_excluded() -> None:
+    from abicheck.pe_metadata import PeExport, PeMetadata
+
+    # numpy.dll exports PyArray_*/PyUFunc_* (the Py C-API convention) but is NOT
+    # the CPython runtime — its symbols must not be judged against the Limited API.
+    pe = PeMetadata()
+    pe.exports = [PeExport(name="PyInit_foo")]
+    pe.imports = {
+        "python3.dll": ["PyList_New", "PyLong_FromLong"],
+        "numpy.dll": ["PyArray_New", "PyUFunc_FromFuncAndData"],
+        "kernel32.dll": ["Sleep"],
+    }
+    snap = AbiSnapshot(library="foo.abi3.pyd", version="1.0", pe=pe)
+    meta = detect_python_extension(snap)
+    assert meta is not None
+    # Only the CPython-DLL symbols are captured; numpy's Py* symbols are excluded.
+    assert meta.cpython_imports == ["PyList_New", "PyLong_FromLong"]
+    assert "numpy.dll" not in meta.cpython_dlls
+    assert meta.cpython_dlls == ["python3.dll"]
+
+
+def test_pe_third_party_py_import_not_a_stable_abi_violation() -> None:
+    from abicheck.pe_metadata import PeExport, PeMetadata
+
+    pe = PeMetadata()
+    pe.exports = [PeExport(name="PyInit_foo")]
+    pe.imports = {
+        "python3.dll": ["PyList_New"],
+        "numpy.dll": ["PyArray_New"],
+    }
+    snap = AbiSnapshot(library="foo.abi3.pyd", version="1.0", pe=pe)
+    snap.python_ext = detect_python_extension(snap)
+    # Audit via the shared helper: numpy's PyArray_New must NOT be flagged.
+    from abicheck.diff_python import audit_stable_abi_imports
+
+    findings = audit_stable_abi_imports(snap.python_ext, (3, 9))
+    assert findings == []
+
+
 def test_versioned_dll_roundtrips_through_serialization() -> None:
     from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 

@@ -38,6 +38,16 @@ export and `Py*` import surface, across Cython/pybind11/nanobind/C) and captures
 the imported CPython C-API symbols plus whether the module is a stable-ABI
 (`abi3`) build. Two things are then checked.
 
+!!! note "Only *CPython-provided* `Py*` symbols are judged"
+    Some third-party libraries follow the `Py` C-API naming convention
+    (NumPy's `PyArray_*`, a companion `PyFoo_*` library). On Windows the audit
+    uses the **provider DLL** — only `Py*` symbols imported from an actual CPython
+    runtime DLL (`python3.dll`/`pythonXY.dll`) count, so a `numpy.dll` import is
+    never mistaken for a Limited-API violation. (NumPy's C API is reached through
+    a runtime capsule rather than direct symbol linkage, so on ELF/Mach-O — where
+    the undefined-symbol table carries no per-symbol provider — those names don't
+    appear as imports anyway.)
+
 ### 1. Audit a single module — `scan --abi3`
 
 ```console
