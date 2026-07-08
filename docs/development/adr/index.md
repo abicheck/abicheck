@@ -42,4 +42,3 @@
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
 | [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Accepted — implemented (G22) |
 | [038](038-build-integrated-fact-collection-variants.md) | Working With Sources — Full-Scan and Two Build-Injection Flows | Accepted — implemented |
-| [Gap Analysis](../archive/adr-gap-analysis.md) | Decisions Needing Formal ADRs (historical snapshot, archived) | Reference |

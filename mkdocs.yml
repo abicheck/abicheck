@@ -37,7 +37,6 @@ nav:
     - Start Here:
       - Getting Started: getting-started.md
       - Choose Your Workflow: user-guide/choose-your-workflow.md
-      - Local Compare: user-guide/local-compare.md
       - 'Worked Example: Real Library': user-guide/real-world-example.md
       - 'Scanning a Conda-Forge Package': user-guide/scanning-conda-packages.md
     - Everyday Use:
@@ -57,11 +56,14 @@ nav:
       - Multi-Binary Releases: user-guide/multi-binary.md
       - Application Compatibility: user-guide/appcompat.md
       - Plugin Systems: user-guide/plugin-systems.md
+      - Build Evidence Setup: user-guide/build-evidence-setup.md
+      - API Surface Intelligence: concepts/api-surface-intelligence.md
       - Kernel & eBPF (BTF): user-guide/kernel-btf.md
       - Security Hardening: user-guide/security-hardening.md
       - Probe Harness: user-guide/probe-harness.md
     - Integrations & Migration:
       - Tool Modes: user-guide/tool-modes.md
+      - Python API: user-guide/python-api.md
       - MCP Integration: user-guide/mcp-integration.md
       - Migrating from ABICC: user-guide/from-abicc.md
       - Migrating from libabigail: user-guide/from-libabigail.md
@@ -69,11 +71,11 @@ nav:
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
     - Verdicts: concepts/verdicts.md
+    - Verdicts and Exit Codes: concepts/verdicts-and-exit-codes.md
     - Evidence & Detectability: concepts/evidence-and-detectability.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
-    - API Surface Intelligence: concepts/api-surface-intelligence.md
     - Class Layout ABI & API: concepts/class-layout-abi.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
@@ -81,16 +83,19 @@ nav:
     - Change Kinds: reference/change-kinds.md
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
+    - Snapshot Format: reference/snapshot-format.md
+    - Configuration File: reference/config-file.md
+    - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
-    - ABICC Format Compliance: reference/abicc-format-compliance.md
-    - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
+    - ABICC Flag Reference: reference/abicc-flags.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
   - ABI/API Handling & Recommendations:
     - Overview: concepts/abi-api-handling.md
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
     - Learning Series:
+      - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
       - "1. Foundations": concepts/abi-series/01-foundations.md
       - "2. Symbol Contracts": concepts/abi-series/02-symbol-contracts.md
@@ -118,47 +123,25 @@ nav:
       - Addition: examples/by-category/addition.md
       - Quality: examples/by-category/quality.md
       - No Change: examples/by-category/no_change.md
+  # Contributor-facing docs. Internal planning artifacts (implementation plans,
+  # backlog, roadmap audits, archived status notes) stay in the repo under
+  # docs/development/ but are intentionally kept out of the published nav — see
+  # the "Working documents" note in the Codebase Overview.
   - Development:
     - Contributing:
       - Codebase Overview: development/codebase-overview.md
       - Testing: development/testing.md
       - Performance: development/performance.md
       - Troubleshooting: troubleshooting.md
-      - Config Key Review: development/config-key-review.md
     - Roadmap & Status:
       - Goals: development/goals.md
-      - Backlog: development/backlog.md
-      - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
-      - User Scenarios & Flows: development/user-scenarios.md
-      - Architecture Deepening Plan: development/architecture-deepening-plan.md
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
+      - ABICC Format Compliance: reference/abicc-format-compliance.md
       - libabigail Parity Matrix: development/libabigail-parity.md
       - Report Comparison: development/report-comparison.md
-    - Implementation Plans:
-      - Overview: development/plans/index.md
-      - "G1: Cross-platform e2e": development/plans/g1-cross-platform-e2e.md
-      - "G2: Build-config & bundle": development/plans/g2-build-config-and-bundle.md
-      - "G3: Workflow examples & reporting": development/plans/g3-workflow-examples-and-reporting.md
-      - "G4: Header-AST extractor": development/plans/g4-header-ast-extractor.md
-      - "G5: Plugin contract": development/plans/g5-plugin-bidirectional-contract.md
-      - "G6: Kernel BTF & accelerator": development/plans/g6-kernel-btf-and-accelerator.md
-      - "G8: Static libraries": development/plans/g8-static-libraries.md
-      - "G9: Wheel vendored-library pairing": development/plans/g9-wheel-vendored-matching.md
-      - "G10: manylinux glibc-floor check": development/plans/g10-glibc-floor-check.md
-      - "G11: Single-binary audit / lint": development/plans/g11-single-binary-audit.md
-      - "G12: Security-hardening drift": development/plans/g12-security-hardening.md
-      - "G13: Cross-architecture guardrail": development/plans/g13-arch-mismatch-guard.md
-      - "G14: abi3 import-contract": development/plans/g14-stable-abi-subset.md
-      - "G15: Inline-namespace version stamp": development/plans/g15-inline-namespace-version.md
-      - "G16: Header-scope toolchain robustness": development/plans/g16-header-scope-toolchain-robustness.md
-      - "G17: Real-world validation corpus": development/plans/g17-real-world-corpus.md
-      - "G18: Bazel build-evidence": development/plans/g18-bazel-build-evidence.md
-      - "G19: PR-tier source intelligence": development/plans/g19-pr-source-intelligence.md
-      - "G20: Source-scan example catalog": development/plans/g20-source-scan-example-catalog.md
-      - "G21: One-shot deep compare & CLI usability": development/plans/g21-oneshot-deep-compare.md
-      - "G22: CLI consolidation": development/plans/g22-cli-consolidation.md
+      - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md
@@ -201,10 +184,6 @@ nav:
       - "036: Report View-Model & Canonical Severity": development/adr/036-report-view-model.md
       - "037: CLI Interface Contract": development/adr/037-cli-interface-contract.md
       - "038: Working With Sources": development/adr/038-build-integrated-fact-collection-variants.md
-    - Archive (historical):
-      - "ADR Gap Analysis": development/archive/adr-gap-analysis.md
-      - "Data-Source Process Remediation Plan": development/archive/data-source-process-remediation-plan.md
-      - "Data-Source Remeasurement Status": development/archive/data-source-remeasurement-status-2026-06-11.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

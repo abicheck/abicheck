@@ -22,7 +22,7 @@
 - Why the *same* technical change can be a release-blocking break for one
   product and a non-event for another.
 
-This is the **prologue** to the seven-part series. The later parts teach the
+This is the **prologue** (part 0) of the nine-part series. The later parts teach the
 *mechanisms* (what bytes move, what the loader does). This part teaches the
 *framing* that makes those mechanisms matter: a change is only a "break" if it
 breaks something you promised.

@@ -282,7 +282,7 @@ this mapping for the XML report:
 |----------|-------------|
 | **High** | func_removed, type_size_changed, type_vtable_changed, type_base_changed, struct_size_changed, func_virtual_removed, func_deleted, base_class_position_changed, type_kind_changed |
 | **Medium** | func_return_changed, func_params_changed, type_field_offset_changed, type_field_type_changed, type_field_removed, var_type_changed, calling_convention_changed, soname_changed, symbol_type_changed, typedef_base_changed, union_field_removed |
-| **Low** | enum_member_value_changed, field_bitfield_changed, func_visibility_changed, func_noexcept_changed, enum_underlying_size_changed, symbol_binding_changed, all other breaking kinds |
+| **Low** | enum_member_value_changed, field_bitfield_changed, func_visibility_changed, func_noexcept_removed, enum_underlying_size_changed, symbol_binding_changed, all other breaking kinds |
 
 ---
 

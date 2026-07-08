@@ -72,17 +72,19 @@ pytest tests/ --cov=abicheck --cov-report=term-missing
 | `integration` | castxml, gcc/g++ | Real toolchain interactions, ELF/DWARF parsing |
 | `libabigail` | abidiff, gcc/g++ | libabigail parity tests |
 | `abicc` | abi-compliance-checker, gcc/g++ | ABICC compatibility parity tests |
+| `msvc` | MSVC `cl.exe` (Windows) | MSVC + PDB end-to-end lane |
 | `slow` | varies | Performance and large-input tests (excluded from fast CI gate) |
+| `golden` | golden snapshot files | Output-format snapshot tests (skip unless changing output format) |
 
 ### Example validation
 
-Run the 74 example cases against ground truth:
+Run the example cases against ground truth:
 
 ```bash
 pytest tests/ -v -k "example" --tb=short
 ```
 
-Or use the benchmark script:
+Or use the benchmark script (scans the full `examples/` catalog):
 
 ```bash
 python3 scripts/benchmark_comparison.py --skip-abicc
@@ -127,7 +129,13 @@ test: add coverage for PolicyFile.compute_verdict
    - `abicheck/diff_platform.py` — ELF/PE/Mach-O/DWARF-specific changes
    - `abicheck/detectors.py` — individual detection rules
 4. Add a unit test in `tests/`
-5. Document in `docs/` if user-visible
+5. Regenerate the detector-spec matrix: `python scripts/gen_detector_spec.py`
+6. Mention the kind in `docs/` and, where practical, add an `examples/caseNN_*`
+   fixture — the AI-readiness gate checks that every `ChangeKind` is classified,
+   produced by a detector, and mentioned in the docs
+
+CI (`scripts/check_ai_readiness.py`) enforces steps 2, 5, and 6; run it locally
+before pushing.
 
 ## Questions
 

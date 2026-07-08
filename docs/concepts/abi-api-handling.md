@@ -14,6 +14,17 @@ change kinds are woven in throughout, so the same page that teaches you *why* a
 struct-field insertion corrupts memory also tells you what abicheck will report
 when it sees one.
 
+!!! tip "New to the topic? Don't start here — start with the on-ramp."
+    This hub is dense (it doubles as a deep reference, including a full
+    evidence-model walk-through further down). If binary compatibility is new to
+    you, read the five-minute on-ramp first and follow the series in order:
+
+    1. [**ABI in Five Minutes**](abi-series/abi-in-5-minutes.md) — the gentlest introduction.
+    2. [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) — the framing.
+    3. [Part 1 — Foundations](abi-series/01-foundations.md) — symbols, linking, the loader.
+
+    Then come back here to navigate the rest of the series.
+
 > **Looking for something faster?** For a 2-minute scannable card, see the
 > [ABI Cheat Sheet](abi-cheat-sheet.md). For per-case runnable reproductions with
 > code and a real failure demo, see the

@@ -297,26 +297,133 @@ abicheck dump libfoo.so -H foo.h -v
 abicheck compare old.json new.json -v
 ```
 
-#### Surface and source-graph reports
+### Companion commands: surface, source-graph, and PR-comment reports
 
-Three companion commands report on the public surface and the L5 source graph
-rather than producing a compare verdict:
+These commands report on a single library's public surface, the L5 source
+graph, or an existing report — they never produce a compare verdict or affect
+the `compare` exit code.
+
+#### `surface-report` — public-surface structural metrics
+
+Emits descriptive structural facts about **one** library's public ABI surface
+(no diff): header→symbol coverage, undocumented-export ratio, type fan-in, and
+per-header cohesion. Purely descriptive — it never computes a verdict.
+
+```
+abicheck surface-report [OPTIONS] LIBRARY
+```
+
+`LIBRARY` is a shared library (ELF/PE/Mach-O) or an `.abi.json` snapshot.
+
+| Flag | Value | Default | Purpose |
+|------|-------|---------|---------|
+| `-H` / `--header` | path (repeatable) | none | Public header file or directory (repeatable). Enables header-aware coverage metrics. |
+| `-I` / `--include` | path (repeatable) | none | Additional include directory passed to the header parser. |
+| `--format` | `text` \| `json` | `text` | Output format. |
+| `--top` | integer ≥ 1 | `10` | How many highest-fan-in types to list. |
+| `--idioms` / `--no-idioms` | flag | `--no-idioms` | Recognise and report API idioms (opaque pointer, PIMPL, handle, factory, create/destroy, callback). |
+| `--anti-patterns` / `--no-anti-patterns` | flag | `--no-anti-patterns` | Detect and report ABI anti-patterns (`std::` types crossed by value, polymorphic types with no virtual destructor). |
+| `--audit` / `--no-audit` | flag | `--no-audit` | Run the single-release hygiene audit (intra-version cross-source checks: accidental ABI surface, private-header leaks, unversioned exports, RTTI for internal types, …). No baseline needed; advisory only. |
+| `-o` / `--output` | path | stdout | Write report to a file. |
 
 ```bash
 # Structural metrics + idiom/anti-pattern report for one library's public surface
 abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
 
-# Diff two L5 source-graph summaries (from `collect --source-graph`)
-abicheck graph compare old-pack/ new-pack/
+# JSON output to a file
+abicheck surface-report libfoo.so -H include/ --format json -o surface.json
 
-# Localize a compare finding through the L5 source graph (which TU/include chain)
-abicheck graph explain --report report.json --finding-id <id> --sources new-pack/
+# Single-release hygiene lint (no baseline)
+abicheck surface-report libfoo.so -H include/ --audit
 ```
 
 See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
-the surface metrics and idiom recognizers mean, and
-[Build & Source Packs](../concepts/build-source-data.md) for producing the packs
-that `graph compare` / `graph explain` consume.
+the surface metrics, idiom recognizers, and anti-pattern checks mean.
+
+#### `graph compare` — structural source-graph diff
+
+Compares two L5 source-graph summaries and reports which nodes/edges entered or
+left the graph. The diff *explains and prioritizes* impact; it never, on its
+own, decides or suppresses an artifact-proven ABI break.
+
+```
+abicheck graph compare [OPTIONS] OLD NEW
+```
+
+`OLD` and `NEW` may each be a `graph/source_graph_summary.json` file or an
+evidence-pack directory produced by `collect --source-graph summary`.
+
+| Flag | Value | Default | Purpose |
+|------|-------|---------|---------|
+| `--format` | `text` \| `json` | `text` | Output format for the structural graph diff. |
+
+```bash
+# Diff two L5 source-graph summaries (from `collect --source-graph`)
+abicheck graph compare old-pack/ new-pack/
+```
+
+#### `graph explain` — localize a symbol through the source graph
+
+Given an exported symbol (directly via `--symbol`, or resolved from a `compare`
+JSON report finding via `--finding-id`), walks the graph to show what produced
+and reaches it: exporting target, source declaration(s), declaring public
+header(s), ABI-relevant build option(s), and static callees. This explains and
+prioritizes; it is never an ABI verdict.
+
+```
+abicheck graph explain [OPTIONS]
+```
+
+| Flag | Value | Default | Purpose |
+|------|-------|---------|---------|
+| `--sources` | path (**required**) | — | Source/graph pack directory (or a `source_graph_summary.json`) to explain through. |
+| `--symbol` | text | empty | Exported (mangled) binary symbol to localize. |
+| `--report` | path | none | A `compare --format json` report; with `--finding-id`, resolves the symbol from it. |
+| `--finding-id` | text | empty | Index (or symbol) of a finding in `--report` to localize. |
+| `--format` | `text` \| `json` | `text` | Output format for the localization result. |
+
+```bash
+# Localize a specific symbol
+abicheck graph explain --sources new-pack/ --symbol _ZN3foo3barEv
+
+# Localize a compare finding by index (which TU/include chain produced it)
+abicheck graph explain --report report.json --finding-id 0 --sources new-pack/
+```
+
+See [Build & Source Packs](../concepts/build-source-data.md) for producing the
+packs that `graph compare` / `graph explain` consume.
+
+#### `pr-comment` — render a sticky GitHub PR comment
+
+Renders a sticky GitHub PR-comment body from a JSON report produced by
+`abicheck compare` or `abicheck appcompat` (`--format json`); `compare` also
+covers release/bundle comparisons on directory/package inputs. When `--on=never`,
+or `--on=changes` and the report has no changes, nothing is written (an empty
+`--output` file is produced) so the caller can skip posting.
+
+```
+abicheck pr-comment [OPTIONS] REPORT
+```
+
+`REPORT` is a JSON file from `abicheck compare` or `abicheck appcompat` run with
+`--format json` (release/bundle fan-out is handled by `compare` on directory/
+package inputs — there is no separate `compare-release` command).
+
+| Flag | Value | Default | Purpose |
+|------|-------|---------|---------|
+| `--sha` | text | empty | Commit SHA being scanned (PR head). |
+| `--detail` | `summary` \| `standard` \| `full` | `standard` | How much per-change detail to include in the comment. |
+| `--on` | `always` \| `changes` \| `never` | `changes` | When to emit a comment body: always, only on changes, or never. |
+| `--run-label` | text | none | Run label shown in the footer, e.g. `run #128`. |
+| `--report-url` | text | none | URL of the full report/run, linked in the footer and used when the comment is condensed or truncated to fit GitHub's size limit. |
+| `--gate-api-break` | flag | off | Treat API/source breaks as breaking (mirror `fail-on-api-break`, which turns the check red on them). |
+| `-o` / `--output` | path | stdout | Write the comment markdown to a file. |
+
+```bash
+# Produce a JSON report, then render a PR-comment body from it
+abicheck compare old.json new.so -H include/ --format json -o report.json
+abicheck pr-comment report.json --sha "$GITHUB_SHA" -o comment.md
+```
 
 ### Report filtering and display options
 
@@ -431,7 +538,8 @@ abicheck compare ./build-old/libfoo.so new-release.json \
 ### 4) ABICC-compatible invocation (for migration)
 
 For teams migrating from `abi-compliance-checker` — same flags, same XML descriptors.
-See [ABICC compatibility reference](from-abicc.md) for the full flag list.
+See the [Migrating from ABICC](from-abicc.md) guide and the
+[ABICC Flag Reference](../reference/abicc-flags.md) for the full flag list.
 
 ```bash
 # Minimal (identical to abi-compliance-checker):
@@ -489,43 +597,10 @@ rationale.
 
 ## ABI/API breakages and what each tool mode can detect
 
-This section maps breakage types to example cases under `examples/` and compares:
-
-- `abicheck` (header + ELF metadata pipeline)
-- `abidiff + headers`
-- `ABICC Usage #2` (header-based ABICC mode)
-- `ABICC Usage #1` (abi-dumper / DWARF dump mode)
-
-Legend: ✅ strong support, ⚠️ partial/conditional, ❌ generally not covered.
-
-| Case | Breakage type | Verdict | abicheck | abidiff + headers | ABICC #2 (headers) | ABICC #1 (dumps) |
-|---|---|---|:---:|:---:|:---:|:---:|
-| case01_symbol_removal | Public symbol removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case02_param_type_change | Function parameter type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case03_compat_addition | Compatible API addition | COMPATIBLE | ✅ | ✅ | ✅ | ✅ |
-| case04_no_change | No ABI change baseline | NO_CHANGE | ✅ | ✅ | ✅ | ✅ |
-| case05_soname | SONAME / packaging policy issue | BREAKING | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| case06_visibility | Visibility/export policy drift | BREAKING | ✅ | ✅ | ⚠️ | ⚠️ |
-| case07_struct_layout | Struct layout changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case08_enum_value_change | Enum value changed | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case09_cpp_vtable | VTable/method order/signature drift | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case10_return_type | Function return type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case11_global_var_type | Global variable type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case12_function_removed | API function removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case13_symbol_versioning | Symbol version policy regression | COMPATIBLE | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| case14_cpp_class_size | C++ class size/layout changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case15_noexcept_change | `noexcept` contract changed | COMPATIBLE | ✅ | ⚠️ | ✅ | ❌ |
-| case16_inline_to_non_inline | Inline/ODR surface change | BREAKING | ✅ | ⚠️ | ✅ | ❌ |
-| case17_template_abi | Template-instantiation ABI drift | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case18_dependency_leak | Transitive dependency leaked into API | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case19_enum_member_removed | Enum member removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case20_enum_member_value_changed | Enum member value changed | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case21_method_became_static | Method became static | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case22_method_const_changed | Method const-qualifier changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case23_pure_virtual_added | Added pure virtual method | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case24_union_field_removed | Union field removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-
-### Summary by breakage category
+The per-case matrix comparing abicheck, `abidiff`, and ABICC modes across the
+catalog lives in the **[Tool Comparison & Benchmarks](../reference/tool-comparison.md)**
+reference, and every case has a full reproduction in the
+[Examples Encyclopedia](../examples/index.md). The qualitative takeaway:
 
 - **API surface breaks** (removed/changed signatures): all modes generally catch these.
 - **C++ semantic contract breaks** (`noexcept`, inline/ODR): header-aware analysis is strongest.
@@ -673,56 +748,11 @@ The parser handles the full Debian symbols tag syntax:
 - `(regex)` and `(symver)` pattern-matching tags are parsed but not evaluated.
 - `(arch=...)` tags are parsed but not filtered (no `--arch` option yet).
 
-## High-level architecture
+## Architecture and runtime dependencies
 
-```text
-CLI  (core commands; see `abicheck --help` for the full list)
-  dump                         — dump ABI snapshot to JSON
-  compare                      — compare two ABI surfaces (also directory/package inputs)
-  scan                         — one-shot source-intelligence scan (dump + compare + evidence)
-  deps tree                    — show dependency tree + binding status (Linux ELF)
-  deps compare                 — full-stack comparison across environments (Linux ELF)
-  debian-symbols generate      — generate Debian symbols file from shared library
-  debian-symbols validate      — validate symbols file against binary
-  debian-symbols diff          — diff two Debian symbols files
-  compat check                 — ABICC drop-in comparison
-  compat dump                  — dump from ABICC XML descriptor
-    -> dumper (castxml AST + ELF metadata)
-    -> checker (rule-based diff + severity)
-    -> resolver (transitive dependency resolution)
-    -> binder (symbol binding simulation)
-    -> stack_checker (stack-level ABI comparison)
-    -> debian_symbols (Debian symbols file adapter)
-    -> reporters (markdown/json/sarif/html)
-```
-
-## Core modules and purpose
-
-- `abicheck.cli` — command-line entrypoints.
-- `abicheck.dumper` — snapshot construction from headers + binary metadata.
-- `abicheck.checker` — change detection and breakage classification.
-- `abicheck.resolver` — transitive ELF dependency resolution with loader-accurate search order.
-- `abicheck.binder` — symbol binding simulation across a resolved dependency graph.
-- `abicheck.stack_checker` — stack-level ABI comparison and verdict computation.
-- `abicheck.stack_report` — JSON and Markdown output for stack-level results.
-- `abicheck.build_context` — compile_commands.json parsing and flag extraction.
-- `abicheck.debug_resolver` — debug artifact resolution (DWARF, PDB, dSYM, debuginfod).
-- `abicheck.baseline` — baseline registry (push/pull/list/delete with integrity checks).
-- `abicheck.compat` — ABICC compatibility layer (`abicheck.compat.descriptor`, `abicheck.compat.xml_report`, `abicheck.compat.cli`, `abicheck.compat.abicc_dump_import`).
-- `abicheck.debian_symbols` — Debian symbols file generation, parsing, validation, and diffing.
-- `abicheck.reporter` / `abicheck.sarif` / `abicheck.html_report` — output generators.
-- `abicheck.elf_metadata`, `abicheck.dwarf_metadata`, `abicheck.dwarf_advanced` — low-level binary metadata extraction.
-
-## Runtime dependencies (practical view)
-
-- **Python 3.10+**
-- **castxml** (for header-driven API/ABI modeling)
-- **pyelftools** (ELF/DWARF metadata)
-- **click** (CLI)
-- **defusedxml** (safe XML parsing for ABICC descriptor mode)
-
-Optional ecosystem tools for comparisons/benchmarks:
-
-- `abidiff` / libabigail tools
-- ABICC + abi-dumper toolchain
+For the internal pipeline and module map (dumper → checker → resolver → reporters),
+see the [Codebase Overview](../development/codebase-overview.md) and the
+[Architecture](../concepts/architecture.md) concept page. For the runtime
+dependencies (Python 3.10+, castxml, pyelftools, …) and per-platform setup, see
+[Getting Started](../getting-started.md#requirements).
 

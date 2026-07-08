@@ -19,6 +19,7 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 | **Did my library break?** — does upgrading it break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
 | **Does my application still work** with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
 | **Did my whole package / release break?** | `abicheck compare` | [Multi-Binary Releases](user-guide/multi-binary.md) |
+| **Gate a pull request** with the deepest evidence available (headers + build + sources)? | `abicheck scan` | [Source-Scan Depth](user-guide/scan-levels.md) |
 | Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--sysroot /rootfs` for a specific root) | [CLI Usage](user-guide/cli-usage.md) |
 | Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --baseline … --candidate …` | [CLI Usage](user-guide/cli-usage.md) |
 | I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
@@ -309,7 +310,11 @@ By default, `abicheck compare` exits with the verdict:
 > potential-breaking, `4` = in ABI-breaking. The shape stays the same —
 > `0` passes, `4` is worst — but `1` then means a *finding*, not a tool error.
 
-Full reference (including `compat` mode): [Exit Codes](reference/exit-codes.md)
+Other commands add their own codes on top of this space — `scan` can exit `5`
+(a `--budget` time guard tripped) and a multi-library release compare can exit
+`8` (a library was removed with `--fail-on-removed-library`). The full
+per-command matrix, including `compat` mode, is the
+[Exit Codes reference](reference/exit-codes.md).
 
 ### Policy recipes — what should fail the build?
 

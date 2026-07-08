@@ -266,6 +266,16 @@ def _verdict_counts(cases: list[Case]) -> dict[str, int]:
     return out
 
 
+def _case_sort_key(name: str) -> tuple[int, str]:
+    """Order cases by their numeric index (case2 < case10 < case109), with the
+    optional letter suffix (case26 < case26b) as the tiebreak. Lexical sorting
+    would otherwise interleave case10 between case1 and case2."""
+    m = re.match(r"case(\d+)([a-z]*)", name)
+    if not m:
+        return (10**9, name)
+    return (int(m.group(1)), m.group(2))
+
+
 def _case_row(case: Case) -> str:
     vinfo = VERDICT_META[case.verdict]
     return (
@@ -330,9 +340,16 @@ def _render_index(cases: list[Case]) -> str:
             f"| [{info['label']}](by-category/{cat}.md) | {n} | {info['blurb']} |\n"
         )
     lines.append("\n## All cases\n\n")
+    lines.append(
+        "> **Gaps in the numbering are expected.** Some case numbers "
+        "(e.g. 84, 90–93) are **multi-library bundle cases** that are not part "
+        "of this single-library catalog; they are documented in the repository "
+        "under `examples/` and indexed in `examples/README.md`. The list below "
+        "is sorted by case number.\n\n"
+    )
     lines.append("| Case | Title | Verdict | Category |\n")
     lines.append("|------|-------|---------|----------|\n")
-    for c in sorted(cases, key=lambda c: c.name):
+    for c in sorted(cases, key=lambda c: _case_sort_key(c.name)):
         lines.append(_case_row(c) + "\n")
     return "".join(lines)
 
@@ -355,7 +372,7 @@ def _render_group_index(
         return "".join(lines)
     lines.append("| Case | Title | Verdict | Category |\n")
     lines.append("|------|-------|---------|----------|\n")
-    for c in sorted(cases, key=lambda c: c.name):
+    for c in sorted(cases, key=lambda c: _case_sort_key(c.name)):
         vinfo = VERDICT_META[c.verdict]
         lines.append(
             f"| [{c.name}](../{c.name}.md) "

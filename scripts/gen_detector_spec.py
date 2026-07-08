@@ -31,6 +31,12 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parent.parent
 MD_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.md"
 JSON_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.json"
+GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+EXAMPLES_DOC_DIR = REPO_DIR / "docs" / "examples"
+
+# Cap the number of example links rendered per kind so common kinds don't blow
+# up the row width; the full mapping is always available in the JSON.
+_MAX_EXAMPLE_LINKS = 4
 
 # Sentinel for kinds with no declared evidence tier. EVIDENCE_TIER_BY_KIND is
 # intentionally partial (the L0–L4 model maps the kinds that appear in cases;
@@ -61,6 +67,26 @@ def _category_of(kind, policy) -> str:
     return "unknown"
 
 
+def _examples_by_kind() -> dict[str, list[str]]:
+    """Reverse-map each ChangeKind value to the example case(s) that demonstrate
+    it, sourced from examples/ground_truth.json['verdicts'][*]['expected_kinds'].
+
+    Only cases with a generated docs page (docs/examples/<case>.md) are included,
+    so the rendered links can't dangle under `mkdocs build --strict` (bundle
+    cases have no single-library doc page)."""
+    try:
+        gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    out: dict[str, list[str]] = {}
+    for case_name, meta in sorted(gt.items()):
+        if not (EXAMPLES_DOC_DIR / f"{case_name}.md").exists():
+            continue
+        for kind in meta.get("expected_kinds", []):
+            out.setdefault(kind, []).append(case_name)
+    return out
+
+
 def build_spec() -> list[dict[str, str]]:
     """Build the per-ChangeKind spec rows (sorted by kind value)."""
     # Make the command work from a clean checkout (no install / no PYTHONPATH):
@@ -72,6 +98,7 @@ def build_spec() -> list[dict[str, str]]:
     from abicheck import checker_policy as policy
     from abicheck.checker_policy import ChangeKind, policy_for
 
+    examples = _examples_by_kind()
     rows: list[dict[str, str]] = []
     for kind in sorted(ChangeKind, key=lambda k: k.value):
         entry = policy_for(kind)
@@ -82,6 +109,7 @@ def build_spec() -> list[dict[str, str]]:
             "severity": entry.severity,
             "min_evidence": EVIDENCE_TIER_BY_KIND.get(kind.value, UNSPECIFIED_TIER),
             "doc_slug": entry.doc_slug,
+            "examples": ",".join(examples.get(kind.value, [])),
         })
     return rows
 
@@ -93,17 +121,27 @@ def render_markdown(rows: list[dict[str, str]]) -> str:
         "# Detector specification matrix",
         "",
         f"One row per `ChangeKind` ({len(rows)} total). Columns fuse the verdict "
-        "partition (`checker_policy`), default policy (`policy_for`), and the "
+        "partition (`checker_policy`), default policy (`policy_for`), the "
         "weakest evidence layer at which the kind becomes detectable "
-        "(`scripts/evidence_tiers`).",
+        "(`scripts/evidence_tiers`), and the example case(s) that demonstrate the "
+        "kind (`examples/ground_truth.json`). The **Examples** column is capped at "
+        f"{_MAX_EXAMPLE_LINKS} links per kind; the full mapping is in "
+        "`detector-spec.json`.",
         "",
-        "| ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |",
-        "|---|---|---|---|---|---|",
+        "| ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in rows:
+        cases = [c for c in r["examples"].split(",") if c]
+        shown = cases[:_MAX_EXAMPLE_LINKS]
+        links = ", ".join(
+            f"[{c.split('_')[0]}](../examples/{c}.md)" for c in shown
+        )
+        if len(cases) > _MAX_EXAMPLE_LINKS:
+            links += f", +{len(cases) - _MAX_EXAMPLE_LINKS}"
         lines.append(
             f"| `{r['kind']}` | {r['category']} | `{r['default_verdict']}` | "
-            f"`{r['severity']}` | {r['min_evidence']} | `{r['doc_slug']}` |"
+            f"`{r['severity']}` | {r['min_evidence']} | `{r['doc_slug']}` | {links or '—'} |"
         )
     lines.append("")
     return "\n".join(lines)

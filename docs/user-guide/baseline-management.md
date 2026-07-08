@@ -331,6 +331,17 @@ abicheck compare old-baseline.json new-baseline.json
 Snapshots are self-contained — they include all type, function, variable, and enum
 information. Comparing two snapshots requires no headers, compilers, or debug info.
 
+You can also pass **packages** (RPM, Deb, tar, conda, or wheel) straight to
+`compare` — it compares all shared libraries inside them without manual
+extraction:
+
+```bash
+abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm
+```
+
+See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and the
+[GitHub Action](github-action.md) guide for CI examples with packages.
+
 ### `scan --baseline` against a native library
 
 `abicheck scan` takes a single `-H` (built for the *new* binary). When the
