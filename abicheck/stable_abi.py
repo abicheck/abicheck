@@ -186,18 +186,20 @@ LIMITED_API_ADDED: dict[str, tuple[int, int]] = {
     "PyType_GenericNew": _V32,
     "PyCapsule_New": _V32,
     "PyCapsule_GetPointer": _V32,
-    # --- genuinely later Limited-API additions (real floors) ---
-    "PyObject_GenericSetDict": (3, 3),
-    "PyType_GetSlot": (3, 4),
-    "PyType_FromSpec": (3, 3),
+    # --- later Stable-ABI additions ---
+    # IMPORTANT: the value is the release the symbol entered the *Stable ABI*
+    # (Limited API), which can be LATER than the CPython version that first
+    # introduced the symbol. e.g. PyType_GetModuleByDef was added in 3.11 but
+    # only became part of the Stable ABI in 3.13 — an abi3 module targeting 3.11
+    # that imports it would fail to load there. Only high-confidence entries
+    # (cross-checked against CPython's Doc/data/stable_abi.dat) live here;
+    # anything omitted degrades to StableAbiStatus.UNKNOWN (an advisory), never a
+    # wrong floor.
+    "PyType_FromSpec": (3, 2),
     "PyType_FromSpecWithBases": (3, 3),
-    "PyModule_AddFunctions": (3, 5),
-    "PyErr_FormatV": (3, 5),
-    "PyMem_Calloc": (3, 5),
-    "PyCodec_NameReplaceErrors": (3, 5),
+    "PyType_GetSlot": (3, 4),
     "PyType_GetFlags": (3, 2),
     "Py_GenericAlias": (3, 9),
-    "PyObject_GC_IsTracked": (3, 9),
     "PyObject_CallNoArgs": (3, 10),
     "PyModule_AddType": (3, 10),
     "Py_NewRef": (3, 10),
@@ -205,7 +207,7 @@ LIMITED_API_ADDED: dict[str, tuple[int, int]] = {
     "PyType_GetName": (3, 11),
     "PyType_GetQualName": (3, 11),
     "PyFrame_GetVar": (3, 12),
-    "PyType_GetModuleByDef": (3, 11),
+    "PyType_GetModuleByDef": (3, 13),
 }
 
 
@@ -272,6 +274,12 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
     """Parse an ``--abi3`` argument like ``"3.9"`` / ``"3"`` into a tuple.
 
     Returns ``None`` when *text* is not a recognisable ``major[.minor]`` string.
+
+    The bare-major form ``"3"`` is the documented ``Py_LIMITED_API=3`` spelling,
+    which CPython treats as the **3.2** Stable-ABI baseline (the Limited API did
+    not exist before 3.2). We therefore normalise ``3`` — and any ``3.0``/``3.1``
+    — to ``(3, 2)`` so ordinary stable symbols (``PyList_New`` etc., floor 3.2)
+    are not wrongly reported as above-floor.
     """
     parts = text.strip().split(".")
     try:
@@ -279,4 +287,7 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
         minor = int(parts[1]) if len(parts) > 1 else 0
     except (ValueError, IndexError):
         return None
+    if major == 3 and minor < 2:
+        # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.
+        minor = 2
     return (major, minor)

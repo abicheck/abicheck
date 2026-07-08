@@ -176,10 +176,37 @@ def test_min_required_abi3_none_when_no_recognised_stable() -> None:
 
 @pytest.mark.parametrize(
     "text,expected",
-    [("3.9", (3, 9)), ("3", (3, 0)), ("3.12", (3, 12)), ("bogus", None), ("", None)],
+    [
+        ("3.9", (3, 9)),
+        ("3.12", (3, 12)),
+        ("bogus", None),
+        ("", None),
+        # Py_LIMITED_API=3 → the 3.2 Stable-ABI baseline (not 3.0).
+        ("3", (3, 2)),
+        ("3.0", (3, 2)),
+        ("3.1", (3, 2)),
+    ],
 )
 def test_parse_abi3_version(text: str, expected: tuple[int, int] | None) -> None:
     assert stable_abi.parse_abi3_version(text) == expected
+
+
+def test_stable_abi_since_differs_from_added_version() -> None:
+    # PyType_GetModuleByDef was added in CPython 3.11 but only entered the Stable
+    # ABI in 3.13: an abi3 module targeting 3.11 that imports it is above-floor.
+    status, added = stable_abi.classify("PyType_GetModuleByDef", (3, 11))
+    assert status is StableAbiStatus.ABOVE_FLOOR
+    assert added == (3, 13)
+    status, _ = stable_abi.classify("PyType_GetModuleByDef", (3, 13))
+    assert status is StableAbiStatus.STABLE
+
+
+def test_bare_major_floor_accepts_core_stable_symbols() -> None:
+    # A cp3-abi3 (Py_LIMITED_API=3) module importing only 3.2-era stable symbols
+    # must NOT be flagged as above-floor once `3` maps to (3, 2).
+    floor = stable_abi.parse_abi3_version("3")
+    status, _ = stable_abi.classify("PyList_New", floor)
+    assert status is StableAbiStatus.STABLE
 
 
 # ── Compare-time detector ────────────────────────────────────────────────────
