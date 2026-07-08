@@ -325,6 +325,17 @@ def test_version_specific_module_does_not_flag_private_imports() -> None:
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
 
 
+def test_new_abi3_flagged_when_old_is_not_an_extension() -> None:
+    # Baseline is a plain library (no python_ext); the new artifact is
+    # introduced/retagged as abi3 and imports a private symbol → flagged, with
+    # the missing old extension treated as an empty baseline.
+    old = AbiSnapshot(library="libfoo.so", version="1.0", elf=ElfMetadata())
+    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    assert old.python_ext is None
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
+
+
 def test_detector_skipped_for_non_extension_pair() -> None:
     a = AbiSnapshot(library="libfoo.so", version="1.0", elf=ElfMetadata())
     b = AbiSnapshot(library="libfoo.so", version="2.0", elf=ElfMetadata())

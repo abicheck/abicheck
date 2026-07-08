@@ -107,7 +107,7 @@ def _diff_stable_abi_violations(
 @registry.detector(
     "python_ext",
     requires_support=lambda o, n: (
-        o.python_ext is not None and n.python_ext is not None,
+        n.python_ext is not None,
         "missing CPython extension metadata",
     ),
 )
@@ -124,9 +124,13 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     3.9+ user). Floor conformance is checked in the ``stable-abi`` command, where
     the user supplies the target floor via ``--abi3``.
     """
-    o = old.python_ext
     n = new.python_ext
-    assert o is not None and n is not None  # guaranteed by requires_support
+    assert n is not None  # guaranteed by requires_support
+    # The old side need not be an extension at all: a module freshly introduced
+    # or retagged as abi3 has no (or a non-extension) baseline. Treat a missing
+    # old extension as an empty baseline so every private import in the new abi3
+    # build is flagged.
+    o = old.python_ext if old.python_ext is not None else PythonExtMetadata()
 
     # The contract is the NEW artifact's: only a stable-ABI (abi3) new build
     # makes the cross-interpreter promise a private import breaks. The old build
