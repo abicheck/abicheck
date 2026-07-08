@@ -172,7 +172,10 @@ print(result.verdict)       # e.g. Verdict.BREAKING
 print(len(result.changes))  # number of detected changes
 ```
 
-See `abicheck.service` for the full signature, plus the [MCP server integration](https://abicheck.github.io/abicheck/user-guide/mcp-integration/) for AI-agent workflows.
+See the [Python API guide](https://abicheck.github.io/abicheck/user-guide/python-api/)
+for snapshots, custom policies, and rendering, plus the
+[MCP server integration](https://abicheck.github.io/abicheck/user-guide/mcp-integration/)
+for AI-agent workflows.
 
 ---
 

@@ -62,6 +62,7 @@ nav:
       - Probe Harness: user-guide/probe-harness.md
     - Integrations & Migration:
       - Tool Modes: user-guide/tool-modes.md
+      - Python API: user-guide/python-api.md
       - MCP Integration: user-guide/mcp-integration.md
       - Migrating from ABICC: user-guide/from-abicc.md
       - Migrating from libabigail: user-guide/from-libabigail.md
