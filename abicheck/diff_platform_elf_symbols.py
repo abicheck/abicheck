@@ -233,7 +233,44 @@ def _diff_elf_symbol_metadata(
                     name=sym_name,
                 )
             )
+
+    changes.extend(_check_gained_gnu_unique(old_syms, new_syms))
     return changes
+
+
+def _check_gained_gnu_unique(
+    old_syms: dict[str, Any], new_syms: dict[str, Any]
+) -> list[Change]:
+    """Report a release newly gaining STB_GNU_UNIQUE exports (G23-A4).
+
+    The per-symbol transition detector (``_check_binding_change``) only sees
+    symbols present on both sides, so a *newly-added* unique export — the common
+    case when a library first turns on ``-fgnu-unique`` — would otherwise be
+    reported as a plain compatible addition, missing the dlclose-inhibition /
+    process-wide-uniqueness risk. Because enabling the flag flips many symbols at
+    once, this fires **once** per release, at the library level: only when the
+    old side exported *no* unique symbols and the new side introduces one.
+    """
+    if any(s.binding == SymbolBinding.UNIQUE for s in old_syms.values()):
+        return []  # already non-unloadable; adding more changes nothing
+    added_unique = sorted(
+        name
+        for name, s in new_syms.items()
+        if s.binding == SymbolBinding.UNIQUE and name not in old_syms
+    )
+    if not added_unique:
+        return []
+    first = added_unique[0]
+    suffix = f" (+{len(added_unique) - 1} more)" if len(added_unique) > 1 else ""
+    return [
+        make_change(
+            ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=first,
+            name=f"{first}{suffix}",
+            old="(no GNU_UNIQUE exports)",
+            new=f"{len(added_unique)} GNU_UNIQUE export(s)",
+        )
+    ]
 
 
 def _check_ifunc_type_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:

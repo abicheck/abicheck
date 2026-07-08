@@ -272,6 +272,14 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
     ChangeKind.VTABLE_THUNK_SET_CHANGED,
     ChangeKind.VTT_SLOT_COUNT_CHANGED,
+    # G23 Phase D — ecosystem detectors (tests/test_g23_phase_d.py)
+    ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI,
+    ChangeKind.LONG_DOUBLE_ABI_CHANGED,
+    ChangeKind.KABI_SYMBOL_REMOVED,
+    ChangeKind.KABI_SYMBOL_ADDED,
+    ChangeKind.KABI_CRC_CHANGED,
+    ChangeKind.KABI_EXPORT_TYPE_CHANGED,
+    ChangeKind.KABI_SYMBOL_NAMESPACE_CHANGED,
     ChangeKind.ABI_SURFACE_EXPLOSION,
     # SYCL Plugin Interface (ADR-020b)
     ChangeKind.SYCL_IMPLEMENTATION_CHANGED,

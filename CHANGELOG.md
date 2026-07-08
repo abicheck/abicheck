@@ -11,55 +11,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **CPython extension-module `abi3` / Limited-API support (G14).** abicheck now
-  recognises CPython extension modules — built with Cython, pybind11, nanobind,
-  or hand-written C — and checks the contract the export table cannot see: the
-  CPython C-API symbols the module *imports* from libpython, plus its
-  stable-ABI (`abi3` / `Py_LIMITED_API`) conformance. `abicheck scan --binary
-  ext.so --abi3 3.9` audits a single module against a target `Py_LIMITED_API`
-  floor; the violations are advisory by default and gate CI when promoted with
-  `--crosscheck python_stable_abi_violation=error`. `compare` gains a
-  deployment-`RISK` change kind for
-  `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
-  ABI, e.g. an internal `_Py*` symbol). Classification uses a vendored,
-  authoritative copy of CPython's `Misc/stable_abi.toml` (≈970 symbols), so the
-  `abi_only` `_Py*` symbols the Limited-API macros expand to (`_Py_Dealloc`,
-  `_PyObject_GC_New`, `_PyArg_*_SizeT`, `_Py_NoneStruct`, …) are correctly
-  treated as stable rather than flagged, while `PyUnstable_*` (PEP 689) is
-  flagged. `compare` also raises `python_abi3_dropped` when a module that was an
-  `abi3` build becomes version-specific (dropping every other interpreter it
-  used to support). Interpreter-*floor* conformance is checked
-  by `scan --abi3` (where the user supplies the floor), not at compare time,
-  since a bare `.abi3.so` carries no declared floor to judge against. Version-specific (`cpython-3XX`) modules are deliberately not
-  subject to the stable-ABI checks, so a normal per-interpreter extension never
-  false-positives. **Free-threaded (PEP 703, `Py_GIL_DISABLED`) builds** are
-  recognised from the `t` SOABI marker (`cpython-3XXt` / `cp3XXt`), correctly
-  treated as version-specific (never `abi3`, since `Py_LIMITED_API` is
-  incompatible with `Py_GIL_DISABLED`), and `compare` raises
-  `python_gil_abi_changed` when a module crosses the GIL/no-GIL boundary between
-  builds, and `python_abi3_floor_raised` when both builds carry an explicit
-  `cpXY-abi3` tag but the new declared floor is higher (`cp39-abi3` → `cp310-abi3`
-  drops CPython 3.9 users) — exact, read from the tag on both sides, no
-  min-of-imports inference. Cross-platform (ELF/PE imports, plus new Mach-O
-  undefined-symbol capture; on Windows a version-specific `pythonXY.dll` import
-  under `abi3` is flagged). See the
-  [Python Extensions](docs/user-guide/python-extensions.md) guide.
-- **`post_manifest` library — POST Python ABI-commitment checking.**
-  [POST Python](https://post-py.org/) compiles a typed subset of Python to a
-  shared library whose stable C ABI is the set of `pp_*` symbols documented in a
-  versioned JSON export manifest (`post-py build --emit-manifest`). New
-  `abicheck/post_manifest.py` provides a tolerant manifest parser and three
-  checks against POST's commitments: manifest↔binary validation (every promised
-  `pp_*`/ufunc-loop symbol is exported; ELF/PE/COFF/Mach-O), a compiler-
-  independent manifest↔manifest ABI diff (using the manifest's dtypes, which a
-  stripped binary lacks), and a `post_abi` version-bump gate.
-- **`compare --post-manifest <manifest.json>`.** Scope a binary comparison to a
-  POST manifest's committed ABI surface: only changes to the manifest's
-  `pp_*`/ufunc-loop symbols count toward the verdict, while private `__pp_*`
-  kernel churn and other non-committed exports are demoted to the filtered
-  ledger (`--show-filtered`). Type-level and internal-leak findings are always
-  kept (scoping never hides a break). Plumbed through `CompareRequest`, the
-  Tier-2 service, and the post-processing pipeline as `public_surface_allowlist`.
+- **G23 Phase D — ecosystem detectors (7 new `ChangeKind`s).**
+  - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`
+    manifests to `compare` (recognized by filename or content) to get
+    `kabi_symbol_removed` / `kabi_crc_changed` / `kabi_symbol_namespace_changed`
+    (BREAKING), `kabi_export_type_changed` (`EXPORT_SYMBOL` ↔ `EXPORT_SYMBOL_GPL`,
+    API_BREAK), and `kabi_symbol_added` (COMPATIBLE). The 5-field (namespace) and
+    4-field pre-5.4 formats are both parsed.
+  - **`long_double_abi_changed`** (BREAKING) — a `long double` representation
+    migration (ppc64 IBM ↔ IEEE128, or `__float128`) re-paired from a
+    removed↔added symbol pair via their demangled types; collapses the redundant
+    add/remove into one finding.
+  - **`unnamed_type_in_public_abi`** (RISK) — a newly-exported symbol embeds a
+    lambda closure (`Ul…E_`) or unnamed struct/enum (`Ut…_`), whose mangling is
+    compiler-ordering-fragile.
+- **G23-A4 refinement** — a release that newly gains `STB_GNU_UNIQUE` exports
+  (e.g. first enables `-fgnu-unique`) now reports `symbol_binding_became_unique`
+  once at the library level, catching the dlclose-inhibition risk that the
+  both-sides transition detector missed for added symbols.
+
 - **G23 Phase B1 — Itanium multi-inheritance vtable machinery (3 new
   `ChangeKind`s, all L0/binary-only).** Recovered from `.dynsym` thunk and VTT
   symbol names + sizes — no DWARF or headers, works on fully stripped binaries:

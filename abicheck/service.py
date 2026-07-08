@@ -85,6 +85,28 @@ def sniff_text_format(path: Path) -> str:
     return "unknown"
 
 
+def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
+    """Parse a Linux kernel ``Module.symvers`` manifest into a snapshot, or None.
+
+    Recognized by filename (``Module.symvers`` / ``*.symvers``) or, for a
+    generically-named file, by content (a hex-CRC + ``EXPORT_SYMBOL`` record).
+    """
+    from .symvers_metadata import looks_like_symvers, parse_symvers
+
+    name = path.name.lower()
+    by_name = name == "module.symvers" or name.endswith(".symvers")
+    try:
+        text = path.read_text("utf-8", "replace")
+    except OSError:
+        return None
+    if not (by_name or looks_like_symvers(text)):
+        return None
+    kabi = parse_symvers(text)
+    if not kabi.entries:
+        return None
+    return AbiSnapshot(library=path.name, version=version, kabi=kabi)
+
+
 def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     """Parse a bare BTF or CTF blob into a snapshot, or return None.
 
@@ -249,6 +271,12 @@ def resolve_input(
     raw_typeinfo = _resolve_raw_typeinfo(path, version)
     if raw_typeinfo is not None:
         return raw_typeinfo
+
+    # Linux kernel Module.symvers (kABI manifest) — a tab-separated text file,
+    # recognized by filename or content (G23-D1).
+    kabi_snap = _resolve_symvers(path, version)
+    if kabi_snap is not None:
+        return kabi_snap
 
     # Text-based formats
     fmt = sniff_text_format(path)

@@ -140,6 +140,7 @@
   ],
   "git_commit": null,
   "git_tag": null,
+  "kabi": null,
   "language_profile": null,
   "library": "libdemo.so",
   "macho": null,

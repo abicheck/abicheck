@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 284,
+  "count": 291,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1101,6 +1101,51 @@
       "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique"
     },
     {
+      "kind": "kabi_crc_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_crc_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_export_type_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_export_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_added",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_namespace_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_namespace_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_removed",
+      "examples": ""
+    },
+    {
       "kind": "layer_coverage_asymmetric",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1134,6 +1179,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "link_export_policy_changed",
+      "examples": ""
+    },
+    {
+      "kind": "long_double_abi_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "long_double_abi_changed",
       "examples": ""
     },
     {
@@ -2367,6 +2421,15 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "union_field_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "unnamed_type_in_public_abi",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "unnamed_type_in_public_abi",
       "examples": ""
     },
     {

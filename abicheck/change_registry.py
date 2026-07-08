@@ -1709,4 +1709,55 @@ REGISTRY = ChangeKindRegistry([
               "so a constructor compiled against the old VTT installs the wrong "
               "vptrs. Recovered from the `_ZTT` symbol size alone (no DWARF).",
        description_template="VTT size changed for '{name}': {old} → {new} bytes — virtual-base construction scaffolding changed"),
+
+    # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
+    # D3: unnamed-type leakage.
+    _E("unnamed_type_in_public_abi", _R,
+       impact="An exported symbol embeds an unnamed type in its mangled name — a "
+              "lambda closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). The "
+              "Itanium mangling of unnamed types is per-translation-unit and "
+              "compiler-ordering dependent (recompiling, or merely reordering "
+              "unrelated declarations, can renumber `{lambda#1}` → `{lambda#2}`), "
+              "so exporting one is an ABI time bomb: a rebuilt consumer can fail to "
+              "resolve the symbol. RISK / hygiene — reported when newly introduced.",
+       description_template="Unnamed type leaks into the public ABI: {name} ({detail}) — its mangled name is compiler-ordering-fragile"),
+    # D2: long-double representation change.
+    _E("long_double_abi_changed", _B,
+       impact="A function's `long double` parameter or return representation "
+              "changed — e.g. ppc64 migrating IBM double-double ↔ IEEE binary128, "
+              "or `-mlong-double-64` shrinking 80-bit x87 to 64-bit. The source "
+              "signature is unchanged, but the floating-point format differs, so "
+              "old binaries pass/return the value in the wrong size and bit layout, "
+              "silently corrupting it. Detected from the Itanium long-double "
+              "mangling token (`e`/`g`/`u9__ieee128`) on a removed↔added pair, or "
+              "from the `long double` DWARF byte size on a persisting symbol.",
+       description_template="long double ABI changed: {detail} — floating-point representation differs (symbol {old} → {new})"),
+    # D1: kABI (Module.symvers).
+    _E("kabi_symbol_removed", _B,
+       impact="A kernel-exported symbol (EXPORT_SYMBOL*) was removed from "
+              "Module.symvers. Out-of-tree modules that reference it fail to load "
+              "with 'Unknown symbol'.",
+       description_template="Kernel-exported symbol removed: {name}"),
+    _E("kabi_crc_changed", _B,
+       impact="A kernel-exported symbol's genksyms CRC changed. Even though the "
+              "symbol still exists, CONFIG_MODVERSIONS embeds the old CRC in "
+              "out-of-tree modules and the loader rejects the module ('disagrees "
+              "about version of symbol') — the type signature behind the symbol "
+              "changed.",
+       description_template="Kernel symbol CRC changed: {name} ({old} → {new}) — modversions will reject the module"),
+    _E("kabi_symbol_namespace_changed", _B,
+       impact="A kernel-exported symbol gained or moved its export namespace "
+              "(EXPORT_SYMBOL_NS*). A module that does not declare the matching "
+              "MODULE_IMPORT_NS() fails to load, so a gained/changed namespace is a "
+              "load-time break for existing modules.",
+       description_template="Kernel symbol namespace changed: {name} ({old} → {new})"),
+    _E("kabi_export_type_changed", _A,
+       impact="A kernel-exported symbol changed between EXPORT_SYMBOL and "
+              "EXPORT_SYMBOL_GPL. A non-GPL module that used a symbol now marked "
+              "GPL-only can no longer link against it — a license-gated "
+              "availability break for that class of consumer.",
+       description_template="Kernel symbol export type changed: {name} ({old} → {new})"),
+    _E("kabi_symbol_added", _C, is_addition=True,
+       impact="A new kernel-exported symbol appeared; existing modules are unaffected.",
+       description_template="New kernel-exported symbol: {name}"),
 ])

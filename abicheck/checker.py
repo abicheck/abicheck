@@ -59,8 +59,14 @@ from .diff_filtering import (  # noqa: F401
     _filter_reserved_field_renames,
     _match_root_type,
 )
+from .diff_kabi import (  # noqa: F401 — triggers detector registration
+    _diff_kabi,
+)
 from .diff_layout import (  # noqa: F401 — triggers detector registration
     _diff_layout_descriptor,
+)
+from .diff_long_double import (  # noqa: F401 — triggers detector registration
+    _diff_long_double,
 )
 from .diff_platform import (  # noqa: F401
     _diff_dwarf,
@@ -95,6 +101,9 @@ from .diff_types import (  # noqa: F401
     _diff_unions,
     _diff_var_values,
     _is_version_stamped_typedef,
+)
+from .diff_unnamed_types import (  # noqa: F401 — triggers detector registration
+    _diff_unnamed_types,
 )
 from .diff_versioning import (  # noqa: F401 — re-export for testing
     check_soname_bump_policy,

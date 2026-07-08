@@ -428,8 +428,15 @@ class SuppressRenamedPairs:
         renamed_old: dict[str, str] = {}  # old_value → new_value
         renamed_new: dict[str, str] = {}  # new_value → old_value
         rename_changes: dict[str, Change] = {}  # old_value → the rename Change
+        # LONG_DOUBLE_ABI_CHANGED re-pairs a removed↔added symbol pair (its
+        # old_value/new_value are the mangled symbols), so its redundant
+        # func_removed/func_added halves collapse into it just like a rename.
+        _pairing_kinds = (
+            ChangeKind.FUNC_LIKELY_RENAMED,
+            ChangeKind.LONG_DOUBLE_ABI_CHANGED,
+        )
         for c in changes:
-            if c.kind == ChangeKind.FUNC_LIKELY_RENAMED and c.old_value and c.new_value:
+            if c.kind in _pairing_kinds and c.old_value and c.new_value:
                 renamed_old[c.old_value] = c.new_value
                 renamed_new[c.new_value] = c.old_value
                 rename_changes[c.old_value] = c

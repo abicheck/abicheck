@@ -48,6 +48,14 @@ def _tls_sym(name: str = "tls_var") -> ElfSymbol:
     return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.TLS)
 
 
+def _sym_obj(name: str) -> ElfSymbol:
+    return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)
+
+
+def _uniq_obj(name: str) -> ElfSymbol:
+    return ElfSymbol(name=name, binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)
+
+
 def _elf(**kwargs) -> ElfMetadata:
     # The A1/A2 detectors are gated on both sides having captured ELF identity
     # (a real parse always sets machine); default it so these fixtures aren't
@@ -296,6 +304,26 @@ class TestGnuUniqueBinding:
             ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_LOST_UNIQUE in _kinds(r)
+
+    def test_newly_added_unique_export_flagged_at_library_level(self):
+        # When a release first gains GNU_UNIQUE exports (e.g. turns on
+        # -fgnu-unique), the added unique symbol isn't a both-sides transition,
+        # but the library newly becomes non-unloadable — reported once.
+        old = ElfMetadata(machine="EM_X86_64", symbols=[
+            _sym_obj("plain")])
+        new = ElfMetadata(machine="EM_X86_64", symbols=[
+            _sym_obj("plain"), _uniq_obj("inst1"), _uniq_obj("inst2")])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE in _kinds(r)
+
+    def test_added_unique_not_flagged_when_already_non_unloadable(self):
+        # If the old side already had a unique export, adding more doesn't change
+        # the library's unloadability → no new finding.
+        old = ElfMetadata(machine="EM_X86_64", symbols=[_uniq_obj("inst0")])
+        new = ElfMetadata(machine="EM_X86_64", symbols=[
+            _uniq_obj("inst0"), _uniq_obj("inst1")])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(r)
 
     def test_unique_does_not_emit_generic_binding_change(self):
         old = _elf(symbols=[

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from .pe_metadata import PeMetadata
     from .python_ext import PythonExtMetadata
     from .sycl_metadata import SyclMetadata
+    from .symvers_metadata import KabiMetadata
 
 _model_log = _logging.getLogger(__name__)
 
@@ -339,10 +340,9 @@ class AbiSnapshot:
     sycl: SyclMetadata | None = field(
         default=None
     )  # SYCL PI plugin metadata (ADR-020b)
-    python_ext: PythonExtMetadata | None = field(
+    kabi: KabiMetadata | None = field(
         default=None
-    )  # CPython extension-module facts: init export, abi3/Limited-API status,
-    # and imported CPython C-API symbols (G14). None for non-extension libraries.
+    )  # Linux kernel Module.symvers metadata (G23-D1)
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

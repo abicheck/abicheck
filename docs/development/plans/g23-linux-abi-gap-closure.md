@@ -398,7 +398,7 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 | M2 | B1 (L0 thunk/VTT diff) | 3 | M | **done** |
 | M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L | planned |
 | M4 | C (clang flag extraction) | 0 | M | planned |
-| M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | planned |
+| M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | **done** |
 
 Every milestone leaves the gates green: partition assertion, detector/docs
 coverage, doc-count-sync headline counts, FP-rate and tier-accuracy corpora

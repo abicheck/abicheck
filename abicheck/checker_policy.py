@@ -692,6 +692,26 @@ class ChangeKind(str, Enum):
     VTABLE_THUNK_SET_CHANGED = "vtable_thunk_set_changed"  # a persisting method gained/lost a vtable thunk (secondary-base override) → BREAKING
     VTT_SLOT_COUNT_CHANGED = "vtt_slot_count_changed"  # _ZTT size delta → virtual-base construction scaffolding changed → BREAKING
 
+    # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
+    # D3: an exported symbol whose mangled name embeds an unnamed type — a lambda
+    # closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). Their mangling is
+    # TU- and compiler-ordering-fragile (recompiling can renumber them), so
+    # exporting them is an ABI time bomb. Hygiene RISK, reported when newly
+    # introduced.
+    UNNAMED_TYPE_IN_PUBLIC_ABI = "unnamed_type_in_public_abi"  # → RISK
+    # D2: a function's `long double` parameter/return representation changed
+    # (ppc64 IEEE128 ↔ IBM double-double, or -mlong-double-64) — same source
+    # signature, different FP format. Detected from the Itanium long-double
+    # mangling token (e/g/u9__ieee128) on a removed↔added pair, or from the
+    # DWARF byte size on a persisting symbol.
+    LONG_DOUBLE_ABI_CHANGED = "long_double_abi_changed"  # → BREAKING
+    # D1: Linux kernel module ABI (kABI) facts from Module.symvers / genksyms.
+    KABI_SYMBOL_REMOVED = "kabi_symbol_removed"  # exported kernel symbol gone → BREAKING
+    KABI_CRC_CHANGED = "kabi_crc_changed"  # genksyms CRC changed → modversions reject the module → BREAKING
+    KABI_SYMBOL_NAMESPACE_CHANGED = "kabi_symbol_namespace_changed"  # export namespace gained/moved → module needs MODULE_IMPORT_NS → BREAKING
+    KABI_EXPORT_TYPE_CHANGED = "kabi_export_type_changed"  # EXPORT_SYMBOL ↔ EXPORT_SYMBOL_GPL → API_BREAK
+    KABI_SYMBOL_ADDED = "kabi_symbol_added"  # new exported kernel symbol → COMPATIBLE
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and
