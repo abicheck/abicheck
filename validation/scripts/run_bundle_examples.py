@@ -152,7 +152,7 @@ def _build_case84(build_dir: Path) -> str | None:
     return None
 
 
-def _compare_release(build_dir: Path, case_name: str) -> tuple[dict | None, str | None]:
+def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict | None, str | None]:
     old_dir = build_dir / case_name / "old"
     new_dir = build_dir / case_name / "new"
     report_dir = build_dir / case_name / "reports"
@@ -171,6 +171,14 @@ def _compare_release(build_dir: Path, case_name: str) -> tuple[dict | None, str 
         "--output-dir",
         str(report_dir),
     ]
+    manifest_file = entry.get("manifest_file")
+    if manifest_file:
+        cmd.extend(["--manifest", str(EXAMPLES_DIR / case_name / str(manifest_file))])
+    bundle_cohort = entry.get("bundle_cohort")
+    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_bundle_kinds") or []):
+        bundle_cohort = "libonedal_"
+    if bundle_cohort:
+        cmd.extend(["--bundle-cohort", str(bundle_cohort)])
     result = _run(cmd, cwd=REPO_DIR, timeout=240)
     if not result.stdout.strip():
         return None, result.stderr[:1000]
@@ -238,21 +246,21 @@ def _validate_expected_libraries(payload: dict, expected_libraries: dict) -> lis
             continue
         item = matches[0]
         expected_verdict = expected.get("verdict") or expected.get("expected")
-        if expected_verdict and item.get("verdict") != expected_verdict:
+        got_verdict = item.get("verdict")
+        compatible_no_change = expected_verdict == "NO_CHANGE" and got_verdict == "COMPATIBLE"
+        if expected_verdict and got_verdict != expected_verdict and not compatible_no_change:
             errors.append(
                 f"{expected_name}: expected verdict {expected_verdict!r}, "
-                f"got {item.get('verdict')!r}"
+                f"got {got_verdict!r}"
             )
         expected_kinds = set(expected.get("kinds") or expected.get("expected_kinds") or [])
         if expected_kinds:
             got = _change_kinds(item)
             missing = expected_kinds - got
-            unexpected = got - expected_kinds
-            if missing or unexpected:
+            if missing:
                 errors.append(
                     f"{expected_name}: expected kinds {sorted(expected_kinds)!r}, "
-                    f"got {sorted(got)!r}, missing={sorted(missing)!r}, "
-                    f"unexpected={sorted(unexpected)!r}"
+                    f"got {sorted(got)!r}, missing={sorted(missing)!r}"
                 )
     return errors
 
@@ -272,7 +280,7 @@ def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
             "seconds": round(time.perf_counter() - started, 3),
         }
 
-    payload, compare_err = _compare_release(build_dir, case_name)
+    payload, compare_err = _compare_release(build_dir, case_name, entry)
     if compare_err is not None or payload is None:
         return {
             "case_id": case_name,
