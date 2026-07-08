@@ -396,15 +396,18 @@ packs that `graph compare` / `graph explain` consume.
 #### `pr-comment` — render a sticky GitHub PR comment
 
 Renders a sticky GitHub PR-comment body from a JSON report produced by
-`compare`, `compare-release`, or `appcompat`. When `--on=never`, or `--on=changes`
-and the report has no changes, nothing is written (an empty `--output` file is
-produced) so the caller can skip posting.
+`abicheck compare` or `abicheck appcompat` (`--format json`); `compare` also
+covers release/bundle comparisons on directory/package inputs. When `--on=never`,
+or `--on=changes` and the report has no changes, nothing is written (an empty
+`--output` file is produced) so the caller can skip posting.
 
 ```
 abicheck pr-comment [OPTIONS] REPORT
 ```
 
-`REPORT` is a JSON file from `abicheck compare|compare-release|appcompat --format json`.
+`REPORT` is a JSON file from `abicheck compare` or `abicheck appcompat` run with
+`--format json` (release/bundle fan-out is handled by `compare` on directory/
+package inputs — there is no separate `compare-release` command).
 
 | Flag | Value | Default | Purpose |
 |------|-------|---------|---------|

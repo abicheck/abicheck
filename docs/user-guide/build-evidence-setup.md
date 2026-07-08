@@ -91,13 +91,14 @@ severity:                  # per-category overrides (CLI keeps only --severity-p
 scope:                     # public-surface / FP tuning (stable project properties)
   public: true
   collapse_versioned_symbols: false
-  public_symbols: ["foo_*", "bar_init"]
+  public_symbols: ["foo_init", "bar_init"]  # exact match only — globs/wildcards are not supported
 suppression:               # suppression hygiene (a project rule, inherited by CI)
   strict: true
   require_justification: true
 source:
   method: s4               # legacy S-axis escape hatch (deprecated; prefer the --depth dial)
-  graph: summary           # summary | full — L5 graph replay scope
+sources:
+  graph: summary           # summary | full — L5 source-graph detail (the key is sources.graph)
 exit_code_scheme: auto     # auto | legacy | severity (ADR-037 D12)
 ```
 
