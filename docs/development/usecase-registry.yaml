@@ -399,6 +399,7 @@ use_cases:
       modules: [
         abicheck/python_ext.py,
         abicheck/stable_abi.py,
+        abicheck/stable_abi_data.py,
         abicheck/diff_python.py,
         abicheck/cli_stable_abi.py,
       ]

@@ -185,10 +185,13 @@ def stable_abi_cmd(
     )
 
     # Without a resolvable floor the stable-symbol (above-floor) check cannot
-    # run — only private (`_Py*`) imports are caught. Say so loudly instead of
-    # exiting clean, so a `cp39-abi3` module importing a 3.11 symbol is not
-    # silently accepted (Codex review): the user must pass --abi3 to check it.
-    floor_check_skipped = abi3_floor is None and python_ext.limited_api
+    # run — only private imports are caught. This happens for ANY tagless
+    # artifact (a bare `foo.pyd` or a snapshot with no SOABI tag), not just ones
+    # whose name already says `abi3`: we cannot rule out that it is a stable-ABI
+    # build whose floor lives in the wheel tag. Treat every unresolved floor as
+    # an incomplete audit and require --abi3, so a cp39-abi3 module importing a
+    # 3.11 symbol is not silently accepted (Codex review).
+    floor_check_skipped = abi3_floor is None
 
     floor_txt = stable_abi.format_version(abi3_floor) if abi3_floor else "unset"
     click.echo(

@@ -21,7 +21,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   not-an-extension / 3 incomplete — abi3 module with no resolvable floor), and
   `compare` gains a deployment-`RISK` change kind for
   `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
-  ABI, e.g. a private `_Py*` symbol). Interpreter-*floor* conformance is checked
+  ABI, e.g. an internal `_Py*` symbol). Classification uses a vendored,
+  authoritative copy of CPython's `Misc/stable_abi.toml` (≈900 symbols), so the
+  `abi_only` `_Py*` symbols the Limited-API macros expand to (`_Py_Dealloc`,
+  `_PyObject_GC_New`, `_PyArg_*_SizeT`, `_Py_NoneStruct`, …) are correctly
+  treated as stable rather than flagged. Interpreter-*floor* conformance is checked
   by the `stable-abi` command (where the user supplies the floor via `--abi3`),
   not at compare time, since a bare `.abi3.so` carries no declared floor to
   judge against. Version-specific (`cpython-3XX`) modules are deliberately not

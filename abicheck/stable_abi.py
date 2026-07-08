@@ -25,216 +25,60 @@ a symbol outside the stable set (or one newer than its declared floor), it fails
 to load on an older interpreter with an ``undefined symbol`` error — a break the
 export-table view is blind to.
 
-This module classifies a single imported CPython symbol against the stable-ABI
-allowlist. The two signals it uses, in order of confidence:
+Classification is driven by the **authoritative** vendored membership set
+:data:`~abicheck.stable_abi_data.STABLE_ABI_SYMBOLS` (generated from CPython's
+``Misc/stable_abi.toml``), NOT a name-prefix heuristic. This matters because the
+Limited-API headers deliberately route public macros to underscore-prefixed
+``abi_only`` symbols — ``Py_DECREF`` → ``_Py_Dealloc``, ``PyObject_GC_New`` →
+``_PyObject_GC_New``, ``PyArg_ParseTuple`` (with ``PY_SSIZE_T_CLEAN``) →
+``_PyArg_ParseTuple_SizeT``, ``Py_None`` → ``&_Py_NoneStruct`` — so a ``_Py``
+prefix does NOT imply private. Membership decides:
 
-1. **Private-prefix rule (always correct).** Any symbol beginning with ``_Py``
-   (or ``_PyRuntime``) is CPython *private* API. It is never part of the
-   Limited API and is not guaranteed stable across minor releases. An ``abi3``
-   module importing one is a definite violation. This rule needs no allowlist
-   and never goes stale.
+* a symbol **in** the set is stable (at its recorded floor);
+* a ``_Py``-prefixed symbol **not** in the set is genuinely internal/private —
+  a definite ``abi3`` violation (the module reached outside the Limited API);
+* a public ``Py``-prefixed symbol **not** in the set is
+  :data:`StableAbiStatus.UNKNOWN` (advisory — likely a newer symbol than the
+  vendored data, or a typo), never a hard verdict.
 
-2. **Allowlist floor (best-effort).** ``LIMITED_API_ADDED`` maps recognised
-   stable symbols to the ``(major, minor)`` release that introduced them into
-   the Limited API. It is a *curated, refreshable subset* of CPython's
-   canonical ``Doc/data/stable_abi.dat`` — enough to compute a useful minimum
-   interpreter floor without over-claiming. A public ``Py*`` symbol that is not
-   in the map is reported as :data:`StableAbiStatus.UNKNOWN` (no hard verdict),
-   so allowlist staleness produces an advisory, never a false break.
-
-To refresh the allowlist against a CPython source tree::
-
-    # Doc/data/stable_abi.dat rows: 'function','PyList_New','3.2',...
-    # keep only rows whose feature is in the Limited API and record the version.
-
-Only symbols we are confident about live in the map; leaving one out degrades
-gracefully to ``UNKNOWN`` rather than mis-stating a floor.
+Refresh the data by re-running the extraction over a newer
+``Misc/stable_abi.toml`` (see :mod:`abicheck.stable_abi_data`).
 """
 
 from __future__ import annotations
 
 from enum import Enum
 
-#: Prefixes that mark a symbol as CPython *private* API — never part of the
-#: stable ABI. ``_Py``/``_PyRuntime`` cover the internal C-API; the check is a
-#: prefix test so it stays correct as CPython grows new private symbols.
-_PRIVATE_PREFIXES: tuple[str, ...] = ("_Py", "_PyRuntime")
+from .stable_abi_data import STABLE_ABI_SYMBOLS
 
-#: ABI-only Stable-ABI *data* symbols that begin with ``_Py`` but ARE part of
-#: the Limited API: they back the singleton macros (``Py_None`` →
-#: ``&_Py_NoneStruct``, ``Py_True``/``Py_False`` → ``&_Py_TrueStruct`` /
-#: ``&_Py_FalseStruct``, ``Py_NotImplemented`` → ``&_Py_NotImplementedStruct``,
-#: ``Py_Ellipsis`` → ``&_Py_EllipsisObject``). Before CPython 3.13 an abi3
-#: extension that uses these constants imports the underlying struct symbol
-#: directly, so they must be exempted from the ``_Py*``-is-private rule to avoid
-#: false violations on clean Limited-API modules. Part of the Stable ABI since
-#: 3.2.
-_STABLE_ABI_PRIVATE_EXCEPTIONS: frozenset[str] = frozenset(
-    {
-        "_Py_NoneStruct",
-        "_Py_TrueStruct",
-        "_Py_FalseStruct",
-        "_Py_NotImplementedStruct",
-        "_Py_EllipsisObject",
-    }
-)
+#: Prefix that marks a symbol as CPython private/internal API *unless* it is in
+#: the authoritative stable set (the ``abi_only`` symbols the Limited-API macros
+#: route to are ``_Py``-prefixed but stable — see module docstring).
+_PRIVATE_PREFIXES: tuple[str, ...] = ("_Py",)
 
 #: Prefixes that mark a symbol as belonging to the CPython C-API surface at all
 #: (public or private). Anything not matching is "not CPython" and ignored by
 #: the stable-ABI check (e.g. libc, libstdc++, or the module's own helpers).
 _CPYTHON_PREFIXES: tuple[str, ...] = ("Py", "_Py")
 
+#: Symbol -> ``(major, minor)`` release it entered the Limited API. Alias of the
+#: authoritative vendored table; kept as a module name for back-compat.
+LIMITED_API_ADDED: dict[str, tuple[int, int]] = STABLE_ABI_SYMBOLS
+
 
 class StableAbiStatus(str, Enum):
     """Classification of one imported CPython symbol against the Limited API."""
 
-    #: In the stable-ABI allowlist and at/under the target floor.
+    #: In the stable-ABI set and at/under the target floor.
     STABLE = "stable"
-    #: Private CPython API (``_Py*``) — never stable. Definite violation.
+    #: CPython private/internal API (``_Py*`` not in the stable set) — a violation.
     PRIVATE = "private"
     #: Recognised stable symbol, but newer than the declared/target floor.
     ABOVE_FLOOR = "above_floor"
-    #: Public ``Py*`` symbol not in the curated allowlist — advisory only.
+    #: Public ``Py*`` symbol not in the vendored set — advisory only.
     UNKNOWN = "unknown"
     #: Not a CPython C-API symbol at all (libc, C++ runtime, module-local, …).
     NOT_CPYTHON = "not_cpython"
-
-
-# ---------------------------------------------------------------------------
-# Vendored stable-ABI allowlist (curated subset of Doc/data/stable_abi.dat)
-# ---------------------------------------------------------------------------
-# Symbol -> (major, minor) release that added it to the Limited API. The bulk
-# of the core object/type/number/list/dict/unicode API has been stable since
-# 3.2 (PEP 384); a handful of later additions are recorded with their real
-# introduction version so the minimum-floor computation is accurate. This is a
-# representative subset, not the full ~900-symbol table — unlisted public
-# symbols degrade to StableAbiStatus.UNKNOWN (see module docstring).
-
-_V32 = (3, 2)
-
-LIMITED_API_ADDED: dict[str, tuple[int, int]] = {
-    # Reference counting / lifecycle
-    "Py_IncRef": _V32,
-    "Py_DecRef": _V32,
-    # Object protocol
-    "PyObject_GetAttr": _V32,
-    "PyObject_GetAttrString": _V32,
-    "PyObject_SetAttr": _V32,
-    "PyObject_SetAttrString": _V32,
-    "PyObject_Call": _V32,
-    "PyObject_CallObject": _V32,
-    "PyObject_Repr": _V32,
-    "PyObject_Str": _V32,
-    "PyObject_IsTrue": _V32,
-    "PyObject_RichCompare": _V32,
-    "PyObject_Hash": _V32,
-    "PyObject_GetItem": _V32,
-    "PyObject_SetItem": _V32,
-    "PyObject_GetIter": _V32,
-    "PyObject_GenericGetAttr": _V32,
-    "PyObject_GenericSetAttr": _V32,
-    # Number protocol
-    "PyNumber_Add": _V32,
-    "PyNumber_Subtract": _V32,
-    "PyNumber_Multiply": _V32,
-    "PyNumber_TrueDivide": _V32,
-    "PyNumber_And": _V32,
-    "PyNumber_Or": _V32,
-    "PyNumber_Xor": _V32,
-    "PyNumber_Power": _V32,
-    "PyNumber_Long": _V32,
-    "PyNumber_Float": _V32,
-    # Long / int
-    "PyLong_FromLong": _V32,
-    "PyLong_FromLongLong": _V32,
-    "PyLong_FromUnsignedLong": _V32,
-    "PyLong_FromSsize_t": _V32,
-    "PyLong_AsLong": _V32,
-    "PyLong_AsLongLong": _V32,
-    "PyLong_AsSsize_t": _V32,
-    # Float
-    "PyFloat_FromDouble": _V32,
-    "PyFloat_AsDouble": _V32,
-    # Unicode / str
-    "PyUnicode_FromString": _V32,
-    "PyUnicode_FromStringAndSize": _V32,
-    "PyUnicode_FromFormat": _V32,
-    "PyUnicode_Concat": _V32,
-    "PyUnicode_Compare": _V32,
-    "PyUnicode_AsUTF8String": _V32,
-    "PyUnicode_DecodeUTF8": _V32,
-    # Bytes
-    "PyBytes_FromString": _V32,
-    "PyBytes_FromStringAndSize": _V32,
-    "PyBytes_AsString": _V32,
-    "PyBytes_Size": _V32,
-    # Sequence containers
-    "PyList_New": _V32,
-    "PyList_Append": _V32,
-    "PyList_GetItem": _V32,
-    "PyList_SetItem": _V32,
-    "PyList_Size": _V32,
-    "PyTuple_New": _V32,
-    "PyTuple_GetItem": _V32,
-    "PyTuple_SetItem": _V32,
-    "PyTuple_Size": _V32,
-    "PyDict_New": _V32,
-    "PyDict_GetItem": _V32,
-    "PyDict_GetItemString": _V32,
-    "PyDict_SetItem": _V32,
-    "PyDict_SetItemString": _V32,
-    "PyDict_Next": _V32,
-    # Error handling
-    "PyErr_SetString": _V32,
-    "PyErr_SetObject": _V32,
-    "PyErr_Occurred": _V32,
-    "PyErr_Clear": _V32,
-    "PyErr_Format": _V32,
-    "PyErr_NoMemory": _V32,
-    # Module / init
-    "PyModule_Create2": _V32,
-    "PyModule_AddObject": _V32,
-    "PyModule_AddIntConstant": _V32,
-    "PyModule_AddStringConstant": _V32,
-    "PyModule_GetState": _V32,
-    "PyArg_ParseTuple": _V32,
-    "PyArg_ParseTupleAndKeywords": _V32,
-    "PyArg_Parse": _V32,
-    "Py_BuildValue": _V32,
-    "PyType_Ready": _V32,
-    "PyType_GenericNew": _V32,
-    "PyCapsule_New": _V32,
-    "PyCapsule_GetPointer": _V32,
-    # ABI-only singleton data symbols (see _STABLE_ABI_PRIVATE_EXCEPTIONS) — the
-    # structs behind Py_None/Py_True/Py_False/Py_NotImplemented/Py_Ellipsis.
-    "_Py_NoneStruct": _V32,
-    "_Py_TrueStruct": _V32,
-    "_Py_FalseStruct": _V32,
-    "_Py_NotImplementedStruct": _V32,
-    "_Py_EllipsisObject": _V32,
-    # --- later Stable-ABI additions ---
-    # IMPORTANT: the value is the release the symbol entered the *Stable ABI*
-    # (Limited API), which can be LATER than the CPython version that first
-    # introduced the symbol. e.g. PyType_GetModuleByDef was added in 3.11 but
-    # only became part of the Stable ABI in 3.13 — an abi3 module targeting 3.11
-    # that imports it would fail to load there. Only high-confidence entries
-    # (cross-checked against CPython's Doc/data/stable_abi.dat) live here;
-    # anything omitted degrades to StableAbiStatus.UNKNOWN (an advisory), never a
-    # wrong floor.
-    "PyType_FromSpec": (3, 2),
-    "PyType_FromSpecWithBases": (3, 3),
-    "PyType_GetSlot": (3, 4),
-    "PyType_GetFlags": (3, 2),
-    "Py_GenericAlias": (3, 9),
-    "PyObject_CallNoArgs": (3, 10),
-    "PyModule_AddType": (3, 10),
-    "Py_NewRef": (3, 10),
-    "Py_XNewRef": (3, 10),
-    "PyType_GetName": (3, 11),
-    "PyType_GetQualName": (3, 11),
-    "PyFrame_GetVar": (3, 12),
-    "PyType_GetModuleByDef": (3, 13),
-}
 
 
 def is_cpython_symbol(name: str) -> bool:
@@ -243,15 +87,15 @@ def is_cpython_symbol(name: str) -> bool:
 
 
 def is_private_symbol(name: str) -> bool:
-    """True if *name* is CPython *private* API (``_Py*``) — never stable.
+    """True if *name* is CPython private/internal API — never part of the ABI.
 
-    The ABI-only Stable-ABI singleton data symbols (:data:`_STABLE_ABI_PRIVATE_EXCEPTIONS`,
-    e.g. ``_Py_NoneStruct``) are ``_Py``-prefixed but part of the Limited API, so
-    they are explicitly exempted here.
+    A ``_Py``-prefixed symbol is private ONLY when it is absent from the
+    authoritative stable set: the ``abi_only`` symbols the Limited-API macros
+    route to (``_Py_Dealloc``, ``_PyObject_GC_New``, ``_PyArg_*_SizeT``,
+    ``_Py_NoneStruct``, …) are ``_Py``-prefixed but stable, so they are not
+    private.
     """
-    if name in _STABLE_ABI_PRIVATE_EXCEPTIONS:
-        return False
-    return name.startswith(_PRIVATE_PREFIXES)
+    return name.startswith(_PRIVATE_PREFIXES) and name not in STABLE_ABI_SYMBOLS
 
 
 def classify(
@@ -260,19 +104,21 @@ def classify(
     """Classify one imported symbol against the stable ABI.
 
     Returns ``(status, added_version)``. ``added_version`` is the release the
-    symbol entered the Limited API when known, else ``None``.
+    symbol entered the Limited API when it is a stable symbol, else ``None``.
 
     ``abi3_floor`` is the module's declared / target ``Py_LIMITED_API`` version
-    as ``(major, minor)``. When given, a recognised stable symbol newer than the
-    floor is reported :data:`StableAbiStatus.ABOVE_FLOOR` (it would be missing on
-    an interpreter at the floor).
+    as ``(major, minor)``. When given, a stable symbol newer than the floor is
+    reported :data:`StableAbiStatus.ABOVE_FLOOR` (it would be missing on an
+    interpreter at the floor).
     """
     if not is_cpython_symbol(name):
         return StableAbiStatus.NOT_CPYTHON, None
-    if is_private_symbol(name):
-        return StableAbiStatus.PRIVATE, None
-    added = LIMITED_API_ADDED.get(name)
+    added = STABLE_ABI_SYMBOLS.get(name)
     if added is None:
+        # Not a stable symbol: a `_Py*` name is genuinely private (violation);
+        # a public `Py*` name is unknown-to-the-vendored-data (advisory).
+        if name.startswith(_PRIVATE_PREFIXES):
+            return StableAbiStatus.PRIVATE, None
         return StableAbiStatus.UNKNOWN, None
     if abi3_floor is not None and added > abi3_floor:
         return StableAbiStatus.ABOVE_FLOOR, added
@@ -282,17 +128,16 @@ def classify(
 def min_required_abi3(names: list[str]) -> tuple[int, int] | None:
     """Minimum Limited-API floor implied by *names*.
 
-    The highest ``added_version`` among the recognised stable imports: an
-    ``abi3`` module can only load on interpreters at or above this. Returns
-    ``None`` when no import is a recognised stable symbol (nothing to floor on).
-    Private (``_Py*``) imports are not floors — they are outright violations —
-    so they do not participate here.
+    The highest ``added_version`` among the stable imports: an ``abi3`` module
+    can only load on interpreters at or above this. Returns ``None`` when no
+    import is a stable symbol (nothing to floor on). Private imports are not
+    floors — they are outright violations — so they do not participate here.
     """
     floors = [
         v
         for n in names
         if not is_private_symbol(n)
-        for v in (LIMITED_API_ADDED.get(n),)
+        for v in (STABLE_ABI_SYMBOLS.get(n),)
         if v is not None
     ]
     return max(floors) if floors else None

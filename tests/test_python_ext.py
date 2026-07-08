@@ -85,10 +85,12 @@ def test_detect_extension_from_pyinit_export() -> None:
 
 
 def test_detect_only_captures_cpython_imports() -> None:
-    snap = _ext_snapshot("1.0", ["PyList_New", "malloc", "memcpy", "_PyObject_New"])
+    snap = _ext_snapshot(
+        "1.0", ["PyList_New", "malloc", "memcpy", "_PyObject_LookupSpecial"]
+    )
     assert snap.python_ext is not None
     # libc symbols dropped; both public and private CPython symbols kept.
-    assert snap.python_ext.cpython_imports == ["PyList_New", "_PyObject_New"]
+    assert snap.python_ext.cpython_imports == ["PyList_New", "_PyObject_LookupSpecial"]
 
 
 def test_detect_abi3_from_suffix() -> None:
@@ -155,7 +157,7 @@ def test_windows_abi3_pyd_compare_flags_new_private_import() -> None:
     src = "foo.cp39-abi3-win_amd64.pyd"
     old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
     new = _ext_snapshot(
-        "2.0", ["PyList_New", "_PyObject_New"], source_path=src, library=src
+        "2.0", ["PyList_New", "_PyObject_LookupSpecial"], source_path=src, library=src
     )
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
@@ -187,7 +189,7 @@ def test_extension_detected_from_imports_without_init_export() -> None:
 @pytest.mark.parametrize(
     "name,floor,expected",
     [
-        ("_PyObject_New", None, StableAbiStatus.PRIVATE),
+        ("_PyObject_LookupSpecial", None, StableAbiStatus.PRIVATE),
         ("_PyRuntime", None, StableAbiStatus.PRIVATE),
         ("PyList_New", (3, 2), StableAbiStatus.STABLE),
         ("PyType_GetName", (3, 9), StableAbiStatus.ABOVE_FLOOR),
@@ -265,7 +267,9 @@ def test_bare_major_floor_accepts_core_stable_symbols() -> None:
 
 def test_stable_abi_violation_on_new_private_import() -> None:
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
-    new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong", "_PyObject_GC_New"])
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "PyLong_FromLong", "_PyThreadState_UncheckedGet"]
+    )
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
@@ -295,11 +299,13 @@ def test_retag_to_abi3_flags_carried_over_private_import() -> None:
     # though it is not newly gained.
     old = _ext_snapshot(
         "1.0",
-        ["PyList_New", "_PyObject_GC_New"],
+        ["PyList_New", "_PyThreadState_UncheckedGet"],
         source_path="foo.cpython-311-x86_64-linux-gnu.so",
         library="foo.cpython-311-x86_64-linux-gnu.so",
     )
-    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_GC_New"])  # foo.abi3.so
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "_PyThreadState_UncheckedGet"]
+    )  # foo.abi3.so
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
@@ -319,7 +325,10 @@ def test_version_specific_module_does_not_flag_private_imports() -> None:
     src = "foo.cpython-311-x86_64-linux-gnu.so"
     old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
     new = _ext_snapshot(
-        "2.0", ["PyList_New", "_PyObject_GC_New"], source_path=src, library=src
+        "2.0",
+        ["PyList_New", "_PyThreadState_UncheckedGet"],
+        source_path=src,
+        library=src,
     )
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
@@ -330,7 +339,7 @@ def test_new_abi3_flagged_when_old_is_not_an_extension() -> None:
     # introduced/retagged as abi3 and imports a private symbol → flagged, with
     # the missing old extension treated as an empty baseline.
     old = AbiSnapshot(library="libfoo.so", version="1.0", elf=ElfMetadata())
-    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     assert old.python_ext is None
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
@@ -347,7 +356,9 @@ def test_detector_skipped_for_non_extension_pair() -> None:
 
 
 def test_python_ext_survives_serialization_roundtrip() -> None:
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName", "_PyObject_New"])
+    snap = _ext_snapshot(
+        "2.0", ["PyList_New", "PyType_GetName", "_PyObject_LookupSpecial"]
+    )
     back = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
     assert back.python_ext is not None
     assert back.python_ext.cpython_imports == snap.python_ext.cpython_imports
@@ -426,7 +437,7 @@ def test_cli_stable_abi_flags_private_import(tmp_path: object) -> None:
 
     from abicheck.cli import main
 
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
     runner = CliRunner()
@@ -443,7 +454,7 @@ def test_cli_stable_abi_all_output_formats(tmp_path: object, fmt: str) -> None:
 
     from abicheck.cli import main
 
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
     out = f"{tmp_path}/report.{fmt}"
 
@@ -515,7 +526,7 @@ def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -
     from abicheck.cli import main
 
     # Private imports are caught even without a floor.
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
     runner = CliRunner()
@@ -533,14 +544,14 @@ def test_detect_extension_from_pe_imports() -> None:
     pe = PeMetadata()
     pe.exports = [PeExport(name="PyInit_foo")]
     pe.imports = {
-        "python312.dll": ["PyList_New", "_PyObject_New"],
+        "python312.dll": ["PyList_New", "_PyObject_LookupSpecial"],
         "kernel32.dll": ["Sleep"],
     }
     snap = AbiSnapshot(library="foo.cp312-win_amd64.pyd", version="1.0", pe=pe)
     meta = detect_python_extension(snap)
     assert meta is not None
     assert meta.module_name == "foo"
-    assert meta.cpython_imports == ["PyList_New", "_PyObject_New"]
+    assert meta.cpython_imports == ["PyList_New", "_PyObject_LookupSpecial"]
     assert meta.declared_abi3 == (3, 12)
 
 
@@ -549,11 +560,11 @@ def test_detect_extension_from_macho_imports() -> None:
 
     macho = MachoMetadata()
     macho.exports = [MachoExport(name="PyInit_foo")]
-    macho.imported_symbols = ["PyList_New", "_PyObject_New", "malloc"]
+    macho.imported_symbols = ["PyList_New", "_PyObject_LookupSpecial", "malloc"]
     snap = AbiSnapshot(library="foo.abi3.so", version="1.0", macho=macho)
     meta = detect_python_extension(snap)
     assert meta is not None
-    assert meta.cpython_imports == ["PyList_New", "_PyObject_New"]
+    assert meta.cpython_imports == ["PyList_New", "_PyObject_LookupSpecial"]
     assert meta.limited_api is True
 
 
@@ -605,7 +616,7 @@ def test_detector_uses_init_symbol_when_module_name_absent() -> None:
     # imports-only extension (no PyInit export) → module_name is None; the
     # finding falls back to a stable identifier without crashing.
     old = _ext_snapshot("1.0", ["PyList_New"], init=None)
-    new = _ext_snapshot("2.0", ["PyList_New", "_PyObject_GC_New"], init=None)
+    new = _ext_snapshot("2.0", ["PyList_New", "_PyThreadState_UncheckedGet"], init=None)
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
@@ -657,7 +668,9 @@ def test_derive_on_load_when_key_absent() -> None:
     # a saved abi3 baseline is still checked at compare time.
     elf = {
         "symbols": [{"name": "PyInit_foo", "binding": "global", "sym_type": "func"}],
-        "imports": [{"name": "_PyObject_New", "binding": "global", "sym_type": "func"}],
+        "imports": [
+            {"name": "_PyObject_LookupSpecial", "binding": "global", "sym_type": "func"}
+        ],
     }
     d = {
         "library": "foo.abi3.so",
@@ -668,7 +681,7 @@ def test_derive_on_load_when_key_absent() -> None:
     snap = snapshot_from_dict(d)
     assert snap.python_ext is not None
     assert snap.python_ext.limited_api is True
-    assert "_PyObject_New" in snap.python_ext.cpython_imports
+    assert "_PyObject_LookupSpecial" in snap.python_ext.cpython_imports
 
 
 def test_explicit_null_python_ext_not_rederived() -> None:
