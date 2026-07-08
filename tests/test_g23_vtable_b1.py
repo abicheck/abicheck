@@ -21,6 +21,8 @@ binaries. All tests use synthetic ``ElfMetadata``.
 """
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -52,6 +54,10 @@ def _kinds(result) -> set[ChangeKind]:
     ("_ZThn16_N7Derived2fbEv", ("N7Derived2fbEv", "h:n16")),
     ("_ZTh8_N3Foo3barEv", ("N3Foo3barEv", "h:8")),
     ("_ZTv0_n24_N7Derived3fooEv", ("N7Derived3fooEv", "v:0_n24")),
+    # Covariant-return thunks: each of the two call-offsets carries its own
+    # h/v adjustment-kind letter (e.g. _ZTch0_h8_...).
+    ("_ZTch0_h8_N1D5cloneEv", ("N1D5cloneEv", "c:h0_h8")),
+    ("_ZTchn8_h8_N1D5cloneEv", ("N1D5cloneEv", "c:hn8_h8")),
     ("_ZThn16_7Foo3barEv", ("7Foo3barEv", "h:n16")),   # unqualified base name
     ("_ZN7Derived2fbEv", None),                          # a plain method, not a thunk
     ("some_c_function", None),
@@ -77,6 +83,14 @@ class TestThunkOffsetChanged:
         new = _snap(_sym("_ZThn16_N7Derived2fbEv"))
         r = compare(old, new)
         assert ChangeKind.VTABLE_THUNK_OFFSET_CHANGED not in _kinds(r)
+
+    def test_covariant_thunk_offset_shift_is_breaking(self):
+        # A covariant-return override thunk whose adjustment offset shifts under
+        # a base reorder must be caught (the _ZTc offset encoding carries h/v).
+        old = _snap(_sym("_ZTch0_h8_N1D5cloneEv"))
+        new = _snap(_sym("_ZTch0_h16_N1D5cloneEv"))
+        r = compare(old, new)
+        assert ChangeKind.VTABLE_THUNK_OFFSET_CHANGED in _kinds(r)
 
     def test_thunk_does_not_double_count_as_func_rename(self):
         # The thunk-offset change must be the *only* finding — the underlying
@@ -151,6 +165,10 @@ def test_b1_kinds_are_breaking():
 # ── real-binary acceptance (multi-inheritance base reorder, stripped) ────────
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="builds ELF thunks with g++ (produces Mach-O on macOS, PE on Windows)",
+)
 def test_multi_inheritance_base_reorder_stripped_is_breaking(tmp_path):
     """Acceptance fixture: growing a primary base shifts a secondary-base
     override's thunk offset while the primary _ZTV size is unchanged. This is

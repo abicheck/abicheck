@@ -165,12 +165,16 @@ def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
 # ── G23 Phase B1 — Itanium thunk / VTT surface (L0) ──────────────────────────
 # Virtual-override thunks encode a `this`-pointer adjustment in their mangled
 # name: `_ZThn<off>_<base>` (non-virtual), `_ZTv<o1>_<o2>_<base>` (virtual),
-# `_ZTc…_<base>` (covariant). The base is the target method's mangled encoding
-# (a nested-name `N…E` or an unqualified `<len><name>…`), stable across versions;
-# the offset is what shifts when a base subobject moves. Anchoring the base to
-# start with N or a digit lets one non-greedy regex split offset from base for
-# all three thunk kinds.
-_THUNK_RE = re.compile(r"^_ZT(?P<kind>[hvc])(?P<offset>[n0-9_]+?)_(?P<base>[N0-9].*)$")
+# `_ZTc<call-off><call-off>_<base>` (covariant, whose two call-offsets each carry
+# their own `h`/`v` adjustment-kind letter, e.g. `_ZTch0_h8_N1D5cloneEv`). The
+# base is the target method's mangled encoding (a nested-name `N…E` or an
+# unqualified `<len><name>…`), stable across versions; the offset is what shifts
+# when a base subobject moves. The offset alphabet therefore includes `h`/`v`
+# (for covariant) plus `n`, digits and `_`; anchoring the base to start with N or
+# a digit lets one non-greedy regex split offset from base for all three kinds.
+# `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`/`_ZTC` start with an uppercase letter, so the
+# lowercase `[hvc]` marker never collides with them.
+_THUNK_RE = re.compile(r"^_ZT(?P<kind>[hvc])(?P<offset>[hvn0-9_]+?)_(?P<base>[N0-9].*)$")
 
 
 def _parse_thunk(name: str) -> tuple[str, str] | None:
