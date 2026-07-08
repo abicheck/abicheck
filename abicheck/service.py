@@ -402,6 +402,7 @@ def run_dump(
             notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
+        _try_attach_python_ext_metadata(snap)
         return snap
     if binary_fmt == "pe":
         snap = _dump_pe(
@@ -414,7 +415,9 @@ def run_dump(
             header_backend=eff_backend,
             compile=compile,
         )
-        return _apply_native_provenance(snap, public_headers, public_header_dirs)
+        snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
+        _try_attach_python_ext_metadata(snap)
+        return snap
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -425,7 +428,9 @@ def run_dump(
             lang=lang,
             compile=compile,
         )
-        return _apply_native_provenance(snap, public_headers, public_header_dirs)
+        snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
+        _try_attach_python_ext_metadata(snap)
+        return snap
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
@@ -475,6 +480,31 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
             "SYCL metadata attached: implementation=%s, %d plugin(s)",
             sycl.implementation,
             len(sycl.plugins),
+        )
+
+
+def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
+    """Recognise a CPython extension module and attach its metadata (G14).
+
+    Cheap and side-effect-free: inspects the snapshot's already-parsed export
+    and import tables (plus the filename SOABI tag) for a ``PyInit_*`` export or
+    ``Py*`` imports. A plain C/C++ library has neither, so ``python_ext`` stays
+    ``None`` and nothing downstream changes.
+    """
+    from .python_ext import detect_python_extension
+
+    try:
+        python_ext = detect_python_extension(snap)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("Python extension detection skipped: %s", exc)
+        return
+    if python_ext is not None:
+        snap.python_ext = python_ext
+        _logger.info(
+            "CPython extension detected: module=%s, abi3=%s, %d CPython import(s)",
+            python_ext.module_name,
+            python_ext.limited_api,
+            len(python_ext.cpython_imports),
         )
 
 

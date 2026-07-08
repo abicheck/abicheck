@@ -263,6 +263,7 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
         dependent_libs=e.get("dependent_libs", []),
         reexported_libs=e.get("reexported_libs", []),
         exports=exports,
+        imported_symbols=e.get("imported_symbols", []),
         current_version=e.get("current_version", ""),
         compat_version=e.get("compat_version", ""),
         min_os_version=e.get("min_os_version", ""),
@@ -356,6 +357,27 @@ def _sycl_from_dict(d: dict[str, Any]) -> Any:
         pi_version=d.get("pi_version", ""),
         plugins=plugins,
         plugin_search_paths=d.get("plugin_search_paths", []),
+    )
+
+
+def _python_ext_from_dict(d: dict[str, Any]) -> Any:
+    from .python_ext import PythonExtMetadata
+
+    declared = d.get("declared_abi3")
+    # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
+    declared_abi3 = (
+        (int(declared[0]), int(declared[1]))
+        if isinstance(declared, (list, tuple)) and len(declared) == 2
+        else None
+    )
+    return PythonExtMetadata(
+        module_name=d.get("module_name"),
+        init_symbol=d.get("init_symbol"),
+        python_major=d.get("python_major"),
+        soabi_tag=d.get("soabi_tag"),
+        limited_api=bool(d.get("limited_api", False)),
+        declared_abi3=declared_abi3,
+        cpython_imports=list(d.get("cpython_imports", [])),
     )
 
 
@@ -497,6 +519,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     sycl_data = d.get("sycl")
     sycl = _sycl_from_dict(sycl_data) if isinstance(sycl_data, dict) else None
 
+    python_ext_data = d.get("python_ext")
+    python_ext = (
+        _python_ext_from_dict(python_ext_data)
+        if isinstance(python_ext_data, dict)
+        else None
+    )
+
     dep_data = d.get("dependency_info")
     dep_info = (
         DependencyInfo(
@@ -565,6 +594,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         enums=enums, typedefs=typedefs,
         elf=elf, pe=pe, macho=macho,
         dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl,
+        python_ext=python_ext,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,

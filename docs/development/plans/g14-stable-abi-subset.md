@@ -1,7 +1,14 @@
 # G14 — CPython Limited-API / `abi3` import-contract conformance
 
-**Registry:** `UC-WF-stable-abi-subset` (`planned`)
+**Registry:** `UC-WF-stable-abi-subset` (`complete`)
 **Effort:** M · **Risk:** low
+**Status:** Done. `abicheck/python_ext.py` recognises extension modules
+(Cython/pybind11/nanobind/C) and captures their imported CPython C-API surface;
+`abicheck/stable_abi.py` classifies each import against the Limited-API
+allowlist; `abicheck/diff_python.py` raises `PYTHON_STABLE_ABI_VIOLATION` /
+`PYTHON_ABI_FLOOR_RAISED` on compare; and `abicheck stable-abi ext.so --abi3 3.9`
+(`abicheck/cli_stable_abi.py`) audits a single module. See
+[Python Extensions (abi3)](../../user-guide/python-extensions.md).
 
 ## Problem
 
@@ -27,13 +34,13 @@ Empirically confirmed (cryptography 42.0.8 → 43.0.3, both `cp39-abi3`):
 
 ## Goal & acceptance criteria
 
-- [ ] A check that enumerates an extension's **imported** CPython C-API symbols
+- [x] A check that enumerates an extension's **imported** CPython C-API symbols
       and classifies each against a stable-ABI allowlist for a target
       `Py_LIMITED_API` version.
-- [ ] An imported symbol outside the `abi3` set (or newer than the declared
+- [x] An imported symbol outside the `abi3` set (or newer than the declared
       floor) is reported as a deployment-`RISK`/`BREAKING` finding that reaches
       the verdict and JSON/SARIF — not silently `COMPATIBLE`.
-- [ ] A clean `abi3` extension passes; a `--no-limited-api` extension that
+- [x] A clean `abi3` extension passes; a `--no-limited-api` extension that
       imports a non-stable symbol is flagged.
 
 ## Design

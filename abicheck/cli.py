@@ -1916,6 +1916,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_scan,  # noqa: F401  — registers scan
+    cli_stable_abi,  # noqa: F401  — registers stable-abi
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
     cli_suggest,  # noqa: F401  — registers suggest-suppressions
     cli_surface,  # noqa: F401  — registers surface-report

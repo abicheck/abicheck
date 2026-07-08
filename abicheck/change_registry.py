@@ -1545,4 +1545,28 @@ REGISTRY = ChangeKindRegistry([
               "by-value users are miscompiled. Recovered from the ELF symbol size without "
               "DWARF — the binary-only analogue of TYPE_BASE_CHANGED.",
        description_template="RTTI typeinfo for '{name}' changed size: {old} → {new} bytes ({detail}). The base-class shape changed, which shifts this-pointer adjustments, member offsets, and the vtable. Detected from the ELF symbol size without debug info."),
+
+    # ── CPython extension modules (abi3 / Py_LIMITED_API) ─────────────────────
+    _E("python_stable_abi_violation", _R,
+       impact="A stable-ABI (`abi3` / `Py_LIMITED_API`) CPython extension module — "
+              "produced by Cython, pybind11, nanobind, or a hand-written C "
+              "extension — gained an import of a CPython C-API symbol that is not "
+              "part of the Limited API (typically a private `_Py*` symbol). The "
+              "module still exports only `PyInit_<mod>`, so the export-table view "
+              "sees no change, but the module now links a symbol outside its abi3 "
+              "promise. On an interpreter built without that symbol exported it "
+              "fails to import with an `undefined symbol` error. Verdict is a "
+              "deployment RISK: whether it breaks depends on the target "
+              "interpreter, not on the module's own consumers.",
+       description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}"),
+    _E("python_abi_floor_raised", _R,
+       impact="A stable-ABI (`abi3`) CPython extension module's minimum required "
+              "interpreter version rose: the new build imports Limited-API "
+              "symbols introduced in a later CPython minor than the old build "
+              "did. The module can no longer be imported on the older "
+              "interpreters it previously supported (`undefined symbol` at load). "
+              "The wheel still tags itself `abi3`, so nothing in the export table "
+              "or wheel filename reveals the raised floor — a deployment RISK for "
+              "consumers pinned to an older Python.",
+       description_template="abi3 extension '{name}' raised its CPython floor: {old} → {new}"),
 ])

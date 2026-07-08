@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 269,
+  "count": 271,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1377,6 +1377,24 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "public_typedef_target_changed",
+      "examples": ""
+    },
+    {
+      "kind": "python_abi_floor_raised",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "python_abi_floor_raised",
+      "examples": ""
+    },
+    {
+      "kind": "python_stable_abi_violation",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "python_stable_abi_violation",
       "examples": ""
     },
     {

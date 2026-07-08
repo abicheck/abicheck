@@ -114,6 +114,7 @@
   "parsed_with_build_context": false,
   "pe": null,
   "platform": null,
+  "python_ext": null,
   "schema_version": 8,
   "scope_fallback": null,
   "source_path": null,

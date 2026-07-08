@@ -1,0 +1,224 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""CLI — ``stable-abi`` command (CPython Limited-API / ``abi3`` audit, G14).
+
+Audits a single CPython extension module (Cython, pybind11, nanobind, or a
+hand-written C extension) against the stable-ABI contract: it enumerates the
+CPython C-API symbols the module **imports** from ``libpython`` and flags any
+that are outside the Limited API for a target ``Py_LIMITED_API`` floor. This is
+the compatibility surface the export table cannot see — an ``abi3`` module
+exports essentially just ``PyInit_<mod>``, but importing a private ``_Py*``
+symbol (or one newer than its declared floor) makes it fail to import on an
+older interpreter with an ``undefined symbol`` error.
+
+    abicheck stable-abi ext.abi3.so --abi3 3.9
+
+Split out of :mod:`abicheck.cli` per the "Adding a new top-level command"
+convention; imported for side-effect at the bottom of :mod:`abicheck.cli` so the
+``@main.command("stable-abi")`` decorator runs.
+
+Exit codes: ``0`` = clean (all imports within the target stable ABI), ``1`` =
+one or more non-stable imports found, ``2`` = the input is not a recognisable
+CPython extension module.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import click
+
+from . import stable_abi
+from .checker_policy import ChangeKind, compute_verdict
+from .checker_types import Change, DiffResult
+from .cli import _write_or_echo, main
+from .diff_helpers import make_change
+from .stable_abi import StableAbiStatus
+
+_EXIT_VIOLATIONS = 1
+_EXIT_NOT_EXTENSION = 2
+
+
+def _audit_imports(
+    module_name: str,
+    cpython_imports: list[str],
+    abi3_floor: tuple[int, int] | None,
+) -> tuple[list[Change], list[str]]:
+    """Classify a module's CPython imports → (findings, unknown symbols).
+
+    Emits at most two aggregated :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION`
+    findings — one for private (``_Py*``) imports, one for imports newer than the
+    target floor — so a SARIF/JUnit consumer sees distinct, actionable rows
+    without one line per symbol. Public symbols not in the curated allowlist are
+    returned separately as *advisory* unknowns (never a hard finding, since the
+    allowlist is a subset and may lag CPython).
+    """
+    private: list[str] = []
+    above_floor: list[str] = []
+    unknown: list[str] = []
+    for name in cpython_imports:
+        status, added = stable_abi.classify(name, abi3_floor)
+        if status is StableAbiStatus.PRIVATE:
+            private.append(name)
+        elif status is StableAbiStatus.ABOVE_FLOOR:
+            above_floor.append(
+                f"{name} (added {stable_abi.format_version(added)})"
+                if added is not None
+                else name
+            )
+        elif status is StableAbiStatus.UNKNOWN:
+            unknown.append(name)
+
+    findings: list[Change] = []
+    if private:
+        findings.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                detail=", ".join(sorted(private)),
+                new_value=sorted(private),
+            )
+        )
+    if above_floor:
+        findings.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                detail=", ".join(sorted(above_floor)),
+                new_value=sorted(above_floor),
+            )
+        )
+    return findings, sorted(unknown)
+
+
+@main.command("stable-abi")
+@click.argument("ext", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--abi3",
+    "abi3",
+    default=None,
+    help="Target Py_LIMITED_API floor, e.g. `3.9`. Imports newer than this are "
+    "flagged even when they are stable-ABI symbols. Defaults to the module's "
+    "own declared floor (from its SOABI tag) when omitted.",
+)
+@click.option(
+    "-f",
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "markdown", "sarif", "junit"]),
+    default="markdown",
+    show_default=True,
+    help="Output format for the audit findings.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write the report here (default: stdout).",
+)
+@click.option(
+    "--policy",
+    default="strict_abi",
+    show_default=True,
+    help="Built-in policy profile for verdict classification.",
+)
+def stable_abi_cmd(
+    ext: Path,
+    abi3: str | None,
+    fmt: str,
+    output: Path | None,
+    policy: str,
+) -> None:
+    """Audit a CPython extension's imported C-API against the stable ABI (abi3).
+
+    EXT is a compiled extension module (``.so`` / ``.pyd`` / ``.dylib``) or a
+    saved abicheck snapshot of one.
+    """
+    from .cli_resolve import _resolve_input
+
+    snap = _resolve_input(ext, [], [], version="", lang="c++")
+
+    python_ext = snap.python_ext
+    if python_ext is None or not python_ext.is_extension:
+        click.echo(
+            f"{ext}: not a recognisable CPython extension module "
+            f"(no PyInit_* export and no CPython C-API imports).",
+            err=True,
+        )
+        raise SystemExit(_EXIT_NOT_EXTENSION)
+
+    # Target floor: explicit --abi3 wins, else the module's own declared floor.
+    abi3_floor: tuple[int, int] | None = None
+    if abi3 is not None:
+        abi3_floor = stable_abi.parse_abi3_version(abi3)
+        if abi3_floor is None:
+            raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
+    else:
+        abi3_floor = python_ext.declared_abi3
+
+    module_name = python_ext.module_name or python_ext.init_symbol or ext.name
+    findings, unknown = _audit_imports(
+        module_name, python_ext.cpython_imports, abi3_floor
+    )
+
+    floor_txt = stable_abi.format_version(abi3_floor) if abi3_floor else "unset"
+    click.echo(
+        f"stable-abi: {module_name} — {len(python_ext.cpython_imports)} CPython "
+        f"import(s), target abi3 floor {floor_txt}, "
+        f"{len(findings)} finding(s), {len(unknown)} unknown symbol(s).",
+        err=True,
+    )
+    if unknown:
+        click.echo(
+            "  advisory (public Py* imports not in the curated allowlist; may be "
+            "stable — refresh the allowlist to confirm): "
+            + ", ".join(unknown[:20])
+            + (" …" if len(unknown) > 20 else ""),
+            err=True,
+        )
+
+    result = DiffResult(
+        old_version=snap.version or "",
+        new_version=snap.version or "",
+        library=snap.library or str(ext),
+        changes=findings,
+        verdict=compute_verdict(findings, policy=policy),
+        policy=policy,
+    )
+
+    if fmt == "json":
+        from .reporter import to_json
+
+        text = to_json(result)
+    elif fmt == "markdown":
+        from .reporter import to_markdown
+
+        text = to_markdown(result)
+    elif fmt == "sarif":
+        from .sarif import to_sarif_str
+
+        text = to_sarif_str(result)
+    else:  # junit
+        from .junit_report import to_junit_xml
+
+        text = to_junit_xml(result)
+
+    _write_or_echo(output, text)
+
+    raise SystemExit(_EXIT_VIOLATIONS if findings else 0)

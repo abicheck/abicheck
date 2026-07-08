@@ -645,6 +645,13 @@ class ChangeKind(str, Enum):
     VTABLE_SLOT_COUNT_CHANGED = "vtable_slot_count_changed"  # _ZTV size delta → virtual method add/remove/reorder → BREAKING
     RTTI_INHERITANCE_CHANGED = "rtti_inheritance_changed"  # _ZTI size delta → base-class set/shape changed → BREAKING
 
+    # ── CPython extension modules (Cython / pybind11 / C-ext, abi3) ───────────
+    # Emitted by diff_python.py for a stable-ABI (abi3 / Py_LIMITED_API)
+    # extension module. The compatibility contract for such a module is the set
+    # of CPython C-API symbols it IMPORTS from libpython, not its exports (G14).
+    PYTHON_STABLE_ABI_VIOLATION = "python_stable_abi_violation"  # abi3 module gained an import outside the stable ABI (e.g. a private _Py* symbol) → won't load on a Limited-API interpreter → RISK
+    PYTHON_ABI_FLOOR_RAISED = "python_abi_floor_raised"  # abi3 module's minimum CPython interpreter floor rose → drops older interpreters it used to load on → RISK
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and
