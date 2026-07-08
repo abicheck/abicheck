@@ -32,7 +32,9 @@ convention; imported for side-effect at the bottom of :mod:`abicheck.cli` so the
 
 Exit codes: ``0`` = clean (all imports within the target stable ABI), ``1`` =
 one or more non-stable imports found, ``2`` = the input is not a recognisable
-CPython extension module.
+CPython extension module, ``3`` = incomplete audit — an ``abi3`` module was
+given without a resolvable target floor (pass ``--abi3`` so the stable-symbol
+floor check can run and the module can be certified).
 """
 
 from __future__ import annotations
@@ -50,6 +52,9 @@ from .stable_abi import StableAbiStatus
 
 _EXIT_VIOLATIONS = 1
 _EXIT_NOT_EXTENSION = 2
+#: abi3 module audited without a resolvable target floor — the floor check could
+#: not run, so the audit is incomplete and cannot certify the module.
+_EXIT_NO_FLOOR = 3
 
 
 def _audit_imports(
@@ -194,10 +199,11 @@ def stable_abi_cmd(
     )
     if floor_check_skipped:
         click.echo(
-            "  WARNING: no target floor — an abi3 module carries no minor in its "
-            "filename, so the stable-symbol floor check was SKIPPED (only private "
-            "_Py* imports were checked). Pass --abi3 <version> (e.g. the wheel's "
-            "cpXY-abi3 tag) to verify imported symbols against that floor.",
+            "  ERROR: no target floor — an abi3 module carries no minor in its "
+            "filename, so the stable-symbol floor check could NOT run (only "
+            "private _Py* imports were checked). The audit is INCOMPLETE and "
+            "cannot certify the module (exit 3). Pass --abi3 <version> (e.g. the "
+            "wheel's cpXY-abi3 tag) to verify imported symbols against that floor.",
             err=True,
         )
     if unknown:
@@ -237,4 +243,13 @@ def stable_abi_cmd(
 
     _write_or_echo(output, text)
 
-    raise SystemExit(_EXIT_VIOLATIONS if findings else 0)
+    # Exit precedence: a concrete violation (1) outranks an incomplete audit.
+    # When the module is abi3 but no target floor could be resolved, the
+    # stable-symbol floor check did not run — the audit is INCOMPLETE and cannot
+    # certify the module, so it must NOT exit 0 (a CI job would otherwise accept
+    # a cp39-abi3 artifact importing a 3.11 symbol). Fail with a distinct code.
+    if findings:
+        raise SystemExit(_EXIT_VIOLATIONS)
+    if floor_check_skipped:
+        raise SystemExit(_EXIT_NO_FLOOR)
+    raise SystemExit(0)

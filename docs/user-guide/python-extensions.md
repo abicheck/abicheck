@@ -61,8 +61,10 @@ allowlist for the target `Py_LIMITED_API` floor:
 The floor comes from `--abi3`, or from the module's own SOABI tag when omitted.
 
 Exit codes: `0` = clean, `1` = one or more violations, `2` = the input is not a
-recognisable extension module. Wire it into CI to gate a wheel before you ship
-it.
+recognisable extension module, `3` = **incomplete** — an `abi3` module was given
+without a resolvable target floor, so the stable-symbol floor check could not run
+and the module cannot be certified (pass `--abi3 <floor>`). Wire it into CI to
+gate a wheel before you ship it; both `1` and `3` fail the gate.
 
 ### 2. Compare two versions — `compare`
 

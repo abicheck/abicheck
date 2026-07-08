@@ -18,7 +18,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   stable-ABI (`abi3` / `Py_LIMITED_API`) conformance. A new
   `abicheck stable-abi ext.so --abi3 3.9` command audits a single module against
   a target `Py_LIMITED_API` floor (exit 0 clean / 1 violations / 2
-  not-an-extension), and `compare` gains a deployment-`RISK` change kind for
+  not-an-extension / 3 incomplete — abi3 module with no resolvable floor), and
+  `compare` gains a deployment-`RISK` change kind for
   `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
   ABI, e.g. a private `_Py*` symbol). Interpreter-*floor* conformance is checked
   by the `stable-abi` command (where the user supplies the floor via `--abi3`),

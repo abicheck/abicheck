@@ -480,16 +480,22 @@ def test_cli_stable_abi_warns_when_no_floor_on_abi3_module(tmp_path: object) -> 
     from abicheck.cli import main
 
     # abi3 module, no --abi3: the stable-symbol floor check cannot run. A newer
-    # stable import (PyType_GetName, 3.11) is not flagged, but the command must
-    # NOT pass silently — it warns that --abi3 is needed (Codex review).
+    # stable import (PyType_GetName, 3.11) is not flagged, but the audit is
+    # INCOMPLETE and must fail (exit 3), not pass silently — otherwise CI would
+    # accept a cp39-abi3 artifact importing a 3.11 symbol (Codex review).
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
     runner = CliRunner()
     result = runner.invoke(main, ["stable-abi", path])
-    assert result.exit_code == 0, result.output
-    assert "SKIPPED" in result.output
+    assert result.exit_code == 3, result.output
+    assert "INCOMPLETE" in result.output
     assert "--abi3" in result.output
+
+    # Supplying --abi3 lets the floor check run: PyType_GetName (3.11) > 3.9 →
+    # a real violation (exit 1), and at 3.12 it is clean (exit 0).
+    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"]).exit_code == 1
+    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.12"]).exit_code == 0
 
 
 def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -> None:
