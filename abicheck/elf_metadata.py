@@ -167,10 +167,12 @@ class ElfMetadata:
     # ── Static-TLS drift (G23-A1) ────────────────────────────────────────
     # DF_STATIC_TLS in DT_FLAGS: the library uses the static (initial/local-exec)
     # TLS model and can no longer be reliably dlopen()ed. ``has_tls_symbols`` is
-    # True when the dynamic symbol table carries any STT_TLS entry (defined OR
-    # undefined import) — an initial-exec reference to an external __thread var
-    # sets DF_STATIC_TLS with no local TLS definitions, and that import-only case
-    # is exactly as dlopen-hostile, so the suppression guard must consider it.
+    # True when the library participates in TLS at all — set from *either* a
+    # dynamic STT_TLS entry (defined OR an undefined `extern __thread` import) or
+    # a PT_TLS program-header segment (which also covers hidden/local __thread
+    # variables that never reach .dynsym). Both the import-only and hidden-local
+    # cases are just as dlopen-hostile, so the DF_STATIC_TLS suppression guard
+    # must consider all of them.
     has_static_tls: bool = False
     has_tls_symbols: bool = False
 
@@ -432,6 +434,13 @@ def _parse_segments(
             _process_segment(seg, meta, so_path)
             if seg.header.p_type == "PT_GNU_RELRO":
                 has_relro_segment = True
+            elif seg.header.p_type == "PT_TLS":
+                # A PT_TLS segment means the object defines TLS storage of its
+                # own — including hidden/local `__thread` variables that never
+                # appear in .dynsym. Used (alongside dynamic STT_TLS symbols) to
+                # gate the DF_STATIC_TLS finding so hidden static TLS is not
+                # suppressed (G23-A1).
+                meta.has_tls_symbols = True
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read program headers from %s: %s", so_path, exc)
 

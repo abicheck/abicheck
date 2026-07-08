@@ -227,3 +227,25 @@ def test_gnu_unique_symbol_binding() -> None:
     if not unique_syms:
         pytest.skip("toolchain did not emit STB_GNU_UNIQUE symbols")
     assert unique_syms, "expected at least one STB_GNU_UNIQUE symbol"
+
+
+@pytest.mark.integration
+def test_hidden_tls_sets_tls_participation() -> None:
+    """G23-A1: a hidden/local __thread variable produces a PT_TLS segment but no
+    dynamic STT_TLS symbol; has_tls_symbols must still be set (from PT_TLS) so
+    the static_tls_introduced guard is not falsely suppressed."""
+    src = """
+    static __thread int hidden_counter;
+    int bump(void) { return ++hidden_counter; }
+    """
+    with tempfile.TemporaryDirectory() as td:
+        so = _compile_so(
+            src, "libtls.so", Path(td),
+            extra_flags=["-ftls-model=initial-exec"],
+        )
+        meta = parse_elf_metadata(so)
+    # No dynamic STT_TLS symbol is exported for a hidden __thread var.
+    tls_dynsyms = [s for s in meta.symbols if s.sym_type == SymbolType.TLS]
+    assert not tls_dynsyms
+    # ...but PT_TLS presence still marks TLS participation.
+    assert meta.has_tls_symbols is True

@@ -233,6 +233,32 @@ class TestElfIdentity:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
+    def test_decoded_tokens_equal_but_raw_eflags_differ(self):
+        # A partially-decoded arch (MIPS) can keep the same decoded ABI token
+        # while an undecoded bit in e_flags flips (e.g. arch level). The raw
+        # e_flags fallback must still surface the drift.
+        old = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x1000)
+        new = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x9000)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED in _kinds(r)
+
+    def test_decoded_tokens_equal_and_raw_eflags_equal_no_change(self):
+        old = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400)
+        new = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
+
+
+class TestStaticTlsHiddenTls:
+    def test_pt_tls_segment_counts_as_tls_participation(self):
+        # A hidden/local __thread variable produces a PT_TLS segment but no
+        # dynamic STT_TLS symbol; has_tls_symbols set from PT_TLS must let
+        # static_tls_introduced fire (not suppressed).
+        old = ElfMetadata(has_tls_symbols=True)
+        new = ElfMetadata(has_tls_symbols=True, has_static_tls=True)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.STATIC_TLS_INTRODUCED in _kinds(r)
+
 
 # ── A4: STB_GNU_UNIQUE binding transitions ──────────────────────────────────
 

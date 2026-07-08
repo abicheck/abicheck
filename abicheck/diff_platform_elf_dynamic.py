@@ -331,19 +331,20 @@ def _diff_abi_flags(old_elf: Any, new_elf: Any) -> list[Change]:
     """
     old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
     new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
-    if old_abi or new_abi:
-        if old_abi != new_abi:
-            return [
-                make_change(
-                    ChangeKind.ELF_ABI_FLAGS_CHANGED,
-                    symbol="ELF_HEADER",
-                    old=", ".join(sorted(old_abi)) or "(none)",
-                    new=", ".join(sorted(new_abi)) or "(none)",
-                )
-            ]
-        return []
+    if old_abi != new_abi:
+        return [
+            make_change(
+                ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                symbol="ELF_HEADER",
+                old=", ".join(sorted(old_abi)) or "(none)",
+                new=", ".join(sorted(new_abi)) or "(none)",
+            )
+        ]
 
-    # Undecoded architecture: diff the raw e_flags word.
+    # Decoded tokens match (or both empty). Fall back to the raw e_flags word,
+    # which catches ABI bits we don't decode — both undecoded architectures
+    # (e.g. PPC64 ELFv1/ELFv2) and *extra* bits on partially-decoded ones
+    # (e.g. a MIPS arch-level change that keeps the same ABI token).
     old_ef = getattr(old_elf, "e_flags", 0)
     new_ef = getattr(new_elf, "e_flags", 0)
     if old_ef != new_ef:
