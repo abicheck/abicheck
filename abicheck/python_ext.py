@@ -183,12 +183,14 @@ def _detect_soabi(
 def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
     """Recognise a CPython extension module from *snap*, else ``None``.
 
-    A library qualifies when it either exports a ``PyInit_*`` / ``init*`` module
-    init function **or** imports CPython C-API symbols. Both catch the same set
-    of Cython/pybind11/nanobind/C extensions from different angles; requiring
-    only one keeps stripped-init or statically-linked-libpython edge cases in
-    scope while never matching an ordinary C/C++ library (no ``Py*`` imports and
-    no init export).
+    A library qualifies when it exports the **unambiguous** Python-3
+    ``PyInit_*`` init function **or** imports CPython C-API symbols. The
+    Python-2 ``init<mod>`` pattern is deliberately NOT sufficient on its own: it
+    is far too broad — an ordinary C library exporting ``initialize`` /
+    ``init_foo`` would match — so it only counts when corroborated by actual
+    ``Py*`` imports. This keeps stripped-init (Py3) and statically-linked
+    extensions in scope while never matching a non-Python library that merely
+    has an ``init`` export and no CPython imports.
     """
     imported = _iter_imported_names(snap)
     cpython_imports = sorted({n for n in imported if stable_abi.is_cpython_symbol(n)})
@@ -196,7 +198,10 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         _iter_exported_names(snap)
     )
 
-    if init_symbol is None and not cpython_imports:
+    # Py3 `PyInit_*` (python_major == 3) is unambiguous and qualifies alone. The
+    # broad Py2 `init*` pattern (python_major == 2) and the no-init case both
+    # require CPython imports as corroboration.
+    if python_major != 3 and not cpython_imports:
         return None
 
     soabi_tag, limited_api, declared_abi3 = _detect_soabi(

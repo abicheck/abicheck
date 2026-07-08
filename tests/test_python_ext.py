@@ -175,6 +175,44 @@ def test_plain_library_is_not_an_extension() -> None:
     assert detect_python_extension(snap) is None
 
 
+def test_init_export_alone_is_not_an_extension() -> None:
+    # A non-Python C library exporting `initialize` (matches the broad Py2
+    # `init*` pattern) with NO Py* imports must NOT be treated as an extension.
+    elf = ElfMetadata()
+    elf.symbols = [
+        ElfSymbol(
+            name="initialize", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
+    ]
+    elf.imports = [
+        ElfImport(name="malloc", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+    ]
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", elf=elf)
+    assert detect_python_extension(snap) is None
+
+
+def test_python2_init_requires_cpython_imports() -> None:
+    # `initfoo` alone → not an extension; with a Py* import → a Py2 extension.
+    elf = ElfMetadata()
+    elf.symbols = [
+        ElfSymbol(
+            name="initfoo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
+    ]
+    snap = AbiSnapshot(library="foo.so", version="1.0", elf=elf)
+    assert detect_python_extension(snap) is None
+
+    elf.imports = [
+        ElfImport(
+            name="PyList_New", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
+    ]
+    snap2 = AbiSnapshot(library="foo.so", version="1.0", elf=elf)
+    meta = detect_python_extension(snap2)
+    assert meta is not None
+    assert meta.python_major == 2
+
+
 def test_extension_detected_from_imports_without_init_export() -> None:
     # A stripped or statically-linked init still leaves the Py* import surface.
     snap = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"], init=None)
