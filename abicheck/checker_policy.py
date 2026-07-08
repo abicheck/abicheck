@@ -683,6 +683,15 @@ class ChangeKind(str, Enum):
     SYMBOL_BINDING_BECAME_UNIQUE = "symbol_binding_became_unique"  # → RISK
     SYMBOL_BINDING_LOST_UNIQUE = "symbol_binding_lost_unique"  # → RISK
 
+    # ── G23 Phase B1 — Itanium multi-inheritance vtable machinery (L0) ───────
+    # Recovered from .dynsym thunk / VTT symbol names + sizes, no DWARF/headers.
+    # These catch multi-inheritance / virtual-base breaks that the primary-vtable
+    # _ZTV size diff (VTABLE_SLOT_COUNT_CHANGED) cannot see — e.g. a base reorder
+    # that shifts this-adjustment thunk offsets without changing the slot count.
+    VTABLE_THUNK_OFFSET_CHANGED = "vtable_thunk_offset_changed"  # this-adjustment baked into old vtables now wrong → BREAKING
+    VTABLE_THUNK_SET_CHANGED = "vtable_thunk_set_changed"  # a persisting method gained/lost a vtable thunk (secondary-base override) → BREAKING
+    VTT_SLOT_COUNT_CHANGED = "vtt_slot_count_changed"  # _ZTT size delta → virtual-base construction scaffolding changed → BREAKING
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

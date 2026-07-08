@@ -268,6 +268,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.ELF_OSABI_CHANGED,
     ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
     ChangeKind.SYMBOL_BINDING_LOST_UNIQUE,
+    # G23 Phase B1 — Itanium thunk/VTT machinery (tests/test_g23_vtable_b1.py)
+    ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
+    ChangeKind.VTABLE_THUNK_SET_CHANGED,
+    ChangeKind.VTT_SLOT_COUNT_CHANGED,
     ChangeKind.ABI_SURFACE_EXPLOSION,
     # SYCL Plugin Interface (ADR-020b)
     ChangeKind.SYCL_IMPLEMENTATION_CHANGED,

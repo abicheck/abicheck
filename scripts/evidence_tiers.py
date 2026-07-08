@@ -97,6 +97,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "python_abi3_dropped": "L0",
     "python_gil_abi_changed": "L0",
     "python_abi3_floor_raised": "L0",
+    # G23 Phase B1 — Itanium thunk / VTT surface, from .dynsym names/sizes alone.
+    "vtable_thunk_offset_changed": "L0",
+    "vtable_thunk_set_changed": "L0",
+    "vtt_slot_count_changed": "L0",
     # G23 Phase A — Linux ELF artifact facts. All read purely from the dynamic
     # section, symbol table, ELF header, or .note.gnu.property — no DWARF/headers.
     "static_tls_introduced": "L0",

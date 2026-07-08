@@ -395,7 +395,7 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 | Milestone | Contents | New kinds | Effort | Status |
 |---|---|---|---|---|
 | M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable | **done** |
-| M2 | B1 (L0 thunk/VTT diff) | 3 | M | planned |
+| M2 | B1 (L0 thunk/VTT diff) | 3 | M | **done** |
 | M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L | planned |
 | M4 | C (clang flag extraction) | 0 | M | planned |
 | M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | planned |
@@ -414,9 +414,14 @@ where applicable.
       security-policy gating for the hardening kinds, and unit tests
       (`tests/test_g23_elf_facts.py`). All AI-readiness/mypy/ruff/FP-rate/tier
       gates green.
+- [x] **Phase B1 implemented** — 3 kinds (`vtable_thunk_offset_changed`,
+      `vtable_thunk_set_changed`, `vtt_slot_count_changed`) in `diff_elf_layout.py`
+      from `.dynsym` thunk/VTT names + sizes; thunk symbols excluded from the
+      generic func surface so they don't double-count. The acceptance fixture —
+      a multi-inheritance base reorder that shifts a secondary-base override's
+      thunk offset with unchanged `_ZTV` size — is BREAKING on a **stripped**
+      pair (verified end-to-end via `abicheck compare`; `tests/test_g23_vtable_b1.py`).
 - [ ] Each remaining Phase B/D kind lands with the full shared checklist above.
-- [ ] The B1 acceptance fixture — thunk-offset shift with unchanged `_ZTV`
-      sizes — is BREAKING on a **stripped** pair (today: NO_CHANGE).
 - [ ] The B2 diamond fixture localizes the exact secondary-group slot at L1,
       and the tier-accuracy matrix shows L0 (B1) catching it coarsely —
       under-call monotonicity holds.

@@ -60,6 +60,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   ledger (`--show-filtered`). Type-level and internal-leak findings are always
   kept (scoping never hides a break). Plumbed through `CompareRequest`, the
   Tier-2 service, and the post-processing pipeline as `public_surface_allowlist`.
+- **G23 Phase B1 — Itanium multi-inheritance vtable machinery (3 new
+  `ChangeKind`s, all L0/binary-only).** Recovered from `.dynsym` thunk and VTT
+  symbol names + sizes — no DWARF or headers, works on fully stripped binaries:
+  - `vtable_thunk_offset_changed` (BREAKING) — a virtual-override thunk's
+    `this`-adjustment offset shifted (a secondary base subobject moved). Catches
+    the multi-inheritance base-reorder break that the primary-vtable
+    `vtable_slot_count_changed` misses because the `_ZTV` size is unchanged.
+  - `vtable_thunk_set_changed` (BREAKING) — a persisting method gained/lost a
+    vtable thunk (a secondary-base virtual override was added/removed).
+  - `vtt_slot_count_changed` (BREAKING) — a class's VTT (`_ZTT`) size changed
+    (virtual-base construction scaffolding changed).
+  - Virtual-override thunks (`_ZTh`/`_ZTv`/`_ZTc`) are now excluded from the
+    generic exported-function surface (`is_abi_relevant_elf_symbol`), so a
+    thunk-offset shift no longer also surfaces as a spurious
+    `func_added`/`func_removed`/`func_likely_renamed`.
+
 - **G23 Phase A — Linux ELF artifact-fact detectors (12 new `ChangeKind`s).**
   ELF metadata capture and diff rules for facts readable from the binary alone
   (L0), with no DWARF or headers required:

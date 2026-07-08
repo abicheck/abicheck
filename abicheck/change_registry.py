@@ -1676,4 +1676,37 @@ REGISTRY = ChangeKindRegistry([
               "across all DSOs) is gone; duplicate per-DSO instances may reappear. "
               "RISK.",
        description_template="Symbol binding lost GNU_UNIQUE: {name} — process-wide uniqueness guarantee removed"),
+
+    # ── G23 Phase B1 — Itanium multi-inheritance vtable machinery (L0) ───────
+    _E("vtable_thunk_offset_changed", _B,
+       impact="A virtual-override thunk's this-pointer adjustment offset changed "
+              "(e.g. `_ZThn8_` → `_ZThn16_` for the same target method). In the "
+              "Itanium C++ ABI a thunk fixes up `this` when a call arrives through "
+              "a secondary base's vtable, and the adjustment is baked into the "
+              "vtables of every already-compiled consumer. A changed offset means "
+              "a base subobject moved, so old binaries adjust `this` by the wrong "
+              "amount and corrupt memory on virtual dispatch — with no symbol "
+              "error. Recovered from the thunk symbol name alone (no DWARF), so it "
+              "is caught even on stripped binaries where the primary-vtable _ZTV "
+              "size is unchanged.",
+       description_template="Vtable thunk offset changed for {name}: {old} → {new} — a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"),
+    _E("vtable_thunk_set_changed", _B,
+       impact="A method that persists across versions gained or lost a "
+              "virtual-override thunk. A thunk appears when a class overrides a "
+              "virtual inherited through a *secondary* (multiple-inheritance) "
+              "base; its appearance/disappearance means the override was added or "
+              "removed in a secondary vtable. Because the inherited slot itself "
+              "persists, the primary-vtable _ZTV size can be unchanged, so this is "
+              "invisible to the slot-count diff. Old binaries dispatch to the "
+              "wrong target through the secondary vtable.",
+       description_template="Vtable thunk set changed for {name}: {detail} — a secondary-base override was added or removed"),
+    _E("vtt_slot_count_changed", _B,
+       impact="A class's VTT (virtual-table-table, `_ZTT`) object changed size. "
+              "The VTT is the construction scaffolding the Itanium ABI uses to "
+              "initialize the vtable pointers of virtual bases during "
+              "construction/destruction; its size encodes the number of "
+              "sub-vtables. A change means the virtual-inheritance shape changed, "
+              "so a constructor compiled against the old VTT installs the wrong "
+              "vptrs. Recovered from the `_ZTT` symbol size alone (no DWARF).",
+       description_template="VTT size changed for '{name}': {old} → {new} bytes — virtual-base construction scaffolding changed"),
 ])

@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 281,
+  "count": 284,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -2547,6 +2547,33 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "vtable_symbol_identity_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtable_thunk_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtable_thunk_offset_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtable_thunk_set_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtable_thunk_set_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtt_slot_count_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtt_slot_count_changed",
       "examples": ""
     },
     {

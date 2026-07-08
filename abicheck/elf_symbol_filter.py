@@ -103,6 +103,15 @@ def is_abi_relevant_elf_symbol(
     if name in _ELF_LINKER_ARTIFACTS:
         return False
 
+    # Virtual-override thunks (_ZTh / _ZTv / _ZTc) are compiler-generated vtable
+    # artifacts, not independent public-API symbols: their add/remove/offset
+    # churn mirrors the owning class's vtable and is owned by the L0
+    # thunk/VTT detector (diff_elf_layout, G23-B1). Excluding them here keeps a
+    # thunk-offset shift from also surfacing as a spurious func_added/removed/
+    # renamed. The detector reads raw elf.symbols, so it still sees them.
+    if name.startswith(("_ZTh", "_ZTv", "_ZTc")):
+        return False
+
     for prefix in _GCC_INTERNAL_PREFIXES:
         if name.startswith(prefix):
             return False
