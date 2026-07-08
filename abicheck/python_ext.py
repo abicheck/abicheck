@@ -64,6 +64,12 @@ _ABI3_TAG_RE = re.compile(r"(?:^|[._-])abi3(?:[._-]|$)")
 _PYINIT3_RE = re.compile(r"^PyInit_(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 _PYINIT2_RE = re.compile(r"^init(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 
+#: A Windows CPython import library. The Stable ABI links against ``python3.dll``
+#: (the version-neutral forwarder); a version-specific ``pythonXY.dll``
+#: (``python311.dll``, …) ties the module to one interpreter minor. Group 1 is
+#: the digits: ``"3"`` is the stable forwarder, anything else is version-specific.
+_PYTHON_DLL_RE = re.compile(r"^python(\d+)\.dll$", re.IGNORECASE)
+
 
 @dataclass
 class PythonExtMetadata:
@@ -102,11 +108,35 @@ class PythonExtMetadata:
     free_threaded: bool = False
     #: Imported CPython C-API symbols (``Py*`` / ``_Py*``), sorted & de-duped.
     cpython_imports: list[str] = field(default_factory=list)
+    #: Windows import DLL(s) that provide the CPython C-API imports, e.g.
+    #: ``["python3.dll"]`` (Stable-ABI forwarder) or ``["python311.dll"]``
+    #: (version-specific). Populated from the PE import table only — ELF/Mach-O
+    #: resolve ``libpython`` at load time, not via a named import library — so it
+    #: is empty on those platforms. Lets the ``abi3`` check catch a PE module that
+    #: imports stable *symbol names* but links a version-specific ``pythonXY.dll``
+    #: (which would not load on another interpreter minor).
+    cpython_dlls: list[str] = field(default_factory=list)
 
     @property
     def is_extension(self) -> bool:
         """True when this looks like a genuine CPython extension module."""
         return self.init_symbol is not None or bool(self.cpython_imports)
+
+    @property
+    def version_specific_python_dlls(self) -> list[str]:
+        """CPython import DLLs that pin the module to one interpreter minor.
+
+        The Stable ABI links against ``python3.dll`` (the version-neutral
+        forwarder); a ``pythonXY.dll`` (``python311.dll`` …) is version-specific.
+        A non-empty list on an ``abi3`` module is a violation — the module cannot
+        load on another minor regardless of which symbol *names* it imports.
+        """
+        out: list[str] = []
+        for dll in self.cpython_dlls:
+            m = _PYTHON_DLL_RE.match(dll)
+            if m and m.group(1) != "3":
+                out.append(dll)
+        return out
 
     @property
     def private_imports(self) -> list[str]:
@@ -141,6 +171,24 @@ def _iter_imported_names(snap: AbiSnapshot) -> list[str]:
     if snap.macho is not None:
         names.extend(getattr(snap.macho, "imported_symbols", []) or [])
     return names
+
+
+def _iter_cpython_dlls(snap: AbiSnapshot) -> list[str]:
+    """Windows import DLL(s) that provide CPython C-API symbols (PE only).
+
+    Reads the PE import map (``dll_name -> [funcs]``) and returns each DLL that
+    supplies at least one ``Py*`` / ``_Py*`` symbol. Empty for ELF/Mach-O, whose
+    ``libpython`` dependency is not a named import library in the same way.
+    """
+    if snap.pe is None:
+        return []
+    dlls: list[str] = []
+    for dll_name, funcs in snap.pe.imports.items():
+        if not dll_name:
+            continue
+        if any(f and stable_abi.is_cpython_symbol(f) for f in funcs):
+            dlls.append(dll_name)
+    return sorted(set(dlls))
 
 
 def _detect_init_export(names: list[str]) -> tuple[str | None, str | None, int | None]:
@@ -235,4 +283,5 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         declared_abi3=declared_abi3,
         free_threaded=free_threaded,
         cpython_imports=cpython_imports,
+        cpython_dlls=_iter_cpython_dlls(snap),
     )

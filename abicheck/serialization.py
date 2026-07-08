@@ -379,6 +379,7 @@ def _python_ext_from_dict(d: dict[str, Any]) -> Any:
         declared_abi3=declared_abi3,
         free_threaded=bool(d.get("free_threaded", False)),
         cpython_imports=list(d.get("cpython_imports", [])),
+        cpython_dlls=list(d.get("cpython_dlls", [])),
     )
 
 

@@ -729,6 +729,61 @@ def test_detect_extension_from_pe_imports() -> None:
     assert meta.declared_abi3 == (3, 12)
 
 
+def _pe_ext(dll: str, src: str = "foo.abi3.pyd") -> AbiSnapshot:
+    from abicheck.pe_metadata import PeExport, PeMetadata
+
+    pe = PeMetadata()
+    pe.exports = [PeExport(name="PyInit_foo")]
+    pe.imports = {dll: ["PyList_New", "PyLong_FromLong"], "kernel32.dll": ["Sleep"]}
+    snap = AbiSnapshot(library=src, version="1.0", pe=pe, source_path=src)
+    snap.python_ext = detect_python_extension(snap)
+    return snap
+
+
+def test_pe_captures_cpython_provider_dll() -> None:
+    snap = _pe_ext("python311.dll")
+    assert snap.python_ext is not None
+    assert snap.python_ext.cpython_dlls == ["python311.dll"]
+    assert snap.python_ext.version_specific_python_dlls == ["python311.dll"]
+
+
+def test_pe_stable_python3_dll_is_not_version_specific() -> None:
+    snap = _pe_ext("python3.dll")
+    assert snap.python_ext is not None
+    assert snap.python_ext.version_specific_python_dlls == []
+
+
+def test_abi3_pyd_linking_versioned_dll_is_a_violation() -> None:
+    # An abi3-tagged .pyd that links python311.dll cannot load on another minor,
+    # even though PyList_New/PyLong_FromLong are stable symbol names.
+    from abicheck.diff_python import audit_stable_abi_imports
+
+    snap = _pe_ext("python311.dll")
+    findings = audit_stable_abi_imports(snap.python_ext, (3, 9))
+    assert findings
+    assert any("python311.dll" in str(f.new_value) for f in findings)
+    # The version-neutral python3.dll audits clean.
+    clean = audit_stable_abi_imports(_pe_ext("python3.dll").python_ext, (3, 9))
+    assert clean == []
+
+
+def test_compare_flags_switch_to_versioned_python_dll() -> None:
+    old = _pe_ext("python3.dll")
+    new = _pe_ext("python311.dll")
+    result = compare(old, new)
+    kinds = _kinds(result)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in kinds
+
+
+def test_versioned_dll_roundtrips_through_serialization() -> None:
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+    snap = _pe_ext("python311.dll")
+    restored = snapshot_from_dict(snapshot_to_dict(snap))
+    assert restored.python_ext is not None
+    assert restored.python_ext.cpython_dlls == ["python311.dll"]
+
+
 def test_detect_extension_from_macho_imports() -> None:
     from abicheck.macho_metadata import MachoExport, MachoMetadata
 

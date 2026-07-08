@@ -99,6 +99,25 @@ def audit_stable_abi_imports(
                     new_value=sorted(group),
                 )
             )
+    # Windows: an abi3 module must link the version-neutral `python3.dll`; a
+    # version-specific `pythonXY.dll` ties it to one interpreter minor, so it
+    # fails to load elsewhere no matter how stable its imported symbol *names*
+    # are. Flag it even when every symbol is in the stable set.
+    versioned = meta.version_specific_python_dlls
+    if versioned:
+        findings.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                detail=(
+                    "links version-specific "
+                    + ", ".join(versioned)
+                    + " (abi3 requires python3.dll)"
+                ),
+                new_value=versioned,
+            )
+        )
     return findings
 
 
@@ -148,20 +167,44 @@ def _diff_stable_abi_violations(
         for s in new.cpython_imports
         if s not in baseline and stable_abi.is_nonstable_cpython_import(s)
     )
-    if not gained:
-        return []
     module = _module_symbol(new, old)
     name = new.module_name or old.module_name or "<extension>"
-    detail = ", ".join(gained)
-    return [
-        make_change(
-            ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
-            symbol=module,
-            name=name,
-            detail=detail,
-            new_value=gained,
+    changes: list[Change] = []
+    if gained:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=module,
+                name=name,
+                detail=", ".join(gained),
+                new_value=gained,
+            )
         )
-    ]
+    # Windows: the abi3 build must link the version-neutral `python3.dll`. A
+    # newly version-specific `pythonXY.dll` breaks the cross-interpreter promise
+    # even if every imported symbol name is stable. Baselined like the imports:
+    # only flag DLLs not already present on an abi3 old build.
+    dll_baseline = (
+        set(old.version_specific_python_dlls) if _is_abi3(old) else set()
+    )
+    gained_dlls = sorted(
+        d for d in new.version_specific_python_dlls if d not in dll_baseline
+    )
+    if gained_dlls:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=module,
+                name=name,
+                detail=(
+                    "links version-specific "
+                    + ", ".join(gained_dlls)
+                    + " (abi3 requires python3.dll)"
+                ),
+                new_value=gained_dlls,
+            )
+        )
+    return changes
 
 
 @registry.detector(

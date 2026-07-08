@@ -115,6 +115,15 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     `python_gil_abi_changed` risk when a module crosses the GIL/no-GIL boundary
     between builds.
 
+!!! note "Windows `abi3` must link `python3.dll`, not `pythonXY.dll`"
+    On Windows the Stable ABI links against the version-neutral `python3.dll`
+    forwarder; a version-specific `python311.dll` ties the module to one
+    interpreter minor and it will not load on another — no matter how stable its
+    imported *symbol names* are. abicheck reads the PE import table's provider
+    DLL, so an `abi3` `.pyd` that links a `pythonXY.dll` is flagged as a
+    `python_stable_abi_violation` (in both `scan --abi3` and `compare`), even
+    when every imported symbol is in the stable set.
+
 !!! note "Interpreter-*floor* drift is checked by `scan --abi3`, not `compare`"
     Proving that a raised interpreter floor drops a *supported* interpreter
     needs the module's declared `Py_LIMITED_API` floor — and a bare `.abi3.so`
