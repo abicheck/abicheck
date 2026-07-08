@@ -216,12 +216,34 @@ def stable_abi_cmd(
             err=True,
         )
 
+    # The report must reflect an incomplete audit too: an abi3/tagless module run
+    # without a resolvable floor exits 3, but if it has no concrete import
+    # findings the DiffResult would otherwise carry zero changes — a JUnit/JSON/
+    # SARIF consumer would then read the audit as passed (Codex review). Add a
+    # synthetic finding describing the incomplete state so machine outputs show
+    # it. Kept OUT of `findings` so the exit code stays 3 (incomplete), not 1.
+    report_changes = list(findings)
+    if floor_check_skipped and not findings:
+        report_changes.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                description=(
+                    f"stable-abi audit INCOMPLETE for '{module_name}': no "
+                    "Py_LIMITED_API floor could be resolved, so imported symbols "
+                    "were not verified against a stable-ABI floor. Pass --abi3 "
+                    "<version> to certify the module."
+                ),
+            )
+        )
+
     result = DiffResult(
         old_version=snap.version or "",
         new_version=snap.version or "",
         library=snap.library or str(ext),
-        changes=findings,
-        verdict=compute_verdict(findings, policy=policy),
+        changes=report_changes,
+        verdict=compute_verdict(report_changes, policy=policy),
         policy=policy,
     )
 

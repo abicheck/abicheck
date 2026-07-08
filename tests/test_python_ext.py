@@ -650,6 +650,29 @@ def test_cli_stable_abi_version_specific_requires_floor(tmp_path: object) -> Non
     assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"]).exit_code == 1
 
 
+def test_cli_stable_abi_incomplete_audit_shows_in_machine_output(
+    tmp_path: object,
+) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # An abi3 module run without --abi3 exits 3 (incomplete). The machine-readable
+    # report must reflect that — not read as passed — so a synthetic finding is
+    # added: JUnit emits a <failure>, JSON carries the incomplete change.
+    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
+    path = _write_snapshot(tmp_path, snap)
+    runner = CliRunner()
+
+    junit = runner.invoke(main, ["stable-abi", path, "-f", "junit"])
+    assert junit.exit_code == 3, junit.output
+    assert 'failures="1"' in junit.output
+
+    js = runner.invoke(main, ["stable-abi", path, "-f", "json"])
+    assert js.exit_code == 3, js.output
+    assert "INCOMPLETE" in js.output
+
+
 def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -> None:
     from click.testing import CliRunner
 

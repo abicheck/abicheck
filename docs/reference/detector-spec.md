@@ -2,278 +2,278 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (271 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (271 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
-| ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
-|---|---|---|---|---|---|
-| `abi_relevant_build_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `abi_relevant_build_flag_changed` |
-| `abi_surface_explosion` | quality | `COMPATIBLE` | `warning` | unspecified | `abi_surface_explosion` |
-| `abi_tag_changed` | breaking | `BREAKING` | `error` | L0 | `abi_tag_changed` |
-| `anon_field_changed` | breaking | `BREAKING` | `error` | unspecified | `anon_field_changed` |
-| `api_depends_on_consumer_env` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `api_depends_on_consumer_env` |
-| `atomic_qualifier_changed` | breaking | `BREAKING` | `error` | L1 | `atomic_qualifier_changed` |
-| `base_class_offset_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_offset_changed` |
-| `base_class_position_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_position_changed` |
-| `base_class_virtual_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_virtual_changed` |
-| `behavioural_default_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `behavioural_default_changed` |
-| `bit_int_width_changed` | breaking | `BREAKING` | `error` | L1 | `bit_int_width_changed` |
-| `build_context_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `build_context_changed` |
-| `build_option_reaches_public_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `build_option_reaches_public_symbol` |
-| `bundle_intra_dep_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_removed` |
-| `bundle_intra_dep_resolved_to_different_version` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_intra_dep_resolved_to_different_version` |
-| `bundle_intra_dep_signature_changed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_signature_changed` |
-| `bundle_intra_type_changed` | breaking | `BREAKING` | `error` | unspecified | `bundle_intra_type_changed` |
-| `bundle_library_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_library_added` |
-| `bundle_library_removed` | breaking | `BREAKING` | `error` | unspecified | `bundle_library_removed` |
-| `bundle_manifest_instantiation_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_manifest_instantiation_added` |
-| `bundle_manifest_instantiation_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_manifest_instantiation_removed` |
-| `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` |
-| `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` |
-| `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` |
-| `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` |
-| `char8t_migration` | breaking | `BREAKING` | `error` | L1 | `char8t_migration` |
-| `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` |
-| `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` |
-| `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` |
-| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` |
-| `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` |
-| `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` |
-| `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` |
-| `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` |
-| `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` |
-| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` |
-| `ctor_explicit_added` | api_break | `API_BREAK` | `warning` | L2 | `ctor_explicit_added` |
-| `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` |
-| `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` |
-| `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` |
-| `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` |
-| `dwarf_info_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `dwarf_info_missing` |
-| `enum_last_member_value_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `enum_last_member_value_changed` |
-| `enum_member_added` | addition | `COMPATIBLE` | `warning` | L1 | `enum_member_added` |
-| `enum_member_removed` | breaking | `BREAKING` | `error` | L1 | `enum_member_removed` |
-| `enum_member_renamed` | api_break | `API_BREAK` | `warning` | L1 | `enum_member_renamed` |
-| `enum_member_value_changed` | breaking | `BREAKING` | `error` | L1 | `enum_member_value_changed` |
-| `enum_size_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `enum_size_flag_changed` |
-| `enum_underlying_size_changed` | breaking | `BREAKING` | `error` | L1 | `enum_underlying_size_changed` |
-| `evidence_required_missing` | api_break | `API_BREAK` | `warning` | unspecified | `evidence_required_missing` |
-| `exceptions_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `exceptions_mode_changed` |
-| `executable_stack` | quality | `COMPATIBLE` | `warning` | unspecified | `executable_stack` |
-| `executable_stack_removed` | quality | `COMPATIBLE` | `warning` | L0 | `executable_stack_removed` |
-| `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L0 | `experimental_graduated` |
-| `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L0 | `experimental_removed_without_replacement` |
-| `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` |
-| `exported_symbol_source_owner_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `exported_symbol_source_owner_changed` |
-| `field_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `field_access_changed` |
-| `field_became_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_const` |
-| `field_became_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_mutable` |
-| `field_became_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_volatile` |
-| `field_bitfield_changed` | breaking | `BREAKING` | `error` | L1 | `field_bitfield_changed` |
-| `field_lost_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_const` |
-| `field_lost_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_mutable` |
-| `field_lost_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_volatile` |
-| `field_renamed` | api_break | `API_BREAK` | `warning` | L1 | `field_renamed` |
-| `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` |
-| `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` |
-| `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` |
-| `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` |
-| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` |
-| `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` |
-| `func_cv_changed` | breaking | `BREAKING` | `error` | L1 | `func_cv_changed` |
-| `func_deleted` | breaking | `BREAKING` | `error` | unspecified | `func_deleted` |
-| `func_deleted_dwarf` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_dwarf` |
-| `func_deleted_elf_fallback` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_elf_fallback` |
-| `func_language_linkage_changed` | breaking | `BREAKING` | `error` | L0 | `func_language_linkage_changed` |
-| `func_likely_renamed` | breaking | `BREAKING` | `error` | unspecified | `func_likely_renamed` |
-| `func_lost_inline` | quality | `COMPATIBLE` | `warning` | unspecified | `func_lost_inline` |
-| `func_noexcept_added` | quality | `COMPATIBLE` | `warning` | unspecified | `func_noexcept_added` |
-| `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `func_noexcept_removed` |
-| `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` |
-| `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` |
-| `func_ref_qual_changed` | breaking | `BREAKING` | `error` | unspecified | `func_ref_qual_changed` |
-| `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` |
-| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` |
-| `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` |
-| `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` |
-| `func_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_virtual_added` |
-| `func_virtual_became_pure` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_became_pure` |
-| `func_virtual_removed` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_removed` |
-| `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` |
-| `func_visibility_protected_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `func_visibility_protected_changed` |
-| `generated_file_dependency_unstable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_file_dependency_unstable` |
-| `generated_header_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_changed` |
-| `generated_header_reaches_public_api` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_reaches_public_api` |
-| `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` |
-| `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` |
-| `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` |
-| `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` |
-| `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` |
-| `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` |
-| `ifunc_introduced` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_introduced` |
-| `ifunc_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_removed` |
-| `include_graph_public_header_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `include_graph_public_header_drift` |
-| `inline_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `inline_body_changed` |
-| `inline_body_references_renamed_member` | breaking | `BREAKING` | `error` | L2 | `inline_body_references_renamed_member` |
-| `inline_function_removed` | api_break | `API_BREAK` | `warning` | L4 | `inline_function_removed` |
-| `inline_namespace_moved` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_moved` |
-| `inline_namespace_version_bumped` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_version_bumped` |
-| `instantiation_missing_from_binary` | breaking | `BREAKING` | `error` | L2 | `instantiation_missing_from_binary` |
-| `integer_model_changed` | breaking | `BREAKING` | `error` | L1 | `integer_model_changed` |
-| `internal_template_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_template_leaks_via_public_api` |
-| `internal_type_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_type_leaks_via_public_api` |
-| `layer_coverage_asymmetric` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layer_coverage_asymmetric` |
-| `layout_unverifiable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layout_unverifiable` |
-| `libcpp_abi_version_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `libcpp_abi_version_changed` |
-| `link_export_policy_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `link_export_policy_changed` |
-| `lto_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `lto_mode_changed` |
-| `macho_cpu_type_changed` | breaking | `BREAKING` | `error` | L0 | `macho_cpu_type_changed` |
-| `mandatory_template_param_added` | api_break | `API_BREAK` | `warning` | unspecified | `mandatory_template_param_added` |
-| `method_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `method_access_changed` |
-| `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` |
-| `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` |
-| `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` |
-| `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` |
-| `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` |
-| `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_added` |
-| `overload_set_rerouted` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_set_rerouted` |
-| `param_became_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_became_va_list` |
-| `param_default_value_changed` | quality | `COMPATIBLE` | `warning` | L2 | `param_default_value_changed` |
-| `param_default_value_removed` | api_break | `API_BREAK` | `warning` | L2 | `param_default_value_removed` |
-| `param_lost_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_lost_va_list` |
-| `param_pointer_level_changed` | breaking | `BREAKING` | `error` | L1 | `param_pointer_level_changed` |
-| `param_renamed` | api_break | `API_BREAK` | `warning` | unspecified | `param_renamed` |
-| `param_restrict_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `param_restrict_changed` |
-| `pe_forwarder_changed` | breaking | `BREAKING` | `error` | L0 | `pe_forwarder_changed` |
-| `pe_machine_changed` | breaking | `BREAKING` | `error` | L0 | `pe_machine_changed` |
-| `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` |
-| `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `polymorphic_type_non_virtual_dtor` |
-| `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` |
-| `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` |
-| `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` |
-| `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` |
-| `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` |
-| `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` |
-| `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` |
-| `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` |
-| `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` |
-| `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` |
-| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` |
-| `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` |
-| `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` |
-| `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` |
-| `python_stable_abi_violation` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_stable_abi_violation` |
-| `relro_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `relro_weakened` |
-| `removed_const_overload` | api_break | `API_BREAK` | `warning` | unspecified | `removed_const_overload` |
-| `return_pointer_level_changed` | breaking | `BREAKING` | `error` | unspecified | `return_pointer_level_changed` |
-| `rpath_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `rpath_changed` |
-| `rtti_for_internal_type` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `rtti_for_internal_type` |
-| `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` |
-| `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` |
-| `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` |
-| `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` |
-| `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` |
-| `soname_bump_recommended` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_recommended` |
-| `soname_bump_unnecessary` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_unnecessary` |
-| `soname_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `soname_changed` |
-| `soname_missing` | quality | `COMPATIBLE` | `warning` | L0 | `soname_missing` |
-| `source_binary_provenance_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_binary_provenance_mismatch` |
-| `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` |
-| `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` |
-| `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` |
-| `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` |
-| `standard_layout_lost` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `standard_layout_lost` |
-| `std_reexport_removed` | api_break | `API_BREAK` | `warning` | unspecified | `std_reexport_removed` |
-| `stdlib_debug_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `stdlib_debug_mode_changed` |
-| `stdlib_implementation_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `stdlib_implementation_changed` |
-| `struct_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_alignment_changed` |
-| `struct_field_offset_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_offset_changed` |
-| `struct_field_removed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_removed` |
-| `struct_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_type_changed` |
-| `struct_packing_changed` | breaking | `BREAKING` | `error` | L1 | `struct_packing_changed` |
-| `struct_packing_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `struct_packing_mode_changed` |
-| `struct_return_convention_changed` | breaking | `BREAKING` | `error` | L1 | `struct_return_convention_changed` |
-| `struct_size_changed` | breaking | `BREAKING` | `error` | L1 | `struct_size_changed` |
-| `sycl_backend_driver_req_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_backend_driver_req_changed` |
-| `sycl_implementation_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_implementation_changed` |
-| `sycl_overload_set_removed` | breaking | `BREAKING` | `error` | L0 | `sycl_overload_set_removed` |
-| `sycl_pi_entrypoint_added` | addition | `COMPATIBLE` | `warning` | unspecified | `sycl_pi_entrypoint_added` |
-| `sycl_pi_entrypoint_removed` | breaking | `BREAKING` | `error` | unspecified | `sycl_pi_entrypoint_removed` |
-| `sycl_pi_version_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_pi_version_changed` |
-| `sycl_plugin_added` | addition | `COMPATIBLE` | `warning` | unspecified | `sycl_plugin_added` |
-| `sycl_plugin_removed` | breaking | `BREAKING` | `error` | unspecified | `sycl_plugin_removed` |
-| `sycl_plugin_search_path_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_plugin_search_path_changed` |
-| `sycl_runtime_version_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `sycl_runtime_version_changed` |
-| `symbol_binding_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_binding_changed` |
-| `symbol_binding_strengthened` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_strengthened` |
-| `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_elf_visibility_changed` |
-| `symbol_leaked_from_dependency_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_leaked_from_dependency_changed` |
-| `symbol_moved_version_node` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_moved_version_node` |
-| `symbol_renamed_batch` | breaking | `BREAKING` | `error` | unspecified | `symbol_renamed_batch` |
-| `symbol_size_changed` | breaking | `BREAKING` | `error` | L0 | `symbol_size_changed` |
-| `symbol_size_changed_const_object` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_const_object` |
-| `symbol_size_changed_internal` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_internal` |
-| `symbol_type_changed` | breaking | `BREAKING` | `error` | unspecified | `symbol_type_changed` |
-| `symbol_version_alias_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_alias_changed` |
-| `symbol_version_defined_added` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_defined_added` |
-| `symbol_version_defined_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_defined_removed` |
-| `symbol_version_node_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_node_removed` |
-| `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_required_added` |
-| `symbol_version_required_added_compat` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_added_compat` |
-| `symbol_version_required_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_removed` |
-| `tag_type_renamed` | breaking | `BREAKING` | `error` | L0 | `tag_type_renamed` |
-| `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` |
-| `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` |
-| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` |
-| `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` |
-| `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` |
-| `threadsafe_statics_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `threadsafe_statics_mode_changed` |
-| `tls_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `tls_model_changed` |
-| `tls_var_size_changed` | breaking | `BREAKING` | `error` | L1 | `tls_var_size_changed` |
-| `toolchain_flag_drift` | quality | `COMPATIBLE` | `warning` | L1 | `toolchain_flag_drift` |
-| `toolchain_version_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `toolchain_version_changed` |
-| `trivially_copyable_lost` | breaking | `BREAKING` | `error` | unspecified | `trivially_copyable_lost` |
-| `type_added` | addition | `COMPATIBLE` | `warning` | unspecified | `type_added` |
-| `type_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `type_alignment_changed` |
-| `type_base_changed` | breaking | `BREAKING` | `error` | L1 | `type_base_changed` |
-| `type_became_final` | api_break | `API_BREAK` | `warning` | L2 | `type_became_final` |
-| `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` |
-| `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` |
-| `type_field_added_compatible` | addition | `COMPATIBLE` | `warning` | unspecified | `type_field_added_compatible` |
-| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` |
-| `type_field_removed` | breaking | `BREAKING` | `error` | unspecified | `type_field_removed` |
-| `type_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `type_field_type_changed` |
-| `type_kind_changed` | breaking | `BREAKING` | `error` | L1 | `type_kind_changed` |
-| `type_lost_final` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `type_lost_final` |
-| `type_removed` | breaking | `BREAKING` | `error` | L1 | `type_removed` |
-| `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` |
-| `type_visibility_changed` | breaking | `BREAKING` | `error` | unspecified | `type_visibility_changed` |
-| `type_vtable_changed` | breaking | `BREAKING` | `error` | L1 | `type_vtable_changed` |
-| `typedef_base_changed` | breaking | `BREAKING` | `error` | L1 | `typedef_base_changed` |
-| `typedef_removed` | breaking | `BREAKING` | `error` | L1 | `typedef_removed` |
-| `typedef_version_sentinel` | quality | `COMPATIBLE` | `warning` | unspecified | `typedef_version_sentinel` |
-| `undocumented_export_ratio_increased` | quality | `COMPATIBLE` | `warning` | unspecified | `undocumented_export_ratio_increased` |
-| `uninstantiated_template_removed` | api_break | `API_BREAK` | `warning` | unspecified | `uninstantiated_template_removed` |
-| `union_field_added` | addition | `COMPATIBLE` | `warning` | unspecified | `union_field_added` |
-| `union_field_removed` | breaking | `BREAKING` | `error` | L1 | `union_field_removed` |
-| `union_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `union_field_type_changed` |
-| `unspecified_return_now_named` | api_break | `API_BREAK` | `warning` | unspecified | `unspecified_return_now_named` |
-| `unversioned_exported_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unversioned_exported_symbol` |
-| `used_reserved_field` | quality | `COMPATIBLE` | `warning` | L1 | `used_reserved_field` |
-| `value_abi_trait_changed` | breaking | `BREAKING` | `error` | L1 | `value_abi_trait_changed` |
-| `var_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `var_access_changed` |
-| `var_access_widened` | quality | `COMPATIBLE` | `warning` | unspecified | `var_access_widened` |
-| `var_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_added` |
-| `var_became_const` | breaking | `BREAKING` | `error` | L1 | `var_became_const` |
-| `var_lost_const` | breaking | `BREAKING` | `error` | unspecified | `var_lost_const` |
-| `var_removed` | breaking | `BREAKING` | `error` | L0 | `var_removed` |
-| `var_type_changed` | breaking | `BREAKING` | `error` | L1 | `var_type_changed` |
-| `var_value_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `var_value_changed` |
-| `vector_abi_changed` | breaking | `BREAKING` | `error` | unspecified | `vector_abi_changed` |
-| `version_script_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `version_script_missing` |
-| `versioned_symbol_scheme_detected` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `versioned_symbol_scheme_detected` |
-| `virtual_method_added` | breaking | `BREAKING` | `error` | unspecified | `virtual_method_added` |
-| `visibility_leak` | quality | `COMPATIBLE` | `warning` | unspecified | `visibility_leak` |
-| `vptr_introduced` | breaking | `BREAKING` | `error` | unspecified | `vptr_introduced` |
-| `vtable_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_slot_count_changed` |
-| `vtable_symbol_identity_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `vtable_symbol_identity_changed` |
-| `whole_program_vtables_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `whole_program_vtables_mode_changed` |
-| `writable_executable_segment` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `writable_executable_segment` |
+| ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
+|---|---|---|---|---|---|---|
+| `abi_relevant_build_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `abi_relevant_build_flag_changed` | — |
+| `abi_surface_explosion` | quality | `COMPATIBLE` | `warning` | unspecified | `abi_surface_explosion` | — |
+| `abi_tag_changed` | breaking | `BREAKING` | `error` | L0 | `abi_tag_changed` | [case113](../examples/case113_abi_tag_changed.md) |
+| `anon_field_changed` | breaking | `BREAKING` | `error` | unspecified | `anon_field_changed` | — |
+| `api_depends_on_consumer_env` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `api_depends_on_consumer_env` | — |
+| `atomic_qualifier_changed` | breaking | `BREAKING` | `error` | L1 | `atomic_qualifier_changed` | [case116](../examples/case116_atomic_qualifier_changed.md) |
+| `base_class_offset_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_offset_changed` | [case140](../examples/case140_empty_base_optimization_lost.md) |
+| `base_class_position_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_position_changed` | — |
+| `base_class_virtual_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_virtual_changed` | — |
+| `behavioural_default_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `behavioural_default_changed` | — |
+| `bit_int_width_changed` | breaking | `BREAKING` | `error` | L1 | `bit_int_width_changed` | [case115](../examples/case115_bit_int_width_changed.md) |
+| `build_context_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `build_context_changed` | — |
+| `build_option_reaches_public_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `build_option_reaches_public_symbol` | — |
+| `bundle_intra_dep_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_removed` | — |
+| `bundle_intra_dep_resolved_to_different_version` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_intra_dep_resolved_to_different_version` | — |
+| `bundle_intra_dep_signature_changed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_signature_changed` | — |
+| `bundle_intra_type_changed` | breaking | `BREAKING` | `error` | unspecified | `bundle_intra_type_changed` | — |
+| `bundle_library_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_library_added` | — |
+| `bundle_library_removed` | breaking | `BREAKING` | `error` | unspecified | `bundle_library_removed` | — |
+| `bundle_manifest_instantiation_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_manifest_instantiation_added` | — |
+| `bundle_manifest_instantiation_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_manifest_instantiation_removed` | — |
+| `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` | — |
+| `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` | — |
+| `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` | — |
+| `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case64](../examples/case64_calling_convention_changed.md) |
+| `char8t_migration` | breaking | `BREAKING` | `error` | L1 | `char8t_migration` | [case114](../examples/case114_char8t_migration.md) |
+| `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` | [case155](../examples/case155_char_signedness_flip.md) |
+| `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` | — |
+| `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` | — |
+| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | [case105](../examples/case105_concept_tightening.md) |
+| `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` | — |
+| `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` | [case124](../examples/case124_header_constant_value_changed.md) |
+| `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` | — |
+| `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` | — |
+| `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` | [case88](../examples/case88_cpo_kind_changed.md) |
+| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` | [case83](../examples/case83_cpu_dispatch_isa_dropped.md) |
+| `ctor_explicit_added` | api_break | `API_BREAK` | `warning` | L2 | `ctor_explicit_added` | [case106](../examples/case106_ctor_became_explicit.md) |
+| `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
+| `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
+| `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
+| `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case87](../examples/case87_default_template_arg_changed.md) |
+| `dwarf_info_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `dwarf_info_missing` | — |
+| `enum_last_member_value_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `enum_last_member_value_changed` | — |
+| `enum_member_added` | addition | `COMPATIBLE` | `warning` | L1 | `enum_member_added` | [case25](../examples/case25_enum_member_added.md) |
+| `enum_member_removed` | breaking | `BREAKING` | `error` | L1 | `enum_member_removed` | [case19](../examples/case19_enum_member_removed.md), [case78](../examples/case78_task_arena_attach_tag.md) |
+| `enum_member_renamed` | api_break | `API_BREAK` | `warning` | L1 | `enum_member_renamed` | [case31](../examples/case31_enum_rename.md) |
+| `enum_member_value_changed` | breaking | `BREAKING` | `error` | L1 | `enum_member_value_changed` | [case08](../examples/case08_enum_value_change.md), [case20](../examples/case20_enum_member_value_changed.md) |
+| `enum_size_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `enum_size_flag_changed` | [case152](../examples/case152_enum_size_flag_flip.md) |
+| `enum_underlying_size_changed` | breaking | `BREAKING` | `error` | L1 | `enum_underlying_size_changed` | [case57](../examples/case57_enum_underlying_size_changed.md) |
+| `evidence_required_missing` | api_break | `API_BREAK` | `warning` | unspecified | `evidence_required_missing` | — |
+| `exceptions_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `exceptions_mode_changed` | [case130](../examples/case130_exceptions_mode_flip.md) |
+| `executable_stack` | quality | `COMPATIBLE` | `warning` | unspecified | `executable_stack` | — |
+| `executable_stack_removed` | quality | `COMPATIBLE` | `warning` | L0 | `executable_stack_removed` | [case136](../examples/case136_executable_stack_removed.md) |
+| `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L0 | `experimental_graduated` | [case99](../examples/case99_experimental_graduated.md) |
+| `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L0 | `experimental_removed_without_replacement` | [case100](../examples/case100_experimental_removed_without_replacement.md) |
+| `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` | — |
+| `exported_symbol_source_owner_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `exported_symbol_source_owner_changed` | [case162](../examples/case162_symbol_source_owner_changed.md) |
+| `field_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `field_access_changed` | — |
+| `field_became_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_const` | — |
+| `field_became_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_mutable` | — |
+| `field_became_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_volatile` | — |
+| `field_bitfield_changed` | breaking | `BREAKING` | `error` | L1 | `field_bitfield_changed` | [case63](../examples/case63_bitfield_changed.md) |
+| `field_lost_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_const` | — |
+| `field_lost_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_mutable` | — |
+| `field_lost_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_volatile` | — |
+| `field_renamed` | api_break | `API_BREAK` | `warning` | L1 | `field_renamed` | [case35](../examples/case35_field_rename.md) |
+| `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` | [case70](../examples/case70_flexible_array_member_changed.md) |
+| `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` | — |
+| `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
+| `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` | — |
+| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](../examples/case03_compat_addition.md), [case111](../examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](../examples/case141_versioned_symbol_scheme.md), [case53](../examples/case53_namespace_pollution.md), +2 |
+| `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
+| `func_cv_changed` | breaking | `BREAKING` | `error` | L1 | `func_cv_changed` | [case22](../examples/case22_method_const_changed.md) |
+| `func_deleted` | breaking | `BREAKING` | `error` | unspecified | `func_deleted` | — |
+| `func_deleted_dwarf` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_dwarf` | — |
+| `func_deleted_elf_fallback` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_elf_fallback` | — |
+| `func_language_linkage_changed` | breaking | `BREAKING` | `error` | L0 | `func_language_linkage_changed` | [case66](../examples/case66_language_linkage_changed.md) |
+| `func_likely_renamed` | breaking | `BREAKING` | `error` | unspecified | `func_likely_renamed` | — |
+| `func_lost_inline` | quality | `COMPATIBLE` | `warning` | unspecified | `func_lost_inline` | — |
+| `func_noexcept_added` | quality | `COMPATIBLE` | `warning` | unspecified | `func_noexcept_added` | — |
+| `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `func_noexcept_removed` | — |
+| `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` | [case02](../examples/case02_param_type_change.md), [case102](../examples/case102_frozen_runtime_signature_changed.md) |
+| `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | [case23](../examples/case23_pure_virtual_added.md) |
+| `func_ref_qual_changed` | breaking | `BREAKING` | `error` | unspecified | `func_ref_qual_changed` | — |
+| `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](../examples/case01_symbol_removal.md), [case100](../examples/case100_experimental_removed_without_replacement.md), [case104](../examples/case104_glibcxx_dual_abi_flip.md), [case107](../examples/case107_task_scheduler_init_removed.md), +8 |
+| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case97](../examples/case97_api_depends_on_consumer_env.md) |
+| `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](../examples/case102_frozen_runtime_signature_changed.md), [case10](../examples/case10_return_type.md), [case70](../examples/case70_flexible_array_member_changed.md), [case72](../examples/case72_covariant_return_changed.md) |
+| `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` | [case21](../examples/case21_method_became_static.md) |
+| `func_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_virtual_added` | [case68](../examples/case68_virtual_method_added.md) |
+| `func_virtual_became_pure` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_became_pure` | — |
+| `func_virtual_removed` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_removed` | — |
+| `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` | [case06](../examples/case06_visibility.md) |
+| `func_visibility_protected_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `func_visibility_protected_changed` | — |
+| `generated_file_dependency_unstable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_file_dependency_unstable` | — |
+| `generated_header_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_changed` | — |
+| `generated_header_reaches_public_api` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_reaches_public_api` | — |
+| `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` | [case104](../examples/case104_glibcxx_dual_abi_flip.md) |
+| `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` | — |
+| `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` | — |
+| `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` | — |
+| `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` | — |
+| `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` | [case96](../examples/case96_hidden_friend_removed.md) |
+| `ifunc_introduced` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_introduced` | — |
+| `ifunc_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_removed` | — |
+| `include_graph_public_header_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `include_graph_public_header_drift` | — |
+| `inline_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `inline_body_changed` | — |
+| `inline_body_references_renamed_member` | breaking | `BREAKING` | `error` | L2 | `inline_body_references_renamed_member` | [case89](../examples/case89_inline_accessor_renamed_pimpl_member.md) |
+| `inline_function_removed` | api_break | `API_BREAK` | `warning` | L4 | `inline_function_removed` | [case157](../examples/case157_inline_function_removed.md) |
+| `inline_namespace_moved` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_moved` | [case71](../examples/case71_inline_namespace_moved.md) |
+| `inline_namespace_version_bumped` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_version_bumped` | [case101](../examples/case101_inline_namespace_version_bumped.md) |
+| `instantiation_missing_from_binary` | breaking | `BREAKING` | `error` | L2 | `instantiation_missing_from_binary` | [case79](../examples/case79_missing_template_instantiation.md) |
+| `integer_model_changed` | breaking | `BREAKING` | `error` | L1 | `integer_model_changed` | [case112](../examples/case112_lp64_ilp64.md) |
+| `internal_template_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_template_leaks_via_public_api` | [case85](../examples/case85_internal_template_signature_changed.md) |
+| `internal_type_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_type_leaks_via_public_api` | [case74](../examples/case74_detail_base_class_changed.md), [case75](../examples/case75_detail_embedded_by_value.md), [case76](../examples/case76_detail_pimpl_vtable_changed.md), [case77](../examples/case77_detail_templated_base_changed.md), +1 |
+| `layer_coverage_asymmetric` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layer_coverage_asymmetric` | — |
+| `layout_unverifiable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layout_unverifiable` | — |
+| `libcpp_abi_version_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `libcpp_abi_version_changed` | — |
+| `link_export_policy_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `link_export_policy_changed` | — |
+| `lto_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `lto_mode_changed` | [case154](../examples/case154_lto_mode_flip.md) |
+| `macho_cpu_type_changed` | breaking | `BREAKING` | `error` | L0 | `macho_cpu_type_changed` | — |
+| `mandatory_template_param_added` | api_break | `API_BREAK` | `warning` | unspecified | `mandatory_template_param_added` | — |
+| `method_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `method_access_changed` | — |
+| `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` | [case138](../examples/case138_needed_added.md) |
+| `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |
+| `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` | — |
+| `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | — |
+| `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` | — |
+| `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_added` | — |
+| `overload_set_rerouted` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_set_rerouted` | — |
+| `param_became_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_became_va_list` | — |
+| `param_default_value_changed` | quality | `COMPATIBLE` | `warning` | L2 | `param_default_value_changed` | [case32](../examples/case32_param_defaults.md) |
+| `param_default_value_removed` | api_break | `API_BREAK` | `warning` | L2 | `param_default_value_removed` | [case123](../examples/case123_default_argument_removed.md), [case32](../examples/case32_param_defaults.md) |
+| `param_lost_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_lost_va_list` | — |
+| `param_pointer_level_changed` | breaking | `BREAKING` | `error` | L1 | `param_pointer_level_changed` | [case33](../examples/case33_pointer_level.md) |
+| `param_renamed` | api_break | `API_BREAK` | `warning` | unspecified | `param_renamed` | — |
+| `param_restrict_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `param_restrict_changed` | — |
+| `pe_forwarder_changed` | breaking | `BREAKING` | `error` | L0 | `pe_forwarder_changed` | — |
+| `pe_machine_changed` | breaking | `BREAKING` | `error` | L0 | `pe_machine_changed` | — |
+| `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` | — |
+| `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `polymorphic_type_non_virtual_dtor` | — |
+| `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | — |
+| `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
+| `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |
+| `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](../examples/case160_public_api_internal_dep_added.md) |
+| `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` | [case156](../examples/case156_public_macro_removed.md) |
+| `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` | — |
+| `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | — |
+| `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` | — |
+| `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
+| `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
+| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | — |
+| `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` | [case158](../examples/case158_public_typedef_removed.md) |
+| `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |
+| `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` | — |
+| `python_stable_abi_violation` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_stable_abi_violation` | — |
+| `relro_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `relro_weakened` | [case134](../examples/case134_relro_weakened.md) |
+| `removed_const_overload` | api_break | `API_BREAK` | `warning` | unspecified | `removed_const_overload` | — |
+| `return_pointer_level_changed` | breaking | `BREAKING` | `error` | unspecified | `return_pointer_level_changed` | — |
+| `rpath_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `rpath_changed` | — |
+| `rtti_for_internal_type` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `rtti_for_internal_type` | — |
+| `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` | — |
+| `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](../examples/case131_rtti_mode_flip.md) |
+| `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](../examples/case137_runpath_changed.md) |
+| `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |
+| `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` | [case81](../examples/case81_serialization_tag_reassigned.md) |
+| `soname_bump_recommended` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_recommended` | — |
+| `soname_bump_unnecessary` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_unnecessary` | — |
+| `soname_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `soname_changed` | — |
+| `soname_missing` | quality | `COMPATIBLE` | `warning` | L0 | `soname_missing` | [case05](../examples/case05_soname.md) |
+| `source_binary_provenance_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_binary_provenance_mismatch` | — |
+| `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` | — |
+| `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` | — |
+| `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` | — |
+| `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` | [case135](../examples/case135_stack_canary_removed.md) |
+| `standard_layout_lost` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `standard_layout_lost` | — |
+| `std_reexport_removed` | api_break | `API_BREAK` | `warning` | unspecified | `std_reexport_removed` | — |
+| `stdlib_debug_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `stdlib_debug_mode_changed` | — |
+| `stdlib_implementation_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `stdlib_implementation_changed` | — |
+| `struct_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_alignment_changed` | — |
+| `struct_field_offset_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_offset_changed` | — |
+| `struct_field_removed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_removed` | — |
+| `struct_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_type_changed` | — |
+| `struct_packing_changed` | breaking | `BREAKING` | `error` | L1 | `struct_packing_changed` | [case56](../examples/case56_struct_packing_changed.md) |
+| `struct_packing_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `struct_packing_mode_changed` | [case153](../examples/case153_struct_packing_flip.md) |
+| `struct_return_convention_changed` | breaking | `BREAKING` | `error` | L1 | `struct_return_convention_changed` | [case129](../examples/case129_struct_return_convention.md) |
+| `struct_size_changed` | breaking | `BREAKING` | `error` | L1 | `struct_size_changed` | [case121](../examples/case121_kernel_btf_struct_field_added.md) |
+| `sycl_backend_driver_req_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_backend_driver_req_changed` | — |
+| `sycl_implementation_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_implementation_changed` | — |
+| `sycl_overload_set_removed` | breaking | `BREAKING` | `error` | L0 | `sycl_overload_set_removed` | [case82](../examples/case82_sycl_overload_set_removed.md) |
+| `sycl_pi_entrypoint_added` | addition | `COMPATIBLE` | `warning` | unspecified | `sycl_pi_entrypoint_added` | — |
+| `sycl_pi_entrypoint_removed` | breaking | `BREAKING` | `error` | unspecified | `sycl_pi_entrypoint_removed` | — |
+| `sycl_pi_version_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_pi_version_changed` | — |
+| `sycl_plugin_added` | addition | `COMPATIBLE` | `warning` | unspecified | `sycl_plugin_added` | — |
+| `sycl_plugin_removed` | breaking | `BREAKING` | `error` | unspecified | `sycl_plugin_removed` | — |
+| `sycl_plugin_search_path_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_plugin_search_path_changed` | — |
+| `sycl_runtime_version_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `sycl_runtime_version_changed` | — |
+| `symbol_binding_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_binding_changed` | — |
+| `symbol_binding_strengthened` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_strengthened` | [case128](../examples/case128_symbol_binding_strengthened.md) |
+| `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_elf_visibility_changed` | — |
+| `symbol_leaked_from_dependency_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_leaked_from_dependency_changed` | — |
+| `symbol_moved_version_node` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_moved_version_node` | — |
+| `symbol_renamed_batch` | breaking | `BREAKING` | `error` | unspecified | `symbol_renamed_batch` | — |
+| `symbol_size_changed` | breaking | `BREAKING` | `error` | L0 | `symbol_size_changed` | [case127](../examples/case127_data_object_size_changed.md) |
+| `symbol_size_changed_const_object` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_const_object` | — |
+| `symbol_size_changed_internal` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_internal` | — |
+| `symbol_type_changed` | breaking | `BREAKING` | `error` | unspecified | `symbol_type_changed` | — |
+| `symbol_version_alias_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_alias_changed` | — |
+| `symbol_version_defined_added` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_defined_added` | — |
+| `symbol_version_defined_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_defined_removed` | [case65](../examples/case65_symbol_version_removed.md) |
+| `symbol_version_node_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_node_removed` | [case139](../examples/case139_symbol_version_node_removed.md) |
+| `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_required_added` | — |
+| `symbol_version_required_added_compat` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_added_compat` | — |
+| `symbol_version_required_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_removed` | — |
+| `tag_type_renamed` | breaking | `BREAKING` | `error` | L0 | `tag_type_renamed` | [case86](../examples/case86_tag_struct_renamed.md) |
+| `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
+| `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](../examples/case161_target_dependency_added.md) |
+| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` | — |
+| `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
+| `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
+| `threadsafe_statics_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `threadsafe_statics_mode_changed` | [case132](../examples/case132_threadsafe_statics_flip.md) |
+| `tls_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `tls_model_changed` | [case133](../examples/case133_tls_model_flip.md) |
+| `tls_var_size_changed` | breaking | `BREAKING` | `error` | L1 | `tls_var_size_changed` | [case67](../examples/case67_tls_var_size_changed.md) |
+| `toolchain_flag_drift` | quality | `COMPATIBLE` | `warning` | L1 | `toolchain_flag_drift` | [case103](../examples/case103_toolchain_flag_drift.md) |
+| `toolchain_version_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `toolchain_version_changed` | — |
+| `trivially_copyable_lost` | breaking | `BREAKING` | `error` | unspecified | `trivially_copyable_lost` | — |
+| `type_added` | addition | `COMPATIBLE` | `warning` | unspecified | `type_added` | — |
+| `type_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `type_alignment_changed` | — |
+| `type_base_changed` | breaking | `BREAKING` | `error` | L1 | `type_base_changed` | [case37](../examples/case37_base_class.md), [case72](../examples/case72_covariant_return_changed.md) |
+| `type_became_final` | api_break | `API_BREAK` | `warning` | L2 | `type_became_final` | [case125](../examples/case125_class_became_final.md) |
+| `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` | [case28](../examples/case28_typedef_opaque.md) |
+| `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` | [case94](../examples/case94_empty_tag_gained_state.md) |
+| `type_field_added_compatible` | addition | `COMPATIBLE` | `warning` | unspecified | `type_field_added_compatible` | — |
+| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](../examples/case117_no_unique_address.md), [case140](../examples/case140_empty_base_optimization_lost.md) |
+| `type_field_removed` | breaking | `BREAKING` | `error` | unspecified | `type_field_removed` | — |
+| `type_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `type_field_type_changed` | — |
+| `type_kind_changed` | breaking | `BREAKING` | `error` | L1 | `type_kind_changed` | [case55](../examples/case55_type_kind_changed.md) |
+| `type_lost_final` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `type_lost_final` | — |
+| `type_removed` | breaking | `BREAKING` | `error` | L1 | `type_removed` | [case107](../examples/case107_task_scheduler_init_removed.md), [case108](../examples/case108_task_class_removed.md), [case109](../examples/case109_flow_graph_policy_renames.md), [case78](../examples/case78_task_arena_attach_tag.md) |
+| `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` | [case07](../examples/case07_struct_layout.md), [case117](../examples/case117_no_unique_address.md), [case126](../examples/case126_sycl_device_impl_ptr.md), [case140](../examples/case140_empty_base_optimization_lost.md), +1 |
+| `type_visibility_changed` | breaking | `BREAKING` | `error` | unspecified | `type_visibility_changed` | — |
+| `type_vtable_changed` | breaking | `BREAKING` | `error` | L1 | `type_vtable_changed` | [case09](../examples/case09_cpp_vtable.md), [case72](../examples/case72_covariant_return_changed.md) |
+| `typedef_base_changed` | breaking | `BREAKING` | `error` | L1 | `typedef_base_changed` | [case73](../examples/case73_typedef_underlying_changed.md) |
+| `typedef_removed` | breaking | `BREAKING` | `error` | L1 | `typedef_removed` | [case109](../examples/case109_flow_graph_policy_renames.md), [case95](../examples/case95_allocator_nested_typedef_removed.md) |
+| `typedef_version_sentinel` | quality | `COMPATIBLE` | `warning` | unspecified | `typedef_version_sentinel` | — |
+| `undocumented_export_ratio_increased` | quality | `COMPATIBLE` | `warning` | unspecified | `undocumented_export_ratio_increased` | — |
+| `uninstantiated_template_removed` | api_break | `API_BREAK` | `warning` | unspecified | `uninstantiated_template_removed` | — |
+| `union_field_added` | addition | `COMPATIBLE` | `warning` | unspecified | `union_field_added` | — |
+| `union_field_removed` | breaking | `BREAKING` | `error` | L1 | `union_field_removed` | [case24](../examples/case24_union_field_removed.md) |
+| `union_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `union_field_type_changed` | — |
+| `unspecified_return_now_named` | api_break | `API_BREAK` | `warning` | unspecified | `unspecified_return_now_named` | — |
+| `unversioned_exported_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unversioned_exported_symbol` | — |
+| `used_reserved_field` | quality | `COMPATIBLE` | `warning` | L1 | `used_reserved_field` | [case54](../examples/case54_used_reserved_field.md) |
+| `value_abi_trait_changed` | breaking | `BREAKING` | `error` | L1 | `value_abi_trait_changed` | [case69](../examples/case69_trivial_to_nontrivial.md) |
+| `var_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `var_access_changed` | — |
+| `var_access_widened` | quality | `COMPATIBLE` | `warning` | unspecified | `var_access_widened` | — |
+| `var_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_added` | [case61](../examples/case61_var_added.md) |
+| `var_became_const` | breaking | `BREAKING` | `error` | L1 | `var_became_const` | [case39](../examples/case39_var_const.md) |
+| `var_lost_const` | breaking | `BREAKING` | `error` | unspecified | `var_lost_const` | — |
+| `var_removed` | breaking | `BREAKING` | `error` | L0 | `var_removed` | [case58](../examples/case58_var_removed.md) |
+| `var_type_changed` | breaking | `BREAKING` | `error` | L1 | `var_type_changed` | [case11](../examples/case11_global_var_type.md) |
+| `var_value_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `var_value_changed` | — |
+| `vector_abi_changed` | breaking | `BREAKING` | `error` | unspecified | `vector_abi_changed` | — |
+| `version_script_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `version_script_missing` | — |
+| `versioned_symbol_scheme_detected` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `versioned_symbol_scheme_detected` | [case141](../examples/case141_versioned_symbol_scheme.md) |
+| `virtual_method_added` | breaking | `BREAKING` | `error` | unspecified | `virtual_method_added` | — |
+| `visibility_leak` | quality | `COMPATIBLE` | `warning` | unspecified | `visibility_leak` | — |
+| `vptr_introduced` | breaking | `BREAKING` | `error` | unspecified | `vptr_introduced` | — |
+| `vtable_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_slot_count_changed` | [case142](../examples/case142_vtable_slot_count_binary_only.md) |
+| `vtable_symbol_identity_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `vtable_symbol_identity_changed` | — |
+| `whole_program_vtables_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `whole_program_vtables_mode_changed` | — |
+| `writable_executable_segment` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `writable_executable_segment` | — |
