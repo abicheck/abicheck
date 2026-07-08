@@ -40,6 +40,7 @@ from abicheck.dumper import (
 )
 from abicheck.dumper_clang import (
     _ClangAstParser,
+    _Decl,
     _function_qualifiers,
     _pointer_depth,
     _return_type,
@@ -434,6 +435,63 @@ def test_parse_anonymous_typedef_enum_uses_typedef_name() -> None:
         ("LOG_ERR", 1),
         ("LOG_WARN", 2),
     ]
+
+
+def test_parse_anonymous_typedef_enum_ignores_non_owned_typedefs() -> None:
+    root = _tu(
+        {
+            "kind": "TypedefDecl",
+            "name": "builtin_enum_t",
+            "loc": {"file": "<built-in>", "line": 1},
+            "inner": [
+                {"ownedTagDecl": {"kind": "EnumDecl", "id": "0xbuiltin"}},
+            ],
+        },
+        {
+            "kind": "TypedefDecl",
+            "name": "",
+            "loc": {"file": "include/log.h", "line": 1},
+            "inner": [
+                {"ownedTagDecl": {"kind": "EnumDecl", "id": "0xempty"}},
+            ],
+        },
+        {
+            "kind": "TypedefDecl",
+            "name": "not_enum_t",
+            "loc": {"file": "include/log.h", "line": 2},
+            "inner": [
+                "not-a-dict-child",
+                {"ownedTagDecl": {"kind": "RecordDecl", "id": "0xrecord"}},
+                {"ownedTagDecl": {"kind": "EnumDecl"}},
+            ],
+        },
+        {
+            "kind": "EnumDecl",
+            "id": "0xbuiltin",
+            "name": "builtin_enum_t",
+            "loc": {"file": "<built-in>", "line": 1},
+        },
+        {
+            "kind": "EnumDecl",
+            "id": "0xanon",
+            "name": "",
+            "loc": {"file": "include/log.h", "line": 3},
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    parser._typedefs.append(
+        _Decl(
+            {
+                "kind": "TypedefDecl",
+                "name": "",
+                "inner": [{"ownedTagDecl": {"kind": "EnumDecl", "id": "0xmanual"}}],
+            },
+            (),
+            "include/log.h",
+            "public",
+        )
+    )
+    assert parser.parse_enums() == []
 
 
 def test_parse_typedefs() -> None:
