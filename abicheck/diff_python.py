@@ -67,13 +67,6 @@ def _module_symbol(new: PythonExtMetadata, old: PythonExtMetadata) -> str:
     return "python:<extension>"
 
 
-def _abi3_floor(
-    new: PythonExtMetadata, old: PythonExtMetadata
-) -> tuple[int, int] | None:
-    """The declared Limited-API floor, preferring the new build's declaration."""
-    return new.declared_abi3 or old.declared_abi3
-
-
 def _diff_stable_abi_violations(
     old: PythonExtMetadata, new: PythonExtMetadata
 ) -> list[Change]:

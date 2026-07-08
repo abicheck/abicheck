@@ -525,6 +525,14 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         if isinstance(python_ext_data, dict)
         else None
     )
+    # A snapshot dumped without the G14 key (older abicheck, or a `dump` writer
+    # path that didn't attach it) has no serialized ``python_ext``. Derive it on
+    # load from the already-parsed binary metadata so `dump` → `compare` never
+    # silently disables the extension detector — the same recognition the dumper
+    # runs, applied at read time. ``_derive_python_ext_key_absent`` records that
+    # the key was missing (vs. an explicit ``null`` meaning "checked, not an
+    # extension") so we only re-derive when there is no recorded answer.
+    _python_ext_key_absent = "python_ext" not in d
 
     dep_data = d.get("dependency_info")
     dep_info = (
@@ -587,7 +595,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # that demand genuine header evidence (parameter renames) stay quiet.
         from_headers_inferred = from_headers
 
-    return AbiSnapshot(
+    snap = AbiSnapshot(
         library=d["library"], version=d["version"],
         source_path=d.get("source_path"),
         functions=funcs, variables=variables, types=types,
@@ -618,6 +626,18 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # snapshots loads as False.
         parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
     )
+
+    # G14: derive the CPython extension surface for snapshots that predate the
+    # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
+    # still checked at compare time. Skip when the key was present (the dumper
+    # already answered, including an explicit "not an extension" null).
+    if snap.python_ext is None and _python_ext_key_absent:
+        if snap.elf is not None or snap.pe is not None or snap.macho is not None:
+            from .python_ext import detect_python_extension
+
+            snap.python_ext = detect_python_extension(snap)
+
+    return snap
 
 
 def _build_mode_from_dict(raw: Any) -> BuildMode | None:
