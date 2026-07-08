@@ -142,6 +142,34 @@ class TestFilterSourceOnly:
     def test_const_object_size_change_is_binary_only(self):
         """symbol_size_changed_const_object is still ELF st_size metadata."""
         assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT in _BINARY_ONLY_KINDS
+
+    def test_g23_phase_a_facts_are_binary_only(self):
+        """G23 Phase A ELF facts (machine/class/ABI-flags/OSABI, static-TLS,
+        CET/BTI, GNU-unique bindings) have no source-API delta, so
+        source-only mode must drop them (Codex review)."""
+        for kind in (
+            ChangeKind.ELF_MACHINE_CHANGED,
+            ChangeKind.ELF_CLASS_CHANGED,
+            ChangeKind.ELF_ABI_FLAGS_CHANGED,
+            ChangeKind.ELF_OSABI_CHANGED,
+            ChangeKind.STATIC_TLS_INTRODUCED,
+            ChangeKind.CET_PROTECTION_WEAKENED,
+            ChangeKind.BRANCH_PROTECTION_WEAKENED,
+            ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+        ):
+            assert kind in _BINARY_ONLY_KINDS, kind
+            filtered = _filter_source_only(_result(Verdict.BREAKING, [kind]))
+            assert kind not in {c.kind for c in filtered.changes}
+
+    def test_g23_b1_thunk_kinds_are_not_binary_only(self):
+        """The B1 thunk/VTT kinds mirror source-visible vtable/base changes
+        (like vtable_slot_count_changed), so they are NOT filtered."""
+        for kind in (
+            ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
+            ChangeKind.VTABLE_THUNK_SET_CHANGED,
+            ChangeKind.VTT_SLOT_COUNT_CHANGED,
+        ):
+            assert kind not in _BINARY_ONLY_KINDS, kind
         from abicheck.compat.cli import _filter_source_only
         r = _result(Verdict.BREAKING,
                     [ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT])
