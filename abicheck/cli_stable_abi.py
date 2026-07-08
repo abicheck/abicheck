@@ -239,8 +239,15 @@ def stable_abi_cmd(
         text = to_sarif_str(result)
     else:  # junit
         from .junit_report import to_junit_xml
+        from .severity import PRESET_STRICT
 
-        text = to_junit_xml(result)
+        # Every audit finding is a hard violation (the command exits 1 on any),
+        # so they must render as JUnit <failure> elements. Without escalation the
+        # shared writer emits <failure> only for breaking/error kinds, and
+        # PYTHON_STABLE_ABI_VIOLATION is RISK — a JUnit-only CI dashboard would
+        # then show failures="0" for a failing audit (Codex review). The strict
+        # config classifies RISK (potential_breaking) as error.
+        text = to_junit_xml(result, severity_config=PRESET_STRICT)
 
     _write_or_echo(output, text)
 

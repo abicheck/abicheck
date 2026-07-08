@@ -575,6 +575,26 @@ def test_cli_stable_abi_flags_unknown_public_symbol(tmp_path: object) -> None:
     assert "PyUnicode_AsUTF8" in result.output
 
 
+def test_cli_stable_abi_junit_emits_failure(tmp_path: object) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # A stable-ABI violation must render as a JUnit <failure>, not failures="0"
+    # (a JUnit-only CI dashboard would otherwise show a passing audit).
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
+    path = _write_snapshot(tmp_path, snap)
+    out = f"{tmp_path}/report.xml"
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["stable-abi", path, "-f", "junit", "-o", out])
+    assert result.exit_code == 1, result.output
+    with open(out, encoding="utf-8") as fh:
+        xml = fh.read()
+    assert "<failure" in xml
+    assert 'failures="0"' not in xml
+
+
 def test_unknown_public_import_flagged_in_compare() -> None:
     # A newly-gained public non-Limited-API import in an abi3 module is flagged.
     old = _ext_snapshot("1.0", ["PyList_New"])
