@@ -88,6 +88,25 @@ def audit_stable_abi_imports(
 
     module_name = meta.module_name or meta.init_symbol or "<extension>"
     findings: list[Change] = []
+    # The artifact's own SOABI tag can pin it to one interpreter regardless of
+    # its imports: a version-specific `foo.cpython-311.so` cannot satisfy the
+    # requested abi3 floor no matter how stable its symbol names are. Auditing it
+    # as abi3 is a contradiction — surface it rather than certify a build the tag
+    # itself restricts to one minor.
+    if meta.is_version_specific:
+        findings.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                detail=(
+                    f"artifact SOABI tag '{meta.soabi_tag}' is version-specific — "
+                    "not an abi3 build; it loads only on that one interpreter, so "
+                    "it cannot satisfy a Py_LIMITED_API floor"
+                ),
+                new_value=[meta.soabi_tag],
+            )
+        )
     for group in (private, above_floor, unknown):
         if group:
             findings.append(

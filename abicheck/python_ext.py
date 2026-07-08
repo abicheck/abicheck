@@ -137,6 +137,23 @@ class PythonExtMetadata:
         return self.init_symbol is not None or bool(self.cpython_imports)
 
     @property
+    def is_version_specific(self) -> bool:
+        """True when the SOABI tag pins the module to one interpreter (not abi3).
+
+        A ``foo.cpython-311-…so`` / ``foo.cp311-win_amd64.pyd`` (or a free-threaded
+        ``cpython-313t``) carries a version-specific interpreter tag and loads
+        only on that one minor — it is not an ``abi3`` build and cannot satisfy a
+        ``Py_LIMITED_API`` floor no matter how stable its imported symbol *names*
+        are. A bare ``.abi3.`` build (``limited_api``) or a tagless artifact
+        (``soabi_tag is None``) is not version-specific.
+        """
+        return (
+            self.soabi_tag is not None
+            and self.soabi_tag != "abi3"
+            and not self.limited_api
+        )
+
+    @property
     def version_specific_python_dlls(self) -> list[str]:
         """CPython import DLLs that pin the module to one interpreter ABI.
 

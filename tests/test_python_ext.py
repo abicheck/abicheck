@@ -697,6 +697,32 @@ def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
     assert "invalid --abi3" in result.output
 
 
+def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
+    # `scan --abi3 3.9` on a version-specific `foo.cpython-311.so` must not
+    # certify it clean: the SOABI tag itself pins it to 3.11, so it cannot
+    # satisfy the abi3 floor no matter how stable its imports are.
+    src = "foo.cpython-311-x86_64-linux-gnu.so"
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    assert snap.python_ext.is_version_specific is True
+    path = _write_snapshot(tmp_path, snap)
+
+    result = _scan_abi3(path, "--abi3", "3.9")
+    assert "python_stable_abi_violation" in result.output
+    assert "cpython-311" in result.output
+    # And it gates when promoted.
+    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    assert gated.exit_code == 2, gated.output
+
+
+def test_audit_abi3_tagged_artifact_not_version_specific() -> None:
+    # A proper `.abi3.` build is not version-specific and audits clean.
+    from abicheck.diff_python import audit_stable_abi_imports
+
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path="foo.abi3.so")
+    assert snap.python_ext.is_version_specific is False
+    assert audit_stable_abi_imports(snap.python_ext, (3, 9)) == []
+
+
 def test_scan_abi3_flags_unknown_public_symbol(tmp_path: object) -> None:
     # A public Py* symbol absent from the authoritative Stable-ABI set
     # (PyUnicode_AsUTF8 — public but never Limited API) is a violation.
