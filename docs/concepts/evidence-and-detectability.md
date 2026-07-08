@@ -24,6 +24,12 @@ different inputs.
 
 ## 0. The five sources of information
 
+> **Canonical evidence-model reference.** The `L0`–`L5` table below is the
+> source of truth for the evidence layers. Other pages (getting-started,
+> choose-your-workflow, scan levels, architecture, build & source data) show
+> the same model tailored to their context and link back here — when the model
+> changes, update this table first.
+
 A release engineer can hand a compatibility checker up to **five different
 sources of information** about a library, ordered from the least to the most.
 Each one *adds* facts the previous cannot see; none of them is complete on its
@@ -221,18 +227,12 @@ what can a checker conclude — and what is it structurally blind to?*
 ### Why abicheck combines layers
 
 abicheck is strongest because it does **not** rely on a single row. It overlays
-the five **independent, additive** sources of [§0](#0-the-five-sources-of-information)
-— plus the derived `L5` graph — for **six evidence layers in all**
-(see [Architecture](architecture.md#evidence-layers-the-five-sources) and ADR-003 / ADR-028):
-
-| Layer | Source | Evidence it contributes |
-|-------|--------|-------------------------|
-| **L0** | Binary metadata | ELF symbols, SONAME, versioning, visibility, dependencies (and PE/COFF + Mach-O equivalents) |
-| **L1** | Debug info (DWARF/PDB) | Layout, offsets, enum values, calling convention, vtable slots, type cross-checks |
-| **L2** | Header AST (castxml or clang) | Function signatures, classes, structs, enums, typedefs, templates, `noexcept`, access, public/internal scoping (castxml also resolves vtables/layout; the clang backend is syntactic — pair it with L1/DWARF for layout) |
-| **L3** | Build context | ABI-relevant flags, toolchain/sysroot, target graph, export-policy changes |
-| **L4** | Source ABI replay | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
-| **L5** | Source/build graph *(derived)* | Include/type/call reachability — localizes and explains findings, prioritizes cross-symbol impact (folded from L3, plus any L4 surface) |
+the five **independent, additive** sources of
+[§0 above](#0-the-five-sources-of-information) — plus the derived `L5` graph —
+for **six evidence layers in all** (`L0`–`L5`; see the
+[§0 table](#0-the-five-sources-of-information) for what each layer reveals, and
+[Architecture](architecture.md) and ADR-003 / ADR-028 for how they are
+reconciled).
 
 The best input you can give it is therefore:
 
