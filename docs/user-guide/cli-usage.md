@@ -489,43 +489,10 @@ rationale.
 
 ## ABI/API breakages and what each tool mode can detect
 
-This section maps breakage types to example cases under `examples/` and compares:
-
-- `abicheck` (header + ELF metadata pipeline)
-- `abidiff + headers`
-- `ABICC Usage #2` (header-based ABICC mode)
-- `ABICC Usage #1` (abi-dumper / DWARF dump mode)
-
-Legend: ✅ strong support, ⚠️ partial/conditional, ❌ generally not covered.
-
-| Case | Breakage type | Verdict | abicheck | abidiff + headers | ABICC #2 (headers) | ABICC #1 (dumps) |
-|---|---|---|:---:|:---:|:---:|:---:|
-| case01_symbol_removal | Public symbol removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case02_param_type_change | Function parameter type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case03_compat_addition | Compatible API addition | COMPATIBLE | ✅ | ✅ | ✅ | ✅ |
-| case04_no_change | No ABI change baseline | NO_CHANGE | ✅ | ✅ | ✅ | ✅ |
-| case05_soname | SONAME / packaging policy issue | BREAKING | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| case06_visibility | Visibility/export policy drift | BREAKING | ✅ | ✅ | ⚠️ | ⚠️ |
-| case07_struct_layout | Struct layout changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case08_enum_value_change | Enum value changed | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case09_cpp_vtable | VTable/method order/signature drift | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case10_return_type | Function return type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case11_global_var_type | Global variable type changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case12_function_removed | API function removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case13_symbol_versioning | Symbol version policy regression | COMPATIBLE | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| case14_cpp_class_size | C++ class size/layout changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case15_noexcept_change | `noexcept` contract changed | COMPATIBLE | ✅ | ⚠️ | ✅ | ❌ |
-| case16_inline_to_non_inline | Inline/ODR surface change | BREAKING | ✅ | ⚠️ | ✅ | ❌ |
-| case17_template_abi | Template-instantiation ABI drift | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case18_dependency_leak | Transitive dependency leaked into API | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case19_enum_member_removed | Enum member removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case20_enum_member_value_changed | Enum member value changed | BREAKING | ✅ | ⚠️ | ✅ | ✅ |
-| case21_method_became_static | Method became static | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case22_method_const_changed | Method const-qualifier changed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case23_pure_virtual_added | Added pure virtual method | BREAKING | ✅ | ✅ | ✅ | ✅ |
-| case24_union_field_removed | Union field removed | BREAKING | ✅ | ✅ | ✅ | ✅ |
-
-### Summary by breakage category
+The per-case matrix comparing abicheck, `abidiff`, and ABICC modes across the
+catalog lives in the **[Tool Comparison & Benchmarks](../reference/tool-comparison.md)**
+reference, and every case has a full reproduction in the
+[Examples Encyclopedia](../examples/index.md). The qualitative takeaway:
 
 - **API surface breaks** (removed/changed signatures): all modes generally catch these.
 - **C++ semantic contract breaks** (`noexcept`, inline/ODR): header-aware analysis is strongest.
@@ -673,56 +640,11 @@ The parser handles the full Debian symbols tag syntax:
 - `(regex)` and `(symver)` pattern-matching tags are parsed but not evaluated.
 - `(arch=...)` tags are parsed but not filtered (no `--arch` option yet).
 
-## High-level architecture
+## Architecture and runtime dependencies
 
-```text
-CLI  (core commands; see `abicheck --help` for the full list)
-  dump                         — dump ABI snapshot to JSON
-  compare                      — compare two ABI surfaces (also directory/package inputs)
-  scan                         — one-shot source-intelligence scan (dump + compare + evidence)
-  deps tree                    — show dependency tree + binding status (Linux ELF)
-  deps compare                 — full-stack comparison across environments (Linux ELF)
-  debian-symbols generate      — generate Debian symbols file from shared library
-  debian-symbols validate      — validate symbols file against binary
-  debian-symbols diff          — diff two Debian symbols files
-  compat check                 — ABICC drop-in comparison
-  compat dump                  — dump from ABICC XML descriptor
-    -> dumper (castxml AST + ELF metadata)
-    -> checker (rule-based diff + severity)
-    -> resolver (transitive dependency resolution)
-    -> binder (symbol binding simulation)
-    -> stack_checker (stack-level ABI comparison)
-    -> debian_symbols (Debian symbols file adapter)
-    -> reporters (markdown/json/sarif/html)
-```
-
-## Core modules and purpose
-
-- `abicheck.cli` — command-line entrypoints.
-- `abicheck.dumper` — snapshot construction from headers + binary metadata.
-- `abicheck.checker` — change detection and breakage classification.
-- `abicheck.resolver` — transitive ELF dependency resolution with loader-accurate search order.
-- `abicheck.binder` — symbol binding simulation across a resolved dependency graph.
-- `abicheck.stack_checker` — stack-level ABI comparison and verdict computation.
-- `abicheck.stack_report` — JSON and Markdown output for stack-level results.
-- `abicheck.build_context` — compile_commands.json parsing and flag extraction.
-- `abicheck.debug_resolver` — debug artifact resolution (DWARF, PDB, dSYM, debuginfod).
-- `abicheck.baseline` — baseline registry (push/pull/list/delete with integrity checks).
-- `abicheck.compat` — ABICC compatibility layer (`abicheck.compat.descriptor`, `abicheck.compat.xml_report`, `abicheck.compat.cli`, `abicheck.compat.abicc_dump_import`).
-- `abicheck.debian_symbols` — Debian symbols file generation, parsing, validation, and diffing.
-- `abicheck.reporter` / `abicheck.sarif` / `abicheck.html_report` — output generators.
-- `abicheck.elf_metadata`, `abicheck.dwarf_metadata`, `abicheck.dwarf_advanced` — low-level binary metadata extraction.
-
-## Runtime dependencies (practical view)
-
-- **Python 3.10+**
-- **castxml** (for header-driven API/ABI modeling)
-- **pyelftools** (ELF/DWARF metadata)
-- **click** (CLI)
-- **defusedxml** (safe XML parsing for ABICC descriptor mode)
-
-Optional ecosystem tools for comparisons/benchmarks:
-
-- `abidiff` / libabigail tools
-- ABICC + abi-dumper toolchain
+For the internal pipeline and module map (dumper → checker → resolver → reporters),
+see the [Codebase Overview](../development/codebase-overview.md) and the
+[Architecture](../concepts/architecture.md) concept page. For the runtime
+dependencies (Python 3.10+, castxml, pyelftools, …) and per-platform setup, see
+[Getting Started](../getting-started.md#requirements).
 
