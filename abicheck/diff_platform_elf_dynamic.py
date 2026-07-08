@@ -373,14 +373,33 @@ _BENIGN_OSABI = frozenset({
 })
 
 
+def _both_captured_elf_identity(old_elf: Any, new_elf: Any) -> bool:
+    """True only when BOTH snapshots were parsed by a G23-aware version.
+
+    Every G23 ELF fact (machine, static-TLS, gnu-property, …) is captured in the
+    same parse pass, so a real ELF parsed by current code always has a non-empty
+    ``machine``. A legacy snapshot serialized before these fields existed — or a
+    header-only / parse-failed side — has machine="" and rehydrates the new
+    booleans to their defaults (``has_static_tls=False``, empty gnu_properties),
+    which would otherwise read as "the feature was absent" rather than "unknown"
+    and fabricate a finding. Gate the new detectors on this so a legacy baseline
+    never triggers e.g. a spurious ``static_tls_introduced``.
+    """
+    return bool(getattr(old_elf, "machine", "") and getattr(new_elf, "machine", ""))
+
+
 def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
     """Detect DF_STATIC_TLS drift (G23-A1).
 
     Only report when the *new* side actually participates in TLS (defines or
-    imports an STT_TLS symbol), so a TLS-free library that happens to flip the
-    flag is never flagged. The removal (improvement) direction is a distinct
-    COMPATIBLE kind so the security policy can gate the regression alone.
+    imports an STT_TLS symbol, or carries a PT_TLS segment), so a TLS-free
+    library that happens to flip the flag is never flagged. The removal
+    (improvement) direction is a distinct COMPATIBLE kind so the security policy
+    can gate the regression alone. Skipped entirely unless both snapshots
+    captured ELF identity (so a legacy baseline never false-positives).
     """
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
     old_static = getattr(old_elf, "has_static_tls", False)
     new_static = getattr(new_elf, "has_static_tls", False)
     if old_static == new_static:
@@ -419,6 +438,8 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
     feature) directions are emitted, mirroring the executable-stack pair, so
     the security policy can gate weakening without failing an improvement.
     """
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
     old_props: frozenset[str] = getattr(old_elf, "gnu_properties", frozenset())
     new_props: frozenset[str] = getattr(new_elf, "gnu_properties", frozenset())
     if old_props == new_props:

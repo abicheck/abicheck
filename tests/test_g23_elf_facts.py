@@ -48,20 +48,28 @@ def _tls_sym(name: str = "tls_var") -> ElfSymbol:
     return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.TLS)
 
 
+def _elf(**kwargs) -> ElfMetadata:
+    # The A1/A2 detectors are gated on both sides having captured ELF identity
+    # (a real parse always sets machine); default it so these fixtures aren't
+    # mistaken for legacy/empty snapshots.
+    kwargs.setdefault("machine", "EM_X86_64")
+    return ElfMetadata(**kwargs)
+
+
 # ── A1: static-TLS drift ────────────────────────────────────────────────────
 
 class TestStaticTls:
     def test_introduced_with_tls_symbols(self):
-        old = ElfMetadata(symbols=[_tls_sym()], has_tls_symbols=True)
-        new = ElfMetadata(symbols=[_tls_sym()], has_tls_symbols=True, has_static_tls=True)
+        old = _elf(symbols=[_tls_sym()], has_tls_symbols=True)
+        new = _elf(symbols=[_tls_sym()], has_tls_symbols=True, has_static_tls=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_INTRODUCED in _kinds(r)
 
     def test_introduced_suppressed_when_no_tls_symbols(self):
         # DF_STATIC_TLS set but the library participates in no TLS at all → not a
         # dlopen hazard, so no finding (the suppression guard).
-        old = ElfMetadata(has_tls_symbols=False)
-        new = ElfMetadata(has_tls_symbols=False, has_static_tls=True)
+        old = _elf(has_tls_symbols=False)
+        new = _elf(has_tls_symbols=False, has_static_tls=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_INTRODUCED not in _kinds(r)
 
@@ -69,62 +77,72 @@ class TestStaticTls:
         # An initial-exec reference to an *external* __thread var sets
         # DF_STATIC_TLS with no local TLS definitions; has_tls_symbols is still
         # True (set from any STT_TLS entry, defined or undefined).
-        old = ElfMetadata(has_tls_symbols=True)
-        new = ElfMetadata(has_tls_symbols=True, has_static_tls=True)
+        old = _elf(has_tls_symbols=True)
+        new = _elf(has_tls_symbols=True, has_static_tls=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_INTRODUCED in _kinds(r)
 
     def test_removed_is_compatible(self):
-        old = ElfMetadata(symbols=[_tls_sym()], has_tls_symbols=True, has_static_tls=True)
-        new = ElfMetadata(symbols=[_tls_sym()], has_tls_symbols=True)
+        old = _elf(symbols=[_tls_sym()], has_tls_symbols=True, has_static_tls=True)
+        new = _elf(symbols=[_tls_sym()], has_tls_symbols=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_REMOVED in _kinds(r)
 
     def test_no_change_when_stable(self):
-        old = ElfMetadata(has_tls_symbols=True, has_static_tls=True)
-        new = ElfMetadata(has_tls_symbols=True, has_static_tls=True)
+        old = _elf(has_tls_symbols=True, has_static_tls=True)
+        new = _elf(has_tls_symbols=True, has_static_tls=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_INTRODUCED not in _kinds(r)
         assert ChangeKind.STATIC_TLS_REMOVED not in _kinds(r)
+
+    def test_legacy_baseline_without_identity_never_introduces(self):
+        # A legacy baseline serialized before the G23 fields existed has
+        # machine="" and rehydrates has_static_tls=False (unknown, not "absent").
+        # Comparing it to a fresh DSO that already had DF_STATIC_TLS must NOT
+        # emit static_tls_introduced (which the security policy could fail on).
+        legacy = ElfMetadata()  # no machine, no G23 fields captured
+        fresh = _elf(has_tls_symbols=True, has_static_tls=True)
+        r = compare(_snap(legacy), _snap(fresh))
+        assert ChangeKind.STATIC_TLS_INTRODUCED not in _kinds(r)
 
 
 # ── A2: .note.gnu.property CET / branch protection ──────────────────────────
 
 class TestGnuProperty:
     def test_cet_weakened(self):
-        old = ElfMetadata(gnu_properties=frozenset({"IBT", "SHSTK"}))
-        new = ElfMetadata(gnu_properties=frozenset({"SHSTK"}))
+        old = _elf(gnu_properties=frozenset({"IBT", "SHSTK"}))
+        new = _elf(gnu_properties=frozenset({"SHSTK"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.CET_PROTECTION_WEAKENED in _kinds(r)
 
     def test_cet_fully_dropped(self):
-        old = ElfMetadata(gnu_properties=frozenset({"IBT", "SHSTK"}))
-        new = ElfMetadata(gnu_properties=frozenset())
+        old = _elf(gnu_properties=frozenset({"IBT", "SHSTK"}))
+        new = _elf(gnu_properties=frozenset())
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.CET_PROTECTION_WEAKENED in _kinds(r)
 
     def test_cet_improved(self):
-        old = ElfMetadata(gnu_properties=frozenset())
-        new = ElfMetadata(gnu_properties=frozenset({"IBT", "SHSTK"}))
+        old = _elf(gnu_properties=frozenset())
+        new = _elf(gnu_properties=frozenset({"IBT", "SHSTK"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.CET_PROTECTION_IMPROVED in _kinds(r)
 
     def test_branch_protection_weakened(self):
-        old = ElfMetadata(gnu_properties=frozenset({"BTI", "PAC"}))
-        new = ElfMetadata(gnu_properties=frozenset({"PAC"}))
+        old = _elf(gnu_properties=frozenset({"BTI", "PAC"}))
+        new = _elf(gnu_properties=frozenset({"PAC"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.BRANCH_PROTECTION_WEAKENED in _kinds(r)
 
     def test_branch_protection_improved(self):
-        old = ElfMetadata(gnu_properties=frozenset({"PAC"}))
-        new = ElfMetadata(gnu_properties=frozenset({"BTI", "PAC"}))
+        old = _elf(gnu_properties=frozenset({"PAC"}))
+        new = _elf(gnu_properties=frozenset({"BTI", "PAC"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.BRANCH_PROTECTION_IMPROVED in _kinds(r)
 
     def test_cet_and_branch_independent(self):
         # Dropping CET while gaining BTI reports one of each direction.
-        old = ElfMetadata(gnu_properties=frozenset({"IBT"}))
-        new = ElfMetadata(gnu_properties=frozenset({"BTI"}))
+        old = _elf(gnu_properties=frozenset({"IBT"}))
+        new = _elf(gnu_properties=frozenset({"BTI"}))
         r = compare(_snap(old), _snap(new))
         ks = _kinds(r)
         assert ChangeKind.CET_PROTECTION_WEAKENED in ks
@@ -132,7 +150,7 @@ class TestGnuProperty:
 
     def test_no_change_when_stable(self):
         props = frozenset({"IBT", "SHSTK", "BTI"})
-        r = compare(_snap(ElfMetadata(gnu_properties=props)), _snap(ElfMetadata(gnu_properties=props)))
+        r = compare(_snap(_elf(gnu_properties=props)), _snap(_elf(gnu_properties=props)))
         ks = _kinds(r)
         assert ChangeKind.CET_PROTECTION_WEAKENED not in ks
         assert ChangeKind.BRANCH_PROTECTION_WEAKENED not in ks
@@ -254,8 +272,8 @@ class TestStaticTlsHiddenTls:
         # A hidden/local __thread variable produces a PT_TLS segment but no
         # dynamic STT_TLS symbol; has_tls_symbols set from PT_TLS must let
         # static_tls_introduced fire (not suppressed).
-        old = ElfMetadata(has_tls_symbols=True)
-        new = ElfMetadata(has_tls_symbols=True, has_static_tls=True)
+        old = _elf(has_tls_symbols=True)
+        new = _elf(has_tls_symbols=True, has_static_tls=True)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.STATIC_TLS_INTRODUCED in _kinds(r)
 
@@ -264,25 +282,25 @@ class TestStaticTlsHiddenTls:
 
 class TestGnuUniqueBinding:
     def test_became_unique(self):
-        old = ElfMetadata(symbols=[
+        old = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
-        new = ElfMetadata(symbols=[
+        new = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE in _kinds(r)
 
     def test_lost_unique(self):
-        old = ElfMetadata(symbols=[
+        old = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
-        new = ElfMetadata(symbols=[
+        new = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_LOST_UNIQUE in _kinds(r)
 
     def test_unique_does_not_emit_generic_binding_change(self):
-        old = ElfMetadata(symbols=[
+        old = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
-        new = ElfMetadata(symbols=[
+        new = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
         ks = _kinds(compare(_snap(old), _snap(new)))
         assert ChangeKind.SYMBOL_BINDING_CHANGED not in ks
