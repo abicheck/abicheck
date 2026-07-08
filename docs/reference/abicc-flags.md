@@ -29,7 +29,7 @@ mapping), see [Migrating from ABICC](../user-guide/from-abicc.md).
 |------|-----------|-------------|
 | `-source` | `-src`, `-api` | Source/API compatibility only — filters out ELF-level symbol metadata changes (SONAME, symbol binding, versioning) |
 | `-binary` | `-bin`, `-abi` | Binary ABI mode (default behavior, explicit flag is a no-op) |
-| `-s` | `-strict` | Strict mode: any change (COMPATIBLE or API_BREAK) is treated as BREAKING → exit 1 |
+| `-s` | `-strict` | Strict mode: incompatible changes (COMPATIBLE-with-risk or API_BREAK) are promoted to BREAKING → exit 1. **Exception:** pure additions (`FUNC_ADDED`/`VAR_ADDED`/`TYPE_ADDED`/…) stay COMPATIBLE (ABICC 2.3 semantics) — use `-warn-newsym` to fail on new symbols. |
 | `-warn-newsym` | | Treat new symbols (FUNC_ADDED, VAR_ADDED) as compatibility breaks → exit 1 |
 | `-show-retval` | | Include return-value changes in the HTML report |
 | `-headers-only` | | Header-only analysis mode (accepted; ELF/DWARF checks still run) |
@@ -45,7 +45,7 @@ mapping), see [Migrating from ABICC](../user-guide/from-abicc.md).
 | `-limit-affected N` | | Maximum number of affected symbols shown per change kind |
 | `-list-affected` | | Generate a separate `.affected.txt` file listing all affected symbols |
 | `-q` | `-quiet` | Suppress console output (reports still written to file) |
-| `-old-style` | | Legacy-style report layout (accepted for compatibility, no visual effect) |
+| `-old-style` | `-compat-html` | Generate ABICC-compatible HTML with matching element IDs and structure — use when tooling scrapes the report's HTML |
 
 ## Version label overrides
 
@@ -92,7 +92,7 @@ _Z12another_funcv
 |------|-------------|
 | `-headers-list PATH` | File listing specific header files to include in analysis |
 | `-header PATH` | Single header file to analyze |
-| `-skip-headers PATH` | File listing headers to exclude (accepted, not yet wired) |
+| `-skip-headers PATH` | File listing headers to exclude from analysis (functional — loaded and applied to the resolved header set) |
 
 ## Cross-compilation / toolchain flags
 
