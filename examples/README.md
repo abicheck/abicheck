@@ -75,16 +75,25 @@ Commands below use `PYTHONPATH=.`.
 
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
-| Build/autodiscovery | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, Python 3.14 | 129 runnable single-library cases | 118 passed / 5 xfailed / 6 skipped | Passing |
-| Default/debug verdicts | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` | CI Linux, blocking gate | 134 catalog cases | 122 PASS / 5 XFAIL / 7 SKIP | Passing; no FAIL/ERROR |
-| Runtime smoke | `python validation/scripts/run_example_runtime_smoke.py --json` | CI Linux artifact | 134 catalog cases | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
-| Release headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
-| Stripped headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant stripped-headers --json` | CI Linux artifact | 7 representative cases | 6 PASS / 1 FAIL | Informational; `case129` loses stripped-only signal |
+| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 161 integration items | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 162 catalog cases | gcc: 132 PASS / 4 XFAIL / 26 SKIP; clang: 133 PASS / 4 XFAIL / 25 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 162 catalog cases | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 162 catalog cases | 132 PASS / 4 XFAIL / 26 SKIP | Informational, FP guard clean |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 162 catalog cases | 127 PASS / 3 FAIL / 6 XFAIL / 26 SKIP | Informational; three reduced-evidence signal-loss backlogs |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
 
-The full release/stripped/build-source matrix is not a blocking CI gate; CI
-keeps those modes to the representative smoke set so catalog changes do not make
-ordinary pull requests wait on the full extended matrix.
+Default/debug skips are not accepted as green coverage. They are cases outside
+the default single-library debug lane: G20 audit/cross-source snapshots, L3/L4/L5
+build/source-only fixtures, bundle/release cases, BTF, or host feature gaps. The
+catalog keeps them in `ground_truth.json`, and dedicated tests cover those
+families.
+
+Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
+`case117_no_unique_address`, and `case129_struct_return_convention`.
+
+The release/stripped artifact lanes are reported-only plus false-positive
+guarded, while build-source stays a representative smoke because source replay is
+the expensive extended mode.
 
 Recent build/source and ABI-mode examples:
 
@@ -96,9 +105,10 @@ Recent build/source and ABI-mode examples:
 | `case132_threadsafe_statics_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
 | `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
 
-Current mode-specific backlog: the representative stripped-headers smoke
-under-classifies `case129_struct_return_convention` as `COMPATIBLE`; default,
-release, and build/source modes classify it as `BREAKING`.
+Current mode-specific backlog: stripped headers under-classifies
+`case103_toolchain_flag_drift`, `case117_no_unique_address`, and
+`case129_struct_return_convention`; default/debug and release-header modes
+classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 

@@ -11,5 +11,6 @@ typedef enum {
 } log_level_t;
 
 void set_log_level(log_level_t level);
+extern log_level_t default_log_level;
 
 #endif

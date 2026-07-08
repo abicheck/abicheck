@@ -85,3 +85,6 @@ struct Widget {
 ## References
 
 - [How to Write Shared Libraries — Opaque Types](https://www.akkadia.org/drepper/dsohowto.pdf)
+
+
+Implementation note: v1 keeps reserved private storage in the opaque `Session` object; v2 consumes part of that storage for the new private `priority` field while preserving the public handle ABI. This keeps the case focused on a compatible private field addition rather than a public layout change.

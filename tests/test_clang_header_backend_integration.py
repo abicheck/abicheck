@@ -131,6 +131,51 @@ def test_clang_backend_produces_header_aware_snapshot(
     assert "handle_t" in snap.typedefs
 
 
+def test_clang_backend_recovers_c_anonymous_typedef_enum(tmp_path: Path) -> None:
+    """Regression: clang fallback must not drop ``typedef enum {…} name``.
+
+    Some newer distro toolchains can make castxml fail before abicheck falls
+    back to the clang header backend.  case31_enum_rename depends on the enum
+    surviving that fallback path, so assert the live clang AST shape here.
+    """
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip("clang and gcc are required for the C enum fallback regression")
+    header = tmp_path / "log.h"
+    header.write_text(
+        """
+        typedef enum {
+            LOG_NONE = 0,
+            LOG_ERR = 1,
+            LOG_WARN = 2,
+        } log_level_t;
+        extern log_level_t default_log_level;
+        """
+    )
+    src = tmp_path / "log.c"
+    src.write_text(
+        """
+        #include "log.h"
+        log_level_t default_log_level = LOG_ERR;
+        """
+    )
+    so = tmp_path / "liblog.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    snap = dump(so, [header], header_backend="clang")
+    enums = {e.name: e for e in snap.enums}
+    assert "log_level_t" in enums
+    assert [(m.name, m.value) for m in enums["log_level_t"].members] == [
+        ("LOG_NONE", 0),
+        ("LOG_ERR", 1),
+        ("LOG_WARN", 2),
+    ]
+    assert {v.name: v.type for v in snap.variables}["default_log_level"] == "log_level_t"
+
+
 def test_clang_and_castxml_snapshots_agree_on_public_surface(
     built_lib: tuple[Path, Path],
 ) -> None:

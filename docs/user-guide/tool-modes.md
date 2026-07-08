@@ -114,8 +114,8 @@ exactly which sources a binary affords and which mode abicheck will use.
 superset of the one above, both finding more breaks and (from L2) removing false
 positives by scoping to the public surface. The
 [`--evidence-tiers` benchmark](../reference/tool-comparison.md#benchmarking-by-evidence-tier)
-quantifies the cumulative gain across the example catalog (32% → 81% → 99% →
-100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
+quantifies the cumulative gain across the compare-mode example catalog (33% →
+75% → 90% → 95% → 98% → 100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
 keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
 (and the `L5` source graph abicheck derives from them — see
 [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)) explain, scope,

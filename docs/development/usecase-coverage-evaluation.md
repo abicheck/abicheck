@@ -66,7 +66,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 269 change kinds; 129 cases; parity tests |
+| Change taxonomy | `complete` | 269 change kinds; 162 ground-truth entries; parity tests |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |

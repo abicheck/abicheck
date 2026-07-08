@@ -2,7 +2,7 @@
 
 > Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **269**, see the [Change Kind Reference](../reference/change-kinds.md).
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
-> Target: abicheck `examples/` (129 cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**269 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
+> Target: abicheck `examples/` (162 ground-truth entries today; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**269 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
 >
 > **Analysis modes:** Abicheck uses **both** header comparison (via castxml) **and** binary analysis (ELF/DWARF).
 > The `dump()` function combines castxml header parsing (types, functions, enums, typedefs, constants) with

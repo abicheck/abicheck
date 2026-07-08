@@ -139,7 +139,8 @@ Two lessons hide in this table:
   "that struct changed, but it was never part of the public surface."
 - **The staircase is real and measurable.** Over the example catalog, a stripped
   binary alone reaches the correct verdict for about a third of cases; adding
-  debug info takes it to ~81%; headers to ~99%; build/source data closes the rest
+  debug info takes it to ~75%; headers to ~90%; build data to ~95%; source and
+  source-graph data close the rest
   (current numbers in the
   [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what)).
 
