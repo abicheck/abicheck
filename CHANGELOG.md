@@ -33,8 +33,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   not at compare time, since a bare `.abi3.so` carries no declared floor to
   judge against. Version-specific (`cpython-3XX`) modules are deliberately not
   subject to the stable-ABI checks, so a normal per-interpreter extension never
-  false-positives. Cross-platform (ELF/PE imports, plus new Mach-O
-  undefined-symbol capture). See the
+  false-positives. **Free-threaded (PEP 703, `Py_GIL_DISABLED`) builds** are
+  recognised from the `t` SOABI marker (`cpython-3XXt` / `cp3XXt`), correctly
+  treated as version-specific (never `abi3`, since `Py_LIMITED_API` is
+  incompatible with `Py_GIL_DISABLED`), and `compare` raises
+  `python_gil_abi_changed` when a module crosses the GIL/no-GIL boundary between
+  builds. Cross-platform (ELF/PE imports, plus new Mach-O undefined-symbol
+  capture). See the
   [Python Extensions](docs/user-guide/python-extensions.md) guide.
 
 ### Changed

@@ -141,6 +141,14 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # build is flagged.
     o = old.python_ext if old.python_ext is not None else PythonExtMetadata()
 
+    changes: list[Change] = []
+    # GIL ↔ free-threaded (PEP 703) ABI switch is independent of the abi3 promise
+    # and applies to any two real extension builds: report it whenever the module
+    # gained or lost the free-threaded `t` ABI. Skipped when the old side is not a
+    # genuine extension (a freshly introduced module changes nothing).
+    if old.python_ext is not None and old.python_ext.is_extension:
+        changes.extend(_diff_gil_abi(o, n))
+
     # The contract is the NEW artifact's: only a stable-ABI (abi3) new build
     # makes the cross-interpreter promise a private import breaks. The old build
     # need not be abi3 — a retag from a version-specific build to abi3 newly
@@ -151,10 +159,30 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # interpreter at/above its floor, now only on one. That is a deployment
         # regression even though the new build uses private API legitimately.
         if _is_abi3(o):
-            return _diff_abi3_dropped(o, n)
-        return []
+            changes.extend(_diff_abi3_dropped(o, n))
+        return changes
 
-    return _diff_stable_abi_violations(o, n)
+    changes.extend(_diff_stable_abi_violations(o, n))
+    return changes
+
+
+def _diff_gil_abi(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Change]:
+    """The module switched between the regular (GIL) and free-threaded ABI."""
+    if old.free_threaded == new.free_threaded:
+        return []
+    module = _module_symbol(new, old)
+    name = new.module_name or old.module_name or "<extension>"
+    old_tag = "free-threaded" if old.free_threaded else "gil"
+    new_tag = "free-threaded" if new.free_threaded else "gil"
+    return [
+        make_change(
+            ChangeKind.PYTHON_GIL_ABI_CHANGED,
+            symbol=module,
+            name=name,
+            old=old_tag,
+            new=new_tag,
+        )
+    ]
 
 
 def _diff_abi3_dropped(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Change]:

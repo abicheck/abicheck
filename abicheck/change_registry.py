@@ -1569,4 +1569,16 @@ REGISTRY = ChangeKindRegistry([
               "support; the promise lived in the wheel/SOABI tag. A deployment "
               "RISK for anyone not on the exact new interpreter.",
        description_template="extension '{name}' dropped its abi3 promise: {old} → {new}"),
+    _E("python_gil_abi_changed", _R,
+       impact="A CPython extension module switched between the regular (GIL) and "
+              "the free-threaded (PEP 703, `Py_GIL_DISABLED`) CPython ABI — its "
+              "SOABI tag gained or lost the free-threaded `t` marker "
+              "(`cpython-3XX` ↔ `cpython-3XXt`). The two builds target different, "
+              "non-interchangeable interpreter ABIs: a consumer running the "
+              "regular interpreter cannot load a free-threaded build and vice "
+              "versa (different extension suffix, different struct layouts, and — "
+              "since `Py_LIMITED_API` is incompatible with `Py_GIL_DISABLED` — a "
+              "free-threaded build can never be `abi3`). A deployment RISK: "
+              "whether it breaks depends on which interpreter the consumer runs.",
+       description_template="extension '{name}' changed GIL/free-threaded ABI: {old} → {new}"),
 ])

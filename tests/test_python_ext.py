@@ -144,11 +144,12 @@ def test_abi3_tag_variants_recognised() -> None:
     assert _detect_soabi("foo.abi3.so", None)[:2] == ("abi3", True)
     # `-abi3-` token embedded (no cp floor)
     assert _detect_soabi("foo-abi3-linux.so", None)[:2] == ("abi3", True)
-    # version-specific tags stay non-abi3
+    # version-specific tags stay non-abi3 (and not free-threaded)
     assert _detect_soabi("foo.cp312-win_amd64.pyd", None) == (
         "cpython-312",
         False,
         (3, 12),
+        False,
     )
 
 
@@ -391,6 +392,85 @@ def test_no_finding_when_import_surface_unchanged() -> None:
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong"])
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
+
+
+# ── Free-threading (PEP 703, Py_GIL_DISABLED) ────────────────────────────────
+
+
+def test_detect_free_threaded_soabi() -> None:
+    # A `cpython-313t` tag marks a free-threaded (no-GIL) build; it is
+    # version-specific (never abi3) and flagged free_threaded.
+    src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    assert snap.python_ext is not None
+    assert snap.python_ext.free_threaded is True
+    assert snap.python_ext.limited_api is False
+    assert snap.python_ext.soabi_tag == "cpython-313t"
+    assert snap.python_ext.declared_abi3 == (3, 13)
+
+
+def test_detect_free_threaded_windows_tag() -> None:
+    src = "foo.cp314t-win_amd64.pyd"
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    assert snap.python_ext is not None
+    assert snap.python_ext.free_threaded is True
+    assert snap.python_ext.declared_abi3 == (3, 14)
+
+
+def test_regular_build_is_not_free_threaded() -> None:
+    src = "foo.cpython-313-x86_64-linux-gnu.so"
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    assert snap.python_ext is not None
+    assert snap.python_ext.free_threaded is False
+
+
+def test_gil_to_free_threaded_switch_flagged() -> None:
+    # Regular (GIL) 3.13 build → free-threaded 3.13t build: the ABIs are not
+    # interchangeable, so the switch is a deployment RISK.
+    old_src = "foo.cpython-313-x86_64-linux-gnu.so"
+    new_src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=old_src, library=old_src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_GIL_ABI_CHANGED in _kinds(result)
+
+
+def test_free_threaded_to_gil_switch_flagged() -> None:
+    # The reverse direction is equally a switch and equally flagged.
+    old_src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    new_src = "foo.cpython-313-x86_64-linux-gnu.so"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=old_src, library=old_src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_GIL_ABI_CHANGED in _kinds(result)
+
+
+def test_gil_abi_not_flagged_when_unchanged() -> None:
+    # Two free-threaded builds: no GIL-ABI change.
+    src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    old = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=src, library=src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_GIL_ABI_CHANGED not in _kinds(result)
+
+
+def test_gil_abi_not_flagged_for_freshly_introduced_extension() -> None:
+    # A module that was not an extension before gains no GIL-change finding.
+    old = AbiSnapshot(library="foo.so", version="1.0", elf=ElfMetadata())
+    new_src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    new = _ext_snapshot("2.0", ["PyList_New"], source_path=new_src, library=new_src)
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_GIL_ABI_CHANGED not in _kinds(result)
+
+
+def test_free_threaded_roundtrips_through_serialization() -> None:
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+    src = "foo.cpython-313t-x86_64-linux-gnu.so"
+    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
+    restored = snapshot_from_dict(snapshot_to_dict(snap))
+    assert restored.python_ext is not None
+    assert restored.python_ext.free_threaded is True
 
 
 def test_retag_to_abi3_flags_carried_over_private_import() -> None:

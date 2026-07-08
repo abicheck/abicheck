@@ -651,6 +651,7 @@ class ChangeKind(str, Enum):
     # of CPython C-API symbols it IMPORTS from libpython, not its exports (G14).
     PYTHON_STABLE_ABI_VIOLATION = "python_stable_abi_violation"  # abi3 module gained an import outside the stable ABI (e.g. a private _Py* symbol) → won't load on a Limited-API interpreter → RISK
     PYTHON_ABI3_DROPPED = "python_abi3_dropped"  # module was abi3 (loads on all interpreters ≥ its floor) but the new build is version-specific → drops every other interpreter it used to support → RISK
+    PYTHON_GIL_ABI_CHANGED = "python_gil_abi_changed"  # extension switched between the regular (GIL) and free-threaded (PEP 703, Py_GIL_DISABLED) CPython ABI → the two builds are not interchangeable, a consumer on the other interpreter can't load it → RISK
 
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:

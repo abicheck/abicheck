@@ -81,16 +81,27 @@ gate a wheel before you ship it; both `1` and `3` fail the gate.
 
 ### 2. Compare two versions — `compare`
 
-A normal `compare` of two extension modules adds one deployment-risk finding for
-stable-ABI (`abi3`) builds:
+A normal `compare` of two extension modules adds up to three deployment-risk
+findings:
 
 | ChangeKind | Fires when |
 |---|---|
 | `python_stable_abi_violation` | the new build gained a **non-stable** import — a private `_Py*`/`PyUnstable_*` symbol outside the Stable ABI, or a public `Py*` symbol never added to the Limited API (e.g. `PyUnicode_AsUTF8`) — outside the Limited API regardless of interpreter version |
 | `python_abi3_dropped` | the module was an `abi3` build (loadable on every interpreter at/above its floor) but the new build is **version-specific** — it drops every other interpreter it used to support |
+| `python_gil_abi_changed` | the module switched between the regular (GIL) and **free-threaded** (PEP 703, `Py_GIL_DISABLED`) CPython ABI — its SOABI tag gained or lost the `t` marker (`cpython-3XX` ↔ `cpython-3XXt`). The two builds target different, non-interchangeable interpreter ABIs |
 
-Both are classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
-depends on the *target interpreter*, not on the module's own consumers.
+All three are classified `COMPATIBLE_WITH_RISK`: whether the module actually
+breaks depends on the *target interpreter*, not on the module's own consumers.
+
+!!! note "Free-threaded (no-GIL) builds are never `abi3`"
+    A free-threaded build (PEP 703, `cpython-313t` / `cp314t`) uses a different
+    CPython ABI than the regular GIL build of the same minor, and
+    `Py_LIMITED_API` is **incompatible** with `Py_GIL_DISABLED` — so a
+    free-threaded wheel is always version-specific, never `abi3`. abicheck
+    recognises the `t` marker, treats such a module as version-specific (so the
+    stable-ABI contract correctly does not apply), and flags a
+    `python_gil_abi_changed` risk when a module crosses the GIL/no-GIL boundary
+    between builds.
 
 !!! note "Interpreter-*floor* drift is checked by `stable-abi`, not `compare`"
     Proving that a raised interpreter floor drops a *supported* interpreter

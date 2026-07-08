@@ -47,9 +47,12 @@ if TYPE_CHECKING:
 
 #: SOABI / extension-suffix patterns. CPython names extension modules
 #: ``foo.cpython-311-x86_64-linux-gnu.so`` (version-specific) or ``foo.abi3.so``
-#: (stable-ABI); Windows uses ``foo.cp311-win_amd64.pyd`` / ``foo.pyd``.
-_CPYTHON_TAG_RE = re.compile(r"\.cpython-(\d)(\d+)-")
-_CP_WIN_TAG_RE = re.compile(r"\.cp(\d)(\d+)-")
+#: (stable-ABI); Windows uses ``foo.cp311-win_amd64.pyd`` / ``foo.pyd``. A
+#: free-threaded (PEP 703, ``Py_GIL_DISABLED``) build carries a ``t`` right after
+#: the minor: ``foo.cpython-313t-…so`` / ``foo.cp313t-win_amd64.pyd``. The
+#: optional ``t`` group is captured so the free-threaded ABI is recognised.
+_CPYTHON_TAG_RE = re.compile(r"\.cpython-(\d)(\d+)(t?)-")
+_CP_WIN_TAG_RE = re.compile(r"\.cp(\d)(\d+)(t?)-")
 #: ``cpXY-abi3`` — the wheel/SOABI stable-ABI tag that also carries the floor
 #: (e.g. ``foo.cp39-abi3-win_amd64.pyd`` → abi3, floor 3.9). Checked before the
 #: version-specific ``cpXY`` tag so a stable-ABI Windows artifact is recognised.
@@ -89,6 +92,14 @@ class PythonExtMetadata:
     #: known (e.g. an ``abi3`` tag pins the module to that minor). ``None`` when
     #: undeclared.
     declared_abi3: tuple[int, int] | None = None
+    #: True when this is a **free-threaded** (PEP 703, ``Py_GIL_DISABLED``) build
+    #: — a ``t``-suffixed interpreter tag (``cpython-313t`` / ``cp313t``). A
+    #: free-threaded build targets a *different* CPython ABI than the regular
+    #: (GIL) build of the same minor: the two are not interchangeable, and a
+    #: free-threaded build **cannot** be ``abi3`` (``Py_LIMITED_API`` is
+    #: incompatible with ``Py_GIL_DISABLED`` as of CPython 3.13/3.14), so
+    #: :attr:`limited_api` is always ``False`` when this is set.
+    free_threaded: bool = False
     #: Imported CPython C-API symbols (``Py*`` / ``_Py*``), sorted & de-duped.
     cpython_imports: list[str] = field(default_factory=list)
 
@@ -147,10 +158,10 @@ def _detect_init_export(names: list[str]) -> tuple[str | None, str | None, int |
 
 def _detect_soabi(
     library: str | None, source_path: str | None
-) -> tuple[str | None, bool, tuple[int, int] | None]:
+) -> tuple[str | None, bool, tuple[int, int] | None, bool]:
     """Parse the filename for an SOABI/abi3 tag.
 
-    Returns ``(soabi_tag, limited_api, declared_abi3)``.
+    Returns ``(soabi_tag, limited_api, declared_abi3, free_threaded)``.
 
     LIMITATION: the stable-ABI promise lives in the *wheel* tag
     (``…-cp39-abi3-win_amd64.whl``), not always in the extension filename.
@@ -158,9 +169,15 @@ def _detect_soabi(
     tag, which is indistinguishable from a version-specific build — it cannot be
     recognised as abi3 from the file alone. When the ``cpXY-abi3`` tag *is*
     present in the name (it often is), it is honoured here and its floor
-    recovered. For a tagless artifact, run ``stable-abi --abi3 <floor>`` (which
-    flags private imports regardless of the limited-api flag) or give the tagged
+    recovered. For a tagless artifact, run ``scan --abi3 <floor>`` (which flags
+    private imports regardless of the limited-api flag) or give the tagged
     filename.
+
+    A free-threaded (PEP 703) build carries a ``t`` after the minor
+    (``cpython-313t`` / ``cp313t``); it is recognised and reported via the
+    fourth return value. Such a build is never ``abi3`` — ``Py_LIMITED_API`` and
+    ``Py_GIL_DISABLED`` are mutually exclusive — so the abi3 branches never carry
+    a ``t`` and ``limited_api`` stays ``False`` for it.
     """
     for candidate in (source_path, library):
         if not candidate:
@@ -169,15 +186,17 @@ def _detect_soabi(
         # `cpXY-abi3` — abi3 promise WITH a declared floor (Windows/wheel tag).
         m = _CP_ABI3_RE.search(base)
         if m:
-            return "abi3", True, (int(m.group(1)), int(m.group(2)))
+            return "abi3", True, (int(m.group(1)), int(m.group(2))), False
         # A bare `abi3` token — abi3 promise, floor undeclared (`foo.abi3.so`).
         if _ABI3_TAG_RE.search(base):
-            return "abi3", True, None
+            return "abi3", True, None, False
         m = _CPYTHON_TAG_RE.search(base) or _CP_WIN_TAG_RE.search(base)
         if m:
             major, minor = int(m.group(1)), int(m.group(2))
-            return f"cpython-{major}{minor}", False, (major, minor)
-    return None, False, None
+            free_threaded = m.group(3) == "t"
+            tag = f"cpython-{major}{minor}{'t' if free_threaded else ''}"
+            return tag, False, (major, minor), free_threaded
+    return None, False, None, False
 
 
 def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
@@ -204,7 +223,7 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
     if python_major != 3 and not cpython_imports:
         return None
 
-    soabi_tag, limited_api, declared_abi3 = _detect_soabi(
+    soabi_tag, limited_api, declared_abi3, free_threaded = _detect_soabi(
         snap.library, snap.source_path
     )
     return PythonExtMetadata(
@@ -214,5 +233,6 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         soabi_tag=soabi_tag,
         limited_api=limited_api,
         declared_abi3=declared_abi3,
+        free_threaded=free_threaded,
         cpython_imports=cpython_imports,
     )
