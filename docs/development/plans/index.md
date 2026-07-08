@@ -30,6 +30,7 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 | Plan | ADR | Effort |
 |---|---|---|
 | **G19** | [PR-tier source intelligence & cross-source validation](g19-pr-source-intelligence.md) | [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) · XL (phased) |
+| **G23** | [Linux ABI/API detection gap closure](g23-linux-abi-gap-closure.md) | — · L (phased: ELF facts → vtable machinery → clang flag extraction → kABI/ecosystem; macOS/Windows gaps recorded as deferred) |
 
 Completed or decided plans are retained for implementation history:
 
