@@ -6,6 +6,17 @@ findings from the original 2026-03 review have been retired from this page; open
 work now lives in [Backlog](backlog.md), [Use-Case Coverage Evaluation](usecase-coverage-evaluation.md),
 and the [implementation plans](plans/index.md).
 
+> **Working documents.** The roadmap artifacts linked above — the backlog, the
+> per-goal implementation plans (`development/plans/`), the coverage/scenario
+> audits, and archived status notes — live in the repository but are kept out of
+> the published site navigation. They are internal planning notes, not product
+> documentation, and may be less current than the pages in the nav. Besides the
+> backlog and plans linked above, they include the
+> [config-key review](config-key-review.md),
+> [architecture-deepening plan](architecture-deepening-plan.md),
+> [user scenarios & flows](user-scenarios.md), and the archived
+> [data-source process remediation plan](archive/data-source-process-remediation-plan.md).
+
 ---
 
 ## 1. Architecture overview

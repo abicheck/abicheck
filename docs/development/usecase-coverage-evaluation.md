@@ -5,9 +5,8 @@
 ABI-API change use cases, identify where coverage is deep vs. thin, and record
 the concrete code / test / example follow-ups.
 
-This is a companion to [`archive/adr-gap-analysis.md`](archive/adr-gap-analysis.md)
-(which tracks *undocumented decisions*); this document tracks *uncovered
-scenarios*.
+This document tracks *uncovered scenarios* (as opposed to undocumented
+decisions, which are captured directly in the [ADRs](adr/index.md)).
 
 Three related artifacts, kept distinct: the **examples catalog** (`examples/`)
 demonstrates ABI/API *change types*; the **user-scenario catalog**
