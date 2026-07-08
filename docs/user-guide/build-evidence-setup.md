@@ -122,13 +122,16 @@ out-of-band per side at compare time:
 abicheck compare old.abi.json new.abi.json \
   --old-build-info old.bs/ --new-build-info new.bs/
 
-# (Advanced) Collect a pack from an existing build tree (no rebuild), then embed:
+# (Advanced) Collect a pack from an existing build tree (no rebuild), then embed.
+#   --source-abi-extractor : clang (default) | castxml | android
+#   --source-abi-scope     : off | headers-only | changed | target | full
+#   --source-abi-cache     : optional per-TU dump cache (ADR-030 D8)
 abicheck collect \
   --compile-db build/compile_commands.json \
   --source-abi \
-  --source-abi-extractor clang \          # clang (default) | castxml | android
-  --source-abi-scope target \             # off | headers-only | changed | target | full
-  --source-abi-cache .abicache/source \   # optional per-TU dump cache (ADR-030 D8)
+  --source-abi-extractor clang \
+  --source-abi-scope target \
+  --source-abi-cache .abicache/source \
   --source-graph summary \
   --output libfoo.evidence/
 abicheck dump libfoo.so -H include/ --sources libfoo.evidence/ -o new.abi.json
