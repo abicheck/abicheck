@@ -654,6 +654,35 @@ class ChangeKind(str, Enum):
     PYTHON_GIL_ABI_CHANGED = "python_gil_abi_changed"  # extension switched between the regular (GIL) and free-threaded (PEP 703, Py_GIL_DISABLED) CPython ABI → the two builds are not interchangeable, a consumer on the other interpreter can't load it → RISK
     PYTHON_ABI3_FLOOR_RAISED = "python_abi3_floor_raised"  # both builds are abi3 but the new one's declared cpXY-abi3 tag floor is higher (e.g. cp39-abi3 → cp310-abi3) → interpreters in the dropped range can no longer load it → RISK
 
+    # ── G23 Phase A — Linux ELF artifact facts ──────────────────────────────
+    # A1: DF_STATIC_TLS drift. A library that adopts the static (initial/local-
+    # exec) TLS model can no longer be reliably dlopen()ed. Artifact-provable
+    # from the binary, so it does not need an L3 build pack (the flag-level
+    # TLS_MODEL_CHANGED stays the explanatory L3 signal).
+    STATIC_TLS_INTRODUCED = "static_tls_introduced"  # → RISK (breaks dlopen consumers)
+    STATIC_TLS_REMOVED = "static_tls_removed"  # → COMPATIBLE (improvement)
+
+    # A2: .note.gnu.property control-flow-protection drift. Dropping IBT/SHSTK
+    # (x86 CET) or BTI/PAC (AArch64) weakens the process-wide guarantee.
+    CET_PROTECTION_WEAKENED = "cet_protection_weakened"  # IBT/SHSTK dropped → RISK
+    BRANCH_PROTECTION_WEAKENED = "branch_protection_weakened"  # BTI/PAC dropped → RISK
+    CET_PROTECTION_IMPROVED = "cet_protection_improved"  # IBT/SHSTK gained → COMPATIBLE
+    BRANCH_PROTECTION_IMPROVED = "branch_protection_improved"  # BTI/PAC gained → COMPATIBLE
+
+    # A3: ELF identity / ABI-flags guard. The ELF-side counterpart to
+    # PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED. ELF_ABI_FLAGS_CHANGED makes
+    # float-ABI drift artifact-proven (the flag-level FLOAT_ABI_CHANGED stays the
+    # explanatory L3 signal).
+    ELF_MACHINE_CHANGED = "elf_machine_changed"  # e_machine differs → BREAKING
+    ELF_CLASS_CHANGED = "elf_class_changed"  # 32↔64-bit → BREAKING
+    ELF_ABI_FLAGS_CHANGED = "elf_abi_flags_changed"  # decoded float-ABI/EABI drift → BREAKING
+    ELF_OSABI_CHANGED = "elf_osabi_changed"  # EI_OSABI differs → RISK
+
+    # A4: STB_GNU_UNIQUE binding transitions. Uniqueness is enforced process-wide
+    # and inhibits dlclose(); losing it removes an ODR-uniqueness guarantee.
+    SYMBOL_BINDING_BECAME_UNIQUE = "symbol_binding_became_unique"  # → RISK
+    SYMBOL_BINDING_LOST_UNIQUE = "symbol_binding_lost_unique"  # → RISK
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

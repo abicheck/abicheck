@@ -1593,4 +1593,87 @@ REGISTRY = ChangeKindRegistry([
               "min-of-imports inference). A deployment RISK: whether it breaks "
               "depends on which interpreters the consumer must support.",
        description_template="abi3 extension '{name}' raised its Py_LIMITED_API floor: {old} → {new}"),
+    # ── G23 Phase A — Linux ELF artifact facts ──────────────────────────────
+    # A1: static-TLS drift.
+    _E("static_tls_introduced", _R,
+       impact="The library set DF_STATIC_TLS: it now uses the static "
+              "(initial-exec / local-exec) TLS model. Such a library can no "
+              "longer be reliably dlopen()ed — the dynamic loader may fail with "
+              "'cannot allocate memory in static TLS block' when the process's "
+              "static TLS surplus is exhausted. Link-time consumers are "
+              "unaffected, so this defaults to RISK; gate it to break via the "
+              "plugin/security policy if the library is meant to be dlopen-loadable. "
+              "The flag-level TLS_MODEL_CHANGED (L3) explains which build flag "
+              "caused it; this kind proves the artifact effect.",
+       description_template="Static-TLS model introduced (DF_STATIC_TLS set): the library may no longer be reliably dlopen()ed"),
+    _E("static_tls_removed", _C,
+       impact="DF_STATIC_TLS was cleared: the library returned to the dynamic "
+              "TLS model and is dlopen-friendly again. Informational improvement.",
+       description_template="Static-TLS model removed (DF_STATIC_TLS cleared) — dlopen-friendly again"),
+
+    # A2: GNU-property control-flow-protection drift.
+    _E("cet_protection_weakened", _R,
+       impact="An x86 CET control-flow-protection feature (IBT and/or SHSTK) was "
+              "dropped from .note.gnu.property. CET is enforced per link map: a "
+              "single non-IBT DSO disables indirect-branch tracking for the whole "
+              "process, so weakening it silently lowers the runtime hardening of "
+              "every consumer. RISK by default; the shipped security policy gates "
+              "it to break.",
+       description_template="CET protection weakened: {old} → {new}"),
+    _E("branch_protection_weakened", _R,
+       impact="An AArch64 branch-protection feature (BTI and/or PAC) was dropped "
+              "from .note.gnu.property. Like CET, BTI enforcement is process-wide, "
+              "so a single non-BTI DSO weakens the guarantee for the whole link "
+              "map. RISK by default; gated to break by the security policy.",
+       description_template="Branch protection weakened: {old} → {new}"),
+    _E("cet_protection_improved", _C,
+       impact="An x86 CET feature (IBT/SHSTK) was added to .note.gnu.property — "
+              "a hardening improvement. Informational.",
+       description_template="CET protection improved: {old} → {new}"),
+    _E("branch_protection_improved", _C,
+       impact="An AArch64 branch-protection feature (BTI/PAC) was added to "
+              ".note.gnu.property — a hardening improvement. Informational.",
+       description_template="Branch protection improved: {old} → {new}"),
+
+    # A3: ELF identity / ABI-flags guard.
+    _E("elf_machine_changed", _B,
+       impact="The ELF e_machine (target architecture) changed. The two inputs "
+              "are different-architecture binaries — nothing about their ABI is "
+              "comparable, and a consumer built for one cannot load the other. "
+              "The ELF-side analogue of PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED.",
+       description_template="ELF machine changed: {old} → {new} — different target architecture"),
+    _E("elf_class_changed", _B,
+       impact="The ELF class changed between 32-bit and 64-bit. Pointer width, "
+              "type sizes, and the calling convention all differ; no consumer "
+              "built against one class can use the other.",
+       description_template="ELF class changed: {old}-bit → {new}-bit"),
+    _E("elf_abi_flags_changed", _B,
+       impact="The ELF e_flags ABI-selecting bits changed — the float ABI "
+              "(hard/soft-float), EABI version, or base ISA differs between "
+              "versions. Object code compiled against the old convention passes "
+              "floating-point arguments in the wrong registers/stack slots, "
+              "silently corrupting calls. Artifact-proven from e_flags; the "
+              "flag-level FLOAT_ABI_CHANGED (L3) stays the explanatory signal.",
+       description_template="ELF ABI flags changed: {old} → {new}"),
+    _E("elf_osabi_changed", _R,
+       impact="The ELF EI_OSABI (target OS ABI) changed (e.g. SYSV ↔ GNU/Linux ↔ "
+              "FreeBSD). This can alter the meaning of OS-specific symbol types "
+              "and relocations; consumers may resolve or load differently. RISK.",
+       description_template="ELF OS ABI changed: {old} → {new}"),
+
+    # A4: STB_GNU_UNIQUE binding transitions.
+    _E("symbol_binding_became_unique", _R,
+       impact="An exported symbol's binding became STB_GNU_UNIQUE. GNU-unique "
+              "symbols are enforced as process-wide unique by the dynamic loader, "
+              "and a library that defines one becomes non-unloadable — dlclose() "
+              "is inhibited for it. Changes loader semantics for consumers that "
+              "rely on unloading. RISK.",
+       description_template="Symbol binding became GNU_UNIQUE: {name} — inhibits dlclose() on this library"),
+    _E("symbol_binding_lost_unique", _R,
+       impact="An exported symbol's binding was STB_GNU_UNIQUE and is no longer. "
+              "The process-wide ODR-uniqueness guarantee that consumers may have "
+              "relied on (a single shared instance of an inline/template static "
+              "across all DSOs) is gone; duplicate per-DSO instances may reappear. "
+              "RISK.",
+       description_template="Symbol binding lost GNU_UNIQUE: {name} — process-wide uniqueness guarantee removed"),
 ])

@@ -60,6 +60,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   ledger (`--show-filtered`). Type-level and internal-leak findings are always
   kept (scoping never hides a break). Plumbed through `CompareRequest`, the
   Tier-2 service, and the post-processing pipeline as `public_surface_allowlist`.
+- **G23 Phase A — Linux ELF artifact-fact detectors (12 new `ChangeKind`s).**
+  ELF metadata capture and diff rules for facts readable from the binary alone
+  (L0), with no DWARF or headers required:
+  - **Static-TLS drift** (`static_tls_introduced` → RISK, `static_tls_removed`
+    → COMPATIBLE): `DF_STATIC_TLS` adoption makes a library un-`dlopen`-able.
+    Reported only when the library actually participates in TLS (defined or
+    imported `STT_TLS`).
+  - **Control-flow-integrity drift** (`cet_protection_weakened` /
+    `branch_protection_weakened` → RISK, `_improved` counterparts → COMPATIBLE):
+    x86 CET (IBT/SHSTK) and AArch64 branch protection (BTI/PAC) decoded from
+    `.note.gnu.property`.
+  - **ELF identity / ABI-flags guard** (`elf_machine_changed`,
+    `elf_class_changed`, `elf_abi_flags_changed` → BREAKING;
+    `elf_osabi_changed` → RISK): the ELF-side counterpart to
+    `pe_machine_changed` / `macho_cpu_type_changed`, including decoded per-arch
+    float-ABI/EABI `e_flags` bits (ARM/RISC-V/MIPS).
+  - **GNU-unique binding transitions** (`symbol_binding_became_unique` /
+    `symbol_binding_lost_unique` → RISK): `STB_GNU_UNIQUE` inhibits `dlclose()`
+    and carries a process-wide ODR-uniqueness guarantee.
+  - The shipped `security` policy now gates `cet_protection_weakened`,
+    `branch_protection_weakened`, and `static_tls_introduced` to break.
 
 ### Changed
 

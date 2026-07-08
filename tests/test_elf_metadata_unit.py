@@ -397,9 +397,19 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("exotic", bind="STB_GNU_UNIQUE")]
+        section.iter_symbols.return_value = [self._make_sym("exotic", bind="STB_EXOTIC")]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].binding == SymbolBinding.OTHER
+
+    def test_gnu_unique_bind_maps_to_unique(self):
+        # STB_GNU_UNIQUE (and the STB_LOOS alias older pyelftools reports) is a
+        # recognized binding, not "other" — G23-A4 routes it to dedicated kinds.
+        meta = ElfMetadata()
+        section = MagicMock()
+        section.name = ".dynsym"
+        section.iter_symbols.return_value = [self._make_sym("inst", bind="STB_GNU_UNIQUE")]
+        _parse_dynsym(section, meta)
+        assert meta.symbols[0].binding == SymbolBinding.UNIQUE
 
     def test_unknown_type_maps_to_other(self):
         meta = ElfMetadata()

@@ -219,6 +219,14 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_fortify_source=e.get("has_fortify_source", False),
         has_writable_executable_segment=e.get("has_writable_executable_segment", False),
         pointer_size=e.get("pointer_size", 8),
+        machine=e.get("machine", ""),
+        elf_class=e.get("elf_class", 64),
+        osabi=e.get("osabi", ""),
+        e_flags=e.get("e_flags", 0),
+        abi_flags=frozenset(e.get("abi_flags", [])),
+        has_static_tls=e.get("has_static_tls", False),
+        has_tls_symbols=e.get("has_tls_symbols", False),
+        gnu_properties=frozenset(e.get("gnu_properties", [])),
     )
 
 

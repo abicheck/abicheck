@@ -1,10 +1,11 @@
 # G23 — Linux ABI/API detection gap closure
 
 **Origin:** ABI/API break-coverage evaluation (July 2026) — a sweep of the full
-break universe against the current 269-kind catalog. The catalog has full
+break universe against the `ChangeKind` catalog. The catalog has full
 ABICC/libabigail scenario parity; the residual gaps below are in deep Itanium
 C++ machinery, modern ELF metadata, toolchain extraction robustness, and
-ecosystem-specific contracts.
+ecosystem-specific contracts. Phase A (ELF artifact facts) is implemented; the
+remaining phases are scoped below.
 **Effort:** phased — A: S–M per item · B: L–XL (phased) · C: M · D: S–M per item
 **Risk:** low for A/C/D (additive detectors over already-parsed or cheap-to-parse
 facts); medium for B (vtable reconstruction is genuinely hard; scoped tri-state
@@ -344,11 +345,23 @@ source type. The Itanium mangling distinguishes them (`e` vs `g` vs
 as an unexplained `FUNC_REMOVED`+`FUNC_ADDED` pair rather than a named,
 policy-addressable transition.
 
-**Detection.** In the removed↔added pairing pass (`binary_fingerprint.py` /
-rename detection precedent): when a removed/added pair demangles to the same
-signature except for a long-double-family mangling substitution, emit the
-specific kind instead of the generic pair. At L1, corroborate via
-`DW_AT_encoding`/`DW_AT_byte_size` on `long double` typed parameters.
+**Detection.** Two complementary paths, because not every long-double
+transition changes the mangled name:
+
+1. *Symbol-pair path* (mangling changes): in the removed↔added pairing pass
+   (`binary_fingerprint.py` / rename-detection precedent), when a removed/added
+   pair demangles to the same signature except for a long-double-family
+   mangling substitution (`e` ↔ `g` ↔ `u9__ieee128`), emit the specific kind
+   instead of the generic `FUNC_REMOVED`+`FUNC_ADDED`. This covers the ppc64
+   IEEE128↔IBM double-double case.
+2. *Same-symbol path* (mangling unchanged): `-mlong-double-64` on x86-64 keeps
+   the **same** mangled name (`_Z1fe` both before and after) while changing the
+   representation from 80-bit to 64-bit — so there is no removed/added pair to
+   match, and path 1 alone would report nothing. Detect this at L1 from the
+   `DW_AT_byte_size` of the `long double` parameter/return type on a symbol that
+   persists across versions (a size change on a type whose `DW_AT_encoding` is
+   float and whose source name is `long double`), or from an L3 `-mlong-double-*`
+   flag flip. Emit the same kind.
 
 **Kind.** `LONG_DOUBLE_ABI_CHANGED` → **BREAKING**.
 
@@ -379,13 +392,13 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 
 ## Sequencing
 
-| Milestone | Contents | New kinds | Effort |
-|---|---|---|---|
-| M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable |
-| M2 | B1 (L0 thunk/VTT diff) | 3 | M |
-| M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L |
-| M4 | C (clang flag extraction) | 0 | M |
-| M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S |
+| Milestone | Contents | New kinds | Effort | Status |
+|---|---|---|---|---|
+| M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable | **done** |
+| M2 | B1 (L0 thunk/VTT diff) | 3 | M | planned |
+| M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L | planned |
+| M4 | C (clang flag extraction) | 0 | M | planned |
+| M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | planned |
 
 Every milestone leaves the gates green: partition assertion, detector/docs
 coverage, doc-count-sync headline counts, FP-rate and tier-accuracy corpora
@@ -393,7 +406,15 @@ where applicable.
 
 ## Acceptance criteria (plan-level)
 
-- [ ] Each Phase A/B/D kind lands with the full shared checklist above.
+- [x] **Phase A implemented** — 12 kinds (`static_tls_introduced`/`_removed`,
+      `cet_protection_weakened`/`_improved`, `branch_protection_weakened`/`_improved`,
+      `elf_machine_changed`, `elf_class_changed`, `elf_abi_flags_changed`,
+      `elf_osabi_changed`, `symbol_binding_became_unique`/`_lost_unique`) with
+      ELF metadata capture, registry entries, detectors, evidence-tier mapping,
+      security-policy gating for the hardening kinds, and unit tests
+      (`tests/test_g23_elf_facts.py`). All AI-readiness/mypy/ruff/FP-rate/tier
+      gates green.
+- [ ] Each remaining Phase B/D kind lands with the full shared checklist above.
 - [ ] The B1 acceptance fixture — thunk-offset shift with unchanged `_ZTV`
       sizes — is BREAKING on a **stripped** pair (today: NO_CHANGE).
 - [ ] The B2 diamond fixture localizes the exact secondary-group slot at L1,

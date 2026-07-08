@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import stat
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -50,6 +51,7 @@ class SymbolBinding(str, Enum):
     GLOBAL = "global"
     WEAK = "weak"
     LOCAL = "local"
+    UNIQUE = "unique"  # STB_GNU_UNIQUE — process-wide uniqueness, inhibits dlclose
     OTHER = "other"
 
 
@@ -148,6 +150,37 @@ class ElfMetadata:
     # so in-memory snapshots constructed in tests need not set it explicitly.
     pointer_size: int = 8
 
+    # ── ELF identity (G23-A3) ────────────────────────────────────────────
+    # Header fields that define the binary's target contract. A drift here
+    # means the two inputs are different-architecture / different-ABI images.
+    # ``machine`` is the pyelftools e_machine string (e.g. "EM_X86_64");
+    # ``elf_class`` is 32 or 64; ``osabi`` is the EI_OSABI string
+    # (e.g. "ELFOSABI_SYSV"). ``e_flags`` is the raw per-arch flag word and
+    # ``abi_flags`` a decoded, human-readable subset (float ABI / EABI version)
+    # for the architectures we know how to decode (ARM, RISC-V, MIPS).
+    machine: str = ""
+    elf_class: int = 64
+    osabi: str = ""
+    e_flags: int = 0
+    abi_flags: frozenset[str] = field(default_factory=frozenset)
+
+    # ── Static-TLS drift (G23-A1) ────────────────────────────────────────
+    # DF_STATIC_TLS in DT_FLAGS: the library uses the static (initial/local-exec)
+    # TLS model and can no longer be reliably dlopen()ed. ``has_tls_symbols`` is
+    # True when the dynamic symbol table carries any STT_TLS entry (defined OR
+    # undefined import) — an initial-exec reference to an external __thread var
+    # sets DF_STATIC_TLS with no local TLS definitions, and that import-only case
+    # is exactly as dlopen-hostile, so the suppression guard must consider it.
+    has_static_tls: bool = False
+    has_tls_symbols: bool = False
+
+    # ── GNU-property hardening (G23-A2) ──────────────────────────────────
+    # Control-flow protections carried in PT_GNU_PROPERTY / .note.gnu.property.
+    # A set of feature tokens drawn from {"IBT", "SHSTK", "BTI", "PAC"}. Dropping
+    # a feature between versions weakens the process-wide guarantee (a single
+    # non-IBT/BTI DSO disables enforcement for the whole link map).
+    gnu_properties: frozenset[str] = field(default_factory=frozenset)
+
     @cached_property
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
@@ -166,6 +199,11 @@ _BINDING_MAP: dict[str, SymbolBinding] = {
     "STB_GLOBAL": SymbolBinding.GLOBAL,
     "STB_WEAK": SymbolBinding.WEAK,
     "STB_LOCAL": SymbolBinding.LOCAL,
+    # STB_GNU_UNIQUE (bind value 10, GNU OS-specific range). pyelftools reports
+    # it as "STB_GNU_UNIQUE"; older versions surface the raw OS range as
+    # "STB_LOOS", which on Linux ELF coincides with STB_GNU_UNIQUE.
+    "STB_GNU_UNIQUE": SymbolBinding.UNIQUE,
+    "STB_LOOS": SymbolBinding.UNIQUE,
 }
 
 _TYPE_MAP: dict[str, SymbolType] = {
@@ -215,6 +253,8 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     elf = ELFFile(f)
 
     meta.pointer_size = _read_pointer_size(elf, so_path)
+    _read_identity(elf, meta, so_path)
+    _parse_gnu_property(elf, meta, so_path)
     has_relro_segment, is_et_dyn = _parse_segments(elf, meta, so_path)
 
     ver_sym_section, dynsym_section, ver_index_map = _parse_all_sections(elf, meta, so_path)
@@ -242,6 +282,126 @@ def _read_pointer_size(elf: ELFFile, so_path: Path) -> int:
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc)
         return 8
+
+
+# ── ELF identity / per-arch ABI-flag decoding (G23-A3) ──────────────────────
+# Only the bits that select an *incompatible* calling convention are decoded;
+# unknown architectures fall back to reporting the raw e_flags value.
+_EF_ARM_ABI_FLOAT_HARD = 0x00000400
+_EF_ARM_ABI_FLOAT_SOFT = 0x00000200
+_EF_ARM_EABI_MASK = 0xFF000000
+_EF_RISCV_FLOAT_ABI_MASK = 0x0006  # 0=soft, 2=single, 4=double, 6=quad
+_EF_RISCV_RVC = 0x0001
+_EF_RISCV_RVE = 0x0008
+_EF_MIPS_ABI_MASK = 0x0000F000
+_RISCV_FLOAT_ABI_NAMES = {0x0: "float-soft", 0x2: "float-single", 0x4: "float-double", 0x6: "float-quad"}
+
+
+def _decode_abi_flags(machine: str, e_flags: int) -> frozenset[str]:
+    """Decode the ABI-selecting bits of ``e_flags`` for architectures we know.
+
+    Returns a set of human-readable tokens whose *change* between two versions
+    signals a calling-convention-incompatible rebuild (float ABI, EABI version).
+    Unknown architectures return an empty set; the raw ``e_flags`` value is
+    diffed separately so drift is still caught, just without a decoded label.
+    """
+    tokens: set[str] = set()
+    if machine in ("EM_ARM",):
+        if e_flags & _EF_ARM_ABI_FLOAT_HARD:
+            tokens.add("float-hard")
+        elif e_flags & _EF_ARM_ABI_FLOAT_SOFT:
+            tokens.add("float-soft")
+        eabi = (e_flags & _EF_ARM_EABI_MASK) >> 24
+        if eabi:
+            tokens.add(f"eabi{eabi}")
+    elif machine in ("EM_RISCV",):
+        tokens.add(_RISCV_FLOAT_ABI_NAMES.get(e_flags & _EF_RISCV_FLOAT_ABI_MASK, "float-unknown"))
+        if e_flags & _EF_RISCV_RVC:
+            tokens.add("rvc")
+        if e_flags & _EF_RISCV_RVE:
+            tokens.add("rve")
+    elif machine in ("EM_MIPS",):
+        abi = e_flags & _EF_MIPS_ABI_MASK
+        if abi:
+            tokens.add(f"mips-abi-{abi:#x}")
+    return frozenset(tokens)
+
+
+def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
+    """Capture the ELF header fields that define the target binary contract."""
+    try:
+        meta.machine = elf["e_machine"]
+        meta.elf_class = 32 if elf.elfclass == 32 else 64
+        meta.osabi = elf["e_ident"]["EI_OSABI"]
+        meta.e_flags = int(elf["e_flags"])
+        meta.abi_flags = _decode_abi_flags(meta.machine, meta.e_flags)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("parse_elf_metadata: failed to read ELF identity from %s: %s", so_path, exc)
+
+
+# ── GNU-property control-flow-protection decoding (G23-A2) ──────────────────
+_NT_GNU_PROPERTY_TYPE_0 = 5
+_GNU_PROPERTY_X86_FEATURE_1_AND = 0xC0000002
+_GNU_PROPERTY_X86_FEATURE_1_IBT = 0x1
+_GNU_PROPERTY_X86_FEATURE_1_SHSTK = 0x2
+_GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xC0000000
+_GNU_PROPERTY_AARCH64_FEATURE_1_BTI = 0x1
+_GNU_PROPERTY_AARCH64_FEATURE_1_PAC = 0x2
+
+
+def _decode_gnu_property_desc(desc: bytes, little_endian: bool) -> frozenset[str]:
+    """Parse a NT_GNU_PROPERTY_TYPE_0 note description into feature tokens.
+
+    The description is a sequence of properties, each laid out as
+    ``pr_type (u32) | pr_datasz (u32) | pr_data[pr_datasz] | pad-to-8``.
+    Only the x86 and AArch64 control-flow-protection AND-features are decoded.
+    """
+    endian = "<" if little_endian else ">"
+    tokens: set[str] = set()
+    off = 0
+    n = len(desc)
+    while off + 8 <= n:
+        pr_type, pr_datasz = struct.unpack_from(endian + "II", desc, off)
+        off += 8
+        if off + pr_datasz > n:
+            break
+        data = desc[off : off + pr_datasz]
+        if pr_type == _GNU_PROPERTY_X86_FEATURE_1_AND and pr_datasz >= 4:
+            (bits,) = struct.unpack_from(endian + "I", data, 0)
+            if bits & _GNU_PROPERTY_X86_FEATURE_1_IBT:
+                tokens.add("IBT")
+            if bits & _GNU_PROPERTY_X86_FEATURE_1_SHSTK:
+                tokens.add("SHSTK")
+        elif pr_type == _GNU_PROPERTY_AARCH64_FEATURE_1_AND and pr_datasz >= 4:
+            (bits,) = struct.unpack_from(endian + "I", data, 0)
+            if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_BTI:
+                tokens.add("BTI")
+            if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_PAC:
+                tokens.add("PAC")
+        # Advance past pr_data, padded up to 8-byte alignment.
+        off += (pr_datasz + 7) & ~7
+    return frozenset(tokens)
+
+
+def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
+    """Read control-flow-protection features from .note.gnu.property, if present."""
+    try:
+        section = elf.get_section_by_name(".note.gnu.property")
+        if section is None or not hasattr(section, "iter_notes"):
+            return
+        features: set[str] = set()
+        for note in section.iter_notes():
+            if note.get("n_type") != _NT_GNU_PROPERTY_TYPE_0:
+                continue
+            desc = note.get("n_descdata") or note.get("n_desc")
+            if isinstance(desc, str):
+                desc = desc.encode("latin-1", "replace")
+            if not isinstance(desc, (bytes, bytearray)):
+                continue
+            features |= _decode_gnu_property_desc(bytes(desc), elf.little_endian)
+        meta.gnu_properties = frozenset(features)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("parse_elf_metadata: failed to read .note.gnu.property from %s: %s", so_path, exc)
 
 
 _PF_X = 0x1
@@ -458,6 +618,7 @@ def _postprocess_metadata(
 
 # Dynamic-flag bit constants (elf.h).
 _DF_BIND_NOW = 0x8        # DT_FLAGS
+_DF_STATIC_TLS = 0x10     # DT_FLAGS
 _DF_1_NOW = 0x1           # DT_FLAGS_1
 _DF_1_PIE = 0x08000000    # DT_FLAGS_1
 
@@ -478,6 +639,8 @@ def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
         elif d_tag == "DT_FLAGS":
             if tag.entry.d_val & _DF_BIND_NOW:
                 meta.bind_now = True
+            if tag.entry.d_val & _DF_STATIC_TLS:
+                meta.has_static_tls = True
         elif d_tag == "DT_FLAGS_1":
             if tag.entry.d_val & _DF_1_NOW:
                 meta.bind_now = True
@@ -704,6 +867,12 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
         vis_str = sym.entry.st_other.visibility
         binding = _BINDING_MAP.get(binding_str, SymbolBinding.OTHER)
         name = sym.name
+
+        # Any STT_TLS entry (defined or undefined import) means the library
+        # participates in TLS — used to gate the DF_STATIC_TLS finding so a
+        # TLS-free library is never flagged (G23-A1).
+        if type_str == "STT_TLS":
+            meta.has_tls_symbols = True
 
         # Collect undefined symbols as imports.
         if sym.entry.st_shndx == "SHN_UNDEF":

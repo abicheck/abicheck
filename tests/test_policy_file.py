@@ -227,6 +227,10 @@ def test_builtin_security_policy_gates_hardening_to_break() -> None:
         ChangeKind.FORTIFY_SOURCE_WEAKENED,
         ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
         ChangeKind.EXECUTABLE_STACK,
+        # G23-A1/A2 hardening kinds
+        ChangeKind.CET_PROTECTION_WEAKENED,
+        ChangeKind.BRANCH_PROTECTION_WEAKENED,
+        ChangeKind.STATIC_TLS_INTRODUCED,
     ):
         assert pf.overrides.get(kind) == Verdict.BREAKING, kind
         assert pf.compute_verdict([_change(kind)]) == Verdict.BREAKING

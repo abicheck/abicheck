@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 273,
+  "count": 281,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -100,6 +100,24 @@
       "min_evidence": "L1",
       "doc_slug": "bit_int_width_changed",
       "examples": "case115_bit_int_width_changed"
+    },
+    {
+      "kind": "branch_protection_improved",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "branch_protection_improved",
+      "examples": ""
+    },
+    {
+      "kind": "branch_protection_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "branch_protection_weakened",
+      "examples": ""
     },
     {
       "kind": "build_context_changed",
@@ -226,6 +244,24 @@
       "min_evidence": "L1",
       "doc_slug": "calling_convention_changed",
       "examples": "case64_calling_convention_changed"
+    },
+    {
+      "kind": "cet_protection_improved",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "cet_protection_improved",
+      "examples": ""
+    },
+    {
+      "kind": "cet_protection_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "cet_protection_weakened",
+      "examples": ""
     },
     {
       "kind": "char8t_migration",
@@ -378,6 +414,42 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "dwarf_info_missing",
+      "examples": ""
+    },
+    {
+      "kind": "elf_abi_flags_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_abi_flags_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_class_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_class_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_machine_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_machine_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_osabi_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "elf_osabi_changed",
       "examples": ""
     },
     {
@@ -1596,6 +1668,24 @@
       "examples": ""
     },
     {
+      "kind": "static_tls_introduced",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "static_tls_introduced",
+      "examples": ""
+    },
+    {
+      "kind": "static_tls_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "static_tls_removed",
+      "examples": ""
+    },
+    {
       "kind": "std_reexport_removed",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -1785,12 +1875,30 @@
       "examples": ""
     },
     {
+      "kind": "symbol_binding_became_unique",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_binding_became_unique",
+      "examples": ""
+    },
+    {
       "kind": "symbol_binding_changed",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "symbol_binding_changed",
+      "examples": ""
+    },
+    {
+      "kind": "symbol_binding_lost_unique",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_binding_lost_unique",
       "examples": ""
     },
     {

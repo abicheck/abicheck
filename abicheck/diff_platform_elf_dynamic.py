@@ -239,7 +239,164 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         )
 
     changes.extend(_diff_security_hardening(old_elf, new_elf))
+    changes.extend(_diff_elf_identity(old_elf, new_elf))
+    changes.extend(_diff_static_tls(old_elf, new_elf))
+    changes.extend(_diff_gnu_property(old_elf, new_elf))
 
+    return changes
+
+
+def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect ELF header identity drift (G23-A3): machine, class, ABI flags, OS ABI.
+
+    A machine/class/ABI-flags change means the two inputs are
+    different-architecture or different-calling-convention images — the
+    ELF-side counterpart to PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED. Empty
+    identity (e.g. an in-memory snapshot with no ELF parsed) is skipped so a
+    missing-metadata side never fabricates a finding.
+    """
+    changes: list[Change] = []
+
+    old_machine = getattr(old_elf, "machine", "")
+    new_machine = getattr(new_elf, "machine", "")
+    if old_machine and new_machine and old_machine != new_machine:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_MACHINE_CHANGED,
+                symbol="ELF_HEADER",
+                old=old_machine,
+                new=new_machine,
+                old_value=old_machine,
+                new_value=new_machine,
+            )
+        )
+        # Machine drift subsumes ABI-flag/class drift (flags are per-arch); a
+        # cross-architecture pair has nothing further comparable.
+        return changes
+
+    old_class = getattr(old_elf, "elf_class", 0)
+    new_class = getattr(new_elf, "elf_class", 0)
+    if old_class and new_class and old_class != new_class:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_CLASS_CHANGED,
+                symbol="ELF_HEADER",
+                old=str(old_class),
+                new=str(new_class),
+                old_value=str(old_class),
+                new_value=str(new_class),
+            )
+        )
+
+    old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
+    new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
+    if old_abi != new_abi and (old_abi or new_abi):
+        changes.append(
+            make_change(
+                ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                symbol="ELF_HEADER",
+                old=", ".join(sorted(old_abi)) or "(none)",
+                new=", ".join(sorted(new_abi)) or "(none)",
+            )
+        )
+
+    old_osabi = getattr(old_elf, "osabi", "")
+    new_osabi = getattr(new_elf, "osabi", "")
+    if old_osabi and new_osabi and old_osabi != new_osabi:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_OSABI_CHANGED,
+                symbol="ELF_HEADER",
+                old=old_osabi,
+                new=new_osabi,
+                old_value=old_osabi,
+                new_value=new_osabi,
+            )
+        )
+
+    return changes
+
+
+def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect DF_STATIC_TLS drift (G23-A1).
+
+    Only report when the *new* side actually participates in TLS (defines or
+    imports an STT_TLS symbol), so a TLS-free library that happens to flip the
+    flag is never flagged. The removal (improvement) direction is a distinct
+    COMPATIBLE kind so the security policy can gate the regression alone.
+    """
+    old_static = getattr(old_elf, "has_static_tls", False)
+    new_static = getattr(new_elf, "has_static_tls", False)
+    if old_static == new_static:
+        return []
+    if new_static and not old_static:
+        if not getattr(new_elf, "has_tls_symbols", False):
+            return []
+        return [
+            make_change(
+                ChangeKind.STATIC_TLS_INTRODUCED,
+                symbol="DF_STATIC_TLS",
+                old_value="dynamic-tls",
+                new_value="static-tls",
+            )
+        ]
+    return [
+        make_change(
+            ChangeKind.STATIC_TLS_REMOVED,
+            symbol="DF_STATIC_TLS",
+            old_value="static-tls",
+            new_value="dynamic-tls",
+        )
+    ]
+
+
+#: GNU-property feature tokens grouped by the kind that reports their drift.
+_CET_FEATURES = frozenset({"IBT", "SHSTK"})
+_BRANCH_FEATURES = frozenset({"BTI", "PAC"})
+
+
+def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect .note.gnu.property control-flow-protection drift (G23-A2).
+
+    x86 CET (IBT/SHSTK) and AArch64 branch-protection (BTI/PAC) are reported
+    separately. Both weakening (dropped feature) and improvement (added
+    feature) directions are emitted, mirroring the executable-stack pair, so
+    the security policy can gate weakening without failing an improvement.
+    """
+    old_props: frozenset[str] = getattr(old_elf, "gnu_properties", frozenset())
+    new_props: frozenset[str] = getattr(new_elf, "gnu_properties", frozenset())
+    if old_props == new_props:
+        return []
+
+    changes: list[Change] = []
+    for feats, weakened, improved in (
+        (_CET_FEATURES, ChangeKind.CET_PROTECTION_WEAKENED, ChangeKind.CET_PROTECTION_IMPROVED),
+        (_BRANCH_FEATURES, ChangeKind.BRANCH_PROTECTION_WEAKENED, ChangeKind.BRANCH_PROTECTION_IMPROVED),
+    ):
+        old_f = old_props & feats
+        new_f = new_props & feats
+        if old_f == new_f:
+            continue
+        dropped = old_f - new_f
+        symbol = ".note.gnu.property"
+        if dropped:
+            changes.append(
+                make_change(
+                    weakened,
+                    symbol=symbol,
+                    old=", ".join(sorted(old_f)) or "(none)",
+                    new=", ".join(sorted(new_f)) or "(none)",
+                )
+            )
+        else:
+            changes.append(
+                make_change(
+                    improved,
+                    symbol=symbol,
+                    old=", ".join(sorted(old_f)) or "(none)",
+                    new=", ".join(sorted(new_f)) or "(none)",
+                )
+            )
     return changes
 
 

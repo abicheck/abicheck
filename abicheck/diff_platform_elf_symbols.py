@@ -272,17 +272,25 @@ def _check_ifunc_type_change(sym_name: str, s_old: Any, s_new: Any) -> list[Chan
 
 
 def _check_binding_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect symbol binding changes (GLOBAL↔WEAK and other binding transitions)."""
+    """Detect symbol binding changes (GLOBAL↔WEAK, GNU_UNIQUE transitions)."""
     if s_old.binding == s_new.binding:
         return []
-    is_weakening = (
-        s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
-    )
-    kind = (
-        ChangeKind.SYMBOL_BINDING_CHANGED
-        if is_weakening
-        else ChangeKind.SYMBOL_BINDING_STRENGTHENED
-    )
+    # STB_GNU_UNIQUE transitions carry distinct loader semantics (process-wide
+    # uniqueness + dlclose inhibition), so route them to dedicated kinds rather
+    # than the generic GLOBAL/WEAK strengthen/weaken pair (G23-A4).
+    if s_new.binding == SymbolBinding.UNIQUE and s_old.binding != SymbolBinding.UNIQUE:
+        kind = ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE
+    elif s_old.binding == SymbolBinding.UNIQUE and s_new.binding != SymbolBinding.UNIQUE:
+        kind = ChangeKind.SYMBOL_BINDING_LOST_UNIQUE
+    else:
+        is_weakening = (
+            s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
+        )
+        kind = (
+            ChangeKind.SYMBOL_BINDING_CHANGED
+            if is_weakening
+            else ChangeKind.SYMBOL_BINDING_STRENGTHENED
+        )
     return [
         make_change(
             kind,
