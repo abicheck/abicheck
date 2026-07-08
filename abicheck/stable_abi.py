@@ -51,10 +51,14 @@ from enum import Enum
 
 from .stable_abi_data import STABLE_ABI_SYMBOLS
 
-#: Prefix that marks a symbol as CPython private/internal API *unless* it is in
-#: the authoritative stable set (the ``abi_only`` symbols the Limited-API macros
-#: route to are ``_Py``-prefixed but stable — see module docstring).
-_PRIVATE_PREFIXES: tuple[str, ...] = ("_Py",)
+#: Prefixes that mark a symbol as outside the stable ABI *unless* it is in the
+#: authoritative stable set. ``_Py`` is CPython's private/internal C-API (the
+#: ``abi_only`` symbols the Limited-API macros route to are ``_Py``-prefixed but
+#: appear in the stable set, so membership wins). ``PyUnstable`` is CPython's
+#: explicitly *unstable* API tier (PEP 689) — public, but documented as
+#: changeable every minor release, so it is never part of the Limited API and an
+#: ``abi3`` module importing it is a definite violation.
+_PRIVATE_PREFIXES: tuple[str, ...] = ("_Py", "PyUnstable")
 
 #: Prefixes that mark a symbol as belonging to the CPython C-API surface at all
 #: (public or private). Anything not matching is "not CPython" and ignored by
@@ -71,7 +75,8 @@ class StableAbiStatus(str, Enum):
 
     #: In the stable-ABI set and at/under the target floor.
     STABLE = "stable"
-    #: CPython private/internal API (``_Py*`` not in the stable set) — a violation.
+    #: Outside the stable ABI by construction — a violation: CPython private
+    #: (``_Py*`` not in the stable set) or unstable (``PyUnstable_*``) API.
     PRIVATE = "private"
     #: Recognised stable symbol, but newer than the declared/target floor.
     ABOVE_FLOOR = "above_floor"
@@ -87,13 +92,14 @@ def is_cpython_symbol(name: str) -> bool:
 
 
 def is_private_symbol(name: str) -> bool:
-    """True if *name* is CPython private/internal API — never part of the ABI.
+    """True if *name* is outside the stable ABI by construction — a violation.
 
-    A ``_Py``-prefixed symbol is private ONLY when it is absent from the
+    Covers CPython *private* (``_Py*``) and *unstable* (``PyUnstable_*``, PEP
+    689) API. A ``_Py``-prefixed symbol counts ONLY when absent from the
     authoritative stable set: the ``abi_only`` symbols the Limited-API macros
     route to (``_Py_Dealloc``, ``_PyObject_GC_New``, ``_PyArg_*_SizeT``,
     ``_Py_NoneStruct``, …) are ``_Py``-prefixed but stable, so they are not
-    private.
+    flagged. ``PyUnstable_*`` is never in the stable set.
     """
     return name.startswith(_PRIVATE_PREFIXES) and name not in STABLE_ABI_SYMBOLS
 

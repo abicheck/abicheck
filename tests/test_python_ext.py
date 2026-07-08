@@ -191,6 +191,8 @@ def test_extension_detected_from_imports_without_init_export() -> None:
     [
         ("_PyObject_LookupSpecial", None, StableAbiStatus.PRIVATE),
         ("_PyRuntime", None, StableAbiStatus.PRIVATE),
+        # PyUnstable_* (PEP 689) is public but never Limited-API → violation.
+        ("PyUnstable_Code_New", None, StableAbiStatus.PRIVATE),
         ("PyList_New", (3, 2), StableAbiStatus.STABLE),
         ("PyType_GetName", (3, 9), StableAbiStatus.ABOVE_FLOOR),
         ("PyType_GetName", (3, 12), StableAbiStatus.STABLE),
@@ -289,6 +291,15 @@ def test_added_stable_import_is_not_flagged_as_floor_raise() -> None:
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong", "PyType_GetName"])
     result = compare(old, new)
     assert not (_kinds(result) & {ChangeKind.PYTHON_STABLE_ABI_VIOLATION})
+
+
+def test_unstable_api_import_flagged() -> None:
+    # An abi3 module that gains a PyUnstable_* import (unstable API tier) is a
+    # violation — the compare detector uses the same predicate as the audit.
+    old = _ext_snapshot("1.0", ["PyList_New"])
+    new = _ext_snapshot("2.0", ["PyList_New", "PyUnstable_Code_New"])
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
 
 def test_no_finding_when_import_surface_unchanged() -> None:
