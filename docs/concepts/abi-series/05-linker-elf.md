@@ -182,6 +182,71 @@ layout, and access model of TLS exports as first-class ABI.
 
 ---
 
+## 7. The C ABI as the cross-language substrate
+
+Section 6 treated `extern "C"` as a way to keep a C++ symbol unmangled. That
+undersells it. `extern "C"` selects **C language linkage**, and C language
+linkage is the closest thing computing has to a universal binary interface: a
+flat, unmangled symbol name plus the platform's C calling convention and C struct
+layout. It is the contract *other languages* target when they call into native
+code — so it is worth reframing everything in this series as, ultimately, a
+description of that substrate.
+
+**`extern "C"` is an interop contract, not just a mangling switch.** Declaring a
+function `extern "C"` promises three things at once, all of which a foreign caller
+depends on: the symbol appears under its **plain name** (no Itanium mangling, so a
+Rust or Python binding can name it as a string), it uses the **C calling
+convention** (System V AMD64 on Linux — [section 4](#4-calling-conventions)), and
+its parameters and return use **C aggregate layout**. Drop `extern "C"` and all
+three change at once ([case66](../../examples/case66_language_linkage_changed.md));
+the foreign side has no header to recompile and simply fails to resolve — or
+worse, resolves a differently-mangled name to the wrong thing.
+
+**The C ABI is the lingua franca every FFI tool speaks.** None of these languages
+share C++'s ABI, its exceptions, or its templates — they meet C at the binary
+level:
+
+- **Rust** exposes and consumes C-ABI functions with `extern "C"`, and lays types
+  out to match C with `#[repr(C)]`. Tools like **cbindgen** (Rust → C header) and
+  **bindgen** (C header → Rust) generate the binding from one side's declarations
+  — freezing your struct offsets and signatures into the *other* language's
+  source.
+- **SWIG**, **ctypes**/**cffi** (Python), **JNA/JNI** (Java), Go's **cgo**, and
+  most language runtimes' FFI all target the same C-ABI surface: a named symbol,
+  C calling convention, C layout.
+
+Every one of them is, in effect, a consumer built against your library's C ABI —
+exactly the "already-compiled caller" from [Part 1](01-foundations.md), just
+written in a different language.
+
+**Layout and calling-convention stability matter *doubly* across a language
+boundary.** Within one C/C++ ecosystem, a consumer at least *recompiles against
+your headers*, so an API-level change is caught by its compiler
+([Part 3](03-type-layout.md)). A foreign binding usually does **not**: it was
+generated once (by cbindgen, bindgen, a hand-written `ctypes.Structure`, a SWIG
+interface) and hard-codes your field offsets, enum widths, and argument registers
+into its own source. There is no shared compiler over the boundary to notice when
+those numbers drift. So the silent breaks from [Part 3](03-type-layout.md)
+(inserting a struct field, changing an enum's underlying type) and this page's
+[calling-convention flips](#4-calling-conventions) are not just as dangerous
+across an FFI seam — they are *more* dangerous, because the one safety net
+(recompilation) is gone.
+
+!!! note "How abicheck sees it"
+    abicheck checks the **C ABI surface** of such a library exactly the way it
+    checks any C library — it does not need, and does not read, the Rust/Python/Java
+    side. It reads the shared object's exported symbols, and (with DWARF or
+    headers) the struct layouts, enum widths, and calling conventions that every
+    foreign binding depends on. A `struct_member_added` or
+    `calling_convention_changed` verdict is exactly as authoritative for a Rust
+    `#[repr(C)]` consumer as for a C one, because they are consumers of the *same*
+    binary contract. The one thing abicheck cannot see is the foreign side's
+    hard-coded copy of that layout — so treat a generated binding (cbindgen
+    output, a checked-in `ctypes.Structure`) as a consumer that must be
+    regenerated whenever the C ABI surface changes.
+
+---
+
 ## PE/COFF and Mach-O parallels
 
 Everything above is the **ELF/SysV** model. Windows and macOS solve the same
