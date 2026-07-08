@@ -15,11 +15,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   recognises CPython extension modules — built with Cython, pybind11, nanobind,
   or hand-written C — and checks the contract the export table cannot see: the
   CPython C-API symbols the module *imports* from libpython, plus its
-  stable-ABI (`abi3` / `Py_LIMITED_API`) conformance. A new
-  `abicheck stable-abi ext.so --abi3 3.9` command audits a single module against
-  a target `Py_LIMITED_API` floor (exit 0 clean / 1 violations / 2
-  not-an-extension / 3 incomplete — abi3 module with no resolvable floor), and
-  `compare` gains a deployment-`RISK` change kind for
+  stable-ABI (`abi3` / `Py_LIMITED_API`) conformance. `abicheck scan --binary
+  ext.so --abi3 3.9` audits a single module against a target `Py_LIMITED_API`
+  floor; the violations are advisory by default and gate CI when promoted with
+  `--crosscheck python_stable_abi_violation=error`. `compare` gains a
+  deployment-`RISK` change kind for
   `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
   ABI, e.g. an internal `_Py*` symbol). Classification uses a vendored,
   authoritative copy of CPython's `Misc/stable_abi.toml` (≈900 symbols), so the
@@ -29,9 +29,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   flagged. `compare` also raises `python_abi3_dropped` when a module that was an
   `abi3` build becomes version-specific (dropping every other interpreter it
   used to support). Interpreter-*floor* conformance is checked
-  by the `stable-abi` command (where the user supplies the floor via `--abi3`),
-  not at compare time, since a bare `.abi3.so` carries no declared floor to
-  judge against. Version-specific (`cpython-3XX`) modules are deliberately not
+  by `scan --abi3` (where the user supplies the floor), not at compare time,
+  since a bare `.abi3.so` carries no declared floor to judge against. Version-specific (`cpython-3XX`) modules are deliberately not
   subject to the stable-ABI checks, so a normal per-interpreter extension never
   false-positives. **Free-threaded (PEP 703, `Py_GIL_DISABLED`) builds** are
   recognised from the `t` SOABI marker (`cpython-3XXt` / `cp3XXt`), correctly

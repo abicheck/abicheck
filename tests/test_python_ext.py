@@ -15,10 +15,10 @@
 
 """Tests for CPython extension-module support (G14).
 
-Covers: extension recognition (Cython/pybind11/C-ext, abi3 vs version-specific),
-the stable-ABI classifier, the compare-time detector (stable-ABI violations and
-interpreter-floor drift), snapshot serialization round-trip, and the
-``abicheck stable-abi`` CLI.
+Covers: extension recognition (Cython/pybind11/C-ext, abi3 vs version-specific,
+free-threaded), the stable-ABI classifier, the compare-time detector (stable-ABI
+violations, abi3-dropped, GIL/free-threaded switch), snapshot serialization
+round-trip, and the ``abicheck scan --abi3`` single-artifact audit.
 """
 
 from __future__ import annotations
@@ -346,7 +346,7 @@ def test_added_stable_import_is_not_flagged_as_floor_raise() -> None:
     # Adding a newer *stable* symbol (PyType_GetName, 3.11) is NOT a finding:
     # without the module's declared floor we cannot prove any supported
     # interpreter was dropped, so the compare-time detector stays silent
-    # (floor conformance is the `stable-abi --abi3` command's job).
+    # (floor conformance is the `scan --abi3` audit's job).
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong", "PyType_GetName"])
     result = compare(old, new)
@@ -566,39 +566,47 @@ def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
     return path
 
 
-def test_cli_stable_abi_flags_above_floor(tmp_path: object) -> None:
+def _scan_abi3(path: str, *args: str) -> object:
+    """Invoke ``scan --binary <path> --depth binary`` with extra args."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
+    return CliRunner().invoke(
+        main, ["scan", "--binary", path, "--depth", "binary", *args]
+    )
+
+
+#: Promote the audit finding to a hard gate (scan's advisory→error path).
+_GATE = ("--crosscheck", "python_stable_abi_violation=error")
+
+
+def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
+    # PyType_GetName entered the Stable ABI in 3.11; under a 3.9 floor it is a
+    # violation. Advisory by default (exit 0), and gated to exit 2 on promotion.
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "--abi3", "3.9", "-f", "json"])
-    assert result.exit_code == 1, result.output
+    result = _scan_abi3(path, "--abi3", "3.9")
+    assert result.exit_code == 0, result.output
     assert "python_stable_abi_violation" in result.output
 
+    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    assert gated.exit_code == 2, gated.output
 
-def test_cli_stable_abi_clean_passes(tmp_path: object) -> None:
-    from click.testing import CliRunner
 
-    from abicheck.cli import main
-
+def test_scan_abi3_clean_passes(tmp_path: object) -> None:
+    # Floor 3.12 admits PyType_GetName (added 3.11) → no findings, even gated.
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    # Floor 3.12 admits PyType_GetName (added 3.11) → no findings.
-    result = runner.invoke(main, ["stable-abi", path, "--abi3", "3.12", "-f", "json"])
+    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
     assert result.exit_code == 0, result.output
+    assert "python_stable_abi_violation" not in result.output
 
 
-def test_cli_stable_abi_rejects_non_extension(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
+def test_scan_abi3_rejects_non_extension(tmp_path: object) -> None:
+    # --abi3 on a plain C library is a usage error (nothing to audit).
     elf = ElfMetadata()
     elf.symbols = [
         ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
@@ -606,94 +614,53 @@ def test_cli_stable_abi_rejects_non_extension(tmp_path: object) -> None:
     snap = AbiSnapshot(library="libfoo.so", version="1.0", elf=elf)
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path])
-    assert result.exit_code == 2, result.output
+    result = _scan_abi3(path, "--abi3", "3.9")
+    assert result.exit_code != 0
     assert "not a recognisable CPython extension" in result.output
 
 
-def test_cli_stable_abi_flags_private_import(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
+def test_scan_abi3_flags_private_import(tmp_path: object) -> None:
+    # A private _Py* import is a violation at any floor.
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    # No --abi3: uses the module's own (abi3-tagged) floor; a private import is
-    # always a violation regardless of floor.
-    result = runner.invoke(main, ["stable-abi", path, "-f", "json"])
-    assert result.exit_code == 1, result.output
+    result = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    assert result.exit_code == 2, result.output
     assert "python_stable_abi_violation" in result.output
 
 
-@pytest.mark.parametrize("fmt", ["markdown", "json", "sarif", "junit"])
-def test_cli_stable_abi_all_output_formats(tmp_path: object, fmt: str) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
+def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
+    import json as _json
 
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
-    out = f"{tmp_path}/report.{fmt}"
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "-f", fmt, "-o", out])
-    assert result.exit_code == 1, result.output
-    with open(out, encoding="utf-8") as fh:
-        assert fh.read().strip()
+    result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
+    assert result.exit_code == 0, result.output
+    data = _json.loads(result.output)
+    # The abi3 audit coverage row records it ran.
+    layers = {row.get("layer") for row in data.get("coverage", [])}
+    assert "abi3_audit" in layers
 
 
-def test_cli_stable_abi_invalid_abi3(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
+def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New"])
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "--abi3", "not-a-version"])
+    result = _scan_abi3(path, "--abi3", "not-a-version")
     assert result.exit_code != 0
     assert "invalid --abi3" in result.output
 
 
-def test_cli_stable_abi_flags_unknown_public_symbol(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
+def test_scan_abi3_flags_unknown_public_symbol(tmp_path: object) -> None:
     # A public Py* symbol absent from the authoritative Stable-ABI set
-    # (PyUnicode_AsUTF8 — public but never Limited API) is a violation, not a
-    # silent advisory: exit 1, and the summary explains it.
+    # (PyUnicode_AsUTF8 — public but never Limited API) is a violation.
     snap = _ext_snapshot("2.0", ["PyList_New", "PyUnicode_AsUTF8"])
     path = _write_snapshot(tmp_path, snap)
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"])
-    assert result.exit_code == 1, result.output
-    assert "PyUnicode_AsUTF8" in result.output
-
-
-def test_cli_stable_abi_junit_emits_failure(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    # A stable-ABI violation must render as a JUnit <failure>, not failures="0"
-    # (a JUnit-only CI dashboard would otherwise show a passing audit).
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
-    path = _write_snapshot(tmp_path, snap)
-    out = f"{tmp_path}/report.xml"
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "-f", "junit", "-o", out])
-    assert result.exit_code == 1, result.output
-    with open(out, encoding="utf-8") as fh:
-        xml = fh.read()
-    assert "<failure" in xml
-    assert 'failures="0"' not in xml
+    result = _scan_abi3(path, "--abi3", "3.9")
+    assert result.exit_code == 0, result.output
+    assert "python_stable_abi_violation" in result.output
 
 
 def test_unknown_public_import_flagged_in_compare() -> None:
@@ -704,89 +671,29 @@ def test_unknown_public_import_flagged_in_compare() -> None:
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
 
-def test_cli_stable_abi_warns_when_no_floor_on_abi3_module(tmp_path: object) -> None:
-    from click.testing import CliRunner
+def test_audit_stable_abi_imports_helper() -> None:
+    # The shared single-artifact audit returns one aggregated finding per class
+    # of violation (private + above-floor here).
+    from abicheck.diff_python import audit_stable_abi_imports
+    from abicheck.python_ext import PythonExtMetadata
 
-    from abicheck.cli import main
-
-    # abi3 module, no --abi3: the stable-symbol floor check cannot run. A newer
-    # stable import (PyType_GetName, 3.11) is not flagged, but the audit is
-    # INCOMPLETE and must fail (exit 3), not pass silently — otherwise CI would
-    # accept a cp39-abi3 artifact importing a 3.11 symbol (Codex review).
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
-    path = _write_snapshot(tmp_path, snap)
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path])
-    assert result.exit_code == 3, result.output
-    assert "INCOMPLETE" in result.output
-    assert "--abi3" in result.output
-
-    # Supplying --abi3 lets the floor check run: PyType_GetName (3.11) > 3.9 →
-    # a real violation (exit 1), and at 3.12 it is clean (exit 0).
-    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"]).exit_code == 1
-    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.12"]).exit_code == 0
-
-
-def test_cli_stable_abi_version_specific_requires_floor(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    # A version-specific `foo.cpython-311.so` declares an interpreter minor, NOT
-    # an abi3 floor. Auditing it without --abi3 must be reported incomplete
-    # (exit 3), not silently certified against 3.11 (Codex review).
-    src = "foo.cpython-311-x86_64-linux-gnu.so"
-    snap = _ext_snapshot(
-        "1.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    meta = PythonExtMetadata(
+        module_name="foo",
+        cpython_imports=["PyList_New", "_PyObject_LookupSpecial", "PyType_GetName"],
     )
-    assert snap.python_ext.limited_api is False
-    path = _write_snapshot(tmp_path, snap)
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path])
-    assert result.exit_code == 3, result.output
-    assert "INCOMPLETE" in result.output
-    # With an explicit floor the check runs: PyType_GetName (3.11) > 3.9 → exit 1.
-    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"]).exit_code == 1
-
-
-def test_cli_stable_abi_incomplete_audit_shows_in_machine_output(
-    tmp_path: object,
-) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    # An abi3 module run without --abi3 exits 3 (incomplete). The machine-readable
-    # report must reflect that — not read as passed — so a synthetic finding is
-    # added: JUnit emits a <failure>, JSON carries the incomplete change.
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
-    path = _write_snapshot(tmp_path, snap)
-    runner = CliRunner()
-
-    junit = runner.invoke(main, ["stable-abi", path, "-f", "junit"])
-    assert junit.exit_code == 3, junit.output
-    assert 'failures="1"' in junit.output
-
-    js = runner.invoke(main, ["stable-abi", path, "-f", "json"])
-    assert js.exit_code == 3, js.output
-    assert "INCOMPLETE" in js.output
-
-
-def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    # Private imports are caught even without a floor.
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
-    path = _write_snapshot(tmp_path, snap)
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["stable-abi", path, "-f", "json"])
-    assert result.exit_code == 1, result.output
-    assert "python_stable_abi_violation" in result.output
+    findings = audit_stable_abi_imports(meta, (3, 9))
+    assert findings
+    assert all(
+        f.kind is ChangeKind.PYTHON_STABLE_ABI_VIOLATION for f in findings
+    )
+    joined = " ".join(str(f.new_value) for f in findings)
+    assert "_PyObject_LookupSpecial" in joined
+    assert "PyType_GetName" in joined
+    # A clean floor (3.12) leaves only... nothing above floor, no private → empty.
+    clean = audit_stable_abi_imports(
+        PythonExtMetadata(module_name="foo", cpython_imports=["PyList_New"]), (3, 12)
+    )
+    assert clean == []
 
 
 # ── Cross-platform detection (PE / Mach-O) ──────────────────────────────────

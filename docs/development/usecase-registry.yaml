@@ -401,7 +401,7 @@ use_cases:
         abicheck/stable_abi.py,
         abicheck/stable_abi_data.py,
         abicheck/diff_python.py,
-        abicheck/cli_stable_abi.py,
+        abicheck/cli_scan.py,
       ]
       tests: [tests/test_python_ext.py]
     notes: >
@@ -412,10 +412,11 @@ use_cases:
       for a target Py_LIMITED_API floor; diff_python raises
       PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
       compare time. Interpreter-floor conformance is checked by the
-      `abicheck stable-abi ext.so --abi3 3.9` command (the user supplies the
-      target floor, which a bare .abi3.so does not carry), which audits a single
-      module and exits non-zero on a violation the export-table view would call
-      COMPATIBLE.
+      `abicheck scan --abi3` audit (diff_python.audit_stable_abi_imports; the
+      user supplies the target floor, which a bare .abi3.so does not carry),
+      which audits a single module and surfaces a violation the export-table view
+      would call COMPATIBLE (advisory, or gated via
+      --crosscheck python_stable_abi_violation=error).
 
   - id: UC-WF-audit
     axis: workflow

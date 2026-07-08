@@ -130,7 +130,6 @@ module = [
     "abicheck.cli_plugin",
     "abicheck.cli_pr_comment",
     "abicheck.cli_probe",
-    "abicheck.cli_stable_abi",
     "abicheck.cli_stack",
     "abicheck.cli_suggest",
     "abicheck.cli_surface",

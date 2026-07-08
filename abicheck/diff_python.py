@@ -33,8 +33,9 @@ Two findings:
 
 Interpreter-*floor* conformance (a stable symbol newer than the declared
 ``Py_LIMITED_API``) is intentionally NOT diffed here — see
-:func:`_diff_python_ext` for why — it is checked by the ``stable-abi`` command,
-where the user supplies the target floor via ``--abi3``.
+:func:`_diff_python_ext` for why — it is checked by ``abicheck scan --abi3``,
+where the user supplies the target floor. :func:`audit_stable_abi_imports` is the
+shared single-artifact audit that command drives.
 
 Registered via ``@registry.detector("python_ext")`` and skipped automatically
 when either snapshot lacks extension metadata.
@@ -49,6 +50,56 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .python_ext import PythonExtMetadata
+from .stable_abi import StableAbiStatus
+
+
+def audit_stable_abi_imports(
+    meta: PythonExtMetadata, abi3_floor: tuple[int, int] | None
+) -> list[Change]:
+    """Single-artifact stable-ABI audit of a module's CPython imports.
+
+    Classifies every imported CPython symbol against the authoritative Stable-ABI
+    set for the target ``abi3_floor`` and returns aggregated
+    :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` findings — one row each for
+    private/unstable imports, imports newer than the floor, and public ``Py*``
+    symbols absent from the vendored set (all outside the Limited API). This is
+    the shared engine behind ``abicheck scan --abi3`` (a single-binary audit,
+    distinct from the two-snapshot :func:`_diff_python_ext` detector).
+
+    Without a floor only the floor-independent violations (private/unstable and
+    unknown-public imports) are caught — stable symbols cannot be judged
+    above-floor — so callers should require a floor before certifying a module.
+    """
+    private: list[str] = []
+    above_floor: list[str] = []
+    unknown: list[str] = []
+    for name in meta.cpython_imports:
+        status, added = stable_abi.classify(name, abi3_floor)
+        if status is StableAbiStatus.PRIVATE:
+            private.append(name)
+        elif status is StableAbiStatus.ABOVE_FLOOR:
+            above_floor.append(
+                f"{name} (added {stable_abi.format_version(added)})"
+                if added is not None
+                else name
+            )
+        elif status is StableAbiStatus.UNKNOWN:
+            unknown.append(name)
+
+    module_name = meta.module_name or meta.init_symbol or "<extension>"
+    findings: list[Change] = []
+    for group in (private, above_floor, unknown):
+        if group:
+            findings.append(
+                make_change(
+                    ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                    symbol=f"python:{module_name}",
+                    name=module_name,
+                    detail=", ".join(sorted(group)),
+                    new_value=sorted(group),
+                )
+            )
+    return findings
 
 
 def _is_abi3(meta: PythonExtMetadata) -> bool:
@@ -130,8 +181,8 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     dropped needs the module's declared ``Py_LIMITED_API`` floor, which a bare
     ``.abi3.so`` does not carry, so comparing the min-of-imports across versions
     would false-positive (e.g. a ``cp39-abi3`` build adding a 3.5 symbol drops no
-    3.9+ user). Floor conformance is checked in the ``stable-abi`` command, where
-    the user supplies the target floor via ``--abi3``.
+    3.9+ user). Floor conformance is checked by ``abicheck scan --abi3 <floor>``,
+    where the user supplies the target floor.
     """
     n = new.python_ext
     assert n is not None  # guaranteed by requires_support

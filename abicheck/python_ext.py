@@ -27,8 +27,8 @@ For such a module the compatibility surface that matters is not the export
 table (essentially just the init function) but the *imported* CPython symbols
 plus whether the module is an ``abi3`` / ``Py_LIMITED_API`` build. This module
 recognises extension modules from a snapshot and captures that surface into
-:class:`PythonExtMetadata`, which :mod:`abicheck.diff_python` then diffs and the
-``abicheck stable-abi`` command audits against :mod:`abicheck.stable_abi`.
+:class:`PythonExtMetadata`, which :mod:`abicheck.diff_python` then diffs and
+``abicheck scan --abi3`` audits against :mod:`abicheck.stable_abi`.
 
 The recognition is uniform across builders: Cython/pybind11/nanobind/C all land
 here because they all emit the same ``PyInit_*`` export and link ``libpython``.

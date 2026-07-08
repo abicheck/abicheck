@@ -6,7 +6,7 @@
 (Cython/pybind11/nanobind/C) and captures their imported CPython C-API surface;
 `abicheck/stable_abi.py` classifies each import against the Limited-API
 allowlist; `abicheck/diff_python.py` raises `PYTHON_STABLE_ABI_VIOLATION` on
-compare (a new private `_Py*` import); and `abicheck stable-abi ext.so --abi3 3.9`
+compare (a new private `_Py*` import); and `abicheck scan --abi3 3.9`
 (`abicheck/cli_stable_abi.py`) audits a single module against a target floor.
 Interpreter-floor conformance lives in the command (not compare), since a bare
 `.abi3.so` carries no declared floor. See
@@ -51,7 +51,7 @@ Empirically confirmed (cryptography 42.0.8 → 43.0.3, both `cp39-abi3`):
    substrate; expose an imported-symbol view on the model if not present.
 2. Ship a stable-ABI allowlist (the `abi3` symbol set per CPython minor; sourced
    from CPython's `Doc/data/stable_abi.dat`, vendored as data, refreshable).
-3. A driver `abicheck stable-abi <ext.so> [--abi3 3.9]` classifies imports;
+3. A driver `abicheck scan --binary <ext.so> --abi3 3.9` classifies imports;
    wires through the existing reporter and a new `RISK`/`BREAKING` `ChangeKind`
    (added per the root `CLAUDE.md` four-step procedure).
 4. Cross-platform: the same idea applies to `python3.dll` (PE imports) and the

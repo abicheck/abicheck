@@ -42,7 +42,7 @@ Completed or decided plans are retained for implementation history:
 | **G7** | Done — release recommendation | `abicheck/semver.py` |
 | **G8** | Decided — static/import archives are a by-design non-goal | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | [g12](g12-security-hardening.md) |
-| **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `stable-abi` command | [g14](g14-stable-abi-subset.md) |
+| **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit | [g14](g14-stable-abi-subset.md) |
 
 ## How to pick up a plan
 

@@ -683,7 +683,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_probe",
                 "cli_resolve",
                 "cli_scan",
-                "cli_stable_abi",
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",

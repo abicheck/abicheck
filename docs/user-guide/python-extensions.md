@@ -38,28 +38,29 @@ export and `Py*` import surface, across Cython/pybind11/nanobind/C) and captures
 the imported CPython C-API symbols plus whether the module is a stable-ABI
 (`abi3`) build. Two things are then checked.
 
-### 1. Audit a single module — `stable-abi`
+### 1. Audit a single module — `scan --abi3`
 
 ```console
-$ abicheck stable-abi foo.abi3.so --abi3 3.9
-stable-abi: foo — 118 CPython import(s), target abi3 floor 3.9, 1 finding(s)…
+$ abicheck scan --binary foo.abi3.so --abi3 3.9
+…
+  abi3_audit         ran           118 CPython import(s) audited against
+                                   Py_LIMITED_API 3.9; 1 violation finding(s)
 
-## ⚠️ Deployment Risk Changes
-- python_stable_abi_violation: abi3 extension 'foo' imports non-stable
-  CPython symbol: _PyObject_LookupSpecial
+Cross-source findings (advisory)
+  [warning] python_stable_abi_violation: 1
 ```
 
-`stable-abi` classifies every imported CPython symbol against the vendored,
-authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries from
-CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
+`scan --abi3 <floor>` classifies every imported CPython symbol against the
+vendored, authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries
+from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
 
 - **private/internal symbols** — a `_Py*`/`PyUnstable_*` name *not* in the
   Stable-ABI set → a **violation** (the module reached outside the Limited API);
 - **public `Py*` symbols not in the Stable-ABI set** (e.g. `PyUnicode_AsUTF8`,
   which is public but was never added to the Limited API) → **violation**; the
   vendored set is authoritative, so absence means the symbol is not `abi3`. The
-  one benign case is a symbol *newer* than the vendored CPython release — the
-  CLI flags it but notes to refresh the data to confirm;
+  one case that may be a false positive is a symbol *newer* than the vendored
+  CPython release — it is flagged but the data should be refreshed to confirm;
 - **stable symbols newer than the floor** (e.g. `PyType_GetName`, stable since
   3.11, under a `--abi3 3.9` target) → **violation**.
 
@@ -71,13 +72,24 @@ CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
     by **membership** in the vendored set, not by the name prefix, so these
     clean Limited-API imports are correctly classified as stable.
 
-The floor comes from `--abi3`, or from the module's own SOABI tag when omitted.
+The `--binary` must be a CPython extension module (or a saved snapshot of one);
+`--abi3` on a plain library is a usage error. The floor is **required** — it is
+the target `Py_LIMITED_API` version you supply, so there is no ambiguity about
+what the module is certified against.
 
-Exit codes: `0` = clean, `1` = one or more violations, `2` = the input is not a
-recognisable extension module, `3` = **incomplete** — an `abi3` module was given
-without a resolvable target floor, so the stable-symbol floor check could not run
-and the module cannot be certified (pass `--abi3 <floor>`). Wire it into CI to
-gate a wheel before you ship it; both `1` and `3` fail the gate.
+**Gating.** Like every single-artifact `scan` check, stable-ABI violations are
+**advisory by default** (they appear in the report but do not fail the scan) —
+"adoption never starts by blocking merges". To gate CI on them, promote the
+finding to an error:
+
+```console
+$ abicheck scan --binary foo.abi3.so --abi3 3.9 \
+      --crosscheck python_stable_abi_violation=error
+```
+
+Then a violation raises the exit code to the source-break tier (`2`), failing
+the build. Exit `0` = clean or advisory-only; a usage error (bad `--abi3`, or
+`--abi3` on a non-extension) exits non-zero.
 
 ### 2. Compare two versions — `compare`
 
@@ -103,14 +115,14 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     `python_gil_abi_changed` risk when a module crosses the GIL/no-GIL boundary
     between builds.
 
-!!! note "Interpreter-*floor* drift is checked by `stable-abi`, not `compare`"
+!!! note "Interpreter-*floor* drift is checked by `scan --abi3`, not `compare`"
     Proving that a raised interpreter floor drops a *supported* interpreter
     needs the module's declared `Py_LIMITED_API` floor — and a bare `.abi3.so`
     doesn't carry its minor. Comparing the minimum-imported-symbol version across
     two builds would false-positive (a `cp39-abi3` build adding a 3.5 symbol
     drops no 3.9+ user), so `compare` deliberately does **not** flag floor drift.
-    Use `stable-abi --abi3 <floor>` — where you supply the target floor — to
-    catch stable symbols newer than it.
+    Use `scan --abi3 <floor>` — where you supply the target floor — to catch
+    stable symbols newer than it.
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private
