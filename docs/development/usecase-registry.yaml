@@ -116,6 +116,23 @@ use_cases:
       concept tightening, hidden friends, and user-ctor mangled names
       (dormant fixtures: cases 78/105/106/111).
 
+  - id: UC-ARCH-python-api
+    axis: archetype
+    name: CPython extension Python-level API surface
+    status: planned
+    gap: G23
+    plan: docs/development/plans/g23-python-level-api-diff.md
+    next_steps: >
+      G14 covers an extension module's native C-ABI contract (imported Py* / abi3
+      conformance) but not the Python-level API it exposes to import: functions,
+      classes, methods, and their signatures (arg names/kinds/defaults, type
+      annotations). Two builds can be C-ABI-identical yet break every caller (a
+      renamed kwarg, a dropped default). Add a python_api surface extractor —
+      static from .pyi stubs / __text_signature__ / docstrings first, optional
+      opt-in runtime introspection — a diff_python_api detector, and a family of
+      python_api_* ChangeKinds, surfaced through compare/scan. Complements, does
+      not replace, the C-ABI check.
+
   - id: UC-ARCH-kernel-btf
     axis: archetype
     name: Kernel / eBPF modules (BTF/CTF)

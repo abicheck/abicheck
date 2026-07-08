@@ -7,9 +7,9 @@
 `abicheck/stable_abi.py` classifies each import against the Limited-API
 allowlist; `abicheck/diff_python.py` raises `PYTHON_STABLE_ABI_VIOLATION` on
 compare (a new private `_Py*` import); and `abicheck scan --abi3 3.9`
-(`abicheck/cli_stable_abi.py`) audits a single module against a target floor.
-Interpreter-floor conformance lives in the command (not compare), since a bare
-`.abi3.so` carries no declared floor. See
+(`abicheck/cli_scan.py` + `diff_python.audit_stable_abi_imports`) audits a single
+module against a target floor. Interpreter-floor conformance lives in the audit
+(not compare), since a bare `.abi3.so` carries no declared floor. See
 [Python Extensions (abi3)](../../user-guide/python-extensions.md).
 
 ## Problem
@@ -60,10 +60,11 @@ Empirically confirmed (cryptography 42.0.8 → 43.0.3, both `cp39-abi3`):
 ## Files & surfaces
 
 - `abicheck/model.py` (imported-symbol view if missing), a new
-  `abicheck/stable_abi.py` + vendored allowlist data, a CLI module
-  `abicheck/cli_stable_abi.py` (registered per the root `CLAUDE.md` "Adding a new
-  top-level command"), `abicheck/checker_policy.py` (new kind), reuse of
-  `abicheck/reporter.py`.
+  `abicheck/stable_abi.py` + vendored allowlist data
+  (`abicheck/stable_abi_data.py`, refreshed by `scripts/gen_stable_abi_data.py`),
+  the `--abi3` audit mode of `abicheck/cli_scan.py` (shared engine
+  `diff_python.audit_stable_abi_imports`), `abicheck/checker_policy.py` (new
+  kinds), reuse of `abicheck/reporter.py`.
 
 ## Tests
 

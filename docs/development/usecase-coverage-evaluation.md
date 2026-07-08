@@ -124,7 +124,8 @@ planned row from drifting away from its plan.
 | Priority | Gap | Plan |
 |---|---|---|
 | High | G9 — wheel vendored-library pairing | [g9](plans/g9-wheel-vendored-matching.md) |
-| High | G14 — CPython `abi3` import-contract | [g14](plans/g14-stable-abi-subset.md) |
+| Done | G14 — CPython `abi3` import-contract (`scan --abi3`) | [g14](plans/g14-stable-abi-subset.md) |
+| Medium | G23 — Python-level API diff (`.pyi`/signature) for extensions | [g23](plans/g23-python-level-api-diff.md) |
 | Medium | G4 — header-only / inline-only analysis | [g4](plans/g4-header-ast-extractor.md) |
 | Medium | G11 — single-binary audit/lint | [g11](plans/g11-single-binary-audit.md) |
 | Medium | G15 — inline-namespace version stamp | [g15](plans/g15-inline-namespace-version.md) |
