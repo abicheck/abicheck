@@ -132,7 +132,13 @@ Suppression **hygiene policy** (a project rule, distinct from the suppression
 
 | Sub-key | Type | Default | Purpose |
 |---------|------|---------|---------|
-| `method` | `s0`..`s6` \| `auto` | unset | Pins the precise S-axis (evidence method) for power users. |
+| `method` | `s0`..`s6` | unset | Pins the precise S-axis (evidence method) for power users. |
+
+> **Use a concrete `s0`..`s6`, not `auto`.** When `compare` reads `source.method`
+> from the config (i.e. no `--depth`/`--max` on the command line), the value must
+> resolve to a concrete method — `compare` rejects `auto` with a usage error. Pin
+> a specific level here, or leave the key unset and let `--depth`/`--max` drive
+> the collection depth per run.
 
 See [Scan levels](../user-guide/scan-levels.md) and
 [Scan & evidence levels](../concepts/scan-and-evidence-levels.md). (A `graph`
@@ -259,9 +265,9 @@ suppression:
   strict: true
   require_justification: true
 
-# Precise evidence method (optional)
+# Precise evidence method (optional; a concrete s0..s6, never `auto`)
 source:
-  method: auto
+  method: s6
 
 # Exit-code scheme for CI
 exit_code_scheme: auto
