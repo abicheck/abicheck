@@ -70,6 +70,7 @@ nav:
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
     - Verdicts: concepts/verdicts.md
+    - Verdicts and Exit Codes: concepts/verdicts-and-exit-codes.md
     - Evidence & Detectability: concepts/evidence-and-detectability.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
@@ -82,6 +83,7 @@ nav:
     - Change Kinds: reference/change-kinds.md
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
+    - Snapshot Format: reference/snapshot-format.md
     - Configuration File: reference/config-file.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
@@ -92,6 +94,7 @@ nav:
     - Overview: concepts/abi-api-handling.md
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
     - Learning Series:
+      - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
       - "1. Foundations": concepts/abi-series/01-foundations.md
       - "2. Symbol Contracts": concepts/abi-series/02-symbol-contracts.md

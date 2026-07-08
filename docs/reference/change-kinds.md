@@ -165,6 +165,7 @@ Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium
 | Kind | Description |
 |------|-------------|
 | `template_return_type_changed` | A function's return type is a template specialization whose inner type argument changed (e.g. `vector<int>` → `vector<double>`). The mangled return type changes, so old binaries fail to resolve the symbol. |
+| `template_param_type_changed` | A function *parameter* type is a template specialization whose inner type argument changed (e.g. `vector<int>` → `vector<double>`). The mangled parameter type changes, so old binaries fail to resolve the symbol. The parameter-side counterpart of `template_return_type_changed`. |
 
 ### Symbol Rename
 
@@ -296,6 +297,13 @@ These changes break the source-level API contract but do not affect already-comp
 |------|-------------|
 | `std_reexport_removed` | A public header used to re-export a name from `std::` (e.g. `using std::execution::par;`) and the re-export was deleted. Consumer source that referenced the library-qualified name (`lib::par`) no longer compiles, even though the underlying `std::par` is still available. Source-only break — no symbol disappears. |
 
+### Inline and Build-Configuration Changes
+
+| Kind | Description |
+|------|-------------|
+| `func_became_inline` | A function gained the `inline` specifier. An inline function need not emit a standalone external symbol, so its definition can vanish from the DSO and consumers must have the header to inline it themselves. The dual of the compatible `func_lost_inline`. |
+| `cxx_standard_floor_raised` | The library's minimum required C++ standard rose between releases (e.g. C++17 → C++20). Consumers still building against the old standard no longer get a working header set, and standard-library facilities removed in newer standards may disappear from the API surface. Detected across a probe matrix of build configurations. |
+
 ---
 
 ## Deployment Risk (`COMPATIBLE_WITH_RISK`)
@@ -334,6 +342,8 @@ library from loading in some deployment environments. Manual review is required.
 | `rtti_mode_changed` | C++ RTTI support was toggled between builds (`-frtti` ↔ `-fno-rtti`), from the L3 build evidence. `-fno-rtti` omits typeinfo for polymorphic types, so `dynamic_cast`/`typeid` and cross-DSO exception matching can fail when one side has RTTI and the other does not. RISK; the artifact diff confirms concrete breaks. **Recommended action:** rebuild consumers in the matching mode if the public API exposes polymorphic types or `dynamic_cast`/`typeid` in inlines. |
 | `tls_model_changed` | The thread-local storage model changed between builds (`-ftls-model=`, or `-fextern-tls-init` ↔ `-fno-extern-tls-init`), from the L3 build evidence. The TLS access sequence — and, with `-fextern-tls-init`, whether a wrapper mediates access to a dynamically-initialized `thread_local` from another TU — differs, so consumers built against the old model can use the wrong access pattern for an exported `thread_local`. |
 | `threadsafe_statics_mode_changed` | Thread-safe initialization of function-local statics was toggled (`-fno-threadsafe-statics` ↔ default), from the L3 build evidence. `-fno-threadsafe-statics` omits the `__cxa_guard` acquire/release around a local static's first-use init, so a public inline holding a function-local static, compiled in different modes across TUs, has mismatched guard expectations — a data race or double-init on concurrent first use. |
+| `ctor_explicit_removed` | A constructor or conversion operator lost its `explicit` specifier. Existing code keeps compiling and the mangled name is unchanged, but implicit-conversion paths that previously excluded this function now consider it, which can silently select a different overload. The dual of `ctor_explicit_added`. |
+| `api_depends_on_consumer_env` | A public declaration is present under some consumer build configurations (compiler, language standard, macro set) and absent under others, so source that compiled for the library author may not compile for the consumer. Detected only when abicheck is given a probe matrix of snapshots taken under multiple configurations. |
 
 See the [Security-hardening drift](../user-guide/security-hardening.md) guide for how to scan for these across releases.
 
@@ -463,3 +473,10 @@ Aggregate roll-up signals computed from the [API surface metrics](../concepts/ap
 | `var_value_changed` | A global variable's initial value changed. Compile-time values inlined by the compiler may differ, but the binary ABI (symbol presence and type) is unchanged. |
 | `used_reserved_field` | A previously `__reserved` field was put into use. Since reserved fields are allocated space but semantically undefined, using them is compatible (was unused). |
 | `var_access_widened` | A variable's access level widened (e.g., `private` → `public`). Widening is always compatible. |
+
+### Hidden Friends and Version Sentinels
+
+| Kind | Description |
+|------|-------------|
+| `hidden_friend_added` | A new in-class `friend` declaration (a "hidden friend", findable only via ADL on one of its argument types) was added. Purely additive: existing code keeps compiling, no symbol disappears, and the new function only joins overload resolution at ADL call sites. The additive dual of `hidden_friend_removed`. |
+| `typedef_version_sentinel` | A removed typedef whose name encodes a version number (e.g. `png_libpng_version_1_6_46`) was recognised as a compile-time version sentinel, not real API. Such typedefs are never exported as ELF symbols and change every release by design, so their removal is not an ABI break. |
