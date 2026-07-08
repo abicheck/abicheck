@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 271,
+  "count": 270,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -8,8 +8,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "abi_relevant_build_flag_changed",
-      "examples": ""
+      "doc_slug": "abi_relevant_build_flag_changed"
     },
     {
       "kind": "abi_surface_explosion",
@@ -17,8 +16,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "abi_surface_explosion",
-      "examples": ""
+      "doc_slug": "abi_surface_explosion"
     },
     {
       "kind": "abi_tag_changed",
@@ -26,8 +24,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "abi_tag_changed",
-      "examples": "case113_abi_tag_changed"
+      "doc_slug": "abi_tag_changed"
     },
     {
       "kind": "anon_field_changed",
@@ -35,8 +32,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "anon_field_changed",
-      "examples": ""
+      "doc_slug": "anon_field_changed"
     },
     {
       "kind": "api_depends_on_consumer_env",
@@ -44,8 +40,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "api_depends_on_consumer_env",
-      "examples": ""
+      "doc_slug": "api_depends_on_consumer_env"
     },
     {
       "kind": "atomic_qualifier_changed",
@@ -53,8 +48,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "atomic_qualifier_changed",
-      "examples": "case116_atomic_qualifier_changed"
+      "doc_slug": "atomic_qualifier_changed"
     },
     {
       "kind": "base_class_offset_changed",
@@ -62,8 +56,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "base_class_offset_changed",
-      "examples": "case140_empty_base_optimization_lost"
+      "doc_slug": "base_class_offset_changed"
     },
     {
       "kind": "base_class_position_changed",
@@ -71,8 +64,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "base_class_position_changed",
-      "examples": ""
+      "doc_slug": "base_class_position_changed"
     },
     {
       "kind": "base_class_virtual_changed",
@@ -80,8 +72,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "base_class_virtual_changed",
-      "examples": ""
+      "doc_slug": "base_class_virtual_changed"
     },
     {
       "kind": "behavioural_default_changed",
@@ -89,8 +80,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "behavioural_default_changed",
-      "examples": ""
+      "doc_slug": "behavioural_default_changed"
     },
     {
       "kind": "bit_int_width_changed",
@@ -98,8 +88,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "bit_int_width_changed",
-      "examples": "case115_bit_int_width_changed"
+      "doc_slug": "bit_int_width_changed"
     },
     {
       "kind": "build_context_changed",
@@ -107,8 +96,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "build_context_changed",
-      "examples": ""
+      "doc_slug": "build_context_changed"
     },
     {
       "kind": "build_option_reaches_public_symbol",
@@ -116,8 +104,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "build_option_reaches_public_symbol",
-      "examples": ""
+      "doc_slug": "build_option_reaches_public_symbol"
     },
     {
       "kind": "bundle_intra_dep_removed",
@@ -125,8 +112,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "bundle_intra_dep_removed",
-      "examples": ""
+      "doc_slug": "bundle_intra_dep_removed"
     },
     {
       "kind": "bundle_intra_dep_resolved_to_different_version",
@@ -134,8 +120,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "bundle_intra_dep_resolved_to_different_version",
-      "examples": ""
+      "doc_slug": "bundle_intra_dep_resolved_to_different_version"
     },
     {
       "kind": "bundle_intra_dep_signature_changed",
@@ -143,8 +128,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "bundle_intra_dep_signature_changed",
-      "examples": ""
+      "doc_slug": "bundle_intra_dep_signature_changed"
     },
     {
       "kind": "bundle_intra_type_changed",
@@ -152,8 +136,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "bundle_intra_type_changed",
-      "examples": ""
+      "doc_slug": "bundle_intra_type_changed"
     },
     {
       "kind": "bundle_library_added",
@@ -161,8 +144,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "bundle_library_added",
-      "examples": ""
+      "doc_slug": "bundle_library_added"
     },
     {
       "kind": "bundle_library_removed",
@@ -170,8 +152,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "bundle_library_removed",
-      "examples": ""
+      "doc_slug": "bundle_library_removed"
     },
     {
       "kind": "bundle_manifest_instantiation_added",
@@ -179,8 +160,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "bundle_manifest_instantiation_added",
-      "examples": ""
+      "doc_slug": "bundle_manifest_instantiation_added"
     },
     {
       "kind": "bundle_manifest_instantiation_removed",
@@ -188,8 +168,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "bundle_manifest_instantiation_removed",
-      "examples": ""
+      "doc_slug": "bundle_manifest_instantiation_removed"
     },
     {
       "kind": "bundle_provider_changed",
@@ -197,8 +176,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "bundle_provider_changed",
-      "examples": ""
+      "doc_slug": "bundle_provider_changed"
     },
     {
       "kind": "bundle_soname_skew",
@@ -206,8 +184,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "bundle_soname_skew",
-      "examples": ""
+      "doc_slug": "bundle_soname_skew"
     },
     {
       "kind": "call_graph_public_entry_reachability_changed",
@@ -215,8 +192,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "call_graph_public_entry_reachability_changed",
-      "examples": ""
+      "doc_slug": "call_graph_public_entry_reachability_changed"
     },
     {
       "kind": "calling_convention_changed",
@@ -224,8 +200,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "calling_convention_changed",
-      "examples": "case64_calling_convention_changed"
+      "doc_slug": "calling_convention_changed"
     },
     {
       "kind": "char8t_migration",
@@ -233,8 +208,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "char8t_migration",
-      "examples": "case114_char8t_migration"
+      "doc_slug": "char8t_migration"
     },
     {
       "kind": "char_signedness_changed",
@@ -242,8 +216,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "char_signedness_changed",
-      "examples": "case155_char_signedness_flip"
+      "doc_slug": "char_signedness_changed"
     },
     {
       "kind": "common_symbol_risk",
@@ -251,8 +224,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "common_symbol_risk",
-      "examples": ""
+      "doc_slug": "common_symbol_risk"
     },
     {
       "kind": "compat_version_changed",
@@ -260,8 +232,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "compat_version_changed",
-      "examples": ""
+      "doc_slug": "compat_version_changed"
     },
     {
       "kind": "concept_tightened",
@@ -269,8 +240,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L4",
-      "doc_slug": "concept_tightened",
-      "examples": "case105_concept_tightening"
+      "doc_slug": "concept_tightened"
     },
     {
       "kind": "constant_added",
@@ -278,8 +248,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "constant_added",
-      "examples": ""
+      "doc_slug": "constant_added"
     },
     {
       "kind": "constant_changed",
@@ -287,8 +256,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "constant_changed",
-      "examples": "case124_header_constant_value_changed"
+      "doc_slug": "constant_changed"
     },
     {
       "kind": "constant_removed",
@@ -296,8 +264,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "constant_removed",
-      "examples": ""
+      "doc_slug": "constant_removed"
     },
     {
       "kind": "constexpr_value_changed",
@@ -305,8 +272,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "constexpr_value_changed",
-      "examples": ""
+      "doc_slug": "constexpr_value_changed"
     },
     {
       "kind": "cpo_kind_changed",
@@ -314,8 +280,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "cpo_kind_changed",
-      "examples": "case88_cpo_kind_changed"
+      "doc_slug": "cpo_kind_changed"
     },
     {
       "kind": "cpu_dispatch_isa_dropped",
@@ -323,8 +288,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "cpu_dispatch_isa_dropped",
-      "examples": "case83_cpu_dispatch_isa_dropped"
+      "doc_slug": "cpu_dispatch_isa_dropped"
     },
     {
       "kind": "ctor_explicit_added",
@@ -332,8 +296,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "ctor_explicit_added",
-      "examples": "case106_ctor_became_explicit"
+      "doc_slug": "ctor_explicit_added"
     },
     {
       "kind": "ctor_explicit_removed",
@@ -341,8 +304,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "ctor_explicit_removed",
-      "examples": ""
+      "doc_slug": "ctor_explicit_removed"
     },
     {
       "kind": "cxx_standard_floor_raised",
@@ -350,8 +312,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "cxx_standard_floor_raised",
-      "examples": ""
+      "doc_slug": "cxx_standard_floor_raised"
     },
     {
       "kind": "default_argument_changed",
@@ -359,8 +320,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "default_argument_changed",
-      "examples": ""
+      "doc_slug": "default_argument_changed"
     },
     {
       "kind": "default_template_arg_changed",
@@ -368,8 +328,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "default_template_arg_changed",
-      "examples": "case87_default_template_arg_changed"
+      "doc_slug": "default_template_arg_changed"
     },
     {
       "kind": "dwarf_info_missing",
@@ -377,8 +336,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "dwarf_info_missing",
-      "examples": ""
+      "doc_slug": "dwarf_info_missing"
     },
     {
       "kind": "enum_last_member_value_changed",
@@ -386,8 +344,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "enum_last_member_value_changed",
-      "examples": ""
+      "doc_slug": "enum_last_member_value_changed"
     },
     {
       "kind": "enum_member_added",
@@ -395,8 +352,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "enum_member_added",
-      "examples": "case25_enum_member_added"
+      "doc_slug": "enum_member_added"
     },
     {
       "kind": "enum_member_removed",
@@ -404,8 +360,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "enum_member_removed",
-      "examples": "case19_enum_member_removed,case78_task_arena_attach_tag"
+      "doc_slug": "enum_member_removed"
     },
     {
       "kind": "enum_member_renamed",
@@ -413,8 +368,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "enum_member_renamed",
-      "examples": "case31_enum_rename"
+      "doc_slug": "enum_member_renamed"
     },
     {
       "kind": "enum_member_value_changed",
@@ -422,8 +376,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "enum_member_value_changed",
-      "examples": "case08_enum_value_change,case20_enum_member_value_changed"
+      "doc_slug": "enum_member_value_changed"
     },
     {
       "kind": "enum_size_flag_changed",
@@ -431,8 +384,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "enum_size_flag_changed",
-      "examples": "case152_enum_size_flag_flip"
+      "doc_slug": "enum_size_flag_changed"
     },
     {
       "kind": "enum_underlying_size_changed",
@@ -440,8 +392,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "enum_underlying_size_changed",
-      "examples": "case57_enum_underlying_size_changed"
+      "doc_slug": "enum_underlying_size_changed"
     },
     {
       "kind": "evidence_required_missing",
@@ -449,8 +400,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "evidence_required_missing",
-      "examples": ""
+      "doc_slug": "evidence_required_missing"
     },
     {
       "kind": "exceptions_mode_changed",
@@ -458,8 +408,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "exceptions_mode_changed",
-      "examples": "case130_exceptions_mode_flip"
+      "doc_slug": "exceptions_mode_changed"
     },
     {
       "kind": "executable_stack",
@@ -467,8 +416,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "executable_stack",
-      "examples": ""
+      "doc_slug": "executable_stack"
     },
     {
       "kind": "executable_stack_removed",
@@ -476,8 +424,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "executable_stack_removed",
-      "examples": "case136_executable_stack_removed"
+      "doc_slug": "executable_stack_removed"
     },
     {
       "kind": "experimental_graduated",
@@ -485,8 +432,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "experimental_graduated",
-      "examples": "case99_experimental_graduated"
+      "doc_slug": "experimental_graduated"
     },
     {
       "kind": "experimental_removed_without_replacement",
@@ -494,8 +440,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "experimental_removed_without_replacement",
-      "examples": "case100_experimental_removed_without_replacement"
+      "doc_slug": "experimental_removed_without_replacement"
     },
     {
       "kind": "exported_not_public",
@@ -503,8 +448,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "exported_not_public",
-      "examples": ""
+      "doc_slug": "exported_not_public"
     },
     {
       "kind": "exported_symbol_source_owner_changed",
@@ -512,8 +456,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L5",
-      "doc_slug": "exported_symbol_source_owner_changed",
-      "examples": "case162_symbol_source_owner_changed"
+      "doc_slug": "exported_symbol_source_owner_changed"
     },
     {
       "kind": "field_access_changed",
@@ -521,8 +464,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_access_changed",
-      "examples": ""
+      "doc_slug": "field_access_changed"
     },
     {
       "kind": "field_became_const",
@@ -530,8 +472,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_became_const",
-      "examples": ""
+      "doc_slug": "field_became_const"
     },
     {
       "kind": "field_became_mutable",
@@ -539,8 +480,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_became_mutable",
-      "examples": ""
+      "doc_slug": "field_became_mutable"
     },
     {
       "kind": "field_became_volatile",
@@ -548,8 +488,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_became_volatile",
-      "examples": ""
+      "doc_slug": "field_became_volatile"
     },
     {
       "kind": "field_bitfield_changed",
@@ -557,8 +496,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "field_bitfield_changed",
-      "examples": "case63_bitfield_changed"
+      "doc_slug": "field_bitfield_changed"
     },
     {
       "kind": "field_lost_const",
@@ -566,8 +504,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_lost_const",
-      "examples": ""
+      "doc_slug": "field_lost_const"
     },
     {
       "kind": "field_lost_mutable",
@@ -575,8 +512,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_lost_mutable",
-      "examples": ""
+      "doc_slug": "field_lost_mutable"
     },
     {
       "kind": "field_lost_volatile",
@@ -584,8 +520,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "field_lost_volatile",
-      "examples": ""
+      "doc_slug": "field_lost_volatile"
     },
     {
       "kind": "field_renamed",
@@ -593,8 +528,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "field_renamed",
-      "examples": "case35_field_rename"
+      "doc_slug": "field_renamed"
     },
     {
       "kind": "flexible_array_member_changed",
@@ -602,8 +536,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "flexible_array_member_changed",
-      "examples": "case70_flexible_array_member_changed"
+      "doc_slug": "flexible_array_member_changed"
     },
     {
       "kind": "float_abi_changed",
@@ -611,8 +544,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "float_abi_changed",
-      "examples": ""
+      "doc_slug": "float_abi_changed"
     },
     {
       "kind": "fortify_source_weakened",
@@ -620,8 +552,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "fortify_source_weakened",
-      "examples": ""
+      "doc_slug": "fortify_source_weakened"
     },
     {
       "kind": "frame_register_changed",
@@ -629,8 +560,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "frame_register_changed",
-      "examples": ""
+      "doc_slug": "frame_register_changed"
     },
     {
       "kind": "func_added",
@@ -638,8 +568,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "doc_slug": "func_added"
     },
     {
       "kind": "func_became_inline",
@@ -647,8 +576,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "func_became_inline",
-      "examples": ""
+      "doc_slug": "func_became_inline"
     },
     {
       "kind": "func_cv_changed",
@@ -656,8 +584,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_cv_changed",
-      "examples": "case22_method_const_changed"
+      "doc_slug": "func_cv_changed"
     },
     {
       "kind": "func_deleted",
@@ -665,8 +592,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_deleted",
-      "examples": ""
+      "doc_slug": "func_deleted"
     },
     {
       "kind": "func_deleted_dwarf",
@@ -674,8 +600,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_deleted_dwarf",
-      "examples": ""
+      "doc_slug": "func_deleted_dwarf"
     },
     {
       "kind": "func_deleted_elf_fallback",
@@ -683,8 +608,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_deleted_elf_fallback",
-      "examples": ""
+      "doc_slug": "func_deleted_elf_fallback"
     },
     {
       "kind": "func_language_linkage_changed",
@@ -692,8 +616,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "func_language_linkage_changed",
-      "examples": "case66_language_linkage_changed"
+      "doc_slug": "func_language_linkage_changed"
     },
     {
       "kind": "func_likely_renamed",
@@ -701,8 +624,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_likely_renamed",
-      "examples": ""
+      "doc_slug": "func_likely_renamed"
     },
     {
       "kind": "func_lost_inline",
@@ -710,8 +632,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "func_lost_inline",
-      "examples": ""
+      "doc_slug": "func_lost_inline"
     },
     {
       "kind": "func_noexcept_added",
@@ -719,8 +640,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "func_noexcept_added",
-      "examples": ""
+      "doc_slug": "func_noexcept_added"
     },
     {
       "kind": "func_noexcept_removed",
@@ -728,8 +648,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "func_noexcept_removed",
-      "examples": ""
+      "doc_slug": "func_noexcept_removed"
     },
     {
       "kind": "func_params_changed",
@@ -737,8 +656,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_params_changed",
-      "examples": "case02_param_type_change,case102_frozen_runtime_signature_changed"
+      "doc_slug": "func_params_changed"
     },
     {
       "kind": "func_pure_virtual_added",
@@ -746,8 +664,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_pure_virtual_added",
-      "examples": "case23_pure_virtual_added"
+      "doc_slug": "func_pure_virtual_added"
     },
     {
       "kind": "func_ref_qual_changed",
@@ -755,8 +672,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_ref_qual_changed",
-      "examples": ""
+      "doc_slug": "func_ref_qual_changed"
     },
     {
       "kind": "func_removed",
@@ -764,8 +680,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "func_removed",
-      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case53_namespace_pollution,case59_func_became_inline,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
+      "doc_slug": "func_removed"
     },
     {
       "kind": "func_removed_elf_only",
@@ -773,8 +688,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "func_removed_elf_only",
-      "examples": "case97_api_depends_on_consumer_env"
+      "doc_slug": "func_removed_elf_only"
     },
     {
       "kind": "func_return_changed",
@@ -782,8 +696,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_return_changed",
-      "examples": "case102_frozen_runtime_signature_changed,case10_return_type,case70_flexible_array_member_changed,case72_covariant_return_changed"
+      "doc_slug": "func_return_changed"
     },
     {
       "kind": "func_static_changed",
@@ -791,8 +704,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_static_changed",
-      "examples": "case21_method_became_static"
+      "doc_slug": "func_static_changed"
     },
     {
       "kind": "func_virtual_added",
@@ -800,8 +712,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "func_virtual_added",
-      "examples": "case68_virtual_method_added"
+      "doc_slug": "func_virtual_added"
     },
     {
       "kind": "func_virtual_became_pure",
@@ -809,8 +720,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_virtual_became_pure",
-      "examples": ""
+      "doc_slug": "func_virtual_became_pure"
     },
     {
       "kind": "func_virtual_removed",
@@ -818,8 +728,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "func_virtual_removed",
-      "examples": ""
+      "doc_slug": "func_virtual_removed"
     },
     {
       "kind": "func_visibility_changed",
@@ -827,8 +736,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "func_visibility_changed",
-      "examples": "case06_visibility"
+      "doc_slug": "func_visibility_changed"
     },
     {
       "kind": "func_visibility_protected_changed",
@@ -836,8 +744,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "func_visibility_protected_changed",
-      "examples": ""
+      "doc_slug": "func_visibility_protected_changed"
     },
     {
       "kind": "generated_file_dependency_unstable",
@@ -845,8 +752,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "generated_file_dependency_unstable",
-      "examples": ""
+      "doc_slug": "generated_file_dependency_unstable"
     },
     {
       "kind": "generated_header_changed",
@@ -854,8 +760,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "generated_header_changed",
-      "examples": ""
+      "doc_slug": "generated_header_changed"
     },
     {
       "kind": "generated_header_reaches_public_api",
@@ -863,8 +768,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "generated_header_reaches_public_api",
-      "examples": ""
+      "doc_slug": "generated_header_reaches_public_api"
     },
     {
       "kind": "glibcxx_dual_abi_flip_detected",
@@ -872,8 +776,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "glibcxx_dual_abi_flip_detected",
-      "examples": "case104_glibcxx_dual_abi_flip"
+      "doc_slug": "glibcxx_dual_abi_flip_detected"
     },
     {
       "kind": "handle_type_changed",
@@ -881,8 +784,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "handle_type_changed",
-      "examples": ""
+      "doc_slug": "handle_type_changed"
     },
     {
       "kind": "header_build_context_mismatch",
@@ -890,8 +792,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "header_build_context_mismatch",
-      "examples": ""
+      "doc_slug": "header_build_context_mismatch"
     },
     {
       "kind": "header_parse_context_drift",
@@ -899,8 +800,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "header_parse_context_drift",
-      "examples": ""
+      "doc_slug": "header_parse_context_drift"
     },
     {
       "kind": "hidden_friend_added",
@@ -908,8 +808,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "hidden_friend_added",
-      "examples": ""
+      "doc_slug": "hidden_friend_added"
     },
     {
       "kind": "hidden_friend_removed",
@@ -917,8 +816,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "hidden_friend_removed",
-      "examples": "case96_hidden_friend_removed"
+      "doc_slug": "hidden_friend_removed"
     },
     {
       "kind": "ifunc_introduced",
@@ -926,8 +824,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "ifunc_introduced",
-      "examples": ""
+      "doc_slug": "ifunc_introduced"
     },
     {
       "kind": "ifunc_removed",
@@ -935,8 +832,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "ifunc_removed",
-      "examples": ""
+      "doc_slug": "ifunc_removed"
     },
     {
       "kind": "include_graph_public_header_drift",
@@ -944,8 +840,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "include_graph_public_header_drift",
-      "examples": ""
+      "doc_slug": "include_graph_public_header_drift"
     },
     {
       "kind": "inline_body_changed",
@@ -953,8 +848,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "inline_body_changed",
-      "examples": ""
+      "doc_slug": "inline_body_changed"
     },
     {
       "kind": "inline_body_references_renamed_member",
@@ -962,8 +856,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "inline_body_references_renamed_member",
-      "examples": "case89_inline_accessor_renamed_pimpl_member"
+      "doc_slug": "inline_body_references_renamed_member"
     },
     {
       "kind": "inline_function_removed",
@@ -971,8 +864,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L4",
-      "doc_slug": "inline_function_removed",
-      "examples": "case157_inline_function_removed"
+      "doc_slug": "inline_function_removed"
     },
     {
       "kind": "inline_namespace_moved",
@@ -980,8 +872,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "inline_namespace_moved",
-      "examples": "case71_inline_namespace_moved"
+      "doc_slug": "inline_namespace_moved"
     },
     {
       "kind": "inline_namespace_version_bumped",
@@ -989,8 +880,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "inline_namespace_version_bumped",
-      "examples": "case101_inline_namespace_version_bumped"
+      "doc_slug": "inline_namespace_version_bumped"
     },
     {
       "kind": "instantiation_missing_from_binary",
@@ -998,8 +888,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "instantiation_missing_from_binary",
-      "examples": "case79_missing_template_instantiation"
+      "doc_slug": "instantiation_missing_from_binary"
     },
     {
       "kind": "integer_model_changed",
@@ -1007,8 +896,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "integer_model_changed",
-      "examples": "case112_lp64_ilp64"
+      "doc_slug": "integer_model_changed"
     },
     {
       "kind": "internal_template_leaks_via_public_api",
@@ -1016,8 +904,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "internal_template_leaks_via_public_api",
-      "examples": "case85_internal_template_signature_changed"
+      "doc_slug": "internal_template_leaks_via_public_api"
     },
     {
       "kind": "internal_type_leaks_via_public_api",
@@ -1025,8 +912,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "internal_type_leaks_via_public_api",
-      "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique"
+      "doc_slug": "internal_type_leaks_via_public_api"
     },
     {
       "kind": "layer_coverage_asymmetric",
@@ -1034,8 +920,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "layer_coverage_asymmetric",
-      "examples": ""
+      "doc_slug": "layer_coverage_asymmetric"
     },
     {
       "kind": "layout_unverifiable",
@@ -1043,8 +928,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "layout_unverifiable",
-      "examples": ""
+      "doc_slug": "layout_unverifiable"
     },
     {
       "kind": "libcpp_abi_version_changed",
@@ -1052,8 +936,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "libcpp_abi_version_changed",
-      "examples": ""
+      "doc_slug": "libcpp_abi_version_changed"
     },
     {
       "kind": "link_export_policy_changed",
@@ -1061,8 +944,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "link_export_policy_changed",
-      "examples": ""
+      "doc_slug": "link_export_policy_changed"
     },
     {
       "kind": "lto_mode_changed",
@@ -1070,8 +952,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "lto_mode_changed",
-      "examples": "case154_lto_mode_flip"
+      "doc_slug": "lto_mode_changed"
     },
     {
       "kind": "macho_cpu_type_changed",
@@ -1079,8 +960,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "macho_cpu_type_changed",
-      "examples": ""
+      "doc_slug": "macho_cpu_type_changed"
     },
     {
       "kind": "mandatory_template_param_added",
@@ -1088,8 +968,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "mandatory_template_param_added",
-      "examples": ""
+      "doc_slug": "mandatory_template_param_added"
     },
     {
       "kind": "method_access_changed",
@@ -1097,8 +976,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "method_access_changed",
-      "examples": ""
+      "doc_slug": "method_access_changed"
     },
     {
       "kind": "needed_added",
@@ -1106,8 +984,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "needed_added",
-      "examples": "case138_needed_added"
+      "doc_slug": "needed_added"
     },
     {
       "kind": "needed_removed",
@@ -1115,8 +992,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "needed_removed",
-      "examples": ""
+      "doc_slug": "needed_removed"
     },
     {
       "kind": "odr_source_conflict",
@@ -1124,8 +1000,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "odr_source_conflict",
-      "examples": ""
+      "doc_slug": "odr_source_conflict"
     },
     {
       "kind": "odr_type_variant",
@@ -1133,8 +1008,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L4",
-      "doc_slug": "odr_type_variant",
-      "examples": ""
+      "doc_slug": "odr_type_variant"
     },
     {
       "kind": "opaque_invariant_broken",
@@ -1142,8 +1016,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "opaque_invariant_broken",
-      "examples": ""
+      "doc_slug": "opaque_invariant_broken"
     },
     {
       "kind": "overload_added",
@@ -1151,8 +1024,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "overload_added",
-      "examples": ""
+      "doc_slug": "overload_added"
     },
     {
       "kind": "overload_set_rerouted",
@@ -1160,8 +1032,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "overload_set_rerouted",
-      "examples": ""
+      "doc_slug": "overload_set_rerouted"
     },
     {
       "kind": "param_became_va_list",
@@ -1169,8 +1040,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "param_became_va_list",
-      "examples": ""
+      "doc_slug": "param_became_va_list"
     },
     {
       "kind": "param_default_value_changed",
@@ -1178,8 +1048,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "param_default_value_changed",
-      "examples": "case32_param_defaults"
+      "doc_slug": "param_default_value_changed"
     },
     {
       "kind": "param_default_value_removed",
@@ -1187,8 +1056,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "param_default_value_removed",
-      "examples": "case123_default_argument_removed,case32_param_defaults"
+      "doc_slug": "param_default_value_removed"
     },
     {
       "kind": "param_lost_va_list",
@@ -1196,8 +1064,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "param_lost_va_list",
-      "examples": ""
+      "doc_slug": "param_lost_va_list"
     },
     {
       "kind": "param_pointer_level_changed",
@@ -1205,8 +1072,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "param_pointer_level_changed",
-      "examples": "case33_pointer_level"
+      "doc_slug": "param_pointer_level_changed"
     },
     {
       "kind": "param_renamed",
@@ -1214,8 +1080,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "param_renamed",
-      "examples": ""
+      "doc_slug": "param_renamed"
     },
     {
       "kind": "param_restrict_changed",
@@ -1223,8 +1088,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "param_restrict_changed",
-      "examples": ""
+      "doc_slug": "param_restrict_changed"
     },
     {
       "kind": "pe_forwarder_changed",
@@ -1232,8 +1096,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "pe_forwarder_changed",
-      "examples": ""
+      "doc_slug": "pe_forwarder_changed"
     },
     {
       "kind": "pe_machine_changed",
@@ -1241,8 +1104,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "pe_machine_changed",
-      "examples": ""
+      "doc_slug": "pe_machine_changed"
     },
     {
       "kind": "pie_disabled",
@@ -1250,8 +1112,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "pie_disabled",
-      "examples": ""
+      "doc_slug": "pie_disabled"
     },
     {
       "kind": "polymorphic_type_non_virtual_dtor",
@@ -1259,8 +1120,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "polymorphic_type_non_virtual_dtor",
-      "examples": ""
+      "doc_slug": "polymorphic_type_non_virtual_dtor"
     },
     {
       "kind": "private_header_leak",
@@ -1268,8 +1128,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "private_header_leak",
-      "examples": ""
+      "doc_slug": "private_header_leak"
     },
     {
       "kind": "protected_visibility_changed",
@@ -1277,8 +1136,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "protected_visibility_changed",
-      "examples": ""
+      "doc_slug": "protected_visibility_changed"
     },
     {
       "kind": "public_api_exposes_stl_by_value",
@@ -1286,8 +1144,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_api_exposes_stl_by_value",
-      "examples": ""
+      "doc_slug": "public_api_exposes_stl_by_value"
     },
     {
       "kind": "public_api_internal_dependency_added",
@@ -1295,8 +1152,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L5",
-      "doc_slug": "public_api_internal_dependency_added",
-      "examples": "case160_public_api_internal_dep_added"
+      "doc_slug": "public_api_internal_dependency_added"
     },
     {
       "kind": "public_macro_removed",
@@ -1304,8 +1160,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L4",
-      "doc_slug": "public_macro_removed",
-      "examples": "case156_public_macro_removed"
+      "doc_slug": "public_macro_removed"
     },
     {
       "kind": "public_macro_value_changed",
@@ -1313,8 +1168,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_macro_value_changed",
-      "examples": ""
+      "doc_slug": "public_macro_value_changed"
     },
     {
       "kind": "public_not_exported",
@@ -1322,8 +1176,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "public_not_exported",
-      "examples": ""
+      "doc_slug": "public_not_exported"
     },
     {
       "kind": "public_reachability_changed",
@@ -1331,8 +1184,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_reachability_changed",
-      "examples": ""
+      "doc_slug": "public_reachability_changed"
     },
     {
       "kind": "public_surface_grew",
@@ -1340,8 +1192,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_surface_grew",
-      "examples": ""
+      "doc_slug": "public_surface_grew"
     },
     {
       "kind": "public_surface_shrank",
@@ -1349,8 +1200,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_surface_shrank",
-      "examples": ""
+      "doc_slug": "public_surface_shrank"
     },
     {
       "kind": "public_to_internal_dependency",
@@ -1358,8 +1208,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L5",
-      "doc_slug": "public_to_internal_dependency",
-      "examples": ""
+      "doc_slug": "public_to_internal_dependency"
     },
     {
       "kind": "public_typedef_removed",
@@ -1367,8 +1216,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L4",
-      "doc_slug": "public_typedef_removed",
-      "examples": "case158_public_typedef_removed"
+      "doc_slug": "public_typedef_removed"
     },
     {
       "kind": "public_typedef_target_changed",
@@ -1376,17 +1224,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "public_typedef_target_changed",
-      "examples": ""
-    },
-    {
-      "kind": "python_abi_floor_raised",
-      "category": "risk",
-      "default_verdict": "COMPATIBLE_WITH_RISK",
-      "severity": "warning",
-      "min_evidence": "L0",
-      "doc_slug": "python_abi_floor_raised",
-      "examples": ""
+      "doc_slug": "public_typedef_target_changed"
     },
     {
       "kind": "python_stable_abi_violation",
@@ -1394,8 +1232,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "python_stable_abi_violation",
-      "examples": ""
+      "doc_slug": "python_stable_abi_violation"
     },
     {
       "kind": "relro_weakened",
@@ -1403,8 +1240,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "relro_weakened",
-      "examples": "case134_relro_weakened"
+      "doc_slug": "relro_weakened"
     },
     {
       "kind": "removed_const_overload",
@@ -1412,8 +1248,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "removed_const_overload",
-      "examples": ""
+      "doc_slug": "removed_const_overload"
     },
     {
       "kind": "return_pointer_level_changed",
@@ -1421,8 +1256,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "return_pointer_level_changed",
-      "examples": ""
+      "doc_slug": "return_pointer_level_changed"
     },
     {
       "kind": "rpath_changed",
@@ -1430,8 +1264,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "rpath_changed",
-      "examples": ""
+      "doc_slug": "rpath_changed"
     },
     {
       "kind": "rtti_for_internal_type",
@@ -1439,8 +1272,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "rtti_for_internal_type",
-      "examples": ""
+      "doc_slug": "rtti_for_internal_type"
     },
     {
       "kind": "rtti_inheritance_changed",
@@ -1448,8 +1280,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "rtti_inheritance_changed",
-      "examples": ""
+      "doc_slug": "rtti_inheritance_changed"
     },
     {
       "kind": "rtti_mode_changed",
@@ -1457,8 +1288,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "rtti_mode_changed",
-      "examples": "case131_rtti_mode_flip"
+      "doc_slug": "rtti_mode_changed"
     },
     {
       "kind": "runpath_changed",
@@ -1466,8 +1296,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "runpath_changed",
-      "examples": "case137_runpath_changed"
+      "doc_slug": "runpath_changed"
     },
     {
       "kind": "sanitizer_mode_changed",
@@ -1475,8 +1304,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "sanitizer_mode_changed",
-      "examples": ""
+      "doc_slug": "sanitizer_mode_changed"
     },
     {
       "kind": "serialization_tag_changed",
@@ -1484,8 +1312,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L2",
-      "doc_slug": "serialization_tag_changed",
-      "examples": "case81_serialization_tag_reassigned"
+      "doc_slug": "serialization_tag_changed"
     },
     {
       "kind": "soname_bump_recommended",
@@ -1493,8 +1320,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "soname_bump_recommended",
-      "examples": ""
+      "doc_slug": "soname_bump_recommended"
     },
     {
       "kind": "soname_bump_unnecessary",
@@ -1502,8 +1328,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "soname_bump_unnecessary",
-      "examples": ""
+      "doc_slug": "soname_bump_unnecessary"
     },
     {
       "kind": "soname_changed",
@@ -1511,8 +1336,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "soname_changed",
-      "examples": ""
+      "doc_slug": "soname_changed"
     },
     {
       "kind": "soname_missing",
@@ -1520,8 +1344,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "soname_missing",
-      "examples": "case05_soname"
+      "doc_slug": "soname_missing"
     },
     {
       "kind": "source_binary_provenance_mismatch",
@@ -1529,8 +1352,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "source_binary_provenance_mismatch",
-      "examples": ""
+      "doc_slug": "source_binary_provenance_mismatch"
     },
     {
       "kind": "source_decl_binary_symbol_mismatch",
@@ -1538,8 +1360,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "source_decl_binary_symbol_mismatch",
-      "examples": ""
+      "doc_slug": "source_decl_binary_symbol_mismatch"
     },
     {
       "kind": "source_level_kind_changed",
@@ -1547,8 +1368,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "source_level_kind_changed",
-      "examples": ""
+      "doc_slug": "source_level_kind_changed"
     },
     {
       "kind": "source_to_binary_mapping_changed",
@@ -1556,8 +1376,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "source_to_binary_mapping_changed",
-      "examples": ""
+      "doc_slug": "source_to_binary_mapping_changed"
     },
     {
       "kind": "stack_canary_removed",
@@ -1565,8 +1384,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "stack_canary_removed",
-      "examples": "case135_stack_canary_removed"
+      "doc_slug": "stack_canary_removed"
     },
     {
       "kind": "standard_layout_lost",
@@ -1574,8 +1392,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "standard_layout_lost",
-      "examples": ""
+      "doc_slug": "standard_layout_lost"
     },
     {
       "kind": "std_reexport_removed",
@@ -1583,8 +1400,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "std_reexport_removed",
-      "examples": ""
+      "doc_slug": "std_reexport_removed"
     },
     {
       "kind": "stdlib_debug_mode_changed",
@@ -1592,8 +1408,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "stdlib_debug_mode_changed",
-      "examples": ""
+      "doc_slug": "stdlib_debug_mode_changed"
     },
     {
       "kind": "stdlib_implementation_changed",
@@ -1601,8 +1416,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "stdlib_implementation_changed",
-      "examples": ""
+      "doc_slug": "stdlib_implementation_changed"
     },
     {
       "kind": "struct_alignment_changed",
@@ -1610,8 +1424,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "struct_alignment_changed",
-      "examples": ""
+      "doc_slug": "struct_alignment_changed"
     },
     {
       "kind": "struct_field_offset_changed",
@@ -1619,8 +1432,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "struct_field_offset_changed",
-      "examples": ""
+      "doc_slug": "struct_field_offset_changed"
     },
     {
       "kind": "struct_field_removed",
@@ -1628,8 +1440,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "struct_field_removed",
-      "examples": ""
+      "doc_slug": "struct_field_removed"
     },
     {
       "kind": "struct_field_type_changed",
@@ -1637,8 +1448,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "struct_field_type_changed",
-      "examples": ""
+      "doc_slug": "struct_field_type_changed"
     },
     {
       "kind": "struct_packing_changed",
@@ -1646,8 +1456,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "struct_packing_changed",
-      "examples": "case56_struct_packing_changed"
+      "doc_slug": "struct_packing_changed"
     },
     {
       "kind": "struct_packing_mode_changed",
@@ -1655,8 +1464,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "struct_packing_mode_changed",
-      "examples": "case153_struct_packing_flip"
+      "doc_slug": "struct_packing_mode_changed"
     },
     {
       "kind": "struct_return_convention_changed",
@@ -1664,8 +1472,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "struct_return_convention_changed",
-      "examples": "case129_struct_return_convention"
+      "doc_slug": "struct_return_convention_changed"
     },
     {
       "kind": "struct_size_changed",
@@ -1673,8 +1480,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "struct_size_changed",
-      "examples": "case121_kernel_btf_struct_field_added"
+      "doc_slug": "struct_size_changed"
     },
     {
       "kind": "sycl_backend_driver_req_changed",
@@ -1682,8 +1488,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_backend_driver_req_changed",
-      "examples": ""
+      "doc_slug": "sycl_backend_driver_req_changed"
     },
     {
       "kind": "sycl_implementation_changed",
@@ -1691,8 +1496,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_implementation_changed",
-      "examples": ""
+      "doc_slug": "sycl_implementation_changed"
     },
     {
       "kind": "sycl_overload_set_removed",
@@ -1700,8 +1504,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "sycl_overload_set_removed",
-      "examples": "case82_sycl_overload_set_removed"
+      "doc_slug": "sycl_overload_set_removed"
     },
     {
       "kind": "sycl_pi_entrypoint_added",
@@ -1709,8 +1512,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_pi_entrypoint_added",
-      "examples": ""
+      "doc_slug": "sycl_pi_entrypoint_added"
     },
     {
       "kind": "sycl_pi_entrypoint_removed",
@@ -1718,8 +1520,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_pi_entrypoint_removed",
-      "examples": ""
+      "doc_slug": "sycl_pi_entrypoint_removed"
     },
     {
       "kind": "sycl_pi_version_changed",
@@ -1727,8 +1528,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_pi_version_changed",
-      "examples": ""
+      "doc_slug": "sycl_pi_version_changed"
     },
     {
       "kind": "sycl_plugin_added",
@@ -1736,8 +1536,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_plugin_added",
-      "examples": ""
+      "doc_slug": "sycl_plugin_added"
     },
     {
       "kind": "sycl_plugin_removed",
@@ -1745,8 +1544,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_plugin_removed",
-      "examples": ""
+      "doc_slug": "sycl_plugin_removed"
     },
     {
       "kind": "sycl_plugin_search_path_changed",
@@ -1754,8 +1552,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_plugin_search_path_changed",
-      "examples": ""
+      "doc_slug": "sycl_plugin_search_path_changed"
     },
     {
       "kind": "sycl_runtime_version_changed",
@@ -1763,8 +1560,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "sycl_runtime_version_changed",
-      "examples": ""
+      "doc_slug": "sycl_runtime_version_changed"
     },
     {
       "kind": "symbol_binding_changed",
@@ -1772,8 +1568,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_binding_changed",
-      "examples": ""
+      "doc_slug": "symbol_binding_changed"
     },
     {
       "kind": "symbol_binding_strengthened",
@@ -1781,8 +1576,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "symbol_binding_strengthened",
-      "examples": "case128_symbol_binding_strengthened"
+      "doc_slug": "symbol_binding_strengthened"
     },
     {
       "kind": "symbol_elf_visibility_changed",
@@ -1790,8 +1584,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_elf_visibility_changed",
-      "examples": ""
+      "doc_slug": "symbol_elf_visibility_changed"
     },
     {
       "kind": "symbol_leaked_from_dependency_changed",
@@ -1799,8 +1592,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_leaked_from_dependency_changed",
-      "examples": ""
+      "doc_slug": "symbol_leaked_from_dependency_changed"
     },
     {
       "kind": "symbol_moved_version_node",
@@ -1808,8 +1600,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_moved_version_node",
-      "examples": ""
+      "doc_slug": "symbol_moved_version_node"
     },
     {
       "kind": "symbol_renamed_batch",
@@ -1817,8 +1608,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_renamed_batch",
-      "examples": ""
+      "doc_slug": "symbol_renamed_batch"
     },
     {
       "kind": "symbol_size_changed",
@@ -1826,8 +1616,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "symbol_size_changed",
-      "examples": "case127_data_object_size_changed"
+      "doc_slug": "symbol_size_changed"
     },
     {
       "kind": "symbol_size_changed_const_object",
@@ -1835,8 +1624,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_size_changed_const_object",
-      "examples": ""
+      "doc_slug": "symbol_size_changed_const_object"
     },
     {
       "kind": "symbol_size_changed_internal",
@@ -1844,8 +1632,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_size_changed_internal",
-      "examples": ""
+      "doc_slug": "symbol_size_changed_internal"
     },
     {
       "kind": "symbol_type_changed",
@@ -1853,8 +1640,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_type_changed",
-      "examples": ""
+      "doc_slug": "symbol_type_changed"
     },
     {
       "kind": "symbol_version_alias_changed",
@@ -1862,8 +1648,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_version_alias_changed",
-      "examples": ""
+      "doc_slug": "symbol_version_alias_changed"
     },
     {
       "kind": "symbol_version_defined_added",
@@ -1871,8 +1656,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_version_defined_added",
-      "examples": ""
+      "doc_slug": "symbol_version_defined_added"
     },
     {
       "kind": "symbol_version_defined_removed",
@@ -1880,8 +1664,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "symbol_version_defined_removed",
-      "examples": "case65_symbol_version_removed"
+      "doc_slug": "symbol_version_defined_removed"
     },
     {
       "kind": "symbol_version_node_removed",
@@ -1889,8 +1672,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "symbol_version_node_removed",
-      "examples": "case139_symbol_version_node_removed"
+      "doc_slug": "symbol_version_node_removed"
     },
     {
       "kind": "symbol_version_required_added",
@@ -1898,8 +1680,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_version_required_added",
-      "examples": ""
+      "doc_slug": "symbol_version_required_added"
     },
     {
       "kind": "symbol_version_required_added_compat",
@@ -1907,8 +1688,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_version_required_added_compat",
-      "examples": ""
+      "doc_slug": "symbol_version_required_added_compat"
     },
     {
       "kind": "symbol_version_required_removed",
@@ -1916,8 +1696,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "symbol_version_required_removed",
-      "examples": ""
+      "doc_slug": "symbol_version_required_removed"
     },
     {
       "kind": "tag_type_renamed",
@@ -1925,8 +1704,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "tag_type_renamed",
-      "examples": "case86_tag_struct_renamed"
+      "doc_slug": "tag_type_renamed"
     },
     {
       "kind": "tail_padding_reuse_changed",
@@ -1934,8 +1712,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "tail_padding_reuse_changed",
-      "examples": ""
+      "doc_slug": "tail_padding_reuse_changed"
     },
     {
       "kind": "target_dependency_added",
@@ -1943,8 +1720,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L5",
-      "doc_slug": "target_dependency_added",
-      "examples": "case161_target_dependency_added"
+      "doc_slug": "target_dependency_added"
     },
     {
       "kind": "template_body_changed",
@@ -1952,8 +1728,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "template_body_changed",
-      "examples": ""
+      "doc_slug": "template_body_changed"
     },
     {
       "kind": "template_param_type_changed",
@@ -1961,8 +1736,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "template_param_type_changed",
-      "examples": ""
+      "doc_slug": "template_param_type_changed"
     },
     {
       "kind": "template_return_type_changed",
@@ -1970,8 +1744,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "template_return_type_changed",
-      "examples": ""
+      "doc_slug": "template_return_type_changed"
     },
     {
       "kind": "threadsafe_statics_mode_changed",
@@ -1979,8 +1752,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "threadsafe_statics_mode_changed",
-      "examples": "case132_threadsafe_statics_flip"
+      "doc_slug": "threadsafe_statics_mode_changed"
     },
     {
       "kind": "tls_model_changed",
@@ -1988,8 +1760,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "tls_model_changed",
-      "examples": "case133_tls_model_flip"
+      "doc_slug": "tls_model_changed"
     },
     {
       "kind": "tls_var_size_changed",
@@ -1997,8 +1768,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "tls_var_size_changed",
-      "examples": "case67_tls_var_size_changed"
+      "doc_slug": "tls_var_size_changed"
     },
     {
       "kind": "toolchain_flag_drift",
@@ -2006,8 +1776,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "toolchain_flag_drift",
-      "examples": "case103_toolchain_flag_drift"
+      "doc_slug": "toolchain_flag_drift"
     },
     {
       "kind": "toolchain_version_changed",
@@ -2015,8 +1784,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "toolchain_version_changed",
-      "examples": ""
+      "doc_slug": "toolchain_version_changed"
     },
     {
       "kind": "trivially_copyable_lost",
@@ -2024,8 +1792,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "trivially_copyable_lost",
-      "examples": ""
+      "doc_slug": "trivially_copyable_lost"
     },
     {
       "kind": "type_added",
@@ -2033,8 +1800,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "type_added",
-      "examples": ""
+      "doc_slug": "type_added"
     },
     {
       "kind": "type_alignment_changed",
@@ -2042,8 +1808,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "type_alignment_changed",
-      "examples": ""
+      "doc_slug": "type_alignment_changed"
     },
     {
       "kind": "type_base_changed",
@@ -2051,8 +1816,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_base_changed",
-      "examples": "case37_base_class,case72_covariant_return_changed"
+      "doc_slug": "type_base_changed"
     },
     {
       "kind": "type_became_final",
@@ -2060,8 +1824,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "L2",
-      "doc_slug": "type_became_final",
-      "examples": "case125_class_became_final"
+      "doc_slug": "type_became_final"
     },
     {
       "kind": "type_became_opaque",
@@ -2069,8 +1832,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_became_opaque",
-      "examples": "case28_typedef_opaque"
+      "doc_slug": "type_became_opaque"
     },
     {
       "kind": "type_field_added",
@@ -2078,8 +1840,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_field_added",
-      "examples": "case94_empty_tag_gained_state"
+      "doc_slug": "type_field_added"
     },
     {
       "kind": "type_field_added_compatible",
@@ -2087,8 +1848,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "type_field_added_compatible",
-      "examples": ""
+      "doc_slug": "type_field_added_compatible"
     },
     {
       "kind": "type_field_offset_changed",
@@ -2096,8 +1856,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_field_offset_changed",
-      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost"
+      "doc_slug": "type_field_offset_changed"
     },
     {
       "kind": "type_field_removed",
@@ -2105,8 +1864,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "type_field_removed",
-      "examples": ""
+      "doc_slug": "type_field_removed"
     },
     {
       "kind": "type_field_type_changed",
@@ -2114,8 +1872,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "type_field_type_changed",
-      "examples": ""
+      "doc_slug": "type_field_type_changed"
     },
     {
       "kind": "type_kind_changed",
@@ -2123,8 +1880,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_kind_changed",
-      "examples": "case55_type_kind_changed"
+      "doc_slug": "type_kind_changed"
     },
     {
       "kind": "type_lost_final",
@@ -2132,8 +1888,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "type_lost_final",
-      "examples": ""
+      "doc_slug": "type_lost_final"
     },
     {
       "kind": "type_removed",
@@ -2141,8 +1896,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_removed",
-      "examples": "case107_task_scheduler_init_removed,case108_task_class_removed,case109_flow_graph_policy_renames,case78_task_arena_attach_tag"
+      "doc_slug": "type_removed"
     },
     {
       "kind": "type_size_changed",
@@ -2150,8 +1904,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case126_sycl_device_impl_ptr,case140_empty_base_optimization_lost,case94_empty_tag_gained_state"
+      "doc_slug": "type_size_changed"
     },
     {
       "kind": "type_visibility_changed",
@@ -2159,8 +1912,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "type_visibility_changed",
-      "examples": ""
+      "doc_slug": "type_visibility_changed"
     },
     {
       "kind": "type_vtable_changed",
@@ -2168,8 +1920,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "type_vtable_changed",
-      "examples": "case09_cpp_vtable,case72_covariant_return_changed"
+      "doc_slug": "type_vtable_changed"
     },
     {
       "kind": "typedef_base_changed",
@@ -2177,8 +1928,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "typedef_base_changed",
-      "examples": "case73_typedef_underlying_changed"
+      "doc_slug": "typedef_base_changed"
     },
     {
       "kind": "typedef_removed",
@@ -2186,8 +1936,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "typedef_removed",
-      "examples": "case109_flow_graph_policy_renames,case95_allocator_nested_typedef_removed"
+      "doc_slug": "typedef_removed"
     },
     {
       "kind": "typedef_version_sentinel",
@@ -2195,8 +1944,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "typedef_version_sentinel",
-      "examples": ""
+      "doc_slug": "typedef_version_sentinel"
     },
     {
       "kind": "undocumented_export_ratio_increased",
@@ -2204,8 +1952,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "undocumented_export_ratio_increased",
-      "examples": ""
+      "doc_slug": "undocumented_export_ratio_increased"
     },
     {
       "kind": "uninstantiated_template_removed",
@@ -2213,8 +1960,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "uninstantiated_template_removed",
-      "examples": ""
+      "doc_slug": "uninstantiated_template_removed"
     },
     {
       "kind": "union_field_added",
@@ -2222,8 +1968,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "union_field_added",
-      "examples": ""
+      "doc_slug": "union_field_added"
     },
     {
       "kind": "union_field_removed",
@@ -2231,8 +1976,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "union_field_removed",
-      "examples": "case24_union_field_removed"
+      "doc_slug": "union_field_removed"
     },
     {
       "kind": "union_field_type_changed",
@@ -2240,8 +1984,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "union_field_type_changed",
-      "examples": ""
+      "doc_slug": "union_field_type_changed"
     },
     {
       "kind": "unspecified_return_now_named",
@@ -2249,8 +1992,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "unspecified_return_now_named",
-      "examples": ""
+      "doc_slug": "unspecified_return_now_named"
     },
     {
       "kind": "unversioned_exported_symbol",
@@ -2258,8 +2000,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "unversioned_exported_symbol",
-      "examples": ""
+      "doc_slug": "unversioned_exported_symbol"
     },
     {
       "kind": "used_reserved_field",
@@ -2267,8 +2008,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L1",
-      "doc_slug": "used_reserved_field",
-      "examples": "case54_used_reserved_field"
+      "doc_slug": "used_reserved_field"
     },
     {
       "kind": "value_abi_trait_changed",
@@ -2276,8 +2016,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "value_abi_trait_changed",
-      "examples": "case69_trivial_to_nontrivial"
+      "doc_slug": "value_abi_trait_changed"
     },
     {
       "kind": "var_access_changed",
@@ -2285,8 +2024,7 @@
       "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "var_access_changed",
-      "examples": ""
+      "doc_slug": "var_access_changed"
     },
     {
       "kind": "var_access_widened",
@@ -2294,8 +2032,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "var_access_widened",
-      "examples": ""
+      "doc_slug": "var_access_widened"
     },
     {
       "kind": "var_added",
@@ -2303,8 +2040,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "var_added",
-      "examples": "case61_var_added"
+      "doc_slug": "var_added"
     },
     {
       "kind": "var_became_const",
@@ -2312,8 +2048,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "var_became_const",
-      "examples": "case39_var_const"
+      "doc_slug": "var_became_const"
     },
     {
       "kind": "var_lost_const",
@@ -2321,8 +2056,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "var_lost_const",
-      "examples": ""
+      "doc_slug": "var_lost_const"
     },
     {
       "kind": "var_removed",
@@ -2330,8 +2064,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "var_removed",
-      "examples": "case58_var_removed"
+      "doc_slug": "var_removed"
     },
     {
       "kind": "var_type_changed",
@@ -2339,8 +2072,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L1",
-      "doc_slug": "var_type_changed",
-      "examples": "case11_global_var_type"
+      "doc_slug": "var_type_changed"
     },
     {
       "kind": "var_value_changed",
@@ -2348,8 +2080,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "var_value_changed",
-      "examples": ""
+      "doc_slug": "var_value_changed"
     },
     {
       "kind": "vector_abi_changed",
@@ -2357,8 +2088,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "vector_abi_changed",
-      "examples": ""
+      "doc_slug": "vector_abi_changed"
     },
     {
       "kind": "version_script_missing",
@@ -2366,8 +2096,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "version_script_missing",
-      "examples": ""
+      "doc_slug": "version_script_missing"
     },
     {
       "kind": "versioned_symbol_scheme_detected",
@@ -2375,8 +2104,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L0",
-      "doc_slug": "versioned_symbol_scheme_detected",
-      "examples": "case141_versioned_symbol_scheme"
+      "doc_slug": "versioned_symbol_scheme_detected"
     },
     {
       "kind": "virtual_method_added",
@@ -2384,8 +2112,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "virtual_method_added",
-      "examples": ""
+      "doc_slug": "virtual_method_added"
     },
     {
       "kind": "visibility_leak",
@@ -2393,8 +2120,7 @@
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "visibility_leak",
-      "examples": ""
+      "doc_slug": "visibility_leak"
     },
     {
       "kind": "vptr_introduced",
@@ -2402,8 +2128,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "unspecified",
-      "doc_slug": "vptr_introduced",
-      "examples": ""
+      "doc_slug": "vptr_introduced"
     },
     {
       "kind": "vtable_slot_count_changed",
@@ -2411,8 +2136,7 @@
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
-      "doc_slug": "vtable_slot_count_changed",
-      "examples": "case142_vtable_slot_count_binary_only"
+      "doc_slug": "vtable_slot_count_changed"
     },
     {
       "kind": "vtable_symbol_identity_changed",
@@ -2420,8 +2144,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "vtable_symbol_identity_changed",
-      "examples": ""
+      "doc_slug": "vtable_symbol_identity_changed"
     },
     {
       "kind": "whole_program_vtables_mode_changed",
@@ -2429,8 +2152,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "L3",
-      "doc_slug": "whole_program_vtables_mode_changed",
-      "examples": ""
+      "doc_slug": "whole_program_vtables_mode_changed"
     },
     {
       "kind": "writable_executable_segment",
@@ -2438,8 +2160,7 @@
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
-      "doc_slug": "writable_executable_segment",
-      "examples": ""
+      "doc_slug": "writable_executable_segment"
     }
   ]
 }

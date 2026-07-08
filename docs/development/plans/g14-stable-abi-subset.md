@@ -5,9 +5,11 @@
 **Status:** Done. `abicheck/python_ext.py` recognises extension modules
 (Cython/pybind11/nanobind/C) and captures their imported CPython C-API surface;
 `abicheck/stable_abi.py` classifies each import against the Limited-API
-allowlist; `abicheck/diff_python.py` raises `PYTHON_STABLE_ABI_VIOLATION` /
-`PYTHON_ABI_FLOOR_RAISED` on compare; and `abicheck stable-abi ext.so --abi3 3.9`
-(`abicheck/cli_stable_abi.py`) audits a single module. See
+allowlist; `abicheck/diff_python.py` raises `PYTHON_STABLE_ABI_VIOLATION` on
+compare (a new private `_Py*` import); and `abicheck stable-abi ext.so --abi3 3.9`
+(`abicheck/cli_stable_abi.py`) audits a single module against a target floor.
+Interpreter-floor conformance lives in the command (not compare), since a bare
+`.abi3.so` carries no declared floor. See
 [Python Extensions (abi3)](../../user-guide/python-extensions.md).
 
 ## Problem

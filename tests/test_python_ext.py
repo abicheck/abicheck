@@ -193,11 +193,15 @@ def test_stable_abi_violation_on_new_private_import() -> None:
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
-def test_abi_floor_raised_detected() -> None:
+def test_added_stable_import_is_not_flagged_as_floor_raise() -> None:
+    # Adding a newer *stable* symbol (PyType_GetName, 3.11) is NOT a finding:
+    # without the module's declared floor we cannot prove any supported
+    # interpreter was dropped, so the compare-time detector stays silent
+    # (floor conformance is the `stable-abi --abi3` command's job).
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong", "PyType_GetName"])
     result = compare(old, new)
-    assert ChangeKind.PYTHON_ABI_FLOOR_RAISED in _kinds(result)
+    assert not (_kinds(result) & {ChangeKind.PYTHON_STABLE_ABI_VIOLATION})
 
 
 def test_no_finding_when_import_surface_unchanged() -> None:
@@ -205,7 +209,6 @@ def test_no_finding_when_import_surface_unchanged() -> None:
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong"])
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
-    assert ChangeKind.PYTHON_ABI_FLOOR_RAISED not in _kinds(result)
 
 
 def test_version_specific_module_does_not_flag_private_imports() -> None:
@@ -254,7 +257,7 @@ def test_python_ext_metadata_helpers() -> None:
 
 def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
     path = f"{tmp_path}/ext.abi.json"
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(snapshot_to_json(snap))
     return path
 
@@ -334,7 +337,7 @@ def test_cli_stable_abi_all_output_formats(tmp_path: object, fmt: str) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["stable-abi", path, "-f", fmt, "-o", out])
     assert result.exit_code == 1, result.output
-    with open(out) as fh:
+    with open(out, encoding="utf-8") as fh:
         assert fh.read().strip()
 
 
@@ -367,6 +370,39 @@ def test_cli_stable_abi_reports_unknown_advisory(tmp_path: object) -> None:
     assert result.exit_code == 0, result.output
     assert "advisory" in result.output
     assert "PyTotallyMadeUpSymbol" in result.output
+
+
+def test_cli_stable_abi_warns_when_no_floor_on_abi3_module(tmp_path: object) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # abi3 module, no --abi3: the stable-symbol floor check cannot run. A newer
+    # stable import (PyType_GetName, 3.11) is not flagged, but the command must
+    # NOT pass silently — it warns that --abi3 is needed (Codex review).
+    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
+    path = _write_snapshot(tmp_path, snap)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["stable-abi", path])
+    assert result.exit_code == 0, result.output
+    assert "SKIPPED" in result.output
+    assert "--abi3" in result.output
+
+
+def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # Private imports are caught even without a floor.
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_New"])
+    path = _write_snapshot(tmp_path, snap)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["stable-abi", path, "-f", "json"])
+    assert result.exit_code == 1, result.output
+    assert "python_stable_abi_violation" in result.output
 
 
 # ── Cross-platform detection (PE / Mach-O) ──────────────────────────────────
@@ -431,17 +467,6 @@ def test_soabi_falls_back_to_library_name_when_no_source_path() -> None:
 
 
 # ── Detector helpers ────────────────────────────────────────────────────────
-
-
-def test_abi_floor_raised_names_the_raising_symbols() -> None:
-    old = _ext_snapshot("1.0", ["PyList_New"])
-    new = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
-    result = compare(old, new)
-    floor_change = next(
-        c for c in result.changes if c.kind is ChangeKind.PYTHON_ABI_FLOOR_RAISED
-    )
-    assert "3.2" in floor_change.description
-    assert "3.11" in floor_change.description
 
 
 def test_module_symbol_fallbacks() -> None:

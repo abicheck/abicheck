@@ -164,6 +164,8 @@ def stable_abi_cmd(
         raise SystemExit(_EXIT_NOT_EXTENSION)
 
     # Target floor: explicit --abi3 wins, else the module's own declared floor.
+    # A bare `.abi3.so` carries no minor in its name, so the declared floor is
+    # unknown unless the user supplies --abi3.
     abi3_floor: tuple[int, int] | None = None
     if abi3 is not None:
         abi3_floor = stable_abi.parse_abi3_version(abi3)
@@ -177,6 +179,12 @@ def stable_abi_cmd(
         module_name, python_ext.cpython_imports, abi3_floor
     )
 
+    # Without a resolvable floor the stable-symbol (above-floor) check cannot
+    # run — only private (`_Py*`) imports are caught. Say so loudly instead of
+    # exiting clean, so a `cp39-abi3` module importing a 3.11 symbol is not
+    # silently accepted (Codex review): the user must pass --abi3 to check it.
+    floor_check_skipped = abi3_floor is None and python_ext.limited_api
+
     floor_txt = stable_abi.format_version(abi3_floor) if abi3_floor else "unset"
     click.echo(
         f"stable-abi: {module_name} — {len(python_ext.cpython_imports)} CPython "
@@ -184,6 +192,14 @@ def stable_abi_cmd(
         f"{len(findings)} finding(s), {len(unknown)} unknown symbol(s).",
         err=True,
     )
+    if floor_check_skipped:
+        click.echo(
+            "  WARNING: no target floor — an abi3 module carries no minor in its "
+            "filename, so the stable-symbol floor check was SKIPPED (only private "
+            "_Py* imports were checked). Pass --abi3 <version> (e.g. the wheel's "
+            "cpXY-abi3 tag) to verify imported symbols against that floor.",
+            err=True,
+        )
     if unknown:
         click.echo(
             "  advisory (public Py* imports not in the curated allowlist; may be "

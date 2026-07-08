@@ -22,14 +22,16 @@ version-specific (``cpython-311``) module is *expected* to use private CPython
 API and rebuild per interpreter, so applying these checks to it would be a false
 positive. The gate is therefore strict on the abi3 tag.
 
-Two findings:
+One finding:
 
 * :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` — the new build gained an
   import of a CPython *private* symbol (``_Py*``), which is outside the Limited
-  API. This is the always-correct signal (no allowlist needed).
-* :data:`ChangeKind.PYTHON_ABI_FLOOR_RAISED` — the minimum interpreter version
-  implied by the new build's recognised stable imports is higher than the old
-  build's, so the module drops interpreters it used to load on.
+  API. This is the always-correct signal (no allowlist, no floor needed).
+
+Interpreter-*floor* conformance (a stable symbol newer than the declared
+``Py_LIMITED_API``) is intentionally NOT diffed here — see
+:func:`_diff_python_ext` for why — it is checked by the ``stable-abi`` command,
+where the user supplies the target floor via ``--abi3``.
 
 Registered via ``@registry.detector("python_ext")`` and skipped automatically
 when either snapshot lacks extension metadata.
@@ -93,35 +95,6 @@ def _diff_stable_abi_violations(
     ]
 
 
-def _diff_abi_floor(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Change]:
-    """A rise in the module's minimum interpreter floor across recognised imports."""
-    old_floor = old.min_required_abi3()
-    new_floor = new.min_required_abi3()
-    if old_floor is None or new_floor is None or new_floor <= old_floor:
-        return []
-    module = _module_symbol(new, old)
-    name = new.module_name or old.module_name or "<extension>"
-    # Which recognised stable imports are responsible for the raised floor.
-    old_imports = set(old.cpython_imports)
-    raisers = sorted(
-        s
-        for s in new.cpython_imports
-        if s not in old_imports
-        and (v := stable_abi.added_version(s)) is not None
-        and v > old_floor
-    )
-    return [
-        make_change(
-            ChangeKind.PYTHON_ABI_FLOOR_RAISED,
-            symbol=module,
-            name=name,
-            old=stable_abi.format_version(old_floor),
-            new=stable_abi.format_version(new_floor),
-            detail=", ".join(raisers),
-        )
-    ]
-
-
 @registry.detector(
     "python_ext",
     requires_support=lambda o, n: (
@@ -130,18 +103,26 @@ def _diff_abi_floor(old: PythonExtMetadata, new: PythonExtMetadata) -> list[Chan
     ),
 )
 def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """CPython extension-module compatibility detector (G14)."""
+    """CPython extension-module compatibility detector (G14).
+
+    Emits :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` when a stable-ABI
+    (abi3) module gains a CPython *private* (``_Py*``) import — the
+    always-correct, floor-independent signal. A raised *interpreter floor* is
+    deliberately NOT diffed here: proving that a supported interpreter was
+    dropped needs the module's declared ``Py_LIMITED_API`` floor, which a bare
+    ``.abi3.so`` does not carry, so comparing the min-of-imports across versions
+    would false-positive (e.g. a ``cp39-abi3`` build adding a 3.5 symbol drops no
+    3.9+ user). Floor conformance is checked in the ``stable-abi`` command, where
+    the user supplies the target floor via ``--abi3``.
+    """
     o = old.python_ext
     n = new.python_ext
     assert o is not None and n is not None  # guaranteed by requires_support
 
-    # Only stable-ABI (abi3) modules carry these contracts. A version-specific
+    # Only stable-ABI (abi3) modules carry this contract. A version-specific
     # extension legitimately uses private CPython API and is rebuilt per
     # interpreter, so it has no cross-interpreter import promise to break.
     if not (_is_abi3(n) and _is_abi3(o)):
         return []
 
-    changes: list[Change] = []
-    changes.extend(_diff_stable_abi_violations(o, n))
-    changes.extend(_diff_abi_floor(o, n))
-    return changes
+    return _diff_stable_abi_violations(o, n)

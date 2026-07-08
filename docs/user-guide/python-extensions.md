@@ -66,16 +66,24 @@ it.
 
 ### 2. Compare two versions — `compare`
 
-A normal `compare` of two extension modules adds two deployment-risk findings
-for stable-ABI (`abi3`) builds:
+A normal `compare` of two extension modules adds one deployment-risk finding for
+stable-ABI (`abi3`) builds:
 
 | ChangeKind | Fires when |
 |---|---|
-| `python_stable_abi_violation` | the new build gained a private `_Py*` import that the old build did not have |
-| `python_abi_floor_raised` | the new build's imports require a **newer** minimum interpreter than the old build (e.g. it now calls a 3.11-only Limited-API symbol) — so it drops the older interpreters it used to load on |
+| `python_stable_abi_violation` | the new build gained a **private** `_Py*` import that the old build did not have — always outside the Limited API, regardless of interpreter version |
 
-Both are classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
+It is classified `COMPATIBLE_WITH_RISK`: whether the module actually breaks
 depends on the *target interpreter*, not on the module's own consumers.
+
+!!! note "Interpreter-*floor* drift is checked by `stable-abi`, not `compare`"
+    Proving that a raised interpreter floor drops a *supported* interpreter
+    needs the module's declared `Py_LIMITED_API` floor — and a bare `.abi3.so`
+    doesn't carry its minor. Comparing the minimum-imported-symbol version across
+    two builds would false-positive (a `cp39-abi3` build adding a 3.5 symbol
+    drops no 3.9+ user), so `compare` deliberately does **not** flag floor drift.
+    Use `stable-abi --abi3 <floor>` — where you supply the target floor — to
+    catch stable symbols newer than it.
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private

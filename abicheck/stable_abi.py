@@ -219,11 +219,6 @@ def is_private_symbol(name: str) -> bool:
     return name.startswith(_PRIVATE_PREFIXES)
 
 
-def added_version(name: str) -> tuple[int, int] | None:
-    """Return the Limited-API ``(major, minor)`` that added *name*, or None."""
-    return LIMITED_API_ADDED.get(name)
-
-
 def classify(
     name: str, abi3_floor: tuple[int, int] | None = None
 ) -> tuple[StableAbiStatus, tuple[int, int] | None]:

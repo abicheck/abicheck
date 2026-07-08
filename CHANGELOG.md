@@ -16,15 +16,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   or hand-written C — and checks the contract the export table cannot see: the
   CPython C-API symbols the module *imports* from libpython, plus its
   stable-ABI (`abi3` / `Py_LIMITED_API`) conformance. A new
-  `abicheck stable-abi ext.so --abi3 3.9` command audits a single module
-  (exit 0 clean / 1 violations / 2 not-an-extension), and `compare` gains two
-  deployment-`RISK` change kinds for `abi3` builds: `python_stable_abi_violation`
-  (a new import outside the stable ABI — e.g. a private `_Py*` symbol) and
-  `python_abi_floor_raised` (the minimum interpreter version rose, dropping
-  older interpreters the module used to load on). Version-specific
-  (`cpython-3XX`) modules are deliberately not subject to the stable-ABI checks,
-  so a normal per-interpreter extension never false-positives. Cross-platform
-  (ELF/PE imports, plus new Mach-O undefined-symbol capture). See the
+  `abicheck stable-abi ext.so --abi3 3.9` command audits a single module against
+  a target `Py_LIMITED_API` floor (exit 0 clean / 1 violations / 2
+  not-an-extension), and `compare` gains a deployment-`RISK` change kind for
+  `abi3` builds — `python_stable_abi_violation` (a new import outside the stable
+  ABI, e.g. a private `_Py*` symbol). Interpreter-*floor* conformance is checked
+  by the `stable-abi` command (where the user supplies the floor via `--abi3`),
+  not at compare time, since a bare `.abi3.so` carries no declared floor to
+  judge against. Version-specific (`cpython-3XX`) modules are deliberately not
+  subject to the stable-ABI checks, so a normal per-interpreter extension never
+  false-positives. Cross-platform (ELF/PE imports, plus new Mach-O
+  undefined-symbol capture). See the
   [Python Extensions](docs/user-guide/python-extensions.md) guide.
 
 ### Changed

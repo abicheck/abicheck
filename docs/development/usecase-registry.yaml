@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (271 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (270 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -409,10 +409,12 @@ use_cases:
       (Cython/pybind11/nanobind/C) from the PyInit_* export and Py* import
       surface; stable_abi classifies each import against the Limited-API allowlist
       for a target Py_LIMITED_API floor; diff_python raises
-      PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module)
-      and PYTHON_ABI_FLOOR_RAISED (the interpreter floor rose). The
-      `abicheck stable-abi ext.so --abi3 3.9` command audits a single module and
-      exits non-zero on a violation the export-table view would call COMPATIBLE.
+      PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
+      compare time. Interpreter-floor conformance is checked by the
+      `abicheck stable-abi ext.so --abi3 3.9` command (the user supplies the
+      target floor, which a bare .abi3.so does not carry), which audits a single
+      module and exits non-zero on a violation the export-table view would call
+      COMPATIBLE.
 
   - id: UC-WF-audit
     axis: workflow

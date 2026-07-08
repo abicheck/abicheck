@@ -1559,14 +1559,4 @@ REGISTRY = ChangeKindRegistry([
               "deployment RISK: whether it breaks depends on the target "
               "interpreter, not on the module's own consumers.",
        description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}"),
-    _E("python_abi_floor_raised", _R,
-       impact="A stable-ABI (`abi3`) CPython extension module's minimum required "
-              "interpreter version rose: the new build imports Limited-API "
-              "symbols introduced in a later CPython minor than the old build "
-              "did. The module can no longer be imported on the older "
-              "interpreters it previously supported (`undefined symbol` at load). "
-              "The wheel still tags itself `abi3`, so nothing in the export table "
-              "or wheel filename reveals the raised floor — a deployment RISK for "
-              "consumers pinned to an older Python.",
-       description_template="abi3 extension '{name}' raised its CPython floor: {old} → {new}"),
 ])
