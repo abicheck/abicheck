@@ -120,6 +120,14 @@ findings:
 All four are classified `COMPATIBLE_WITH_RISK`: whether the module actually
 breaks depends on the *target interpreter*, not on the module's own consumers.
 
+!!! note "How these gate CI"
+    These four are **compare-time** kinds. Like every `RISK` change they are
+    advisory in `compare` by default; gate them through `compare`'s severity /
+    policy configuration (e.g. a policy profile that escalates the kind, or the
+    `--severity-*` flags). The `--crosscheck python_stable_abi_violation=error`
+    switch is specific to the single-artifact **`scan --abi3` audit** — it does
+    not gate the compare-time kinds, which ride the `compare` verdict instead.
+
 !!! note "Free-threaded (no-GIL) builds are never `abi3`"
     A free-threaded build (PEP 703, `cpython-313t` / `cp314t`) uses a different
     CPython ABI than the regular GIL build of the same minor, and

@@ -257,17 +257,6 @@ def test_stable_abi_singleton_data_symbols_are_not_private(name: str) -> None:
     assert status is StableAbiStatus.STABLE
 
 
-def test_min_required_abi3_ignores_private_and_unknown() -> None:
-    floor = stable_abi.min_required_abi3(
-        ["PyList_New", "PyType_GetName", "_PyPrivate", "PyMadeUp"]
-    )
-    assert floor == (3, 11)
-
-
-def test_min_required_abi3_none_when_no_recognised_stable() -> None:
-    assert stable_abi.min_required_abi3(["_PyPrivate", "PyMadeUp"]) is None
-
-
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -578,16 +567,6 @@ def test_python_ext_survives_serialization_roundtrip() -> None:
     assert back.python_ext.module_name == "foo"
 
 
-def test_python_ext_metadata_helpers() -> None:
-    meta = PythonExtMetadata(
-        module_name="foo",
-        cpython_imports=["PyList_New", "PyType_GetName", "_PyPrivate"],
-        limited_api=True,
-    )
-    assert meta.private_imports == ["_PyPrivate"]
-    assert meta.min_required_abi3() == (3, 11)
-
-
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
@@ -625,6 +604,19 @@ def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
 
     gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
     assert gated.exit_code == 2, gated.output
+
+
+def test_scan_crosscheck_rejects_compare_time_python_kinds(tmp_path: object) -> None:
+    # Only the single-artifact audit finding is promotable via --crosscheck. The
+    # compare-time kinds gate through compare's own verdict, so promoting them
+    # here is rejected as an unknown cross-check (documented boundary).
+    snap = _ext_snapshot("2.0", ["PyList_New"])
+    path = _write_snapshot(tmp_path, snap)
+    result = _scan_abi3(
+        path, "--abi3", "3.9", "--crosscheck", "python_abi3_dropped=error"
+    )
+    assert result.exit_code != 0
+    assert "unknown cross-check" in result.output
 
 
 def test_scan_abi3_clean_passes(tmp_path: object) -> None:

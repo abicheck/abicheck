@@ -24,8 +24,12 @@ symbols that the Limited-API headers route public macros to (e.g. ``Py_DECREF`` 
 presence here — not a name prefix — decides whether it is stable.
 
 Source: CPython ``Misc/stable_abi.toml`` @ branch 3.15 (967 symbols).
+This is GENERATED data — do not hand-edit individual rows; the table grows by
+a few dozen symbols each CPython release. If the source branch above is a
+not-yet-released (in-development) CPython, its newest ``added`` versions may
+still change before release — re-run the generator once it stabilises.
 Refresh: run ``scripts/gen_stable_abi_data.py`` over a newer ``stable_abi.toml``
-(functions + data sections, ``added`` → floor). Do not hand-edit individual rows.
+(functions + data sections, ``added`` → floor).
 """
 
 from __future__ import annotations

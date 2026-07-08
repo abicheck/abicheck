@@ -166,15 +166,6 @@ class PythonExtMetadata:
         """
         return [d for d in self.cpython_dlls if d.lower() != _STABLE_PYTHON_DLL]
 
-    @property
-    def private_imports(self) -> list[str]:
-        """CPython *private* (``_Py*``) imports — never part of the stable ABI."""
-        return [s for s in self.cpython_imports if stable_abi.is_private_symbol(s)]
-
-    def min_required_abi3(self) -> tuple[int, int] | None:
-        """Minimum Limited-API floor implied by the recognised stable imports."""
-        return stable_abi.min_required_abi3(self.cpython_imports)
-
 
 def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
     """All exported symbol names across whichever binary metadata is present."""

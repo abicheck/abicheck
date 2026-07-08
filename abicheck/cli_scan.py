@@ -101,10 +101,20 @@ _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
 _CROSSCHECK_LEVELS = frozenset({"off", "info", "warning", "error"})
 
 #: ChangeKinds that ride the same advisory→gating promotion path as the
-#: cross-checks but are NOT toggleable engine checks — the ``--abi3`` stable-ABI
-#: audit finding. Accepted as ``--crosscheck KEY=LEVEL`` severity keys so a
-#: maintainer can promote them to ``error`` to gate CI (ADR-035 D6), without
-#: being part of the on/off ``ALL_CHECKS`` set.
+#: cross-checks but are NOT toggleable engine checks. Accepted as
+#: ``--crosscheck KEY=LEVEL`` severity keys so a maintainer can promote them to
+#: ``error`` to gate CI (ADR-035 D6), without being part of the on/off
+#: ``ALL_CHECKS`` set.
+#:
+#: Only the ``--abi3`` **audit** finding is here: it is injected into
+#: ``cc.findings`` (below), which is what ``_crosscheck_severity_exit`` inspects,
+#: so promoting it actually gates. The other CPython kinds
+#: (``python_abi3_dropped`` / ``python_gil_abi_changed`` /
+#: ``python_abi3_floor_raised``) are **compare-time** — they only arise under
+#: ``scan --baseline`` via ``_run_baseline_compare`` and live in the baseline
+#: diff's ``DiffResult``, not ``cc.findings``. They therefore gate through the
+#: *compare* verdict/severity path (like every other RISK kind), not this one;
+#: adding them here would accept the flag but silently fail to honour it.
 _PROMOTABLE_FINDING_KINDS = frozenset({"python_stable_abi_violation"})
 
 

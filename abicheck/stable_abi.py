@@ -159,22 +159,6 @@ def classify(
     return StableAbiStatus.STABLE, added
 
 
-def min_required_abi3(names: list[str]) -> tuple[int, int] | None:
-    """Minimum Limited-API floor implied by *names*.
-
-    The highest ``added_version`` among the stable imports: an ``abi3`` module
-    can only load on interpreters at or above this. Returns ``None`` when no
-    import is a stable symbol (nothing to floor on). Private imports are not
-    floors — they are outright violations — so they do not participate here.
-    """
-    floors = [
-        STABLE_ABI_SYMBOLS[n]
-        for n in names
-        if not is_private_symbol(n) and n in STABLE_ABI_SYMBOLS
-    ]
-    return max(floors) if floors else None
-
-
 def format_version(v: tuple[int, int]) -> str:
     """Render a ``(major, minor)`` version tuple as ``"3.9"``."""
     return f"{v[0]}.{v[1]}"

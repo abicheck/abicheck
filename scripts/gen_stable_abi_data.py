@@ -107,9 +107,14 @@ def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
         "stable.\n\n"
         f"Source: CPython ``Misc/stable_abi.toml`` @ branch {version} "
         f"({len(symbols)} symbols).\n"
+        "This is GENERATED data — do not hand-edit individual rows; the table "
+        "grows by\na few dozen symbols each CPython release. If the source branch "
+        "above is a\nnot-yet-released (in-development) CPython, its newest "
+        "``added`` versions may\nstill change before release — re-run the "
+        "generator once it stabilises.\n"
         "Refresh: run ``scripts/gen_stable_abi_data.py`` over a newer "
-        "``stable_abi.toml``\n(functions + data sections, ``added`` → floor). "
-        'Do not hand-edit individual rows.\n"""\n\n'
+        "``stable_abi.toml``\n(functions + data sections, ``added`` → floor).\n"
+        '"""\n\n'
         "from __future__ import annotations\n\n"
         "#: Stable-ABI symbol -> (major, minor) release it entered the "
         "Limited API.\n"
