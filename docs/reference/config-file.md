@@ -111,7 +111,7 @@ Public-surface scoping — the main false-positive control. See
 |---------|------|---------------------|---------|
 | `public` | boolean | unset → `true` | Restrict analysis to the public exported surface. |
 | `collapse_versioned_symbols` | boolean | unset → `false` | Collapse symbol-versioned duplicates before diffing. |
-| `public_symbols` | list of strings | `[]` | Explicit public-symbol overlay. Additive with any CLI `--public-symbol` values. |
+| `public_symbols` | list of strings | `[]` | Explicit public-symbol overlay. Additive with any CLI `--public-symbol` values. Entries are matched **exactly** — by the raw symbol, or (for a qualified name) its trailing `::` segment, so `foo` also matches `ns::foo`. **Globs/wildcards are not supported** (`mylib_*` matches nothing); list each symbol. |
 
 ---
 
@@ -208,7 +208,7 @@ files**, not in `.abicheck.yml`:
 
 | Concept | File / flag | Top-level schema | Docs |
 |---------|-------------|------------------|------|
-| Policy profile | `--policy <file>` (`PolicyFile.load`, `policy_file.py`) | `base_policy`, `overrides`, `frozen_namespaces`, `evidence_policy` | [Policies](../user-guide/policies.md) |
+| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `frozen_namespaces`, `evidence_policy` | [Policies](../user-guide/policies.md) |
 | Suppression rules | `--suppress <file>` (`suppression.py`) | Suppression rule entries (YAML or ABICC format) | [Suppressions](../user-guide/suppressions.md) |
 
 The `evidence_policy` block is part of the **policy file**, not `.abicheck.yml`.
@@ -258,7 +258,8 @@ scope:
   public: true
   collapse_versioned_symbols: false
   public_symbols:
-    - mylib_*
+    - mylib_foo
+    - mylib_bar
 
 # Suppression hygiene
 suppression:
