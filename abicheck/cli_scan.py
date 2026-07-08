@@ -1465,17 +1465,24 @@ def run_scan_core(
 
         abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)
         cc.findings.extend(abi3_findings)
-        cc.coverage.append(
-            {
-                "layer": "abi3_audit",
-                "status": "ran",
-                "detail": (
-                    f"{len(py_ext.cpython_imports)} CPython import(s) audited "
-                    f"against Py_LIMITED_API {abi3_floor[0]}.{abi3_floor[1]}; "
-                    f"{len(abi3_findings)} violation finding(s)"
-                ),
-            }
+        # Name the offending symbols in the coverage row (rendered verbatim in
+        # text and carried in JSON) so a CI artifact tells the user WHICH import
+        # to fix — the cross-check summary only reports a per-kind count, which
+        # would otherwise hide the symbol in Change.detail/new_value (Codex
+        # review). Capped so a pathological module cannot flood the report.
+        offending: list[str] = []
+        for f in abi3_findings:
+            offending.extend(f.new_value if isinstance(f.new_value, list) else [])
+        detail = (
+            f"{len(py_ext.cpython_imports)} CPython import(s) audited against "
+            f"Py_LIMITED_API {abi3_floor[0]}.{abi3_floor[1]}; "
+            f"{len(abi3_findings)} violation finding(s)"
         )
+        if offending:
+            shown = ", ".join(offending[:20])
+            more = f" (+{len(offending) - 20} more)" if len(offending) > 20 else ""
+            detail += f" — outside the stable ABI: {shown}{more}"
+        cc.coverage.append({"layer": "abi3_audit", "status": "ran", "detail": detail})
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None

@@ -638,9 +638,22 @@ def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
     result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
     assert result.exit_code == 0, result.output
     data = _json.loads(result.output)
-    # The abi3 audit coverage row records it ran.
-    layers = {row.get("layer") for row in data.get("coverage", [])}
-    assert "abi3_audit" in layers
+    # The abi3 audit coverage row records it ran AND names the offending symbol,
+    # so a CI artifact tells the user which import to fix (not just a count).
+    rows = {row.get("layer"): row for row in data.get("coverage", [])}
+    assert "abi3_audit" in rows
+    assert "_PyObject_LookupSpecial" in rows["abi3_audit"]["detail"]
+
+
+def test_scan_abi3_text_report_names_offending_symbol(tmp_path: object) -> None:
+    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
+    path = _write_snapshot(tmp_path, snap)
+
+    result = _scan_abi3(path, "--abi3", "3.9")
+    assert result.exit_code == 0, result.output
+    # The specific non-stable import is visible in the human report, not hidden
+    # behind a bare `python_stable_abi_violation: 1` count.
+    assert "_PyObject_LookupSpecial" in result.output
 
 
 def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
