@@ -751,6 +751,24 @@ def test_pe_stable_python3_dll_is_not_version_specific() -> None:
     snap = _pe_ext("python3.dll")
     assert snap.python_ext is not None
     assert snap.python_ext.version_specific_python_dlls == []
+    # Case-insensitive: Windows import names vary in case.
+    assert _pe_ext("PYTHON3.DLL").python_ext.version_specific_python_dlls == []
+
+
+@pytest.mark.parametrize(
+    "dll",
+    [
+        "python311.dll",  # numbered
+        "python313t.dll",  # free-threaded
+        "python311_d.dll",  # debug
+        "python315.dll",
+    ],
+)
+def test_pe_suffixed_python_dll_is_version_specific(dll: str) -> None:
+    # Anything but exactly python3.dll pins the module to one interpreter ABI.
+    snap = _pe_ext(dll)
+    assert snap.python_ext is not None
+    assert snap.python_ext.version_specific_python_dlls == [dll]
 
 
 def test_abi3_pyd_linking_versioned_dll_is_a_violation() -> None:

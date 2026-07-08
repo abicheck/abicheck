@@ -64,11 +64,12 @@ _ABI3_TAG_RE = re.compile(r"(?:^|[._-])abi3(?:[._-]|$)")
 _PYINIT3_RE = re.compile(r"^PyInit_(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 _PYINIT2_RE = re.compile(r"^init(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 
-#: A Windows CPython import library. The Stable ABI links against ``python3.dll``
-#: (the version-neutral forwarder); a version-specific ``pythonXY.dll``
-#: (``python311.dll``, …) ties the module to one interpreter minor. Group 1 is
-#: the digits: ``"3"`` is the stable forwarder, anything else is version-specific.
-_PYTHON_DLL_RE = re.compile(r"^python(\d+)\.dll$", re.IGNORECASE)
+#: The ONE version-neutral Windows CPython import library the Stable ABI links
+#: against. Every other CPython import DLL — ``python311.dll``, the free-threaded
+#: ``python313t.dll``, the debug ``python311_d.dll``, … — is version-specific and
+#: pins the module to one interpreter ABI, so for the abi3 contract anything but
+#: this exact name is a violation.
+_STABLE_PYTHON_DLL = "python3.dll"
 
 
 @dataclass
@@ -124,19 +125,16 @@ class PythonExtMetadata:
 
     @property
     def version_specific_python_dlls(self) -> list[str]:
-        """CPython import DLLs that pin the module to one interpreter minor.
+        """CPython import DLLs that pin the module to one interpreter ABI.
 
-        The Stable ABI links against ``python3.dll`` (the version-neutral
-        forwarder); a ``pythonXY.dll`` (``python311.dll`` …) is version-specific.
-        A non-empty list on an ``abi3`` module is a violation — the module cannot
-        load on another minor regardless of which symbol *names* it imports.
+        The Stable ABI links against exactly ``python3.dll`` (the version-neutral
+        forwarder). Every other CPython import DLL is version-specific — a
+        numbered ``python311.dll``, the free-threaded ``python313t.dll``, the
+        debug ``python311_d.dll``, … — so any provider DLL whose name is not
+        exactly ``python3.dll`` is a violation for an ``abi3`` module: it cannot
+        load on another interpreter regardless of which symbol *names* it imports.
         """
-        out: list[str] = []
-        for dll in self.cpython_dlls:
-            m = _PYTHON_DLL_RE.match(dll)
-            if m and m.group(1) != "3":
-                out.append(dll)
-        return out
+        return [d for d in self.cpython_dlls if d.lower() != _STABLE_PYTHON_DLL]
 
     @property
     def private_imports(self) -> list[str]:
