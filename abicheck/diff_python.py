@@ -75,34 +75,40 @@ def _module_symbol(new: PythonExtMetadata, old: PythonExtMetadata) -> str:
 def _diff_stable_abi_violations(
     old: PythonExtMetadata, new: PythonExtMetadata
 ) -> list[Change]:
-    """Private (``_Py*``) imports that violate the NEW build's abi3 promise.
+    """Non-stable imports that violate the NEW build's abi3 promise.
 
-    When the old build was *also* abi3, only *newly-gained* private imports are a
-    change this version introduced. But when the old build was version-specific
-    and the new one is retagged to abi3 (``foo.cpython-311.so`` → ``foo.abi3.so``),
-    the cross-interpreter promise is brand new, so **every** private import in the
-    new build is now a violation — even one carried over unchanged. The baseline
-    to diff against is therefore the old imports only if the old build already
-    made the abi3 promise, else empty.
+    A "non-stable" import is any CPython symbol absent from the authoritative
+    Stable-ABI set — an internal ``_Py*``/``PyUnstable_*`` symbol OR a public
+    ``Py*`` function that was never added to the Limited API (e.g.
+    ``PyUnicode_AsUTF8``). For an ``abi3`` module all of these break the
+    cross-interpreter promise.
+
+    When the old build was *also* abi3, only *newly-gained* non-stable imports
+    are a change this version introduced. But when the old build was
+    version-specific and the new one is retagged to abi3
+    (``foo.cpython-311.so`` → ``foo.abi3.so``), the promise is brand new, so
+    **every** non-stable import in the new build is now a violation — even one
+    carried over unchanged. The baseline is therefore the old imports only if the
+    old build already made the abi3 promise, else empty.
     """
     baseline = set(old.cpython_imports) if _is_abi3(old) else set()
-    gained_private = sorted(
+    gained = sorted(
         s
         for s in new.cpython_imports
-        if s not in baseline and stable_abi.is_private_symbol(s)
+        if s not in baseline and stable_abi.is_nonstable_cpython_import(s)
     )
-    if not gained_private:
+    if not gained:
         return []
     module = _module_symbol(new, old)
     name = new.module_name or old.module_name or "<extension>"
-    detail = ", ".join(gained_private)
+    detail = ", ".join(gained)
     return [
         make_change(
             ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
             symbol=module,
             name=name,
             detail=detail,
-            new_value=gained_private,
+            new_value=gained,
         )
     ]
 

@@ -64,12 +64,13 @@ def _audit_imports(
 ) -> tuple[list[Change], list[str]]:
     """Classify a module's CPython imports → (findings, unknown symbols).
 
-    Emits at most two aggregated :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION`
-    findings — one for private (``_Py*``) imports, one for imports newer than the
-    target floor — so a SARIF/JUnit consumer sees distinct, actionable rows
-    without one line per symbol. Public symbols not in the curated allowlist are
-    returned separately as *advisory* unknowns (never a hard finding, since the
-    allowlist is a subset and may lag CPython).
+    Emits aggregated :data:`ChangeKind.PYTHON_STABLE_ABI_VIOLATION` findings —
+    private/unstable imports, imports newer than the target floor, and public
+    ``Py*`` symbols absent from the authoritative Stable-ABI set — so a
+    SARIF/JUnit consumer sees distinct, actionable rows without one line per
+    symbol. The unknown-public symbols are also returned so the CLI can note that
+    they are treated as violations but *could* be newer than the vendored CPython
+    data (refresh to confirm) — the one benign case.
     """
     private: list[str] = []
     above_floor: list[str] = []
@@ -88,26 +89,17 @@ def _audit_imports(
             unknown.append(name)
 
     findings: list[Change] = []
-    if private:
-        findings.append(
-            make_change(
-                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
-                symbol=f"python:{module_name}",
-                name=module_name,
-                detail=", ".join(sorted(private)),
-                new_value=sorted(private),
+    for group in (private, above_floor, unknown):
+        if group:
+            findings.append(
+                make_change(
+                    ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                    symbol=f"python:{module_name}",
+                    name=module_name,
+                    detail=", ".join(sorted(group)),
+                    new_value=sorted(group),
+                )
             )
-        )
-    if above_floor:
-        findings.append(
-            make_change(
-                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
-                symbol=f"python:{module_name}",
-                name=module_name,
-                detail=", ".join(sorted(above_floor)),
-                new_value=sorted(above_floor),
-            )
-        )
     return findings, sorted(unknown)
 
 
@@ -215,8 +207,10 @@ def stable_abi_cmd(
         )
     if unknown:
         click.echo(
-            "  advisory (public Py* imports not in the curated allowlist; may be "
-            "stable — refresh the allowlist to confirm): "
+            "  note: the following public Py* imports are NOT in the vendored "
+            "Stable-ABI set, so they are counted as violations — they are outside "
+            "the Limited API (e.g. PyUnicode_AsUTF8). The one benign case is a "
+            "symbol newer than the vendored CPython data; refresh it to confirm: "
             + ", ".join(unknown[:20])
             + (" …" if len(unknown) > 20 else ""),
             err=True,

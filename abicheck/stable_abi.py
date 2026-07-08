@@ -104,6 +104,19 @@ def is_private_symbol(name: str) -> bool:
     return name.startswith(_PRIVATE_PREFIXES) and name not in STABLE_ABI_SYMBOLS
 
 
+def is_nonstable_cpython_import(name: str) -> bool:
+    """True if *name* is a CPython symbol that is NOT in the Stable ABI.
+
+    The vendored set is authoritative for CPython ≤ its data version, so a
+    CPython symbol absent from it is outside the Limited API — whether an
+    internal ``_Py*``/``PyUnstable_*`` symbol or a public ``Py*`` function that
+    was simply never added to the Limited API (e.g. ``PyUnicode_AsUTF8``). For an
+    ``abi3`` module all of these are violations. (A symbol newer than the
+    vendored CPython release is the one benign case — refresh the data.)
+    """
+    return is_cpython_symbol(name) and name not in STABLE_ABI_SYMBOLS
+
+
 def classify(
     name: str, abi3_floor: tuple[int, int] | None = None
 ) -> tuple[StableAbiStatus, tuple[int, int] | None]:

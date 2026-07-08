@@ -558,21 +558,29 @@ def test_cli_stable_abi_invalid_abi3(tmp_path: object) -> None:
     assert "invalid --abi3" in result.output
 
 
-def test_cli_stable_abi_reports_unknown_advisory(tmp_path: object) -> None:
+def test_cli_stable_abi_flags_unknown_public_symbol(tmp_path: object) -> None:
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    # A public Py* symbol not in the curated allowlist is an advisory, not a
-    # hard finding: exit 0, but the summary mentions it.
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyTotallyMadeUpSymbol"])
+    # A public Py* symbol absent from the authoritative Stable-ABI set
+    # (PyUnicode_AsUTF8 — public but never Limited API) is a violation, not a
+    # silent advisory: exit 1, and the summary explains it.
+    snap = _ext_snapshot("2.0", ["PyList_New", "PyUnicode_AsUTF8"])
     path = _write_snapshot(tmp_path, snap)
 
     runner = CliRunner()
     result = runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"])
-    assert result.exit_code == 0, result.output
-    assert "advisory" in result.output
-    assert "PyTotallyMadeUpSymbol" in result.output
+    assert result.exit_code == 1, result.output
+    assert "PyUnicode_AsUTF8" in result.output
+
+
+def test_unknown_public_import_flagged_in_compare() -> None:
+    # A newly-gained public non-Limited-API import in an abi3 module is flagged.
+    old = _ext_snapshot("1.0", ["PyList_New"])
+    new = _ext_snapshot("2.0", ["PyList_New", "PyUnicode_AsUTF8"])
+    result = compare(old, new)
+    assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION in _kinds(result)
 
 
 def test_cli_stable_abi_warns_when_no_floor_on_abi3_module(tmp_path: object) -> None:

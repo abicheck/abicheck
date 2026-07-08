@@ -53,12 +53,15 @@ stable-abi: foo — 118 CPython import(s), target abi3 floor 3.9, 1 finding(s)�
 authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries from
 CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
 
-- **private/internal symbols** — a `_Py*` name *not* in the Stable-ABI set → a
-  **violation** (the module reached outside the Limited API);
+- **private/internal symbols** — a `_Py*`/`PyUnstable_*` name *not* in the
+  Stable-ABI set → a **violation** (the module reached outside the Limited API);
+- **public `Py*` symbols not in the Stable-ABI set** (e.g. `PyUnicode_AsUTF8`,
+  which is public but was never added to the Limited API) → **violation**; the
+  vendored set is authoritative, so absence means the symbol is not `abi3`. The
+  one benign case is a symbol *newer* than the vendored CPython release — the
+  CLI flags it but notes to refresh the data to confirm;
 - **stable symbols newer than the floor** (e.g. `PyType_GetName`, stable since
-  3.11, under a `--abi3 3.9` target) → **violation**;
-- **public `Py*` symbols not in the vendored set** → reported as an *advisory*
-  (likely newer than the vendored data, or a typo — never a hard verdict).
+  3.11, under a `--abi3 3.9` target) → **violation**.
 
 !!! note "`_Py`-prefix does not mean private"
     The Limited-API headers route public macros to underscore-prefixed
