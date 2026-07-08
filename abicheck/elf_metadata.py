@@ -27,7 +27,7 @@ import os
 import re
 import stat
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
@@ -391,27 +391,72 @@ def _decode_gnu_property_desc(desc: bytes, little_endian: bool, align: int = 8) 
 
 
 def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
-    """Read control-flow-protection features from .note.gnu.property, if present."""
+    """Read control-flow-protection features from GNU-property notes.
+
+    Prefers the ``.note.gnu.property`` section, but falls back to the loadable
+    ``PT_GNU_PROPERTY`` program segment when section headers have been stripped
+    (common for production artifacts) — otherwise CET/BTI/PAC drift would be
+    invisible on exactly those binaries.
+    """
     try:
-        section = elf.get_section_by_name(".note.gnu.property")
-        if section is None or not hasattr(section, "iter_notes"):
-            return
         # GNU property entries are padded to the ELF class word size: 8 bytes
         # for ELFCLASS64, 4 bytes for ELFCLASS32.
         align = 4 if elf.elfclass == 32 else 8
         features: set[str] = set()
+        for desc in _iter_gnu_property_descs(elf):
+            features |= _decode_gnu_property_desc(desc, elf.little_endian, align)
+        meta.gnu_properties = frozenset(features)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("parse_elf_metadata: failed to read GNU-property notes from %s: %s", so_path, exc)
+
+
+def _iter_gnu_property_descs(elf: ELFFile) -> Iterator[bytes]:
+    """Yield NT_GNU_PROPERTY_TYPE_0 description blobs from section or segment."""
+    section = elf.get_section_by_name(".note.gnu.property")
+    if section is not None and hasattr(section, "iter_notes"):
+        found = False
         for note in section.iter_notes():
+            found = True
             if note.get("n_type") not in _NT_GNU_PROPERTY_TYPE_0_NAMES:
                 continue
             desc = note.get("n_descdata") or note.get("n_desc")
             if isinstance(desc, str):
                 desc = desc.encode("latin-1", "replace")
-            if not isinstance(desc, (bytes, bytearray)):
-                continue
-            features |= _decode_gnu_property_desc(bytes(desc), elf.little_endian, align)
-        meta.gnu_properties = frozenset(features)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read .note.gnu.property from %s: %s", so_path, exc)
+            if isinstance(desc, (bytes, bytearray)):
+                yield bytes(desc)
+        if found:
+            return
+    # Fallback: section absent / empty (stripped) — parse the PT_GNU_PROPERTY
+    # program segment's raw note bytes directly.
+    try:
+        segments = list(elf.iter_segments())
+    except Exception:  # noqa: BLE001
+        return
+    for seg in segments:
+        if getattr(seg.header, "p_type", None) != "PT_GNU_PROPERTY":
+            continue
+        yield from _parse_raw_notes(seg.data(), elf.little_endian)
+
+
+def _parse_raw_notes(data: bytes, little_endian: bool) -> Iterator[bytes]:
+    """Parse ELF notes from raw bytes, yielding GNU-property description blobs.
+
+    The note wrapper (namesz | descsz | n_type | name | desc) uses 4-byte
+    padding regardless of ELF class; only the property array *inside* the
+    description follows the class alignment (handled by the desc decoder).
+    """
+    endian = "<" if little_endian else ">"
+    off = 0
+    n = len(data)
+    while off + 12 <= n:
+        namesz, descsz, n_type = struct.unpack_from(endian + "III", data, off)
+        off += 12
+        name = data[off : off + namesz]
+        off += (namesz + 3) & ~3
+        desc = data[off : off + descsz]
+        off += (descsz + 3) & ~3
+        if n_type in _NT_GNU_PROPERTY_TYPE_0_NAMES and name.rstrip(b"\x00") == b"GNU":
+            yield desc
 
 
 _PF_X = 0x1

@@ -188,6 +188,28 @@ class TestParseGnuProperty:
         _parse_gnu_property(elf, meta, Path("x.so"))
         assert meta.gnu_properties == frozenset()
 
+    def test_raw_note_segment_parser_extracts_gnu_property(self):
+        # Section-header-stripped binaries keep only the PT_GNU_PROPERTY segment.
+        # _parse_raw_notes must extract the description from raw note bytes.
+        import struct
+
+        from abicheck.elf_metadata import _decode_gnu_property_desc, _parse_raw_notes
+        # ELF note: namesz=4, descsz=16, n_type=5, name="GNU\0", desc=property array.
+        desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
+        note = struct.pack("<III", 4, len(desc), 5) + b"GNU\x00" + desc
+        descs = list(_parse_raw_notes(note, True))
+        assert len(descs) == 1
+        assert _decode_gnu_property_desc(descs[0], True, 8) == frozenset({"IBT", "SHSTK"})
+
+    def test_raw_note_segment_parser_skips_non_gnu(self):
+        import struct
+
+        from abicheck.elf_metadata import _parse_raw_notes
+        # A non-GNU note (name "XYZ") must be ignored.
+        desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
+        note = struct.pack("<III", 4, len(desc), 5) + b"XYZ\x00" + desc
+        assert list(_parse_raw_notes(note, True)) == []
+
     def test_elf32_alignment_decodes_cet_after_preceding_property(self):
         # ELFCLASS32 pads each property to 4 bytes, not 8. A preceding property
         # with a 4-byte payload occupies exactly 12 bytes; with 8-byte alignment

@@ -249,3 +249,29 @@ def test_hidden_tls_sets_tls_participation() -> None:
     assert not tls_dynsyms
     # ...but PT_TLS presence still marks TLS participation.
     assert meta.has_tls_symbols is True
+
+
+@pytest.mark.integration
+def test_gnu_property_from_stripped_segment() -> None:
+    """G23-A2: CET features are still read from the PT_GNU_PROPERTY segment when
+    section headers have been stripped (production artifacts keep segments but
+    may drop the section header table)."""
+    import struct
+
+    src = "int cet_fn(int x) { return x * 3; }\n"
+    with tempfile.TemporaryDirectory() as td:
+        so = _compile_so(src, "libcet.so", Path(td), extra_flags=["-fcf-protection=full"])
+        if not parse_elf_metadata(so).gnu_properties:
+            pytest.skip("toolchain did not emit CET .note.gnu.property")
+        # Zero the ELF64 section-header table pointers to remove all sections.
+        raw = bytearray(so.read_bytes())
+        if raw[4] != 2:  # EI_CLASS: 2 == ELFCLASS64
+            pytest.skip("test fixture assumes a 64-bit host toolchain")
+        struct.pack_into("<Q", raw, 0x28, 0)  # e_shoff
+        struct.pack_into("<H", raw, 0x3C, 0)  # e_shnum
+        struct.pack_into("<H", raw, 0x3E, 0)  # e_shstrndx
+        stripped = Path(td) / "libcet_noshdr.so"
+        stripped.write_bytes(bytes(raw))
+        meta = parse_elf_metadata(stripped)
+    assert "IBT" in meta.gnu_properties
+    assert "SHSTK" in meta.gnu_properties
