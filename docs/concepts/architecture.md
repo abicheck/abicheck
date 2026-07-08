@@ -18,7 +18,7 @@ conceptual companion.
 | Platform | Binary format | Binary metadata | Header AST (castxml) | Debug info cross-check |
 |----------|--------------|:---------------:|:--------------------:|:----------------------:|
 | Linux | ELF (`.so`) | Yes (pyelftools) | Yes (GCC, Clang) | Yes (DWARF) |
-| Windows | PE/COFF (`.dll`) | Yes (pefile) | Yes (MSVC, MinGW) | Planned (PDB) |
+| Windows | PE/COFF (`.dll`) | Yes (pefile) | Yes (MSVC, MinGW) | Yes (PDB) |
 | macOS | Mach-O (`.dylib`) | Yes (macholib) | Yes (Clang, GCC) | Yes (DWARF) |
 
 ---

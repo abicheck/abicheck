@@ -8,6 +8,13 @@ benchmark results across real-world test cases, and why the numbers come out the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full catalog now has
 > 162 cases (157 single-library cases + 5 multi-library bundle cases). The
 > subset is pinned so accuracy numbers stay reproducible across releases.
+>
+> **Which denominator is which.** Several case counts appear below because each
+> lane measures a different slice: **162** = the whole catalog (157 single-library
+> + 5 bundle); **134** = the catalog cases run through the default/debug *verdict*
+> lane; **129** = the single-library cases that are *buildable* by the autodiscovery
+> harness (excludes hand-built snapshot-only fixtures); **74** = the pinned
+> cross-tool subset. They are subsets of the same catalog, not conflicting totals.
 
 > **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
 > story: each tool sees a different subset of the binary/debug/header inputs. For

@@ -93,20 +93,24 @@ feature macros, or the exact `-std`. Disable it with `--nostdinc`, an explicit
 
 ## Stripped Production Binaries
 
-Tiers 3 and 4 (DWARF layout + Advanced DWARF) require debug symbols (`-g`).
-Production `.so` files are typically stripped — in this case:
+The layout-level checks (`L1`) require debug symbols (`-g`). Production `.so`
+files are typically stripped, which removes the `L1` evidence source — in this
+case:
 
-- Struct field offset changes may be missed (Tier 3 unavailable)
-- Calling convention drift, struct packing changes not detected (Tier 4 unavailable)
-- Tier 1 (castxml/headers) and Tier 2 (ELF symbols) still run — most critical breaks caught
+- Struct field offset changes may be missed (`L1` layout unavailable)
+- Calling convention drift, struct packing changes not detected (`L1` unavailable)
+- Symbol-only checks (`L0`) and, if you pass headers, the header AST (`L2`) still
+  run — most critical breaks are still caught
 
 **Mitigation:** Use `--debug-root` to point abicheck at separate debug files
 (distro debuginfo packages, build-id trees, or dSYM bundles). abicheck
 automatically searches for debug artifacts via a resolver chain. For
 Fedora/RHEL, use `--debuginfod` to fetch debug info by build-id from
 debuginfod servers. See the [CLI usage guide](../user-guide/cli-usage.md) for
-details. For production binaries without debug info, Tier 1+2 analysis covers
-the majority of real-world ABI breaks.
+details. For production binaries without debug info, `L0`+`L2` analysis covers
+the majority of real-world ABI breaks. See
+[Evidence & Detectability](evidence-and-detectability.md) for the full evidence
+model.
 
 ---
 
@@ -164,11 +168,15 @@ abicheck addresses this with its layered model (see
 [Architecture](architecture.md)). Each layer recovers signals the layers below
 cannot see:
 
-| Tier | Data source | Recovers |
-|------|-------------|----------|
-| `elf_only` | symbol table only | symbol add/remove, versioning |
-| `dwarf_aware` | DWARF/PDB (needs `-g` / `/Zi`) | struct layout, field offsets, enum values, calling convention, struct packing |
-| `header_aware` | public headers via castxml | source-level qualifiers — `final`, access, ref-qualifiers, `inline`, `noexcept`, `explicit`, **default-argument values**, **`const`/`constexpr` constant values** |
+The internal label names below map onto the `L0`–`L2` evidence codes used
+everywhere else in the docs (see
+[Evidence & Detectability](evidence-and-detectability.md)):
+
+| Evidence code | Internal label | Data source | Recovers |
+|:-------------:|----------------|-------------|----------|
+| `L0` | `elf_only` | symbol table only | symbol add/remove, versioning |
+| `L1` | `dwarf_aware` | DWARF/PDB (needs `-g` / `/Zi`) | struct layout, field offsets, enum values, calling convention, struct packing |
+| `L2` | `header_aware` | public headers via castxml | source-level qualifiers — `final`, access, ref-qualifiers, `inline`, `noexcept`, `explicit`, **default-argument values**, **`const`/`constexpr` constant values** |
 
 So whether a change is detectable depends on the tier you give abicheck:
 

@@ -113,7 +113,7 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
 
 The `private-header` / `system-header` reasons are provenance-derived: they
 only appear when the snapshots were produced with `--public-header` /
-`--public-header-dir` (ADR-015 schema v6). `--public-header` is supported for
+`--public-header-dir` (ADR-015). `--public-header` is supported for
 ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
 public-header set, every declaration's origin is `unknown` and only the
 linkage/reachability reasons above are emitted.
@@ -279,7 +279,15 @@ from abicheck.schemas import (
 ```
 
 Every JSON report carries a top-level `report_schema_version` field
-(`MAJOR.MINOR`) so consumers can detect the contract version they are reading:
+(`MAJOR.MINOR`) so consumers can detect the contract version they are reading.
+
+> **Two version numbers, two contracts.** `report_schema_version` (above)
+> versions the **comparison report** emitted by `compare`/`scan`. It is
+> distinct from the `schema_version` integer inside a **snapshot** (`.abi.json`)
+> produced by `dump` — that one versions the on-disk ABI surface and is
+> currently `8`. A report and a snapshot can carry different version numbers at
+> the same time; consumers should read whichever field belongs to the file they
+> loaded.
 
 ```json
 {

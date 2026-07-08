@@ -131,7 +131,9 @@ readelf --debug-dump=links libfoo.so   # shows .gnu_debuglink / .gnu_debugaltlin
 readelf --debug-dump=follow-links libfoo.so  # follows the link and inspects linked debug-info
 ```
 
-Without DWARF, Tier 3/4 checks are limited. Use debug builds (`-g`) for deeper analysis.
+Without DWARF, the layout-level checks that depend on debug info (`L1`) are
+limited — abicheck falls back toward symbol-only (`L0`) analysis. Use debug
+builds (`-g`) for deeper analysis.
 If the binary uses split debug (separate `.debug` file), the linked debug info is still
 analysed automatically when `--debug-dump=follow-links` can resolve the path.
 

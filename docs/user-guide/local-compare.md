@@ -90,7 +90,7 @@ Both sides use pre-saved snapshots. No headers or compilation toolchain needed.
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 8,
   "library": "libfoo.so.1",
   "version": "2.0.0",
   "platform": "elf",
@@ -133,7 +133,7 @@ jobs:
         with:
           mode: dump
           new-library: build/libfoo.so
-          header: include/foo.h
+          new-header: include/foo.h
           new-version: ${{ github.ref_name }}
           output-file: abi-baseline.json
 

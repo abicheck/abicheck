@@ -107,10 +107,15 @@ Inspect the resulting symbol table:
 $ gcc -c math.c -o math.o
 $ nm math.o
 0000000000000000 T add          # T = defined, in .text (code)
-0000000000000004 C counter      # C = common/global data symbol
+0000000000000000 B counter      # B = defined, in .bss (zero-initialized data)
                  U log_event     # U = UNDEFINED — this file needs it from elsewhere
 0000000000000014 T tally
 ```
+
+> On GCC 9 and earlier (or with an explicit `-fcommon`), an uninitialized
+> global like `counter` shows up as `C` — a *common* symbol the linker merges
+> across translation units. GCC 10+ defaults to `-fno-common`, so it lands in
+> `.bss` as `B`, shown above. Either way it is a **defined** data symbol.
 
 Two categories matter for the rest of the series:
 
