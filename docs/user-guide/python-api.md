@@ -48,16 +48,18 @@ will reach for most often:
 | `old_includes` / `new_includes` | `list[Path]` | `None` | Extra include dirs passed to the header parser (`-I`) |
 | `old_version` / `new_version` | `str` | `""` | Version labels recorded in the snapshots |
 | `lang` | `str` | `"c++"` | Header language mode (`"c++"` or `"c"`) |
-| `frontend` | `str` | `"auto"` | Header AST frontend (`"auto"`, `"castxml"`, `"clang"`) |
+| `frontend` | `str` | `"auto"` | Header-AST frontend — `"auto"`, `"castxml"`, or `"clang"` (the value `"android"` is also accepted, for source-ABI-only inputs with no header-AST path) |
 | `policy` | `str` | `"strict_abi"` | Built-in policy profile (`strict_abi`, `sdk_vendor`, `plugin_abi`) |
 | `policy_file_path` | `Path` | `None` | Custom YAML policy file |
 | `suppress` | `Path` | `None` | Suppression file (YAML or ABICC format) |
 | `scope_to_public_surface` | `bool` | `True` | Restrict findings to the public ABI surface |
 | `enable_debuginfod` | `bool` | `False` | Resolve debug info via debuginfod |
 
-For the exhaustive argument set (PDB paths, debug roots, forced public symbols,
-pattern verdicts), build a `CompareRequest`/`InputSpec` directly and call
-`run_compare_request` — see the docstrings in `abicheck/service.py`.
+The table above is the common subset, not the full surface. `run_compare` also
+takes per-side PDB paths, debug roots, forced public symbols, and pattern
+verdicts; for those, build a `CompareRequest`/`InputSpec` directly and call
+`run_compare_request`. See the `run_compare` and `CompareRequest` docstrings in
+`abicheck/service.py` for the complete argument list.
 
 ## Work with snapshots directly
 
