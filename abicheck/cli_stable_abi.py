@@ -168,15 +168,18 @@ def stable_abi_cmd(
         )
         raise SystemExit(_EXIT_NOT_EXTENSION)
 
-    # Target floor: explicit --abi3 wins, else the module's own declared floor.
-    # A bare `.abi3.so` carries no minor in its name, so the declared floor is
-    # unknown unless the user supplies --abi3.
+    # Target floor: explicit --abi3 wins, else the module's own declared floor —
+    # but ONLY when the module is actually an abi3 build (its floor came from a
+    # `cpXY-abi3` tag). For a version-specific `foo.cpython-311.so`,
+    # `declared_abi3` is the *interpreter* minor, not a Limited-API floor, so it
+    # must NOT be treated as an abi3 target; the floor stays unresolved and the
+    # audit is reported incomplete unless the user passes --abi3 (Codex review).
     abi3_floor: tuple[int, int] | None = None
     if abi3 is not None:
         abi3_floor = stable_abi.parse_abi3_version(abi3)
         if abi3_floor is None:
             raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
-    else:
+    elif python_ext.limited_api:
         abi3_floor = python_ext.declared_abi3
 
     module_name = python_ext.module_name or python_ext.init_symbol or ext.name
@@ -202,11 +205,12 @@ def stable_abi_cmd(
     )
     if floor_check_skipped:
         click.echo(
-            "  ERROR: no target floor — an abi3 module carries no minor in its "
-            "filename, so the stable-symbol floor check could NOT run (only "
-            "private _Py* imports were checked). The audit is INCOMPLETE and "
-            "cannot certify the module (exit 3). Pass --abi3 <version> (e.g. the "
-            "wheel's cpXY-abi3 tag) to verify imported symbols against that floor.",
+            "  ERROR: no target floor — the module declares no Limited-API floor "
+            "(a bare `.abi3.so`, a tagless `.pyd`, or a version-specific build), "
+            "so the stable-symbol floor check could NOT run (only private/unstable "
+            "imports were checked). The audit is INCOMPLETE and cannot certify the "
+            "module (exit 3). Pass --abi3 <version> (e.g. the wheel's cpXY-abi3 "
+            "tag) to verify imported symbols against that floor.",
             err=True,
         )
     if unknown:

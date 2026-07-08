@@ -536,6 +536,29 @@ def test_cli_stable_abi_warns_when_no_floor_on_abi3_module(tmp_path: object) -> 
     assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.12"]).exit_code == 0
 
 
+def test_cli_stable_abi_version_specific_requires_floor(tmp_path: object) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # A version-specific `foo.cpython-311.so` declares an interpreter minor, NOT
+    # an abi3 floor. Auditing it without --abi3 must be reported incomplete
+    # (exit 3), not silently certified against 3.11 (Codex review).
+    src = "foo.cpython-311-x86_64-linux-gnu.so"
+    snap = _ext_snapshot(
+        "1.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    )
+    assert snap.python_ext.limited_api is False
+    path = _write_snapshot(tmp_path, snap)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["stable-abi", path])
+    assert result.exit_code == 3, result.output
+    assert "INCOMPLETE" in result.output
+    # With an explicit floor the check runs: PyType_GetName (3.11) > 3.9 → exit 1.
+    assert runner.invoke(main, ["stable-abi", path, "--abi3", "3.9"]).exit_code == 1
+
+
 def test_cli_stable_abi_private_import_flagged_without_floor(tmp_path: object) -> None:
     from click.testing import CliRunner
 
