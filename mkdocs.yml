@@ -82,6 +82,8 @@ nav:
     - Change Kinds: reference/change-kinds.md
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
+    - Configuration File: reference/config-file.md
+    - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,

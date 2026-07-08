@@ -178,7 +178,7 @@ everywhere else in the docs (see
 | `L1` | `dwarf_aware` | DWARF/PDB (needs `-g` / `/Zi`) | struct layout, field offsets, enum values, calling convention, struct packing |
 | `L2` | `header_aware` | public headers via castxml | source-level qualifiers — `final`, access, ref-qualifiers, `inline`, `noexcept`, `explicit`, **default-argument values**, **`const`/`constexpr` constant values** |
 
-So whether a change is detectable depends on the tier you give abicheck:
+So whether a change is detectable depends on the evidence code you give abicheck:
 
 | Change | object/DWARF | header (castxml) | source-AST tool |
 |--------|:---:|:---:|:---:|
