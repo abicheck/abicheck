@@ -220,7 +220,10 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_writable_executable_segment=e.get("has_writable_executable_segment", False),
         pointer_size=e.get("pointer_size", 8),
         machine=e.get("machine", ""),
-        elf_class=e.get("elf_class", 64),
+        # Legacy snapshots (written before elf_class existed) carry no class
+        # field; derive it from pointer_size (4→32, 8→64) rather than hard-coding
+        # 64, so a saved 32-bit baseline does not false-positive elf_class_changed.
+        elf_class=e.get("elf_class", 32 if e.get("pointer_size", 8) == 4 else 64),
         osabi=e.get("osabi", ""),
         e_flags=e.get("e_flags", 0),
         abi_flags=frozenset(e.get("abi_flags", [])),

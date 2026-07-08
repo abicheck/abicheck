@@ -137,6 +137,57 @@ class TestParseDynamic:
         assert meta.bind_now is True
         assert meta.is_pie is True  # tentative; gated on ET_DYN by caller
 
+    def test_df_static_tls_flag_sets_has_static_tls(self):
+        # G23-A1: DF_STATIC_TLS (0x10) in DT_FLAGS.
+        meta = ElfMetadata()
+        section = MagicMock()
+        section.iter_tags.return_value = [self._val_tag("DT_FLAGS", 0x10)]
+        _parse_dynamic(section, meta)
+        assert meta.has_static_tls is True
+
+
+# ── _parse_gnu_property (G23-A2) ──────────────────────────────────────────
+
+class TestParseGnuProperty:
+    def _note_section_with(self, n_type, descdata: bytes):
+        section = MagicMock()
+        section.iter_notes.return_value = [{"n_type": n_type, "n_descdata": descdata}]
+        return section
+
+    # x86 X86_FEATURE_1_AND property with IBT|SHSTK bits set (little-endian):
+    # pr_type=0xC0000002, pr_datasz=4, data=0x00000003, pad to 8.
+    _IBT_SHSTK_DESC = b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+
+    def test_string_note_type_is_accepted(self):
+        # Regression: pyelftools reports n_type as the *string*
+        # "NT_GNU_PROPERTY_TYPE_0", not the numeric 5. The parser must not skip it.
+        from abicheck.elf_metadata import _parse_gnu_property
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.little_endian = True
+        elf.get_section_by_name.return_value = self._note_section_with(
+            "NT_GNU_PROPERTY_TYPE_0", self._IBT_SHSTK_DESC
+        )
+        _parse_gnu_property(elf, meta, Path("x.so"))
+        assert meta.gnu_properties == frozenset({"IBT", "SHSTK"})
+
+    def test_numeric_note_type_is_accepted(self):
+        from abicheck.elf_metadata import _parse_gnu_property
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.little_endian = True
+        elf.get_section_by_name.return_value = self._note_section_with(5, self._IBT_SHSTK_DESC)
+        _parse_gnu_property(elf, meta, Path("x.so"))
+        assert meta.gnu_properties == frozenset({"IBT", "SHSTK"})
+
+    def test_missing_section_is_empty(self):
+        from abicheck.elf_metadata import _parse_gnu_property
+        meta = ElfMetadata()
+        elf = MagicMock()
+        elf.get_section_by_name.return_value = None
+        _parse_gnu_property(elf, meta, Path("x.so"))
+        assert meta.gnu_properties == frozenset()
+
 
 # ── _finalize_hardening ──────────────────────────────────────────────────
 

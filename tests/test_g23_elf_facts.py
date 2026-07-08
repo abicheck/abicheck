@@ -228,6 +228,41 @@ class TestGnuUniqueBinding:
         assert ChangeKind.SYMBOL_BINDING_STRENGTHENED not in ks
 
 
+class TestLegacySnapshotDeserialization:
+    def test_missing_elf_class_derived_from_pointer_size_32(self):
+        # A legacy snapshot (no elf_class key) with 32-bit pointer_size must
+        # rehydrate as 32-bit, not the hard-coded 64 default, so it does not
+        # false-positive elf_class_changed against a real 32-bit binary.
+        from abicheck.serialization import _elf_from_dict
+
+        elf = _elf_from_dict({"pointer_size": 4})
+        assert elf.elf_class == 32
+
+    def test_missing_elf_class_defaults_to_64_for_64bit(self):
+        from abicheck.serialization import _elf_from_dict
+
+        elf = _elf_from_dict({"pointer_size": 8})
+        assert elf.elf_class == 64
+
+    def test_new_fields_roundtrip(self):
+        from abicheck.serialization import _elf_from_dict
+
+        elf = _elf_from_dict({
+            "machine": "EM_ARM",
+            "elf_class": 32,
+            "osabi": "ELFOSABI_LINUX",
+            "abi_flags": ["float-hard", "eabi5"],
+            "has_static_tls": True,
+            "has_tls_symbols": True,
+            "gnu_properties": ["BTI"],
+        })
+        assert elf.machine == "EM_ARM"
+        assert elf.elf_class == 32
+        assert elf.abi_flags == frozenset({"float-hard", "eabi5"})
+        assert elf.has_static_tls is True
+        assert elf.gnu_properties == frozenset({"BTI"})
+
+
 def test_all_a_phase_kinds_are_partitioned():
     # Sanity: every new kind resolves to exactly one verdict band.
     from abicheck.checker_policy import (

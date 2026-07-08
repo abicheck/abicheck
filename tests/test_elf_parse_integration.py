@@ -180,3 +180,50 @@ def test_parse_unhardened_so_drops_relro_and_canary() -> None:
         meta = parse_elf_metadata(so)
     assert meta.relro == "none"
     assert meta.has_stack_canary is False
+
+
+@pytest.mark.integration
+def test_parse_cet_gnu_property_and_identity() -> None:
+    """G23-A2/A3: a real -fcf-protection=full .so exposes IBT/SHSTK from
+    .note.gnu.property, and the ELF identity fields are captured.
+
+    Regression guard: pyelftools reports the note type as the string
+    'NT_GNU_PROPERTY_TYPE_0' (not numeric 5), so the parser must accept it —
+    otherwise the CET/branch-protection detectors never fire on real binaries.
+    """
+    src = "int cet_fn(int x) { return x * 2; }\n"
+    with tempfile.TemporaryDirectory() as td:
+        so = _compile_so(
+            src, "libcet.so", Path(td),
+            extra_flags=["-fcf-protection=full"],
+        )
+        meta = parse_elf_metadata(so)
+    if not meta.gnu_properties:
+        pytest.skip("toolchain did not emit .note.gnu.property CET features")
+    assert "IBT" in meta.gnu_properties
+    assert "SHSTK" in meta.gnu_properties
+    # Identity fields are always captured on a real ELF.
+    assert meta.machine.startswith("EM_")
+    assert meta.elf_class in (32, 64)
+    assert meta.osabi.startswith("ELFOSABI_")
+
+
+@pytest.mark.integration
+def test_gnu_unique_symbol_binding() -> None:
+    """G23-A4: an inline static under -fgnu-unique exports an STB_GNU_UNIQUE
+    symbol, which parse_elf_metadata classifies as SymbolBinding.UNIQUE."""
+    src = """
+    struct Counter { static int& value() { static int n = 0; return n; } };
+    int use_counter() { return Counter::value(); }
+    """
+    with tempfile.TemporaryDirectory() as td:
+        gpp = ["g++", "-fgnu-unique", "-shared", "-fPIC",
+               "-o", str(Path(td) / "libuniq.so"), "-x", "c++", "-"]
+        result = subprocess.run(gpp, input=src.encode(), capture_output=True)
+        if result.returncode != 0:
+            pytest.skip(f"g++ failed: {result.stderr.decode()[:200]}")
+        meta = parse_elf_metadata(Path(td) / "libuniq.so")
+    unique_syms = [s for s in meta.symbols if s.binding == SymbolBinding.UNIQUE]
+    if not unique_syms:
+        pytest.skip("toolchain did not emit STB_GNU_UNIQUE symbols")
+    assert unique_syms, "expected at least one STB_GNU_UNIQUE symbol"

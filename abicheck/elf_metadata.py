@@ -340,7 +340,10 @@ def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
 
 
 # ── GNU-property control-flow-protection decoding (G23-A2) ──────────────────
+# pyelftools reports the note type as the *string* "NT_GNU_PROPERTY_TYPE_0"
+# (its known-type name), not the raw numeric 5 — accept both forms.
 _NT_GNU_PROPERTY_TYPE_0 = 5
+_NT_GNU_PROPERTY_TYPE_0_NAMES = frozenset({5, "NT_GNU_PROPERTY_TYPE_0"})
 _GNU_PROPERTY_X86_FEATURE_1_AND = 0xC0000002
 _GNU_PROPERTY_X86_FEATURE_1_IBT = 0x1
 _GNU_PROPERTY_X86_FEATURE_1_SHSTK = 0x2
@@ -391,7 +394,7 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
             return
         features: set[str] = set()
         for note in section.iter_notes():
-            if note.get("n_type") != _NT_GNU_PROPERTY_TYPE_0:
+            if note.get("n_type") not in _NT_GNU_PROPERTY_TYPE_0_NAMES:
                 continue
             desc = note.get("n_descdata") or note.get("n_desc")
             if isinstance(desc, str):
