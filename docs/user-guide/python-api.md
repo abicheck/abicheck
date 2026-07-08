@@ -81,11 +81,28 @@ result = compare_snapshots(old, new, policy="strict_abi")
 print(result.verdict)
 ```
 
-`compare_snapshots` accepts the same policy/suppression/scoping keywords as
-`run_compare` and returns a `DiffResult`. Snapshots are serialised as
-`.abi.json` (`schema_version` `8`); see
-[Output Formats](output-formats.md) for the on-disk contract and
-[Local Compare](local-compare.md) for the baseline workflow.
+`compare_snapshots` returns a `DiffResult`. Unlike `run_compare`, it works on
+**already-loaded objects**, not file paths: `policy` is a built-in profile name,
+but a custom policy file is passed as a loaded `PolicyFile` via `policy_file=`,
+and suppressions as a loaded `SuppressionList` via the `suppression=` argument
+(scoping keywords such as `scope_to_public_surface` match `run_compare`). Use
+`load_suppression_and_policy` to turn paths into those objects:
+
+```python
+from abicheck.service import load_suppression_and_policy, compare_snapshots
+
+suppression, policy_file = load_suppression_and_policy(
+    suppress=Path("suppressions.yaml"),
+    policy_file_path=Path("policy.yaml"),
+)
+result = compare_snapshots(old, new, suppression, policy_file=policy_file)
+```
+
+If you only have file paths and don't want to pre-load them, call `run_compare`
+(or `run_compare_request`) instead — it accepts `suppress=`/`policy_file_path=`
+as paths and does the loading for you. Snapshots are serialised as `.abi.json`
+(`schema_version` `8`); see [Output Formats](output-formats.md) for the on-disk
+contract and [Local Compare](local-compare.md) for the baseline workflow.
 
 ## Render results
 

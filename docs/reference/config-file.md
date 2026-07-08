@@ -25,8 +25,10 @@ turn overrides the built-in defaults (`CLI > config > default`).
 | any | An explicit `--config <path>` overrides discovery. | `cli_options.py` (`--config`) |
 
 > **Note:** an auto-discovered (untrusted) `.abicheck.yml` never causes a build
-> command in `build.query` to run. Executing a build query requires an
-> **explicit** `--config` plus `--allow-build-query`.
+> command in `build.query` to run — it is skipped with a diagnostic. A
+> `build.query` runs **only** when the config is supplied **explicitly** with
+> `--config` (which marks it trusted for subprocess execution).
+> `--allow-build-query` is a deprecated no-op and is **not** required.
 
 ### Forward compatibility
 
@@ -66,7 +68,7 @@ Drives inline build/source collection. See
 | Sub-key | Type | Default | Purpose |
 |---------|------|---------|---------|
 | `system` | string | `auto` | Advisory build-system hint (e.g. `auto`, `cmake`, `bazel`, `make`, `ninja`). |
-| `query` | string | `""` | Build-query command to produce a compile DB. Runs **only** with an explicit `--config` + `--allow-build-query`; ignored from an auto-discovered config. |
+| `query` | string | `""` | Build-query command to produce a compile DB. Runs **only** when the config is passed explicitly with `--config` (trusted); ignored from an auto-discovered config. `--allow-build-query` is a deprecated no-op. |
 | `compile_db` | string | `""` | Path (or glob) to a `compile_commands.json`. |
 
 ---
