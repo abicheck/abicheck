@@ -433,6 +433,22 @@ def test_ctor_dtor_fold_handles_digit_suffixed_class_names() -> None:
         assert _ctor_dtor_canonical(cls + "C1Ev") != cls + "C1Ev"
 
 
+def test_ctor_dtor_fold_tolerates_malformed_huge_length_fields() -> None:
+    # Exported symbol names may come from untrusted binaries or ABI snapshots.
+    # A malformed Itanium name with an enormous length field must not crash the
+    # structural parser via Python's int-conversion digit limit; it should simply
+    # fail to fold and keep exact/unmatched semantics.
+    from abicheck.buildsource.source_link import _ctor_dtor_canonical
+
+    malformed = "_ZN" + ("9" * 5000)
+    assert _ctor_dtor_canonical(malformed) == malformed
+
+    tu = SourceAbiTu(functions=[_entity("ok", "function", mangled="_Z2okv")])
+    surface = link_source_abi([tu], exported_symbols=["_Z2okv", malformed])
+    assert surface.mappings["source_decl_to_binary_symbol"]["_Z2okv"] == "_Z2okv"
+    assert malformed in surface.unmatched["symbols_without_decl"]
+
+
 def test_ctor_dtor_fold_parses_template_and_substitution_prefixes() -> None:
     # The nested-name parser must skip <substitution> (St = std::) and
     # <template-args> (I…E) before reaching a genuine ctor/dtor tag, e.g.
