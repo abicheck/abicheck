@@ -169,6 +169,22 @@ def test_detect_skips_malformed_stub(tmp_path) -> None:
     assert detect_python_api(_ext_snapshot(so)) is None
 
 
+def test_overload_widened_with_optional_param_is_compatible() -> None:
+    # One overload gains a compatible optional parameter while another keeps the
+    # name overloaded — the old call shape still works, so no removal.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, y: int = ...) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in _diff_kinds(old, new)
+
+
 def test_overload_dropping_varargs_is_breaking() -> None:
     # One overload loses *args while another keeps the name overloaded — the
     # extra-positional call shape is gone, so it is a removal (not silent).
@@ -500,6 +516,16 @@ def test_adding_var_positional_is_compatible() -> None:
     # Gaining *args is more permissive — callers are unaffected.
     kinds = _diff_kinds("def f(a): ...\n", "def f(a, *args): ...\n")
     assert not kinds
+
+
+def test_var_positional_annotation_change_is_risk() -> None:
+    kinds = _diff_kinds("def f(*args: int): ...\n", "def f(*args: str): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED in kinds
+
+
+def test_var_keyword_annotation_change_is_risk() -> None:
+    kinds = _diff_kinds("def f(**kw: int): ...\n", "def f(**kw: str): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED in kinds
 
 
 # ── Callable protocol: async / descriptor kind ──────────────────────────────

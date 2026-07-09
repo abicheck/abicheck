@@ -59,6 +59,14 @@ def _has_kind(fn: PyFunction, kind: str) -> bool:
     return any(p.kind == kind for p in fn.parameters)
 
 
+def _param_of_kind(fn: PyFunction, kind: str) -> PyParameter | None:
+    """The parameter of *kind* (e.g. the ``*args`` collector), or ``None``."""
+    for p in fn.parameters:
+        if p.kind == kind:
+            return p
+    return None
+
+
 def _is_keyword_capable(p: PyParameter) -> bool:
     """True when *p* can be passed by keyword (not positional-only / variadic)."""
     return p.kind in (POSITIONAL_OR_KEYWORD, KEYWORD_ONLY)
@@ -227,27 +235,39 @@ def _diff_signature(
             )
         )
 
-    # Dropping a ``*args`` / ``**kwargs`` collector breaks callers that passed
-    # extra positional / keyword arguments (they now raise ``TypeError``).
-    # Adding one is more permissive and compatible, so it is not reported.
-    if _has_kind(old_fn, VAR_POSITIONAL) and not _has_kind(new_fn, VAR_POSITIONAL):
-        changes.append(
-            make_change(
-                ChangeKind.PYTHON_API_PARAMETER_REMOVED,
-                symbol=symbol,
-                name=qualified,
-                detail="*args",
+    # ``*args`` / ``**kwargs`` collectors. Dropping one breaks callers that
+    # passed extra positional / keyword arguments (they now raise ``TypeError``);
+    # adding one is more permissive and compatible. When the collector survives
+    # but its *annotation* changed, that is the same type-contract RISK the named
+    # parameters get (only flagged when both sides declare a type and differ).
+    for var_kind, label in ((VAR_POSITIONAL, "*args"), (VAR_KEYWORD, "**kwargs")):
+        ov, nv = _param_of_kind(old_fn, var_kind), _param_of_kind(new_fn, var_kind)
+        if ov is not None and nv is None:
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_PARAMETER_REMOVED,
+                    symbol=symbol,
+                    name=qualified,
+                    detail=label,
+                )
             )
-        )
-    if _has_kind(old_fn, VAR_KEYWORD) and not _has_kind(new_fn, VAR_KEYWORD):
-        changes.append(
-            make_change(
-                ChangeKind.PYTHON_API_PARAMETER_REMOVED,
-                symbol=symbol,
-                name=qualified,
-                detail="**kwargs",
+        elif (
+            ov is not None
+            and nv is not None
+            and ov.annotation
+            and nv.annotation
+            and ov.annotation != nv.annotation
+        ):
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED,
+                    symbol=symbol,
+                    name=qualified,
+                    old=ov.annotation,
+                    new=nv.annotation,
+                    detail=label,
+                )
             )
-        )
 
     if (
         old_fn.return_annotation
@@ -281,20 +301,28 @@ def _callable_kind_detail(old_fn: PyFunction, new_fn: PyFunction) -> str | None:
 def _overload_identity(fn: PyFunction) -> tuple[Any, ...]:
     """A hashable identity for one overload variant — parameters + protocol.
 
-    The **return annotation is deliberately excluded**: what distinguishes one
-    ``@overload`` from another is its accepted call shape (parameter names,
-    kinds, defaults, and *input* types), not its return type. Keying on the
-    return too would report a return-only change on a variant as a *removed*
-    overload (API_BREAK) when it is really a return-type change (RISK) — the
-    same classification the non-overloaded path gives it. The presence of
-    ``*args`` / ``**kwargs`` collectors IS part of the call shape (dropping one
-    rejects extra positional / keyword arguments), so it is included.
+    Identity is the variant's **required input call shape**: the name, kind, and
+    input type of each parameter that has *no* default, plus ``async`` /
+    descriptor kind and whether it accepts ``*args`` / ``**kwargs``. Excluded on
+    purpose:
+
+    * the **return annotation** — it does not distinguish overloads, so a
+      return-only change on a matched variant is a return-type-change RISK, not
+      a spurious removal (mirrors the non-overloaded path);
+    * **optional (defaulted) parameters** — adding one compatibly *widens* a
+      variant, so it must still match the old one rather than read as a removed
+      overload plus a new one.
+
+    ``*args`` / ``**kwargs`` presence stays in the identity because dropping a
+    collector rejects extra arguments (a real removal).
     """
     return (
         fn.is_async,
         fn.descriptor,
         tuple(
-            (p.name, p.kind, p.has_default, p.annotation) for p in fn.named_parameters
+            (p.name, p.kind, p.annotation)
+            for p in fn.named_parameters
+            if not p.has_default
         ),
         _has_kind(fn, VAR_POSITIONAL),
         _has_kind(fn, VAR_KEYWORD),
