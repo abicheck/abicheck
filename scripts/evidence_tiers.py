@@ -321,6 +321,10 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # Documented gap (ADR-026): an uninstantiated template signature change is
     # invisible to every artifact layer; only source replay (L4) would see it.
     "case122_template_signature_uninstantiated": "L4",
+    # ADR-039: a context-free header parse false-positives a #ifdef-guarded
+    # field; the binary is blind (identical builds) and only build context (the
+    # active -D defines) clears the phantom via --reconcile-build-context.
+    "case164_preproc_conditional_field": "L3",
 }
 
 

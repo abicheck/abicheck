@@ -17,6 +17,7 @@ evidence and is exercised by `.github/workflows/examples-validation.yml`.
 | `scripts/run_example_runtime_smoke.py` | Runtime smoke over example cases. |
 | `scripts/summarize_remeasurement.py` | Combines example / component-suite / real-world artifacts into the release-gate summary. |
 | `scripts/conda_harness.py`, `scripts/validate.py` | Fetch/extract + unified end-to-end validation loop. |
+| `scripts/fp_depth_demo.py` | Pure-Python (no toolchain/network) runnable demonstration of *which evidence depth clears a false positive*: the build-context/preprocessor-divergence FP that `binary`/`headers` raise and `build` clears, plus the honest negative that no pure source-only clear exists. Backs `false-positive-depth-analysis-2026-07.md`. |
 | `data/*.json` | Raw per-`.so` results, run metadata, FP exemplars, dated UXL/oneDAL scans. |
 | `suppress_internal.yaml` | Internal-namespace suppression used in the reports. |
 | `*.md` (`REPORT.md`, `DESIGN_ANALYSIS.md`, `realworld-*.md`, `uxl-*.md`) | Curated findings + root-cause analyses; hand-edited narrative. |

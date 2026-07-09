@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
     _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
 from .checker import DiffResult, LibraryMetadata
-from .cli_audit import echo_filtered_surface, echo_pattern_modulations
+from .cli_audit import echo_filtered_surface, echo_pattern_modulations, echo_reconciled
 from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
     perform_elf_dump,
@@ -632,6 +632,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,
         gcc_option_tokens=gcc_option_tokens,
+        user_gcc_options=gcc_options,
+        compile_db_filter=compile_db_filter,
         sysroot=sysroot,
         nostdinc=nostdinc,
         dwarf_only=dwarf_only,
@@ -975,6 +977,8 @@ def _finalize_compare_result(
         _merge_redundant_changes(result)
     if show_filtered and result.out_of_surface_changes:
         echo_filtered_surface(result)
+    if show_filtered and result.reconciled_changes:
+        echo_reconciled(result)
 
     # The scoping fallback warning goes to stderr so it never corrupts the
     # machine-readable payload on stdout (which carries scope_resolved /
@@ -1371,6 +1375,12 @@ def _embed_inline_source_side(
 @debug_resolution_options
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
+@click.option("--reconcile-build-context", is_flag=True, default=False,
+              help="Clear context-free header-parse false positives using the build's "
+                   "active preprocessor defines (ADR-039): a conditional field's phantom "
+                   "add/remove/size change the build proves never happened is moved to an "
+                   "audit bucket instead of the verdict. No-op unless snapshots carry "
+                   "build_context_defines + per-field guards.")
 @verbose_option
 @click.pass_context
 def compare_cmd(
@@ -1422,6 +1432,7 @@ def compare_cmd(
     pattern_verdicts: bool,
     explain_patterns: bool,
     surface_metrics: bool,
+    reconcile_build_context: bool,
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
@@ -1545,6 +1556,15 @@ def compare_cmd(
                 "verdict scheme, or severity-aware when severity is configured in "
                 ".abicheck.yml. Compare libraries individually for explicit "
                 "scheme control."
+            )
+        # --reconcile-build-context (ADR-039) is not threaded through the
+        # per-library release fan-out; reject it loudly rather than silently
+        # ignore it (ADR-037 D12). It applies to single-file / snapshot inputs.
+        if reconcile_build_context:
+            raise click.UsageError(
+                "--reconcile-build-context is not supported for directory/package "
+                "(release) comparisons; it applies to single-file / snapshot "
+                "inputs. Compare the libraries individually to use it."
             )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -1843,6 +1863,7 @@ def compare_cmd(
         surface_metrics=surface_metrics,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=post_manifest_allowlist,
+        reconcile_build_context=reconcile_build_context,
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows

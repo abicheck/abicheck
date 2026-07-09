@@ -918,6 +918,14 @@ def _check_case_preconditions(
                           "Python-extension .pyi-pair case — validated by "
                           "tests/test_python_api_examples.py")
 
+    # ADR-039 build-context reconciliation cases ship a guard-annotated fixture
+    # pair (no compilable v1/v2 sources — castxml does not yet emit the guard
+    # registry) and are validated compiler-free by tests/test_diff_reconcile.py.
+    if entry.get("mode") == "reconcile":
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "build-context reconciliation fixture — validated by "
+                          "tests/test_diff_reconcile.py")
+
     # L3/L4/L5 build/source-only cases (152-162) ship a hand-built evidence-model
     # fixture pair (old.json/new.json) instead of a compilable v1/v2 source pair;
     # they are validated compiler-free by tests/test_l3l4l5_examples.py.

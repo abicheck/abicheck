@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **163 cases** (158 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **164 cases** (159 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -25,7 +25,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | COMPATIBLE_WITH_RISK | 23 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 6 | — | ✅ |
+| NO_CHANGE | 7 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -76,10 +76,10 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 161 integration items | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 162 catalog cases | gcc: 132 PASS / 4 XFAIL / 26 SKIP; clang: 133 PASS / 4 XFAIL / 25 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 162 catalog cases | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 162 catalog cases | 132 PASS / 4 XFAIL / 26 SKIP | Informational, FP guard clean |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 162 catalog cases | 127 PASS / 3 FAIL / 6 XFAIL / 26 SKIP | Informational; three reduced-evidence signal-loss backlogs |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 164 catalog cases | gcc: 132 PASS / 4 XFAIL / 28 SKIP; clang: 133 PASS / 4 XFAIL / 27 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 164 catalog cases | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 164 catalog cases | 132 PASS / 4 XFAIL / 28 SKIP | Informational, FP guard clean |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 164 catalog cases | 127 PASS / 3 FAIL / 6 XFAIL / 28 SKIP | Informational; three reduced-evidence signal-loss backlogs |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
 
 Default/debug skips are not accepted as green coverage. They are cases outside
@@ -286,6 +286,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [163](case163_python_kwarg_renamed/README.md) | Python-API break invisible to the C-ABI check | API Break | 🟠 API_BREAK |
+| [164](case164_preproc_conditional_field/README.md) | Preprocessor-conditional field: a header false positive only build context clears | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

@@ -437,6 +437,32 @@ class AbiSnapshot:
     # context-free dumps); ignored by old readers (additive optional field).
     parsed_with_build_context: bool = field(default=False, kw_only=True)
 
+    # ADR-039 — the preprocessor macros the build actually defines (its active
+    # ``-D`` set, harvested from the compile database). Empty means context-free
+    # / unknown.
+    build_context_defines: set[str] = field(default_factory=set, kw_only=True)
+    # ADR-039 — registry of *conditional* record fields the header parse knows
+    # about, with their full declaration: ``{type: {field: {"guard": macro,
+    # "type": type_name, "is_bitfield": bool, "bitfield_bits": int|None,
+    # "access": str, "is_const": bool, "is_volatile": bool, "is_mutable": bool,
+    # "is_last": bool}}}`` (each field entry is a mixed-value dict, not
+    # ``dict[str, str]``; a field may also carry ``"negative": True`` for an
+    # ``#ifndef`` guard or ``"ambiguous": True`` when its guard macro is
+    # conditionally ``#undef``/``#define``d). ``is_last`` marks a field that is
+    # terminal in its record's source order — the reconciler only clears a presence
+    # delta for a terminal field, so re-adding it cannot reorder a sibling. A
+    # field lives here iff its presence is gated by a ``#if defined(GUARD)``
+    # region, whether or not a context-free parse pruned it from the type's
+    # ``fields`` list. Carrying the *declaration* (not just the guard) lets
+    # ``diff_reconcile`` prove a pruned-field presence delta is a
+    # context-free-parse artifact **and** that the field's declaration is
+    # unchanged — so a guarded field whose type changed (a real ABI break) is
+    # never cleared. Corroborating build evidence only; it never deletes a finding
+    # artifact evidence proves (the authority rule, ADR-028).
+    conditional_fields: dict[str, dict[str, dict[str, object]]] = field(
+        default_factory=dict, kw_only=True
+    )
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set

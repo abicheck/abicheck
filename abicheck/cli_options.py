@@ -1132,7 +1132,11 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: removed-library gate, ADR-023 bundle/manifest analysis) folded onto ``compare``'s
 #: directory/package path (ADR-037 D7) — genuine release surface, inert on single
 #: files, grouped in its own ``--help`` panel.
-COMPARE_FLAG_BUDGET = 77
+#: Raised 77→78 for ``--reconcile-build-context`` (ADR-039): a genuine new
+#: analysis capability (clearing context-free header-parse false positives from
+#: build defines), not a project setting demotable to ``.abicheck.yml`` — it is
+#: an invocation-time analysis toggle like ``--pattern-verdicts``.
+COMPARE_FLAG_BUDGET = 78
 
 
 def count_visible_options(cmd: object) -> int:

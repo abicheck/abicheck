@@ -1064,6 +1064,7 @@ def compare_snapshots(
     surface_metrics: bool = False,
     collapse_versioned_symbols: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    reconcile_build_context: bool = False,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1101,6 +1102,7 @@ def compare_snapshots(
         surface_metrics=surface_metrics,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
+        reconcile_build_context=reconcile_build_context,
     )
 
 
@@ -1182,6 +1184,7 @@ def run_compare_request(
             else None
         ),
         pattern_verdicts=request.pattern_verdicts,
+        reconcile_build_context=request.reconcile_build_context,
     )
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
