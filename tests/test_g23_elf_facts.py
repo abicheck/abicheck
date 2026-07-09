@@ -163,6 +163,21 @@ class TestGnuProperty:
         assert ChangeKind.CET_PROTECTION_WEAKENED not in ks
         assert ChangeKind.BRANCH_PROTECTION_WEAKENED not in ks
 
+    def test_suppressed_across_machine_change(self):
+        # CET (IBT/SHSTK) is x86-only and branch-protection (BTI/PAC) is
+        # AArch64-only, so the feature sets are not comparable across a machine
+        # change. Comparing an x86_64+IBT DSO to an aarch64+BTI DSO must report
+        # only elf_machine_changed — not a fabricated CET-dropped/BTI-added pair.
+        old = _elf(machine="EM_X86_64", gnu_properties=frozenset({"IBT", "SHSTK"}))
+        new = _elf(machine="EM_AARCH64", gnu_properties=frozenset({"BTI", "PAC"}))
+        r = compare(_snap(old), _snap(new))
+        ks = _kinds(r)
+        assert ChangeKind.ELF_MACHINE_CHANGED in ks
+        assert ChangeKind.CET_PROTECTION_WEAKENED not in ks
+        assert ChangeKind.CET_PROTECTION_IMPROVED not in ks
+        assert ChangeKind.BRANCH_PROTECTION_WEAKENED not in ks
+        assert ChangeKind.BRANCH_PROTECTION_IMPROVED not in ks
+
 
 # ── A3: ELF identity / ABI-flags guard ──────────────────────────────────────
 

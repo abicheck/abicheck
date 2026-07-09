@@ -161,6 +161,17 @@ class TestFilterSourceOnly:
             filtered = _filter_source_only(_result(Verdict.BREAKING, [kind]))
             assert kind not in {c.kind for c in filtered.changes}
 
+    def test_long_double_abi_change_is_binary_only(self):
+        """long_double_abi_changed keeps the source signature identical (a
+        representation flip, e.g. 80-bit x87 ↔ __float128) and only changes the
+        binary FP format, so source-only mode must drop it (Codex review)."""
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED in _BINARY_ONLY_KINDS
+        filtered = _filter_source_only(
+            _result(Verdict.BREAKING, [ChangeKind.LONG_DOUBLE_ABI_CHANGED])
+        )
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in {c.kind for c in filtered.changes}
+        assert filtered.verdict == Verdict.NO_CHANGE
+
     def test_g23_b1_thunk_kinds_are_not_binary_only(self):
         """The B1 thunk/VTT kinds mirror source-visible vtable/base changes
         (like vtable_slot_count_changed), so they are NOT filtered."""

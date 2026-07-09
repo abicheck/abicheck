@@ -188,6 +188,12 @@ _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset(
         # DWARF-derived aggregate-return convention flip — a binary-only ABI fact
         # with no source-API delta, so it is filtered from source-only views.
         ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+        # A long-double representation flip (80-bit x87 ↔ __float128, ppc64
+        # double-double ↔ IEEE binary128) keeps the source signature identical —
+        # `long double f(long double)` recompiles unchanged — and only changes the
+        # binary floating-point format, so like STRUCT_RETURN_CONVENTION_CHANGED it
+        # is a pure ABI fact with no source-API delta.
+        ChangeKind.LONG_DOUBLE_ABI_CHANGED,
         # ── G23 Phase A — Linux ELF artifact facts (binary/link-level only) ──
         # Pure ELF header / dynamic-section / .note facts with no source-API
         # delta, so they are filtered from source-only views (like the symbol

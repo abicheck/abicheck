@@ -440,6 +440,13 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
     """
     if not _both_captured_elf_identity(old_elf, new_elf):
         return []
+    # CET (IBT/SHSTK) is x86-only and branch-protection (BTI/PAC) is AArch64-only,
+    # so the feature sets are not comparable across machines. A machine change is
+    # already reported as `elf_machine_changed` by `_diff_elf_identity`; diffing
+    # gnu.property across it would fabricate a spurious weakened/improved pair
+    # (e.g. x86_64+IBT → aarch64+BTI reads as CET dropped + branch-prot added).
+    if getattr(old_elf, "machine", "") != getattr(new_elf, "machine", ""):
+        return []
     old_props: frozenset[str] = getattr(old_elf, "gnu_properties", frozenset())
     new_props: frozenset[str] = getattr(new_elf, "gnu_properties", frozenset())
     if old_props == new_props:
