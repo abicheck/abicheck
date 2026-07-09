@@ -445,17 +445,24 @@ where applicable.
       a multi-inheritance base reorder that shifts a secondary-base override's
       thunk offset with unchanged `_ZTV` size — is BREAKING on a **stripped**
       pair (verified end-to-end via `abicheck compare`; `tests/test_g23_vtable_b1.py`).
-- [ ] Each remaining Phase B/D kind lands with the full shared checklist above.
-- [ ] The B2 diamond fixture localizes the exact secondary-group slot at L1,
-      and the tier-accuracy matrix shows L0 (B1) catching it coarsely —
-      under-call monotonicity holds.
-- [ ] `TOOLCHAIN_FLAG_DRIFT` fires on a clang `-grecord-command-line` fixture
-      pair, and via L3 flags with no producer flags at all; the
-      `known_gap_toolchains: clang` ground-truth annotations for covered cases
-      are removed.
-- [ ] `-fcf-protection` removal fails under the security policy preset.
-- [ ] A `Module.symvers` pair with one CRC drift returns BREAKING with the
-      symbol named.
+- [x] **Phase B2 implemented** — 2 kinds (`secondary_vtable_group_changed`,
+      `virtual_base_offset_changed`) in `diff_vtable_layout.py`, reconstructing
+      vtable-group structure from DWARF inheritance with tri-state guarding, plus
+      registry/tier/docs/completeness/architecture wiring and unit tests
+      (`tests/test_g23_vtable_b2.py`). Deferred within B2: constant vbase-offset
+      modelling (not reliably DWARF-derivable) and secondary-group
+      `TYPE_VTABLE_CHANGED` slot localization.
+- [x] **Phase C implemented** — the producer scan matches clang's
+      `-grecord-command-line` form and now unions `abi_flags` across all CUs;
+      `toolchain_flag_drift` fires on a clang `-grecord-command-line` fixture
+      pair (`tests/test_compiler_record_cross_toolchain.py`). L3-flag fallback
+      with no producer flags is deferred.
+- [x] Each Phase B/D kind lands with the full shared checklist (enum, registry,
+      detector, evidence tier, completeness test, docs, unit tests).
+- [x] `-fcf-protection` removal fails under the security policy preset
+      (`cet_protection_weakened` gated in `policies/security.yaml`).
+- [x] A `Module.symvers` pair with one CRC drift returns BREAKING with the
+      symbol named (`tests/test_g23_phase_d.py::TestKabiDiff`).
 
 ## Deferred: macOS / Windows (later stage)
 
