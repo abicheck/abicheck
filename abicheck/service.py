@@ -1007,20 +1007,19 @@ def compare_snapshots(
     through here instead of importing ``checker.compare``; the kwargs mirror the
     core verb exactly so no capability is lost.
     """
-    # Centralized POST removed-wrapper recovery: when a committed-surface
-    # allowlist is supplied, union the wrappers present in *old* but gone from
-    # *new* (contract_scope_allowlist's snapshot half) so a dropped/hidden/
-    # non-default-demoted committed wrapper — absent from a *new* manifest — stays
-    # in-surface. Every scope caller (CLI, run_compare_request, direct API) routes
-    # through here, so recovery happens once and uniformly; it is a no-op when the
-    # allowlist/binaries carry no `pp_*` removals (safe for scan/appcompat, which
-    # never set the allowlist). Idempotent if the caller already unioned it.
+    # Centralized POST committed-wrapper recovery: when a committed-surface
+    # allowlist is supplied, union the callable `pp_*` wrappers exported by the
+    # old snapshot (contract_scope_allowlist's snapshot half). This keeps both
+    # dropped wrappers and still-exported-but-omitted wrappers in-surface when a
+    # caller scopes against a new manifest, preventing manifest omissions from
+    # hiding ABI breaks. Every scope caller (CLI, run_compare_request, direct API)
+    # routes through here, so recovery happens once and uniformly; it is a no-op
+    # when the allowlist/binaries carry no `pp_*` wrappers. Idempotent if the
+    # caller already unioned it.
     if public_surface_allowlist is not None:
-        from .post_manifest import removed_contract_symbols
+        from .post_manifest import _snapshot_contract_symbols
 
-        public_surface_allowlist = (
-            set(public_surface_allowlist) | removed_contract_symbols(old, new)
-        )
+        public_surface_allowlist = set(public_surface_allowlist) | _snapshot_contract_symbols(old)
     return compare(
         old,
         new,

@@ -279,10 +279,42 @@ def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(tmp_path: 
     assert "__pp_foo_impl" in json.dumps(doc["surface_scope"])
 
 
-def test_contract_scope_allowlist_unions_only_removed_symbols() -> None:
-    # The union recovers a *removed* committed wrapper (old-not-new) but must NOT
-    # add an undeclared pp_* present in *both* snapshots — that stays demoted
-    # under manifest-authoritative scoping.
+def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(tmp_path: Path) -> None:
+    # Regression: a new manifest that omits a still-exported old pp_* wrapper
+    # must not be able to scope that wrapper's ABI changes out of the verdict.
+    old_p = tmp_path / "old.json"
+    new_p = tmp_path / "new.json"
+    old_p.write_text(
+        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_undeclared", "int", ("int",))])),
+        encoding="utf-8",
+    )
+    new_p.write_text(
+        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_undeclared", "long", ("long",))])),
+        encoding="utf-8",
+    )
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "post_abi": 1,
+        "exports": [{"name": "foo", "c_symbol": "pp_foo",
+                     "params": ["Float64"], "return_dtype": "Float64"}],
+    }), encoding="utf-8")
+
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest),
+               "--no-scope-public-headers", "--format", "json"],
+    )
+    assert res.exit_code == 4, res.output
+    doc = json.loads(res.output[res.output.find("{"):])
+    assert doc["verdict"] == "BREAKING"
+    assert "pp_undeclared" in json.dumps(doc.get("changes", []))
+    assert "pp_undeclared" not in json.dumps(doc.get("surface_scope", {}))
+
+
+def test_contract_scope_allowlist_unions_old_committed_symbols() -> None:
+    # The union recovers any old committed wrapper, including one omitted from
+    # the new manifest but still exported in both snapshots. Such wrappers stay
+    # in-surface so manifest omissions cannot hide their ABI changes.
     from abicheck.post_manifest import contract_scope_allowlist, parse_manifest
 
     manifest = parse_manifest({"post_abi": 1, "exports": [{
@@ -295,7 +327,7 @@ def test_contract_scope_allowlist_unions_only_removed_symbols() -> None:
     allow = contract_scope_allowlist(manifest, old, new)
     assert "pp_foo" in allow            # committed
     assert "pp_removed" in allow        # removed committed wrapper -> kept in-surface
-    assert "pp_undeclared" not in allow  # present in both, undeclared -> demoted
+    assert "pp_undeclared" in allow      # old committed wrapper -> kept in-surface
     assert "__pp_impl" not in allow     # private kernel -> demoted
 
 

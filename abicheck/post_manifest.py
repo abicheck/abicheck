@@ -375,28 +375,30 @@ def contract_scope_allowlist(
     """The committed surface to scope ``compare --post-manifest`` against.
 
     The manifest's ``pp_*``/loop symbols, plus committed-namespace (``pp_*``,
-    excluding ``__pp_*``) symbols that were **removed** — present in the old
-    snapshot but not the new one.
+    excluding ``__pp_*``) symbols exported by the old snapshot.
 
-    The removed-symbol union keeps a *dropped* committed wrapper in-surface: when
-    the manifest passed is the **new** one that no longer lists it, its removal
-    would otherwise fall outside the allowlist and be demoted — hiding an ABI
-    break. It is deliberately narrow: a ``pp_*`` symbol present in *both*
-    snapshots but absent from the manifest is an *undeclared* export (validation
-    reports it separately), so its signature churn stays demoted under
-    manifest-authoritative scoping rather than driving the verdict. ``__pp_*``
-    kernel churn is excluded throughout.
+    The old-symbol union keeps any previously committed wrapper in-surface even
+    when the supplied manifest is the **new** one and omits it. That covers both
+    dropped wrappers and still-exported-but-undeclared wrappers: their removals,
+    visibility changes, or signature churn must not be silently demoted by a
+    manifest-authoritative allowlist. ``__pp_*`` kernel churn is excluded
+    throughout.
 
-    BOUNDARY: recovery of a *removed* committed symbol keys on the ``pp_*``
-    namespace, since a single (new) manifest cannot name what was committed
-    before. A committed ufunc ``loop_symbol`` that is *not* ``pp_``-prefixed and
-    is dropped/renamed across versions therefore may be demoted under binary
-    scoping. The manifest↔manifest :func:`diff_manifests` / :func:`check_version_gate`
-    — which see *both* versions — are the authoritative check for loop-symbol
+    BOUNDARY: snapshot recovery keys on the ``pp_*`` namespace, since a single
+    (new) manifest cannot name what was committed before. A committed ufunc
+    ``loop_symbol`` that is *not* ``pp_``-prefixed and is dropped/renamed across
+    versions therefore may be demoted under binary scoping. The
+    manifest↔manifest :func:`diff_manifests` / :func:`check_version_gate` —
+    which see *both* versions — are the authoritative check for loop-symbol
     renames and removals; use them in release gating, with binary
     ``compare --post-manifest`` as the best-effort surface filter.
     """
-    return public_c_symbols(manifest) | removed_contract_symbols(old_snapshot, new_snapshot)
+    old_syms = (
+        _snapshot_contract_symbols(old_snapshot)
+        if old_snapshot is not None
+        else removed_contract_symbols(old_snapshot, new_snapshot)
+    )
+    return public_c_symbols(manifest) | old_syms
 
 
 def removed_contract_symbols(old_snapshot: Any = None, new_snapshot: Any = None) -> set[str]:
