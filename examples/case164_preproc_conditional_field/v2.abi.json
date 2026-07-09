@@ -1,0 +1,109 @@
+{
+  "library": "libconfig.so.1",
+  "version": "2.0.0",
+  "functions": [
+    {
+      "name": "cfg_make",
+      "mangled": "cfg_make",
+      "return_type": "Config *",
+      "params": [],
+      "visibility": "public",
+      "is_virtual": false,
+      "is_noexcept": false,
+      "is_extern_c": true,
+      "vtable_index": null,
+      "source_location": "config.h:20",
+      "is_static": false,
+      "is_const": false,
+      "is_volatile": false,
+      "is_pure_virtual": false,
+      "is_deleted": false,
+      "deleted_from_dwarf": false,
+      "is_inline": false,
+      "access": "public",
+      "return_pointer_depth": 0,
+      "elf_visibility": null,
+      "ref_qualifier": "",
+      "is_explicit": null,
+      "is_hidden_friend": null,
+      "source_header": null,
+      "origin": "public_header"
+    }
+  ],
+  "variables": [],
+  "types": [
+    {
+      "name": "Config",
+      "kind": "struct",
+      "size_bits": 64,
+      "alignment_bits": null,
+      "fields": [
+        {
+          "name": "version",
+          "type": "int",
+          "offset_bits": null,
+          "is_bitfield": false,
+          "bitfield_bits": null,
+          "is_const": false,
+          "is_volatile": false,
+          "is_mutable": false,
+          "access": "public"
+        }
+      ],
+      "bases": [],
+      "virtual_bases": [],
+      "vtable": [],
+      "source_location": "config.h:10",
+      "is_union": false,
+      "is_opaque": false,
+      "is_final": null,
+      "source_header": null,
+      "origin": "public_header",
+      "data_size_bits": null,
+      "is_standard_layout": null,
+      "is_trivially_copyable": null,
+      "vptr_offset_bits": null,
+      "base_offsets": {}
+    }
+  ],
+  "elf": null,
+  "pe": null,
+  "macho": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "sycl": null,
+  "python_ext": null,
+  "kabi": null,
+  "enums": [],
+  "typedefs": {},
+  "constants": {},
+  "elf_only_mode": false,
+  "from_headers": true,
+  "platform": "elf",
+  "language_profile": "c",
+  "scope_fallback": null,
+  "dependency_info": null,
+  "git_commit": null,
+  "git_tag": null,
+  "created_at": null,
+  "build_id": null,
+  "build_mode": null,
+  "source_path": null,
+  "build_source_pack": null,
+  "parsed_with_build_context": true,
+  "build_context_defines": [
+    "CONFIG_KEEP_LEGACY"
+  ],
+  "conditional_fields": {
+    "Config": {
+      "legacy": {
+        "guard": "CONFIG_KEEP_LEGACY",
+        "type": "int",
+        "is_bitfield": false,
+        "bitfield_bits": null,
+        "access": "public"
+      }
+    }
+  },
+  "schema_version": 8
+}

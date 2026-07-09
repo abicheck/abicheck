@@ -143,6 +143,11 @@ class CompareRequest:
     public_surface_allowlist: frozenset[str] | None = None
     pattern_verdicts: bool = False
     enable_debuginfod: bool = False
+    # ADR-039: clear context-free header-parse false positives using the build's
+    # active preprocessor defines (a conditional field's phantom add/remove/size
+    # delta the build proves never changed). Opt-in; a no-op unless the snapshots
+    # carry ``build_context_defines`` + per-field ``guard`` annotations.
+    reconcile_build_context: bool = False
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

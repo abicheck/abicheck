@@ -759,6 +759,14 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # Build-context parse provenance (v7, ADR-029) — absent on older
         # snapshots loads as False.
         parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
+        # ADR-039 — active build-time define set (context-free dumps: empty).
+        build_context_defines=set(d.get("build_context_defines", [])),
+        # ADR-039 — {type: {field: {guard, type, is_bitfield, bitfield_bits}}}
+        # registry of conditional record fields (full declaration, not just guard).
+        conditional_fields={
+            str(t): {str(fn): dict(decl) for fn, decl in fields.items()}
+            for t, fields in dict(d.get("conditional_fields", {})).items()
+        },
     )
 
     # G14: derive the CPython extension surface for snapshots that predate the

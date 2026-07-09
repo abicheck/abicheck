@@ -256,6 +256,28 @@ def to_sarif(
                         if result.scope_to_public_surface
                         else {}
                     ),
+                    # ADR-039: build-context reconciliation ledger. Findings
+                    # cleared as context-free header-parse artifacts are disclosed
+                    # here (never silently dropped) when reconciliation removed any.
+                    **(
+                        {
+                            "buildContextReconciled": {
+                                "count": result.reconciled_count,
+                                "changes": [
+                                    {
+                                        "kind": c.kind.value,
+                                        "symbol": c.symbol,
+                                        "description": c.description,
+                                        **({"sourceLocation": c.source_location} if c.source_location else {}),
+                                        **({"reason": c.surface_exclusion_reason} if c.surface_exclusion_reason else {}),
+                                    }
+                                    for c in result.reconciled_changes
+                                ],
+                            }
+                        }
+                        if result.reconciled_changes
+                        else {}
+                    ),
                 },
             }
         ],

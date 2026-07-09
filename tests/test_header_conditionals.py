@@ -1,0 +1,634 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Unit tests for the ADR-039 collection layer (header_conditionals).
+
+The scanner harvests ``build_context_defines`` + ``conditional_fields`` from
+header source and a compile DB so the reconciler works on real ``dump`` output,
+not just hand-built fixtures. Best-effort and *conservative*: it records only
+unambiguous single-positive-guard member fields, and skips everything else.
+"""
+
+from __future__ import annotations
+
+import json
+
+from abicheck.header_conditionals import (
+    collect_build_context,
+    defines_from_compile_db,
+    defines_from_flags,
+    scan_conditional_fields,
+)
+
+
+def _guard(reg, record, field):
+    return reg.get(record, {}).get(field)
+
+
+# ── define extraction ────────────────────────────────────────────────────────
+
+
+def test_defines_from_flags_all_forms():
+    got = defines_from_flags(["-DA", "-DB=1", "-D", "C", "-Iinc", "-O2", "-Dbad name"])
+    assert got == {"A", "B", "C"}
+
+
+def test_defines_from_flags_honors_undefine_and_order():
+    # -U cancels a prior -D (last wins); a later -D re-adds.
+    assert defines_from_flags(["-DKEEP", "-UKEEP"]) == set()
+    assert defines_from_flags(["-UKEEP", "-DKEEP"]) == {"KEEP"}
+    assert defines_from_flags(["-D", "A", "-U", "A", "-DB"]) == {"B"}
+
+
+def test_defines_from_flags_applies_over_initial_set():
+    """*initial* seeds the active set; the flags are applied on top (in order), so
+    a ``-U`` overrides an already-active macro (Codex review #498)."""
+    assert defines_from_flags(["-UKEEP"], initial={"KEEP"}) == set()
+    assert defines_from_flags(["-DEXTRA"], initial={"KEEP"}) == {"KEEP", "EXTRA"}
+    # the passed-in set is not mutated
+    seed = {"KEEP"}
+    defines_from_flags(["-UKEEP"], initial=seed)
+    assert seed == {"KEEP"}
+
+
+def test_defines_from_compile_db_intersects_commands(tmp_path):
+    """A macro is trusted only when *every* command defines it (conservative)."""
+    db = tmp_path / "compile_commands.json"
+    db.write_text(
+        json.dumps(
+            [
+                {"command": "cc -DCOMMON -DONLY_A -c a.c"},
+                {"arguments": ["cc", "-DCOMMON", "-DONLY_B", "-c", "b.c"]},
+            ]
+        )
+    )
+    # COMMON is in both; ONLY_A / ONLY_B are ambiguous → excluded.
+    assert defines_from_compile_db(db) == {"COMMON"}
+
+
+def test_defines_from_compile_db_applies_source_filter(tmp_path):
+    """``--compile-db-filter`` narrows entries before intersecting, so a guard
+    defined only by the selected TU is harvested (Codex review #498)."""
+    db = tmp_path / "compile_commands.json"
+    db.write_text(
+        json.dumps(
+            [
+                {"directory": "/b", "file": "/b/keep.c", "command": "cc -DKEEP -c keep.c"},
+                {"directory": "/b", "file": "/b/other.c", "command": "cc -c other.c"},
+            ]
+        )
+    )
+    # Without a filter, the intersection drops KEEP (other.c lacks it).
+    assert defines_from_compile_db(db) == set()
+    # Filtering to keep.c selects only that TU → KEEP is trusted.
+    assert defines_from_compile_db(db, "keep.c") == {"KEEP"}
+    # A relative pattern matches the directory-relative path too.
+    assert defines_from_compile_db(db, "*.c") == set()  # matches both → intersect
+    # A filter that matches nothing falls back to all entries (conservative).
+    assert defines_from_compile_db(db, "nope.c") == set()
+
+
+def test_defines_from_compile_db_tolerates_malformed_command(tmp_path):
+    """A compile ``command`` with an unbalanced quote is skipped, not fatal."""
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": 'cc -DOK "unbalanced -c a.c'}]))
+    assert defines_from_compile_db(db) == set()
+
+
+def test_compile_entry_matcher_and_command_splitter_edges():
+    from abicheck.header_conditionals import _compile_entry_matches, _split_command
+
+    assert _split_command(["already", "a", "list"]) == []  # non-str → []
+    assert _split_command("cc -c a.c") == ["cc", "-c", "a.c"]
+    # non-string file, file outside directory (ValueError), and no directory key
+    assert _compile_entry_matches({"file": 123}, "*.c") is False
+    assert _compile_entry_matches({"file": "/x/a.c", "directory": "/y"}, "a.c") is False
+    assert _compile_entry_matches({"file": "/x/a.c"}, "a.c") is False
+    assert _compile_entry_matches({"file": "/x/a.c"}, "/x/a.c") is True
+
+
+def test_defines_from_compile_db_undefine_excludes_from_intersection(tmp_path):
+    db = tmp_path / "compile_commands.json"
+    db.write_text(
+        json.dumps(
+            [
+                {"command": "cc -DKEEP -c a.c"},
+                {"command": "cc -DKEEP -UKEEP -c b.c"},
+            ]
+        )
+    )
+    assert defines_from_compile_db(db) == set()
+
+
+def test_defines_from_compile_db_malformed_is_empty(tmp_path):
+    bad = tmp_path / "compile_commands.json"
+    bad.write_text("{ not valid json")
+    assert defines_from_compile_db(bad) == set()
+    obj = tmp_path / "obj.json"
+    obj.write_text('{"not": "a list"}')
+    assert defines_from_compile_db(obj) == set()
+    assert defines_from_compile_db(tmp_path / "missing.json") == set()
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]")
+    assert defines_from_compile_db(empty) == set()
+
+
+def test_defines_from_compile_db_accepts_build_directory(tmp_path):
+    """A build *directory* is normalised to ``<dir>/compile_commands.json`` so the
+    documented ``dump … -p build/`` form works (Codex review #498)."""
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{"command": "cc -DKEEP -c a.c"}])
+    )
+    assert defines_from_compile_db(tmp_path) == {"KEEP"}
+    defines, _ = collect_build_context([], tmp_path)
+    assert defines == {"KEEP"}
+
+
+def test_defines_from_compile_db_skips_nondict_entries(tmp_path):
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps(["not-a-dict", {"command": "cc -DOK -c a.c"}]))
+    assert defines_from_compile_db(db) == {"OK"}
+
+
+# ── conditional-field scan: what IS recorded ─────────────────────────────────
+
+
+def test_scan_records_ifdef_guarded_field():
+    src = "struct Config {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    reg = scan_conditional_fields(src)
+    assert _guard(reg, "Config", "legacy") == {
+        "guard": "KEEP",
+        "type": "int",
+        "is_bitfield": False,
+        "bitfield_bits": None,
+        "access": "public",  # struct default
+    }
+    # the unconditional field is not registered
+    assert "version" not in reg.get("Config", {})
+
+
+def test_scan_if_defined_paren_and_space_forms():
+    paren = scan_conditional_fields("class W {\n#if defined(X)\n int a;\n#endif\n};")
+    assert _guard(paren, "W", "a")["guard"] == "X"
+    space = scan_conditional_fields("class W {\n#if defined Y\n int a;\n#endif\n};")
+    assert _guard(space, "W", "a")["guard"] == "Y"
+
+
+def test_scan_captures_type_bitfield_and_pointer():
+    src = (
+        "struct S {\n#ifdef G\n unsigned int mode;\n int flags : 3;\n"
+        " char *name;\n#endif\n};"
+    )
+    reg = scan_conditional_fields(src)["S"]
+    assert reg["mode"]["type"] == "unsigned int"
+    assert reg["flags"]["is_bitfield"] and reg["flags"]["bitfield_bits"] == 3
+    assert reg["name"]["type"] == "char *"
+
+
+def test_scan_strips_comments():
+    src = "struct S {\n#ifdef G\n int a; /* c */ // trailing\n#endif\n};"
+    assert _guard(scan_conditional_fields(src), "S", "a")["type"] == "int"
+
+
+def test_scan_records_access_default_by_keyword():
+    """A field's C++ access defaults from the record keyword — public for
+    ``struct``/``union``, private for ``class`` (Codex review #498, P2)."""
+    st = scan_conditional_fields("struct S {\n#ifdef G\n int a;\n#endif\n};")
+    assert _guard(st, "S", "a")["access"] == "public"
+    un = scan_conditional_fields("union U {\n#ifdef G\n int a;\n#endif\n};")
+    assert _guard(un, "U", "a")["access"] == "public"
+    cl = scan_conditional_fields("class C {\n#ifdef G\n int a;\n#endif\n};")
+    assert _guard(cl, "C", "a")["access"] == "private"
+
+
+def test_scan_tracks_access_labels():
+    """An access label (``public:``) switches the recorded access for fields that
+    follow it in the same body."""
+    src = (
+        "class C {\n int hidden;\npublic:\n#ifdef G\n int shown;\n#endif\n"
+        "private:\n#ifdef G\n int again_hidden;\n#endif\n};"
+    )
+    reg = scan_conditional_fields(src)["C"]
+    assert reg["shown"]["access"] == "public"
+    assert reg["again_hidden"]["access"] == "private"
+
+
+# ── conditional-field scan: what is NOT recorded (conservative) ──────────────
+
+
+def test_scan_records_field_inside_include_guarded_header():
+    """A classic ``#ifndef H`` / ``#define H`` file include guard is transparent,
+    so a guarded field in the (near-universal) include-guarded header is still
+    recorded (Codex review #498)."""
+    src = (
+        "#ifndef CONFIG_H\n#define CONFIG_H\n"
+        "struct Config {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};\n"
+        "#endif\n"
+    )
+    reg = scan_conditional_fields(src)
+    assert _guard(reg, "Config", "legacy")["guard"] == "KEEP"
+
+
+def test_scan_include_guard_does_not_make_unguarded_field_recorded():
+    """The include guard is transparent, not a positive guard: an *unguarded*
+    field in an include-guarded header is still not registered."""
+    src = (
+        "#ifndef CONFIG_H\n#define CONFIG_H\n"
+        "struct Config {\n int always;\n};\n#endif\n"
+    )
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_nested_ifdef_inside_include_guard_not_recorded():
+    """Two real positive guards nested inside the include guard is still 'nested'
+    (not a single positive guard) → not recorded."""
+    src = (
+        "#ifndef H\n#define H\nstruct S {\n#ifdef A\n#ifdef B\n int x;\n"
+        "#endif\n#endif\n};\n#endif\n"
+    )
+    assert scan_conditional_fields(src) == {}
+
+
+def test_include_guard_macro_detection():
+    from abicheck.header_conditionals import _include_guard_macro
+
+    assert _include_guard_macro(["#ifndef H", "#define H", "int x;"]) == "H"
+    # #define name must match the #ifndef name
+    assert _include_guard_macro(["#ifndef H", "#define OTHER"]) is None
+    # code before the guard → not a whole-file guard
+    assert _include_guard_macro(["struct S {};", "#ifndef H", "#define H"]) is None
+    # a lone #ifndef with no following #define is not an include guard
+    assert _include_guard_macro(["#ifndef H", "int x;"]) is None
+    # only an #ifndef and nothing after (loop ends), or an empty file
+    assert _include_guard_macro(["#ifndef H"]) is None
+    assert _include_guard_macro([]) is None
+
+
+def test_scan_records_simple_negative_guard():
+    """A simple ``#ifndef GUARD`` field is recorded with ``negative: True`` so the
+    reconciler can prune it from a build that defines GUARD (Codex review #498)."""
+    neg = "struct S {\n#ifndef NO_PAD\n int pad;\n#endif\n};"
+    entry = _guard(scan_conditional_fields(neg), "S", "pad")
+    assert entry["guard"] == "NO_PAD" and entry["negative"] is True
+
+
+def test_scan_negative_guard_distinct_from_include_guard():
+    """Inside an include-guarded header, a real ``#ifndef FEATURE`` field is still
+    recorded as a negative guard (the file guard is the transparent one)."""
+    src = (
+        "#ifndef H\n#define H\nstruct S {\n#ifndef FEATURE\n int pad;\n#endif\n};\n"
+        "#endif\n"
+    )
+    entry = _guard(scan_conditional_fields(src), "S", "pad")
+    assert entry["guard"] == "FEATURE" and entry["negative"] is True
+
+
+def test_scan_skips_compound_guards():
+    """Compound / expression guards remain opaque — not recordable either way."""
+    comp = "struct S {\n#if defined(A) && defined(B)\n int x;\n#endif\n};"
+    assert scan_conditional_fields(comp) == {}
+    expr = "struct S {\n#if VER > 2\n int x;\n#endif\n};"
+    assert scan_conditional_fields(expr) == {}
+    # a positive #ifdef entry carries no ``negative`` key
+    pos = scan_conditional_fields("struct S {\n#ifdef G\n int a;\n#endif\n};")
+    assert "negative" not in _guard(pos, "S", "a")
+
+
+def test_scan_skips_nested_guards():
+    src = "struct S {\n#ifdef A\n#ifdef B\n int x;\n#endif\n#endif\n};"
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_skips_else_branch():
+    src = "struct S {\n#ifdef A\n int a;\n#else\n int b;\n#endif\n};"
+    reg = scan_conditional_fields(src)
+    assert _guard(reg, "S", "a") is not None
+    assert _guard(reg, "S", "b") is None
+
+
+def test_scan_skips_guard_undefined_by_header():
+    """A header-local ``#undef GUARD`` before the guarded region means the build
+    really prunes the field, so it must not be recorded as reconcilable even
+    though a compile DB might define GUARD (Codex review #498)."""
+    src = "struct S {\n#undef G\n#ifdef G\n int gone;\n#endif\n};"
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_records_guard_redefined_after_undef():
+    """A later ``#define GUARD`` re-activates the macro, so a field guarded after
+    the re-definition is recorded again."""
+    src = "struct S {\n#undef G\n#define G 1\n#ifdef G\n int back;\n#endif\n};"
+    assert _guard(scan_conditional_fields(src), "S", "back")["guard"] == "G"
+
+
+def test_scan_conditional_define_does_not_reactivate_undef():
+    """A ``#define`` inside an ``#ifdef OTHER`` branch the scanner cannot evaluate
+    must NOT reactivate a previously ``#undef``'d guard — a build without OTHER
+    really keeps the macro undefined, so the field stays unrecorded (Codex #498)."""
+    src = (
+        "struct S {\n#undef G\n#ifdef OTHER\n#define G 1\n#endif\n"
+        "#ifdef G\n int gone;\n#endif\n};"
+    )
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_undef_after_field_does_not_suppress_it():
+    """An ``#undef`` *after* a guarded field (later in file order) does not
+    retroactively suppress the field recorded before it — the build saw the field
+    while the macro was still active."""
+    src = "struct S {\n#ifdef G\n int early;\n#endif\n#undef G\n};"
+    assert _guard(scan_conditional_fields(src), "S", "early")["guard"] == "G"
+
+
+def test_scan_skips_methods_and_assignments():
+    src = (
+        "struct S {\n#ifdef G\n void run(int x);\n int init = 0;\n int ok;\n#endif\n};"
+    )
+    reg = scan_conditional_fields(src)["S"]
+    assert "run" not in reg and "init" not in reg
+    assert "ok" in reg
+
+
+def test_scan_keys_namespaced_record_by_qualified_name():
+    """A record inside ``namespace api`` is keyed ``api::S`` so the evidence
+    matches the qualified ``RecordType.name`` a DWARF snapshot uses (Codex #498)."""
+    src = "namespace api {\nstruct S {\n#ifdef G\n int legacy;\n#endif\n};\n}"
+    reg = scan_conditional_fields(src)
+    assert "S" not in reg
+    assert _guard(reg, "api::S", "legacy")["guard"] == "G"
+
+
+def test_scan_keys_nested_namespaces_and_records():
+    """Nested namespaces and an enclosing record both contribute qualifier
+    segments (``a::b::Outer::Inner``)."""
+    src = (
+        "namespace a {\nnamespace b {\nstruct Outer {\nstruct Inner {\n"
+        "#ifdef G\n int x;\n#endif\n};\n};\n}\n}"
+    )
+    reg = scan_conditional_fields(src)
+    assert _guard(reg, "a::b::Outer::Inner", "x")["guard"] == "G"
+
+
+def test_scan_distinguishes_same_name_records_in_different_namespaces():
+    """Two ``S`` records in different namespaces stay separate registry keys
+    rather than being conflated under a bare ``S``."""
+    src = (
+        "namespace a {\nstruct S {\n#ifdef G\n int a_field;\n#endif\n};\n}\n"
+        "namespace b {\nstruct S {\n#ifdef G\n int b_field;\n#endif\n};\n}"
+    )
+    reg = scan_conditional_fields(src)
+    assert set(reg) == {"a::S", "b::S"}
+    assert "a_field" in reg["a::S"] and "b_field" in reg["b::S"]
+
+
+def test_scan_qualified_namespace_opener():
+    """A ``namespace a::b {`` opener contributes both segments."""
+    src = "namespace a::b {\nstruct S {\n#ifdef G\n int x;\n#endif\n};\n}"
+    assert _guard(scan_conditional_fields(src), "a::b::S", "x")["guard"] == "G"
+
+
+def test_scan_namespace_brace_on_next_line():
+    """``namespace api`` then ``{`` on the following line still opens the scope."""
+    src = "namespace api\n{\nstruct S {\n#ifdef G\n int x;\n#endif\n};\n}"
+    assert _guard(scan_conditional_fields(src), "api::S", "x")["guard"] == "G"
+
+
+def test_scan_ignores_namespace_alias():
+    """A namespace *alias* (``namespace short = a::b;``) opens no scope."""
+    src = "namespace short = a::b;\nstruct S {\n#ifdef G\n int x;\n#endif\n};"
+    reg = scan_conditional_fields(src)
+    assert set(reg) == {"S"}
+    assert _guard(reg, "S", "x")["guard"] == "G"
+
+
+def test_scan_skips_anonymous_namespace():
+    """A record in an anonymous namespace has internal linkage / no stable public
+    name, so its guarded fields are never recorded."""
+    src = "namespace {\nstruct S {\n#ifdef G\n int x;\n#endif\n};\n}"
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_ignores_using_namespace_directive():
+    """``using namespace std;`` must not be treated as a scope opener."""
+    src = "using namespace std;\nstruct S {\n#ifdef G\n int x;\n#endif\n};"
+    assert _guard(scan_conditional_fields(src), "S", "x")["guard"] == "G"
+
+
+def test_scan_ignores_guarded_field_outside_record_body():
+    # A guarded declaration at file scope is not a record field.
+    src = "#ifdef G\nint global_thing;\n#endif\nstruct S { int a; };"
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_forward_declaration_does_not_open_a_record():
+    src = "struct Fwd;\nstruct S {\n#ifdef G\n int a;\n#endif\n};"
+    reg = scan_conditional_fields(src)
+    assert "Fwd" not in reg and _guard(reg, "S", "a") is not None
+
+
+def test_scan_record_name_on_its_own_line():
+    """``struct Name`` then ``{`` on the next line still opens the body."""
+    src = "struct S\n{\n#ifdef G\n int a;\n#endif\n};"
+    assert _guard(scan_conditional_fields(src), "S", "a")["guard"] == "G"
+
+
+def test_scan_field_after_endif_is_unconditional():
+    """A field after the ``#endif`` is unconditional and not registered."""
+    src = "struct S {\n#ifdef G\n int a;\n#endif\n int b;\n};"
+    reg = scan_conditional_fields(src)
+    assert _guard(reg, "S", "a") is not None
+    assert _guard(reg, "S", "b") is None
+
+
+def test_scan_tolerates_blank_lines_and_other_directives():
+    """Blank lines and non-conditional directives (``#define``/``#include``) are
+    skipped without disturbing the guard/record tracking."""
+    src = (
+        "\nstruct S {\n#define LOCAL 1\n#include <x.h>\n\n#ifdef G\n int a;\n#endif\n};"
+    )
+    assert _guard(scan_conditional_fields(src), "S", "a")["guard"] == "G"
+
+
+def test_parse_field_helper_edge_cases():
+    from abicheck.header_conditionals import _parse_field
+
+    assert _parse_field("void run(int)") is None  # has (
+    assert _parse_field("int x = 0") is None  # has =
+    assert _parse_field("justoneword") is None  # no type/name split
+    assert _parse_field("int return") is None  # keyword name
+    assert _parse_field("int x") == ("x", "int", False, None)
+    assert _parse_field("int flags : 3") == ("flags", "int", True, 3)
+    # a ``::`` before a trailing digit is not a bit-field
+    assert _parse_field("ns::T value") == ("value", "ns::T", False, None)
+
+
+# ── collect_build_context (headers + db) ─────────────────────────────────────
+
+
+def test_collect_build_context_scans_headers_and_reads_db(tmp_path):
+    h = tmp_path / "config.h"
+    h.write_text(
+        "struct Config {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    )
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
+    defines, registry = collect_build_context([h], db, extra_flags=["-DEXTRA"])
+    assert defines == {"KEEP", "EXTRA"}
+    assert _guard(registry, "Config", "legacy")["guard"] == "KEEP"
+
+
+def test_collect_build_context_extra_flag_overrides_db_define(tmp_path):
+    """A user ``-UKEEP`` extra flag overrides a compile-DB ``-DKEEP`` — the real
+    parse applies extra flags after the DB options, so KEEP is not active and its
+    guarded field is never reconciled (Codex review #498)."""
+    h = tmp_path / "config.h"
+    h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
+    defines, _ = collect_build_context([h], db, extra_flags=["-UKEEP"])
+    assert "KEEP" not in defines
+
+
+def test_collect_build_context_skips_unreadable_header(tmp_path):
+    defines, registry = collect_build_context(
+        [tmp_path / "does-not-exist.h"], None, extra_flags=["-DK"]
+    )
+    assert defines == {"K"}
+    assert registry == {}
+
+
+def test_user_define_flags_combines_tokens_and_gcc_options():
+    """The dump collects the user's global flags: ``--gcc-option`` tokens plus the
+    ``-D``/``-U`` in the ``--gcc-options`` string (Codex review #498)."""
+    from abicheck.cli_dump_helpers import _user_define_flags
+
+    assert _user_define_flags((), None) == []
+    assert _user_define_flags(("-DA",), None) == ["-DA"]
+    assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-DA", "-UKEEP", "-DB"]
+    # a malformed --gcc-options (unbalanced quote) is skipped, not fatal
+    assert _user_define_flags(("-DA",), '"oops') == ["-DA"]
+
+
+def test_user_gcc_options_override_db_define_end_to_end(tmp_path):
+    """A user ``--gcc-options=-UKEEP`` reaches the collector and overrides a
+    compile-DB ``-DKEEP``, so KEEP is inactive in ``build_context_defines``."""
+    from abicheck.cli_dump_helpers import _attach_build_context, _user_define_flags
+    from abicheck.model import AbiSnapshot
+
+    h = tmp_path / "config.h"
+    h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
+
+    snap = AbiSnapshot(library="lib", version="1")
+    flags = _user_define_flags((), "-UKEEP")
+    _attach_build_context(snap, db, [h], flags)
+    assert "KEEP" not in snap.build_context_defines
+
+
+def test_attach_build_context_populates_snapshot(tmp_path):
+    """The dump-path helper harvests defines + scans headers and attaches both to
+    the snapshot; an empty harvest leaves the defaults untouched."""
+    from abicheck.cli_dump_helpers import _attach_build_context
+    from abicheck.model import AbiSnapshot
+
+    h = tmp_path / "config.h"
+    h.write_text(
+        "struct Config {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    )
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
+
+    snap = AbiSnapshot(library="lib", version="1")
+    _attach_build_context(snap, db, [h], ["-DEXTRA"])
+    assert snap.build_context_defines == {"KEEP", "EXTRA"}
+    assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
+
+    # No build evidence → snapshot defaults are left untouched.
+    empty = AbiSnapshot(library="lib", version="1")
+    _attach_build_context(empty, tmp_path / "missing.json", [tmp_path / "gone.h"], [])
+    assert empty.build_context_defines == set()
+    assert empty.conditional_fields == {}
+
+
+# ── end-to-end: scanned evidence drives the reconciler ───────────────────────
+
+
+def test_scanned_evidence_reconciles_context_free_false_positive(tmp_path):
+    """A header scanned by the collection layer produces exactly the evidence the
+    reconciler needs to clear a context-free-pruning false positive."""
+    from abicheck.checker import Verdict, compare
+    from abicheck.model import (
+        AbiSnapshot,
+        Function,
+        RecordType,
+        ScopeOrigin,
+        TypeField,
+        Visibility,
+    )
+
+    header = (
+        "struct Config {\n int version;\n"
+        "#ifdef CONFIG_KEEP_LEGACY\n int legacy;\n#endif\n};"
+    )
+    h = tmp_path / "config.h"
+    h.write_text(header)
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DCONFIG_KEEP_LEGACY -c config.c"}]))
+    defines, registry = collect_build_context([h], db)
+
+    def _fn():
+        return Function(
+            name="mk",
+            mangled="mk",
+            return_type="Config *",
+            params=[],
+            visibility=Visibility.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    def _snap(version, fields):
+        s = AbiSnapshot(
+            library="lib",
+            version=version,
+            from_headers=True,
+            types=[
+                RecordType(
+                    name="Config",
+                    kind="struct",
+                    size_bits=64,
+                    fields=fields,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            functions=[_fn()],
+        )
+        s.build_context_defines = set(defines)
+        s.conditional_fields = registry
+        return s
+
+    # v1 declared `legacy` unconditionally; v2's context-free parse pruned it.
+    old = _snap(
+        "1",
+        [TypeField(name="version", type="int"), TypeField(name="legacy", type="int")],
+    )
+    new = _snap("2", [TypeField(name="version", type="int")])
+
+    assert compare(old, new, scope_to_public_surface=True).verdict == Verdict.BREAKING
+    reconciled = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert reconciled.verdict == Verdict.NO_CHANGE
+    assert reconciled.reconciled_count == 1

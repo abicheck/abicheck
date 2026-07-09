@@ -154,6 +154,14 @@ class DiffResult:
     # Recorded for audit — surfaced under --show-filtered — never dropped.
     out_of_surface_changes: list[Change] = field(default_factory=list)
     out_of_surface_count: int = 0
+    # ADR-039 — findings suppressed as context-free header-parse artifacts once
+    # build context (active ``-D`` defines + per-field ``guard`` annotations)
+    # proved the field's real presence is identical across both builds. Recorded
+    # for audit — surfaced under --show-filtered — never silently dropped. Only
+    # populated when ``reconcile_build_context`` was enabled and build evidence
+    # was present; empty otherwise. Excluded from the verdict.
+    reconciled_changes: list[Change] = field(default_factory=list)
+    reconciled_count: int = 0
     scope_to_public_surface: bool = False
     # False only when --scope-public-headers was requested but the public
     # surface could not be resolved, so scoping fell back to the full export

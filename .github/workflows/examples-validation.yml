@@ -294,6 +294,7 @@ jobs:
             tests/test_l3l4l5_examples.py \
             tests/test_python_api_examples.py \
             tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
+            tests/test_diff_reconcile.py::test_case164_fixtures_reconcile \
             -q
 
       - name: Validate bundle examples
@@ -312,6 +313,7 @@ jobs:
             --proof-l3l4l5 \
             --proof-btf \
             --proof-python-api \
+            --proof-reconcile \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix

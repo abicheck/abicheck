@@ -47,6 +47,26 @@ def echo_filtered_surface(result: DiffResult) -> None:
         click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
 
 
+def echo_reconciled(result: DiffResult) -> None:
+    """Print the build-context reconciliation ledger (ADR-039 --show-filtered).
+
+    Findings cleared as context-free header-parse artifacts are recorded here so
+    the demotion is never silent: the verdict dropped them, but the user can see
+    exactly what was removed and why."""
+    n = result.reconciled_count
+    click.echo(
+        f"\nReconciled as context-free header-parse artifacts ({n} "
+        f"{'finding' if n == 1 else 'findings'}, --reconcile-build-context):",
+        err=True,
+    )
+    for c in result.reconciled_changes:
+        loc = f" [{c.source_location}]" if c.source_location else ""
+        reason = (
+            f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
+        )
+        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
+
+
 def echo_pattern_modulations(result: DiffResult) -> None:
     """Print the pattern-aware modulation ledger (ADR-027 A4 --explain-patterns)."""
     mods = result.pattern_modulations

@@ -191,6 +191,31 @@ def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
+    """Attach the ADR-039 build-context reconciliation ledger to a JSON dict.
+
+    Findings cleared as context-free header-parse artifacts are disclosed here —
+    not just dropped from the verdict — so the "why was this removed" trail is
+    machine-readable. Independent of surface scoping (reconciliation can run
+    without ``--scope-public-headers``); emitted only when something was cleared.
+    """
+    if not result.reconciled_changes:
+        return
+    d["build_context_reconciled"] = {
+        "count": result.reconciled_count,
+        "changes": [
+            {
+                "kind": c.kind.value,
+                "symbol": c.symbol,
+                "description": c.description,
+                "source_location": c.source_location,
+                "reason": getattr(c, "surface_exclusion_reason", None),
+            }
+            for c in result.reconciled_changes
+        ],
+    }
+
+
 def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
@@ -271,6 +296,7 @@ def _to_json_leaf(
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
+    _add_reconciled(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -533,6 +559,7 @@ def to_json(
     _add_changes_block(d, result, changes, effective_policy, eff_sets)
     _add_suppression(d, result)
     _add_surface_scope(d, result)
+    _add_reconciled(d, result)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)

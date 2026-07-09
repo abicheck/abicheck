@@ -45,6 +45,10 @@ SPECIAL_PROOFS = {
         "lane": "python-api-stub-pair",
         "proof": "tests/test_python_api_examples.py",
     },
+    "reconcile": {
+        "lane": "build-context-reconcile-fixture",
+        "proof": "tests/test_diff_reconcile.py::test_case164_fixtures_reconcile",
+    },
 }
 
 
@@ -72,6 +76,8 @@ def _case_owner(name: str, entry: dict[str, Any]) -> str:
         return "btf"
     if entry.get("mode") == "audit" or entry.get("expected_crosscheck_kinds"):
         return "g20"
+    if entry.get("mode") == "reconcile":
+        return "reconcile"
     if "old.json" in (entry.get("fixtures") or []):
         return "l3l4l5"
     if entry.get("stub_pair"):
@@ -131,6 +137,7 @@ def build_matrix(
     proof_l3l4l5: bool,
     proof_btf: bool,
     proof_python_api: bool,
+    proof_reconcile: bool = False,
 ) -> dict[str, Any]:
     gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     gcc_results = _results_by_case(gcc)
@@ -180,6 +187,8 @@ def build_matrix(
             status, proof_lane, note = _special_status("l3l4l5", proof_l3l4l5)
         elif owner == "python_api":
             status, proof_lane, note = _special_status("python_api", proof_python_api)
+        elif owner == "reconcile":
+            status, proof_lane, note = _special_status("reconcile", proof_reconcile)
         else:  # pragma: no cover - defensive future-proofing
             status, proof_lane, note = "UNRESOLVED", owner, "unknown owner"
 
@@ -228,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proof-l3l4l5", action="store_true")
     parser.add_argument("--proof-btf", action="store_true")
     parser.add_argument("--proof-python-api", action="store_true")
+    parser.add_argument("--proof-reconcile", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--allow-unresolved",
@@ -245,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         proof_l3l4l5=args.proof_l3l4l5,
         proof_btf=args.proof_btf,
         proof_python_api=args.proof_python_api,
+        proof_reconcile=args.proof_reconcile,
     )
     text = json.dumps(matrix, indent=2)
     if args.out:

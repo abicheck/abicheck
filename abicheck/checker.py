@@ -85,6 +85,7 @@ from .diff_python import _diff_python_ext  # noqa: F401 — triggers detector re
 from .diff_python_api import (
     _diff_python_api,  # noqa: F401 — triggers detector registration
 )
+from .diff_reconcile import reconcile_build_context as reconcile_build_context_findings
 from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
@@ -473,6 +474,7 @@ def compare(
     surface_metrics: bool = False,
     collapse_versioned_symbols: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    reconcile_build_context: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -528,6 +530,19 @@ def compare(
     verdict_redundant = [
         c for c in redundant if not (c.caused_by_type or "").startswith("rename:")
     ]
+
+    # ADR-039 — build-context reconciliation. Opt-in: when enabled and the
+    # snapshots carry build-time defines, move context-free header-parse
+    # artifacts (a conditional field's phantom add/remove the build proves never
+    # changed) out of the verdict into an audit bucket. Runs *before* the SONAME
+    # policy so a phantom breaking finding cannot trigger a stale
+    # ``soname_bump_recommended`` that would survive reconciliation and turn the
+    # advertised NO_CHANGE into COMPATIBLE + a spurious bump advisory (Codex
+    # review #498). Authority-rule-safe: it only clears a finding the build
+    # defines prove is a non-change (see diff_reconcile).
+    reconciled: list[Change] = []
+    if reconcile_build_context:
+        kept, reconciled = reconcile_build_context_findings(kept, old, new)
 
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
@@ -614,6 +629,8 @@ def compare(
         coverage_warnings=coverage_warnings,
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
+        reconciled_changes=reconciled,
+        reconciled_count=len(reconciled),
         scope_to_public_surface=scope_active,
         scope_resolved=scope_resolved,
         surface_scope_confidence=scope_confidence,

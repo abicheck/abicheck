@@ -16,6 +16,7 @@
 """Helper functions for the ``dump`` CLI command (split from cli.py)."""
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -68,6 +69,55 @@ class _WriteSnapshotOutput(Protocol):
         build_compile_db: str | None = ...,
         extractor: str = ...,
     ) -> None: ...
+
+
+def _user_define_flags(
+    gcc_option_tokens: tuple[str, ...], user_gcc_options: str | None
+) -> list[str]:
+    """The user's *global* define-affecting flags for the ADR-039 collector.
+
+    Combines the repeatable ``--gcc-option`` tokens with the ``-D``/``-U`` in the
+    ``--gcc-options`` string. These are applied on top of the compile-DB
+    intersection so a user ``--gcc-options=-UKEEP`` overrides a database
+    ``-DKEEP`` (Codex review #498). The auto-derived first-header build context is
+    deliberately excluded (it must not be unioned snapshot-wide).
+
+    A malformed ``--gcc-options`` (e.g. an unbalanced quote) must not abort the
+    dump — ``shlex.split`` errors are swallowed and only the tokens are used
+    (CodeRabbit review)."""
+    flags = list(gcc_option_tokens)
+    if user_gcc_options:
+        try:
+            flags += shlex.split(user_gcc_options)
+        except ValueError:
+            pass  # bad optional define flags are skipped, not fatal
+    return flags
+
+
+def _attach_build_context(
+    snap: AbiSnapshot,
+    compile_db: str | Path,
+    headers: list[Path],
+    extra_flags: list[str],
+    source_filter: str | None = None,
+) -> None:
+    """ADR-039 collection layer: harvest the build's active ``-D`` set and scan the
+    public headers for ``#ifdef``-guarded record fields, attaching both to *snap*.
+
+    Best-effort and additive — a plain context-free dump (no compile DB) never
+    reaches here, and an empty harvest leaves the snapshot's defaults untouched, so
+    the pass is a safe no-op unless real build evidence is found. *source_filter*
+    (``--compile-db-filter``) selects the same compile-DB entries the header parse
+    used."""
+    from .header_conditionals import collect_build_context
+
+    bc_defines, bc_conditional = collect_build_context(
+        headers, compile_db, extra_flags=extra_flags, source_filter=source_filter
+    )
+    if bc_defines:
+        snap.build_context_defines = bc_defines
+    if bc_conditional:
+        snap.conditional_fields = bc_conditional
 
 
 def resolve_dump_debug_format(
@@ -176,6 +226,8 @@ def perform_elf_dump(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     header_backend: str = "auto",
+    user_gcc_options: str | None = None,
+    compile_db_filter: str | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -235,6 +287,28 @@ def perform_elf_dump(
     # Record that the header AST was parsed with the real build context (ADR-029)
     if effective_compile_db and resolved_headers:
         snap.parsed_with_build_context = True
+
+    # ADR-039 collection layer — when a compile DB is available, harvest the
+    # build's active ``-D`` set and scan the public headers for ``#ifdef``-guarded
+    # record fields, so the reconciler can clear a context-free header-parse false
+    # positive (a guarded field the context-free castxml parse pruned). Best-effort
+    # and additive: absent/empty on a plain context-free dump.
+    if effective_compile_db and resolved_headers:
+        # Augment the sound per-command compile-DB intersection with the user's
+        # *global* flags only: the repeatable ``--gcc-option`` tokens and the
+        # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
+        # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
+        # review #498). We deliberately do NOT feed ``effective_gcc_options``,
+        # which also carries the *first* resolved header's auto-derived build
+        # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
+        # active for every scanned header.
+        _attach_build_context(
+            snap,
+            effective_compile_db,
+            resolved_headers,
+            _user_define_flags(gcc_option_tokens, user_gcc_options),
+            source_filter=compile_db_filter,
+        )
 
     # G14: recognise a CPython extension module and attach its metadata so the
     # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`

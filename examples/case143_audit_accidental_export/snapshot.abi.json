@@ -1,7 +1,9 @@
 {
+  "build_context_defines": [],
   "build_id": null,
   "build_mode": null,
   "build_source_pack": null,
+  "conditional_fields": {},
   "constants": {},
   "created_at": null,
   "dependency_info": null,
