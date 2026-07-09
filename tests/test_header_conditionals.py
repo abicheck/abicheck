@@ -262,6 +262,22 @@ def test_scan_tracks_access_labels():
     assert reg["again_hidden"]["access"] == "private"
 
 
+def test_scan_split_forward_declaration_does_not_capture_next_record():
+    """A forward declaration split across lines (``struct S`` then ``;``) must not
+    leave a stale pending opener that captures the *next* record's body: ``T``'s
+    guarded field must be keyed to ``T``, never ``S`` (Codex review #498, P1)."""
+    src = (
+        "struct S\n;\n"
+        "struct T {\n#ifdef G\n int guarded;\n#endif\n};"
+    )
+    reg = scan_conditional_fields(src)
+    assert "guarded" in reg.get("T", {})
+    assert "S" not in reg  # nothing is misattributed to the forward-declared S
+    # A *real* split definition (no terminating ``;``) still opens S's body.
+    defn = scan_conditional_fields("struct S\n{\n#ifdef G\n int a;\n#endif\n};")
+    assert "a" in defn.get("S", {})
+
+
 # ── conditional-field scan: what is NOT recorded (conservative) ──────────────
 
 

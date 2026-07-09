@@ -561,6 +561,14 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
                         scope_stack.append(_Scope("ns", sc_name, brace_depth, None))
                     pending = None
                 brace_depth += 1
+            elif ch == ";" and pending is not None:
+                # A ``;`` reached before the pending opener's ``{`` terminates a
+                # *split* forward declaration (``struct S`` then ``;`` on the next
+                # line). Clear ``pending`` so a later ``struct T { … }`` opens its
+                # own scope instead of being keyed to ``S`` — otherwise ``T``'s
+                # guarded fields would be misattributed to ``S`` and could
+                # reconcile away a real ``S`` field change (Codex review #498).
+                pending = None
             elif ch == "}":
                 brace_depth = max(0, brace_depth - 1)
                 if scope_stack and brace_depth == scope_stack[-1].depth:
