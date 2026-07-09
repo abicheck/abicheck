@@ -256,8 +256,11 @@ def _snapshot_export_ids(snap: AbiSnapshot) -> set[str]:
                 val = getattr(s, attr, "")
                 if val:
                     ids.add(val)
-    for meta, attr in ((snap.elf, "symbols"), (snap.pe, "exports"),
-                       (snap.macho, "exports")):
+    for meta, attr in (
+        (snap.elf, "symbols"),
+        (snap.pe, "exports"),
+        (snap.macho, "exports"),
+    ):
         for s in getattr(meta, attr, None) or ():
             name = getattr(s, "name", "")
             if name:
@@ -459,6 +462,15 @@ class DemoteOffPythonSurface:
             return changes
         new_ext = ctx.new.python_ext
         if new_ext is None or not new_ext.is_extension:
+            return changes
+        # Both sides must be extensions. Otherwise a normal native library that
+        # is *replaced by* an extension (v1 exports `foo`; v2 is an extension
+        # dropping it) would have its real `func_removed` demoted, hiding a
+        # genuine break for the old library's C/C++ consumers. Only when the old
+        # artifact was itself an extension is its native symbol surface known to
+        # be implementation detail rather than a public contract.
+        old_ext = ctx.old.python_ext
+        if old_ext is None or not old_ext.is_extension:
             return changes
         # Defer to the C-header oracle when one resolved (hybrid modules that
         # ship a real public C API): FilterNonPublicSurface already scoped it.

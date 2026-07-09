@@ -350,10 +350,13 @@ class AbiSnapshot:
     )  # Linux kernel Module.symvers metadata (G23-D1). Keyword-only so inserting
     # it among the optional metadata fields cannot shift any positional argument.
     python_api: PythonApiSurface | None = field(
-        default=None
+        default=None, kw_only=True
     )  # Python-visible API surface (functions/classes/methods/signatures)
-    # recovered from a `.pyi` type stub (G23). None when no stub was found —
-    # the C-ABI/export view can't see this surface, so it's a separate check.
+    # recovered from a `.pyi` type stub (G23). Keyword-only (like ``kabi``) so
+    # inserting it among the optional metadata fields cannot shift the positional
+    # slot of ``enums``/``typedefs``/… for callers that build snapshots
+    # positionally. None when no stub was found — the C-ABI/export view can't see
+    # this surface, so it's a separate check.
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

@@ -122,25 +122,29 @@ def _diff_signature(
     added = [n for n in new_params if n not in old_params]
 
     # Exactly one dropped + one gained named parameter reads as a rename
-    # (the fixture case: `encoding` → `codec`). Callers that passed the old
-    # keyword now hit an unexpected-keyword TypeError. Reported as a single
-    # rename rather than a remove+add pair; the rename is also folded into the
-    # positional-binding comparison below so a same-position rename is not
-    # double-reported as a reorder.
+    # (the fixture case: `encoding` → `codec`). The rename is folded into the
+    # positional-binding comparison below (via ``rename_map``) so a same-position
+    # rename is not double-reported as a reorder. But a rename is only a *break*
+    # when the old parameter could be passed **by keyword**: renaming a
+    # positional-only parameter (`def f(a, /)` → `def f(b, /)`) is invisible to
+    # callers (they pass by position, and the name was never a valid keyword), so
+    # it is recorded in ``rename_map`` (to suppress a false positional-order
+    # finding) but emits nothing.
     rename_map: dict[str, str] = {}
     if len(removed) == 1 and len(added) == 1:
         old_name, new_name = removed[0], added[0]
         rename_map[old_name] = new_name
-        changes.append(
-            make_change(
-                ChangeKind.PYTHON_API_PARAMETER_RENAMED,
-                symbol=symbol,
-                name=qualified,
-                old=old_name,
-                new=new_name,
-                detail=qualified,
+        if _is_keyword_capable(old_params[old_name]):
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_PARAMETER_RENAMED,
+                    symbol=symbol,
+                    name=qualified,
+                    old=old_name,
+                    new=new_name,
+                    detail=qualified,
+                )
             )
-        )
     else:
         for n in removed:
             changes.append(

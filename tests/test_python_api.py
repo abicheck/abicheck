@@ -488,6 +488,24 @@ def test_trailing_positional_removal_is_not_double_reported() -> None:
     assert ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED not in kinds
 
 
+def test_positional_only_rename_is_compatible() -> None:
+    # A positional-only parameter can't be passed by keyword, so renaming it
+    # (same position) is invisible to callers — not a break.
+    kinds = _diff_kinds("def f(a, /): ...\n", "def f(b, /): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED not in kinds
+    assert not kinds
+
+
+def test_positional_or_keyword_rename_is_still_breaking() -> None:
+    kinds = _diff_kinds("def f(a): ...\n", "def f(b): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED in kinds
+
+
+def test_keyword_only_rename_is_still_breaking() -> None:
+    kinds = _diff_kinds("def f(*, a): ...\n", "def f(*, b): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED in kinds
+
+
 def test_same_position_rename_is_not_reported_as_reorder() -> None:
     # A single rename at the same position is a rename, not a reorder.
     kinds = _diff_kinds("def f(a, b): ...\n", "def f(a, c): ...\n")
@@ -783,6 +801,27 @@ def test_oracle_noop_without_recovered_surface(tmp_path) -> None:
     kept, demoted = _run_demote(ext, ext, [internal])
     assert demoted == []
     assert kept == [internal]
+
+
+def test_oracle_noop_when_old_side_not_an_extension(tmp_path) -> None:
+    # v1 is a normal native library (no python_ext); v2 is an extension. A
+    # native removal is a REAL break for the old library's C/C++ consumers and
+    # must NOT be demoted just because the new artifact is an extension.
+    new_ext = _ext_with_api(tmp_path)
+    old_plain = AbiSnapshot(library="libfoo.so", version="1")
+    internal = _c(ChangeKind.FUNC_REMOVED, "foo")
+    kept, demoted = _run_demote(old_plain, new_ext, [internal])
+    assert demoted == []
+    assert kept == [internal]
+
+
+def test_python_api_field_is_keyword_only() -> None:
+    # Guards against a positional-slot shift: a caller building AbiSnapshot
+    # positionally must not land its `enums` argument in `python_api`.
+    import dataclasses
+
+    fields = {f.name: f for f in dataclasses.fields(AbiSnapshot)}
+    assert fields["python_api"].kw_only is True
 
 
 def test_oracle_noop_for_non_extension() -> None:

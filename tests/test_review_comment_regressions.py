@@ -21,7 +21,9 @@ def _load_script(relpath: str) -> ModuleType:
     return module
 
 
-def test_full_matrix_load_json_missing_or_malformed_is_missing_lane(tmp_path: Path) -> None:
+def test_full_matrix_load_json_missing_or_malformed_is_missing_lane(
+    tmp_path: Path,
+) -> None:
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
     assert matrix._load_json(tmp_path / "missing.json") is None
     bad = tmp_path / "bad.json"
@@ -43,11 +45,35 @@ def test_full_matrix_allow_unresolved_never_masks_failed(monkeypatch) -> None:
     assert matrix.main(["--allow-unresolved"]) == 1
 
 
+def test_stub_pair_case_is_covered_by_python_api_proof() -> None:
+    # A .pyi-pair example (G23 case163) is owned by the python_api proof lane and
+    # counts as COVERED when --proof-python-api is supplied — it must not fall
+    # through to the compiled single-library lanes and be reported UNRESOLVED.
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    result = matrix.build_matrix(
+        gcc=None,
+        clang=None,
+        bundle=None,
+        runtime=None,
+        proof_g20=True,
+        proof_l3l4l5=True,
+        proof_btf=True,
+        proof_python_api=True,
+    )
+    stub_rows = [r for r in result["results"] if r["owner"] == "python_api"]
+    assert stub_rows, "no python_api-owned example case found"
+    for row in stub_rows:
+        assert row["status"] == "COVERED"
+        assert row["case_id"] not in result["unresolved_cases"]
+
+
 def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:
     bundle = _load_script("validation/scripts/run_bundle_examples.py")
 
     def raise_timeout(*_args, **_kwargs):
-        raise subprocess.TimeoutExpired(["cmake"], timeout=1, output="out", stderr="err")
+        raise subprocess.TimeoutExpired(
+            ["cmake"], timeout=1, output="out", stderr="err"
+        )
 
     monkeypatch.setattr(bundle.subprocess, "run", raise_timeout)
     result = bundle._run(["cmake"], timeout=1)
@@ -55,7 +81,9 @@ def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:
     assert "timeout after 1s" in result.stderr
 
 
-def test_bundle_runner_rejects_unexpected_bundle_kinds(monkeypatch, tmp_path: Path) -> None:
+def test_bundle_runner_rejects_unexpected_bundle_kinds(
+    monkeypatch, tmp_path: Path
+) -> None:
     bundle = _load_script("validation/scripts/run_bundle_examples.py")
     monkeypatch.setattr(bundle, "_build_case", lambda *_args: None)
     monkeypatch.setattr(
@@ -96,10 +124,13 @@ def test_bundle_runner_validates_expected_libraries() -> None:
             }
         ]
     }
-    assert bundle._validate_expected_libraries(
-        payload,
-        {"libcore.so": {"verdict": "BREAKING", "kinds": ["func_removed"]}},
-    ) == []
+    assert (
+        bundle._validate_expected_libraries(
+            payload,
+            {"libcore.so": {"verdict": "BREAKING", "kinds": ["func_removed"]}},
+        )
+        == []
+    )
     errors = bundle._validate_expected_libraries(
         payload,
         {"libcore.so": {"verdict": "BREAKING", "kinds": ["func_added"]}},
