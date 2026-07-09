@@ -219,6 +219,8 @@ def _build_case(build_dir: Path, build_type: str, case_name: str) -> str | None:
 def _skip_reason(case_name: str, entry: dict[str, object]) -> str | None:
     if entry.get("skip"):
         return str(entry.get("reason", "skip=true"))
+    if entry.get("stub_pair"):
+        return "Python-extension .pyi-pair case — no compilable runtime app"
     if entry.get("category") == "bundle" or entry.get("bundle") is True:
         return "bundle case — runtime smoke uses single-library app/v1/v2 layout"
     platforms = entry.get("platforms", ["linux", "macos", "windows"])

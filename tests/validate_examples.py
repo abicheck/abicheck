@@ -909,6 +909,15 @@ def _check_case_preconditions(
         return CaseResult(name, "SKIP", expected_raw, None,
                           "G20 audit/cross-source case — validated by tests/test_g20_catalog.py")
 
+    # G23 Python-extension cases ship a `.pyi` type-stub pair (v1.pyi/v2.pyi),
+    # not a compilable C/C++ source pair — the Python-level API surface is
+    # recovered statically, so this compile-and-diff path cannot build them.
+    # They are validated compiler-free by tests/test_python_api_examples.py.
+    if entry.get("stub_pair"):
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "Python-extension .pyi-pair case — validated by "
+                          "tests/test_python_api_examples.py")
+
     # L3/L4/L5 build/source-only cases (152-162) ship a hand-built evidence-model
     # fixture pair (old.json/new.json) instead of a compilable v1/v2 source pair;
     # they are validated compiler-free by tests/test_l3l4l5_examples.py.
