@@ -337,6 +337,22 @@ def test_scan_records_simple_negative_guard():
     assert entry["guard"] == "NO_PAD" and entry["negative"] is True
 
 
+def test_include_guard_recognized_after_pragma_once():
+    """A leading ``#pragma once`` before a classic ``#ifndef H`` / ``#define H``
+    wrapper must not stop include-guard recognition — otherwise the wrapper is
+    treated as a real negative guard and an inner ``#ifdef KEEP`` field (now
+    double-guarded) is dropped, leaving no reconcilable evidence (Codex review
+    #498, P2)."""
+    from abicheck.header_conditionals import _include_guard_macro
+
+    assert _include_guard_macro(["#pragma once", "#ifndef H", "#define H"]) == "H"
+    src = (
+        "#pragma once\n#ifndef H\n#define H\nstruct S {\n#ifdef KEEP\n int legacy;\n#endif\n};\n#endif\n"
+    )
+    entry = _guard(scan_conditional_fields(src), "S", "legacy")
+    assert entry["guard"] == "KEEP"  # single guard — the file wrapper is transparent
+
+
 def test_scan_negative_guard_distinct_from_include_guard():
     """Inside an include-guarded header, a real ``#ifndef FEATURE`` field is still
     recorded as a negative guard (the file guard is the transparent one)."""
@@ -656,6 +672,25 @@ def test_collect_build_context_extra_flag_overrides_db_define(tmp_path):
     db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
     defines, _ = collect_build_context([h], db, extra_flags=["-UKEEP"])
     assert "KEEP" not in defines
+
+
+def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
+    """A forced include (``-include``/``-imacros``) is preprocessed before the
+    header and could ``#undef`` a guard the scan never sees, so every scanned
+    guarded field is flagged ``ambiguous`` (Codex review #498, P1)."""
+    h = tmp_path / "config.h"
+    h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
+    # forced include via user --gcc-option pass-through
+    _, reg = collect_build_context([h], None, extra_flags=["-DKEEP", "-include", "prelude.h"])
+    assert _guard(reg, "Config", "legacy")["ambiguous"] is True
+    # and via a compile-DB command line
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -include prelude.h -c config.c"}]))
+    _, reg2 = collect_build_context([h], db)
+    assert _guard(reg2, "Config", "legacy")["ambiguous"] is True
+    # no forced include → normal reconcilable evidence
+    _, reg3 = collect_build_context([h], None, extra_flags=["-DKEEP"])
+    assert "ambiguous" not in _guard(reg3, "Config", "legacy")
 
 
 def test_collect_build_context_skips_unreadable_header(tmp_path):

@@ -47,7 +47,12 @@ per-file and does **not** follow ``#include``s, a guarded field appearing after
 any ``#include`` is marked ``ambiguous`` — an included file could ``#undef`` the
 guard the real build sees, which this text scan cannot know (Codex review #498);
 the reconciler then keeps that field's type rather than risk a wrong clear. Only
-self-contained headers (no preceding include) stay reconcilable. Pure-stdlib and
+self-contained headers (no preceding include) stay reconcilable. A **forced
+include** (``-include`` / ``-imacros`` on the command line or in a compile-DB
+entry) is preprocessed before the header and is treated the same way — all
+scanned fields become ``ambiguous`` (see :func:`collect_build_context`). A
+leading ``#pragma once`` before a classic ``#ifndef``/``#define`` wrapper is
+neutral and does not defeat include-guard recognition. Pure-stdlib and
 side-effect-free.
 """
 
@@ -219,6 +224,7 @@ _IFNDEF = re.compile(r"^#\s*ifndef\s+([A-Za-z_]\w*)\s*$")
 _UNDEF = re.compile(r"^#\s*undef\s+([A-Za-z_]\w*)")
 _DEFINE = re.compile(r"^#\s*define\s+([A-Za-z_]\w*)")
 _INCLUDE = re.compile(r"^#\s*include\b")
+_PRAGMA_ONCE = re.compile(r"^#\s*pragma\s+once\b")
 _FIELD = re.compile(r"^(?P<decl>[A-Za-z_][\w:<>,\s\*&]*?[\w\*&])\s*;\s*$")
 
 #: Sentinel guard-stack entry for a file-level ``#ifndef H`` / ``#define H``
@@ -262,6 +268,8 @@ def _include_guard_macro(lines: list[str]) -> str | None:
         if not s.startswith("#"):
             return None  # code before the guard → not a whole-file include guard
         if first is None:
+            if _PRAGMA_ONCE.match(s):
+                continue  # a leading ``#pragma once`` is neutral — skip and keep probing
             m = _IFNDEF.match(s)
             if not m:
                 return None
@@ -609,6 +617,45 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     return {rec: fields for rec, fields in registry.items() if fields}
 
 
+def _has_forced_include(tokens: Iterable[str]) -> bool:
+    """Whether *tokens* carry a forced-include flag (``-include`` / ``-imacros``).
+
+    These preprocess a file before the translation unit, injecting macro state the
+    per-file scan cannot see, so guarded fields must be treated as ``ambiguous``
+    (Codex review #498)."""
+    return any(t.startswith(("-include", "-imacros")) for t in tokens)
+
+
+def _compile_db_has_forced_include(path: str | Path, source_filter: str | None) -> bool:
+    """Whether any (filtered) compile-DB command carries a forced-include flag.
+
+    Mirrors :func:`defines_from_compile_db`'s read/filter so a ``-include`` in the
+    real build's command line — not just the user's ``--gcc-option`` — makes the
+    scanned guards ``ambiguous`` (Codex review #498). Best-effort: any read/parse
+    error is treated as *no* forced include (the collector never aborts a dump)."""
+    p = Path(path)
+    if p.is_dir():
+        p = p / "compile_commands.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, list):
+        return False
+    entries = [e for e in data if isinstance(e, dict)]
+    if source_filter:
+        matched = [e for e in entries if _compile_entry_matches(e, source_filter)]
+        if matched:
+            entries = matched
+    for entry in entries:
+        args = entry.get("arguments")
+        if not isinstance(args, list):
+            args = _split_command(entry.get("command"))
+        if _has_forced_include(str(a) for a in args):
+            return True
+    return False
+
+
 def collect_build_context(
     header_paths: Iterable[str | Path],
     compile_db: str | Path | None,
@@ -633,7 +680,17 @@ def collect_build_context(
         if compile_db is not None
         else set()
     )
-    defines: set[str] = defines_from_flags(extra_flags, initial=db_defines)
+    extra = list(extra_flags)
+    defines: set[str] = defines_from_flags(extra, initial=db_defines)
+
+    # A forced include (``-include foo.h`` / ``-imacros foo.h``) is preprocessed
+    # *before* the public header, so it can ``#undef``/``#define`` a guard macro the
+    # per-file scan never sees — exactly like an in-source ``#include`` (Codex
+    # review #498). Its macro state is unknown here, so mark every scanned guarded
+    # field ``ambiguous`` and let the reconciler keep those types.
+    forced_include = _has_forced_include(extra) or (
+        compile_db is not None and _compile_db_has_forced_include(compile_db, source_filter)
+    )
 
     registry: dict[str, dict[str, dict[str, object]]] = {}
     for path in header_paths:
@@ -642,5 +699,8 @@ def collect_build_context(
         except OSError:
             continue
         for rec, fields in scan_conditional_fields(text).items():
+            if forced_include:
+                for entry in fields.values():
+                    entry["ambiguous"] = True
             registry.setdefault(rec, {}).update(fields)
     return defines, registry
