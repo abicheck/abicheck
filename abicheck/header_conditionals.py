@@ -42,7 +42,12 @@ the guarded region, without a later ``#define``) is likewise skipped: the build
 really evaluates it inactive, so the field is genuinely pruned. A classic
 file-level ``#ifndef H`` / ``#define H`` **include guard** is treated as a
 transparent wrapper (it is always taken on first include), so guarded fields in
-the near-universal include-guarded header are still recorded. Pure-stdlib and
+the near-universal include-guarded header are still recorded. Because the scan is
+per-file and does **not** follow ``#include``s, a guarded field appearing after
+any ``#include`` is marked ``ambiguous`` — an included file could ``#undef`` the
+guard the real build sees, which this text scan cannot know (Codex review #498);
+the reconciler then keeps that field's type rather than risk a wrong clear. Only
+self-contained headers (no preceding include) stay reconcilable. Pure-stdlib and
 side-effect-free.
 """
 
@@ -213,6 +218,7 @@ _ENDIF = re.compile(r"^#\s*endif\b")
 _IFNDEF = re.compile(r"^#\s*ifndef\s+([A-Za-z_]\w*)\s*$")
 _UNDEF = re.compile(r"^#\s*undef\s+([A-Za-z_]\w*)")
 _DEFINE = re.compile(r"^#\s*define\s+([A-Za-z_]\w*)")
+_INCLUDE = re.compile(r"^#\s*include\b")
 _FIELD = re.compile(r"^(?P<decl>[A-Za-z_][\w:<>,\s\*&]*?[\w\*&])\s*;\s*$")
 
 #: Sentinel guard-stack entry for a file-level ``#ifndef H`` / ``#define H``
@@ -394,6 +400,14 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     # ``ambiguous: True`` and the reconciler refuses to reconcile its type at all,
     # rather than risk adding back / pruning the wrong field (Codex review #498).
     conditionally_touched: set[str] = set()
+    # Whether an ``#include`` has appeared so far. A scanned header cannot see what
+    # an included file does to a macro — an ``#include "config.h"`` that ``#undef``s
+    # the guard would make the real build prune a field this text scan still
+    # records. So a guarded field *after* any include is marked ``ambiguous`` (its
+    # guard state is unprovable without a preprocessor), and the reconciler keeps
+    # its type rather than risk a wrong clear (Codex review #498, P1). Self-contained
+    # headers (no preceding include) stay reconcilable.
+    saw_include = False
     brace_depth = 0
     # pending: (kind, name, keyword) awaiting its opening brace. kind is "ns" or
     # "rec"; keyword is the record keyword (or "" for a namespace).
@@ -412,6 +426,9 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
         if not line:
             continue
         if line.startswith("#"):
+            if _INCLUDE.match(line):
+                saw_include = True  # subsequent guards may be altered by the include
+                continue
             ifdef = _IFDEF.match(line)
             if_defined = None if ifdef else _IF_DEFINED.match(line)
             ifndef_m = _IFNDEF.match(line)
@@ -545,11 +562,12 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
                         # An ``#ifndef GUARD`` field: observed context-free, but
                         # pruned by a build that *defines* GUARD.
                         entry["negative"] = True
-                    if guard in conditionally_touched:
+                    if guard in conditionally_touched or saw_include:
                         # The guard macro is ``#undef``/``#define``d inside a branch
-                        # we cannot evaluate → its state is build-context dependent.
-                        # Flag the field so the reconciler keeps (never reconciles)
-                        # findings on this type (Codex review #498).
+                        # we cannot evaluate, **or** an earlier ``#include`` may have
+                        # altered it (the text scan cannot follow includes) → its
+                        # state is unprovable. Flag the field so the reconciler keeps
+                        # (never reconciles) findings on this type (Codex review #498).
                         entry["ambiguous"] = True
                     registry.setdefault(rec_here.qualified, {})[name] = entry
                     rec_here.recorded.append((entry, pos))

@@ -446,6 +446,21 @@ def test_scan_clean_guard_is_not_ambiguous():
     assert "ambiguous" not in _guard(scan_conditional_fields(src), "S", "x")
 
 
+def test_scan_guarded_field_after_include_is_ambiguous():
+    """A scanned header cannot follow ``#include``s, so an included file could
+    ``#undef`` the guard the real build sees. A guarded field *after* any include
+    is flagged ``ambiguous`` (its guard state is unprovable), so the reconciler
+    keeps its type (Codex review #498, P1)."""
+    src = '#include "config.h"\nstruct S {\n#ifdef KEEP\n int legacy;\n#endif\n};'
+    assert _guard(scan_conditional_fields(src), "S", "legacy")["ambiguous"] is True
+    # A system include has the same unprovable effect.
+    sysinc = "#include <stddef.h>\nstruct S {\n#ifdef KEEP\n int x;\n#endif\n};"
+    assert _guard(scan_conditional_fields(sysinc), "S", "x")["ambiguous"] is True
+    # An include *after* the guarded field does not affect it.
+    after = 'struct S {\n#ifdef KEEP\n int y;\n#endif\n};\n#include "late.h"'
+    assert "ambiguous" not in _guard(scan_conditional_fields(after), "S", "y")
+
+
 def test_scan_records_is_last_for_terminal_field():
     """A guarded field that is the final member of its record is flagged
     ``is_last: True``; one with a member after it is ``False`` (Codex review
