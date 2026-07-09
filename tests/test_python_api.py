@@ -772,6 +772,24 @@ def test_overload_return_only_change_is_risk_not_removal() -> None:
     assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
 
 
+def test_overload_required_param_widened_to_optional_is_compatible() -> None:
+    # `@overload def f(x: int)` → `@overload def f(x: int = ...)`: the required
+    # `x` becomes optional. Every old call that supplied `x` (`f(1)`) is still
+    # accepted, so this is a compatible widening, NOT an overload removal.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int = ...) -> int: ...\n"  # x widened to optional
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
+
+
 def test_overload_param_type_change_is_removal() -> None:
     # A *parameter*-type change drops a supported input call shape → removal.
     old = (
