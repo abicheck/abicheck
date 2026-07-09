@@ -117,6 +117,13 @@ def test_compile_entry_matcher_and_command_splitter_edges():
     assert _compile_entry_matches({"file": "/x/a.c", "directory": "/y"}, "a.c") is False
     assert _compile_entry_matches({"file": "/x/a.c"}, "a.c") is False
     assert _compile_entry_matches({"file": "/x/a.c"}, "/x/a.c") is True
+    # A file outside the build directory matches a CWD-relative filter, mirroring
+    # build_context._entry_matches_filter (Codex review #498).
+    from pathlib import Path
+
+    cwd_file = str(Path.cwd() / "src" / "libfoo" / "a.c")
+    assert _compile_entry_matches({"file": cwd_file, "directory": "/elsewhere"}, "src/libfoo/*") is True
+    assert _compile_entry_matches({"file": cwd_file}, "src/libfoo/*") is True
 
 
 def test_defines_from_compile_db_undefine_excludes_from_intersection(tmp_path):
@@ -363,6 +370,30 @@ def test_scan_conditional_define_does_not_reactivate_undef():
         "struct S {\n#undef G\n#ifdef OTHER\n#define G 1\n#endif\n"
         "#ifdef G\n int gone;\n#endif\n};"
     )
+    assert scan_conditional_fields(src) == {}
+
+
+def test_scan_conditional_undef_preserves_negative_guard():
+    """An ``#undef GUARD`` inside an ``#ifdef OTHER`` branch the scanner cannot
+    evaluate must NOT suppress a later ``#ifndef GUARD`` negative field: a build
+    without OTHER never takes that branch, so GUARD stays defined and the field is
+    really pruned. The negative entry must survive so the reconciler prunes the
+    context-free observed field instead of wrongly clearing an add/remove
+    (Codex review #498, P1)."""
+    src = (
+        "struct S {\n#ifdef OTHER\n#undef KEEP\n#endif\n"
+        "#ifndef KEEP\n int legacy;\n#endif\n};"
+    )
+    entry = _guard(scan_conditional_fields(src), "S", "legacy")
+    assert entry["guard"] == "KEEP" and entry["negative"] is True
+
+
+def test_scan_top_level_undef_suppresses_negative_guard():
+    """A **top-level** ``#undef KEEP`` genuinely undefines the macro for every
+    build, so a later ``#ifndef KEEP`` field is always present — it must NOT be
+    recorded as a negative guard, else the reconciler would prune a field that is
+    really there (Codex review #498, P1)."""
+    src = "struct S {\n#undef KEEP\n#ifndef KEEP\n int legacy;\n#endif\n};"
     assert scan_conditional_fields(src) == {}
 
 

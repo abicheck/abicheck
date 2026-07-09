@@ -131,8 +131,17 @@ def _compile_entry_matches(entry: dict[str, object], pattern: str) -> bool:
         try:
             return fnmatch(str(Path(file).relative_to(directory)), pattern)
         except ValueError:
-            return False
-    return False
+            pass  # file not under directory — fall through to CWD-relative
+    # File outside the build directory (or none given): match relative to the
+    # current project directory too, mirroring ``build_context._entry_matches_filter``
+    # so a filter like ``src/libfoo/**`` selects the same TU on both sides
+    # (Codex review #498). Without this the collector could miss the entry, fall
+    # back to all entries, and intersect away the guard macro the filtered header
+    # parse actually used.
+    try:
+        return fnmatch(str(Path(file).relative_to(Path.cwd())), pattern)
+    except ValueError:
+        return False
 
 
 def defines_from_compile_db(path: str | Path, source_filter: str | None = None) -> set[str]:
@@ -405,10 +414,16 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             elif _ENDIF.match(line):
                 if guard_stack:
                     guard_stack.pop()
-            elif (um := _UNDEF.match(line)) is not None:
-                # Conservative: an ``#undef`` (even inside a branch we don't
-                # evaluate) marks the macro inactive. Over-marking only *misses* a
-                # reconciliation (safe); under-marking could hide a real removal.
+            elif (um := _UNDEF.match(line)) is not None and _only_transparent():
+                # Only a **top-level** ``#undef`` (nothing but the transparent
+                # include guard open) marks the macro header-locally undefined —
+                # symmetric with the ``#define`` gate below. An ``#undef`` inside a
+                # branch we cannot evaluate (e.g. ``#ifdef OTHER``) must NOT mark it:
+                # a build without ``OTHER`` never takes that branch, so the macro
+                # stays defined there. Marking it anyway would *suppress the negative
+                # ``#ifndef`` guard recording* for a later field, leaving the
+                # context-free observed field to be treated as present and letting the
+                # reconciler wrongly clear a real add/remove (Codex review #498).
                 locally_undefined.add(um.group(1))
             elif (dm := _DEFINE.match(line)) is not None and _only_transparent():
                 # Only a **top-level** ``#define`` (nothing but the transparent
