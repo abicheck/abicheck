@@ -792,6 +792,57 @@ def test_audit_stable_abi_imports_helper() -> None:
     assert clean == []
 
 
+def test_audit_honors_lower_declared_abi3_floor() -> None:
+    # A `cp39-abi3` artifact is installed on 3.9/3.10 no matter what floor the
+    # caller passes, so `--abi3 3.12` must not wave through PyType_GetName
+    # (stable only since 3.11): the audit certifies against the *lower* declared
+    # tag floor (3.9), where that symbol is unavailable.
+    from abicheck.diff_python import audit_stable_abi_imports
+
+    src = "foo.cp39-abi3-win_amd64.pyd"
+    snap = _ext_snapshot(
+        "1.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    )
+    assert snap.python_ext.declared_abi3 == (3, 9)
+    assert snap.python_ext.is_version_specific is False
+
+    findings = audit_stable_abi_imports(snap.python_ext, (3, 12))
+    joined = " ".join(str(f.new_value) for f in findings)
+    assert "PyType_GetName" in joined
+    # The description states the floor came from the artifact tag, not --abi3 3.12.
+    detail_text = " ".join(f.description for f in findings)
+    assert "artifact tag" in detail_text
+
+
+def test_audit_supplied_floor_used_when_no_lower_declared() -> None:
+    # A bare `.abi3.so` carries no declared floor, so the supplied floor governs
+    # unchanged: PyType_GetName is clean at 3.12 (stable since 3.11) and only
+    # flagged when the caller asks for a floor below it.
+    from abicheck.diff_python import audit_stable_abi_imports
+
+    snap = _ext_snapshot(
+        "1.0", ["PyList_New", "PyType_GetName"], source_path="foo.abi3.so"
+    )
+    assert snap.python_ext.declared_abi3 is None
+    assert audit_stable_abi_imports(snap.python_ext, (3, 12)) == []
+    flagged = audit_stable_abi_imports(snap.python_ext, (3, 9))
+    assert any("PyType_GetName" in str(f.new_value) for f in flagged)
+
+
+def test_scan_abi3_honors_lower_declared_floor_end_to_end(tmp_path: object) -> None:
+    # Codex P2 (a233b36): `scan --abi3 3.12 --crosscheck …=error` on a cp39-abi3
+    # artifact importing a 3.11-only symbol must FAIL (exit 2), not certify clean
+    # — the tag still advertises 3.9 where the symbol is missing.
+    src = "foo.cp39-abi3-win_amd64.pyd"
+    snap = _ext_snapshot(
+        "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
+    )
+    path = _write_snapshot(tmp_path, snap)
+    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
+    assert result.exit_code == 2, result.output
+    assert "python_stable_abi_violation" in result.output
+
+
 # ── Cross-platform detection (PE / Mach-O) ──────────────────────────────────
 
 

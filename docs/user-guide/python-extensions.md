@@ -91,6 +91,16 @@ that is flagged too: the tag pins it to one interpreter, so it cannot satisfy an
 `abi3` floor no matter how stable its imports are — pointing `--abi3` at such a
 build is a contradiction the audit surfaces rather than silently certifies.
 
+!!! note "A lower declared `cpXY-abi3` tag floor wins over a higher `--abi3`"
+    If the artifact's own tag declares a floor *below* the one you pass
+    (`foo.cp39-abi3-…pyd` audited with `--abi3 3.12`), the audit certifies
+    against the **declared** floor (3.9), not the supplied one. The tag is a hard
+    contract a package manager honors — a `cp39-abi3` wheel is installed on
+    3.9/3.10 regardless of your `--abi3` — so a symbol like `PyType_GetName`
+    (stable only since 3.11) is a violation even under `--abi3 3.12`, because it
+    is missing on the 3.9 the tag still advertises. The finding names the floor
+    it used so the lowering is explicit.
+
 **Gating.** Like every single-artifact `scan` check, stable-ABI violations are
 **advisory by default** (they appear in the report but do not fail the scan) —
 "adoption never starts by blocking merges". To gate CI on them, promote the

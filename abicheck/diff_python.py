@@ -69,12 +69,27 @@ def audit_stable_abi_imports(
     Without a floor only the floor-independent violations (private/unstable and
     unknown-public imports) are caught — stable symbols cannot be judged
     above-floor — so callers should require a floor before certifying a module.
+
+    The artifact's own ``cpXY-abi3`` tag is itself a hard floor: a ``cp39-abi3``
+    wheel is installed on 3.9/3.10 regardless of the ``--abi3`` the caller
+    passes. So when the tag declares a floor **lower** than the requested one,
+    the audit certifies against the tag's floor — otherwise ``--abi3 3.12`` on a
+    ``cp39-abi3`` build would wave through a 3.11-only symbol that breaks on the
+    3.9 the tag still advertises. Only a genuine abi3 build carries a
+    Limited-API floor here; a version-specific module's declared minor is the
+    interpreter, not an abi3 promise (it is flagged separately below), so its
+    tag floor is not folded in.
     """
+    declared = meta.declared_abi3 if not meta.is_version_specific else None
+    effective_floor = abi3_floor
+    if declared is not None and (abi3_floor is None or declared < abi3_floor):
+        effective_floor = declared
+
     private: list[str] = []
     above_floor: list[str] = []
     unknown: list[str] = []
     for name in meta.cpython_imports:
-        status, added = stable_abi.classify(name, abi3_floor)
+        status, added = stable_abi.classify(name, effective_floor)
         if status is StableAbiStatus.PRIVATE:
             private.append(name)
         elif status is StableAbiStatus.ABOVE_FLOOR:
@@ -107,7 +122,7 @@ def audit_stable_abi_imports(
                 new_value=[meta.soabi_tag],
             )
         )
-    for group in (private, above_floor, unknown):
+    for group in (private, unknown):
         if group:
             findings.append(
                 make_change(
@@ -118,6 +133,31 @@ def audit_stable_abi_imports(
                     new_value=sorted(group),
                 )
             )
+    # State the floor the above-floor group was judged against — especially when
+    # it was pulled down to the artifact's declared `cpXY-abi3` tag, so a caller
+    # who passed a higher `--abi3` understands why a symbol newer than *their*
+    # floor (but older than the tag's) is flagged.
+    if above_floor:
+        floor_note = (
+            f"declared abi3 floor {stable_abi.format_version(effective_floor)} "
+            "(from the artifact tag)"
+            if effective_floor != abi3_floor and effective_floor is not None
+            else f"abi3 floor {stable_abi.format_version(effective_floor)}"
+            if effective_floor is not None
+            else "abi3 floor"
+        )
+        findings.append(
+            make_change(
+                ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+                symbol=f"python:{module_name}",
+                name=module_name,
+                detail=(
+                    f"stable symbols newer than the {floor_note}: "
+                    + ", ".join(sorted(above_floor))
+                ),
+                new_value=sorted(above_floor),
+            )
+        )
     # Windows: an abi3 module must link the version-neutral `python3.dll`; a
     # version-specific `pythonXY.dll` ties it to one interpreter minor, so it
     # fails to load elsewhere no matter how stable its imported symbol *names*
