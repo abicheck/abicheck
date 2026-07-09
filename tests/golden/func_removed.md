@@ -25,7 +25,8 @@
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
-| Coverage gap | Detector 'unnamed_types' disabled: missing ELF metadata on the new side |
+| Coverage gap | Detector 'unnamed_types' disabled: missing ELF metadata on one side |
+| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | No binary metadata available; verdict is based on header analysis only |
 

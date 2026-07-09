@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 291,
+  "count": 293,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1623,6 +1623,15 @@
       "examples": ""
     },
     {
+      "kind": "secondary_vtable_group_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "secondary_vtable_group_changed",
+      "examples": ""
+    },
+    {
       "kind": "serialization_tag_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -2566,6 +2575,15 @@
       "min_evidence": "L0",
       "doc_slug": "versioned_symbol_scheme_detected",
       "examples": "case141_versioned_symbol_scheme"
+    },
+    {
+      "kind": "virtual_base_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "virtual_base_offset_changed",
+      "examples": ""
     },
     {
       "kind": "virtual_method_added",

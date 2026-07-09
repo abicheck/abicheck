@@ -31,11 +31,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     is present on both sides.
   - **`unnamed_type_in_public_abi`** (RISK) — a newly-exported symbol embeds a
     lambda closure (`Ul…E_`) or unnamed struct/enum (`Ut…_`), whose mangling is
-    compiler-ordering-fragile.
+    compiler-ordering-fragile. Lambda closures are detected from the mangled
+    `Ul…E[<n>]_` token directly, so detection is stable across platform
+    demanglers, and the check requires the baseline to have captured an ELF
+    symbol table so a pre-existing leak is never mistaken for a new one.
 - **G23-A4 refinement** — a release that newly gains `STB_GNU_UNIQUE` exports
   (e.g. first enables `-fgnu-unique`) now reports `symbol_binding_became_unique`
   once at the library level, catching the dlclose-inhibition risk that the
-  both-sides transition detector missed for added symbols.
+  both-sides transition detector missed for added symbols. Skipped when the
+  baseline captured no symbol table (unknown, not proven-absent).
+
+- **G23 Phase B2 — L1 DWARF vtable-group reconstruction (2 new `ChangeKind`s,
+  both BREAKING).** Reconstructs per-class vtable-group structure from DWARF
+  inheritance and reports two breaks the per-type field/base diff cannot see:
+  - `secondary_vtable_group_changed` — a direct or virtual base gained or lost
+    virtual functions, so it started/stopped owning a *secondary* vtable group
+    in a derived class whose own base declaration list is unchanged (a
+    cross-type effect). Reserved for that case — a moved base is still reported
+    by `base_class_position_changed` / `type_base_changed`.
+  - `virtual_base_offset_changed` — a same-set reorder of virtual bases shifts
+    the virtual-base offset table; invisible to the non-virtual
+    `base_class_position_changed` check. Reconstruction is tri-state guarded: an
+    indeterminate base (absent on that side) emits nothing rather than guessing.
 
 - **G23 Phase B1 — Itanium multi-inheritance vtable machinery (3 new
   `ChangeKind`s, all L0/binary-only).** Recovered from `.dynsym` thunk and VTT

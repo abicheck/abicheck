@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (291 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (293 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -186,6 +186,7 @@ One row per `ChangeKind` (291 total). Columns fuse the verdict partition (`check
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](../examples/case131_rtti_mode_flip.md) |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](../examples/case137_runpath_changed.md) |
 | `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |
+| `secondary_vtable_group_changed` | breaking | `BREAKING` | `error` | L1 | `secondary_vtable_group_changed` | — |
 | `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` | [case81](../examples/case81_serialization_tag_reassigned.md) |
 | `soname_bump_recommended` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_recommended` | — |
 | `soname_bump_unnecessary` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_unnecessary` | — |
@@ -291,6 +292,7 @@ One row per `ChangeKind` (291 total). Columns fuse the verdict partition (`check
 | `vector_abi_changed` | breaking | `BREAKING` | `error` | unspecified | `vector_abi_changed` | — |
 | `version_script_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `version_script_missing` | — |
 | `versioned_symbol_scheme_detected` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `versioned_symbol_scheme_detected` | [case141](../examples/case141_versioned_symbol_scheme.md) |
+| `virtual_base_offset_changed` | breaking | `BREAKING` | `error` | L1 | `virtual_base_offset_changed` | — |
 | `virtual_method_added` | breaking | `BREAKING` | `error` | unspecified | `virtual_method_added` | — |
 | `visibility_leak` | quality | `COMPATIBLE` | `warning` | unspecified | `visibility_leak` | — |
 | `vptr_introduced` | breaking | `BREAKING` | `error` | unspecified | `vptr_introduced` | — |

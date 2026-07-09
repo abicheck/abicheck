@@ -251,6 +251,12 @@ def _check_gained_gnu_unique(
     once, this fires **once** per release, at the library level: only when the
     old side exported *no* unique symbols and the new side introduces one.
     """
+    if not old_syms:
+        # Empty baseline symbol table = the old side never captured ELF (header-
+        # only / legacy / parse-failed), so the old binding is *unknown*, not
+        # proven absent. Firing here would flag every pre-existing GNU_UNIQUE
+        # export as newly introduced.
+        return []
     if any(s.binding == SymbolBinding.UNIQUE for s in old_syms.values()):
         return []  # already non-unloadable; adding more changes nothing
     added_unique = sorted(

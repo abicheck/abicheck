@@ -691,6 +691,14 @@ class ChangeKind(str, Enum):
     VTABLE_THUNK_OFFSET_CHANGED = "vtable_thunk_offset_changed"  # this-adjustment baked into old vtables now wrong → BREAKING
     VTABLE_THUNK_SET_CHANGED = "vtable_thunk_set_changed"  # a persisting method gained/lost a vtable thunk (secondary-base override) → BREAKING
     VTT_SLOT_COUNT_CHANGED = "vtt_slot_count_changed"  # _ZTT size delta → virtual-base construction scaffolding changed → BREAKING
+    # B2: L1 DWARF vtable-group reconstruction. The derived class's own base
+    # declaration list is unchanged, but a base's *polymorphism* changed (a base
+    # gained/lost virtuals), restructuring which bases own a secondary vtable
+    # group — a cross-type effect the per-type field/base diff cannot see.
+    SECONDARY_VTABLE_GROUP_CHANGED = "secondary_vtable_group_changed"  # secondary vtable group added/removed/reordered → BREAKING
+    # A same-set reorder of virtual bases shifts the virtual-base offset table, so
+    # this-pointer adjustments baked into old binaries land on the wrong subobject.
+    VIRTUAL_BASE_OFFSET_CHANGED = "virtual_base_offset_changed"  # vbase offset table reordered → BREAKING
 
     # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
     # D3: an exported symbol whose mangled name embeds an unnamed type — a lambda

@@ -93,16 +93,32 @@ class TestUnnamedTypeLeak:
         assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI not in _kinds(compare(old, new))
 
     def test_ul_substring_without_lambda_not_flagged(self):
-        # "Ul" appears inside an ordinary identifier (Ul... not a closure type);
-        # a demangling that is not a lambda must not be flagged.
+        # A length-prefixed source name starting "Ul" (here "6Ulci003v") is not a
+        # closure type: its "Ul" is preceded by a digit and lacks the E…_ tail.
         from abicheck.diff_unnamed_types import _unnamed_kind
 
         assert _unnamed_kind("_Z6Ulci003v") is None
+
+    def test_lambda_detection_is_demangler_independent(self):
+        # Regression: lambda closures must be caught from the mangled `Ul…E_`
+        # token, not the platform demangler's `{lambda` spelling (macOS libc++abi
+        # differs from libstdc++), so detection is stable across platforms.
+        from abicheck.diff_unnamed_types import _unnamed_kind
+
+        assert _unnamed_kind("_ZNK4g_cbMUliE_clEi") == "lambda closure"
+        assert _unnamed_kind("_ZN3FooMUliE0_clEi") == "lambda closure"  # numbered
 
     def test_exported_names_empty_without_elf(self):
         from abicheck.diff_unnamed_types import _exported_symbol_names
 
         assert _exported_symbol_names(AbiSnapshot(library="x", version="1")) == set()
+
+    def test_empty_baseline_surface_not_flagged(self):
+        # Old side captured ELF but exports nothing (unknown/empty baseline):
+        # a lambda in the new binary must not read as newly introduced.
+        old = _elf_snap()  # no exported symbols
+        new = _elf_snap("_ZNK4g_cbMUliE_clEi")
+        assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI not in _kinds(compare(old, new))
 
 
 # ── D2: long-double ABI transition ──────────────────────────────────────────

@@ -1709,6 +1709,31 @@ REGISTRY = ChangeKindRegistry([
               "so a constructor compiled against the old VTT installs the wrong "
               "vptrs. Recovered from the `_ZTT` symbol size alone (no DWARF).",
        description_template="VTT size changed for '{name}': {old} → {new} bytes — virtual-base construction scaffolding changed"),
+    # B2: L1 DWARF vtable-group reconstruction.
+    _E("secondary_vtable_group_changed", _B,
+       impact="A polymorphic class's set of *secondary* vtable groups changed even "
+              "though its own base declaration list did not — a direct or virtual "
+              "base gained or lost virtual functions, so it started or stopped "
+              "owning a secondary vtable group in the derived class. In the Itanium "
+              "C++ ABI each polymorphic non-primary base contributes its own vtable "
+              "group with its own this-adjustment; adding, removing, or reordering "
+              "a group shifts every following group and the this-offsets baked into "
+              "already-compiled consumers, so virtual dispatch through the affected "
+              "base lands on the wrong slot. Reconstructed from DWARF inheritance "
+              "(L1), catching a cross-type effect the per-type base/field diff — "
+              "which only sees the unchanged derived class — cannot.",
+       description_template="Secondary vtable groups changed for '{name}': {old} → {new} — a base's polymorphism changed, restructuring the derived vtable"),
+    _E("virtual_base_offset_changed", _B,
+       impact="A class's virtual bases were reordered with the base set unchanged, "
+              "so the virtual-base offset table (vbase offsets stored in the "
+              "vtable) is laid out in a different order. The this-pointer "
+              "adjustment used to reach a virtual base is baked into old binaries; "
+              "after a reorder those adjustments point at the wrong subobject, "
+              "corrupting access to virtual-base members with no symbol error. "
+              "Detected from the DWARF virtual-inheritance order (L1); a pure "
+              "virtual-base reorder is invisible to the non-virtual "
+              "base_class_position_changed check.",
+       description_template="Virtual base order changed for '{name}': {old} → {new} — vbase offset table reordered; old binaries mis-adjust `this` to virtual bases"),
 
     # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
     # D3: unnamed-type leakage.

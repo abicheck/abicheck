@@ -42,10 +42,15 @@ from .model import AbiSnapshot
 # Itanium unnamed-type productions in a mangled name:
 #   closure-type  ::= Ul <lambda-sig> E [<number>] _
 #   unnamed-type  ::= Ut [<number>] _
-# The `Ut…_` form is matched directly; the closure `Ul` marker is confirmed via
-# the demangled ``{lambda`` text to avoid matching a source name that merely
-# begins with those letters (a class named ``Ul`` mangles as ``2Ul``).
+# Both are matched directly on the *mangled* form. The system demangler's
+# spelling of a lambda closure varies by platform (e.g. libc++abi vs libstdc++),
+# so relying on the demangled ``{lambda`` text made detection platform-dependent;
+# the ``Ul…E[<n>]_`` token is the authoritative, portable signal. A negative
+# lookbehind rejects a source name that merely begins with those letters — a
+# class named ``Ul`` is length-prefixed (``2Ul``), so its ``Ul`` is preceded by a
+# digit, whereas the closure marker never is.
 _UNNAMED_STRUCT_RE = re.compile(r"Ut\d*_")
+_LAMBDA_CLOSURE_RE = re.compile(r"(?<![0-9])Ul.*?E\d*_")
 
 
 def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
@@ -63,23 +68,26 @@ def _unnamed_kind(mangled: str) -> str | None:
     """Return a human label if *mangled* embeds an unnamed type, else None."""
     if _UNNAMED_STRUCT_RE.search(mangled):
         return "unnamed struct/enum"
-    if "Ul" in mangled:
-        dem = demangle(mangled)
-        if dem and "{lambda" in dem:
-            return "lambda closure"
+    if _LAMBDA_CLOSURE_RE.search(mangled):
+        return "lambda closure"
     return None
 
 
 @registry.detector(
     "unnamed_types",
     requires_support=lambda o, n: (
-        n.elf is not None,
-        "missing ELF metadata on the new side",
+        o.elf is not None and n.elf is not None,
+        "missing ELF metadata on one side",
     ),
 )
 def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Flag newly-introduced exported symbols that leak an unnamed type (D3)."""
     old_syms = _exported_symbol_names(old)
+    if not old_syms:
+        # Empty baseline surface = the old side never captured an ELF symbol
+        # table, so "newly introduced" cannot be proven — every pre-existing
+        # unnamed-type export would look new. Stay quiet rather than false-flag.
+        return []
     changes: list[Change] = []
     for name in sorted(_exported_symbol_names(new) - old_syms):
         label = _unnamed_kind(name)

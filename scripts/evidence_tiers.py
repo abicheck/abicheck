@@ -101,6 +101,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "vtable_thunk_offset_changed": "L0",
     "vtable_thunk_set_changed": "L0",
     "vtt_slot_count_changed": "L0",
+    # G23 Phase B2 — L1 DWARF vtable-group reconstruction.
+    "secondary_vtable_group_changed": "L1",
+    "virtual_base_offset_changed": "L1",
     # G23 Phase D — ecosystem detectors (all read symbol-level manifests / names).
     "unnamed_type_in_public_abi": "L0",   # exported mangled symbol names
     "long_double_abi_changed": "L0",      # Itanium long-double mangling token

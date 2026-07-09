@@ -325,6 +325,15 @@ class TestGnuUniqueBinding:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(r)
 
+    def test_empty_baseline_symbol_table_not_flagged(self):
+        # An old side with no captured symbols (header-only / parse-failed) leaves
+        # the old binding unknown, not proven-absent: a new GNU_UNIQUE export must
+        # not be reported as newly introduced.
+        from abicheck.diff_platform_elf_symbols import _check_gained_gnu_unique
+
+        new_syms = {"inst": _uniq_obj("inst")}
+        assert _check_gained_gnu_unique({}, new_syms) == []
+
     def test_unique_does_not_emit_generic_binding_change(self):
         old = _elf(symbols=[
             ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])

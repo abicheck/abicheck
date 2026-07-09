@@ -110,6 +110,9 @@ from .diff_versioning import (  # noqa: F401 — re-export for testing
     detect_version_node_changes,
     detect_version_script_missing,
 )
+from .diff_vtable_layout import (  # noqa: F401 — triggers detector registration
+    _diff_vtable_layout,
+)
 from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )

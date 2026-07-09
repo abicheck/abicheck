@@ -272,6 +272,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
     ChangeKind.VTABLE_THUNK_SET_CHANGED,
     ChangeKind.VTT_SLOT_COUNT_CHANGED,
+    # G23 Phase B2 — L1 DWARF vtable-group reconstruction (tests/test_g23_vtable_b2.py)
+    ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED,
+    ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED,
     # G23 Phase D — ecosystem detectors (tests/test_g23_phase_d.py)
     ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI,
     ChangeKind.LONG_DOUBLE_ABI_CHANGED,

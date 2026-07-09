@@ -218,10 +218,25 @@ diamond hierarchy where a secondary base gains a virtual method; a base
 reorder that shifts thunk offsets with unchanged `_ZTV` sizes (the case today's
 L0 diff provably misses — this is the acceptance fixture).
 
-### B2 — L1 DWARF vtable reconstruction (L)
+### B2 — L1 DWARF vtable reconstruction (L) — **done**
 
-**Design.** New module `vtable_layout.py` (keeps `dwarf_metadata.py` under the
-size cap):
+**Landed.** Implemented in `diff_vtable_layout.py` as a registry detector,
+reconstructing per-class vtable-group structure at *diff time* from the
+inheritance fields already on `RecordType` (`bases` / `virtual_bases` / `vtable`)
+plus the snapshot's type map — no DWARF/serialization re-plumbing. Two new kinds,
+both BREAKING and both scoped to gaps the existing per-type diff cannot reach:
+`secondary_vtable_group_changed` (a base's *polymorphism* changed, restructuring
+the derived class's secondary groups even though its own base list is unchanged —
+a cross-type effect) and `virtual_base_offset_changed` (a same-set virtual-base
+reorder, invisible to the non-virtual `base_class_position_changed`). Every
+reconstruction is tri-state guarded: an indeterminate base (absent on that side)
+yields `None` and emits nothing, degrading to B1's L0 view. The originally-planned
+virtual-base *offset* modelling and secondary-group `TYPE_VTABLE_CHANGED`
+localization are deferred — the constant vbase offset is not reliably
+DWARF-derivable, and the two new kinds already cover the structural breaks.
+
+**Original design.** New module `vtable_layout.py` (keeps `dwarf_metadata.py`
+under the size cap):
 
 1. Reconstruct per-class vtable groups from DWARF: primary + one secondary
    group per non-primary polymorphic base, ordered by
@@ -405,7 +420,7 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 |---|---|---|---|---|
 | M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable | **done** |
 | M2 | B1 (L0 thunk/VTT diff) | 3 | M | **done** |
-| M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L | planned |
+| M3 | B2 (DWARF vtable reconstruction) | 2 | L | **done** |
 | M4 | C (clang flag extraction) | 0 | M | **done** |
 | M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | **done** |
 

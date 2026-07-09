@@ -23,6 +23,7 @@
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
+| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 
 > **Policy**: `strict_abi`
