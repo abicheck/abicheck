@@ -226,3 +226,22 @@ _See also: [Source-Scan Depth (user guide)](../user-guide/scan-levels.md) ·
 [Evidence & Detectability](evidence-and-detectability.md) ·
 [Build Info & Sources](build-source-data.md) ·
 [Performance § scan-level cost model](../development/performance.md#scan-level-cost-model-one-cliff-at-l4)._
+
+## Current example-catalog status
+
+The scan-depth matrix is scoped to comparable v1/v2 shared-library targets. It
+scans that scope completely: **141/141 targets at every pinned depth**. The full
+162-case catalog includes audit, cross-source, bundle, BTF, and snapshot cases
+that are validated by their dedicated lanes, not by this compare-style matrix.
+
+| Depth | Capability status | Comparable targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | Recommended use |
+|---|---|---:|---:|---:|---:|---:|---|
+| `binary` | Stable fast artifact gate, intentionally shallow | 141 | 79 | 56.0% | 1 | 61 | smoke/very fast CI, export/symbol regressions |
+| `headers` | Stable low-cost API/ABI gate | 141 | 115 | 81.6% | 0 | 26 | default CI gate when public headers are available |
+| `build` | Build-context mode, advisory crosschecks fixed | 141 | 115 | 81.6% | 0 | 26 | review/triage with real compile DB |
+| `source` | Highest-recall source replay in this matrix | 141 | 141 | 100.0% | 0 | 0 | PR deep review with scoped inputs |
+| `full` | Whole-library deep replay for the same targets | 141 | 141 | 100.0% | 0 | 0 | release baseline validation |
+
+`source` and `full` differ by replay scope: `source` is intended for scoped
+changed-TU replay, while `full` replays the whole library. These examples are
+small enough that both modes currently produce the same verdict signal.

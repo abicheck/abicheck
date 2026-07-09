@@ -158,7 +158,7 @@ def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatib
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert payload["mode"] == "pr"
     assert payload["level"]["source_method"] == "s5"
     assert payload["verdict"] == "COMPATIBLE"
@@ -304,7 +304,7 @@ def test_reported_depth_matches_resolved_source_method(
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     # --depth full reaches s6 — must not be reported as the pr-preset 'source'.
     assert payload["level"]["source_method"] == "s6"
     assert payload["level"]["depth"] == "full"
@@ -477,6 +477,78 @@ def test_crosscheck_error_gates_even_with_clean_baseline(
         ],
     )
     assert res.exit_code == 2, res.output
+
+
+def _header_context_mismatch_snap(tmp_path: Path, name: str) -> Path:
+    # Candidate-side evidence hygiene: public headers were parsed without the
+    # ABI-relevant build context. This is a crosscheck finding, but it is not an
+    # old/new ABI/API diff by itself.
+    from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        parsed_with_build_context=False,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    snap.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            build_options=[
+                BuildOption(
+                    key="glibcxx_use_cxx11_abi", value="1", abi_relevant=True
+                )
+            ]
+        ),
+    )
+    return _write_snapshot(tmp_path / name, snap)
+
+
+def test_baseline_compare_keeps_crosschecks_advisory_by_default(runner, tmp_path):
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new),
+            "--baseline",
+            str(old),
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = _payload(res)
+    assert payload["verdict"] != "API_BREAK"
+    assert payload["diff"]["api_break"] == 0
+    assert payload["crosscheck"]["counts_by_check"]["header_build_context_mismatch"] == 1
+
+
+def test_baseline_compare_promoted_crosscheck_still_gates(runner, tmp_path):
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new),
+            "--baseline",
+            str(old),
+            "--crosscheck",
+            "header_build_context_mismatch=error",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "API_BREAK"
 
 
 def _snap_with_build_flag(tmp_path: Path, name: str, value: str) -> Path:

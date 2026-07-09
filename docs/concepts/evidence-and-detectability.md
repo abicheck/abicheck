@@ -63,6 +63,23 @@ struct is non-public ([case118](../examples/case118_internal_struct_field_added_
 
 ### What each layer buys: fewer false negatives *and* fewer false positives
 
+Current scan-depth status is measured on the comparable v1/v2 shared-library
+targets: **141/141 targets scanned at every pinned depth**. FP/FN math uses the
+**141 targets** in that scope: `NO_CHANGE` sentinel cases are checked as
+compatible/no-change outcomes, and bundle cases are checked against their
+per-library expected verdicts.
+
+| Pinned scan depth | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | What this says about the layer today |
+|---|---:|---:|---:|---:|---:|---|
+| `binary` | 141 | 79 | 56.0% | 1 | 61 | Cheap artifact floor; many API/header/source-only breaks are invisible. |
+| `headers` | 141 | 115 | 81.6% | 0 | 26 | Best low-cost gate: public-header evidence removes many misses without FP. |
+| `build` | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no advisory-crosscheck false positives after policy fix. |
+| `source` | 141 | 141 | 100.0% | 0 | 0 | Highest recall; source-smoke proofs cover consumer-only API hazards. |
+| `full` | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
+
+The full 162-case catalog is covered by multiple proof lanes. This table is only
+the compare-style scan-depth lane, so its compare-style scope is complete at 141/141.
+
 Across the full staircase, adding evidence drives **both** error axes down — it
 is not a trade-off where you must choose between missing breaks and crying wolf.
 The gain is not perfectly monotonic at *every single* step (a middle layer can

@@ -16,8 +16,8 @@ namespace detail {
 
 class descriptor_impl {
 public:
-    int n_classes_      = 2;    // was class_count_
     int iteration_cap_  = 100;  // was max_iter_
+    int n_classes_      = 2;    // was class_count_
 };
 
 template <typename T> using pimpl = std::shared_ptr<T>;
