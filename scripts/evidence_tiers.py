@@ -97,6 +97,35 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "python_abi3_dropped": "L0",
     "python_gil_abi_changed": "L0",
     "python_abi3_floor_raised": "L0",
+    # G23 Phase B1 — Itanium thunk / VTT surface, from .dynsym names/sizes alone.
+    "vtable_thunk_offset_changed": "L0",
+    "vtable_thunk_set_changed": "L0",
+    "vtt_slot_count_changed": "L0",
+    # G23 Phase B2 — L1 DWARF vtable-group reconstruction.
+    "secondary_vtable_group_changed": "L1",
+    "virtual_base_offset_changed": "L1",
+    # G23 Phase D — ecosystem detectors (all read symbol-level manifests / names).
+    "unnamed_type_in_public_abi": "L0",   # exported mangled symbol names
+    "long_double_abi_changed": "L0",      # Itanium long-double mangling token
+    "kabi_symbol_removed": "L0",          # Module.symvers manifest
+    "kabi_crc_changed": "L0",
+    "kabi_symbol_namespace_changed": "L0",
+    "kabi_export_type_changed": "L0",
+    "kabi_symbol_added": "L0",
+    # G23 Phase A — Linux ELF artifact facts. All read purely from the dynamic
+    # section, symbol table, ELF header, or .note.gnu.property — no DWARF/headers.
+    "static_tls_introduced": "L0",
+    "static_tls_removed": "L0",
+    "cet_protection_weakened": "L0",
+    "branch_protection_weakened": "L0",
+    "cet_protection_improved": "L0",
+    "branch_protection_improved": "L0",
+    "elf_machine_changed": "L0",
+    "elf_class_changed": "L0",
+    "elf_abi_flags_changed": "L0",
+    "elf_osabi_changed": "L0",
+    "symbol_binding_became_unique": "L0",
+    "symbol_binding_lost_unique": "L0",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",

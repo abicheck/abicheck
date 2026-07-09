@@ -374,6 +374,30 @@ def test_parse_producer_no_flags() -> None:
     assert info.abi_flags == set()
 
 
+def test_process_cu_unions_flags_across_cus() -> None:
+    """G23-C: an ABI flag applied to only one CU is not missed (flags are
+    unioned across all CUs, not taken from the first CU alone)."""
+    from unittest.mock import MagicMock
+
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _process_cu
+
+    def _cu(producer: str):
+        cu = MagicMock()
+        top = MagicMock()
+        top.attributes = {"DW_AT_producer": MagicMock(value=producer.encode())}
+        top.iter_children.return_value = []
+        cu.get_top_DIE.return_value = top
+        return cu
+
+    meta = AdvancedDwarfMetadata()
+    _process_cu(_cu("GNU C17 13.2 -m64"), meta)
+    _process_cu(_cu("GNU C17 13.2 -fshort-enums"), meta)
+    # First CU sets identity; both CUs' flags are present.
+    assert meta.toolchain.version == "13.2"
+    assert "-m64" in meta.toolchain.abi_flags
+    assert "-fshort-enums" in meta.toolchain.abi_flags
+
+
 # ── JSON serialization (set → list → set roundtrip) ──────────────────────────
 
 def test_serialization_roundtrip_no_crash() -> None:

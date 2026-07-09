@@ -11,6 +11,93 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **G23 Phase D — ecosystem detectors (7 new `ChangeKind`s).**
+  - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`
+    manifests to `compare` (recognized by filename or content) to get
+    `kabi_symbol_removed` / `kabi_crc_changed` / `kabi_symbol_namespace_changed`
+    (BREAKING), `kabi_export_type_changed` (API_BREAK) and `kabi_symbol_added`
+    (COMPATIBLE). The export-type check compares only the GPL *license class*
+    and flags the restricting direction (`EXPORT_SYMBOL` → `EXPORT_SYMBOL_GPL`,
+    which locks out proprietary modules); the relaxing direction and a
+    namespace-only change (`EXPORT_SYMBOL` → `EXPORT_SYMBOL_NS`) are not flagged
+    as export-type changes. The 5-field (namespace) and 4-field pre-5.4 formats
+    are both parsed.
+  - **`long_double_abi_changed`** (BREAKING) — a `long double` representation
+    migration (ppc64 IBM ↔ IEEE128, or `__float128`) re-paired from a
+    removed↔added symbol pair via their demangled types; collapses the redundant
+    add/remove into one finding. The same-mangling case
+    (`-mlong-double-64`/`-mabi=ibmlongdouble`, which keeps the symbol name)
+    is caught from the DWARF `long double` base-type byte size when debug info
+    is present on both sides.
+  - **`unnamed_type_in_public_abi`** (RISK) — a newly-exported symbol embeds a
+    lambda closure (`Ul…E_`) or unnamed struct/enum (`Ut…_`), whose mangling is
+    compiler-ordering-fragile. Lambda closures are detected from the mangled
+    `Ul…E[<n>]_` token directly, so detection is stable across platform
+    demanglers, and the check requires the baseline to have captured an ELF
+    symbol table so a pre-existing leak is never mistaken for a new one.
+- **G23-A4 refinement** — a release that newly gains `STB_GNU_UNIQUE` exports
+  (e.g. first enables `-fgnu-unique`) now reports `symbol_binding_became_unique`
+  once at the library level, catching the dlclose-inhibition risk that the
+  both-sides transition detector missed for added symbols. Skipped when the
+  baseline captured no symbol table (unknown, not proven-absent).
+
+- **G23 Phase B2 — L1 DWARF vtable-group reconstruction (2 new `ChangeKind`s,
+  both BREAKING).** Reconstructs per-class vtable-group structure from DWARF
+  inheritance and reports two breaks the per-type field/base diff cannot see:
+  - `secondary_vtable_group_changed` — a direct or virtual base gained or lost
+    virtual functions, so it started/stopped owning a *secondary* vtable group
+    in a derived class whose own base declaration list is unchanged (a
+    cross-type effect). Reserved for that case — a moved base is still reported
+    by `base_class_position_changed` / `type_base_changed`.
+  - `virtual_base_offset_changed` — a same-set reorder of virtual bases shifts
+    the virtual-base offset table; invisible to the non-virtual
+    `base_class_position_changed` check. Reconstruction is tri-state guarded: an
+    indeterminate base (absent on that side) emits nothing rather than guessing.
+
+- **G23 Phase B1 — Itanium multi-inheritance vtable machinery (3 new
+  `ChangeKind`s, all L0/binary-only).** Recovered from `.dynsym` thunk and VTT
+  symbol names + sizes — no DWARF or headers, works on fully stripped binaries:
+  - `vtable_thunk_offset_changed` (BREAKING) — a virtual-override thunk's
+    `this`-adjustment offset shifted (a secondary base subobject moved). Catches
+    the multi-inheritance base-reorder break that the primary-vtable
+    `vtable_slot_count_changed` misses because the `_ZTV` size is unchanged.
+  - `vtable_thunk_set_changed` (BREAKING) — a persisting method gained/lost a
+    vtable thunk (a secondary-base virtual override was added/removed).
+  - `vtt_slot_count_changed` (BREAKING) — a class's VTT (`_ZTT`) size changed
+    (virtual-base construction scaffolding changed).
+  - Virtual-override thunks (`_ZTh`/`_ZTv`/`_ZTc`) are now excluded from the
+    generic exported-function surface (`is_abi_relevant_elf_symbol`), so a
+    thunk-offset shift no longer also surfaces as a spurious
+    `func_added`/`func_removed`/`func_likely_renamed`.
+
+- **G23 Phase A — Linux ELF artifact-fact detectors (12 new `ChangeKind`s).**
+  ELF metadata capture and diff rules for facts readable from the binary alone
+  (L0), with no DWARF or headers required:
+  - **Static-TLS drift** (`static_tls_introduced` → RISK, `static_tls_removed`
+    → COMPATIBLE): `DF_STATIC_TLS` adoption makes a library un-`dlopen`-able.
+    Reported only when the library actually participates in TLS (defined or
+    imported `STT_TLS`).
+  - **Control-flow-integrity drift** (`cet_protection_weakened` /
+    `branch_protection_weakened` → RISK, `_improved` counterparts → COMPATIBLE):
+    x86 CET (IBT/SHSTK) and AArch64 branch protection (BTI/PAC) decoded from
+    `.note.gnu.property`.
+  - **ELF identity / ABI-flags guard** (`elf_machine_changed`,
+    `elf_class_changed`, `elf_abi_flags_changed` → BREAKING;
+    `elf_osabi_changed` → RISK): the ELF-side counterpart to
+    `pe_machine_changed` / `macho_cpu_type_changed`, including decoded per-arch
+    float-ABI/EABI `e_flags` bits (ARM/RISC-V/MIPS).
+  - **GNU-unique binding transitions** (`symbol_binding_became_unique` /
+    `symbol_binding_lost_unique` → RISK): `STB_GNU_UNIQUE` inhibits `dlclose()`
+    and carries a process-wide ODR-uniqueness guarantee.
+  - The shipped `security` policy now gates `cet_protection_weakened`,
+    `branch_protection_weakened`, and `static_tls_introduced` to break.
+
+- **G23 Phase C — clang toolchain-flag drift robustness.** `toolchain_flag_drift`
+  reads ABI-relevant compiler flags from `DW_AT_producer`; clang records them
+  only under `-grecord-command-line`. The producer scan now unions the recorded
+  `abi_flags`/`vector_abi_flags` across *all* compilation units instead of
+  keeping only the first CU's, so a flag recorded on a non-first TU (common with
+  clang) is no longer dropped. No new `ChangeKind`s.
 - **CPython extension-module `abi3` / Limited-API support (G14).** abicheck now
   recognises CPython extension modules — built with Cython, pybind11, nanobind,
   or hand-written C — and checks the contract the export table cannot see: the

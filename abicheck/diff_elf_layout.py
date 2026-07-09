@@ -53,6 +53,8 @@ See ADR-020b's sibling discussion of evidence tiers; these are L0 signals.
 
 from __future__ import annotations
 
+import re
+
 from .checker_policy import ChangeKind, Confidence
 from .checker_types import Change
 from .demangle import demangle
@@ -160,6 +162,136 @@ def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
     return f"{base_count} base classes (__vmi_class_type_info)"
 
 
+# ── G23 Phase B1 — Itanium thunk / VTT surface (L0) ──────────────────────────
+# Virtual-override thunks encode a `this`-pointer adjustment in their mangled
+# name: `_ZThn<off>_<base>` (non-virtual), `_ZTv<o1>_<o2>_<base>` (virtual),
+# `_ZTc<call-off><call-off>_<base>` (covariant, whose two call-offsets each carry
+# their own `h`/`v` adjustment-kind letter, e.g. `_ZTch0_h8_N1D5cloneEv`). The
+# base is the target method's mangled encoding, stable across versions; the
+# offset is what shifts when a base subobject moves. The three thunk kinds carry
+# a different NUMBER of `_`-separated offset components, so a single non-greedy
+# split cannot find the base boundary reliably — a virtual thunk's second offset
+# starts with a digit (`_ZTv0_12_N…`) and would be mistaken for the base. Each
+# kind is therefore parsed with its own call-offset grammar (Itanium §5.1.4.2):
+#   h  non-virtual : h <nv-offset> _                      → one component
+#   v  virtual     : v <offset> _ <virtual-offset> _      → two components
+#   c  covariant   : c <call-offset> <call-offset> _base  → two h/v call-offsets
+# `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`/`_ZTC` start with an uppercase letter, so the
+# lowercase `[hvc]` marker never collides with them.
+_THUNK_H_RE = re.compile(r"^_ZTh(?P<offset>n?\d+)_(?P<base>.+)$")
+_THUNK_V_RE = re.compile(r"^_ZTv(?P<offset>n?\d+_n?\d+)_(?P<base>.+)$")
+# One covariant call-offset: `h<nv-offset>_` or `v<offset>_<virtual-offset>_`.
+_THUNK_C_CALL = r"(?:hn?\d+_|vn?\d+_n?\d+_)"
+_THUNK_C_RE = re.compile(rf"^_ZTc(?P<offset>{_THUNK_C_CALL}{_THUNK_C_CALL})(?P<base>.+)$")
+
+
+def _parse_thunk(name: str) -> tuple[str, str] | None:
+    """Split a thunk symbol into ``(base_encoding, offset_signature)`` or None.
+
+    ``base_encoding`` identifies the target method (stable across versions);
+    ``offset_signature`` (kind + offset) is what a base-subobject move changes.
+    Each kind is matched with its own grammar so the base is extracted correctly
+    even when an offset component (or the base) starts with a digit.
+    """
+    if name.startswith("_ZTh"):
+        m = _THUNK_H_RE.match(name)
+        return (m.group("base"), f"h:{m.group('offset')}") if m else None
+    if name.startswith("_ZTv"):
+        m = _THUNK_V_RE.match(name)
+        return (m.group("base"), f"v:{m.group('offset')}") if m else None
+    if name.startswith("_ZTc"):
+        m = _THUNK_C_RE.match(name)
+        if m is None:
+            return None
+        # Drop the trailing `_` between the last call-offset and the base.
+        return m.group("base"), f"c:{m.group('offset').rstrip('_')}"
+    return None
+
+
+def _base_is_runtime(base: str) -> bool:
+    """True if a thunk's target method belongs to the std:: runtime."""
+    # A std:: member nests as `NSt…`/`NKSt…`, or appears via the `St`/`Ss`/`Si`/
+    # `So` substitution abbreviations for std:: names.
+    return base.startswith(("NSt", "NKSt", "St", "Ss", "Si", "So"))
+
+
+def _thunks_by_base(
+    snap: AbiSnapshot, *, skip_runtime: bool
+) -> dict[str, set[str]]:
+    """Map ``base_encoding → {offset_signatures}`` for every thunk symbol."""
+    elf = snap.elf
+    if elf is None:
+        return {}
+    out: dict[str, set[str]] = {}
+    for sym in elf.symbols:
+        parsed = _parse_thunk(sym.name)
+        if parsed is None:
+            continue
+        base, off_sig = parsed
+        if skip_runtime and _base_is_runtime(base):
+            continue
+        out.setdefault(base, set()).add(off_sig)
+    return out
+
+
+def _method_name(base: str) -> str:
+    """Human-readable name for a thunk's target method (``_Z`` + base)."""
+    return _class_name("_Z" + base) if not base.startswith("_Z") else _class_name(base)
+
+
+def _diff_thunks(old: AbiSnapshot, new: AbiSnapshot, *, skip_runtime: bool) -> list[Change]:
+    """Detect thunk offset / set drift (B1)."""
+    old_t = _thunks_by_base(old, skip_runtime=skip_runtime)
+    new_t = _thunks_by_base(new, skip_runtime=skip_runtime)
+    old_syms = old.elf.symbol_map if old.elf else {}
+    new_syms = new.elf.symbol_map if new.elf else {}
+    changes: list[Change] = []
+
+    # Offset change: the target method has a thunk on both sides but the encoded
+    # this-adjustment offset(s) differ — a base subobject moved.
+    for base in sorted(old_t.keys() & new_t.keys()):
+        o_offs, n_offs = old_t[base], new_t[base]
+        if o_offs == n_offs:
+            continue
+        changes.append(
+            make_change(
+                ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
+                # Report the target method's own mangled symbol (`_Z`+base) — a
+                # real, stable identifier — rather than fabricating a `_ZTh…`
+                # non-virtual-thunk name that misstates the kind for a v/c thunk
+                # (the true kind lives in the offset signatures below).
+                symbol="_Z" + base,
+                name=_method_name(base),
+                old=", ".join(sorted(o_offs)),
+                new=", ".join(sorted(n_offs)),
+                confidence=Confidence.MEDIUM,
+            )
+        )
+
+    # Set change: a method whose *plain* symbol persists across versions gained
+    # or lost a thunk entirely (secondary-base override added/removed). Requiring
+    # the plain method symbol on both sides avoids double-counting a pure thunk
+    # symbol add/remove that rides along with the method itself changing.
+    for base in sorted(old_t.keys() ^ new_t.keys()):
+        plain = "_Z" + base
+        if plain not in old_syms or plain not in new_syms:
+            continue
+        gained = base in new_t
+        changes.append(
+            make_change(
+                ChangeKind.VTABLE_THUNK_SET_CHANGED,
+                symbol=plain,
+                name=_method_name(base),
+                detail="thunk added" if gained else "thunk removed",
+                old="(none)" if gained else ", ".join(sorted(old_t[base])),
+                new=", ".join(sorted(new_t[base])) if gained else "(none)",
+                confidence=Confidence.MEDIUM,
+            )
+        )
+
+    return changes
+
+
 @registry.detector(
     "elf_layout",
     requires_support=lambda o, n: (
@@ -228,5 +360,30 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 confidence=Confidence.MEDIUM,
             )
         )
+
+    # ── VTT slot count (_ZTT) ────────────────────────────────────────────────
+    # The virtual-table-table's size encodes the number of construction
+    # sub-vtables; a change means the virtual-inheritance shape changed (B1).
+    old_vtt = _sized_rtti(old, "_ZTT", skip_runtime=skip_runtime)
+    new_vtt = _sized_rtti(new, "_ZTT", skip_runtime=skip_runtime)
+    for key in sorted(old_vtt.keys() & new_vtt.keys()):
+        o_size, n_size = old_vtt[key], new_vtt[key]
+        if o_size == n_size:
+            continue
+        sym = "_ZTT" + key
+        changes.append(
+            make_change(
+                ChangeKind.VTT_SLOT_COUNT_CHANGED,
+                symbol=sym,
+                name=_class_name(sym),
+                detail=f"~{o_size // pointer_size} → ~{n_size // pointer_size} sub-vtables",
+                old=str(o_size),
+                new=str(n_size),
+                confidence=Confidence.MEDIUM,
+            )
+        )
+
+    # ── Thunk offset / set drift (_ZTh / _ZTv / _ZTc) ────────────────────────
+    changes.extend(_diff_thunks(old, new, skip_runtime=skip_runtime))
 
     return changes

@@ -239,7 +239,261 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         )
 
     changes.extend(_diff_security_hardening(old_elf, new_elf))
+    changes.extend(_diff_elf_identity(old_elf, new_elf))
+    changes.extend(_diff_static_tls(old_elf, new_elf))
+    changes.extend(_diff_gnu_property(old_elf, new_elf))
 
+    return changes
+
+
+def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect ELF header identity drift (G23-A3): machine, class, ABI flags, OS ABI.
+
+    A machine/class/ABI-flags change means the two inputs are
+    different-architecture or different-calling-convention images — the
+    ELF-side counterpart to PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED. Empty
+    identity (e.g. an in-memory snapshot with no ELF parsed) is skipped so a
+    missing-metadata side never fabricates a finding.
+    """
+    changes: list[Change] = []
+
+    old_machine = getattr(old_elf, "machine", "")
+    new_machine = getattr(new_elf, "machine", "")
+    # Require BOTH sides to have captured ELF identity before comparing any of
+    # it. A real parsed ELF always sets `machine`; a default / header-only /
+    # parse-failed `ElfMetadata()` has machine="" but still carries the
+    # `elf_class=64` default — comparing that against a real 32-bit ELF would
+    # false-positive elf_class_changed. An unknown side is not a change.
+    if not (old_machine and new_machine):
+        return changes
+
+    if old_machine != new_machine:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_MACHINE_CHANGED,
+                symbol="ELF_HEADER",
+                old=old_machine,
+                new=new_machine,
+                old_value=old_machine,
+                new_value=new_machine,
+            )
+        )
+        # Machine drift subsumes ABI-flag/class drift (flags are per-arch); a
+        # cross-architecture pair has nothing further comparable.
+        return changes
+
+    old_class = getattr(old_elf, "elf_class", 0)
+    new_class = getattr(new_elf, "elf_class", 0)
+    if old_class and new_class and old_class != new_class:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_CLASS_CHANGED,
+                symbol="ELF_HEADER",
+                old=str(old_class),
+                new=str(new_class),
+                old_value=str(old_class),
+                new_value=str(new_class),
+            )
+        )
+
+    changes.extend(_diff_abi_flags(old_elf, new_elf, old_machine))
+
+    old_osabi = getattr(old_elf, "osabi", "")
+    new_osabi = getattr(new_elf, "osabi", "")
+    if (
+        old_osabi
+        and new_osabi
+        and old_osabi != new_osabi
+        and not (old_osabi in _BENIGN_OSABI and new_osabi in _BENIGN_OSABI)
+    ):
+        changes.append(
+            make_change(
+                ChangeKind.ELF_OSABI_CHANGED,
+                symbol="ELF_HEADER",
+                old=old_osabi,
+                new=new_osabi,
+                old_value=old_osabi,
+                new_value=new_osabi,
+            )
+        )
+
+    return changes
+
+
+#: Architectures whose ABI-selecting e_flags bits are decoded into `abi_flags`
+#: by `elf_metadata._decode_abi_flags`. For these the decoded token set is the
+#: authoritative ABI signal, so the raw-e_flags fallback must NOT run — the
+#: undecoded bits carry ISA-level (`-march`) or feature (RISC-V Ztso, MIPS arch
+#: level) changes that are calling-convention-compatible, and diffing them would
+#: over-call `elf_abi_flags_changed` (BREAKING) on a compatible rebuild.
+_ABI_FLAG_DECODED_MACHINES = frozenset({"EM_ARM", "EM_RISCV", "EM_MIPS"})
+
+
+def _diff_abi_flags(old_elf: Any, new_elf: Any, machine: str) -> list[Change]:
+    """Compare the ABI-selecting e_flags bits (same-machine caller guarantee).
+
+    For architectures the metadata parser knows how to decode (ARM/RISC-V/MIPS)
+    the decoded ``abi_flags`` token set is diffed and is authoritative. For any
+    other architecture both decoded sets are empty, so fall back to the raw
+    ``e_flags`` word — e.g. PPC64 encodes its ELFv1/ELFv2 ABI version there —
+    otherwise ABI-selecting drift on undecoded arches would never surface.
+    """
+    old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
+    new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
+    if old_abi != new_abi:
+        return [
+            make_change(
+                ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                symbol="ELF_HEADER",
+                old=", ".join(sorted(old_abi)) or "(none)",
+                new=", ".join(sorted(new_abi)) or "(none)",
+            )
+        ]
+
+    # Decoded tokens match. For a decoded arch the token set is authoritative, so
+    # stop here: the remaining e_flags bits are ISA-level/feature bits (a MIPS
+    # `-march` bump, RISC-V Ztso, …) that are calling-convention-compatible, and
+    # diffing them would falsely report a BREAKING abi-flags change on a
+    # compatible rebuild. Only fall back to the raw word for arches we don't
+    # decode at all (e.g. PPC64 ELFv1/ELFv2), where it is the sole ABI signal.
+    if machine in _ABI_FLAG_DECODED_MACHINES:
+        return []
+    old_ef = getattr(old_elf, "e_flags", 0)
+    new_ef = getattr(new_elf, "e_flags", 0)
+    if old_ef != new_ef:
+        return [
+            make_change(
+                ChangeKind.ELF_ABI_FLAGS_CHANGED,
+                symbol="ELF_HEADER",
+                old=hex(old_ef),
+                new=hex(new_ef),
+            )
+        ]
+    return []
+
+
+#: OS-ABI values that are interchangeable on Linux. The GNU toolchain stamps a
+#: binary ELFOSABI_GNU/LINUX (3) instead of ELFOSABI_SYSV/NONE (0) as a side
+#: effect of using any GNU extension (IFUNC, STB_GNU_UNIQUE, …), so a SYSV↔GNU
+#: transition is benign and must not be flagged (it routinely rides along with a
+#: compatible change like adding an ifunc). Genuinely different OS ABIs
+#: (FreeBSD, Solaris, …) still report.
+_BENIGN_OSABI = frozenset({
+    "ELFOSABI_SYSV",
+    "ELFOSABI_NONE",
+    "ELFOSABI_GNU",
+    "ELFOSABI_LINUX",
+})
+
+
+def _both_captured_elf_identity(old_elf: Any, new_elf: Any) -> bool:
+    """True only when BOTH snapshots were parsed by a G23-aware version.
+
+    Every G23 ELF fact (machine, static-TLS, gnu-property, …) is captured in the
+    same parse pass, so a real ELF parsed by current code always has a non-empty
+    ``machine``. A legacy snapshot serialized before these fields existed — or a
+    header-only / parse-failed side — has machine="" and rehydrates the new
+    booleans to their defaults (``has_static_tls=False``, empty gnu_properties),
+    which would otherwise read as "the feature was absent" rather than "unknown"
+    and fabricate a finding. Gate the new detectors on this so a legacy baseline
+    never triggers e.g. a spurious ``static_tls_introduced``.
+    """
+    return bool(getattr(old_elf, "machine", "") and getattr(new_elf, "machine", ""))
+
+
+def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect DF_STATIC_TLS drift (G23-A1).
+
+    Only report when the *new* side actually participates in TLS (defines or
+    imports an STT_TLS symbol, or carries a PT_TLS segment), so a TLS-free
+    library that happens to flip the flag is never flagged. The removal
+    (improvement) direction is a distinct COMPATIBLE kind so the security policy
+    can gate the regression alone. Skipped entirely unless both snapshots
+    captured ELF identity (so a legacy baseline never false-positives).
+    """
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
+    old_static = getattr(old_elf, "has_static_tls", False)
+    new_static = getattr(new_elf, "has_static_tls", False)
+    if old_static == new_static:
+        return []
+    if new_static and not old_static:
+        if not getattr(new_elf, "has_tls_symbols", False):
+            return []
+        return [
+            make_change(
+                ChangeKind.STATIC_TLS_INTRODUCED,
+                symbol="DF_STATIC_TLS",
+                old_value="dynamic-tls",
+                new_value="static-tls",
+            )
+        ]
+    return [
+        make_change(
+            ChangeKind.STATIC_TLS_REMOVED,
+            symbol="DF_STATIC_TLS",
+            old_value="static-tls",
+            new_value="dynamic-tls",
+        )
+    ]
+
+
+#: GNU-property feature tokens grouped by the kind that reports their drift.
+_CET_FEATURES = frozenset({"IBT", "SHSTK"})
+_BRANCH_FEATURES = frozenset({"BTI", "PAC"})
+
+
+def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect .note.gnu.property control-flow-protection drift (G23-A2).
+
+    x86 CET (IBT/SHSTK) and AArch64 branch-protection (BTI/PAC) are reported
+    separately. Both weakening (dropped feature) and improvement (added
+    feature) directions are emitted, mirroring the executable-stack pair, so
+    the security policy can gate weakening without failing an improvement.
+    """
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
+    # CET (IBT/SHSTK) is x86-only and branch-protection (BTI/PAC) is AArch64-only,
+    # so the feature sets are not comparable across machines. A machine change is
+    # already reported as `elf_machine_changed` by `_diff_elf_identity`; diffing
+    # gnu.property across it would fabricate a spurious weakened/improved pair
+    # (e.g. x86_64+IBT → aarch64+BTI reads as CET dropped + branch-prot added).
+    if getattr(old_elf, "machine", "") != getattr(new_elf, "machine", ""):
+        return []
+    old_props: frozenset[str] = getattr(old_elf, "gnu_properties", frozenset())
+    new_props: frozenset[str] = getattr(new_elf, "gnu_properties", frozenset())
+    if old_props == new_props:
+        return []
+
+    changes: list[Change] = []
+    for feats, weakened, improved in (
+        (_CET_FEATURES, ChangeKind.CET_PROTECTION_WEAKENED, ChangeKind.CET_PROTECTION_IMPROVED),
+        (_BRANCH_FEATURES, ChangeKind.BRANCH_PROTECTION_WEAKENED, ChangeKind.BRANCH_PROTECTION_IMPROVED),
+    ):
+        old_f = old_props & feats
+        new_f = new_props & feats
+        if old_f == new_f:
+            continue
+        dropped = old_f - new_f
+        symbol = ".note.gnu.property"
+        if dropped:
+            changes.append(
+                make_change(
+                    weakened,
+                    symbol=symbol,
+                    old=", ".join(sorted(old_f)) or "(none)",
+                    new=", ".join(sorted(new_f)) or "(none)",
+                )
+            )
+        else:
+            changes.append(
+                make_change(
+                    improved,
+                    symbol=symbol,
+                    old=", ".join(sorted(old_f)) or "(none)",
+                    new=", ".join(sorted(new_f)) or "(none)",
+                )
+            )
     return changes
 
 

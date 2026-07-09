@@ -219,6 +219,17 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_fortify_source=e.get("has_fortify_source", False),
         has_writable_executable_segment=e.get("has_writable_executable_segment", False),
         pointer_size=e.get("pointer_size", 8),
+        machine=e.get("machine", ""),
+        # Legacy snapshots (written before elf_class existed) carry no class
+        # field; derive it from pointer_size (4→32, 8→64) rather than hard-coding
+        # 64, so a saved 32-bit baseline does not false-positive elf_class_changed.
+        elf_class=e.get("elf_class", 32 if e.get("pointer_size", 8) == 4 else 64),
+        osabi=e.get("osabi", ""),
+        e_flags=e.get("e_flags", 0),
+        abi_flags=frozenset(e.get("abi_flags", [])),
+        has_static_tls=e.get("has_static_tls", False),
+        has_tls_symbols=e.get("has_tls_symbols", False),
+        gnu_properties=frozenset(e.get("gnu_properties", [])),
     )
 
 
@@ -306,6 +317,7 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
     return DwarfMetadata(
         structs=structs,
         enums=enums,
+        base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
     )
 
@@ -358,6 +370,22 @@ def _sycl_from_dict(d: dict[str, Any]) -> Any:
         plugins=plugins,
         plugin_search_paths=d.get("plugin_search_paths", []),
     )
+
+
+def _kabi_from_dict(d: dict[str, Any]) -> Any:
+    from .symvers_metadata import KabiEntry, KabiMetadata
+
+    entries = {
+        sym: KabiEntry(
+            crc=e.get("crc", ""),
+            symbol=e.get("symbol", sym),
+            module=e.get("module", ""),
+            export_type=e.get("export_type", ""),
+            namespace=e.get("namespace", ""),
+        )
+        for sym, e in (d.get("entries", {}) or {}).items()
+    }
+    return KabiMetadata(entries=entries)
 
 
 def _python_ext_from_dict(d: dict[str, Any]) -> Any:
@@ -521,6 +549,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     sycl_data = d.get("sycl")
     sycl = _sycl_from_dict(sycl_data) if isinstance(sycl_data, dict) else None
 
+    kabi_data = d.get("kabi")
+    kabi = _kabi_from_dict(kabi_data) if isinstance(kabi_data, dict) else None
     python_ext_data = d.get("python_ext")
     python_ext = (
         _python_ext_from_dict(python_ext_data)
@@ -603,7 +633,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         functions=funcs, variables=variables, types=types,
         enums=enums, typedefs=typedefs,
         elf=elf, pe=pe, macho=macho,
-        dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl,
+        dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl, kabi=kabi,
         python_ext=python_ext,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,

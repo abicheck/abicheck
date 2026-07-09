@@ -253,6 +253,22 @@ class TestSnapshotRoundtrip:
         assert by_name["core_op"].version_soname == "libcore.so.1"
         assert by_name["syscall"].version_soname == "libc.so.6"
 
+    def test_dwarf_base_types_preserved(self) -> None:
+        """DwarfMetadata.base_types survives the JSON roundtrip (G23 D2).
+
+        The `long double` byte size drives the same-mangling long-double ABI
+        check; a snapshot/cache round-trip that dropped it would hide the break.
+        """
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        orig = _minimal_snap()
+        orig.dwarf = DwarfMetadata(
+            has_dwarf=True, base_types={"long double": 16, "int": 4}
+        )
+        restored = _roundtrip(orig)
+        assert restored.dwarf is not None
+        assert restored.dwarf.base_types == {"long double": 16, "int": 4}
+
 
 # ---------------------------------------------------------------------------
 # 2. compare(snap, snap) == NO_CHANGE

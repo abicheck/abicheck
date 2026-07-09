@@ -189,6 +189,37 @@ class TestResolveInput:
         assert kwargs["public_headers"] == [hdr]
         assert kwargs["public_header_dirs"] == [pubdir]
 
+    def test_symvers_by_filename(self, tmp_path):
+        p = tmp_path / "Module.symvers"
+        p.write_text("0x1\tkmalloc\tvmlinux\tEXPORT_SYMBOL_GPL\tCORE\n")
+        result = resolve_input(p, is_elf=False)
+        assert result.kabi is not None
+        assert result.kabi.entries["kmalloc"].namespace == "CORE"
+
+    def test_symvers_by_content_generic_name(self, tmp_path):
+        # A generically-named file still resolves as kABI via content sniffing.
+        p = tmp_path / "syms.txt"
+        p.write_text("0x2\tkfree\tvmlinux\tEXPORT_SYMBOL\t\n")
+        result = resolve_input(p, is_elf=False)
+        assert result.kabi is not None
+        assert "kfree" in result.kabi.entries
+
+    def test_symvers_empty_falls_through(self, tmp_path):
+        # A .symvers file with no valid records is not treated as kABI.
+        from abicheck.service import _resolve_symvers
+
+        p = tmp_path / "empty.symvers"
+        p.write_text("# only a comment\n")
+        assert _resolve_symvers(p, "1.0") is None
+
+    def test_symvers_unreadable_returns_none(self, tmp_path):
+        from abicheck.service import _resolve_symvers
+
+        # A directory named like a manifest cannot be read as text → None.
+        d = tmp_path / "Module.symvers"
+        d.mkdir()
+        assert _resolve_symvers(d, "1.0") is None
+
     def test_json_text_format(self, tmp_path):
         p = tmp_path / "snap.json"
         snap = AbiSnapshot(library="test", version="1.0")

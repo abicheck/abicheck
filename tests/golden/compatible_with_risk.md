@@ -18,10 +18,12 @@
 | Evidence tier | `elf_only` |
 | Evidence tiers | `elf` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
+| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | Binary-only analysis without debug info; many ABI changes cannot be detected (struct layout, enum values, type changes) |
 

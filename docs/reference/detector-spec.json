@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 273,
+  "count": 297,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -100,6 +100,24 @@
       "min_evidence": "L1",
       "doc_slug": "bit_int_width_changed",
       "examples": "case115_bit_int_width_changed"
+    },
+    {
+      "kind": "branch_protection_improved",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "branch_protection_improved",
+      "examples": ""
+    },
+    {
+      "kind": "branch_protection_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "branch_protection_weakened",
+      "examples": ""
     },
     {
       "kind": "build_context_changed",
@@ -226,6 +244,24 @@
       "min_evidence": "L1",
       "doc_slug": "calling_convention_changed",
       "examples": "case64_calling_convention_changed"
+    },
+    {
+      "kind": "cet_protection_improved",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "cet_protection_improved",
+      "examples": ""
+    },
+    {
+      "kind": "cet_protection_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "cet_protection_weakened",
+      "examples": ""
     },
     {
       "kind": "char8t_migration",
@@ -378,6 +414,42 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "dwarf_info_missing",
+      "examples": ""
+    },
+    {
+      "kind": "elf_abi_flags_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_abi_flags_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_class_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_class_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_machine_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_machine_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_osabi_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "elf_osabi_changed",
       "examples": ""
     },
     {
@@ -1029,6 +1101,51 @@
       "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique"
     },
     {
+      "kind": "kabi_crc_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_crc_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_export_type_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_export_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_added",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_namespace_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_namespace_changed",
+      "examples": ""
+    },
+    {
+      "kind": "kabi_symbol_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "kabi_symbol_removed",
+      "examples": ""
+    },
+    {
       "kind": "layer_coverage_asymmetric",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1062,6 +1179,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "link_export_policy_changed",
+      "examples": ""
+    },
+    {
+      "kind": "long_double_abi_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "long_double_abi_changed",
       "examples": ""
     },
     {
@@ -1497,6 +1623,15 @@
       "examples": ""
     },
     {
+      "kind": "secondary_vtable_group_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "secondary_vtable_group_changed",
+      "examples": ""
+    },
+    {
       "kind": "serialization_tag_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1593,6 +1728,24 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "standard_layout_lost",
+      "examples": ""
+    },
+    {
+      "kind": "static_tls_introduced",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "static_tls_introduced",
+      "examples": ""
+    },
+    {
+      "kind": "static_tls_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "static_tls_removed",
       "examples": ""
     },
     {
@@ -1785,12 +1938,30 @@
       "examples": ""
     },
     {
+      "kind": "symbol_binding_became_unique",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_binding_became_unique",
+      "examples": ""
+    },
+    {
       "kind": "symbol_binding_changed",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "symbol_binding_changed",
+      "examples": ""
+    },
+    {
+      "kind": "symbol_binding_lost_unique",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_binding_lost_unique",
       "examples": ""
     },
     {
@@ -2262,6 +2433,15 @@
       "examples": ""
     },
     {
+      "kind": "unnamed_type_in_public_abi",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "unnamed_type_in_public_abi",
+      "examples": ""
+    },
+    {
       "kind": "unspecified_return_now_named",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -2397,6 +2577,15 @@
       "examples": "case141_versioned_symbol_scheme"
     },
     {
+      "kind": "virtual_base_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "virtual_base_offset_changed",
+      "examples": ""
+    },
+    {
       "kind": "virtual_method_added",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -2439,6 +2628,33 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "vtable_symbol_identity_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtable_thunk_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtable_thunk_offset_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtable_thunk_set_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtable_thunk_set_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtt_slot_count_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtt_slot_count_changed",
       "examples": ""
     },
     {

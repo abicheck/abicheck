@@ -654,6 +654,72 @@ class ChangeKind(str, Enum):
     PYTHON_GIL_ABI_CHANGED = "python_gil_abi_changed"  # extension switched between the regular (GIL) and free-threaded (PEP 703, Py_GIL_DISABLED) CPython ABI → the two builds are not interchangeable, a consumer on the other interpreter can't load it → RISK
     PYTHON_ABI3_FLOOR_RAISED = "python_abi3_floor_raised"  # both builds are abi3 but the new one's declared cpXY-abi3 tag floor is higher (e.g. cp39-abi3 → cp310-abi3) → interpreters in the dropped range can no longer load it → RISK
 
+    # ── G23 Phase A — Linux ELF artifact facts ──────────────────────────────
+    # A1: DF_STATIC_TLS drift. A library that adopts the static (initial/local-
+    # exec) TLS model can no longer be reliably dlopen()ed. Artifact-provable
+    # from the binary, so it does not need an L3 build pack (the flag-level
+    # TLS_MODEL_CHANGED stays the explanatory L3 signal).
+    STATIC_TLS_INTRODUCED = "static_tls_introduced"  # → RISK (breaks dlopen consumers)
+    STATIC_TLS_REMOVED = "static_tls_removed"  # → COMPATIBLE (improvement)
+
+    # A2: .note.gnu.property control-flow-protection drift. Dropping IBT/SHSTK
+    # (x86 CET) or BTI/PAC (AArch64) weakens the process-wide guarantee.
+    CET_PROTECTION_WEAKENED = "cet_protection_weakened"  # IBT/SHSTK dropped → RISK
+    BRANCH_PROTECTION_WEAKENED = "branch_protection_weakened"  # BTI/PAC dropped → RISK
+    CET_PROTECTION_IMPROVED = "cet_protection_improved"  # IBT/SHSTK gained → COMPATIBLE
+    BRANCH_PROTECTION_IMPROVED = "branch_protection_improved"  # BTI/PAC gained → COMPATIBLE
+
+    # A3: ELF identity / ABI-flags guard. The ELF-side counterpart to
+    # PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED. ELF_ABI_FLAGS_CHANGED makes
+    # float-ABI drift artifact-proven (the flag-level FLOAT_ABI_CHANGED stays the
+    # explanatory L3 signal).
+    ELF_MACHINE_CHANGED = "elf_machine_changed"  # e_machine differs → BREAKING
+    ELF_CLASS_CHANGED = "elf_class_changed"  # 32↔64-bit → BREAKING
+    ELF_ABI_FLAGS_CHANGED = "elf_abi_flags_changed"  # decoded float-ABI/EABI drift → BREAKING
+    ELF_OSABI_CHANGED = "elf_osabi_changed"  # EI_OSABI differs → RISK
+
+    # A4: STB_GNU_UNIQUE binding transitions. Uniqueness is enforced process-wide
+    # and inhibits dlclose(); losing it removes an ODR-uniqueness guarantee.
+    SYMBOL_BINDING_BECAME_UNIQUE = "symbol_binding_became_unique"  # → RISK
+    SYMBOL_BINDING_LOST_UNIQUE = "symbol_binding_lost_unique"  # → RISK
+
+    # ── G23 Phase B1 — Itanium multi-inheritance vtable machinery (L0) ───────
+    # Recovered from .dynsym thunk / VTT symbol names + sizes, no DWARF/headers.
+    # These catch multi-inheritance / virtual-base breaks that the primary-vtable
+    # _ZTV size diff (VTABLE_SLOT_COUNT_CHANGED) cannot see — e.g. a base reorder
+    # that shifts this-adjustment thunk offsets without changing the slot count.
+    VTABLE_THUNK_OFFSET_CHANGED = "vtable_thunk_offset_changed"  # this-adjustment baked into old vtables now wrong → BREAKING
+    VTABLE_THUNK_SET_CHANGED = "vtable_thunk_set_changed"  # a persisting method gained/lost a vtable thunk (secondary-base override) → BREAKING
+    VTT_SLOT_COUNT_CHANGED = "vtt_slot_count_changed"  # _ZTT size delta → virtual-base construction scaffolding changed → BREAKING
+    # B2: L1 DWARF vtable-group reconstruction. The derived class's own base
+    # declaration list is unchanged, but a base's *polymorphism* changed (a base
+    # gained/lost virtuals), restructuring which bases own a secondary vtable
+    # group — a cross-type effect the per-type field/base diff cannot see.
+    SECONDARY_VTABLE_GROUP_CHANGED = "secondary_vtable_group_changed"  # secondary vtable group added/removed/reordered → BREAKING
+    # A same-set reorder of virtual bases shifts the virtual-base offset table, so
+    # this-pointer adjustments baked into old binaries land on the wrong subobject.
+    VIRTUAL_BASE_OFFSET_CHANGED = "virtual_base_offset_changed"  # vbase offset table reordered → BREAKING
+
+    # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
+    # D3: an exported symbol whose mangled name embeds an unnamed type — a lambda
+    # closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). Their mangling is
+    # TU- and compiler-ordering-fragile (recompiling can renumber them), so
+    # exporting them is an ABI time bomb. Hygiene RISK, reported when newly
+    # introduced.
+    UNNAMED_TYPE_IN_PUBLIC_ABI = "unnamed_type_in_public_abi"  # → RISK
+    # D2: a function's `long double` parameter/return representation changed
+    # (ppc64 IEEE128 ↔ IBM double-double, or -mlong-double-64) — same source
+    # signature, different FP format. Detected from the Itanium long-double
+    # mangling token (e/g/u9__ieee128) on a removed↔added pair, or from the
+    # DWARF byte size on a persisting symbol.
+    LONG_DOUBLE_ABI_CHANGED = "long_double_abi_changed"  # → BREAKING
+    # D1: Linux kernel module ABI (kABI) facts from Module.symvers / genksyms.
+    KABI_SYMBOL_REMOVED = "kabi_symbol_removed"  # exported kernel symbol gone → BREAKING
+    KABI_CRC_CHANGED = "kabi_crc_changed"  # genksyms CRC changed → modversions reject the module → BREAKING
+    KABI_SYMBOL_NAMESPACE_CHANGED = "kabi_symbol_namespace_changed"  # export namespace gained/moved → module needs MODULE_IMPORT_NS → BREAKING
+    KABI_EXPORT_TYPE_CHANGED = "kabi_export_type_changed"  # EXPORT_SYMBOL ↔ EXPORT_SYMBOL_GPL → API_BREAK
+    KABI_SYMBOL_ADDED = "kabi_symbol_added"  # new exported kernel symbol → COMPATIBLE
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

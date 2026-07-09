@@ -90,3 +90,34 @@ def test_gcc_vs_clang_toolchain_drift_is_captured_and_surfaced(tmp_path):
     changes = diff_build_evidence(gcc_ev, clang_ev)
     drift = [c for c in changes if c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED]
     assert drift, f"expected toolchain drift, got {[c.kind for c in changes]}"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not (sys.platform.startswith("linux") and _CLANG),
+    reason="needs an ELF host with clang",
+)
+def test_clang_grecord_command_line_flag_drift_detected(tmp_path):
+    """G23-C acceptance: with -grecord-command-line, clang embeds its flags in
+    DW_AT_producer, so toolchain_flag_drift (and the artifact-level
+    enum_underlying_size_changed) fire on a -fshort-enums flip — closing the
+    documented clang known_gap for case103."""
+    from abicheck.checker import compare
+    from abicheck.service import resolve_input
+
+    src = tmp_path / "e.c"
+    src.write_text("enum E { A, B }; int f(enum E e) { return e; }\n")
+    v1, v2 = tmp_path / "v1.so", tmp_path / "v2.so"
+    subprocess.run(
+        [_CLANG, "-shared", "-fPIC", "-g", "-grecord-command-line",
+         str(src), "-o", str(v1)],
+        check=True, capture_output=True, timeout=120,
+    )
+    subprocess.run(
+        [_CLANG, "-shared", "-fPIC", "-g", "-grecord-command-line",
+         "-fshort-enums", str(src), "-o", str(v2)],
+        check=True, capture_output=True, timeout=120,
+    )
+    r = compare(resolve_input(v1), resolve_input(v2))
+    kinds = {c.kind for c in r.changes}
+    assert ChangeKind.TOOLCHAIN_FLAG_DRIFT in kinds, kinds

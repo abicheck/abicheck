@@ -25,6 +25,14 @@ overrides:
   # Overflow mitigations
   stack_canary_removed: break
   fortify_source_weakened: break
+  # Control-flow integrity (.note.gnu.property) — CET (x86) / branch protection
+  # (AArch64). Enforcement is process-wide, so dropping a feature silently
+  # weakens hardening for the whole link map (G23-A2).
+  cet_protection_weakened: break
+  branch_protection_weakened: break
+  # Static-TLS adoption makes the library un-dlopen-able for plugin hosts; gate
+  # it here since a security-hardened deployment often relies on dlopen (G23-A1).
+  static_tls_introduced: break
   # Loader search-path changes can be an injection vector — warn, don't break,
   # since legitimate RUNPATH edits are common.
   runpath_changed: warn

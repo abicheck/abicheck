@@ -85,6 +85,38 @@ def sniff_text_format(path: Path) -> str:
     return "unknown"
 
 
+def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
+    """Parse a Linux kernel ``Module.symvers`` manifest into a snapshot, or None.
+
+    Recognized by filename (``Module.symvers`` / ``*.symvers``) or, for a
+    generically-named file, by content (a hex-CRC + ``EXPORT_SYMBOL`` record).
+    """
+    from .symvers_metadata import looks_like_symvers, parse_symvers
+
+    name = path.name.lower()
+    by_name = name == "module.symvers" or name.endswith(".symvers")
+    if not by_name:
+        # Cheap bounded content sniff before committing to a full decode, so a
+        # generically-named non-symvers input (a large JSON snapshot, an archive)
+        # on the hot `compare old new` path isn't read+decoded in full here only
+        # to be rejected — the caller re-reads it for its real format anyway.
+        try:
+            with open(path, "rb") as f:
+                head = f.read(_SNIFF_BYTES).decode("utf-8", "replace")
+        except OSError:
+            return None
+        if not looks_like_symvers(head):
+            return None
+    try:
+        text = path.read_text("utf-8", "replace")
+    except OSError:
+        return None
+    kabi = parse_symvers(text)
+    if not kabi.entries:
+        return None
+    return AbiSnapshot(library=path.name, version=version, kabi=kabi)
+
+
 def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     """Parse a bare BTF or CTF blob into a snapshot, or return None.
 
@@ -249,6 +281,12 @@ def resolve_input(
     raw_typeinfo = _resolve_raw_typeinfo(path, version)
     if raw_typeinfo is not None:
         return raw_typeinfo
+
+    # Linux kernel Module.symvers (kABI manifest) — a tab-separated text file,
+    # recognized by filename or content (G23-D1).
+    kabi_snap = _resolve_symvers(path, version)
+    if kabi_snap is not None:
+        return kabi_snap
 
     # Text-based formats
     fmt = sniff_text_format(path)

@@ -188,6 +188,30 @@ _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset(
         # DWARF-derived aggregate-return convention flip — a binary-only ABI fact
         # with no source-API delta, so it is filtered from source-only views.
         ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+        # A long-double representation flip (80-bit x87 ↔ __float128, ppc64
+        # double-double ↔ IEEE binary128) keeps the source signature identical —
+        # `long double f(long double)` recompiles unchanged — and only changes the
+        # binary floating-point format, so like STRUCT_RETURN_CONVENTION_CHANGED it
+        # is a pure ABI fact with no source-API delta.
+        ChangeKind.LONG_DOUBLE_ABI_CHANGED,
+        # ── G23 Phase A — Linux ELF artifact facts (binary/link-level only) ──
+        # Pure ELF header / dynamic-section / .note facts with no source-API
+        # delta, so they are filtered from source-only views (like the symbol
+        # binding / soname / ifunc facts above). The B1 thunk/VTT layout kinds
+        # are intentionally NOT here — they mirror source-visible vtable/base
+        # changes, matching the existing VTABLE_SLOT_COUNT_CHANGED precedent.
+        ChangeKind.ELF_MACHINE_CHANGED,
+        ChangeKind.ELF_CLASS_CHANGED,
+        ChangeKind.ELF_ABI_FLAGS_CHANGED,
+        ChangeKind.ELF_OSABI_CHANGED,
+        ChangeKind.STATIC_TLS_INTRODUCED,
+        ChangeKind.STATIC_TLS_REMOVED,
+        ChangeKind.CET_PROTECTION_WEAKENED,
+        ChangeKind.CET_PROTECTION_IMPROVED,
+        ChangeKind.BRANCH_PROTECTION_WEAKENED,
+        ChangeKind.BRANCH_PROTECTION_IMPROVED,
+        ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+        ChangeKind.SYMBOL_BINDING_LOST_UNIQUE,
     }
 )
 
