@@ -76,6 +76,19 @@ Two guards make this sound:
   defines — a guard the *new* header adds is never applied to the *old* build's
   field. So a field unguarded in old but guarded-and-undefined in new is a real
   removal (the sides' real sets differ) and is kept.
+- **Terminal-field ordering (P1-c).** The declaration comparison is *orderless*,
+  so a real field **reorder** that surfaces only as a `type_field_removed` — when
+  the snapshot has no field offsets (e.g. the clang header backend leaves
+  `offset_bits=None`, so no `type_field_offset_changed` is emitted) — could
+  otherwise be cleared by adding the pruned field back. A presence delta is
+  therefore reconciled only when the differing field is the **terminal** member on
+  every side it appears (`is_last`, recorded by the scanner): a last field can be
+  added or removed without shifting any sibling. A mid-record guarded field, or a
+  registry without position proof, is kept.
+- **Build-context-dependent guards.** A macro `#undef`/`#define`d inside a branch
+  the context-free scan cannot evaluate is marked `ambiguous`; the reconciler
+  refuses to reconcile any type carrying such a field, since honouring or ignoring
+  the directive both risk a wrong verdict depending on the build's defines.
 
 ### Authority rule (ADR-028 D3) is preserved
 

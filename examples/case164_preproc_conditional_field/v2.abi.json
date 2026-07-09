@@ -101,7 +101,11 @@
         "type": "int",
         "is_bitfield": false,
         "bitfield_bits": null,
-        "access": "public"
+        "access": "public",
+        "is_const": false,
+        "is_volatile": false,
+        "is_mutable": false,
+        "is_last": true
       }
     }
   },

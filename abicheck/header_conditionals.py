@@ -330,7 +330,7 @@ def _record_qualified_name(scope_stack: list[_Scope], name: str) -> str | None:
 class _Scope:
     """One open ``{}`` scope: a namespace or a record body."""
 
-    __slots__ = ("kind", "name", "depth", "access", "qualified")
+    __slots__ = ("kind", "name", "depth", "access", "qualified", "field_index", "recorded")
 
     def __init__(
         self, kind: str, name: str | None, depth: int, qualified: str | None
@@ -341,6 +341,11 @@ class _Scope:
         # Current C++ access (records only); default from the keyword.
         self.access = "public"
         self.qualified = qualified  # records only; None if unrecordable
+        # Source-order member counter and the recorded guarded entries (with the
+        # member index they sit at) — used to stamp ``is_last`` on close so the
+        # reconciler can prove a reconciled field is terminal (Codex review #498).
+        self.field_index = 0
+        self.recorded: list[tuple[dict[str, object], int]] = []
 
 
 def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object]]]:
@@ -348,9 +353,12 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
 
     Returns ``{record: {field: {"guard": macro, "type": t, "is_bitfield": b,
     "bitfield_bits": n, "access": a, "is_const": c, "is_volatile": v,
-    "is_mutable": m}}}`` (plus ``"negative": True`` for an ``#ifndef`` field and
-    ``"ambiguous": True`` when the guard macro is ``#undef``/``#define``d inside an
-    unevaluable branch), keying each record by its
+    "is_mutable": m, "is_last": bool}}}`` (plus ``"negative": True`` for an
+    ``#ifndef`` field and ``"ambiguous": True`` when the guard macro is
+    ``#undef``/``#define``d inside an unevaluable branch). ``is_last`` records
+    whether the field is the final data member of its record in source order — the
+    reconciler only clears a presence finding for a *terminal* field, so re-adding
+    or pruning it cannot reorder a sibling. Each record is keyed by its
     **namespace/class-qualified** name (``api::S``). Qualifying keeps two
     same-named records in different namespaces distinct (no conflation) and skips
     anonymous-namespace records; the reconciler matches this key *exactly* against
@@ -503,13 +511,16 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             rec_here is not None
             and rec_here.qualified is not None
             and brace_depth == rec_here.depth + 1
-            and guard is not None
-            and guard not in locally_undefined
         ):
             fm = _FIELD.match(line)
-            if fm:
-                parsed = _parse_field(fm.group("decl"))
-                if parsed is not None:
+            parsed = _parse_field(fm.group("decl")) if fm else None
+            if parsed is not None:
+                # Count **every** plain data member in source order (guarded or
+                # not) so the recorded guarded fields carry an accurate position;
+                # ``is_last`` is stamped on record close (Codex review #498).
+                pos = rec_here.field_index
+                rec_here.field_index += 1
+                if guard is not None and guard not in locally_undefined:
                     name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable = parsed
                     entry: dict[str, object] = {
                         "guard": guard,
@@ -532,6 +543,7 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
                         # findings on this type (Codex review #498).
                         entry["ambiguous"] = True
                     registry.setdefault(rec_here.qualified, {})[name] = entry
+                    rec_here.recorded.append((entry, pos))
 
         for ch in line:
             if ch == "{":
@@ -549,7 +561,15 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             elif ch == "}":
                 brace_depth = max(0, brace_depth - 1)
                 if scope_stack and brace_depth == scope_stack[-1].depth:
-                    scope_stack.pop()
+                    closing = scope_stack.pop()
+                    # Now that every member is counted, stamp ``is_last`` on the
+                    # record's recorded guarded fields: True iff the field is the
+                    # final data member in source order (Codex review #498). A
+                    # reconciled field must be terminal so re-adding / pruning it
+                    # cannot reorder a sibling.
+                    last_index = closing.field_index - 1
+                    for rec_entry, member_pos in closing.recorded:
+                        rec_entry["is_last"] = member_pos == last_index
 
     return {rec: fields for rec, fields in registry.items() if fields}
 

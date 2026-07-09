@@ -100,6 +100,52 @@ def _has_ambiguous(registry: dict[str, dict[str, object]]) -> bool:
     return any(entry.get("ambiguous") for entry in registry.values())
 
 
+def _order_is_provable(
+    t_old: RecordType,
+    old_registry: dict[str, dict[str, object]],
+    t_new: RecordType,
+    new_registry: dict[str, dict[str, object]],
+) -> bool:
+    """Whether re-adding/pruning the reconciled field cannot reorder a sibling.
+
+    ``_effective_decls`` compares **orderless** declaration maps, so a field
+    swapped for another in the built layout can compare equal — and when the
+    snapshot has no field offsets (e.g. the clang header backend sets
+    ``offset_bits=None``) there is no offset finding to keep the verdict
+    breaking. To stay sound we only clear a presence delta when every field that
+    differs between the two *observed* field sets is the **terminal** member on
+    every side it appears — a last field can be added or removed without shifting
+    any sibling (Codex review #498, P1).
+
+    A field observed on one side only is *terminal-safe* iff it is the last
+    ``rec.fields`` entry there **and** its explaining registry entry (the side
+    that pruned it) is flagged ``is_last``. Absent that proof — a mid-record
+    guarded field, or a registry without position info — the finding is kept.
+    """
+    old_names = [f.name for f in t_old.fields]
+    new_names = [f.name for f in t_new.fields]
+    old_set, new_set = set(old_names), set(new_names)
+
+    def _terminal(
+        name: str,
+        observed: list[str],
+        reg_a: dict[str, dict[str, object]],
+        reg_b: dict[str, dict[str, object]],
+    ) -> bool:
+        if not observed or observed[-1] != name:
+            return False  # not the last observed member on the side that has it
+        entry = reg_a.get(name) or reg_b.get(name) or {}
+        return bool(entry.get("is_last"))
+
+    for name in old_set - new_set:  # observed only in old (removed / added-in-new)
+        if not _terminal(name, old_names, new_registry, old_registry):
+            return False
+    for name in new_set - old_set:  # observed only in new (added / removed-in-old)
+        if not _terminal(name, new_names, old_registry, new_registry):
+            return False
+    return True
+
+
 def _effective_decls(
     rec: RecordType, registry: dict[str, dict[str, object]], defines: set[str]
 ) -> dict[str, tuple[object, ...]]:
@@ -220,7 +266,9 @@ def reconcile_build_context(
         # declaration changed → the finding is an artifact.
         decls_old = _effective_decls(t_old, old_registry, old.build_context_defines)
         decls_new = _effective_decls(t_new, new_registry, new.build_context_defines)
-        if decls_old == decls_new:
+        if decls_old == decls_new and _order_is_provable(
+            t_old, old_registry, t_new, new_registry
+        ):
             change.surface_exclusion_reason = RECONCILE_REASON
             change.evidence_category = "build_context"
             reconciled.append(change)

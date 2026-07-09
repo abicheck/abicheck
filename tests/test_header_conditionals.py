@@ -184,6 +184,7 @@ def test_scan_records_ifdef_guarded_field():
         "is_const": False,
         "is_volatile": False,
         "is_mutable": False,
+        "is_last": True,  # legacy is the final member of Config
     }
     # the unconditional field is not registered
     assert "version" not in reg.get("Config", {})
@@ -420,6 +421,18 @@ def test_scan_clean_guard_is_not_ambiguous():
     carries no ``ambiguous`` flag — normal reconcilable evidence."""
     src = "struct S {\n#ifdef KEEP\n int x;\n#endif\n};"
     assert "ambiguous" not in _guard(scan_conditional_fields(src), "S", "x")
+
+
+def test_scan_records_is_last_for_terminal_field():
+    """A guarded field that is the final member of its record is flagged
+    ``is_last: True``; one with a member after it is ``False`` (Codex review
+    #498, P1). ``is_last`` counts *all* members, guarded or not."""
+    trailing = "struct S {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    assert _guard(scan_conditional_fields(trailing), "S", "legacy")["is_last"] is True
+    mid = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int tail;\n};"
+    assert _guard(scan_conditional_fields(mid), "S", "legacy")["is_last"] is False
+    first = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int version;\n int tail;\n};"
+    assert _guard(scan_conditional_fields(first), "S", "legacy")["is_last"] is False
 
 
 def test_scan_top_level_undef_suppresses_negative_guard():

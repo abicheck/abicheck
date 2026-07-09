@@ -56,15 +56,21 @@ def _tf(name: str, type_: str = "int") -> TypeField:
 
 
 def _guarded(
-    type_: str = "int", guard: str = GUARD, access: str = "public"
+    type_: str = "int", guard: str = GUARD, access: str = "public", is_last: bool = True
 ) -> dict[str, object]:
-    """A conditional-field registry entry (full declaration)."""
+    """A conditional-field registry entry (full declaration).
+
+    ``is_last`` defaults True: the canonical FP is a *trailing* guarded field, and
+    the reconciler only clears a presence delta when the field is terminal (Codex
+    review #498, P1). Tests that model a mid-record field pass ``is_last=False``.
+    """
     return {
         "guard": guard,
         "type": type_,
         "is_bitfield": False,
         "bitfield_bits": None,
         "access": access,
+        "is_last": is_last,
     }
 
 
@@ -225,6 +231,42 @@ def test_guard_not_applied_across_sides():
     absent. Both builds define an unrelated macro, not the guard."""
     old = _snap("1", [_tf("version"), _tf("legacy")], defines={"OTHER"})
     new = _snap("2", [_tf("version")], defines={"OTHER"}, conditional=_reg())
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.verdict == Verdict.BREAKING
+    assert result.reconciled_count == 0
+
+
+def test_reorder_hidden_by_pruned_field_is_kept():
+    """A real field reorder that surfaces only as ``type_field_removed`` (offsets
+    unavailable) must not be reconciled: old ``[version, legacy, tail]`` vs new
+    ``[version, tail, #ifdef KEEP legacy]``. Adding ``legacy`` back makes the
+    orderless maps equal, but ``legacy`` is not terminal in old, so the ordering
+    gate keeps the finding (Codex review #498, P1)."""
+    old = _snap("1", [_tf("version"), _tf("legacy"), _tf("tail")])
+    # new prunes legacy (registry says it is the trailing member of new's source),
+    # but in old legacy sits *before* tail — a genuine reorder.
+    new = _snap(
+        "2",
+        [_tf("version"), _tf("tail")],
+        conditional={"S": {"legacy": _guarded(is_last=True)}},
+    )
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.verdict == Verdict.BREAKING
+    assert result.reconciled_count == 0
+
+
+def test_non_terminal_pruned_field_is_kept():
+    """Even a same-field-set case is kept when the pruned field is not terminal on
+    the pruned side (``is_last`` False): its position among siblings is unproven,
+    so re-adding it could reorder them (Codex review #498, P1)."""
+    old = _snap("1", [_tf("version"), _tf("legacy")])
+    new = _snap(
+        "2", [_tf("version")], conditional={"S": {"legacy": _guarded(is_last=False)}}
+    )
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
     )

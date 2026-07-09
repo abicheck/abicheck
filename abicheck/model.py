@@ -444,10 +444,13 @@ class AbiSnapshot:
     # ADR-039 — registry of *conditional* record fields the header parse knows
     # about, with their full declaration: ``{type: {field: {"guard": macro,
     # "type": type_name, "is_bitfield": bool, "bitfield_bits": int|None,
-    # "access": str, "is_const": bool, "is_volatile": bool, "is_mutable": bool}}}``
-    # (each field entry is a mixed-value dict, not ``dict[str, str]``; a field may
-    # also carry ``"negative": True`` for an ``#ifndef`` guard or ``"ambiguous":
-    # True`` when its guard macro is conditionally ``#undef``/``#define``d). A
+    # "access": str, "is_const": bool, "is_volatile": bool, "is_mutable": bool,
+    # "is_last": bool}}}`` (each field entry is a mixed-value dict, not
+    # ``dict[str, str]``; a field may also carry ``"negative": True`` for an
+    # ``#ifndef`` guard or ``"ambiguous": True`` when its guard macro is
+    # conditionally ``#undef``/``#define``d). ``is_last`` marks a field that is
+    # terminal in its record's source order — the reconciler only clears a presence
+    # delta for a terminal field, so re-adding it cannot reorder a sibling. A
     # field lives here iff its presence is gated by a ``#if defined(GUARD)``
     # region, whether or not a context-free parse pruned it from the type's
     # ``fields`` list. Carrying the *declaration* (not just the guard) lets
