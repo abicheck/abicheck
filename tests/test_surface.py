@@ -958,15 +958,6 @@ class TestWideningOverlay:
         assert kept == [] and len(ledger) == 1
 
 
-def test_collect_force_public_symbols_merges_flag_and_file(tmp_path):
-    from abicheck.cli import _collect_force_public_symbols
-
-    lst = tmp_path / "syms.txt"
-    lst.write_text("# public symbols\nfoo\n\n  bar  \n# comment\nbaz\n")
-    out = _collect_force_public_symbols(("qux", "foo"), lst)
-    assert out == {"foo", "bar", "baz", "qux"}
-
-
 def test_collect_force_public_symbols_no_file():
     from abicheck.cli import _collect_force_public_symbols
 

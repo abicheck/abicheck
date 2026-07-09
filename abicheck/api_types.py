@@ -136,6 +136,11 @@ class CompareRequest:
     suppress: Path | None = None
     scope_public: bool = True
     force_public_symbols: frozenset[str] | None = None
+    # `compare --post-manifest`: the committed `pp_*`/ufunc-loop surface of a POST
+    # manifest. When set, the comparison is scoped to this set — export findings
+    # outside it (e.g. private `__pp_*` kernel churn) are demoted. None = not
+    # manifest-scoped.
+    public_surface_allowlist: frozenset[str] | None = None
     pattern_verdicts: bool = False
     enable_debuginfod: bool = False
 

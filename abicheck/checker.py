@@ -333,6 +333,7 @@ def _run_post_processing(
     scope_to_public_surface: bool,
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
+    public_surface_allowlist: set[str] | None = None,
 ) -> tuple[list[Change], list[Change], list[Change], list[Change], list[Change], bool, PipelineContext]:
     """Run the post-processing pipeline and unpack results.
 
@@ -352,6 +353,7 @@ def _run_post_processing(
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        public_surface_allowlist=public_surface_allowlist,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -455,6 +457,7 @@ def compare(
     pattern_verdicts: bool = False,
     surface_metrics: bool = False,
     collapse_versioned_symbols: bool = False,
+    public_surface_allowlist: set[str] | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -492,6 +495,7 @@ def compare(
         _run_post_processing(
             changes, old, new, suppression, policy_file, scope_to_public_surface,
             force_public_symbols, collapse_versioned_symbols,
+            public_surface_allowlist=public_surface_allowlist,
         )
     )
 
@@ -541,10 +545,20 @@ def compare(
 
     # ADR-024 §D5.3: structured confidence in the surface resolution itself.
     # Reuse the surfaces FilterNonPublicSurface already computed (when scoping
-    # ran) to avoid repeating the type-closure walk.
+    # ran) to avoid repeating the type-closure walk. Confidence is a
+    # header-provenance notion, so it stays gated on the header flag — a POST
+    # manifest surface is an explicit contract and does not depend on it.
     scope_confidence, scope_notes = _compute_scope_confidence(
         old, new, scope_to_public_surface, pp_ctx
     )
+
+    # A POST manifest allowlist scopes the comparison just as much as header
+    # scoping does — it moves non-committed findings to `out_of_surface`. Mark
+    # scoping active whenever *either* is in effect so the report always emits
+    # the surface-scope ledger; otherwise a manifest run combined with
+    # --no-scope-public-headers would silently filter findings and a clean
+    # verdict would hide that (Codex review).
+    scope_active = scope_to_public_surface or public_surface_allowlist is not None
 
     # ADR-027 A1/D1.2: aggregate surface-metric drift (opt-in --surface-metrics).
     # COMPATIBLE informational roll-ups; suppressible like any finding and never
@@ -585,7 +599,7 @@ def compare(
         coverage_warnings=coverage_warnings,
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
-        scope_to_public_surface=scope_to_public_surface,
+        scope_to_public_surface=scope_active,
         scope_resolved=scope_resolved,
         surface_scope_confidence=scope_confidence,
         surface_scope_notes=scope_notes,

@@ -48,6 +48,13 @@ class PipelineContext:
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False
+    # `compare --post-manifest`: an explicit committed-ABI surface (the set of
+    # `pp_*`/ufunc-loop symbols a POST manifest promises). When set,
+    # FilterNonPublicSurface scopes against *this* set instead of the
+    # header-derived surface — an export finding whose symbol is not committed is
+    # demoted, while type-level and leak findings are kept (conservative). None
+    # means "not manifest-scoped".
+    public_surface_allowlist: set[str] | None = None
     # G15 (opt-in): when True, DetectVersionedSymbolScheme reclassifies the
     # version-rename pairs (ICU `u_*_NN`) as compatible so the verdict reflects
     # the real delta instead of the rename churn. Off by default (authority rule).
@@ -227,6 +234,37 @@ class EnrichSourceLocations:
         return changes
 
 
+def _snapshot_export_ids(snap: AbiSnapshot) -> set[str]:
+    """Every identifier (name + mangled) under which a real export appears.
+
+    Used by manifest scoping to tell a concrete exported symbol (subject to the
+    committed-surface filter) from a loader/dynamic pseudo-symbol like
+    ``DT_SONAME`` (which is not an export and must survive scoping).
+
+    Includes the platform export tables (ELF ``.dynsym``, PE/Mach-O export
+    directories), not just the DWARF-derived ``functions``/``variables``: a
+    private ``__pp_*`` helper can appear only in ELF/PE/Mach-O metadata (e.g. a
+    header-scoped or no-debug snapshot), and it must still be recognized as a
+    concrete export so its findings are demoted rather than kept. Dynamic-section
+    pseudo-symbols (``DT_SONAME``/``DT_NEEDED``) are not symbol-table entries, so
+    they stay out of this set and survive scoping.
+    """
+    ids: set[str] = set()
+    for coll in (snap.functions, snap.variables):
+        for s in coll:
+            for attr in ("mangled", "name"):
+                val = getattr(s, attr, "")
+                if val:
+                    ids.add(val)
+    for meta, attr in ((snap.elf, "symbols"), (snap.pe, "exports"),
+                       (snap.macho, "exports")):
+        for s in getattr(meta, attr, None) or ():
+            name = getattr(s, "name", "")
+            if name:
+                ids.add(name)
+    return ids
+
+
 def _change_matches_symbols(change: Change, symbols: set[str]) -> bool:
     """True if *change*'s symbol matches the widening allowlist.
 
@@ -256,8 +294,14 @@ class FilterNonPublicSurface:
     name = "filter_non_public_surface"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # Manifest-scoped mode (`compare --post-manifest`) takes precedence: the
+        # manifest's committed `pp_*`/ufunc-loop set *is* the authoritative
+        # public surface, so there is no header-provenance walk to do.
+        if ctx.public_surface_allowlist is not None:
+            return self._run_allowlist(changes, ctx)
         if not ctx.scope_to_public_surface:
             return changes
+
         from .surface import (
             classify_change_surface,
             compute_public_surface,
@@ -295,6 +339,53 @@ class FilterNonPublicSurface:
             else:
                 # Tag with the ledger reason (ADR-024 §D5.1) before demoting.
                 c.surface_exclusion_reason = reason
+                ctx.out_of_surface.append(c)
+        return kept
+
+    @staticmethod
+    def _run_allowlist(changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        """Scope against an explicit committed-surface allowlist (POST manifest).
+
+        A finding is demoted to ``out_of_surface`` only when it is a *concrete
+        exported symbol* (a function/variable actually present in either
+        snapshot's export universe) that is not in the committed set — e.g. churn
+        on a private ``__pp_*`` kernel symbol. Everything else is kept
+        conservatively (ADR-024 §D5): type-level and never-filter (leak)
+        findings, findings with no symbol, and — crucially — loader/dynamic
+        findings whose ``symbol`` is a pseudo-name (``DT_SONAME``, ``DT_NEEDED``)
+        rather than a real export. A SONAME/NEEDED change breaks linked clients
+        independently of the POST export set, so it must survive scoping. This
+        mirrors the header path, where an unknown (non-exported) symbol is kept.
+        """
+        from .surface import is_symbol_level_finding
+
+        allow = ctx.public_surface_allowlist or set()
+        force_public = ctx.force_public_symbols
+        export_ids = _snapshot_export_ids(ctx.old) | _snapshot_export_ids(ctx.new)
+        kept: list[Change] = []
+        for c in changes:
+            sym = c.symbol or ""
+            if not sym or not is_symbol_level_finding(c) or sym not in export_ids:
+                # Non-export findings (type-level, leaks, loader/dynamic
+                # pseudo-symbols) are outside the export-name filter — keep.
+                kept.append(c)
+                continue
+            # The manifest allowlist is a set of *exact* C export names, so match
+            # exactly — the suffix-tolerant `_change_matches_symbols` would let an
+            # uncommitted namespaced helper (`internal::pp_foo`) pass as committed
+            # `pp_foo`, contradicting the `--post-manifest` contract. The
+            # `force_public` widening overlay is a header-scoping concept and is
+            # only honored when header scoping is also on — the CLI warns it is
+            # ignored under `--no-scope-public-headers`, so applying it here would
+            # contradict that warning (e.g. force a private `__pp_impl` back in).
+            if sym in allow or (
+                ctx.scope_to_public_surface
+                and force_public
+                and _change_matches_symbols(c, force_public)
+            ):
+                kept.append(c)
+            else:
+                c.surface_exclusion_reason = "not in POST manifest committed surface"
                 ctx.out_of_surface.append(c)
         return kept
 
@@ -981,6 +1072,7 @@ class PostProcessingPipeline:
         scope_to_public_surface: bool = False,
         force_public_symbols: set[str] | None = None,
         collapse_versioned_symbols: bool = False,
+        public_surface_allowlist: set[str] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -991,6 +1083,7 @@ class PostProcessingPipeline:
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=public_surface_allowlist,
         )
         for step in self.steps:
             changes = step.run(changes, ctx)

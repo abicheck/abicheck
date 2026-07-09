@@ -188,5 +188,14 @@ def test_headers_depth_matrix_args_stays_l2_only_and_fast(tmp_path: Path) -> Non
     assert rows["L3_build"]["status"] == "not_collected"
     assert doc["pattern_scan"]["files_scanned"] == 1
     assert "virtual_method" not in doc["pattern_scan"].get("counts_by_kind", {})
-    assert doc["elapsed_s"] < 5.0
-    assert wall < 8.0
+    # Timing budgets guard against a *catastrophic* regression (e.g. accidentally
+    # doing L3 build work), not micro-variance — the structural assertions above
+    # (L3 not_collected, files_scanned == 1) are the real "L2-only" guard. The
+    # clang-AST header parse dominates wall time and is highly machine-dependent:
+    # observed 3.4s locally but 6.26s and 11.28s on contended shared CI runners.
+    # Chasing that variance with a tight budget only flakes the lane, so the
+    # ceiling is deliberately generous — a real regression that pulls in a build
+    # layer (cmake configure alone is 60s-timeout territory) blows far past it
+    # while normal runner spikes stay well under.
+    assert doc["elapsed_s"] < 30.0
+    assert wall < 45.0
