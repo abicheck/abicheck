@@ -29,7 +29,13 @@ import json
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
+from abicheck.elf_metadata import (
+    ElfImport,
+    ElfMetadata,
+    ElfSymbol,
+    SymbolBinding,
+    SymbolType,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.python_api import (
     KEYWORD_ONLY,
@@ -295,6 +301,32 @@ def test_detect_returns_none_for_non_extension_with_sibling_pyi(tmp_path) -> Non
     so.write_bytes(b"\x7fELF")
     snap = AbiSnapshot(library=so.name, version="1", source_path=str(so))
     assert snap.python_ext is None
+    assert detect_python_api(snap) is None
+
+
+def test_detect_returns_none_for_embedding_host_with_sibling_pyi(tmp_path) -> None:
+    # An *embedding host* imports Py* C-API symbols (so `is_extension` is true)
+    # but exports NO `PyInit_*` — it is not importable as a module. Pairing it
+    # with a sibling `.pyi` must NOT yield a Python API surface: the module-init
+    # export, not merely CPython imports, is what makes the stub's surface real.
+    (tmp_path / "libhost.pyi").write_text("def go(): ...\n", encoding="utf-8")
+    so = tmp_path / "libhost.so"
+    so.write_bytes(b"\x7fELF")
+    elf = ElfMetadata()
+    elf.imports = [
+        ElfImport(
+            name="Py_Initialize",
+            binding=SymbolBinding.GLOBAL,
+            sym_type=SymbolType.FUNC,
+        )
+    ]
+    snap = AbiSnapshot(library=so.name, version="1", elf=elf, source_path=str(so))
+    snap.python_ext = detect_python_extension(snap)
+    # It reads as an extension (imports Py*), yet has no init export …
+    assert snap.python_ext is not None
+    assert snap.python_ext.is_extension
+    assert snap.python_ext.init_symbol is None
+    # … so no Python API surface is recovered.
     assert detect_python_api(snap) is None
 
 

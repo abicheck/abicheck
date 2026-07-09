@@ -435,18 +435,24 @@ def _find_stub(binary_path: str, module_name: str | None) -> Path | None:
 def detect_python_api(snap: AbiSnapshot) -> PythonApiSurface | None:
     """Recover the Python-level API surface for *snap*, else ``None``.
 
-    Requires (a) the snapshot to be a **recognised CPython extension module**
-    (``snap.python_ext`` present and ``is_extension``), (b) an on-disk
-    ``source_path``, and (c) a ``.pyi`` stub alongside it. The extension gate is
-    essential: without it a plain native library (``libfoo.so``) that merely
-    happens to have an unrelated ``libfoo.pyi`` sibling would be handed a Python
-    API surface and later produce spurious ``python_api_*`` findings. Returns
-    ``None`` — the honest "nothing recovered" answer — only when a precondition
-    is unmet (not an extension, no ``source_path``, or no stub found); a stub
-    that is *present but empty* still yields a (possibly empty) surface so a
-    later removal of its last public name is diffable.
+    Requires (a) the snapshot to be an **importable CPython extension module**
+    — ``snap.python_ext`` present with a module-init export (``init_symbol``,
+    i.e. ``PyInit_foo`` / ``initfoo``) — (b) an on-disk ``source_path``, and
+    (c) a ``.pyi`` stub alongside it. The init-export gate is essential and
+    stricter than ``is_extension`` on purpose: ``is_extension`` is also true for
+    an *embedding host* — a library that merely imports ``Py*`` C-API symbols
+    (``cpython_imports`` nonempty) with no ``PyInit_*`` export. Such a host is
+    not importable as a module, so pairing it with a sibling ``libfoo.pyi`` and
+    emitting ``python_api_*`` findings would be spurious; only a real module-init
+    export means callers can ``import`` it and see the stub's surface. (This also
+    subsumes the plain-native-library case — ``libfoo.so`` with an unrelated
+    ``libfoo.pyi`` has no init export.) Returns ``None`` — the honest "nothing
+    recovered" answer — only when a precondition is unmet (not an importable
+    extension, no ``source_path``, or no stub found); a stub that is *present but
+    empty* still yields a (possibly empty) surface so a later removal of its last
+    public name is diffable.
     """
-    if snap.python_ext is None or not snap.python_ext.is_extension:
+    if snap.python_ext is None or snap.python_ext.init_symbol is None:
         return None
     if not snap.source_path:
         return None
