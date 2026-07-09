@@ -614,6 +614,17 @@ def test_positional_or_keyword_rename_is_still_breaking() -> None:
     assert ChangeKind.PYTHON_API_PARAMETER_RENAMED in kinds
 
 
+def test_positional_only_slot_replaced_by_keyword_only_is_breaking() -> None:
+    # `def f(a, /)` → `def f(*, b)`: the single-removed/single-added heuristic
+    # aligns the slots (both at ordinal 0), and the old name is not
+    # keyword-capable so no rename is emitted — but the binding kind narrowed
+    # from positional-only to keyword-only, so `f(1)` now raises TypeError. The
+    # kind change must be reported, not swallowed as a no-op rename.
+    kinds = _diff_kinds("def f(a, /): ...\n", "def f(*, b): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED in kinds
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED not in kinds
+
+
 def test_keyword_only_rename_is_still_breaking() -> None:
     kinds = _diff_kinds("def f(*, a): ...\n", "def f(*, b): ...\n")
     assert ChangeKind.PYTHON_API_PARAMETER_RENAMED in kinds

@@ -181,6 +181,22 @@ def _diff_signature(
                     detail=new_name,
                 )
             )
+        # The renamed slot may also change *binding kind* — a positional-only
+        # slot replaced by a keyword-only one (`def f(a, /)` → `def f(*, b)`)
+        # breaks positional callers (`f(1)` now raises TypeError) even though no
+        # keyword-renamed name existed. Because this branch bypasses the
+        # removed/added and positional-prefix checks below, the narrowing would
+        # otherwise be swallowed, so compare the kinds here directly.
+        kind_detail = _kind_narrowing_detail(new_name, op, np)
+        if kind_detail is not None:
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED,
+                    symbol=symbol,
+                    name=qualified,
+                    detail=kind_detail,
+                )
+            )
     else:
         for n in removed:
             changes.append(
