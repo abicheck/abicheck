@@ -39,18 +39,44 @@ from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 
-# Itanium unnamed-type productions in a mangled name:
+# Itanium unnamed-type productions, both <unqualified-name> alternatives:
 #   closure-type  ::= Ul <lambda-sig> E [<number>] _
 #   unnamed-type  ::= Ut [<number>] _
-# Both are matched directly on the *mangled* form. The system demangler's
-# spelling of a lambda closure varies by platform (e.g. libc++abi vs libstdc++),
-# so relying on the demangled ``{lambda`` text made detection platform-dependent;
-# the ``Ul…E[<n>]_`` token is the authoritative, portable signal. A negative
-# lookbehind rejects a source name that merely begins with those letters — a
-# class named ``Ul`` is length-prefixed (``2Ul``), so its ``Ul`` is preceded by a
-# digit, whereas the closure marker never is.
-_UNNAMED_STRUCT_RE = re.compile(r"Ut\d*_")
-_LAMBDA_CLOSURE_RE = re.compile(r"(?<![0-9])Ul.*?E\d*_")
+# A plain substring search is unsound: an ordinary source name can contain the
+# letters (a function `aUt_()` mangles as `_Z4aUt_v`), producing a false leak.
+# We instead walk the mangled string, skipping every length-prefixed
+# `<source-name>` (`<decimal><identifier>`) so those tokens are only recognized
+# at real *structural* positions. At a structural position `U` is either a
+# vendor qualifier (`U <source-name> …`, i.e. `U` + digit) or one of these two
+# productions (`Ut`/`Ul`), which is unambiguous because `t`/`l` cannot start a
+# length-prefixed source name. This is demangler-independent, so a lambda is
+# caught identically across libstdc++/libc++abi.
+_UNNAMED_STRUCT_TOKEN = re.compile(r"Ut\d*_")
+
+
+def _unnamed_kind(mangled: str) -> str | None:
+    """Return a human label if *mangled* embeds an unnamed type at a real
+    mangling-token boundary, else None."""
+    i = 0
+    n = len(mangled)
+    while i < n:
+        ch = mangled[i]
+        if ch.isdigit():
+            # <source-name> ::= <decimal length> <identifier>. Skip the whole
+            # identifier so tokens inside a user name are never matched.
+            j = i
+            while j < n and mangled[j].isdigit():
+                j += 1
+            length = int(mangled[i:j])
+            i = j + length
+            continue
+        # Structural position: `Ut[<n>]_` / `Ul…E[<n>]_` are the productions.
+        if mangled.startswith("Ul", i):
+            return "lambda closure"
+        if mangled.startswith("Ut", i) and _UNNAMED_STRUCT_TOKEN.match(mangled, i):
+            return "unnamed struct/enum"
+        i += 1
+    return None
 
 
 def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
@@ -62,15 +88,6 @@ def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
         for s in elf.symbols
         if s.name.startswith("_Z") and is_abi_relevant_elf_symbol(s.name)
     }
-
-
-def _unnamed_kind(mangled: str) -> str | None:
-    """Return a human label if *mangled* embeds an unnamed type, else None."""
-    if _UNNAMED_STRUCT_RE.search(mangled):
-        return "unnamed struct/enum"
-    if _LAMBDA_CLOSURE_RE.search(mangled):
-        return "lambda closure"
-    return None
 
 
 @registry.detector(

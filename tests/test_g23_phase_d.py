@@ -94,10 +94,24 @@ class TestUnnamedTypeLeak:
 
     def test_ul_substring_without_lambda_not_flagged(self):
         # A length-prefixed source name starting "Ul" (here "6Ulci003v") is not a
-        # closure type: its "Ul" is preceded by a digit and lacks the E…_ tail.
+        # closure type: the scanner skips the whole identifier, so its "Ul" is
+        # never seen at a structural position.
         from abicheck.diff_unnamed_types import _unnamed_kind
 
         assert _unnamed_kind("_Z6Ulci003v") is None
+
+    def test_tokens_inside_source_name_not_flagged(self):
+        # `aUt_()` mangles as `_Z4aUt_v`; `Ut_` sits inside the 4-char identifier,
+        # not at an Itanium type-production boundary, so it must not be flagged.
+        from abicheck.diff_unnamed_types import _unnamed_kind
+
+        assert _unnamed_kind("_Z4aUt_v") is None
+        assert _unnamed_kind("_Z6UlciE_v") is None
+
+    def test_ordinary_ut_name_export_not_flagged_end_to_end(self):
+        old = _elf_snap("_Z3fooi")
+        new = _elf_snap("_Z3fooi", "_Z4aUt_v")  # exported aUt_() — not a leak
+        assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI not in _kinds(compare(old, new))
 
     def test_lambda_detection_is_demangler_independent(self):
         # Regression: lambda closures must be caught from the mangled `Ul…E_`
