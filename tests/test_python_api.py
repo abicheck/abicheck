@@ -185,6 +185,22 @@ def test_overload_widened_with_optional_param_is_compatible() -> None:
     assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in _diff_kinds(old, new)
 
 
+def test_overload_dropping_optional_param_is_breaking() -> None:
+    # Removing an optional parameter from a variant drops a supported call shape
+    # (`f(int, int)`), so it is a removal — the flip side of allowing additions.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, y: int = ...) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED in _diff_kinds(old, new)
+
+
 def test_overload_dropping_varargs_is_breaking() -> None:
     # One overload loses *args while another keeps the name overloaded — the
     # extra-positional call shape is gone, so it is a removal (not silent).
@@ -494,6 +510,14 @@ def test_positional_only_rename_is_compatible() -> None:
     kinds = _diff_kinds("def f(a, /): ...\n", "def f(b, /): ...\n")
     assert ChangeKind.PYTHON_API_PARAMETER_RENAMED not in kinds
     assert not kinds
+
+
+def test_positional_only_rename_dropping_default_is_breaking() -> None:
+    # `def f(a=1, /)` → `def f(b, /)`: the positional-only name change is
+    # invisible, but the slot lost its default, so a no-arg caller now breaks.
+    kinds = _diff_kinds("def f(a=1, /): ...\n", "def f(b, /): ...\n")
+    assert ChangeKind.PYTHON_API_DEFAULT_REMOVED in kinds
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED not in kinds
 
 
 def test_positional_or_keyword_rename_is_still_breaking() -> None:
@@ -830,6 +854,23 @@ def test_oracle_noop_for_non_extension() -> None:
     kept, demoted = _run_demote(plain, plain, [internal])
     assert demoted == []
     assert kept == [internal]
+
+
+def test_oracle_defers_to_resolved_old_header_surface(tmp_path) -> None:
+    # A hybrid extension whose OLD side had a public C header (surf_old
+    # resolvable) but whose NEW side no longer resolves must NOT have its native
+    # func_removed demoted — the old header proved the symbol was public.
+    from types import SimpleNamespace
+
+    from abicheck.post_processing import DemoteOffPythonSurface, PipelineContext
+
+    ext = _ext_with_api(tmp_path)
+    ctx = PipelineContext(old=ext, new=ext, scope_to_public_surface=True)
+    ctx.surf_old = SimpleNamespace(resolvable=True)  # type: ignore[assignment]
+    ctx.surf_new = SimpleNamespace(resolvable=False)  # type: ignore[assignment]
+    internal = _c(ChangeKind.FUNC_REMOVED, "_Z8internalv")
+    kept = DemoteOffPythonSurface().run([internal], ctx)
+    assert kept == [internal] and ctx.out_of_surface == []
 
 
 def test_oracle_disabled_when_scoping_off(tmp_path) -> None:

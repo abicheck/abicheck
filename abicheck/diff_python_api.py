@@ -133,8 +133,9 @@ def _diff_signature(
     rename_map: dict[str, str] = {}
     if len(removed) == 1 and len(added) == 1:
         old_name, new_name = removed[0], added[0]
+        op, np = old_params[old_name], new_params[new_name]
         rename_map[old_name] = new_name
-        if _is_keyword_capable(old_params[old_name]):
+        if _is_keyword_capable(op):
             changes.append(
                 make_change(
                     ChangeKind.PYTHON_API_PARAMETER_RENAMED,
@@ -143,6 +144,30 @@ def _diff_signature(
                     old=old_name,
                     new=new_name,
                     detail=qualified,
+                )
+            )
+        # The renamed slot is position-bound: still compare its default and
+        # annotation, so a positional-only rename that ALSO drops a default
+        # (`def f(a=1, /)` → `def f(b, /)`, breaking no-arg callers) or changes
+        # a type is not silently lost.
+        if op.has_default and not np.has_default:
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_DEFAULT_REMOVED,
+                    symbol=symbol,
+                    name=qualified,
+                    detail=new_name,
+                )
+            )
+        if op.annotation and np.annotation and op.annotation != np.annotation:
+            changes.append(
+                make_change(
+                    ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED,
+                    symbol=symbol,
+                    name=qualified,
+                    old=op.annotation,
+                    new=np.annotation,
+                    detail=new_name,
                 )
             )
     else:
@@ -302,35 +327,45 @@ def _callable_kind_detail(old_fn: PyFunction, new_fn: PyFunction) -> str | None:
     return "; ".join(parts) if parts else None
 
 
-def _overload_identity(fn: PyFunction) -> tuple[Any, ...]:
-    """A hashable identity for one overload variant — parameters + protocol.
-
-    Identity is the variant's **required input call shape**: the name, kind, and
-    input type of each parameter that has *no* default, plus ``async`` /
-    descriptor kind and whether it accepts ``*args`` / ``**kwargs``. Excluded on
-    purpose:
-
-    * the **return annotation** — it does not distinguish overloads, so a
-      return-only change on a matched variant is a return-type-change RISK, not
-      a spurious removal (mirrors the non-overloaded path);
-    * **optional (defaulted) parameters** — adding one compatibly *widens* a
-      variant, so it must still match the old one rather than read as a removed
-      overload plus a new one.
-
-    ``*args`` / ``**kwargs`` presence stays in the identity because dropping a
-    collector rejects extra arguments (a real removal).
-    """
-    return (
-        fn.is_async,
-        fn.descriptor,
-        tuple(
-            (p.name, p.kind, p.annotation)
-            for p in fn.named_parameters
-            if not p.has_default
-        ),
-        _has_kind(fn, VAR_POSITIONAL),
-        _has_kind(fn, VAR_KEYWORD),
+def _required_shape(fn: PyFunction) -> tuple[Any, ...]:
+    """The (name, kind, input-type) of each *required* (no-default) parameter."""
+    return tuple(
+        (p.name, p.kind, p.annotation) for p in fn.named_parameters if not p.has_default
     )
+
+
+def _optional_shape(fn: PyFunction) -> frozenset[tuple[Any, ...]]:
+    """The (name, kind, input-type) set of each *optional* (defaulted) parameter."""
+    return frozenset(
+        (p.name, p.kind, p.annotation) for p in fn.named_parameters if p.has_default
+    )
+
+
+def _overload_covers(new_v: PyFunction, old_v: PyFunction) -> bool:
+    """True when new variant *new_v* still accepts every call *old_v* accepted.
+
+    Overload matching is **directional**, not a symmetric identity: adding an
+    optional parameter to a variant is a compatible *widening* (still matches),
+    but *removing* one drops a supported call shape (a real removal), so the two
+    must not collapse to the same key. ``new_v`` covers ``old_v`` when they share
+    the same protocol (async / descriptor), the same required input shape, and
+    ``new_v``'s optional-parameter set is a **superset** of ``old_v``'s (so every
+    optional call ``old_v`` accepted, ``new_v`` also accepts); and ``new_v`` must
+    keep any ``*args`` / ``**kwargs`` collector ``old_v`` had (dropping one
+    rejects extra arguments). The return annotation is excluded — a return-only
+    change on a covered variant is a RISK, not a removal.
+    """
+    if new_v.is_async != old_v.is_async or new_v.descriptor != old_v.descriptor:
+        return False
+    if _required_shape(new_v) != _required_shape(old_v):
+        return False
+    if not (_optional_shape(new_v) >= _optional_shape(old_v)):
+        return False
+    if _has_kind(old_v, VAR_POSITIONAL) and not _has_kind(new_v, VAR_POSITIONAL):
+        return False
+    if _has_kind(old_v, VAR_KEYWORD) and not _has_kind(new_v, VAR_KEYWORD):
+        return False
+    return True
 
 
 def _render_signature(fn: PyFunction) -> str:
@@ -365,14 +400,14 @@ def _diff_callable(
         )
 
     if old_fn.overloads or new_fn.overloads:
-        new_by_id: dict[tuple[Any, ...], PyFunction] = {}
-        for v in _overload_variants(new_fn):
-            new_by_id.setdefault(_overload_identity(v), v)
+        new_variants = _overload_variants(new_fn)
         for variant in _overload_variants(old_fn):
-            match = new_by_id.get(_overload_identity(variant))
+            match = next(
+                (nv for nv in new_variants if _overload_covers(nv, variant)), None
+            )
             if match is None:
-                # The variant's call shape is gone. Added variants are
-                # compatible and not reported.
+                # No new variant still accepts this call shape. Added variants
+                # (that cover nothing old) are compatible and not reported.
                 changes.append(
                     make_change(
                         ChangeKind.PYTHON_API_OVERLOAD_REMOVED,

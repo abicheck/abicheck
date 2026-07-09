@@ -472,9 +472,15 @@ class DemoteOffPythonSurface:
         old_ext = ctx.old.python_ext
         if old_ext is None or not old_ext.is_extension:
             return changes
-        # Defer to the C-header oracle when one resolved (hybrid modules that
-        # ship a real public C API): FilterNonPublicSurface already scoped it.
-        if ctx.surf_new is not None and ctx.surf_new.resolvable:
+        # Defer to the C-header oracle when a public header surface resolved on
+        # *either* side (hybrid modules that ship a real public C API):
+        # FilterNonPublicSurface already scoped it. Checking both sides matters
+        # for a hybrid that removes its last C API function — the old side's
+        # header proves the dropped symbol was public, so its `func_removed`
+        # must not be demoted just because the new side no longer resolves.
+        if (ctx.surf_old is not None and ctx.surf_old.resolvable) or (
+            ctx.surf_new is not None and ctx.surf_new.resolvable
+        ):
             return changes
         # No recovered Python surface ⇒ no oracle ⇒ keep everything (honest
         # degradation, same posture as header-scoping's no-surface fallback).
