@@ -59,6 +59,11 @@ BINARY_ONLY_KINDS: frozenset[str] = frozenset({
     "frame_register_changed",
     # DWARF producer-derived vector-function (SIMD clone) ABI flag drift
     "vector_abi_changed",
+    # G23 Phase D2 — long-double representation flip (e.g. -mlong-double-64,
+    # ppc64 double-double ↔ IEEE binary128). Keeps the source signature
+    # identical and only changes the binary FP format, so it is source-invisible
+    # (mirrors compat/_helpers._BINARY_ONLY_KINDS).
+    "long_double_abi_changed",
     # G23 Phase A — Linux ELF artifact facts (binary/link-level only). The B1
     # thunk/VTT layout kinds are omitted on purpose (they mirror source-visible
     # vtable/base changes, like vtable_slot_count_changed).

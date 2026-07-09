@@ -340,6 +340,10 @@ class AbiSnapshot:
     sycl: SyclMetadata | None = field(
         default=None
     )  # SYCL PI plugin metadata (ADR-020b)
+    python_ext: PythonExtMetadata | None = field(
+        default=None
+    )  # CPython extension-module facts: init export, abi3/Limited-API status,
+    # and imported CPython C-API symbols (G14). None for non-extension libraries.
     kabi: KabiMetadata | None = field(
         default=None
     )  # Linux kernel Module.symvers metadata (G23-D1)

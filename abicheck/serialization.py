@@ -386,6 +386,27 @@ def _kabi_from_dict(d: dict[str, Any]) -> Any:
         for sym, e in (d.get("entries", {}) or {}).items()
     }
     return KabiMetadata(entries=entries)
+def _python_ext_from_dict(d: dict[str, Any]) -> Any:
+    from .python_ext import PythonExtMetadata
+
+    declared = d.get("declared_abi3")
+    # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
+    declared_abi3 = (
+        (int(declared[0]), int(declared[1]))
+        if isinstance(declared, (list, tuple)) and len(declared) == 2
+        else None
+    )
+    return PythonExtMetadata(
+        module_name=d.get("module_name"),
+        init_symbol=d.get("init_symbol"),
+        python_major=d.get("python_major"),
+        soabi_tag=d.get("soabi_tag"),
+        limited_api=bool(d.get("limited_api", False)),
+        declared_abi3=declared_abi3,
+        free_threaded=bool(d.get("free_threaded", False)),
+        cpython_imports=list(d.get("cpython_imports", [])),
+        cpython_dlls=list(d.get("cpython_dlls", [])),
+    )
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
@@ -528,6 +549,20 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
     kabi_data = d.get("kabi")
     kabi = _kabi_from_dict(kabi_data) if isinstance(kabi_data, dict) else None
+    python_ext_data = d.get("python_ext")
+    python_ext = (
+        _python_ext_from_dict(python_ext_data)
+        if isinstance(python_ext_data, dict)
+        else None
+    )
+    # A snapshot dumped without the G14 key (older abicheck, or a `dump` writer
+    # path that didn't attach it) has no serialized ``python_ext``. Derive it on
+    # load from the already-parsed binary metadata so `dump` → `compare` never
+    # silently disables the extension detector — the same recognition the dumper
+    # runs, applied at read time. ``_derive_python_ext_key_absent`` records that
+    # the key was missing (vs. an explicit ``null`` meaning "checked, not an
+    # extension") so we only re-derive when there is no recorded answer.
+    _python_ext_key_absent = "python_ext" not in d
 
     dep_data = d.get("dependency_info")
     dep_info = (
@@ -597,6 +632,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         enums=enums, typedefs=typedefs,
         elf=elf, pe=pe, macho=macho,
         dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl, kabi=kabi,
+        python_ext=python_ext,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
