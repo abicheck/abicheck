@@ -57,7 +57,9 @@ source-level ones:
 # options) a bare compare exiting 2 would kill the step before the test runs
 rc=0
 abicheck compare libfoo.so.1 libfoo.so.2 -H include/ || rc=$?
-test "$rc" -lt 4   # succeeds for 0 (compatible) and 2 (API_BREAK); fails for 4 (BREAKING)
+# succeeds only for compatible/API_BREAK verdicts; fails for tool errors (1)
+# and BREAKING (4)
+test "$rc" -eq 0 || test "$rc" -eq 2
 ```
 
 See [Exit Codes](../reference/exit-codes.md) for the full matrix (including
