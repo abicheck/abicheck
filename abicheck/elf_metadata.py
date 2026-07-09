@@ -293,7 +293,10 @@ _EF_ARM_ABI_FLOAT_HARD = 0x00000400
 _EF_ARM_ABI_FLOAT_SOFT = 0x00000200
 _EF_ARM_EABI_MASK = 0xFF000000
 _EF_RISCV_FLOAT_ABI_MASK = 0x0006  # 0=soft, 2=single, 4=double, 6=quad
-_EF_RISCV_RVC = 0x0001
+# EF_RISCV_RVE (0x8) reduces the integer register file 32→16 and changes the
+# calling convention, so it IS ABI-selecting. EF_RISCV_RVC (0x1, compressed
+# instructions) is an ISA-encoding choice with no calling-convention effect, so
+# it is deliberately NOT decoded — toggling it must not report an ABI break.
 _EF_RISCV_RVE = 0x0008
 _EF_MIPS_ABI_MASK = 0x0000F000
 _RISCV_FLOAT_ABI_NAMES = {0x0: "float-soft", 0x2: "float-single", 0x4: "float-double", 0x6: "float-quad"}
@@ -318,8 +321,6 @@ def _decode_abi_flags(machine: str, e_flags: int) -> frozenset[str]:
             tokens.add(f"eabi{eabi}")
     elif machine in ("EM_RISCV",):
         tokens.add(_RISCV_FLOAT_ABI_NAMES.get(e_flags & _EF_RISCV_FLOAT_ABI_MASK, "float-unknown"))
-        if e_flags & _EF_RISCV_RVC:
-            tokens.add("rvc")
         if e_flags & _EF_RISCV_RVE:
             tokens.add("rve")
     elif machine in ("EM_MIPS",):

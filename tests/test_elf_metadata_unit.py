@@ -240,13 +240,18 @@ class TestDecodeAbiFlags:
         from abicheck.elf_metadata import _decode_abi_flags
         assert _decode_abi_flags("EM_ARM", 0x200) == frozenset({"float-soft"})
 
-    def test_riscv_double_float_with_compressed(self):
+    def test_riscv_compressed_is_not_an_abi_flag(self):
         from abicheck.elf_metadata import _decode_abi_flags
-        # float-abi double (0x4) | RVC (0x1).
-        assert _decode_abi_flags("EM_RISCV", 0x4 | 0x1) == frozenset({"float-double", "rvc"})
+        # RVC (0x1, compressed instructions) is an ISA-encoding choice, not a
+        # calling-convention/ABI selector, so it must NOT contribute a token:
+        # float-abi double (0x4) with or without RVC decodes identically.
+        assert _decode_abi_flags("EM_RISCV", 0x4) == frozenset({"float-double"})
+        assert _decode_abi_flags("EM_RISCV", 0x4 | 0x1) == frozenset({"float-double"})
 
     def test_riscv_soft_float_and_rve(self):
         from abicheck.elf_metadata import _decode_abi_flags
+        # RVE (0x8) halves the integer register file and changes the calling
+        # convention, so it IS ABI-selecting and contributes a token.
         assert _decode_abi_flags("EM_RISCV", 0x0 | 0x8) == frozenset({"float-soft", "rve"})
 
     def test_mips_abi_bits(self):
