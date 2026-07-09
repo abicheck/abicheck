@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess  # noqa: S404 - include extraction shells out to clang (never shell=True)
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -281,6 +282,9 @@ class ClangIncludeExtractor:
     clang_bin: str = "clang++"
     diagnostics: list[str] = field(default_factory=list)
     diagnostics_limit: int = 20
+    max_compile_units: int = 256
+    aggregate_timeout_s: float = 30.0
+    per_unit_timeout_s: float = 120.0
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -299,9 +303,25 @@ class ClangIncludeExtractor:
 
         out: dict[str, list[str]] = {}
         failures = 0
+        attempted = 0
+        deadline = time.monotonic() + self.aggregate_timeout_s
         for cu in build.compile_units:
             if not cu.source:
                 continue
+            if attempted >= self.max_compile_units:
+                self.diagnostics.append(
+                    "clang -M include-map budget exhausted: "
+                    f"stopped after {attempted} compile units"
+                )
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.diagnostics.append(
+                    "clang -M include-map time budget exhausted: "
+                    f"stopped after {attempted} compile units"
+                )
+                break
+            attempted += 1
             argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
             if not argv:
                 argv = [cu.source]
@@ -321,7 +341,8 @@ class ClangIncludeExtractor:
             try:
                 proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
                     cmd, cwd=cwd or None, capture_output=True,
-                    text=True, timeout=120, check=False,
+                    text=True, timeout=min(self.per_unit_timeout_s, remaining),
+                    check=False,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
                 self.diagnostics.append(f"clang -M failed for {cu.id}: {exc}")
