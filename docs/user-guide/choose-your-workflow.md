@@ -62,7 +62,7 @@ more when you need more confidence. (The `scan` docs also use a sixth code,
 See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md).) For a
 concrete, side-by-side look at *what each layer actually sees* on one example —
 and where each one goes blind — see the
-[level-by-level walk-through](../concepts/abi-api-handling.md#what-each-level-actually-sees-a-level-by-level-walk-through).
+[level-by-level walk-through](../concepts/what-each-level-sees.md).
 
 | Layer | Inputs | Confidence | What it newly catches |
 |:--:|---|---|---|
