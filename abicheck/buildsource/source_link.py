@@ -44,6 +44,27 @@ from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 _CTOR_DTOR_TAGS = frozenset({"C1", "C2", "C3", "C4", "D0", "D1", "D2", "D4"})
 
 
+def _consume_source_name(symbol: str, i: int) -> int:
+    """Return the index just past an Itanium length-prefixed ``<source-name>``.
+
+    Mangled names can come from untrusted binaries/snapshots.  Avoid
+    ``int(symbol[i:j])`` here: a malformed symbol with thousands of digits can
+    trip Python's integer-conversion limit (or be expensive on older runtimes).
+    Instead, accumulate only until the declared length is already larger than the
+    remaining symbol, at which point the production is malformed and the caller
+    can safely skip to the end (causing a missed fold, not a crash).
+    """
+    n = len(symbol)
+    j = i
+    length = 0
+    while j < n and "0" <= symbol[j] <= "9":
+        length = length * 10 + (ord(symbol[j]) - ord("0"))
+        j += 1
+        if length > n - j:
+            return n
+    return j + length
+
+
 def _skip_e_terminated(symbol: str, i: int) -> int:
     """Return the index just past the ``E`` that closes the ``I``/``N`` at *i*.
 
@@ -83,11 +104,8 @@ def _skip_e_terminated(symbol: str, i: int) -> int:
                     ldepth -= 1
                 i += 1
             continue
-        if c.isdigit():  # <source-name> — consume by its declared length
-            j = i
-            while j < n and symbol[j].isdigit():
-                j += 1
-            i = j + int(symbol[i:j])
+        if "0" <= c <= "9":  # <source-name> — consume by its declared length
+            i = _consume_source_name(symbol, i)
             continue
         if c in "INF":
             depth += 1
@@ -207,11 +225,8 @@ def _ctor_dtor_structural(symbol: str) -> str:
         c = symbol[i]
         if c == "E":  # end of the nested-name
             break
-        if c.isdigit():  # <source-name> := <len> <identifier> — consume wholesale
-            j = i
-            while j < n and symbol[j].isdigit():
-                j += 1
-            i = j + int(symbol[i:j])
+        if "0" <= c <= "9":  # <source-name> := <len> <identifier> — consume wholesale
+            i = _consume_source_name(symbol, i)
             boundary = True
             continue
         if c == "I":  # <template-args> := I … E (skip the balanced, nested run)
