@@ -274,6 +274,31 @@ def test_non_terminal_pruned_field_is_kept():
     assert result.reconciled_count == 0
 
 
+def test_added_non_terminal_field_is_kept():
+    """The added direction of the ordering gate: a field pruned from old (registry)
+    but observed in new must also be terminal on the pruned (old) side. A non-last
+    ``is_last=False`` registry entry keeps the ``type_field_added`` finding (Codex
+    review #498, P1)."""
+    old = _snap("1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=False)}})
+    new = _snap("2", [_tf("version"), _tf("added")])
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.verdict != Verdict.NO_CHANGE
+    assert result.reconciled_count == 0
+
+
+def test_added_terminal_field_is_reconciled():
+    """The added direction, terminal field: a guarded field pruned from old and
+    observed as the final member of new reconciles (Codex review #498, P1)."""
+    old = _snap("1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=True)}})
+    new = _snap("2", [_tf("version"), _tf("added")])
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.reconciled_count == 1
+
+
 def test_ambiguous_guard_field_is_not_reconciled():
     """A guarded field flagged ``ambiguous`` (its macro is ``#undef``/``#define``d
     inside a branch the scanner could not evaluate) has build-context-dependent

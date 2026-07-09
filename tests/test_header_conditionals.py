@@ -124,6 +124,13 @@ def test_compile_entry_matcher_and_command_splitter_edges():
     cwd_file = str(Path.cwd() / "src" / "libfoo" / "a.c")
     assert _compile_entry_matches({"file": cwd_file, "directory": "/elsewhere"}, "src/libfoo/*") is True
     assert _compile_entry_matches({"file": cwd_file}, "src/libfoo/*") is True
+    # A *relative* file is resolved against directory before matching, so an
+    # absolute filter matches (mirrors build_context.CompileEntry; Codex #498).
+    rel_entry = {"file": "src/libfoo/a.c", "directory": "/build/proj"}
+    assert _compile_entry_matches(rel_entry, "/build/proj/src/libfoo/*") is True
+    # and the directory-relative filter still works on the resolved path
+    assert _compile_entry_matches(rel_entry, "src/libfoo/*") is True
+    assert _compile_entry_matches(rel_entry, "other/*") is False
 
 
 def test_defines_from_compile_db_undefine_excludes_from_intersection(tmp_path):
@@ -613,13 +620,21 @@ def test_collect_build_context_skips_unreadable_header(tmp_path):
 
 
 def test_user_define_flags_combines_tokens_and_gcc_options():
-    """The dump collects the user's global flags: ``--gcc-option`` tokens plus the
-    ``-D``/``-U`` in the ``--gcc-options`` string (Codex review #498)."""
+    """The dump collects the user's global flags in the **same order the real dump
+    applies them**: the ``--gcc-options`` string first, then the repeatable
+    ``--gcc-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
+    same macro resolve identically on both sides (Codex review #498)."""
     from abicheck.cli_dump_helpers import _user_define_flags
 
     assert _user_define_flags((), None) == []
     assert _user_define_flags(("-DA",), None) == ["-DA"]
-    assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-DA", "-UKEEP", "-DB"]
+    # --gcc-options (-UKEEP -DB) is applied before the --gcc-option token (-DA).
+    assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
+    # Order-sensitivity: --gcc-options=-DKEEP then --gcc-option=-UKEEP must leave
+    # KEEP inactive (token last wins), matching dumper.py.
+    from abicheck.header_conditionals import defines_from_flags
+
+    assert defines_from_flags(_user_define_flags(("-UKEEP",), "-DKEEP")) == set()
     # a malformed --gcc-options (unbalanced quote) is skipped, not fatal
     assert _user_define_flags(("-DA",), '"oops') == ["-DA"]
 

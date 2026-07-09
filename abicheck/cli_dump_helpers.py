@@ -76,21 +76,28 @@ def _user_define_flags(
 ) -> list[str]:
     """The user's *global* define-affecting flags for the ADR-039 collector.
 
-    Combines the repeatable ``--gcc-option`` tokens with the ``-D``/``-U`` in the
-    ``--gcc-options`` string. These are applied on top of the compile-DB
-    intersection so a user ``--gcc-options=-UKEEP`` overrides a database
-    ``-DKEEP`` (Codex review #498). The auto-derived first-header build context is
-    deliberately excluded (it must not be unioned snapshot-wide).
+    Combines the ``-D``/``-U`` in the ``--gcc-options`` string with the repeatable
+    ``--gcc-option`` tokens, **in the same order the real dump applies them** —
+    ``dumper._castxml_cmd`` appends ``gcc_options`` first, then
+    ``gcc_option_tokens`` (see ``dumper.py``), so the collector must too (Codex
+    review #498). Order is significant because ``defines_from_flags`` honours
+    ``-D``/``-U`` sequence: ``--gcc-options=-DKEEP --gcc-option=-UKEEP`` must leave
+    ``KEEP`` *inactive* on both the parse and the harvest, else the reconciler
+    would add back a field the real parse pruned. These flags are applied on top
+    of the compile-DB intersection, so a user ``-UKEEP`` also overrides a database
+    ``-DKEEP``. The auto-derived first-header build context is deliberately
+    excluded (it must not be unioned snapshot-wide).
 
     A malformed ``--gcc-options`` (e.g. an unbalanced quote) must not abort the
     dump — ``shlex.split`` errors are swallowed and only the tokens are used
     (CodeRabbit review)."""
-    flags = list(gcc_option_tokens)
+    flags: list[str] = []
     if user_gcc_options:
         try:
             flags += shlex.split(user_gcc_options)
         except ValueError:
             pass  # bad optional define flags are skipped, not fatal
+    flags += list(gcc_option_tokens)
     return flags
 
 

@@ -118,28 +118,31 @@ def _split_command(command: object) -> list[str]:
 def _compile_entry_matches(entry: dict[str, object], pattern: str) -> bool:
     """Whether a raw compile-DB *entry*'s ``file`` matches the filter *pattern*.
 
-    Mirrors ``build_context._entry_matches_filter``: test the absolute ``file``
-    and, when a ``directory`` is present, the directory-relative path — so both
-    absolute and relative (``src/libfoo/**``) filters work."""
+    Mirrors ``build_context`` end-to-end: a **relative** ``file`` is first resolved
+    against the entry's ``directory`` (``build_context.CompileEntry`` stores
+    ``directory / file``), then the pattern is tested against the absolute path,
+    the directory-relative path, and the CWD-relative path — so an absolute filter
+    matches a relative-``file`` entry and a relative ``src/libfoo/**`` filter
+    matches an absolute-``file`` entry (Codex review #498). Without resolving the
+    relative ``file`` first, an absolute filter would always miss, the collector
+    would fall back to all entries, and the guard macro defined only by the
+    selected TU would be intersected away."""
     file = entry.get("file")
     if not isinstance(file, str):
         return False
-    if fnmatch(file, pattern):
-        return True
     directory = entry.get("directory")
+    path = Path(file)
+    if not path.is_absolute() and isinstance(directory, str):
+        path = Path(directory) / path  # resolve like build_context.CompileEntry
+    if fnmatch(str(path), pattern):
+        return True
     if isinstance(directory, str):
         try:
-            return fnmatch(str(Path(file).relative_to(directory)), pattern)
+            return fnmatch(str(path.relative_to(directory)), pattern)
         except ValueError:
             pass  # file not under directory — fall through to CWD-relative
-    # File outside the build directory (or none given): match relative to the
-    # current project directory too, mirroring ``build_context._entry_matches_filter``
-    # so a filter like ``src/libfoo/**`` selects the same TU on both sides
-    # (Codex review #498). Without this the collector could miss the entry, fall
-    # back to all entries, and intersect away the guard macro the filtered header
-    # parse actually used.
     try:
-        return fnmatch(str(Path(file).relative_to(Path.cwd())), pattern)
+        return fnmatch(str(path.relative_to(Path.cwd())), pattern)
     except ValueError:
         return False
 
