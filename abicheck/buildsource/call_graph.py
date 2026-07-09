@@ -41,7 +41,7 @@ import os
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -613,21 +613,25 @@ class ClangCallGraphExtractor:
             self.last_elapsed_s = time.monotonic() - start
             return []
 
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    batches = list(pool.map(self._extract_from_compile_unit, units))
-            else:
-                batches = [self._extract_from_compile_unit(cu) for cu in units]
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
         all_edges: list[CallEdge] = []
         seen: set[tuple[str, str, str]] = set()
-        for edges in batches:
+
+        def add_edges(edges: Iterable[CallEdge]) -> None:
             for e in edges:
                 key = (e.caller, e.callee, e.call_kind)
                 if key not in seen:
                     seen.add(key)
                     all_edges.append(e)
+
+        try:
+            if self.last_jobs > 1 and len(units) > 1:
+                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
+                    for edges in pool.map(self._extract_from_compile_unit, units):
+                        add_edges(edges)
+            else:
+                for cu in units:
+                    add_edges(self._extract_from_compile_unit(cu))
+        finally:
+            self.last_elapsed_s = time.monotonic() - start
+
         return all_edges
