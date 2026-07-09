@@ -104,16 +104,25 @@ def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     persisting = _exported(old) & _exported(new)
     detail = f"long double byte size {old_size} → {new_size}"
+    # Itanium mangling omits the return type, so `long double f()` stays `_Z1fv`
+    # and its demangling ("f()") never mentions long double even though the
+    # returned value's representation changed. Consult the snapshot's recorded
+    # return type as a second signal so return-only breaks are still caught.
+    ret_by_mangled = {
+        f.mangled: f.return_type for f in old.functions if f.return_type
+    }
     changes: list[Change] = []
     for sym in sorted(persisting):
         dem = demangle(sym)
-        if not dem or "long double" not in dem:
+        param_hit = dem is not None and "long double" in dem
+        return_hit = "long double" in ret_by_mangled.get(sym, "")
+        if not (param_hit or return_hit):
             continue
         changes.append(
             make_change(
                 ChangeKind.LONG_DOUBLE_ABI_CHANGED,
                 symbol=sym,
-                name=dem,
+                name=dem or sym,
                 old=sym,
                 new=sym,
                 detail=detail,

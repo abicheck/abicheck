@@ -137,6 +137,15 @@ class TestVirtualBaseOffset:
                     _poly("D", virtual_bases=["A", "B", "C"]))
         assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED not in _kinds(compare(old, new))
 
+    def test_stdlib_owner_reorder_not_flagged(self):
+        # A virtual-base reorder inside a debug-only std:: record (not this
+        # library's own ABI surface) must not surface as a BREAKING finding.
+        old = _snap(_poly("A"), _poly("B"),
+                    _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["A", "B"]))
+        new = _snap(_poly("A"), _poly("B"),
+                    _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["B", "A"]))
+        assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED not in _kinds(compare(old, new))
+
 
 # ── reconstruction helpers ──────────────────────────────────────────────────
 

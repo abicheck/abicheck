@@ -51,7 +51,12 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .model import AbiSnapshot, RecordType
+from .model import (
+    AbiSnapshot,
+    RecordType,
+    is_non_abi_surface_type,
+    stdlib_namespaces_excluded,
+)
 
 
 def _type_map(snap: AbiSnapshot) -> dict[str, RecordType]:
@@ -140,8 +145,16 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_memo: dict[str, bool | None] = {}
     new_memo: dict[str, bool | None] = {}
     changes: list[Change] = []
+    # Keep *all* types in the maps above so polymorphism/base lookups can resolve
+    # transitive std:: / anonymous bases, but only *emit* findings for classes on
+    # the inspected library's own ABI surface — otherwise a reorder inside a
+    # debug-only std:: record would surface as a BREAKING finding for a library
+    # that does not own it (mirrors _is_abi_surface_type in diff_types.py).
+    exclude_stdlib = stdlib_namespaces_excluded(old, new)
 
     for name in sorted(old_types.keys() & new_types.keys()):
+        if is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib):
+            continue
         o, n = old_types[name], new_types[name]
 
         # ── virtual_base_offset_changed ──────────────────────────────────────

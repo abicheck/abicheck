@@ -203,6 +203,42 @@ class TestLongDoubleAbi:
         new = _elf_snap("_Z3fooe")    # foo(long double) — different function
         assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in _kinds(compare(old, new))
 
+    def test_return_only_ld_width_change_flagged(self):
+        # `long double f()` mangles as `_Z1fv`: the return type is absent from the
+        # symbol name, so the demangled string ("f()") never mentions long double.
+        # The recorded return type must still surface the return-only width break.
+        from abicheck.dwarf_metadata import DwarfMetadata
+        from abicheck.model import Function
+
+        def _snap(ld_size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="l.so.1", version="1",
+                functions=[Function(name="f()", mangled="_Z1fv", return_type="long double")],
+                variables=[], types=[], enums=[], typedefs={},
+                elf=ElfMetadata(symbols=[_sym("_Z1fv")], machine="EM_X86_64"),
+                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+            )
+
+        r = compare(_snap(16), _snap(8))
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
+    def test_return_only_non_ld_not_flagged(self):
+        # A non-long-double return type must not be swept up by the width change.
+        from abicheck.dwarf_metadata import DwarfMetadata
+        from abicheck.model import Function
+
+        def _snap(ld_size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="l.so.1", version="1",
+                functions=[Function(name="f()", mangled="_Z1fv", return_type="double")],
+                variables=[], types=[], enums=[], typedefs={},
+                elf=ElfMetadata(symbols=[_sym("_Z1fv")], machine="EM_X86_64"),
+                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+            )
+
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in _kinds(compare(_snap(16), _snap(8)))
+
     def test_exported_empty_without_elf(self):
         from abicheck.diff_long_double import _exported
 
