@@ -44,6 +44,7 @@ from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .python_api import (
     KEYWORD_ONLY,
+    POSITIONAL_ONLY,
     POSITIONAL_OR_KEYWORD,
     VAR_KEYWORD,
     VAR_POSITIONAL,
@@ -121,17 +122,27 @@ def _diff_signature(
     removed = [n for n in old_params if n not in new_params]
     added = [n for n in new_params if n not in old_params]
 
-    # Exactly one dropped + one gained named parameter reads as a rename
-    # (the fixture case: `encoding` → `codec`). The rename is folded into the
-    # positional-binding comparison below (via ``rename_map``) so a same-position
-    # rename is not double-reported as a reorder. But a rename is only a *break*
-    # when the old parameter could be passed **by keyword**: renaming a
-    # positional-only parameter (`def f(a, /)` → `def f(b, /)`) is invisible to
-    # callers (they pass by position, and the name was never a valid keyword), so
-    # it is recorded in ``rename_map`` (to suppress a false positional-order
-    # finding) but emits nothing.
+    # Exactly one dropped + one gained named parameter *at the same ordinal
+    # position* reads as a rename of that slot (the fixture case: `encoding` →
+    # `codec`, both the 2nd named parameter). Requiring positional alignment
+    # distinguishes a rename from an unrelated shuffle — `f(a, b)` → `f(b, c)`
+    # drops `a` and adds `c` at different positions, so it is reported as a
+    # removal + addition (and a reorder), not a phantom `a`→`c` rename. The
+    # rename is folded into the positional-binding comparison below (via
+    # ``rename_map``) so a same-position rename is not double-reported as a
+    # reorder. A rename is only a *break* when the old parameter could be passed
+    # **by keyword**: renaming a positional-only parameter (`def f(a, /)` →
+    # `def f(b, /)`) is invisible to callers (they pass by position, and the name
+    # was never a valid keyword), so it is recorded in ``rename_map`` (to
+    # suppress a false positional-order finding) but emits nothing.
+    old_named = list(old_params)
+    new_named = list(new_params)
     rename_map: dict[str, str] = {}
-    if len(removed) == 1 and len(added) == 1:
+    if (
+        len(removed) == 1
+        and len(added) == 1
+        and old_named.index(removed[0]) == new_named.index(added[0])
+    ):
         old_name, new_name = removed[0], added[0]
         op, np = old_params[old_name], new_params[new_name]
         rename_map[old_name] = new_name
@@ -327,18 +338,45 @@ def _callable_kind_detail(old_fn: PyFunction, new_fn: PyFunction) -> str | None:
     return "; ".join(parts) if parts else None
 
 
+def _param_key(p: PyParameter, pos_only_index: int) -> tuple[Any, ...]:
+    """Overload-identity key for a named parameter.
+
+    Positional-only parameters are keyed by their *slot* (callers bind them by
+    position; the source name is invisible and freely renameable), so
+    ``def f(a: int, /)`` and ``def f(b: int, /)`` share a key.  Keyword-capable
+    parameters are keyed by name, since callers may pass them by keyword.  The
+    annotation is part of the identity either way — two ``@overload`` variants
+    that differ only by input type are genuinely distinct overloads.
+    """
+    slot: Any = pos_only_index if p.kind == POSITIONAL_ONLY else p.name
+    return (slot, p.kind, p.annotation)
+
+
 def _required_shape(fn: PyFunction) -> tuple[Any, ...]:
-    """The (name, kind, input-type) of each *required* (no-default) parameter."""
-    return tuple(
-        (p.name, p.kind, p.annotation) for p in fn.named_parameters if not p.has_default
-    )
+    """Ordered (slot, kind, input-type) keys of each *required* parameter."""
+    keys: list[tuple[Any, ...]] = []
+    pos_only = 0
+    for p in fn.named_parameters:
+        if p.has_default:
+            continue
+        keys.append(_param_key(p, pos_only))
+        if p.kind == POSITIONAL_ONLY:
+            pos_only += 1
+    return tuple(keys)
 
 
 def _optional_shape(fn: PyFunction) -> frozenset[tuple[Any, ...]]:
-    """The (name, kind, input-type) set of each *optional* (defaulted) parameter."""
-    return frozenset(
-        (p.name, p.kind, p.annotation) for p in fn.named_parameters if p.has_default
-    )
+    """The (slot, kind, input-type) set of each *optional* (defaulted) parameter."""
+    keys: list[tuple[Any, ...]] = []
+    pos_only = 0
+    for p in fn.named_parameters:
+        if p.kind == POSITIONAL_ONLY:
+            if p.has_default:
+                keys.append(_param_key(p, pos_only))
+            pos_only += 1
+        elif p.has_default:
+            keys.append(_param_key(p, pos_only))
+    return frozenset(keys)
 
 
 def _overload_covers(new_v: PyFunction, old_v: PyFunction) -> bool:
@@ -416,23 +454,15 @@ def _diff_callable(
                         detail=_render_signature(variant),
                     )
                 )
-            elif (
-                variant.return_annotation
-                and match.return_annotation
-                and variant.return_annotation != match.return_annotation
-            ):
-                # Same call shape, different return: a return-type change (RISK),
-                # not a removed overload — mirrors the non-overloaded path.
-                changes.append(
-                    make_change(
-                        ChangeKind.PYTHON_API_RETURN_TYPE_CHANGED,
-                        symbol=symbol,
-                        name=qualified,
-                        old=variant.return_annotation,
-                        new=match.return_annotation,
-                        detail=_render_signature(variant),
-                    )
-                )
+            else:
+                # A new variant still accepts this call shape; run the full
+                # matched-variant signature diff so within-shape changes the
+                # ``covers`` relation intentionally tolerates are still surfaced:
+                # an optional parameter inserted before an existing one (a
+                # positional-binding shift), a ``*args`` / ``**kwargs`` collector
+                # whose element type changed, or a return-type change — each a
+                # RISK, not a removed overload. Mirrors the non-overloaded path.
+                changes.extend(_diff_signature(variant, match, symbol, qualified))
     else:
         changes.extend(_diff_signature(old_fn, new_fn, symbol, qualified))
     return changes

@@ -217,6 +217,63 @@ def test_overload_dropping_varargs_is_breaking() -> None:
     assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED in _diff_kinds(old, new)
 
 
+def test_overload_positional_only_rename_is_not_a_removal() -> None:
+    # A positional-only slot renamed on one variant (`a` → `b`) is invisible to
+    # callers (they bind by position), so the variant is still matched — it must
+    # not be mis-reported as a removed overload just because the source name of
+    # the slot changed.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(a: int, /) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(b: int, /) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in _diff_kinds(old, new)
+
+
+def test_overload_optional_inserted_before_existing_is_a_binding_shift() -> None:
+    # An optional parameter inserted *before* an existing one on a variant keeps
+    # the optional set a superset (so the variant still "covers" the old call),
+    # but it rebinds positional arguments: `f(1, 2)` bound `x=1, y=2`, now binds
+    # `x=1, z=2`. The matched-variant diff must surface that as a kind change.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, y: int = ...) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, z: int = ..., y: int = ...) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED in kinds
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
+
+
+def test_overload_varargs_annotation_change_is_a_type_change() -> None:
+    # A surviving `*args` collector whose element type changed on a variant is a
+    # type-contract RISK, not a removed overload — the matched-variant diff must
+    # report it rather than silently treating the variant as covered.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, *args: int) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int, *args: str) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED in kinds
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
+
+
 # ── Stub discovery + attach ──────────────────────────────────────────────────
 
 
@@ -528,6 +585,15 @@ def test_positional_or_keyword_rename_is_still_breaking() -> None:
 def test_keyword_only_rename_is_still_breaking() -> None:
     kinds = _diff_kinds("def f(*, a): ...\n", "def f(*, b): ...\n")
     assert ChangeKind.PYTHON_API_PARAMETER_RENAMED in kinds
+
+
+def test_positionally_misaligned_drop_add_is_not_a_rename() -> None:
+    # `f(a, b)` → `f(b, c)`: `a` is dropped and `c` is added at *different*
+    # positions (b shifts), so it is a removal + addition + reorder, not a
+    # phantom `a`→`c` rename.
+    kinds = _diff_kinds("def f(a, b): ...\n", "def f(b, c): ...\n")
+    assert ChangeKind.PYTHON_API_PARAMETER_RENAMED not in kinds
+    assert ChangeKind.PYTHON_API_PARAMETER_REMOVED in kinds
 
 
 def test_same_position_rename_is_not_reported_as_reorder() -> None:
