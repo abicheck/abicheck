@@ -218,11 +218,19 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
 def _process_cu(CU: Any, meta: AdvancedDwarfMetadata) -> None:
     top = CU.get_top_DIE()
 
-    # Extract toolchain info from DW_AT_producer on the CU top DIE (first CU wins)
-    if not meta.toolchain.producer_string:
-        producer = _attr_str(top, "DW_AT_producer")
-        if producer:
-            meta.toolchain = _parse_producer(producer)
+    # Extract toolchain info from DW_AT_producer on the CU top DIE. The first CU
+    # sets the compiler/version/producer string; ABI flags are *unioned* across
+    # every CU, because a flag like -fshort-enums can be applied to only some
+    # translation units and would otherwise be missed if it were absent from the
+    # first CU (G23-C).
+    producer = _attr_str(top, "DW_AT_producer")
+    if producer:
+        parsed = _parse_producer(producer)
+        if not meta.toolchain.producer_string:
+            meta.toolchain = parsed
+        else:
+            meta.toolchain.abi_flags |= parsed.abi_flags
+            meta.toolchain.vector_abi_flags |= parsed.vector_abi_flags
 
     _walk_cu(top, meta, CU)
 

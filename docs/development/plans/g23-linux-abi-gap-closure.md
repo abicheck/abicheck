@@ -261,7 +261,16 @@ every fixture (self-cross-check assertion in tests).
 
 ---
 
-## Phase C — clang toolchain-flag extraction robustness (M)
+## Phase C — clang toolchain-flag extraction robustness (M) — **done**
+
+**Landed.** The producer scan already matched clang's `-grecord-command-line`
+form (verified end-to-end: `enum_underlying_size_changed` +
+`toolchain_flag_drift` both fire on a clang pair built with
+`-grecord-command-line -fshort-enums`). The remaining gap — flags recorded on a
+non-first CU being dropped — is closed: `dwarf_advanced._process_cu` now unions
+`abi_flags`/`vector_abi_flags` across every CU instead of "first CU wins". Steps
+2–3 (L3 fallback, `not_collected` coverage honesty) are left as future work; the
+default-clang false negative is resolved by step 1.
 
 **Problem.** `TOOLCHAIN_FLAG_DRIFT` (and `case…` fixtures with
 `known_gap_toolchains: clang`) read compiler flags from `DW_AT_producer`. GCC
@@ -397,7 +406,7 @@ introduced** (same rule as the other single-snapshot RISK kinds).
 | M1 | A1–A4 (ELF facts) | 12 | 4 × S–M, independently landable | **done** |
 | M2 | B1 (L0 thunk/VTT diff) | 3 | M | **done** |
 | M3 | B2 (DWARF vtable reconstruction) | 2 (+1 detector extension) | L | planned |
-| M4 | C (clang flag extraction) | 0 | M | planned |
+| M4 | C (clang flag extraction) | 0 | M | **done** |
 | M5 | D1–D3 (kABI, long double, unnamed types) | 7 | M + S–M + S | **done** |
 
 Every milestone leaves the gates green: partition assertion, detector/docs

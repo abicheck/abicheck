@@ -208,7 +208,7 @@
       "expected_kinds": [
         "toolchain_flag_drift"
       ],
-      "known_gap": "Clang: the toolchain-flag drift signal reads the compiler flag set from DW_AT_producer, but clang does not embed command-line flags there by default (it needs -grecord-command-line), so -fshort-enums is invisible and the tool returns NO_CHANGE. GCC records the switches in DW_AT_producer by default, so the drift is detected. Producer-specific; detection requires GCC or a clang build with -grecord-command-line.",
+      "known_gap": "Clang: the toolchain-flag drift signal reads the compiler flag set from DW_AT_producer, but clang does not embed command-line flags there by default (it needs -grecord-command-line), so for this default-clang fixture -fshort-enums is invisible and the tool returns NO_CHANGE. GCC records the switches in DW_AT_producer by default, so the drift is detected. When clang IS built with -grecord-command-line the flags are embedded and abicheck detects the drift (and the artifact-level enum_underlying_size_changed) — proven end-to-end by tests/test_compiler_record_cross_toolchain.py::test_clang_grecord_command_line_flag_drift_detected (G23-C). Detection therefore requires GCC or a clang build with -grecord-command-line; abicheck also unions the flag set across all CUs so a flag applied to only some translation units is not missed.",
       "known_gap_toolchains": [
         "clang"
       ],

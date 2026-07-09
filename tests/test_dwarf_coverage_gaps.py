@@ -1962,3 +1962,64 @@ class TestAggregateHasUnalignedMemberNested:
 
         cu = MockCU(cu_offset=0, die_map={120: self._int()})
         assert _aggregate_has_unaligned_member(self._wrapper(120), cu) is False
+
+
+class TestBaseTypeCapture:
+    """G23 D2: DW_TAG_base_type name → byte size is captured for the
+    same-mangling long-double ABI check."""
+
+    def test_base_type_size_recorded(self):
+        from abicheck.dwarf_metadata import DwarfMetadata, _process_cu
+
+        ld = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={
+                "DW_AT_name": MockAttr(b"long double"),
+                "DW_AT_byte_size": MockAttr(16),
+            },
+            offset=100,
+        )
+        top = MockDIE(tag="DW_TAG_compile_unit", children=[ld])
+        cu = MockCU(cu_offset=0, top_die=top)
+        meta = DwarfMetadata()
+        _process_cu(cu, meta, {})
+        assert meta.base_types["long double"] == 16
+
+    def test_first_nonzero_size_wins(self):
+        from abicheck.dwarf_metadata import DwarfMetadata, _process_cu
+
+        first = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={
+                "DW_AT_name": MockAttr(b"long double"),
+                "DW_AT_byte_size": MockAttr(16),
+            },
+            offset=100,
+        )
+        decl = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={
+                "DW_AT_name": MockAttr(b"long double"),
+                "DW_AT_byte_size": MockAttr(0),  # declaration — ignored
+            },
+            offset=110,
+        )
+        top = MockDIE(tag="DW_TAG_compile_unit", children=[first, decl])
+        cu = MockCU(cu_offset=0, top_die=top)
+        meta = DwarfMetadata()
+        _process_cu(cu, meta, {})
+        assert meta.base_types["long double"] == 16
+
+    def test_anonymous_base_type_skipped(self):
+        from abicheck.dwarf_metadata import DwarfMetadata, _process_cu
+
+        anon = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_byte_size": MockAttr(4)},  # no DW_AT_name
+            offset=100,
+        )
+        top = MockDIE(tag="DW_TAG_compile_unit", children=[anon])
+        cu = MockCU(cu_offset=0, top_die=top)
+        meta = DwarfMetadata()
+        _process_cu(cu, meta, {})
+        assert meta.base_types == {}

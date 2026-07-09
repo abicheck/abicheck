@@ -18,6 +18,7 @@
 | Evidence tier | `header_aware` |
 | Evidence tiers | `elf`, `header` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |

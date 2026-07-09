@@ -31,9 +31,13 @@ removal and an addition. Comparing demangled type *spellings* (``long double``,
 ``__float128``, ``__ieee128``, …) avoids the ambiguity of the bare ``e``/``g``
 type codes, which also occur inside ordinary length-prefixed identifiers.
 
-The same-mangling case (``-mlong-double-64`` keeps ``e`` while shrinking the
-size) leaves no removed/added pair and is not covered here; it needs the DWARF
-``long double`` byte size (L1) or an L3 build-flag flip.
+The same-mangling case (``-mlong-double-64``/``-mabi=ibmlongdouble`` keeps the
+``e`` encoding while changing the width) leaves no removed/added pair. When
+DWARF is present on both sides this detector picks it up from the ``long
+double`` base-type byte size (L1): a persisting exported symbol whose demangled
+signature mentions ``long double`` is reported when that size differs between
+the two snapshots. Without DWARF the same-mangling flip stays invisible (an L3
+build-flag flip would be needed).
 """
 from __future__ import annotations
 
@@ -79,6 +83,45 @@ def _exported(snap: AbiSnapshot) -> set[str]:
     }
 
 
+def _ld_base_size(snap: AbiSnapshot) -> int | None:
+    """DWARF byte size of the ``long double`` base type, or None if unknown."""
+    dw = snap.dwarf
+    if dw is None or not dw.has_dwarf:
+        return None
+    return dw.base_types.get("long double")
+
+
+def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Catch a ``long double`` width change that keeps the mangling (L1).
+
+    ``-mlong-double-64`` (and ppc64's IBM↔IEEE toggle at equal width is handled
+    by the mangling path) leaves the symbol name identical, so only the DWARF
+    ``long double`` byte size reveals the ABI break. Fires once per persisting
+    exported symbol whose demangled signature mentions ``long double``.
+    """
+    old_size, new_size = _ld_base_size(old), _ld_base_size(new)
+    if old_size is None or new_size is None or old_size == new_size:
+        return []
+    persisting = _exported(old) & _exported(new)
+    detail = f"long double byte size {old_size} → {new_size}"
+    changes: list[Change] = []
+    for sym in sorted(persisting):
+        dem = demangle(sym)
+        if not dem or "long double" not in dem:
+            continue
+        changes.append(
+            make_change(
+                ChangeKind.LONG_DOUBLE_ABI_CHANGED,
+                symbol=sym,
+                name=dem,
+                old=sym,
+                new=sym,
+                detail=detail,
+            )
+        )
+    return changes
+
+
 @registry.detector(
     "long_double",
     requires_support=lambda o, n: (
@@ -91,8 +134,12 @@ def _diff_long_double(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_syms, new_syms = _exported(old), _exported(new)
     removed = old_syms - new_syms
     added = new_syms - old_syms
+    # Persisting symbols (present on both sides) can only reveal a width change
+    # through the DWARF base-type size; this is disjoint from the removed↔added
+    # pairing below, so it always runs.
+    changes: list[Change] = _diff_same_mangling(old, new)
     if not removed or not added:
-        return []
+        return changes
 
     # Index added symbols that carry a long-double type by their LD-normalized
     # demangled form, so a removed LD symbol can find its renamed counterpart.
@@ -106,9 +153,7 @@ def _diff_long_double(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         added_by_key.setdefault(_normalize_ld(dem), []).append(a)
 
     if not added_by_key:
-        return []
-
-    changes: list[Change] = []
+        return changes
     used_added: set[str] = set()
     for r in sorted(removed):
         r_dem = demangle(r)

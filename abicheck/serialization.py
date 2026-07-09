@@ -317,6 +317,7 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
     return DwarfMetadata(
         structs=structs,
         enums=enums,
+        base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
     )
 

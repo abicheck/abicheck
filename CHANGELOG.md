@@ -15,13 +15,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`
     manifests to `compare` (recognized by filename or content) to get
     `kabi_symbol_removed` / `kabi_crc_changed` / `kabi_symbol_namespace_changed`
-    (BREAKING), `kabi_export_type_changed` (`EXPORT_SYMBOL` ↔ `EXPORT_SYMBOL_GPL`,
-    API_BREAK), and `kabi_symbol_added` (COMPATIBLE). The 5-field (namespace) and
-    4-field pre-5.4 formats are both parsed.
+    (BREAKING), `kabi_export_type_changed` (API_BREAK) and `kabi_symbol_added`
+    (COMPATIBLE). The export-type check compares only the GPL *license class*
+    and flags the restricting direction (`EXPORT_SYMBOL` → `EXPORT_SYMBOL_GPL`,
+    which locks out proprietary modules); the relaxing direction and a
+    namespace-only change (`EXPORT_SYMBOL` → `EXPORT_SYMBOL_NS`) are not flagged
+    as export-type changes. The 5-field (namespace) and 4-field pre-5.4 formats
+    are both parsed.
   - **`long_double_abi_changed`** (BREAKING) — a `long double` representation
     migration (ppc64 IBM ↔ IEEE128, or `__float128`) re-paired from a
     removed↔added symbol pair via their demangled types; collapses the redundant
-    add/remove into one finding.
+    add/remove into one finding. The same-mangling case
+    (`-mlong-double-64`/`-mabi=ibmlongdouble`, which keeps the symbol name)
+    is caught from the DWARF `long double` base-type byte size when debug info
+    is present on both sides.
   - **`unnamed_type_in_public_abi`** (RISK) — a newly-exported symbol embeds a
     lambda closure (`Ul…E_`) or unnamed struct/enum (`Ut…_`), whose mangling is
     compiler-ordering-fragile.
@@ -67,6 +74,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     and carries a process-wide ODR-uniqueness guarantee.
   - The shipped `security` policy now gates `cet_protection_weakened`,
     `branch_protection_weakened`, and `static_tls_introduced` to break.
+
+- **G23 Phase C — clang toolchain-flag drift robustness.** `toolchain_flag_drift`
+  reads ABI-relevant compiler flags from `DW_AT_producer`; clang records them
+  only under `-grecord-command-line`. The producer scan now unions the recorded
+  `abi_flags`/`vector_abi_flags` across *all* compilation units instead of
+  keeping only the first CU's, so a flag recorded on a non-first TU (common with
+  clang) is no longer dropped. No new `ChangeKind`s.
 
 ### Changed
 

@@ -123,6 +123,10 @@ class DwarfMetadata:
     structs: dict[str, StructLayout] = field(default_factory=dict)
     # name → EnumInfo
     enums: dict[str, EnumInfo] = field(default_factory=dict)
+    # DW_TAG_base_type name → DW_AT_byte_size. Captures scalar sizes whose ABI
+    # can shift without any signature or mangling change — notably `long double`
+    # under -mlong-double-64/-mabi=ibmlongdouble (G23 D2, same-mangling case).
+    base_types: dict[str, int] = field(default_factory=dict)
     has_dwarf: bool = False   # False = binary had no DWARF info
 
     # TypeMetadataSource protocol methods
@@ -250,6 +254,12 @@ def _walk_die_iter(
             _process_enum(die, meta, CU, scope_prefix=scope)
         elif tag == "DW_TAG_typedef":
             _process_typedef(die, meta, CU, type_cache)
+        elif tag == "DW_TAG_base_type" and die_name:
+            bsize = _attr_int(die, "DW_AT_byte_size")
+            if bsize:
+                # Same-name base types must agree on size within a binary; keep
+                # the first non-zero size seen (a later 0 is a declaration).
+                meta.base_types.setdefault(die_name, bsize)
 
         # Push children in reverse order so left-to-right DFS order is preserved
         for child in reversed(list(die.iter_children())):
