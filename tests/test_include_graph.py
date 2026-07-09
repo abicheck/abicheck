@@ -317,3 +317,61 @@ def test_extract_uses_dash_m_and_preserves_c_language(monkeypatch) -> None:
     assert out == {"cu://c": ["foo.c", "sys.h"]}
     assert "-M" in captured["cmd"] and "-MM" not in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("-x") + 1] == "c"
+
+
+def test_extract_from_build_caps_compile_units(monkeypatch) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    calls = []
+
+    class _R:
+        stdout = "foo.o: foo.cpp inc/foo.h"
+        stderr = ""
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _R()
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    build = BuildEvidence(compile_units=[
+        CompileUnit(id=f"cu://{i}", source=f"foo{i}.cpp") for i in range(3)
+    ])
+
+    ext = ClangIncludeExtractor(max_compile_units=2)
+    out = ext.extract_from_build(build)
+
+    assert len(calls) == 2
+    assert set(out) == {"cu://0", "cu://1"}
+    assert any("budget exhausted" in d for d in ext.diagnostics)
+
+
+def test_extract_from_build_enforces_aggregate_timeout(monkeypatch) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    calls = []
+    now = {"value": 0.0}
+
+    class _R:
+        stdout = "foo.o: foo.cpp inc/foo.h"
+        stderr = ""
+
+    def _fake_run(cmd, **kw):
+        calls.append((cmd, kw["timeout"]))
+        now["value"] += 2.0
+        return _R()
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(ig.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    build = BuildEvidence(compile_units=[
+        CompileUnit(id=f"cu://{i}", source=f"foo{i}.cpp") for i in range(3)
+    ])
+
+    ext = ClangIncludeExtractor(aggregate_timeout_s=1.0)
+    out = ext.extract_from_build(build)
+
+    assert len(calls) == 1
+    assert calls[0][1] == 1.0
+    assert out == {"cu://0": ["foo.cpp", "inc/foo.h"]}
+    assert any("time budget exhausted" in d for d in ext.diagnostics)
