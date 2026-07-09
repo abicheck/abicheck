@@ -691,6 +691,23 @@ def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
     # no forced include → normal reconcilable evidence
     _, reg3 = collect_build_context([h], None, extra_flags=["-DKEEP"])
     assert "ambiguous" not in _guard(reg3, "Config", "legacy")
+    # a source_filter selecting the forced-include TU still detects it
+    db2 = tmp_path / "cc2.json"
+    db2.write_text(
+        json.dumps(
+            [
+                {"file": "keep.c", "directory": str(tmp_path), "command": "cc -include p.h -c keep.c"},
+                {"file": "other.c", "directory": str(tmp_path), "command": "cc -c other.c"},
+            ]
+        )
+    )
+    _, regf = collect_build_context([h], db2, source_filter="keep.c")
+    assert _guard(regf, "Config", "legacy")["ambiguous"] is True
+    # a malformed (non-list) compile DB is treated as no forced include
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"not": "a list"}))
+    _, regb = collect_build_context([h], bad, extra_flags=["-DKEEP"])
+    assert "ambiguous" not in _guard(regb, "Config", "legacy")
 
 
 def test_collect_build_context_skips_unreadable_header(tmp_path):
