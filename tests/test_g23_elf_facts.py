@@ -294,6 +294,15 @@ class TestElfIdentity:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
+    def test_legacy_rvc_baseline_not_flagged(self):
+        # Back-compat: a saved baseline produced by the pre-fix decoder carries a
+        # legacy `rvc` token in abi_flags. Comparing it against a freshly-parsed
+        # side (no `rvc`) with the same real ABI must NOT report a change (#504).
+        old = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double", "rvc"}))
+        new = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}))
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
+
     def test_undecoded_arch_uses_raw_eflags_fallback(self):
         # For an arch we don't decode at all (e.g. PPC64, whose ELFv1/ELFv2 ABI
         # version lives in e_flags), the raw-e_flags fallback is the only ABI
