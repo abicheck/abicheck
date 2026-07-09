@@ -42,6 +42,7 @@ Membership — not a name prefix — is what decides stability downstream.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -49,6 +50,7 @@ from pathlib import Path
 import tomllib
 
 _OUT = Path(__file__).resolve().parent.parent / "abicheck" / "stable_abi_data.py"
+_SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 _LICENSE = """\
 # Copyright 2026 Nikolay Petrov
@@ -74,12 +76,19 @@ def _parse_version(added: str) -> tuple[int, int]:
     return (int(major_s), int(minor_s or "0"))
 
 
+def _validate_symbol_name(name: str) -> None:
+    """Reject names that cannot be CPython C symbols."""
+    if not _SYMBOL_RE.fullmatch(name):
+        raise ValueError(f"invalid Stable-ABI symbol name: {name!r}")
+
+
 def extract(toml_bytes: bytes) -> dict[str, tuple[int, int]]:
     """Extract ``symbol -> (major, minor)`` for every linkable Stable-ABI entry."""
     data = tomllib.loads(toml_bytes.decode("utf-8"))
     symbols: dict[str, tuple[int, int]] = {}
     for section in ("function", "data"):
         for name, meta in data.get(section, {}).items():
+            _validate_symbol_name(name)
             added = meta.get("added")
             if added is not None:
                 symbols[name] = _parse_version(str(added))
@@ -88,13 +97,14 @@ def extract(toml_bytes: bytes) -> dict[str, tuple[int, int]]:
 
 def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
     """Render the full ``stable_abi_data.py`` module text."""
+    for name in symbols:
+        _validate_symbol_name(name)
     rows = "\n".join(
-        f'    "{name}": ({v[0]}, {v[1]}),'
+        f"    {name!r}: ({v[0]}, {v[1]}),"
         for name, v in sorted(symbols.items())
     )
-    return (
-        _LICENSE
-        + '\n"""Vendored CPython Stable-ABI (Limited API) symbol floors — '
+    doc = (
+        "Vendored CPython Stable-ABI (Limited API) symbol floors — "
         "GENERATED DATA.\n\n"
         "Maps every linkable Stable-ABI symbol (``[function.*]`` and "
         "``[data.*]`` entries)\nto the ``(major, minor)`` CPython release that "
@@ -114,7 +124,10 @@ def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
         "generator once it stabilises.\n"
         "Refresh: run ``scripts/gen_stable_abi_data.py`` over a newer "
         "``stable_abi.toml``\n(functions + data sections, ``added`` → floor).\n"
-        '"""\n\n'
+    )
+    return (
+        _LICENSE
+        + f"\n{doc!r}\n\n"
         "from __future__ import annotations\n\n"
         "#: Stable-ABI symbol -> (major, minor) release it entered the "
         "Limited API.\n"
