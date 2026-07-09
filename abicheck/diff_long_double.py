@@ -38,6 +38,16 @@ double`` base-type byte size (L1): a persisting exported symbol whose demangled
 signature mentions ``long double`` is reported when that size differs between
 the two snapshots. Without DWARF the same-mangling flip stays invisible (an L3
 build-flag flip would be needed).
+
+Accepted limitation — ppc64 IBM double-double ↔ IEEE binary128 at EQUAL width:
+both representations are 16 bytes, so a return-only function (whose return type
+is not mangled, keeping the symbol identical) exhibits *no* observable signal at
+L0 or L1 — no removed/added pair, no DWARF base-type size delta, and the base
+type is spelled ``long double`` on both sides. Distinguishing the two 16-byte
+formats requires the L3 build flag (``-mabi=ibmlongdouble`` vs
+``-mabi=ieeelongdouble``); it is out of reach for the artifact/DWARF tiers this
+detector operates on. The unequal-width ppc64 modes and the x87↔__float128
+transitions (which DO change size or mangling) are covered above.
 """
 from __future__ import annotations
 
@@ -72,7 +82,9 @@ def _normalize_ld(dem: str) -> str:
     return dem
 
 
-def _exported(snap: AbiSnapshot, *, filter_runtime: bool = True) -> set[str]:
+def _exported(
+    snap: AbiSnapshot, *, filter_runtime: bool = True, cxx_only: bool = True
+) -> set[str]:
     elf = snap.elf
     if elf is None:
         return set()
@@ -82,10 +94,16 @@ def _exported(snap: AbiSnapshot, *, filter_runtime: bool = True) -> set[str]:
     # runtime release that flips one of its public std:: symbols from the `e`
     # encoding to `g`/`u9__ieee128` would have both sides filtered out and the
     # long_double_abi_changed break would go unreported.
+    #
+    # ``cxx_only`` keeps only Itanium ``_Z…`` names (the removed↔added mangling
+    # pairing path can only reason about demangled C++ signatures). The
+    # same-mangling DWARF-size path passes ``cxx_only=False`` so C / ``extern
+    # "C"`` exports (e.g. ``long double f(void)`` → symbol ``f``) are kept and
+    # checked against their recorded function types.
     return {
         s.name
         for s in elf.symbols
-        if s.name.startswith("_Z")
+        if (s.name.startswith("_Z") or not cxx_only)
         and is_abi_relevant_elf_symbol(
             s.name, filter_transitive_runtime_symbols=filter_runtime
         )
@@ -106,29 +124,36 @@ def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``-mlong-double-64`` (and ppc64's IBM↔IEEE toggle at equal width is handled
     by the mangling path) leaves the symbol name identical, so only the DWARF
     ``long double`` byte size reveals the ABI break. Fires once per persisting
-    exported symbol whose demangled signature mentions ``long double``.
+    exported symbol (C++ *or* C / ``extern "C"``) whose demangled signature or
+    recorded function types mention ``long double``.
     """
     old_size, new_size = _ld_base_size(old), _ld_base_size(new)
     if old_size is None or new_size is None or old_size == new_size:
         return []
     filter_runtime = stdlib_namespaces_excluded(old, new)
-    persisting = _exported(old, filter_runtime=filter_runtime) & _exported(
-        new, filter_runtime=filter_runtime
-    )
+    # Include C / extern "C" exports (cxx_only=False): their symbol name (`f`)
+    # encodes neither params nor return type, so a `long double` width flip is
+    # only visible through the recorded function types below.
+    persisting = _exported(
+        old, filter_runtime=filter_runtime, cxx_only=False
+    ) & _exported(new, filter_runtime=filter_runtime, cxx_only=False)
     detail = f"long double byte size {old_size} → {new_size}"
-    # Itanium mangling omits the return type, so `long double f()` stays `_Z1fv`
-    # and its demangling ("f()") never mentions long double even though the
-    # returned value's representation changed. Consult the snapshot's recorded
-    # return type as a second signal so return-only breaks are still caught.
-    ret_by_mangled = {
-        f.mangled: f.return_type for f in old.functions if f.return_type
+    # The mangled name is an unreliable signal here: Itanium omits the return
+    # type (`long double f()` stays `_Z1fv`) and a C export encodes no types at
+    # all. So consult the recorded function types — a `long double` in any
+    # parameter OR the return type — as the authoritative signal, which covers
+    # C++ return-only breaks and C/extern-"C" exports alike.
+    ld_by_mangled = {
+        f.mangled
+        for f in old.functions
+        if (f.return_type and "long double" in f.return_type)
+        or any("long double" in p.type for p in f.params)
     }
     changes: list[Change] = []
     for sym in sorted(persisting):
         dem = demangle(sym)
         param_hit = dem is not None and "long double" in dem
-        return_hit = "long double" in ret_by_mangled.get(sym, "")
-        if not (param_hit or return_hit):
+        if not (param_hit or sym in ld_by_mangled):
             continue
         changes.append(
             make_change(

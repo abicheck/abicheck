@@ -235,6 +235,14 @@ virtual-base *offset* modelling and secondary-group `TYPE_VTABLE_CHANGED`
 localization are deferred — the constant vbase offset is not reliably
 DWARF-derivable, and the two new kinds already cover the structural breaks.
 
+*Accepted limitation:* a base whose vtable is captured in only one side's DWARF
+(its virtual methods live in a CU present in only one library) flips
+`_is_polymorphic` and is locally indistinguishable from a base that genuinely
+gained/lost virtuals — both read as an empty→populated vtable. The
+entirely-missing-base case is already tri-state-skipped; this residual
+asymmetric-capture case would need cross-CU completeness tracking, and any real
+change is independently reported on the base type itself.
+
 **Original design.** New module `vtable_layout.py` (keeps `dwarf_metadata.py`
 under the size cap):
 

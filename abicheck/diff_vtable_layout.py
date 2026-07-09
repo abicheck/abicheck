@@ -180,6 +180,16 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # moved base is already reported by base_class_position_changed /
         # type_base_changed, so this is reserved for the cross-type case where a
         # base's *polymorphism* changed underneath an otherwise-stable class.
+        #
+        # Known limitation (accepted, matches B2's best-effort tri-state design):
+        # a base whose vtable is captured in only ONE side's DWARF — its virtual
+        # methods live in a CU present in only one of the two libraries — flips
+        # _is_polymorphic and is indistinguishable here from a base that genuinely
+        # gained/lost virtuals (both look like an empty→populated vtable). The
+        # entirely-missing-base case is already skipped (tri-state None); this
+        # residual asymmetric-capture case would need cross-CU completeness
+        # tracking to resolve, and the *real* change (if any) is independently
+        # reported on the base type itself.
         if o.bases == n.bases and o.virtual_bases == n.virtual_bases:
             og = _secondary_groups(o, old_types, old_memo)
             ng = _secondary_groups(n, new_types, new_memo)

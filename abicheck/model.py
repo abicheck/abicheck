@@ -345,8 +345,9 @@ class AbiSnapshot:
     )  # CPython extension-module facts: init export, abi3/Limited-API status,
     # and imported CPython C-API symbols (G14). None for non-extension libraries.
     kabi: KabiMetadata | None = field(
-        default=None
-    )  # Linux kernel Module.symvers metadata (G23-D1)
+        default=None, kw_only=True
+    )  # Linux kernel Module.symvers metadata (G23-D1). Keyword-only so inserting
+    # it among the optional metadata fields cannot shift any positional argument.
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

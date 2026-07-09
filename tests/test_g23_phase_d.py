@@ -223,6 +223,32 @@ class TestLongDoubleAbi:
         assert ChangeKind.LONG_DOUBLE_ABI_CHANGED in _kinds(r)
         assert r.verdict == Verdict.BREAKING
 
+    def test_c_export_ld_width_change_flagged(self):
+        # A C / extern "C" export (`long double f(long double)`) has the plain
+        # symbol `f`, not an Itanium `_Z…` name, so the mangling encodes no types.
+        # The DWARF same-symbol width path must keep it and consult the recorded
+        # function param/return types.
+        from abicheck.dwarf_metadata import DwarfMetadata
+        from abicheck.model import Function, Param
+
+        def _snap(ld_size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="l.so.1", version="1",
+                functions=[
+                    Function(
+                        name="f", mangled="f", return_type="long double",
+                        params=[Param(name="x", type="long double")],
+                    )
+                ],
+                variables=[], types=[], enums=[], typedefs={},
+                elf=ElfMetadata(symbols=[_sym("f")], machine="EM_X86_64"),
+                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+            )
+
+        r = compare(_snap(16), _snap(8))
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
     def test_return_only_non_ld_not_flagged(self):
         # A non-long-double return type must not be swept up by the width change.
         from abicheck.dwarf_metadata import DwarfMetadata
