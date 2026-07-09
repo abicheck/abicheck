@@ -13,6 +13,7 @@ This script turns runner outputs into one auditable matrix:
 * ``UNRESOLVED`` means the case is known but no lane currently proves it.
 * ``FAILED`` means a lane that should prove the case failed or errored.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +40,10 @@ SPECIAL_PROOFS = {
     "l3l4l5": {
         "lane": "l3l4l5-fixtures",
         "proof": "tests/test_l3l4l5_examples.py",
+    },
+    "python_api": {
+        "lane": "python-api-stub-pair",
+        "proof": "tests/test_python_api_examples.py",
     },
 }
 
@@ -69,6 +74,8 @@ def _case_owner(name: str, entry: dict[str, Any]) -> str:
         return "g20"
     if "old.json" in (entry.get("fixtures") or []):
         return "l3l4l5"
+    if entry.get("stub_pair"):
+        return "python_api"
     if entry.get("bundle") is True or entry.get("category") == "bundle":
         return "bundle"
     return "single-library"
@@ -91,8 +98,7 @@ def _single_library_status(
     lanes: list[dict[str, Any]],
 ) -> tuple[str, str, str]:
     failed = [
-        lane for lane in lanes
-        if lane["status"] in {"FAIL", "ERROR", "BUILD_ERROR"}
+        lane for lane in lanes if lane["status"] in {"FAIL", "ERROR", "BUILD_ERROR"}
     ]
     if failed:
         return "FAILED", failed[0]["lane"], failed[0].get("message", "")
@@ -124,6 +130,7 @@ def build_matrix(
     proof_g20: bool,
     proof_l3l4l5: bool,
     proof_btf: bool,
+    proof_python_api: bool,
 ) -> dict[str, Any]:
     gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     gcc_results = _results_by_case(gcc)
@@ -171,6 +178,8 @@ def build_matrix(
             status, proof_lane, note = _special_status("g20", proof_g20)
         elif owner == "l3l4l5":
             status, proof_lane, note = _special_status("l3l4l5", proof_l3l4l5)
+        elif owner == "python_api":
+            status, proof_lane, note = _special_status("python_api", proof_python_api)
         else:  # pragma: no cover - defensive future-proofing
             status, proof_lane, note = "UNRESOLVED", owner, "unknown owner"
 
@@ -218,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proof-g20", action="store_true")
     parser.add_argument("--proof-l3l4l5", action="store_true")
     parser.add_argument("--proof-btf", action="store_true")
+    parser.add_argument("--proof-python-api", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--allow-unresolved",
@@ -234,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         proof_g20=args.proof_g20,
         proof_l3l4l5=args.proof_l3l4l5,
         proof_btf=args.proof_btf,
+        proof_python_api=args.proof_python_api,
     )
     text = json.dumps(matrix, indent=2)
     if args.out:

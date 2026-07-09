@@ -292,6 +292,7 @@ jobs:
           PYTHONPATH=. pytest \
             tests/test_g20_catalog.py \
             tests/test_l3l4l5_examples.py \
+            tests/test_python_api_examples.py \
             tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
             -q
 
@@ -310,6 +311,7 @@ jobs:
             --proof-g20 \
             --proof-l3l4l5 \
             --proof-btf \
+            --proof-python-api \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix

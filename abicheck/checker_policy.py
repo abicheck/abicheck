@@ -719,6 +719,27 @@ class ChangeKind(str, Enum):
     KABI_SYMBOL_NAMESPACE_CHANGED = "kabi_symbol_namespace_changed"  # export namespace gained/moved → module needs MODULE_IMPORT_NS → BREAKING
     KABI_EXPORT_TYPE_CHANGED = "kabi_export_type_changed"  # EXPORT_SYMBOL ↔ EXPORT_SYMBOL_GPL → API_BREAK
     KABI_SYMBOL_ADDED = "kabi_symbol_added"  # new exported kernel symbol → COMPATIBLE
+    # ── Python-level API of an extension module (G23) ─────────────────────────
+    # Emitted by diff_python_api.py from the Python-visible surface recovered
+    # from a `.pyi` type stub — the functions/classes/methods/signatures a
+    # consumer `import`s. Invisible to the C-ABI/export-table view: two builds
+    # can be binary-identical yet break every caller. These are source-level
+    # (API_BREAK) or behavioural-risk (RISK) findings, never binary breaks.
+    PYTHON_API_FUNCTION_REMOVED = "python_api_function_removed"  # a public top-level function disappeared from the module's Python API → callers importing it break → API_BREAK
+    PYTHON_API_FUNCTION_ADDED = "python_api_function_added"  # a new public top-level function → additive, existing callers unaffected → COMPATIBLE
+    PYTHON_API_CLASS_REMOVED = "python_api_class_removed"  # a public class disappeared from the module's Python API → callers referencing it break → API_BREAK
+    PYTHON_API_CLASS_ADDED = "python_api_class_added"  # a new public class → additive → COMPATIBLE
+    PYTHON_API_METHOD_REMOVED = "python_api_method_removed"  # a public method disappeared from a class that still exists → callers of it break → API_BREAK
+    PYTHON_API_METHOD_ADDED = "python_api_method_added"  # a new public method on an existing class → additive → COMPATIBLE
+    PYTHON_API_PARAMETER_REMOVED = "python_api_parameter_removed"  # a parameter was dropped from a function/method signature → callers passing it hit a TypeError → API_BREAK
+    PYTHON_API_PARAMETER_ADDED = "python_api_parameter_added"  # a new *required* (no-default) parameter was added → every existing call now raises a missing-argument TypeError → API_BREAK
+    PYTHON_API_PARAMETER_RENAMED = "python_api_parameter_renamed"  # a parameter was renamed → callers passing it by keyword hit an unexpected-keyword TypeError → API_BREAK
+    PYTHON_API_DEFAULT_REMOVED = "python_api_default_removed"  # a parameter lost its default value → callers relying on the default now raise a missing-argument TypeError → API_BREAK
+    PYTHON_API_PARAMETER_TYPE_CHANGED = "python_api_parameter_type_changed"  # a parameter's type annotation changed → type-checker/behavioural risk, not a hard runtime break → RISK
+    PYTHON_API_RETURN_TYPE_CHANGED = "python_api_return_type_changed"  # a function/method's return annotation changed → callers may mishandle the result → RISK
+    PYTHON_API_PARAMETER_KIND_CHANGED = "python_api_parameter_kind_changed"  # a parameter's binding changed — positional↔keyword-only, keyword→positional-only, or the positional order/position shifted — so existing call sites bind arguments differently even though the names are unchanged → API_BREAK
+    PYTHON_API_CALLABLE_KIND_CHANGED = "python_api_callable_kind_changed"  # a callable's protocol changed — def↔async def (callers must/mustn't await), or method↔property / static↔class↔instance binding — so existing call/access sites break even with an unchanged parameter list → API_BREAK
+    PYTHON_API_OVERLOAD_REMOVED = "python_api_overload_removed"  # an @overload signature variant was dropped from an overloaded function/method → typed callers that relied on that call shape lose it → API_BREAK
 
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:

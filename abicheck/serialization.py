@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Serialization helpers — AbiSnapshot ↔ JSON."""
+
 from __future__ import annotations
 
 import json
@@ -96,23 +97,47 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     if d.get("elf"):
         elf = d["elf"]
         for sym in elf.get("symbols", []):
-            sym["binding"] = sym["binding"] if isinstance(sym["binding"], str) else sym["binding"].value
-            sym["sym_type"] = sym["sym_type"] if isinstance(sym["sym_type"], str) else sym["sym_type"].value
+            sym["binding"] = (
+                sym["binding"]
+                if isinstance(sym["binding"], str)
+                else sym["binding"].value
+            )
+            sym["sym_type"] = (
+                sym["sym_type"]
+                if isinstance(sym["sym_type"], str)
+                else sym["sym_type"].value
+            )
         for imp in elf.get("imports", []):
-            imp["binding"] = imp["binding"] if isinstance(imp["binding"], str) else imp["binding"].value
-            imp["sym_type"] = imp["sym_type"] if isinstance(imp["sym_type"], str) else imp["sym_type"].value
+            imp["binding"] = (
+                imp["binding"]
+                if isinstance(imp["binding"], str)
+                else imp["binding"].value
+            )
+            imp["sym_type"] = (
+                imp["sym_type"]
+                if isinstance(imp["sym_type"], str)
+                else imp["sym_type"].value
+            )
 
     # Serialize PeMetadata enums to strings
     if d.get("pe"):
         pe = d["pe"]
         for exp in pe.get("exports", []):
-            exp["sym_type"] = exp["sym_type"] if isinstance(exp["sym_type"], str) else exp["sym_type"].value
+            exp["sym_type"] = (
+                exp["sym_type"]
+                if isinstance(exp["sym_type"], str)
+                else exp["sym_type"].value
+            )
 
     # Serialize MachoMetadata enums to strings
     if d.get("macho"):
         macho = d["macho"]
         for exp in macho.get("exports", []):
-            exp["sym_type"] = exp["sym_type"] if isinstance(exp["sym_type"], str) else exp["sym_type"].value
+            exp["sym_type"] = (
+                exp["sym_type"]
+                if isinstance(exp["sym_type"], str)
+                else exp["sym_type"].value
+            )
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
     # and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects)
@@ -158,7 +183,9 @@ def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
 def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
     return EnumType(
         name=e["name"],
-        members=[EnumMember(name=m["name"], value=m["value"]) for m in e.get("members", [])],
+        members=[
+            EnumMember(name=m["name"], value=m["value"]) for m in e.get("members", [])
+        ],
         underlying_type=e.get("underlying_type", "int"),
         source_location=e.get("source_location"),
         source_header=e.get("source_header"),
@@ -178,6 +205,7 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         SymbolBinding,
         SymbolType,
     )
+
     syms = [
         ElfSymbol(
             name=s["name"],
@@ -235,6 +263,7 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
 
 def _pe_from_dict(e: dict[str, Any]) -> Any:
     from .pe_metadata import PeExport, PeMetadata, PeSymbolType
+
     exports = [
         PeExport(
             name=x["name"],
@@ -257,6 +286,7 @@ def _pe_from_dict(e: dict[str, Any]) -> Any:
 
 def _macho_from_dict(e: dict[str, Any]) -> Any:
     from .macho_metadata import MachoExport, MachoMetadata, MachoSymbolType
+
     exports = [
         MachoExport(
             name=x["name"],
@@ -344,7 +374,9 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
         frame_registers=d.get("frame_registers", {}),
-        callee_saved_regs={k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()},
+        callee_saved_regs={
+            k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
+        },
     )
 
 
@@ -411,6 +443,45 @@ def _python_ext_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
+def _python_api_from_dict(d: dict[str, Any]) -> Any:
+    from .python_api import PyClass, PyFunction, PyParameter, PythonApiSurface
+
+    def _param(p: dict[str, Any]) -> PyParameter:
+        return PyParameter(
+            name=p.get("name", ""),
+            kind=p.get("kind", "positional_or_keyword"),
+            has_default=bool(p.get("has_default", False)),
+            annotation=p.get("annotation"),
+        )
+
+    def _func(fn: dict[str, Any]) -> PyFunction:
+        return PyFunction(
+            name=fn.get("name", ""),
+            parameters=[_param(p) for p in fn.get("parameters", [])],
+            return_annotation=fn.get("return_annotation"),
+            is_async=bool(fn.get("is_async", False)),
+            descriptor=fn.get("descriptor", "function"),
+            overloads=[_func(v) for v in fn.get("overloads", [])],
+        )
+
+    functions = {name: _func(fn) for name, fn in (d.get("functions") or {}).items()}
+    classes = {
+        name: PyClass(
+            name=c.get("name", name),
+            methods={m: _func(fn) for m, fn in (c.get("methods") or {}).items()},
+        )
+        for name, c in (d.get("classes") or {}).items()
+    }
+    return PythonApiSurface(
+        module_name=d.get("module_name"),
+        source=d.get("source", "stub"),
+        source_path=d.get("source_path"),
+        functions=functions,
+        classes=classes,
+        parse_ok=bool(d.get("parse_ok", True)),
+    )
+
+
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
@@ -419,6 +490,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     _schema_version: int = int(d.get("schema_version", 1))
     if _schema_version > SCHEMA_VERSION:
         import warnings
+
         warnings.warn(
             f"Snapshot schema_version {_schema_version} is newer than this abicheck "
             f"(supports up to schema_version {SCHEMA_VERSION}). "
@@ -429,10 +501,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
     funcs = [
         Function(
-            name=f["name"], mangled=f["mangled"], return_type=f["return_type"],
+            name=f["name"],
+            mangled=f["mangled"],
+            return_type=f["return_type"],
             params=[
                 Param(
-                    name=p.get("name", ""), type=p.get("type", ""),
+                    name=p.get("name", ""),
+                    type=p.get("type", ""),
                     kind=ParamKind(p.get("kind", "value")),
                     default=p.get("default", None),
                     pointer_depth=p.get("pointer_depth", 0),
@@ -461,7 +536,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_extern_c=f.get("is_extern_c", False),
             access=AccessLevel(f.get("access", "public")),
             return_pointer_depth=f.get("return_pointer_depth", 0),
-            elf_visibility=ElfVisibility(f["elf_visibility"]) if f.get("elf_visibility") else None,
+            elf_visibility=ElfVisibility(f["elf_visibility"])
+            if f.get("elf_visibility")
+            else None,
             ref_qualifier=f.get("ref_qualifier", ""),
             # Tri-state: a missing key (older snapshot) loads as None,
             # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
@@ -479,13 +556,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ]
     variables = [
         Variable(
-            name=v["name"], mangled=v["mangled"], type=v["type"],
+            name=v["name"],
+            mangled=v["mangled"],
+            type=v["type"],
             visibility=Visibility(v.get("visibility", "public")),
             source_location=v.get("source_location"),
             is_const=v.get("is_const", False),
             value=v.get("value"),
             access=AccessLevel(v.get("access", "public")),
-            elf_visibility=ElfVisibility(v["elf_visibility"]) if v.get("elf_visibility") else None,
+            elf_visibility=ElfVisibility(v["elf_visibility"])
+            if v.get("elf_visibility")
+            else None,
             source_header=v.get("source_header"),
             origin=_scope_origin_or_unknown(v.get("origin")),
         )
@@ -493,12 +574,14 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ]
     types = [
         RecordType(
-            name=t["name"], kind=t["kind"],
+            name=t["name"],
+            kind=t["kind"],
             size_bits=t.get("size_bits"),
             alignment_bits=t.get("alignment_bits"),
             fields=[
                 TypeField(
-                    name=f["name"], type=f["type"],
+                    name=f["name"],
+                    type=f["type"],
                     offset_bits=f.get("offset_bits"),
                     is_bitfield=f.get("is_bitfield", False),
                     bitfield_bits=f.get("bitfield_bits"),
@@ -566,6 +649,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # extension") so we only re-derive when there is no recorded answer.
     _python_ext_key_absent = "python_ext" not in d
 
+    python_api_data = d.get("python_api")
+    python_api = (
+        _python_api_from_dict(python_api_data)
+        if isinstance(python_api_data, dict)
+        else None
+    )
+
     dep_data = d.get("dependency_info")
     dep_info = (
         DependencyInfo(
@@ -595,6 +685,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     build_source_pack = None
     if isinstance(ep_raw, dict):
         from .buildsource.model import BuildSourceRef
+
         build_source_pack = BuildSourceRef.from_dict(ep_raw)
 
     # Inline embedded build-info/source facts (single-artifact UX). Optional and
@@ -604,6 +695,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     build_source = None
     if isinstance(bs_raw, dict):
         from .buildsource.pack import BuildSourcePack
+
         build_source = BuildSourcePack.from_embedded_dict(bs_raw)
 
     # from_headers provenance (added alongside the HEADER_AWARE tier-honesty
@@ -628,13 +720,23 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         from_headers_inferred = from_headers
 
     snap = AbiSnapshot(
-        library=d["library"], version=d["version"],
+        library=d["library"],
+        version=d["version"],
         source_path=d.get("source_path"),
-        functions=funcs, variables=variables, types=types,
-        enums=enums, typedefs=typedefs,
-        elf=elf, pe=pe, macho=macho,
-        dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl, kabi=kabi,
+        functions=funcs,
+        variables=variables,
+        types=types,
+        enums=enums,
+        typedefs=typedefs,
+        elf=elf,
+        pe=pe,
+        macho=macho,
+        dwarf=dwarf,
+        dwarf_advanced=dwarf_advanced,
+        sycl=sycl,
+        kabi=kabi,
         python_ext=python_ext,
+        python_api=python_api,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
@@ -743,10 +845,14 @@ def _build_mode_from_dict(raw: Any) -> BuildMode | None:
 
     return BuildMode(
         compiler_family=_enum_or(
-            CompilerFamily, raw.get("compiler_family"), CompilerFamily.UNKNOWN,
+            CompilerFamily,
+            raw.get("compiler_family"),
+            CompilerFamily.UNKNOWN,
         ),
         language_std=_enum_or(
-            CxxStandard, raw.get("language_std"), CxxStandard.UNKNOWN,
+            CxxStandard,
+            raw.get("language_std"),
+            CxxStandard.UNKNOWN,
         ),
         stdlib=_enum_or(StdlibFamily, raw.get("stdlib"), StdlibFamily.UNKNOWN),
         glibcxx_dual_abi=_enum_or(

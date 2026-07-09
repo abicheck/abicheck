@@ -142,9 +142,9 @@ class TestDetectorRegistry:
     """Self-registering detector registry."""
 
     def test_all_detectors_registered(self):
-        """All 54 detectors are registered via decorators."""
+        """All 55 detectors are registered via decorators."""
         registry = _get_populated_registry()
-        assert len(registry) == 54
+        assert len(registry) == 55
 
     def test_detector_names_unique(self):
         """No duplicate detector names."""
@@ -211,7 +211,7 @@ class TestDetectorRegistry:
         assert isinstance(changes, list)
         assert isinstance(results, list)
         # Results should have entries for all detectors (enabled or disabled)
-        assert len(results) == 54
+        assert len(results) == 55
 
     def test_support_check_disables_detector(self):
         """Detectors with failing support checks are disabled."""
@@ -268,6 +268,7 @@ class TestPostProcessingPipeline:
             "downgrade_opaque_type_changes",
             "enrich_source_locations",
             "filter_non_public_surface",
+            "demote_off_python_surface",
             "apply_suppression",
             "suppress_renamed_pairs",
             "filter_redundant",
@@ -368,7 +369,7 @@ class TestCompareUsesNewArchitecture:
         result = compare(old, new)
         assert result.verdict.value == "NO_CHANGE"
         assert result.changes == []
-        assert len(result.detector_results) == 54
+        assert len(result.detector_results) == 55
 
     def test_compare_detects_func_removal(self):
         """compare() detects function removal via registry."""

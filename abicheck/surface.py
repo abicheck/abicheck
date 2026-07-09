@@ -576,6 +576,12 @@ REASON_NO_PROVENANCE = "no-provenance"
 # public API root, so it is truly private and must not drive a hard ABI verdict
 # (ISSUE-15: oneTBB ``tbb::detail::*`` / ``rml::internal::*`` DWARF-only churn).
 REASON_PRIVATE_INTERNAL_UNREACHABLE = "private-internal-unreachable"
+# A native C/C++ finding on a CPython extension module whose only public
+# contract is its Python-visible API (recovered `.pyi`) plus its load contract
+# (imported Py* / abi3). The module exports only `PyInit_`, so churn in its
+# other exported symbols and internal type layout cannot be observed by any
+# `import` consumer — it is off the real public surface (G23 oracle scoping).
+REASON_OFF_PYTHON_SURFACE = "off-python-surface"
 
 # Map a demotable origin to its ledger reason code.
 _ORIGIN_REASON: dict[ScopeOrigin, str] = {
@@ -652,6 +658,14 @@ def classify_change_surface(
     large comparison quadratic in the number of findings.
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
+        return True, None
+    # Python-level API and CPython load-contract findings (G23/G14) live on a
+    # distinct evidence axis from the C/C++ export surface: their ``symbol`` is a
+    # dotted Python name the header-surface classifier cannot place, and demoting
+    # them would hide exactly the break they exist to catch. Never scope them out
+    # (the authority rule — makes explicit what was previously an implicit
+    # survival via the conservative-unknown fallback).
+    if change.kind.value.startswith("python_"):
         return True, None
     if not (surf_old.resolvable and surf_new.resolvable):
         # If either side lacks a resolvable surface we cannot confidently

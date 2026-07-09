@@ -247,6 +247,15 @@ def perform_elf_dump(
 
         snap.python_ext = detect_python_extension(snap)
 
+    # G23: recover the Python-visible API surface from a sibling `.pyi` stub, so
+    # the snapshot also carries the function/class/method signatures a consumer
+    # `import`s — the surface the C-ABI export view cannot see. A no-op when no
+    # stub is found alongside the binary.
+    if snap.python_api is None:
+        from .python_api import detect_python_api
+
+        snap.python_api = detect_python_api(snap)
+
     if follow_deps:
         populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 

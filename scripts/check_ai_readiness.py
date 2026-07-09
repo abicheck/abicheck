@@ -705,6 +705,12 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # are under ``if TYPE_CHECKING``, so neither runs at import time — the same
         # safe pattern as the sycl/buildsource metadata modules.
         frozenset({"model", "python_ext"}),
+        # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot carries
+        # an optional ``python_api: PythonApiSurface`` field (G23), while
+        # ``python_api`` annotates ``detect_python_api`` with ``AbiSnapshot``.
+        # Both edges are under ``if TYPE_CHECKING``, so neither runs at import
+        # time — the same safe pattern as ``python_ext``.
+        frozenset({"model", "python_api"}),
     }
 )
 

@@ -98,7 +98,7 @@ pip install -e .
 gives abicheck the most evidence to work with (see the
 [input-quality ladder](#input-quality-the-five-evidence-layers-l0l4) below).
 
-The repo includes 162 ABI scenario examples. Most are single-library cases with
+The repo includes 163 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
 (152–162) ship hand-built evidence-model fixture pairs; bundle/release-level
 cases use release-style layouts.

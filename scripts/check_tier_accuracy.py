@@ -198,6 +198,13 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         # change at L0/L1 and overstate a constant-axis case (Codex review #487).
         s.constants = {}
         s.from_headers = False
+        # A CPython extension's Python-visible API is recovered from a `.pyi`
+        # type stub — a header-equivalent (L2) fact. A stripped binary and its
+        # DWARF carry no stub, so below L2 the surface is not observable; clear
+        # it (python_ext, the abi3/import surface, is an L0 symbol-table fact and
+        # is kept). Without this an L0/L1 projection would still carry the stub
+        # and over-report a Python-API change the tier could not actually see.
+        s.python_api = None
     if tier == Tier.L0:
         # Stripped binary: only symbol identity survives — no layout, no
         # signatures, no types/enums/typedefs, and variables degrade to a bare
@@ -280,6 +287,39 @@ def _c_param_widened():
 def _c_return_type_changed():
     old = _snap("1", functions=[_fn("capi", mangled="capi", ret="int")])
     new = _snap("2", functions=[_fn("capi", mangled="capi", ret="long long")])
+    return old, new
+
+
+def _ext_snap(version, *, stub):
+    """A CPython extension snapshot with a recovered Python API surface (L2)."""
+    from abicheck.elf_metadata import (
+        ElfMetadata,
+        ElfSymbol,
+        SymbolBinding,
+        SymbolType,
+    )
+    from abicheck.python_api import surface_from_stub_source
+    from abicheck.python_ext import detect_python_extension
+
+    elf = ElfMetadata()
+    elf.symbols = [
+        ElfSymbol(name="PyInit_ext", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+    ]
+    snap = AbiSnapshot(
+        library="ext.abi3.so", version=version, elf=elf, source_path="ext.abi3.so"
+    )
+    snap.python_ext = detect_python_extension(snap)
+    snap.python_api = surface_from_stub_source(stub, module_name="ext")
+    return snap
+
+
+def _python_api_function_removed():
+    # A public function drops from the extension's Python API (recovered from
+    # the `.pyi`). This is a real source break, but the Python surface is only
+    # observable at L2 — a stripped binary / DWARF sees only the unchanged
+    # `PyInit_ext` export, so L0/L1 honestly under-call it.
+    old = _ext_snap("1", stub="def transform(data): ...\ndef helper(x): ...\n")
+    new = _ext_snap("2", stub="def transform(data): ...\n")
     return old, new
 
 
@@ -388,6 +428,9 @@ CORPUS: list[TierCase] = [
     TierCase("c_param_widened", "symbol-signature", 2, Tier.L2, _c_param_widened),
     TierCase("c_return_type_changed", "symbol-signature", 2, Tier.L2, _c_return_type_changed),
     TierCase("public_enum_value_changed", "enum-reachability", 2, Tier.L2, _public_enum_value_changed),
+    # G23: a Python-API break is only observable at L2 (the `.pyi` surface);
+    # L0/L1 honestly under-call it — "what the header/stub layer buys".
+    TierCase("python_api_function_removed", "python-api", 2, Tier.L2, _python_api_function_removed),
     # non-breaking — false positive removed by the scoping layer (L2)
     TierCase("internal_struct_size_changed", "struct-layout", 0, Tier.L2, _internal_struct_size_changed),
     TierCase("internal_field_type_changed", "struct-layout", 0, Tier.L2, _internal_field_type_changed),

@@ -82,6 +82,9 @@ from .diff_platform import (  # noqa: F401
     _template_outer,
 )
 from .diff_python import _diff_python_ext  # noqa: F401 — triggers detector registration
+from .diff_python_api import (
+    _diff_python_api,  # noqa: F401 — triggers detector registration
+)
 from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
