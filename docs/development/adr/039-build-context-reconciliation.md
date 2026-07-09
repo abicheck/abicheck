@@ -42,9 +42,9 @@ enabled by `compare(..., reconcile_build_context=True)` and the CLI
 artifacts out of the verdict into an audit bucket (`DiffResult.reconciled_changes`),
 using two new pieces of build-context evidence carried on the snapshot:
 
-1. **`AbiSnapshot.conditional_fields: dict[str, dict[str, str]]`** — a
-   `{type: {field: {guard, type, is_bitfield, bitfield_bits}}}` registry of the
-   fields a header parse knows are guarded by a `#if defined(GUARD)` region,
+1. **`AbiSnapshot.conditional_fields: dict[str, dict[str, dict[str, str | bool | int | None]]]`** — a
+   `{type: {field: {guard, type, is_bitfield, bitfield_bits, access, is_const, is_volatile, is_mutable}}}`
+   registry of the fields a header parse knows are guarded by a `#if defined(GUARD)` region,
    **whether or not** the context-free parse pruned them from the type's `fields`
    list. It carries each field's **full declaration**, not just its guard,
    precisely because the artifact we clear is a *pruned* field — the context-free

@@ -33,7 +33,8 @@ higher-evidence build context carried on the snapshot:
   build actually defines.
 
 The registry carries each guarded field's **full declaration** (guard + type +
-bit-field shape), not just its guard. Each side is evaluated with **its own**
+bit-field shape + C++ access + cv/mutable qualifiers), not just its guard. Each
+side is evaluated with **its own**
 registry and defines (Codex review #498): a guard the *new* header adds must not
 be applied to the *old* build's field. A field's *effective declaration* on a
 side is: taken from ``fields`` when present (unless guarded here by an undefined
@@ -90,26 +91,37 @@ RECONCILE_REASON = "build-context-reconciled"
 
 def _effective_decls(
     rec: RecordType, registry: dict[str, dict[str, object]], defines: set[str]
-) -> dict[str, tuple[object, object, object, object]]:
+) -> dict[str, tuple[object, ...]]:
     """The *declarations* of fields effectively present on **this** side's record.
 
-    Maps ``field name -> (type, is_bitfield, bitfield_bits, access)`` for every
-    field really present in this build, using only this side's own registry and
-    defines. A field **observed** in ``rec.fields`` is authoritative *unless* this
-    side's registry marks it as ``#ifndef``-guarded (``negative``) by a macro this
-    build **defines** — the context-free parse saw it (macro undefined ⇒ guard
-    true), but the real build prunes it, so it is dropped (Codex review #498). A
-    field known **only** from this side's registry — a positive ``#ifdef`` the
-    context-free parse pruned — is present iff its guard is defined here. Carrying
-    the full declaration (type, bit-field, and C++ access) means a pruned field
-    whose type *or* access changed is not mistaken for an unchanged one.
+    Maps ``field name -> (type, is_bitfield, bitfield_bits, access, is_const,
+    is_volatile, is_mutable)`` for every field really present in this build,
+    using only this side's own registry and defines. A field **observed** in
+    ``rec.fields`` is authoritative *unless* this side's registry marks it as
+    ``#ifndef``-guarded (``negative``) by a macro this build **defines** — the
+    context-free parse saw it (macro undefined ⇒ guard true), but the real build
+    prunes it, so it is dropped (Codex review #498). A field known **only** from
+    this side's registry — a positive ``#ifdef`` the context-free parse pruned —
+    is present iff its guard is defined here. Carrying the full declaration (type,
+    bit-field, C++ access, and cv/mutable qualifiers) means a pruned field whose
+    type, access, *or* qualifiers changed is not mistaken for an unchanged one
+    (Codex review #498, P2): a ``const int``→``int`` change on a guarded field
+    keeps the maps unequal, so the finding is kept rather than reconciled away.
     """
-    out: dict[str, tuple[object, object, object, object]] = {}
+    out: dict[str, tuple[object, ...]] = {}
     for f in rec.fields:
         entry = registry.get(f.name)
         if entry is not None and entry.get("negative") and entry.get("guard") in defines:
             continue  # #ifndef-guarded field the defining build really prunes
-        out[f.name] = (f.type, f.is_bitfield, f.bitfield_bits, f.access.value)
+        out[f.name] = (
+            f.type,
+            f.is_bitfield,
+            f.bitfield_bits,
+            f.access.value,
+            f.is_const,
+            f.is_volatile,
+            f.is_mutable,
+        )
     for name, entry in registry.items():
         if name in out or entry.get("negative"):
             continue  # negative entries correspond to observed fields, handled above
@@ -120,6 +132,9 @@ def _effective_decls(
                 bool(entry.get("is_bitfield", False)),
                 entry.get("bitfield_bits"),
                 str(entry.get("access", "public")),
+                bool(entry.get("is_const", False)),
+                bool(entry.get("is_volatile", False)),
+                bool(entry.get("is_mutable", False)),
             )
     return out
 

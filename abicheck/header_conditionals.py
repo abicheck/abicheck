@@ -254,11 +254,15 @@ def _include_guard_macro(lines: list[str]) -> str | None:
     return None
 
 
-def _parse_field(decl: str) -> tuple[str, str, bool, int | None] | None:
-    """Parse a member declaration into ``(name, type, is_bitfield, bits)``.
+def _parse_field(decl: str) -> tuple[str, str, bool, int | None, bool, bool, bool] | None:
+    """Parse a member declaration into ``(name, type, is_bitfield, bits, const, volatile, mutable)``.
 
     Returns ``None`` for anything that is not a plain single-name member — a
-    function/method (has ``(``), a nested aggregate, an assignment, etc."""
+    function/method (has ``(``), a nested aggregate, an assignment, etc. The
+    ``const``/``volatile``/``mutable`` qualifiers are lifted out of the type
+    string into structured bits so the registry's declaration matches the
+    model's :class:`~abicheck.model.TypeField`, which stores them separately
+    from ``type`` (Codex review #498, P2)."""
     if "(" in decl or "=" in decl or "{" in decl:
         return None
     bits: int | None = None
@@ -278,6 +282,12 @@ def _parse_field(decl: str) -> tuple[str, str, bool, int | None] | None:
     # the name in the original core string.
     type_str = core[: core.rfind(name)].strip()
     type_str = " ".join(type_str.split())
+    # Lift leading cv/mutable qualifiers into structured bits, matching the model.
+    tokens = type_str.split()
+    is_const = "const" in tokens
+    is_volatile = "volatile" in tokens
+    is_mutable = "mutable" in tokens
+    type_str = " ".join(t for t in tokens if t not in ("const", "volatile", "mutable"))
     if not type_str or name in (
         "struct",
         "class",
@@ -288,7 +298,7 @@ def _parse_field(decl: str) -> tuple[str, str, bool, int | None] | None:
         "return",
     ):
         return None
-    return name, type_str, is_bitfield, bits
+    return name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable
 
 
 def _record_qualified_name(scope_stack: list[_Scope], name: str) -> str | None:
@@ -328,7 +338,8 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     """Scan header *source* for record fields under a single positive ``#ifdef``.
 
     Returns ``{record: {field: {"guard": macro, "type": t, "is_bitfield": b,
-    "bitfield_bits": n, "access": a}}}``, keying each record by its
+    "bitfield_bits": n, "access": a, "is_const": c, "is_volatile": v,
+    "is_mutable": m}}}``, keying each record by its
     **namespace/class-qualified** name (``api::S``). Qualifying keeps two
     same-named records in different namespaces distinct (no conflation) and skips
     anonymous-namespace records; the reconciler matches this key *exactly* against
@@ -467,13 +478,16 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             if fm:
                 parsed = _parse_field(fm.group("decl"))
                 if parsed is not None:
-                    name, type_str, is_bitfield, bits = parsed
+                    name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable = parsed
                     entry: dict[str, object] = {
                         "guard": guard,
                         "type": type_str,
                         "is_bitfield": is_bitfield,
                         "bitfield_bits": bits,
                         "access": rec_here.access,
+                        "is_const": is_const,
+                        "is_volatile": is_volatile,
+                        "is_mutable": is_mutable,
                     }
                     if is_negative:
                         # An ``#ifndef GUARD`` field: observed context-free, but

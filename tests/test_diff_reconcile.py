@@ -295,7 +295,7 @@ def test_effective_decls_drops_defined_negative_guard():
     reg = {"legacy": _neg_guarded()}
     # GUARD defined → #ifndef false → legacy pruned.
     assert _effective_decls(rec, reg, {GUARD}) == {
-        "version": ("int", False, None, "public")
+        "version": ("int", False, None, "public", False, False, False)
     }
     # GUARD undefined → #ifndef true → legacy stays.
     assert set(_effective_decls(rec, reg, set())) == {"version", "legacy"}
@@ -307,6 +307,20 @@ def test_mixed_evidence_pair_is_not_reconciled():
     happens even though a registry is present (Codex review #498)."""
     old = _snap("1", [_tf("version"), _tf("legacy")], defines=set())  # context-free
     new = _snap("2", [_tf("version")], defines={GUARD}, conditional=_reg())
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.verdict == Verdict.BREAKING
+    assert result.reconciled_count == 0
+
+
+def test_pruned_field_qualifier_change_is_kept():
+    """A guarded field pruned from the context-free side whose cv-qualifier
+    changed (``const int`` → ``int``) is a real ABI change: carrying the cv/mutable
+    bits in the reconciled declaration keeps the finding rather than collapsing it
+    to NO_CHANGE (Codex review #498, P2)."""
+    old = _snap("1", [_tf("version"), TypeField(name="mode", type="int", is_const=True)])
+    new = _snap("2", [_tf("version")], conditional=_reg("mode"))  # registry: non-const
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
     )
@@ -394,11 +408,11 @@ def test_effective_decls_resolves_registry_guards_per_side():
     rec = RecordType(name="S", kind="struct", fields=[_tf("version")])
     reg = {"legacy": _guarded()}
     assert _effective_decls(rec, reg, set()) == {
-        "version": ("int", False, None, "public")
+        "version": ("int", False, None, "public", False, False, False)
     }
     assert _effective_decls(rec, reg, {GUARD}) == {
-        "version": ("int", False, None, "public"),
-        "legacy": ("int", False, None, "public"),
+        "version": ("int", False, None, "public", False, False, False),
+        "legacy": ("int", False, None, "public", False, False, False),
     }
 
 
@@ -412,8 +426,9 @@ def test_effective_decls_treats_observed_field_as_authoritative():
     rec = RecordType(name="S", kind="struct", fields=[_tf("x")])
     reg = {"x": _guarded()}
     # Guard active or not, the observed field is present (parse saw it).
-    assert _effective_decls(rec, reg, {GUARD}) == {"x": ("int", False, None, "public")}
-    assert _effective_decls(rec, reg, set()) == {"x": ("int", False, None, "public")}
+    expected = {"x": ("int", False, None, "public", False, False, False)}
+    assert _effective_decls(rec, reg, {GUARD}) == expected
+    assert _effective_decls(rec, reg, set()) == expected
 
 
 # ── disclosure (Codex P2) ────────────────────────────────────────────────────

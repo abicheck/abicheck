@@ -174,6 +174,9 @@ def test_scan_records_ifdef_guarded_field():
         "is_bitfield": False,
         "bitfield_bits": None,
         "access": "public",  # struct default
+        "is_const": False,
+        "is_volatile": False,
+        "is_mutable": False,
     }
     # the unconditional field is not registered
     assert "version" not in reg.get("Config", {})
@@ -200,6 +203,25 @@ def test_scan_captures_type_bitfield_and_pointer():
 def test_scan_strips_comments():
     src = "struct S {\n#ifdef G\n int a; /* c */ // trailing\n#endif\n};"
     assert _guard(scan_conditional_fields(src), "S", "a")["type"] == "int"
+
+
+def test_scan_lifts_cv_qualifiers_into_structured_bits():
+    """``const``/``volatile``/``mutable`` are lifted out of the type string into
+    structured bits so the registry declaration matches the model's
+    ``TypeField`` shape (Codex review #498, P2). Otherwise a ``const int``→``int``
+    change on a guarded field would be reconciled away as NO_CHANGE."""
+    src = "struct S {\n#ifdef G\n const int legacy;\n#endif\n};"
+    entry = _guard(scan_conditional_fields(src), "S", "legacy")
+    assert entry["type"] == "int"
+    assert entry["is_const"] is True
+    assert entry["is_volatile"] is False
+    assert entry["is_mutable"] is False
+    vol = _guard(
+        scan_conditional_fields("struct S {\n#ifdef G\n volatile int v;\n#endif\n};"),
+        "S",
+        "v",
+    )
+    assert vol["type"] == "int" and vol["is_volatile"] is True
 
 
 def test_scan_records_access_default_by_keyword():
@@ -468,10 +490,13 @@ def test_parse_field_helper_edge_cases():
     assert _parse_field("int x = 0") is None  # has =
     assert _parse_field("justoneword") is None  # no type/name split
     assert _parse_field("int return") is None  # keyword name
-    assert _parse_field("int x") == ("x", "int", False, None)
-    assert _parse_field("int flags : 3") == ("flags", "int", True, 3)
+    assert _parse_field("int x") == ("x", "int", False, None, False, False, False)
+    assert _parse_field("int flags : 3") == ("flags", "int", True, 3, False, False, False)
     # a ``::`` before a trailing digit is not a bit-field
-    assert _parse_field("ns::T value") == ("value", "ns::T", False, None)
+    assert _parse_field("ns::T value") == ("value", "ns::T", False, None, False, False, False)
+    # cv/mutable qualifiers are lifted out of the type into structured bits
+    assert _parse_field("const int c") == ("c", "int", False, None, True, False, False)
+    assert _parse_field("mutable long m") == ("m", "long", False, None, False, False, True)
 
 
 # ── collect_build_context (headers + db) ─────────────────────────────────────

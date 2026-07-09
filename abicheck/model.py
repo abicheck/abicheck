@@ -443,7 +443,9 @@ class AbiSnapshot:
     build_context_defines: set[str] = field(default_factory=set, kw_only=True)
     # ADR-039 — registry of *conditional* record fields the header parse knows
     # about, with their full declaration: ``{type: {field: {"guard": macro,
-    # "type": type_name, "is_bitfield": bool, "bitfield_bits": int|None}}}``. A
+    # "type": type_name, "is_bitfield": bool, "bitfield_bits": int|None,
+    # "access": str, "is_const": bool, "is_volatile": bool, "is_mutable": bool}}}``
+    # (each field entry is a mixed-value dict, not ``dict[str, str]``). A
     # field lives here iff its presence is gated by a ``#if defined(GUARD)``
     # region, whether or not a context-free parse pruned it from the type's
     # ``fields`` list. Carrying the *declaration* (not just the guard) lets
