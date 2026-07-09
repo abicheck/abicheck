@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 297,
+  "count": 312,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1521,6 +1521,141 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "python_abi3_floor_raised",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_callable_kind_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_callable_kind_changed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_class_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_class_added",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_class_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_class_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_default_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_default_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_function_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_function_added",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_function_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_function_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_method_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_method_added",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_method_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_method_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_overload_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_overload_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_parameter_added",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_parameter_added",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_parameter_kind_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_parameter_kind_changed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_parameter_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_parameter_removed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_parameter_renamed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_parameter_renamed",
+      "examples": "case163_python_kwarg_renamed"
+    },
+    {
+      "kind": "python_api_parameter_type_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_parameter_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "python_api_return_type_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "python_api_return_type_changed",
       "examples": ""
     },
     {

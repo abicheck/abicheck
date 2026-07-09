@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from .elf_metadata import ElfMetadata
     from .macho_metadata import MachoMetadata
     from .pe_metadata import PeMetadata
+    from .python_api import PythonApiSurface
     from .python_ext import PythonExtMetadata
     from .sycl_metadata import SyclMetadata
     from .symvers_metadata import KabiMetadata
@@ -348,6 +349,11 @@ class AbiSnapshot:
         default=None, kw_only=True
     )  # Linux kernel Module.symvers metadata (G23-D1). Keyword-only so inserting
     # it among the optional metadata fields cannot shift any positional argument.
+    python_api: PythonApiSurface | None = field(
+        default=None
+    )  # Python-visible API surface (functions/classes/methods/signatures)
+    # recovered from a `.pyi` type stub (G23). None when no stub was found —
+    # the C-ABI/export view can't see this surface, so it's a separate check.
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

@@ -441,6 +441,7 @@ def run_dump(
         )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
+        _try_attach_python_api_surface(snap)
         return snap
     if binary_fmt == "pe":
         snap = _dump_pe(
@@ -455,6 +456,7 @@ def run_dump(
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
+        _try_attach_python_api_surface(snap)
         return snap
     if binary_fmt == "macho":
         snap = _dump_macho(
@@ -468,6 +470,7 @@ def run_dump(
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
+        _try_attach_python_api_surface(snap)
         return snap
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
@@ -543,6 +546,32 @@ def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
             python_ext.module_name,
             python_ext.limited_api,
             len(python_ext.cpython_imports),
+        )
+
+
+def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
+    """Recover an extension module's Python-visible API surface (G23).
+
+    Looks for a ``.pyi`` type stub alongside the snapshot's ``source_path`` and,
+    if found, statically parses the top-level functions/classes/methods and
+    their signatures into ``python_api``. Never imports or executes the module.
+    A no-op (leaves ``python_api`` as ``None``) when no stub is present — the
+    common case for a plain C/C++ library or a stubless extension.
+    """
+    from .python_api import detect_python_api
+
+    try:
+        python_api = detect_python_api(snap)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("Python API surface recovery skipped: %s", exc)
+        return
+    if python_api is not None:
+        snap.python_api = python_api
+        _logger.info(
+            "Python API surface recovered: module=%s, %d function(s), %d class(es)",
+            python_api.module_name,
+            len(python_api.functions),
+            len(python_api.classes),
         )
 
 

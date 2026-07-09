@@ -126,6 +126,26 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "elf_osabi_changed": "L0",
     "symbol_binding_became_unique": "L0",
     "symbol_binding_lost_unique": "L0",
+    # Python-level API of an extension module (G23): recovered from a `.pyi`
+    # type stub — a declared-API surface analogous to public headers, and like
+    # headers invisible in the binary/debug info. The `.so` export table shows
+    # only `PyInit_*`, so these signature changes need the header-equivalent L2
+    # stub source to be seen at all.
+    "python_api_function_removed": "L2",
+    "python_api_function_added": "L2",
+    "python_api_class_removed": "L2",
+    "python_api_class_added": "L2",
+    "python_api_method_removed": "L2",
+    "python_api_method_added": "L2",
+    "python_api_parameter_removed": "L2",
+    "python_api_parameter_added": "L2",
+    "python_api_parameter_renamed": "L2",
+    "python_api_default_removed": "L2",
+    "python_api_parameter_type_changed": "L2",
+    "python_api_return_type_changed": "L2",
+    "python_api_parameter_kind_changed": "L2",
+    "python_api_callable_kind_changed": "L2",
+    "python_api_overload_removed": "L2",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",

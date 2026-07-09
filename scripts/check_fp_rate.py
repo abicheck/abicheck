@@ -578,8 +578,59 @@ def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 # One tempting case is still deliberately excluded: appending a field to a public
 # struct is often a *compatible* extension, so it is not an unambiguous
 # real-break — track it as detector/scoping work, not an FP-gate corpus entry.
+def _ext_snap(version, *, stub, extra_syms=()) -> AbiSnapshot:
+    """A CPython extension snapshot: PyInit_ export + recovered Python API surface.
+
+    Exercises the G23 public-contract oracle: the module's real contract is its
+    Python-visible API (from *stub*) plus its load contract; *extra_syms* are
+    additional exported C/C++ symbols (internal implementation detail).
+    """
+    from abicheck.elf_metadata import SymbolBinding, SymbolType
+    from abicheck.python_api import surface_from_stub_source
+    from abicheck.python_ext import detect_python_extension
+
+    elf = ElfMetadata()
+    elf.symbols = [
+        ElfSymbol(
+            name=s, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
+        for s in ("PyInit_ext", *extra_syms)
+    ]
+    snap = AbiSnapshot(
+        library="ext.abi3.so",
+        version=version,
+        elf=elf,
+        source_path="ext.abi3.so",
+    )
+    snap.python_ext = detect_python_extension(snap)
+    snap.python_api = surface_from_stub_source(stub, module_name="ext")
+    return snap
+
+
+def _python_ext_internal_symbol_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # An extension drops an internal C++ export while its Python API is
+    # unchanged. No `import` consumer can link that symbol, so the native
+    # removal is noise the Python-surface oracle must scope away.
+    stub = "def transform(data): ...\n"
+    old = _ext_snap("1", stub=stub, extra_syms=["_Z8internalv"])
+    new = _ext_snap("2", stub=stub)
+    return old, new
+
+
+def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A public function disappears from the extension's Python API — a real
+    # source break the oracle must never scope away (authority rule).
+    old = _ext_snap("1", stub="def transform(data): ...\ndef helper(x): ...\n")
+    new = _ext_snap("2", stub="def transform(data): ...\n")
+    return old, new
+
+
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
+    # G23 Python-surface oracle: internal native churn scoped away (FP guard);
+    # a real Python-API break stays breaking (FN sentinel / authority rule).
+    Case("python_ext_internal_symbol_churn", True, _python_ext_internal_symbol_churn),
+    Case("python_api_function_dropped", False, _python_api_function_dropped),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
     Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
@@ -1034,6 +1085,9 @@ CASE_CATEGORY: dict[str, str] = {
     # by-value-vs-pointer / opaque-handle precision
     "opaque_handle_pointer_only_size": "pointer-opaque",
     "defined_pointer_only_type_size": "pointer-opaque",
+    # CPython extension Python-level surface oracle (G23)
+    "python_ext_internal_symbol_churn": "python-api",
+    "python_api_function_dropped": "python-api",
 }
 
 

@@ -1,0 +1,3 @@
+# Python-visible API stub (PEP 484) shipped alongside the compiled extension
+# mymod.cpython-3XX-*.so. This is the v1 public contract consumers `import`.
+def transform(data, *, encoding: str = "utf-8") -> bytes: ...

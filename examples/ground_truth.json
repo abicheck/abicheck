@@ -2836,6 +2836,24 @@
         "macos",
         "windows"
       ]
+    },
+    "case163_python_kwarg_renamed": {
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "category": "api_break",
+      "description": "CPython extension whose .pyi renames a keyword-only argument (encoding -> codec) and drops its default; the compiled .so is byte-identical, so the C-ABI/abi3 check alone scores it compatible while the Python-level API breaks every keyword caller.",
+      "expected": "API_BREAK",
+      "expected_kinds": [
+        "python_api_parameter_renamed"
+      ],
+      "min_evidence": "L2",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "stub_pair": true
     }
   },
   "version": "4"

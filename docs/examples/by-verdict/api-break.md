@@ -3,7 +3,7 @@
 
 Source-level / API-only breaks; recompilation fails or behavior shifts.
 
-_14 case(s)._ [← back to all examples](../index.md)
+_15 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -21,3 +21,4 @@ _14 case(s)._ [← back to all examples](../index.md)
 | [case156_public_macro_removed](../case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
+| [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python-API break invisible to the C-ABI check | 🟠 API_BREAK | API Break |

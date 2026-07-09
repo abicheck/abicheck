@@ -148,6 +148,51 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   kept (scoping never hides a break). Plumbed through `CompareRequest`, the
   Tier-2 service, and the post-processing pipeline as `public_surface_allowlist`.
 
+- **Python-level API diffing for extension modules (G23).** Complementing the
+  G14 native-C-ABI check, abicheck now recovers the **Python-visible API** a
+  CPython extension exposes to `import` — its top-level functions, classes,
+  methods, and their signatures (parameter names, kinds, defaults, and type
+  annotations) — and diffs two versions of it. The surface is recovered
+  **statically** from a sibling PEP 484 `.pyi` type stub (parsed with `ast`,
+  never imported or executed); the stub is discovered next to the binary
+  automatically and attached in both `dump` and `compare`, so a single
+  `compare` surfaces both native-ABI and Python-API changes. Two builds can be
+  byte-for-byte C-ABI-identical yet break every caller (a renamed keyword
+  argument, a dropped default) — that break lives in the Python signatures, not
+  the export table, and is now caught. Fifteen `python_api_*` change kinds are
+  emitted from an order-, kind-, and protocol-aware signature diff (not a
+  name-set diff): `python_api_function_removed` / `_class_removed` /
+  `_method_removed`, `python_api_parameter_removed` / `_added` (new required
+  parameter) / `_renamed`, `python_api_default_removed`,
+  `python_api_parameter_kind_changed` (a binding/order change —
+  positional↔keyword-only, keyword→positional-only, or a positional
+  reorder/insertion), `python_api_callable_kind_changed` (`def`↔`async def`, or
+  method↔`property`/`staticmethod`/`classmethod`), and
+  `python_api_overload_removed` (a dropped `@overload` variant) — all
+  `API_BREAK`; `python_api_parameter_type_changed`
+  and `python_api_return_type_changed` (`RISK`); and the corresponding
+  `*_function_added` / `_class_added` / `_method_added` additions (`COMPATIBLE`).
+  Adding an optional parameter, a default, or an annotation is backward
+  compatible and not reported; `self`/`cls` and private (leading-underscore)
+  names are excluded. The surface is recovered only for a **recognised**
+  extension (a `PyInit_*` export), so a plain native library with an unrelated
+  `.pyi` sibling is never mis-attributed a Python API. When no stub ships the
+  check degrades honestly (surface absent) rather than false-negating.
+  The recovered surface also acts as a **public-contract oracle** that removes
+  native false positives: because an extension exports only `PyInit_`, its other
+  exported C/C++ symbols and internal type layout are not part of any `import`
+  consumer's contract, so native API-content findings on them are demoted to the
+  audit ledger (`off-python-surface`) instead of driving the verdict — while
+  `python_api_*` and the native load-contract findings
+  (`python_stable_abi_violation` / `python_abi3_dropped` /
+  `python_gil_abi_changed` / `python_abi3_floor_raised`) are never demoted
+  (authority rule), load/linkage/security findings are kept, and a resolved C
+  header surface takes precedence. This is measured as a first-class evidence
+  layer (a `python-api` axis in the FP-rate gate and an L2-only signal in the
+  per-tier accuracy gate). See the
+  [Python Extensions](docs/user-guide/python-extensions.md#beyond-the-c-abi-the-python-level-api)
+  guide.
+
 ### Changed
 
 - **`merge` L4 coverage line now reports full accounting.** The stderr summary

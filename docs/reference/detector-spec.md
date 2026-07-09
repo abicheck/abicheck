@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (297 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (312 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -175,6 +175,21 @@ One row per `ChangeKind` (297 total). Columns fuse the verdict partition (`check
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |
 | `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` | — |
 | `python_abi3_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_floor_raised` | — |
+| `python_api_callable_kind_changed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_callable_kind_changed` | — |
+| `python_api_class_added` | addition | `COMPATIBLE` | `warning` | L2 | `python_api_class_added` | — |
+| `python_api_class_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_class_removed` | — |
+| `python_api_default_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_default_removed` | — |
+| `python_api_function_added` | addition | `COMPATIBLE` | `warning` | L2 | `python_api_function_added` | — |
+| `python_api_function_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_function_removed` | — |
+| `python_api_method_added` | addition | `COMPATIBLE` | `warning` | L2 | `python_api_method_added` | — |
+| `python_api_method_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_method_removed` | — |
+| `python_api_overload_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_overload_removed` | — |
+| `python_api_parameter_added` | api_break | `API_BREAK` | `warning` | L2 | `python_api_parameter_added` | — |
+| `python_api_parameter_kind_changed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_parameter_kind_changed` | — |
+| `python_api_parameter_removed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_parameter_removed` | — |
+| `python_api_parameter_renamed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_parameter_renamed` | [case163](../examples/case163_python_kwarg_renamed.md) |
+| `python_api_parameter_type_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `python_api_parameter_type_changed` | — |
+| `python_api_return_type_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `python_api_return_type_changed` | — |
 | `python_gil_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_gil_abi_changed` | — |
 | `python_stable_abi_violation` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_stable_abi_violation` | — |
 | `relro_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `relro_weakened` | [case134](../examples/case134_relro_weakened.md) |

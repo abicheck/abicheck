@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (297 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (312 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -119,19 +119,39 @@ use_cases:
   - id: UC-ARCH-python-api
     axis: archetype
     name: CPython extension Python-level API surface
-    status: planned
-    gap: G23
+    status: complete
     plan: docs/development/plans/g23-python-level-api-diff.md
-    next_steps: >
-      G14 covers an extension module's native C-ABI contract (imported Py* / abi3
-      conformance) but not the Python-level API it exposes to import: functions,
-      classes, methods, and their signatures (arg names/kinds/defaults, type
-      annotations). Two builds can be C-ABI-identical yet break every caller (a
-      renamed kwarg, a dropped default). Add a python_api surface extractor —
-      static from .pyi stubs / __text_signature__ / docstrings first, optional
-      opt-in runtime introspection — a diff_python_api detector, and a family of
-      python_api_* ChangeKinds, surfaced through compare/scan. Complements, does
-      not replace, the C-ABI check.
+    note: >
+      G23 closed (static path). Beyond G14's native C-ABI contract, abicheck now
+      recovers the Python-level API a module exposes to import — top-level
+      functions, classes, methods, and their signatures (arg names/kinds/defaults
+      and type annotations) — statically from a sibling .pyi type stub (parsed
+      with ast, never imported/executed). A diff_python_api detector emits 15
+      python_api_* ChangeKinds from an order-, kind-, and protocol-aware
+      signature diff (not a name-set diff): removed/added function/class/method,
+      parameter removed/added-required/renamed, default removed, parameter- and
+      return-type changed, parameter binding/order changed, callable kind changed
+      (def↔async def, method↔property/static/class), and overload removed —
+      routed through the existing verdict/reporter machinery,
+      so a single `compare` surfaces both a byte-identical binary's native-ABI
+      state and a Python-signature break the export table cannot see. Attached in
+      both `dump` and `compare`; degrades honestly (surface absent) when no stub
+      ships. Out of scope for this pass: the opt-in runtime-introspection and
+      docstring/__text_signature__ fallbacks, and an examples/ catalog fixture
+      (the compiled-binary example harness does not run .pyi pairs) — the
+      headline "C-ABI-identical yet Python-API-broken" scenario is proven by
+      tests/test_python_api.py::test_break_invisible_to_c_abi_is_caught. The
+      recovered surface also acts as a public-contract oracle
+      (post_processing.DemoteOffPythonSurface): native C/C++ API-content findings
+      on an extension's internal symbols/types are demoted off-surface (an
+      extension exports only PyInit_), while python_api_* and the native
+      load-contract findings stay authoritative — measured as a first-class
+      evidence layer by a python-api axis in the FP-rate gate and an L2-only
+      signal in the per-tier accuracy gate.
+    evidence:
+      modules: [abicheck/python_api.py, abicheck/diff_python_api.py, abicheck/post_processing.py]
+      tests: [tests/test_python_api.py, tests/test_fp_rate_gate.py, tests/test_tier_accuracy_gate.py]
+      docs: [docs/user-guide/python-extensions.md]
 
   - id: UC-ARCH-kernel-btf
     axis: archetype

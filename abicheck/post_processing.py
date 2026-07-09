@@ -390,6 +390,97 @@ class FilterNonPublicSurface:
         return kept
 
 
+#: Native C/C++ finding kinds whose *symbol* is an exported function/variable or
+#: whose subject is an internal type — the API-content axis. For a CPython
+#: extension module (which exports only ``PyInit_``) these are not part of any
+#: ``import`` consumer's contract. Load- and linkage-level kinds (``needed_*`` /
+#: ``soname_*`` / security / symbol-version) are deliberately NOT here: they
+#: affect whether the ``.so`` loads, which IS part of the contract.
+_EXT_INTERNAL_SYMBOL_PREFIXES = (
+    "func_",
+    "var_",
+    "virtual_",
+    "method_",
+    "vtable_",
+    "rtti_",
+)
+
+
+def _is_off_python_surface(c: Change, init_symbol: str | None) -> bool:
+    """True when *c* is a native API-content finding off an extension's contract."""
+    from .surface import _NEVER_FILTER_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES
+
+    v = c.kind.value
+    # Authority: Python-level and CPython load-contract findings are the point.
+    if v.startswith("python_"):
+        return False
+    # Leak / constant findings are never scoped out (ADR-024 §D5.2).
+    if v in _NEVER_FILTER_KIND_NAMES:
+        return False
+    # The module's own init export is its one real native public symbol.
+    if init_symbol and c.symbol and (c.symbol == init_symbol or "PyInit_" in c.symbol):
+        return False
+    return v in _TYPE_LEVEL_KIND_NAMES or v.startswith(_EXT_INTERNAL_SYMBOL_PREFIXES)
+
+
+class DemoteOffPythonSurface:
+    """Demote native C/C++ churn that is off a CPython extension's real contract.
+
+    A CPython extension module's consumer contract is (a) its **Python-visible
+    API** — functions/classes/methods recovered from its ``.pyi`` and diffed by
+    :mod:`abicheck.diff_python_api` — and (b) its **native load contract** —
+    imported ``Py*`` symbols / ``abi3`` conformance, checked by
+    :mod:`abicheck.diff_python`. The module exports only ``PyInit_<mod>``; its
+    other exported C/C++ symbols and internal type layout are implementation
+    detail no ``import`` consumer can link or observe. When abicheck is run on
+    such a module with debug info (or headers absent), the native detectors
+    surface that internal churn as breaking — a **false positive** for the
+    extension's real consumers.
+
+    This step uses the recovered Python surface as the authoritative
+    public-contract oracle: when the new snapshot is a recognised extension with
+    a ``python_api`` surface and there is **no** C-header surface to scope
+    against (headers being the stronger oracle, deferred to when present), native
+    API-content findings (:func:`_is_off_python_surface`) are demoted to the
+    audit ledger (``ctx.out_of_surface``, ADR-024 §D4/D5) — never dropped.
+
+    Authority rule (ADR-028 D3): ``python_api_*`` and
+    ``python_stable_abi_*``/``abi3``/``gil`` findings are never demoted here, and
+    load/linkage/leak kinds are kept, so this can only ever remove native
+    internal noise — never hide a real Python-level or load-contract break.
+    Opt-in with ``ctx.scope_to_public_surface`` (on by default), so
+    ``--no-scope-public-headers`` keeps every native finding.
+    """
+
+    name = "demote_off_python_surface"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        if not ctx.scope_to_public_surface:
+            return changes
+        new_ext = ctx.new.python_ext
+        if new_ext is None or not new_ext.is_extension:
+            return changes
+        # Defer to the C-header oracle when one resolved (hybrid modules that
+        # ship a real public C API): FilterNonPublicSurface already scoped it.
+        if ctx.surf_new is not None and ctx.surf_new.resolvable:
+            return changes
+        # No recovered Python surface ⇒ no oracle ⇒ keep everything (honest
+        # degradation, same posture as header-scoping's no-surface fallback).
+        if ctx.new.python_api is None:
+            return changes
+        from .surface import REASON_OFF_PYTHON_SURFACE
+
+        init_symbol = new_ext.init_symbol
+        kept: list[Change] = []
+        for c in changes:
+            if _is_off_python_surface(c, init_symbol):
+                c.surface_exclusion_reason = REASON_OFF_PYTHON_SURFACE
+                ctx.out_of_surface.append(c)
+            else:
+                kept.append(c)
+        return kept
+
+
 class ApplySuppression:
     """Apply user-provided suppression rules."""
 
@@ -591,7 +682,9 @@ class DetectCppPatterns:
         new_findings.extend(detect_serialization_tag_changes(ctx.old, ctx.new))
         new_findings.extend(detect_missing_instantiations(ctx.old, ctx.new))
 
-        sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(ctx.old, ctx.new)
+        sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(
+            ctx.old, ctx.new
+        )
         new_findings.extend(sycl_findings)
 
         isa_findings, isa_suppressed = detect_cpu_dispatch_isa_dropped(ctx.old, ctx.new)
@@ -599,7 +692,9 @@ class DetectCppPatterns:
 
         new_findings.extend(detect_tag_type_renamed(ctx.old, ctx.new))
         new_findings.extend(detect_default_template_arg_changed(ctx.old, ctx.new))
-        new_findings.extend(detect_inline_body_renamed_member(ctx.old, ctx.new, changes))
+        new_findings.extend(
+            detect_inline_body_renamed_member(ctx.old, ctx.new, changes)
+        )
 
         return new_findings, sycl_suppressed | isa_suppressed
 
@@ -931,8 +1026,10 @@ class DetectVersionedSymbolScheme:
             # number of old-side version-rename pairs reclassified as compatible;
             # the reporter renders it ("N version-renames collapsed").
             old_side_kinds = (
-                ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY,
-                ChangeKind.VAR_REMOVED, ChangeKind.FUNC_LIKELY_RENAMED,
+                ChangeKind.FUNC_REMOVED,
+                ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                ChangeKind.VAR_REMOVED,
+                ChangeKind.FUNC_LIKELY_RENAMED,
             )
             advisory.caused_count = sum(1 for c in matched if c.kind in old_side_kinds)
             advisory.description += (
@@ -1115,6 +1212,10 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DowngradeOpaqueTypeChanges(),
         EnrichSourceLocations(),
         FilterNonPublicSurface(),
+        # Runs immediately after FilterNonPublicSurface so it can read the
+        # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
+        # uses the recovered Python API as the extension's public-contract oracle.
+        DemoteOffPythonSurface(),
         ApplySuppression(),
         SuppressRenamedPairs(),
         FilterRedundant(),

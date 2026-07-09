@@ -1785,4 +1785,111 @@ REGISTRY = ChangeKindRegistry([
     _E("kabi_symbol_added", _C, is_addition=True,
        impact="A new kernel-exported symbol appeared; existing modules are unaffected.",
        description_template="New kernel-exported symbol: {name}"),
+
+    # ── Python-level API of an extension module (G23) ─────────────────────────
+    _E("python_api_function_removed", _A,
+       impact="A public top-level function was removed from a CPython extension "
+              "module's Python-visible API (recovered from its `.pyi` type "
+              "stub). The compiled `.so`/`.pyd` still loads — its C-ABI export "
+              "table is unchanged — but any consumer that `import`s and calls "
+              "the function now fails with an `AttributeError` / `ImportError`. "
+              "A source-level (`API_BREAK`) change the native-ABI check cannot "
+              "see.",
+       description_template="Python function removed from extension API: {name}"),
+    _E("python_api_function_added", _C, is_addition=True,
+       impact="A new public top-level function was added to the module's "
+              "Python-visible API. Additive — existing callers are unaffected.",
+       description_template="New Python function in extension API: {name}"),
+    _E("python_api_class_removed", _A,
+       impact="A public class was removed from a CPython extension module's "
+              "Python-visible API. The binary still loads, but consumers that "
+              "reference the class break at import/attribute-access time. A "
+              "source-level (`API_BREAK`) change invisible to the C-ABI view.",
+       description_template="Python class removed from extension API: {name}"),
+    _E("python_api_class_added", _C, is_addition=True,
+       impact="A new public class was added to the module's Python-visible API. "
+              "Additive — existing callers are unaffected.",
+       description_template="New Python class in extension API: {name}"),
+    _E("python_api_method_removed", _A,
+       impact="A public method was removed from a class that still exists in the "
+              "module's Python-visible API. Callers of the method break at "
+              "attribute-access time even though the class and the compiled "
+              "binary are otherwise unchanged. Source-level (`API_BREAK`).",
+       description_template="Python method removed from extension API: {name}"),
+    _E("python_api_method_added", _C, is_addition=True,
+       impact="A new public method was added to an existing class in the "
+              "module's Python-visible API. Additive — existing callers are "
+              "unaffected.",
+       description_template="New Python method in extension API: {name}"),
+    _E("python_api_parameter_removed", _A,
+       impact="A parameter was removed from a function/method in the module's "
+              "Python-visible API. Any caller that passed that argument (by "
+              "position or keyword) now raises a `TypeError`. The C-ABI is "
+              "unchanged; the break lives in the Python signature. "
+              "Source-level (`API_BREAK`).",
+       description_template="Python parameter removed from {name}: {detail}"),
+    _E("python_api_parameter_added", _A,
+       impact="A new *required* parameter (one with no default) was added to a "
+              "function/method in the module's Python-visible API. Every "
+              "existing call that omitted it now raises a missing-argument "
+              "`TypeError`. Source-level (`API_BREAK`); a new *optional* "
+              "parameter would be compatible and is not reported.",
+       description_template="Required Python parameter added to {name}: {detail}"),
+    _E("python_api_parameter_renamed", _A,
+       impact="A parameter was renamed in a function/method of the module's "
+              "Python-visible API. Callers that passed it by keyword hit an "
+              "unexpected-keyword `TypeError`. The compiled binary is "
+              "byte-identical — this is the canonical break the native-ABI "
+              "check misses. Source-level (`API_BREAK`).",
+       description_template="Python parameter renamed in {name}: {old} → {new}"),
+    _E("python_api_default_removed", _A,
+       impact="A parameter lost its default value in the module's "
+              "Python-visible API, making a previously optional argument "
+              "mandatory. Callers relying on the default now raise a "
+              "missing-argument `TypeError`. Source-level (`API_BREAK`).",
+       description_template="Python parameter default removed in {name}: {detail}"),
+    _E("python_api_parameter_type_changed", _R,
+       impact="A parameter's type annotation changed in the module's "
+              "Python-visible API. This is a type-checker / behavioural "
+              "signal, not a hard runtime break: existing calls still execute, "
+              "but static analysis and callers relying on the old contract may "
+              "be affected. A `RISK`.",
+       description_template="Python parameter type changed in {name}: {detail} ({old} → {new})"),
+    _E("python_api_return_type_changed", _R,
+       impact="A function/method's return type annotation changed in the "
+              "module's Python-visible API. Callers may mishandle the returned "
+              "value, but existing calls still execute — a behavioural / "
+              "type-checker `RISK`, not a hard break.",
+       description_template="Python return type changed for {name}: {old} → {new}"),
+    _E("python_api_parameter_kind_changed", _A,
+       impact="A parameter's *binding* changed in the module's Python-visible "
+              "API even though its name did not: it went positional↔keyword-only, "
+              "keyword→positional-only, or the positional order/position shifted "
+              "(a reordered or mid-inserted parameter). Existing call sites that "
+              "pass the argument by position or by keyword now bind it "
+              "differently — a positional caller lands on the wrong parameter, or "
+              "a keyword caller hits an unexpected-keyword `TypeError`. The "
+              "compiled binary is unchanged; the break lives in the call shape. "
+              "Source-level (`API_BREAK`).",
+       description_template="Python parameter binding changed in {name}: {detail}"),
+    _E("python_api_callable_kind_changed", _A,
+       impact="A callable's *protocol* changed in the module's Python-visible "
+              "API even though its parameter list did not: `def`↔`async def` "
+              "(callers must now `await`, or must stop awaiting, the result), or "
+              "a class member changed between instance method, `@staticmethod`, "
+              "`@classmethod`, and `@property`. Each of these changes how an "
+              "existing site calls or accesses the member — an awaited call, a "
+              "class-level vs instance-level bind, or attribute access vs a call "
+              "— so it breaks callers. The compiled binary is unchanged. "
+              "Source-level (`API_BREAK`).",
+       description_template="Python callable kind changed for {name}: {detail}"),
+    _E("python_api_overload_removed", _A,
+       impact="An `@overload` signature variant was dropped from an overloaded "
+              "function/method in the module's Python-visible API. Typed callers "
+              "that relied on that particular call shape (e.g. passing an `int` "
+              "where only a `str` overload now remains) lose a supported "
+              "signature — a source-level break invisible to the export table. "
+              "Adding an overload is compatible and not reported. "
+              "Source-level (`API_BREAK`).",
+       description_template="Python overload removed from {name}: {detail}"),
 ])

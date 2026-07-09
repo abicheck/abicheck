@@ -1,8 +1,14 @@
 # G23 — Python-level API diff for extension modules
 
-**Registry:** `UC-ARCH-python-api` (`planned`)
+**Registry:** `UC-ARCH-python-api` (`complete`)
 **Effort:** XL · **Risk:** medium
-**Status:** Planned. Follow-up to [G14](g14-stable-abi-subset.md).
+**Status:** Done (static `.pyi` path). Follow-up to [G14](g14-stable-abi-subset.md).
+Implemented in `abicheck/python_api.py` (surface + `ast` stub extractor) and
+`abicheck/diff_python_api.py` (detector); 12 `python_api_*` `ChangeKind`s; tests
+in `tests/test_python_api.py`; user docs in
+[python-extensions.md](../../user-guide/python-extensions.md#beyond-the-c-abi-the-python-level-api).
+The opt-in runtime-introspection / docstring fallbacks and an `examples/`
+catalog fixture remain future work (see *Out of scope* / *Tests*).
 
 ## Problem
 
@@ -35,19 +41,22 @@ Python-level surface must be recovered from Python-world artifacts.
 
 ## Goal & acceptance criteria
 
-- [ ] Extract an extension module's **Python-level API surface** — top-level
-      functions, classes, methods, attributes, and their signatures (parameter
+- [x] Extract an extension module's **Python-level API surface** — top-level
+      functions, classes, methods, and their signatures (parameter
       names, kinds — positional/keyword-only/var — defaults, and type
-      annotations where available).
-- [ ] Diff two surfaces and emit Python-level `ChangeKind`s, e.g.
+      annotations where available). *(Attributes deferred — no `ChangeKind`
+      covers them yet.)*
+- [x] Diff two surfaces and emit Python-level `ChangeKind`s:
       `python_api_function_removed`, `python_api_parameter_removed`,
       `python_api_parameter_renamed`, `python_api_default_removed`,
       `python_api_return_type_changed`, `python_api_class_removed`,
-      `python_api_method_removed` — each classified `BREAKING` / `API_BREAK` /
-      `RISK` per the root `CLAUDE.md` four-step procedure.
-- [ ] Works from a **static** source (no import/execution of the module) for the
-      common cases; a runtime-introspection fallback is optional and opt-in.
-- [ ] Complements, does not replace, the G14 C-ABI check: a single `compare`
+      `python_api_method_removed` (plus `*_added`, `python_api_parameter_added`,
+      `python_api_parameter_type_changed`) — each classified `API_BREAK` /
+      `RISK` / `COMPATIBLE` per the root `CLAUDE.md` four-step procedure.
+- [x] Works from a **static** source (no import/execution of the module) —
+      `.pyi` stubs parsed with `ast`. A runtime-introspection fallback remains
+      optional/opt-in future work.
+- [x] Complements, does not replace, the G14 C-ABI check: a single `compare`
       surfaces both native-ABI and Python-API changes.
 
 ## Design
