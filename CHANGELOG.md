@@ -44,6 +44,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   undefined-symbol capture; on Windows a version-specific `pythonXY.dll` import
   under `abi3` is flagged). See the
   [Python Extensions](docs/user-guide/python-extensions.md) guide.
+- **`post_manifest` library — POST Python ABI-commitment checking.**
+  [POST Python](https://post-py.org/) compiles a typed subset of Python to a
+  shared library whose stable C ABI is the set of `pp_*` symbols documented in a
+  versioned JSON export manifest (`post-py build --emit-manifest`). New
+  `abicheck/post_manifest.py` provides a tolerant manifest parser and three
+  checks against POST's commitments: manifest↔binary validation (every promised
+  `pp_*`/ufunc-loop symbol is exported; ELF/PE/COFF/Mach-O), a compiler-
+  independent manifest↔manifest ABI diff (using the manifest's dtypes, which a
+  stripped binary lacks), and a `post_abi` version-bump gate.
+- **`compare --post-manifest <manifest.json>`.** Scope a binary comparison to a
+  POST manifest's committed ABI surface: only changes to the manifest's
+  `pp_*`/ufunc-loop symbols count toward the verdict, while private `__pp_*`
+  kernel churn and other non-committed exports are demoted to the filtered
+  ledger (`--show-filtered`). Type-level and internal-leak findings are always
+  kept (scoping never hides a break). Plumbed through `CompareRequest`, the
+  Tier-2 service, and the post-processing pipeline as `public_surface_allowlist`.
 
 ### Changed
 

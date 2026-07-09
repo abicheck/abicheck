@@ -1320,6 +1320,12 @@ def _embed_inline_source_side(
               help="File of symbols to force public (one per line; '#' comments and blank "
                    "lines ignored), à la abi-compliance-checker -symbols-list. "
                    "Merged with --public-symbol and scope.public_symbols (ADR-037 D4).")
+@click.option("--post-manifest", "post_manifest_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="Scope the comparison to a POST Python export manifest's committed ABI "
+                   "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
+                   "private __pp_* kernel churn and other non-committed exports are demoted "
+                   "to the filtered ledger (see --show-filtered).")
 @click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
               default=None,
               help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
@@ -1401,6 +1407,7 @@ def compare_cmd(
     show_redundant: bool, show_only: str | None, stat: bool,
     scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
+    post_manifest_path: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
     debug_format_opt: str | None,
@@ -1808,6 +1815,23 @@ def compare_cmd(
         )
     )
 
+    # --post-manifest: scope the comparison to the POST manifest's committed
+    # `pp_*`/ufunc-loop surface. The manifest *is* the authoritative public
+    # surface, so this drives FilterNonPublicSurface directly (no header
+    # provenance needed) — private __pp_* kernel churn is demoted.
+    post_manifest_allowlist: set[str] | None = None
+    if post_manifest_path is not None:
+        from .post_manifest import contract_scope_allowlist, load_manifest
+
+        try:
+            manifest = load_manifest(post_manifest_path)
+        except (ValueError, OSError) as exc:
+            raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
+        # Union with the binaries' committed (pp_*) exports so a *removed* wrapper
+        # — absent from a new manifest — stays in-surface instead of being
+        # silently demoted (its symbol still lives in the old snapshot).
+        post_manifest_allowlist = contract_scope_allowlist(manifest, old, new)
+
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     from .service import compare_snapshots
     result = compare_snapshots(
@@ -1818,6 +1842,7 @@ def compare_cmd(
         pattern_verdicts=apply_patterns,
         surface_metrics=surface_metrics,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        public_surface_allowlist=post_manifest_allowlist,
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows

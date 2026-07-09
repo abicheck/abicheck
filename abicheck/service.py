@@ -996,6 +996,7 @@ def compare_snapshots(
     pattern_verdicts: bool = False,
     surface_metrics: bool = False,
     collapse_versioned_symbols: bool = False,
+    public_surface_allowlist: set[str] | None = None,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1006,6 +1007,20 @@ def compare_snapshots(
     through here instead of importing ``checker.compare``; the kwargs mirror the
     core verb exactly so no capability is lost.
     """
+    # Centralized POST removed-wrapper recovery: when a committed-surface
+    # allowlist is supplied, union the wrappers present in *old* but gone from
+    # *new* (contract_scope_allowlist's snapshot half) so a dropped/hidden/
+    # non-default-demoted committed wrapper — absent from a *new* manifest — stays
+    # in-surface. Every scope caller (CLI, run_compare_request, direct API) routes
+    # through here, so recovery happens once and uniformly; it is a no-op when the
+    # allowlist/binaries carry no `pp_*` removals (safe for scan/appcompat, which
+    # never set the allowlist). Idempotent if the caller already unioned it.
+    if public_surface_allowlist is not None:
+        from .post_manifest import removed_contract_symbols
+
+        public_surface_allowlist = (
+            set(public_surface_allowlist) | removed_contract_symbols(old, new)
+        )
     return compare(
         old,
         new,
@@ -1018,6 +1033,7 @@ def compare_snapshots(
         pattern_verdicts=pattern_verdicts,
         surface_metrics=surface_metrics,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        public_surface_allowlist=public_surface_allowlist,
     )
 
 
@@ -1093,6 +1109,11 @@ def run_compare_request(
         force_public_symbols=(
             set(request.force_public_symbols) if request.force_public_symbols else None
         ),
+        public_surface_allowlist=(
+            set(request.public_surface_allowlist)
+            if request.public_surface_allowlist is not None
+            else None
+        ),
         pattern_verdicts=request.pattern_verdicts,
     )
     result.old_metadata = collect_metadata(request.old.path)
@@ -1122,6 +1143,7 @@ def run_compare(
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
+    public_surface_allowlist: set[str] | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1162,6 +1184,11 @@ def run_compare(
         scope_public=scope_to_public_surface,
         force_public_symbols=(
             frozenset(force_public_symbols) if force_public_symbols else None
+        ),
+        public_surface_allowlist=(
+            frozenset(public_surface_allowlist)
+            if public_surface_allowlist is not None
+            else None
         ),
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,

@@ -176,6 +176,24 @@ assert _MEMBER_LEVEL_TYPE_KIND_NAMES <= _TYPE_LEVEL_KIND_NAMES, (
     f"{_MEMBER_LEVEL_TYPE_KIND_NAMES - _TYPE_LEVEL_KIND_NAMES}"
 )
 
+
+def is_symbol_level_finding(change: Change) -> bool:
+    """True when *change* is a symbol/export-level finding (function/variable).
+
+    False for type-level findings (struct/enum/union layout & member changes)
+    and for never-filter findings (internal leaks). This is the single source of
+    truth for the type-vs-symbol distinction, shared with
+    :func:`classify_change_surface`.
+
+    Used by manifest-scoped comparison (``compare --post-manifest``) to demote
+    *only* concrete export findings whose symbol is outside the committed
+    surface. Type-level and leak findings stay in-surface (conservative — a type
+    change may still affect a committed export's ABI, and scoping must never hide
+    a break).
+    """
+    kv = change.kind.value
+    return kv not in _NEVER_FILTER_KIND_NAMES and kv not in _TYPE_LEVEL_KIND_NAMES
+
 # Tokens that are type qualifiers / keywords, not type names.
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
