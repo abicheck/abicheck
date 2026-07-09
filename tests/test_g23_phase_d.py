@@ -113,10 +113,17 @@ class TestUnnamedTypeLeak:
 
         assert _exported_symbol_names(AbiSnapshot(library="x", version="1")) == set()
 
-    def test_empty_baseline_surface_not_flagged(self):
-        # Old side captured ELF but exports nothing (unknown/empty baseline):
-        # a lambda in the new binary must not read as newly introduced.
-        old = _elf_snap()  # no exported symbols
+    def test_captured_empty_baseline_flags_new_lambda(self):
+        # Old side captured ELF and genuinely exported nothing: a lambda in the
+        # new binary IS newly introduced against that proven-empty surface.
+        old = _elf_snap()  # captured, no exported symbols
+        new = _elf_snap("_ZNK4g_cbMUliE_clEi")
+        assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI in _kinds(compare(old, new))
+
+    def test_header_only_old_not_flagged(self):
+        # Old side never captured ELF (elf=None): requires_support disables the
+        # detector, so a pre-existing leak is not mistaken for a new one.
+        old = AbiSnapshot(library="l.so.1", version="1")  # no elf
         new = _elf_snap("_ZNK4g_cbMUliE_clEi")
         assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI not in _kinds(compare(old, new))
 

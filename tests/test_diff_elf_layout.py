@@ -282,15 +282,18 @@ class TestWiring:
         assert restored.elf is not None
         assert restored.elf.pointer_size == 4
 
-    def test_vtt_size_change_keeps_generic_coverage(self) -> None:
-        # VTT (_ZTT, emitted for virtual-base classes) has no dedicated detector
-        # and is part of the construction ABI, so a size change must still surface
-        # as the generic SYMBOL_SIZE_CHANGED — it must NOT be silently suppressed.
+    def test_vtt_size_change_owned_by_dedicated_detector(self) -> None:
+        # VTT (_ZTT, emitted for virtual-base classes) now has a dedicated
+        # detector (G23 B1 vtt_slot_count_changed), which owns its size change.
+        # The generic SYMBOL_SIZE_CHANGED must be skipped so one fact is not
+        # reported twice.
         old = _snap(_obj("_ZTT1B", 16))
         new = _snap(_obj("_ZTT1B", 32))
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
-        assert any(c.kind == ChangeKind.SYMBOL_SIZE_CHANGED for c in result.changes)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.VTT_SLOT_COUNT_CHANGED in kinds
+        assert ChangeKind.SYMBOL_SIZE_CHANGED not in kinds
 
 
 # ---------------------------------------------------------------------------

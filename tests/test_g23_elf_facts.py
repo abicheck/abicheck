@@ -325,14 +325,30 @@ class TestGnuUniqueBinding:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(r)
 
-    def test_empty_baseline_symbol_table_not_flagged(self):
-        # An old side with no captured symbols (header-only / parse-failed) leaves
-        # the old binding unknown, not proven-absent: a new GNU_UNIQUE export must
-        # not be reported as newly introduced.
+    def test_uncaptured_baseline_not_flagged(self):
+        # An old side that never captured a symbol table (header-only / legacy /
+        # parse-failed) leaves the old binding unknown, not proven-absent: a new
+        # GNU_UNIQUE export must not be reported as newly introduced.
         from abicheck.diff_platform_elf_symbols import _check_gained_gnu_unique
 
         new_syms = {"inst": _uniq_obj("inst")}
-        assert _check_gained_gnu_unique({}, new_syms) == []
+        assert _check_gained_gnu_unique({}, new_syms, old_captured=False) == []
+
+    def test_captured_empty_baseline_is_flagged(self):
+        # A genuinely-empty *captured* baseline proves no prior GNU_UNIQUE
+        # exports, so the first one added is a real dlclose/uniqueness risk.
+        from abicheck.diff_platform_elf_symbols import _check_gained_gnu_unique
+
+        new_syms = {"inst": _uniq_obj("inst")}
+        out = _check_gained_gnu_unique({}, new_syms, old_captured=True)
+        assert [c.kind for c in out] == [ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE]
+
+    def test_header_only_old_snapshot_not_flagged_end_to_end(self):
+        # End-to-end: an old snapshot with elf=None (header-only) must not make a
+        # new binary's GNU_UNIQUE export look newly introduced.
+        old = _snap(None)
+        new = ElfMetadata(machine="EM_X86_64", symbols=[_uniq_obj("inst")])
+        assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(compare(old, _snap(new)))
 
     def test_unique_does_not_emit_generic_binding_change(self):
         old = _elf(symbols=[

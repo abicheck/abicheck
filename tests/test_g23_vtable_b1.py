@@ -143,6 +143,16 @@ class TestVttSlotCount:
         new = _snap(_sym("_ZTT7Derived", size=24, sym_type=SymbolType.OBJECT))
         assert ChangeKind.VTT_SLOT_COUNT_CHANGED not in _kinds(compare(old, new))
 
+    def test_vtt_size_change_not_double_reported(self):
+        # The dedicated vtt_slot_count_changed owns _ZTT size; the generic
+        # symbol_size_changed path must skip it so one fact isn't two findings.
+        old = _snap(_sym("_ZTT7Derived", size=24, sym_type=SymbolType.OBJECT))
+        new = _snap(_sym("_ZTT7Derived", size=40, sym_type=SymbolType.OBJECT))
+        ks = _kinds(compare(old, new))
+        assert ChangeKind.VTT_SLOT_COUNT_CHANGED in ks
+        assert ChangeKind.SYMBOL_SIZE_CHANGED not in ks
+        assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL not in ks
+
 
 def test_stdlib_thunks_are_skipped():
     # A thunk whose target is a std:: type is transitive runtime noise, not the

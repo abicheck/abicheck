@@ -81,13 +81,15 @@ def _unnamed_kind(mangled: str) -> str | None:
     ),
 )
 def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Flag newly-introduced exported symbols that leak an unnamed type (D3)."""
+    """Flag newly-introduced exported symbols that leak an unnamed type (D3).
+
+    ``requires_support`` already demands a captured ELF symbol table on *both*
+    sides, so an absent (header-only / parse-failed) baseline disables the
+    detector rather than reaching here — a genuinely-empty captured baseline is
+    a real "exported nothing before" surface, against which a new unnamed-type
+    export is correctly newly introduced.
+    """
     old_syms = _exported_symbol_names(old)
-    if not old_syms:
-        # Empty baseline surface = the old side never captured an ELF symbol
-        # table, so "newly introduced" cannot be proven — every pre-existing
-        # unnamed-type export would look new. Stay quiet rather than false-flag.
-        return []
     changes: list[Change] = []
     for name in sorted(_exported_symbol_names(new) - old_syms):
         label = _unnamed_kind(name)

@@ -207,8 +207,19 @@ def _diff_elf_symbol_metadata(
     if old_elf is None and new_elf is None:
         old_elf = old
         new_elf = new
+        # Direct-ElfMetadata call convention: the caller handed us a real ELF
+        # object, so treat the baseline symbol table as captured.
+        old_captured = True
         old = AbiSnapshot(library="", version="")
         new = AbiSnapshot(library="", version="")
+    else:
+        # Whether the OLD side actually captured an ELF symbol table. `_diff_elf`
+        # substitutes an empty ElfMetadata() when old.elf is None (header-only /
+        # legacy / parse-failed baseline), which is indistinguishable at the
+        # symbol-map level from a real DSO that exports nothing — but only the
+        # snapshot knows which. A genuinely-empty captured table proves the
+        # absence of prior GNU_UNIQUE exports; an absent one does not.
+        old_captured = getattr(old, "elf", None) is not None
     assert old_elf is not None
     assert new_elf is not None
     changes: list[Change] = []
@@ -234,12 +245,17 @@ def _diff_elf_symbol_metadata(
                 )
             )
 
-    changes.extend(_check_gained_gnu_unique(old_syms, new_syms))
+    changes.extend(
+        _check_gained_gnu_unique(old_syms, new_syms, old_captured=old_captured)
+    )
     return changes
 
 
 def _check_gained_gnu_unique(
-    old_syms: dict[str, Any], new_syms: dict[str, Any]
+    old_syms: dict[str, Any],
+    new_syms: dict[str, Any],
+    *,
+    old_captured: bool = True,
 ) -> list[Change]:
     """Report a release newly gaining STB_GNU_UNIQUE exports (G23-A4).
 
@@ -251,11 +267,12 @@ def _check_gained_gnu_unique(
     once, this fires **once** per release, at the library level: only when the
     old side exported *no* unique symbols and the new side introduces one.
     """
-    if not old_syms:
-        # Empty baseline symbol table = the old side never captured ELF (header-
-        # only / legacy / parse-failed), so the old binding is *unknown*, not
-        # proven absent. Firing here would flag every pre-existing GNU_UNIQUE
-        # export as newly introduced.
+    if not old_captured:
+        # The old side never captured an ELF symbol table (header-only / legacy /
+        # parse-failed baseline), so the prior binding is *unknown*, not proven
+        # absent. Firing here would flag every pre-existing GNU_UNIQUE export as
+        # newly introduced. A genuinely-empty *captured* table (old_captured=True,
+        # old_syms empty) does prove absence, so it falls through and reports.
         return []
     if any(s.binding == SymbolBinding.UNIQUE for s in old_syms.values()):
         return []  # already non-unloadable; adding more changes nothing
@@ -407,20 +424,20 @@ def _check_symbol_size_change(
 ) -> list[Change]:
     """Detect exported data-symbol size changes (OBJECT/COMMON/TLS).
 
-    Vtable (_ZTV) and typeinfo (_ZTI) object size changes are owned by
-    diff_elf_layout.py, which decodes them into vtable-slot-count /
-    inheritance-shape findings; typeinfo-name (_ZTS) size only tracks the
-    mangled spelling and is not ABI-meaningful. Skip those here so the
-    generic SYMBOL_SIZE_CHANGED does not double-emit. VTT (_ZTT) is NOT
-    skipped: it is part of the construction ABI for virtual-base classes
-    and has no dedicated detector, so it keeps generic size-change coverage.
+    Vtable (_ZTV), typeinfo (_ZTI), and VTT (_ZTT) object size changes are owned
+    by diff_elf_layout.py, which decodes them into vtable-slot-count /
+    inheritance-shape / construction-scaffolding findings (`vtable_slot_count_changed`,
+    `rtti_inheritance_changed`, `vtt_slot_count_changed`); typeinfo-name (_ZTS)
+    size only tracks the mangled spelling and is not ABI-meaningful. Skip all
+    four here so the generic SYMBOL_SIZE_CHANGED does not double-emit alongside
+    the dedicated finding (G23 B1 added the _ZTT detector).
     """
     if not (
         s_old.size > 0
         and s_new.size > 0
         and s_old.size != s_new.size
         and s_new.sym_type in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS)
-        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS"))
+        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS", "_ZTT"))
     ):
         return []
     size_kind = _resolve_size_change_kind(old, new, sym_name, s_old, s_new)
