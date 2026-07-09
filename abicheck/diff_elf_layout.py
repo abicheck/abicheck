@@ -167,14 +167,22 @@ def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
 # name: `_ZThn<off>_<base>` (non-virtual), `_ZTv<o1>_<o2>_<base>` (virtual),
 # `_ZTc<call-off><call-off>_<base>` (covariant, whose two call-offsets each carry
 # their own `h`/`v` adjustment-kind letter, e.g. `_ZTch0_h8_N1D5cloneEv`). The
-# base is the target method's mangled encoding (a nested-name `N…E` or an
-# unqualified `<len><name>…`), stable across versions; the offset is what shifts
-# when a base subobject moves. The offset alphabet therefore includes `h`/`v`
-# (for covariant) plus `n`, digits and `_`; anchoring the base to start with N or
-# a digit lets one non-greedy regex split offset from base for all three kinds.
+# base is the target method's mangled encoding, stable across versions; the
+# offset is what shifts when a base subobject moves. The three thunk kinds carry
+# a different NUMBER of `_`-separated offset components, so a single non-greedy
+# split cannot find the base boundary reliably — a virtual thunk's second offset
+# starts with a digit (`_ZTv0_12_N…`) and would be mistaken for the base. Each
+# kind is therefore parsed with its own call-offset grammar (Itanium §5.1.4.2):
+#   h  non-virtual : h <nv-offset> _                      → one component
+#   v  virtual     : v <offset> _ <virtual-offset> _      → two components
+#   c  covariant   : c <call-offset> <call-offset> _base  → two h/v call-offsets
 # `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`/`_ZTC` start with an uppercase letter, so the
 # lowercase `[hvc]` marker never collides with them.
-_THUNK_RE = re.compile(r"^_ZT(?P<kind>[hvc])(?P<offset>[hvn0-9_]+?)_(?P<base>[N0-9].*)$")
+_THUNK_H_RE = re.compile(r"^_ZTh(?P<offset>n?\d+)_(?P<base>.+)$")
+_THUNK_V_RE = re.compile(r"^_ZTv(?P<offset>n?\d+_n?\d+)_(?P<base>.+)$")
+# One covariant call-offset: `h<nv-offset>_` or `v<offset>_<virtual-offset>_`.
+_THUNK_C_CALL = r"(?:hn?\d+_|vn?\d+_n?\d+_)"
+_THUNK_C_RE = re.compile(rf"^_ZTc(?P<offset>{_THUNK_C_CALL}{_THUNK_C_CALL})(?P<base>.+)$")
 
 
 def _parse_thunk(name: str) -> tuple[str, str] | None:
@@ -182,17 +190,29 @@ def _parse_thunk(name: str) -> tuple[str, str] | None:
 
     ``base_encoding`` identifies the target method (stable across versions);
     ``offset_signature`` (kind + offset) is what a base-subobject move changes.
+    Each kind is matched with its own grammar so the base is extracted correctly
+    even when an offset component (or the base) starts with a digit.
     """
-    m = _THUNK_RE.match(name)
-    if m is None:
-        return None
-    return m.group("base"), f"{m.group('kind')}:{m.group('offset')}"
+    if name.startswith("_ZTh"):
+        m = _THUNK_H_RE.match(name)
+        return (m.group("base"), f"h:{m.group('offset')}") if m else None
+    if name.startswith("_ZTv"):
+        m = _THUNK_V_RE.match(name)
+        return (m.group("base"), f"v:{m.group('offset')}") if m else None
+    if name.startswith("_ZTc"):
+        m = _THUNK_C_RE.match(name)
+        if m is None:
+            return None
+        # Drop the trailing `_` between the last call-offset and the base.
+        return m.group("base"), f"c:{m.group('offset').rstrip('_')}"
+    return None
 
 
 def _base_is_runtime(base: str) -> bool:
     """True if a thunk's target method belongs to the std:: runtime."""
-    # Nested std name `NSt…` / `NKSt…`, or the `St`/`Ss`/`Si`… substitutions.
-    return base.startswith(("NSt", "NKSt", "St", "Ss", "Si", "So")) or "St" == base[:2]
+    # A std:: member nests as `NSt…`/`NKSt…`, or appears via the `St`/`Ss`/`Si`/
+    # `So` substitution abbreviations for std:: names.
+    return base.startswith(("NSt", "NKSt", "St", "Ss", "Si", "So"))
 
 
 def _thunks_by_base(
@@ -236,7 +256,11 @@ def _diff_thunks(old: AbiSnapshot, new: AbiSnapshot, *, skip_runtime: bool) -> l
         changes.append(
             make_change(
                 ChangeKind.VTABLE_THUNK_OFFSET_CHANGED,
-                symbol="_ZTh" + base,
+                # Report the target method's own mangled symbol (`_Z`+base) — a
+                # real, stable identifier — rather than fabricating a `_ZTh…`
+                # non-virtual-thunk name that misstates the kind for a v/c thunk
+                # (the true kind lives in the offset signatures below).
+                symbol="_Z" + base,
                 name=_method_name(base),
                 old=", ".join(sorted(o_offs)),
                 new=", ".join(sorted(n_offs)),

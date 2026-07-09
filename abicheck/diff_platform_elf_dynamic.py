@@ -296,7 +296,7 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
 
-    changes.extend(_diff_abi_flags(old_elf, new_elf))
+    changes.extend(_diff_abi_flags(old_elf, new_elf, old_machine))
 
     old_osabi = getattr(old_elf, "osabi", "")
     new_osabi = getattr(new_elf, "osabi", "")
@@ -320,14 +320,23 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
     return changes
 
 
-def _diff_abi_flags(old_elf: Any, new_elf: Any) -> list[Change]:
+#: Architectures whose ABI-selecting e_flags bits are decoded into `abi_flags`
+#: by `elf_metadata._decode_abi_flags`. For these the decoded token set is the
+#: authoritative ABI signal, so the raw-e_flags fallback must NOT run — the
+#: undecoded bits carry ISA-level (`-march`) or feature (RISC-V Ztso, MIPS arch
+#: level) changes that are calling-convention-compatible, and diffing them would
+#: over-call `elf_abi_flags_changed` (BREAKING) on a compatible rebuild.
+_ABI_FLAG_DECODED_MACHINES = frozenset({"EM_ARM", "EM_RISCV", "EM_MIPS"})
+
+
+def _diff_abi_flags(old_elf: Any, new_elf: Any, machine: str) -> list[Change]:
     """Compare the ABI-selecting e_flags bits (same-machine caller guarantee).
 
     For architectures the metadata parser knows how to decode (ARM/RISC-V/MIPS)
-    the decoded ``abi_flags`` token set is diffed. For any other architecture
-    both decoded sets are empty, so fall back to the raw ``e_flags`` word — e.g.
-    PPC64 encodes its ELFv1/ELFv2 ABI version there — otherwise ABI-selecting
-    drift on undecoded arches would never surface.
+    the decoded ``abi_flags`` token set is diffed and is authoritative. For any
+    other architecture both decoded sets are empty, so fall back to the raw
+    ``e_flags`` word — e.g. PPC64 encodes its ELFv1/ELFv2 ABI version there —
+    otherwise ABI-selecting drift on undecoded arches would never surface.
     """
     old_abi: frozenset[str] = getattr(old_elf, "abi_flags", frozenset())
     new_abi: frozenset[str] = getattr(new_elf, "abi_flags", frozenset())
@@ -341,10 +350,14 @@ def _diff_abi_flags(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         ]
 
-    # Decoded tokens match (or both empty). Fall back to the raw e_flags word,
-    # which catches ABI bits we don't decode — both undecoded architectures
-    # (e.g. PPC64 ELFv1/ELFv2) and *extra* bits on partially-decoded ones
-    # (e.g. a MIPS arch-level change that keeps the same ABI token).
+    # Decoded tokens match. For a decoded arch the token set is authoritative, so
+    # stop here: the remaining e_flags bits are ISA-level/feature bits (a MIPS
+    # `-march` bump, RISC-V Ztso, …) that are calling-convention-compatible, and
+    # diffing them would falsely report a BREAKING abi-flags change on a
+    # compatible rebuild. Only fall back to the raw word for arches we don't
+    # decode at all (e.g. PPC64 ELFv1/ELFv2), where it is the sole ABI signal.
+    if machine in _ABI_FLAG_DECODED_MACHINES:
+        return []
     old_ef = getattr(old_elf, "e_flags", 0)
     new_ef = getattr(new_elf, "e_flags", 0)
     if old_ef != new_ef:

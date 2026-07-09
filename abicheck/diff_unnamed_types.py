@@ -70,6 +70,30 @@ def _unnamed_kind(mangled: str) -> str | None:
             length = int(mangled[i:j])
             i = j + length
             continue
+        # Substitution / template-param / array productions embed a seq-id or
+        # bound that must NOT be read as a <source-name> length prefix — their
+        # leading letter would otherwise be stepped over and the *following*
+        # digit misread as a length, skipping a real `Ut_`/`Ul…` token:
+        #   substitution   ::= S <seq-id (base-36)> _ | S <std abbrev> | S_
+        #   template-param ::= T <number> _ | T_
+        #   array-type     ::= A <number> _ <type> | A _ <type>
+        # (`Ut`/`Ul` start with `U`, never `S`/`T`/`A`, so they are unaffected.)
+        if ch == "S":
+            nxt = mangled[i + 1] if i + 1 < n else ""
+            if nxt in "abdiost":  # St/Sa/Sb/Ss/Si/So/Sd 2-char std abbreviations
+                i += 2
+                continue
+            j = i + 1
+            while j < n and (mangled[j].isdigit() or mangled[j].isupper()):
+                j += 1
+            i = j + 1 if j < n and mangled[j] == "_" else i + 1
+            continue
+        if ch in "TA":
+            j = i + 1
+            while j < n and mangled[j].isdigit():
+                j += 1
+            i = j + 1 if j < n and mangled[j] == "_" else i + 1
+            continue
         # Structural position: `Ut[<n>]_` / `Ul…E[<n>]_` are the productions.
         if mangled.startswith("Ul", i):
             return "lambda closure"

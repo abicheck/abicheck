@@ -47,7 +47,7 @@ from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot
+from .model import AbiSnapshot, stdlib_namespaces_excluded
 
 # Human spellings of the long-double family, longest-first so a longer spelling
 # is normalized before a substring of it. ``long double`` is normalized as a
@@ -72,14 +72,23 @@ def _normalize_ld(dem: str) -> str:
     return dem
 
 
-def _exported(snap: AbiSnapshot) -> set[str]:
+def _exported(snap: AbiSnapshot, *, filter_runtime: bool = True) -> set[str]:
     elf = snap.elf
     if elf is None:
         return set()
+    # When the inspected DSO *is* the C++ runtime (libstdc++/libc++), its own
+    # ``std::…(long double)`` exports are the ABI surface under test, not a
+    # transitive dependency leak — so keep them (filter_runtime=False), else a
+    # runtime release that flips one of its public std:: symbols from the `e`
+    # encoding to `g`/`u9__ieee128` would have both sides filtered out and the
+    # long_double_abi_changed break would go unreported.
     return {
         s.name
         for s in elf.symbols
-        if s.name.startswith("_Z") and is_abi_relevant_elf_symbol(s.name)
+        if s.name.startswith("_Z")
+        and is_abi_relevant_elf_symbol(
+            s.name, filter_transitive_runtime_symbols=filter_runtime
+        )
     }
 
 
@@ -102,7 +111,10 @@ def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_size, new_size = _ld_base_size(old), _ld_base_size(new)
     if old_size is None or new_size is None or old_size == new_size:
         return []
-    persisting = _exported(old) & _exported(new)
+    filter_runtime = stdlib_namespaces_excluded(old, new)
+    persisting = _exported(old, filter_runtime=filter_runtime) & _exported(
+        new, filter_runtime=filter_runtime
+    )
     detail = f"long double byte size {old_size} → {new_size}"
     # Itanium mangling omits the return type, so `long double f()` stays `_Z1fv`
     # and its demangling ("f()") never mentions long double even though the
@@ -140,7 +152,9 @@ def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 )
 def _diff_long_double(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect long-double ABI transitions via demangled removed↔added pairing (D2)."""
-    old_syms, new_syms = _exported(old), _exported(new)
+    filter_runtime = stdlib_namespaces_excluded(old, new)
+    old_syms = _exported(old, filter_runtime=filter_runtime)
+    new_syms = _exported(new, filter_runtime=filter_runtime)
     removed = old_syms - new_syms
     added = new_syms - old_syms
     # Persisting symbols (present on both sides) can only reveal a width change

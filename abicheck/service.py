@@ -95,11 +95,21 @@ def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
 
     name = path.name.lower()
     by_name = name == "module.symvers" or name.endswith(".symvers")
+    if not by_name:
+        # Cheap bounded content sniff before committing to a full decode, so a
+        # generically-named non-symvers input (a large JSON snapshot, an archive)
+        # on the hot `compare old new` path isn't read+decoded in full here only
+        # to be rejected — the caller re-reads it for its real format anyway.
+        try:
+            with open(path, "rb") as f:
+                head = f.read(_SNIFF_BYTES).decode("utf-8", "replace")
+        except OSError:
+            return None
+        if not looks_like_symvers(head):
+            return None
     try:
         text = path.read_text("utf-8", "replace")
     except OSError:
-        return None
-    if not (by_name or looks_like_symvers(text)):
         return None
     kabi = parse_symvers(text)
     if not kabi.entries:

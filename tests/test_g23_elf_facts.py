@@ -274,12 +274,23 @@ class TestElfIdentity:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
-    def test_decoded_tokens_equal_but_raw_eflags_differ(self):
-        # A partially-decoded arch (MIPS) can keep the same decoded ABI token
-        # while an undecoded bit in e_flags flips (e.g. arch level). The raw
-        # e_flags fallback must still surface the drift.
+    def test_decoded_arch_ignores_non_abi_eflags_bits(self):
+        # A decoded arch (MIPS) whose decoded ABI token is unchanged must NOT
+        # report elf_abi_flags_changed just because an undecoded e_flags bit
+        # flipped: those bits carry ISA-level (`-march`) drift (e.g. mips32 →
+        # mips32r2) that is calling-convention-compatible. The decoded token set
+        # is authoritative for arches we decode, so the raw fallback is skipped.
         old = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x1000)
         new = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x9000)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
+
+    def test_undecoded_arch_uses_raw_eflags_fallback(self):
+        # For an arch we don't decode at all (e.g. PPC64, whose ELFv1/ELFv2 ABI
+        # version lives in e_flags), the raw-e_flags fallback is the only ABI
+        # signal and must still surface drift.
+        old = ElfMetadata(machine="EM_PPC64", e_flags=0x1)
+        new = ElfMetadata(machine="EM_PPC64", e_flags=0x2)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED in _kinds(r)
 

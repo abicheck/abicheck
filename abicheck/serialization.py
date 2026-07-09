@@ -386,6 +386,8 @@ def _kabi_from_dict(d: dict[str, Any]) -> Any:
         for sym, e in (d.get("entries", {}) or {}).items()
     }
     return KabiMetadata(entries=entries)
+
+
 def _python_ext_from_dict(d: dict[str, Any]) -> Any:
     from .python_ext import PythonExtMetadata
 
