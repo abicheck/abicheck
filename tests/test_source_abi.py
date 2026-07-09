@@ -1100,9 +1100,10 @@ def test_non_public_export_accounting_keeps_reasons_separate_from_decl_matches()
         exported_symbols=exports,
         library="libfoo",
     )
-    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["symbols_without_decl"] == sorted(exports)
     assert surface.coverage["matched_symbols"] == 0
     assert surface.coverage["non_public_symbols_classified"] == len(exports)
+    assert surface.coverage["unmatched_symbols"] == len(exports)
     assert surface.mappings["non_public_symbol_to_reason"] == {
         "_ZNSt6vectorIiSaIiEEC1Ev": "dependency:stdlib",
         "_ZN3tbb6detail2r13fooEv": "dependency:tbb",

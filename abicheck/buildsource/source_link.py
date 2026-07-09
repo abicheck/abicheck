@@ -1097,7 +1097,6 @@ def link_source_abi(
         | set(synthesized)
         | set(template_instantiations)
         | set(allocator_interposers)
-        | set(non_public)
     )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
@@ -1209,8 +1208,10 @@ def relink_surface_exports(
     )
     surface.mappings["non_public_symbol_to_reason"] = dict(sorted(non_public.items()))
     all_matched = (
-        matched | set(synthesized) | set(template_instantiations) | set(allocator_interposers)
-        | set(non_public)
+        matched
+        | set(synthesized)
+        | set(template_instantiations)
+        | set(allocator_interposers)
     )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
