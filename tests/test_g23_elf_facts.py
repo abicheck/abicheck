@@ -285,6 +285,15 @@ class TestElfIdentity:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
+    def test_riscv_rvc_toggle_is_not_a_break(self):
+        # Rebuilding a RISC-V library with the same -mabi (lp64d/float-double)
+        # but toggling the compressed-instruction bit (e_flags 0x4 → 0x5) is an
+        # ISA-encoding change, not an ABI break: no elf_abi_flags_changed.
+        old = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x4)
+        new = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x5)
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
+
     def test_undecoded_arch_uses_raw_eflags_fallback(self):
         # For an arch we don't decode at all (e.g. PPC64, whose ELFv1/ELFv2 ABI
         # version lives in e_flags), the raw-e_flags fallback is the only ABI
