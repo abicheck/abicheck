@@ -373,19 +373,53 @@ def test_scan_conditional_define_does_not_reactivate_undef():
     assert scan_conditional_fields(src) == {}
 
 
-def test_scan_conditional_undef_preserves_negative_guard():
-    """An ``#undef GUARD`` inside an ``#ifdef OTHER`` branch the scanner cannot
-    evaluate must NOT suppress a later ``#ifndef GUARD`` negative field: a build
-    without OTHER never takes that branch, so GUARD stays defined and the field is
-    really pruned. The negative entry must survive so the reconciler prunes the
-    context-free observed field instead of wrongly clearing an add/remove
-    (Codex review #498, P1)."""
+def test_scan_conditional_undef_marks_negative_guard_ambiguous():
+    """A ``#undef GUARD`` inside an ``#ifdef OTHER`` branch the scanner cannot
+    evaluate makes GUARD's state build-context dependent: whether the ``#undef``
+    fires depends on OTHER, which the context-free scan does not know. A later
+    ``#ifndef GUARD`` field is recorded ``ambiguous`` so the reconciler keeps
+    (never reconciles) findings on its type — neither adding it back nor pruning
+    it can be proven correct (Codex review #498, P1)."""
     src = (
         "struct S {\n#ifdef OTHER\n#undef KEEP\n#endif\n"
         "#ifndef KEEP\n int legacy;\n#endif\n};"
     )
     entry = _guard(scan_conditional_fields(src), "S", "legacy")
     assert entry["guard"] == "KEEP" and entry["negative"] is True
+    assert entry["ambiguous"] is True
+
+
+def test_scan_conditional_undef_marks_positive_guard_ambiguous():
+    """The symmetric positive case: ``#undef KEEP`` inside ``#ifdef OTHER`` then a
+    ``#ifdef KEEP`` field. When the build defines both OTHER and KEEP the branch is
+    active, the ``#undef`` fires, and the field is really pruned — so recording it
+    as plainly active-KEEP would let the reconciler add a pruned field back. The
+    field is flagged ``ambiguous`` instead (Codex review #498, P1)."""
+    src = (
+        "struct S {\n#ifdef OTHER\n#undef KEEP\n#endif\n"
+        "#ifdef KEEP\n int x;\n#endif\n};"
+    )
+    entry = _guard(scan_conditional_fields(src), "S", "x")
+    assert entry["guard"] == "KEEP" and entry.get("negative") is None
+    assert entry["ambiguous"] is True
+
+
+def test_scan_conditional_define_marks_guard_ambiguous():
+    """A conditional ``#define`` makes the macro's state build-context dependent
+    too, so a field guarded by it is ``ambiguous`` (Codex review #498, P1)."""
+    src = (
+        "struct S {\n#ifdef OTHER\n#define KEEP 1\n#endif\n"
+        "#ifdef KEEP\n int x;\n#endif\n};"
+    )
+    entry = _guard(scan_conditional_fields(src), "S", "x")
+    assert entry["ambiguous"] is True
+
+
+def test_scan_clean_guard_is_not_ambiguous():
+    """A guard whose macro is never touched by a conditional ``#undef``/``#define``
+    carries no ``ambiguous`` flag — normal reconcilable evidence."""
+    src = "struct S {\n#ifdef KEEP\n int x;\n#endif\n};"
+    assert "ambiguous" not in _guard(scan_conditional_fields(src), "S", "x")
 
 
 def test_scan_top_level_undef_suppresses_negative_guard():

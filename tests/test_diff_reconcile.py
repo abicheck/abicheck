@@ -232,6 +232,23 @@ def test_guard_not_applied_across_sides():
     assert result.reconciled_count == 0
 
 
+def test_ambiguous_guard_field_is_not_reconciled():
+    """A guarded field flagged ``ambiguous`` (its macro is ``#undef``/``#define``d
+    inside a branch the scanner could not evaluate) has build-context-dependent
+    presence. The reconciler keeps the finding instead of clearing it — otherwise a
+    build that activates the branch (pruning the field) would have a real add/remove
+    hidden as NO_CHANGE (Codex review #498, P1). Identical inputs *without* the flag
+    reconcile (see ``test_reconciliation_clears_the_false_positive``)."""
+    reg = {"S": {"legacy": {**_guarded(), "ambiguous": True}}}
+    old = _snap("1", [_tf("version"), _tf("legacy")], conditional=reg)
+    new = _snap("2", [_tf("version")], conditional=reg)
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+    assert result.verdict == Verdict.BREAKING
+    assert result.reconciled_count == 0
+
+
 # ── authority rule: never delete a real break ────────────────────────────────
 
 

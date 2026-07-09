@@ -89,6 +89,17 @@ _RECONCILABLE_KINDS: frozenset[ChangeKind] = frozenset(
 RECONCILE_REASON = "build-context-reconciled"
 
 
+def _has_ambiguous(registry: dict[str, dict[str, object]]) -> bool:
+    """Whether any field in *registry* is flagged build-context ``ambiguous``.
+
+    A field guarded by a macro that a header ``#undef``/``#define``s inside a
+    branch the context-free scan could not evaluate carries ``ambiguous: True``
+    (see :func:`abicheck.header_conditionals.scan_conditional_fields`). Its real
+    presence depends on build context the ``guard ∈ defines`` test does not
+    capture, so the reconciler must not reconcile its type (Codex review #498)."""
+    return any(entry.get("ambiguous") for entry in registry.values())
+
+
 def _effective_decls(
     rec: RecordType, registry: dict[str, dict[str, object]], defines: set[str]
 ) -> dict[str, tuple[object, ...]]:
@@ -190,6 +201,16 @@ def reconcile_build_context(
         old_registry = old.conditional_fields.get(change.symbol, {})
         new_registry = new.conditional_fields.get(change.symbol, {})
         if not (old_registry or new_registry):
+            kept.append(change)
+            continue
+
+        # A field whose guard macro is ``#undef``/``#define``d inside a branch the
+        # context-free scan could not evaluate is flagged ``ambiguous`` — its
+        # presence is build-context dependent in a way the simple ``guard ∈ defines``
+        # test cannot resolve. If either side has such a field on this type, refuse
+        # to reconcile the type at all: keep the finding rather than risk adding back
+        # or pruning the wrong field (Codex review #498).
+        if _has_ambiguous(old_registry) or _has_ambiguous(new_registry):
             kept.append(change)
             continue
 

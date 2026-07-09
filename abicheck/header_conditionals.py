@@ -348,7 +348,9 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
 
     Returns ``{record: {field: {"guard": macro, "type": t, "is_bitfield": b,
     "bitfield_bits": n, "access": a, "is_const": c, "is_volatile": v,
-    "is_mutable": m}}}``, keying each record by its
+    "is_mutable": m}}}`` (plus ``"negative": True`` for an ``#ifndef`` field and
+    ``"ambiguous": True`` when the guard macro is ``#undef``/``#define``d inside an
+    unevaluable branch), keying each record by its
     **namespace/class-qualified** name (``api::S``). Qualifying keeps two
     same-named records in different namespaces distinct (no conflation) and skips
     anonymous-namespace records; the reconciler matches this key *exactly* against
@@ -373,6 +375,14 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     # build even if the compile DB defines it, so a field under it must not be
     # recorded as reconcilable — the build really pruned it (Codex review #498).
     locally_undefined: set[str] = set()
+    # Macros ``#undef``'d or ``#define``'d **inside a branch the scanner cannot
+    # evaluate** (a non-transparent conditional). Such an operation only fires when
+    # its enclosing condition is active under the build's defines — which the
+    # context-free scan does not know — so a field guarded by such a macro cannot be
+    # resolved by the simple ``macro ∈ defines`` test. It is recorded with
+    # ``ambiguous: True`` and the reconciler refuses to reconcile its type at all,
+    # rather than risk adding back / pruning the wrong field (Codex review #498).
+    conditionally_touched: set[str] = set()
     brace_depth = 0
     # pending: (kind, name, keyword) awaiting its opening brace. kind is "ns" or
     # "rec"; keyword is the record keyword (or "" for a namespace).
@@ -414,25 +424,32 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             elif _ENDIF.match(line):
                 if guard_stack:
                     guard_stack.pop()
-            elif (um := _UNDEF.match(line)) is not None and _only_transparent():
-                # Only a **top-level** ``#undef`` (nothing but the transparent
-                # include guard open) marks the macro header-locally undefined —
-                # symmetric with the ``#define`` gate below. An ``#undef`` inside a
-                # branch we cannot evaluate (e.g. ``#ifdef OTHER``) must NOT mark it:
-                # a build without ``OTHER`` never takes that branch, so the macro
-                # stays defined there. Marking it anyway would *suppress the negative
-                # ``#ifndef`` guard recording* for a later field, leaving the
-                # context-free observed field to be treated as present and letting the
-                # reconciler wrongly clear a real add/remove (Codex review #498).
-                locally_undefined.add(um.group(1))
-            elif (dm := _DEFINE.match(line)) is not None and _only_transparent():
-                # Only a **top-level** ``#define`` (nothing but the transparent
-                # include guard open) reactivates a locally-undefined guard. A
-                # ``#define`` inside an ``#ifdef OTHER`` branch we cannot evaluate
-                # must NOT clear the undef — a build without OTHER really keeps the
-                # macro undefined, and reactivating it here could let the reconciler
-                # suppress a real removal (Codex review #498).
-                locally_undefined.discard(dm.group(1))
+            elif (um := _UNDEF.match(line)) is not None:
+                if _only_transparent():
+                    # A **top-level** ``#undef`` genuinely undefines the macro for
+                    # every build, so a later guard on it is never active — mark it
+                    # header-locally undefined (its guarded fields are not recorded).
+                    locally_undefined.add(um.group(1))
+                else:
+                    # An ``#undef`` **inside a branch we cannot evaluate** fires only
+                    # when its condition is active under the build's defines. We
+                    # cannot tell statically, so the macro is *ambiguous* — a field
+                    # guarded by it must not be reconciled either way (Codex #498):
+                    # ignoring the undef wrongly adds back a pruned field when the
+                    # branch is active; honouring it wrongly prunes a present field
+                    # when the branch is inactive.
+                    conditionally_touched.add(um.group(1))
+            elif (dm := _DEFINE.match(line)) is not None:
+                if _only_transparent():
+                    # A **top-level** ``#define`` reactivates a locally-undefined
+                    # guard (it is defined for every build).
+                    locally_undefined.discard(dm.group(1))
+                else:
+                    # A conditional ``#define`` makes the macro's state build-context
+                    # dependent for the same reason — mark it ambiguous. (It does not
+                    # reactivate a top-level ``#undef``; a build skipping the branch
+                    # keeps the macro undefined.)
+                    conditionally_touched.add(dm.group(1))
             continue
 
         rec_here = _innermost_record()
@@ -508,6 +525,12 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
                         # An ``#ifndef GUARD`` field: observed context-free, but
                         # pruned by a build that *defines* GUARD.
                         entry["negative"] = True
+                    if guard in conditionally_touched:
+                        # The guard macro is ``#undef``/``#define``d inside a branch
+                        # we cannot evaluate → its state is build-context dependent.
+                        # Flag the field so the reconciler keeps (never reconciles)
+                        # findings on this type (Codex review #498).
+                        entry["ambiguous"] = True
                     registry.setdefault(rec_here.qualified, {})[name] = entry
 
         for ch in line:
