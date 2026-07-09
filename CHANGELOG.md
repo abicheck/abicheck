@@ -204,6 +204,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Python overload required→optional widening no longer a false break.**
+  `_overload_covers` compared required parameter shapes with exact equality, so
+  an `@overload` that keeps a parameter but adds a default
+  (`def f(x: int)` → `def f(x: int = ...)`) moved `x` from the required to the
+  optional shape and was mis-reported as `python_api_overload_removed` /
+  API_BREAK — even though every old call is still accepted. Coverage now uses an
+  order-preserving "widened subsequence" check, so a required→optional widening
+  is treated as compatible while a newly *required* parameter or a reordering of
+  retained required parameters still counts as a removal.
 - **Stdlib RTTI/guard classification.** Exported `typeinfo`/`vtable`/`guard
   variable` symbols for *nested* std types (`std::__detail::_AnyMatcher<…>`, …)
   demangle as `"typeinfo for std::…"`, so the `startswith("std::")` origin test

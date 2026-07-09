@@ -772,6 +772,52 @@ def test_overload_return_only_change_is_risk_not_removal() -> None:
     assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
 
 
+def test_overload_required_param_widened_to_optional_is_compatible() -> None:
+    # `@overload def f(x: int)` → `@overload def f(x: int = ...)`: the required
+    # `x` becomes optional. Every old call that supplied `x` (`f(1)`) is still
+    # accepted, so this is a compatible widening, NOT an overload removal.
+    old = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int) -> int: ...\n"
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    new = (
+        "from typing import overload\n"
+        "@overload\ndef f(x: int = ...) -> int: ...\n"  # x widened to optional
+        "@overload\ndef f(x: str) -> str: ...\n"
+    )
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_OVERLOAD_REMOVED not in kinds
+    # Widening a trailing required param to optional is fully compatible — no
+    # finding of any kind (the old variant is still covered, and the matched
+    # variant's signature diff sees only a gained default, which is additive).
+    assert not kinds
+
+
+def test_overload_new_required_param_is_breaking() -> None:
+    # Adding a *required* parameter to a variant breaks the minimal call shape
+    # (`f(1)` no longer binds), so `_covers_required_shape` refuses to treat the
+    # widening as covered; the matched-variant diff reports the added parameter.
+    old = "from typing import overload\n@overload\ndef f(x: int) -> int: ...\n"
+    new = "from typing import overload\n@overload\ndef f(x: int, y: str) -> int: ...\n"
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_PARAMETER_ADDED in kinds
+
+
+def test_overload_nontrailing_required_widened_forces_reorder_is_breaking() -> None:
+    # Widening a *non-trailing* required param to optional forces Python to
+    # reorder the remaining required param ahead of it
+    # (`def f(a, b)` → `def f(b, a=...)`), which rebinds positional callers:
+    # `f(1, "x")` bound a=1 before, b=1 now. The order-preserving subsequence
+    # check in `_covers_required_shape` does not let this masquerade as a clean
+    # widening — the retained required `b` moved position, so the matched-variant
+    # diff flags the parameter-kind/position change. It must NOT be compatible.
+    old = "from typing import overload\n@overload\ndef f(a: int, b: str) -> int: ...\n"
+    new = "from typing import overload\n@overload\ndef f(b: str, a: int = ...) -> int: ...\n"
+    kinds = _diff_kinds(old, new)
+    assert ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED in kinds
+
+
 def test_overload_param_type_change_is_removal() -> None:
     # A *parameter*-type change drops a supported input call shape → removal.
     old = (

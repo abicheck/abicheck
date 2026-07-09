@@ -395,14 +395,42 @@ def _optional_shape(fn: PyFunction) -> frozenset[tuple[Any, ...]]:
     return frozenset(keys)
 
 
+def _covers_required_shape(
+    old_req: tuple[Any, ...],
+    new_req: tuple[Any, ...],
+    new_opt: frozenset[tuple[Any, ...]],
+) -> bool:
+    """True when ``new_v``'s required params still accept ``old_v``'s minimal call.
+
+    ``new_req`` must be ``old_req`` with zero or more parameters *widened* to
+    optional — an order-preserving subsequence where every dropped key reappears
+    in ``new_opt``. This keeps a required→optional change
+    (``@overload def f(x: int)`` → ``def f(x: int = ...)``) covered — every old
+    call that supplied ``x`` is still accepted — while still rejecting a *new*
+    required parameter (breaks the minimal call) or a reordering of the retained
+    required parameters (rebinds positional callers).
+    """
+    i = 0
+    for key in old_req:
+        if i < len(new_req) and new_req[i] == key:
+            i += 1  # still required in new_v, same position
+        elif key in new_opt:
+            continue  # widened to optional in new_v — the old call still binds
+        else:
+            return False  # required param dropped, or new_v added/reordered one
+    return i == len(new_req)  # no extra required parameter in new_v
+
+
 def _overload_covers(new_v: PyFunction, old_v: PyFunction) -> bool:
     """True when new variant *new_v* still accepts every call *old_v* accepted.
 
     Overload matching is **directional**, not a symmetric identity: adding an
-    optional parameter to a variant is a compatible *widening* (still matches),
-    but *removing* one drops a supported call shape (a real removal), so the two
-    must not collapse to the same key. ``new_v`` covers ``old_v`` when they share
-    the same protocol (async / descriptor), the same required input shape, and
+    optional parameter to a variant (or widening a required one to optional) is a
+    compatible *widening* (still matches), but *removing* one drops a supported
+    call shape (a real removal), so the two must not collapse to the same key.
+    ``new_v`` covers ``old_v`` when they share the same protocol (async /
+    descriptor), ``new_v``'s required shape is ``old_v``'s with zero or more
+    parameters widened to optional (see ``_covers_required_shape``), and
     ``new_v``'s optional-parameter set is a **superset** of ``old_v``'s (so every
     optional call ``old_v`` accepted, ``new_v`` also accepts); and ``new_v`` must
     keep any ``*args`` / ``**kwargs`` collector ``old_v`` had (dropping one
@@ -411,7 +439,9 @@ def _overload_covers(new_v: PyFunction, old_v: PyFunction) -> bool:
     """
     if new_v.is_async != old_v.is_async or new_v.descriptor != old_v.descriptor:
         return False
-    if _required_shape(new_v) != _required_shape(old_v):
+    if not _covers_required_shape(
+        _required_shape(old_v), _required_shape(new_v), _optional_shape(new_v)
+    ):
         return False
     if not (_optional_shape(new_v) >= _optional_shape(old_v)):
         return False
