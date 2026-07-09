@@ -458,6 +458,22 @@ def test_scan_records_is_last_for_terminal_field():
     assert _guard(scan_conditional_fields(first), "S", "legacy")["is_last"] is False
 
 
+def test_scan_is_last_counts_unparsed_members():
+    """A member ``_parse_field`` cannot decode — an array ``int tail[4];`` or a
+    default-initialised ``int x = 0;`` — still advances the position counter, so a
+    guarded field *before* it is not wrongly marked terminal (Codex review #498,
+    P1). Otherwise a real reorder of ``legacy`` and ``tail`` could reconcile away."""
+    arr = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int tail[4];\n};"
+    assert _guard(scan_conditional_fields(arr), "S", "legacy")["is_last"] is False
+    init = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int x = 0;\n};"
+    assert _guard(scan_conditional_fields(init), "S", "legacy")["is_last"] is False
+    method = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n void run();\n};"
+    assert _guard(scan_conditional_fields(method), "S", "legacy")["is_last"] is False
+    # A genuinely-terminal guarded field (only the record's `};` follows) stays last.
+    last = "struct S {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    assert _guard(scan_conditional_fields(last), "S", "legacy")["is_last"] is True
+
+
 def test_scan_top_level_undef_suppresses_negative_guard():
     """A **top-level** ``#undef KEEP`` genuinely undefines the macro for every
     build, so a later ``#ifndef KEEP`` field is always present — it must NOT be

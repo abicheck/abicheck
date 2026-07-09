@@ -517,13 +517,19 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
         ):
             fm = _FIELD.match(line)
             parsed = _parse_field(fm.group("decl")) if fm else None
-            if parsed is not None:
-                # Count **every** plain data member in source order (guarded or
-                # not) so the recorded guarded fields carry an accurate position;
-                # ``is_last`` is stamped on record close (Codex review #498).
+            # Count **every** member-looking declaration in source order — not just
+            # the ones ``_parse_field`` can decode. Array members (``int t[4];``),
+            # default-initialised members (``int x = 0;``), and methods all advance
+            # the position, so a guarded field *before* them is never wrongly marked
+            # terminal (Codex review #498, P1). A line starting with ``}`` (the
+            # record's own close) is excluded so a genuinely-last field keeps
+            # ``is_last``. Over-counting a non-layout member only *suppresses* a
+            # reconciliation (safe); under-counting could hide a real reorder.
+            is_memberish = bool(line) and (line[0].isalpha() or line[0] == "_") and line.endswith(";")
+            if parsed is not None or is_memberish:
                 pos = rec_here.field_index
                 rec_here.field_index += 1
-                if guard is not None and guard not in locally_undefined:
+                if parsed is not None and guard is not None and guard not in locally_undefined:
                     name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable = parsed
                     entry: dict[str, object] = {
                         "guard": guard,
