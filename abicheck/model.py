@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from .elf_metadata import ElfMetadata
     from .macho_metadata import MachoMetadata
     from .pe_metadata import PeMetadata
+    from .python_ext import PythonExtMetadata
     from .sycl_metadata import SyclMetadata
 
 _model_log = _logging.getLogger(__name__)
@@ -338,6 +339,10 @@ class AbiSnapshot:
     sycl: SyclMetadata | None = field(
         default=None
     )  # SYCL PI plugin metadata (ADR-020b)
+    python_ext: PythonExtMetadata | None = field(
+        default=None
+    )  # CPython extension-module facts: init export, abi3/Limited-API status,
+    # and imported CPython C-API symbols (G14). None for non-extension libraries.
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

@@ -17,13 +17,13 @@ scope**.
 | **G10** | [manylinux glibc-floor check](g10-glibc-floor-check.md) | `UC-TC-glibc-floor` | S |
 | **G11** | [Single-binary ABI audit / lint](g11-single-binary-audit.md) | `UC-WF-audit` | M |
 | **G13** | [Cross-architecture comparison guardrail](g13-arch-mismatch-guard.md) | `UC-PLAT-arch-guard` | S |
-| **G14** | [CPython Limited-API / `abi3` import-contract](g14-stable-abi-subset.md) | `UC-WF-stable-abi-subset` | M |
 | **G15** | [Inline-namespace version-stamp normalization](g15-inline-namespace-version.md) | `UC-CHANGE-inline-ns-version` | M |
 | **G16** | [Header-scope toolchain robustness](g16-header-scope-toolchain-robustness.md) | `UC-TC-header-scope-robustness` | M |
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 | **G21** | [One-shot deep compare & CLI usability](g21-oneshot-deep-compare.md) | `UC-WF-oneshot-deep` | M |
 | **G22** | [CLI consolidation & interface-contract enforcement](g22-cli-consolidation.md) | `UC-WF-cli-contract` | L |
+| **G23** | [Python-level API diff for extension modules](g23-python-level-api-diff.md) | `UC-ARCH-python-api` | XL |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 
@@ -43,6 +43,7 @@ Completed or decided plans are retained for implementation history:
 | **G7** | Done — release recommendation | `abicheck/semver.py` |
 | **G8** | Decided — static/import archives are a by-design non-goal | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | [g12](g12-security-hardening.md) |
+| **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit | [g14](g14-stable-abi-subset.md) |
 
 ## How to pick up a plan
 

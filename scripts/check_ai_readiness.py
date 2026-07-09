@@ -699,6 +699,12 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset(
             {"buildsource.pack", "buildsource.source_graph", "checker_types", "model"}
         ),
+        # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot carries
+        # an optional ``python_ext: PythonExtMetadata`` field (G14), while
+        # ``python_ext`` annotates its functions with ``AbiSnapshot``. Both edges
+        # are under ``if TYPE_CHECKING``, so neither runs at import time — the same
+        # safe pattern as the sycl/buildsource metadata modules.
+        frozenset({"model", "python_ext"}),
     }
 )
 

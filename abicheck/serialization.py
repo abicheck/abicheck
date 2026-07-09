@@ -263,6 +263,7 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
         dependent_libs=e.get("dependent_libs", []),
         reexported_libs=e.get("reexported_libs", []),
         exports=exports,
+        imported_symbols=e.get("imported_symbols", []),
         current_version=e.get("current_version", ""),
         compat_version=e.get("compat_version", ""),
         min_os_version=e.get("min_os_version", ""),
@@ -356,6 +357,29 @@ def _sycl_from_dict(d: dict[str, Any]) -> Any:
         pi_version=d.get("pi_version", ""),
         plugins=plugins,
         plugin_search_paths=d.get("plugin_search_paths", []),
+    )
+
+
+def _python_ext_from_dict(d: dict[str, Any]) -> Any:
+    from .python_ext import PythonExtMetadata
+
+    declared = d.get("declared_abi3")
+    # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
+    declared_abi3 = (
+        (int(declared[0]), int(declared[1]))
+        if isinstance(declared, (list, tuple)) and len(declared) == 2
+        else None
+    )
+    return PythonExtMetadata(
+        module_name=d.get("module_name"),
+        init_symbol=d.get("init_symbol"),
+        python_major=d.get("python_major"),
+        soabi_tag=d.get("soabi_tag"),
+        limited_api=bool(d.get("limited_api", False)),
+        declared_abi3=declared_abi3,
+        free_threaded=bool(d.get("free_threaded", False)),
+        cpython_imports=list(d.get("cpython_imports", [])),
+        cpython_dlls=list(d.get("cpython_dlls", [])),
     )
 
 
@@ -497,6 +521,21 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     sycl_data = d.get("sycl")
     sycl = _sycl_from_dict(sycl_data) if isinstance(sycl_data, dict) else None
 
+    python_ext_data = d.get("python_ext")
+    python_ext = (
+        _python_ext_from_dict(python_ext_data)
+        if isinstance(python_ext_data, dict)
+        else None
+    )
+    # A snapshot dumped without the G14 key (older abicheck, or a `dump` writer
+    # path that didn't attach it) has no serialized ``python_ext``. Derive it on
+    # load from the already-parsed binary metadata so `dump` → `compare` never
+    # silently disables the extension detector — the same recognition the dumper
+    # runs, applied at read time. ``_derive_python_ext_key_absent`` records that
+    # the key was missing (vs. an explicit ``null`` meaning "checked, not an
+    # extension") so we only re-derive when there is no recorded answer.
+    _python_ext_key_absent = "python_ext" not in d
+
     dep_data = d.get("dependency_info")
     dep_info = (
         DependencyInfo(
@@ -558,13 +597,14 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # that demand genuine header evidence (parameter renames) stay quiet.
         from_headers_inferred = from_headers
 
-    return AbiSnapshot(
+    snap = AbiSnapshot(
         library=d["library"], version=d["version"],
         source_path=d.get("source_path"),
         functions=funcs, variables=variables, types=types,
         enums=enums, typedefs=typedefs,
         elf=elf, pe=pe, macho=macho,
         dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl,
+        python_ext=python_ext,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
@@ -588,6 +628,35 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # snapshots loads as False.
         parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
     )
+
+    # G14: derive the CPython extension surface for snapshots that predate the
+    # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
+    # still checked at compare time. Skip when the key was present (the dumper
+    # already answered, including an explicit "not an extension" null).
+    #
+    # Mach-O caveat: the ``imported_symbols`` table is itself new in G14. A
+    # legacy Mach-O ``.abi.json`` written before it existed has no import data;
+    # ``_macho_from_dict`` defaults the absent key to ``[]``. Deriving an
+    # extension from that empty set would be actively misleading: `scan --abi3`
+    # would audit *zero* CPython imports and certify the module clean, and
+    # `compare` would treat every import re-captured from the new binary as
+    # newly gained. So when a Mach-O snapshot never recorded its imports, leave
+    # ``python_ext`` as ``None`` (unknown) — `--abi3` then honestly reports the
+    # artifact must be re-dumped rather than silently passing.
+    _macho_imports_uncaptured = (
+        isinstance(macho_data, dict) and "imported_symbols" not in macho_data
+    )
+    if (
+        snap.python_ext is None
+        and _python_ext_key_absent
+        and not _macho_imports_uncaptured
+    ):
+        if snap.elf is not None or snap.pe is not None or snap.macho is not None:
+            from .python_ext import detect_python_extension
+
+            snap.python_ext = detect_python_extension(snap)
+
+    return snap
 
 
 def _build_mode_from_dict(raw: Any) -> BuildMode | None:

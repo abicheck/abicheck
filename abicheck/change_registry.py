@@ -1545,4 +1545,52 @@ REGISTRY = ChangeKindRegistry([
               "by-value users are miscompiled. Recovered from the ELF symbol size without "
               "DWARF — the binary-only analogue of TYPE_BASE_CHANGED.",
        description_template="RTTI typeinfo for '{name}' changed size: {old} → {new} bytes ({detail}). The base-class shape changed, which shifts this-pointer adjustments, member offsets, and the vtable. Detected from the ELF symbol size without debug info."),
+
+    # ── CPython extension modules (abi3 / Py_LIMITED_API) ─────────────────────
+    _E("python_stable_abi_violation", _R,
+       impact="A stable-ABI (`abi3` / `Py_LIMITED_API`) CPython extension module — "
+              "produced by Cython, pybind11, nanobind, or a hand-written C "
+              "extension — gained an import of a CPython C-API symbol that is not "
+              "part of the Limited API (typically a private `_Py*` symbol). The "
+              "module still exports only `PyInit_<mod>`, so the export-table view "
+              "sees no change, but the module now links a symbol outside its abi3 "
+              "promise. On an interpreter built without that symbol exported it "
+              "fails to import with an `undefined symbol` error. Verdict is a "
+              "deployment RISK: whether it breaks depends on the target "
+              "interpreter, not on the module's own consumers.",
+       description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}"),
+    _E("python_abi3_dropped", _R,
+       impact="A CPython extension module that was previously a stable-ABI "
+              "(`abi3` / `Py_LIMITED_API`) build — loadable on every interpreter "
+              "at or above its floor — is now a version-specific build (its SOABI "
+              "tag pins it to a single `cpython-3XX`). Consumers running any other "
+              "interpreter in the module's former supported range can no longer "
+              "import it. Nothing in the export table reveals the narrowed "
+              "support; the promise lived in the wheel/SOABI tag. A deployment "
+              "RISK for anyone not on the exact new interpreter.",
+       description_template="extension '{name}' dropped its abi3 promise: {old} → {new}"),
+    _E("python_gil_abi_changed", _R,
+       impact="A CPython extension module switched between the regular (GIL) and "
+              "the free-threaded (PEP 703, `Py_GIL_DISABLED`) CPython ABI — its "
+              "SOABI tag gained or lost the free-threaded `t` marker "
+              "(`cpython-3XX` ↔ `cpython-3XXt`). The two builds target different, "
+              "non-interchangeable interpreter ABIs: a consumer running the "
+              "regular interpreter cannot load a free-threaded build and vice "
+              "versa (different extension suffix, different struct layouts, and — "
+              "since `Py_LIMITED_API` is incompatible with `Py_GIL_DISABLED` — a "
+              "free-threaded build can never be `abi3`). A deployment RISK: "
+              "whether it breaks depends on which interpreter the consumer runs.",
+       description_template="extension '{name}' changed GIL/free-threaded ABI: {old} → {new}"),
+    _E("python_abi3_floor_raised", _R,
+       impact="Both builds of a CPython extension are stable-ABI (`abi3`) and both "
+              "carry an explicit `cpXY-abi3` wheel/SOABI tag, but the new build's "
+              "declared `Py_LIMITED_API` floor is higher than the old one's "
+              "(e.g. `cp39-abi3` → `cp310-abi3`). Every interpreter in the dropped "
+              "range — CPython at or above the old floor but below the new one — "
+              "can no longer import the module, even though its exported and "
+              "imported symbols may be unchanged. Because the floor is read from "
+              "the explicit tag on *both* sides, this is exact (no heuristic "
+              "min-of-imports inference). A deployment RISK: whether it breaks "
+              "depends on which interpreters the consumer must support.",
+       description_template="abi3 extension '{name}' raised its Py_LIMITED_API floor: {old} → {new}"),
 ])

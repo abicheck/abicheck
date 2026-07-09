@@ -108,6 +108,11 @@ class MachoMetadata:
     # Exported symbols
     exports: list[MachoExport] = field(default_factory=list)
 
+    # Imported (undefined, N_UNDF) external symbol names — the Mach-O analogue
+    # of ELF undefined imports. Needed to see a CPython extension's libpython
+    # C-API import surface (G14). Leading '_' stripped, matching exports.
+    imported_symbols: list[str] = field(default_factory=list)
+
     # Version info from LC_ID_DYLIB
     current_version: str = ""            # e.g. "1.2.3"
     compat_version: str = ""             # e.g. "1.0.0"
@@ -315,23 +320,34 @@ def _parse_macho_symbols(
     """Parse Mach-O symbol table and populate *meta.exports*."""
     try:
         symtab = SymbolTable(macho, header=header)
-        # Prefer extdefsyms (available when LC_DYSYMTAB is present),
-        # fall back to nlists (all symbols) with manual N_EXT filtering.
-        symbols = getattr(symtab, "extdefsyms", None) or symtab.nlists
+        # Prefer the split external tables (available when LC_DYSYMTAB is
+        # present): extdefsyms = external *defined* (exports), undefsyms =
+        # external *undefined* (imports). Concatenate both so the import surface
+        # is captured; fall back to nlists (all symbols) with manual filtering.
+        extdef = getattr(symtab, "extdefsyms", None)
+        undef = getattr(symtab, "undefsyms", None)
+        if extdef is not None or undef is not None:
+            symbols = list(extdef or []) + list(undef or [])
+        else:
+            symbols = symtab.nlists
         for nlist_entry, name_bytes in symbols:
             n_type = int(nlist_entry.n_type)
             n_desc = int(nlist_entry.n_desc)
 
-            # Only exported, defined symbols
+            # Only external symbols; keep undefined ones as imports.
             if not (n_type & N_EXT):
-                continue
-            if (n_type & N_TYPE) == N_UNDF:
                 continue
 
             name = name_bytes.decode("utf-8", errors="replace") if name_bytes else ""
             # Strip leading underscore (Mach-O C symbol convention)
             if name.startswith("_"):
                 name = name[1:]
+
+            if (n_type & N_TYPE) == N_UNDF:
+                # Undefined external symbol → an import (what this dylib requires).
+                if name:
+                    meta.imported_symbols.append(name)
+                continue
 
             is_weak = bool(n_desc & N_WEAK_DEF)
             sym_type = MachoSymbolType.WEAK if is_weak else MachoSymbolType.EXPORTED

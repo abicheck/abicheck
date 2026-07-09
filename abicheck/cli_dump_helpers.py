@@ -236,6 +236,17 @@ def perform_elf_dump(
     if effective_compile_db and resolved_headers:
         snap.parsed_with_build_context = True
 
+    # G14: recognise a CPython extension module and attach its metadata so the
+    # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`
+    # CLI reaches `dumper.dump` directly (not `service.run_dump`), so this is the
+    # attach point for that path; `detect_python_extension` is a leaf import (no
+    # cycle) and a no-op for ordinary libraries. `compare` also derives it on
+    # load as a backstop for snapshots written without it.
+    if snap.python_ext is None:
+        from .python_ext import detect_python_extension
+
+        snap.python_ext = detect_python_extension(snap)
+
     if follow_deps:
         populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 

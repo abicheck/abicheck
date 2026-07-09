@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (269 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (273 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -115,6 +115,23 @@ use_cases:
       Add a libclang-based header-AST extractor alongside castxml to unblock
       concept tightening, hidden friends, and user-ctor mangled names
       (dormant fixtures: cases 78/105/106/111).
+
+  - id: UC-ARCH-python-api
+    axis: archetype
+    name: CPython extension Python-level API surface
+    status: planned
+    gap: G23
+    plan: docs/development/plans/g23-python-level-api-diff.md
+    next_steps: >
+      G14 covers an extension module's native C-ABI contract (imported Py* / abi3
+      conformance) but not the Python-level API it exposes to import: functions,
+      classes, methods, and their signatures (arg names/kinds/defaults, type
+      annotations). Two builds can be C-ABI-identical yet break every caller (a
+      renamed kwarg, a dropped default). Add a python_api surface extractor —
+      static from .pyi stubs / __text_signature__ / docstrings first, optional
+      opt-in runtime introspection — a diff_python_api detector, and a family of
+      python_api_* ChangeKinds, surfaced through compare/scan. Complements, does
+      not replace, the C-ABI check.
 
   - id: UC-ARCH-kernel-btf
     axis: archetype
@@ -392,17 +409,31 @@ use_cases:
   - id: UC-WF-stable-abi-subset
     axis: workflow
     name: CPython Limited-API / abi3 import-contract conformance
-    status: planned
+    status: complete
     gap: G14
     plan: docs/development/plans/g14-stable-abi-subset.md
-    next_steps: >
-      An abi3 wheel's compatibility surface is the set of CPython C-API symbols
-      it IMPORTS, not what it exports. Add a check that classifies an extension's
-      imported Py* symbols against the stable-ABI allowlist for a target
-      Py_LIMITED_API floor. Empirically confirmed on cryptography 42->43: abicheck
-      returns COMPATIBLE from the export table while the imported surface grows
-      +7 Py* symbols, entirely invisible. A symbol outside abi3 or newer than the
-      floor would fail to import on older Python yet stay COMPATIBLE today.
+    evidence:
+      modules: [
+        abicheck/python_ext.py,
+        abicheck/stable_abi.py,
+        abicheck/stable_abi_data.py,
+        abicheck/diff_python.py,
+        abicheck/cli_scan.py,
+      ]
+      tests: [tests/test_python_ext.py]
+    notes: >
+      An abi3 module's compatibility surface is the set of CPython C-API symbols
+      it IMPORTS, not what it exports. python_ext recognises extension modules
+      (Cython/pybind11/nanobind/C) from the PyInit_* export and Py* import
+      surface; stable_abi classifies each import against the Limited-API allowlist
+      for a target Py_LIMITED_API floor; diff_python raises
+      PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
+      compare time. Interpreter-floor conformance is checked by the
+      `abicheck scan --abi3` audit (diff_python.audit_stable_abi_imports; the
+      user supplies the target floor, which a bare .abi3.so does not carry),
+      which audits a single module and surfaces a violation the export-table view
+      would call COMPATIBLE (advisory, or gated via
+      --crosscheck python_stable_abi_violation=error).
 
   - id: UC-WF-audit
     axis: workflow

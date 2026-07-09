@@ -100,6 +100,23 @@ _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
 #: the check; the others keep it enabled (the label rides into the report).
 _CROSSCHECK_LEVELS = frozenset({"off", "info", "warning", "error"})
 
+#: ChangeKinds that ride the same advisory→gating promotion path as the
+#: cross-checks but are NOT toggleable engine checks. Accepted as
+#: ``--crosscheck KEY=LEVEL`` severity keys so a maintainer can promote them to
+#: ``error`` to gate CI (ADR-035 D6), without being part of the on/off
+#: ``ALL_CHECKS`` set.
+#:
+#: Only the ``--abi3`` **audit** finding is here: it is injected into
+#: ``cc.findings`` (below), which is what ``_crosscheck_severity_exit`` inspects,
+#: so promoting it actually gates. The other CPython kinds
+#: (``python_abi3_dropped`` / ``python_gil_abi_changed`` /
+#: ``python_abi3_floor_raised``) are **compare-time** — they only arise under
+#: ``scan --baseline`` via ``_run_baseline_compare`` and live in the baseline
+#: diff's ``DiffResult``, not ``cc.findings``. They therefore gate through the
+#: *compare* verdict/severity path (like every other RISK kind), not this one;
+#: adding them here would accept the flag but silently fail to honour it.
+_PROMOTABLE_FINDING_KINDS = frozenset({"python_stable_abi_violation"})
+
 
 def _parse_budget(value: str | None) -> float | None:
     """Parse a ``time``-style duration (``15m``/``900s``/``1h``) to seconds.
@@ -174,9 +191,10 @@ def _parse_crosschecks(
         key, sep, level = pair.partition("=")
         key = key.strip()
         level = level.strip().lower() if sep else "warning"
-        if key not in ALL_CHECKS:
+        if key not in ALL_CHECKS and key not in _PROMOTABLE_FINDING_KINDS:
             raise click.BadParameter(
-                f"unknown cross-check {key!r}; choose from {', '.join(ALL_CHECKS)}"
+                f"unknown cross-check {key!r}; choose from "
+                f"{', '.join((*ALL_CHECKS, *sorted(_PROMOTABLE_FINDING_KINDS)))}"
             )
         if level not in _CROSSCHECK_LEVELS:
             raise click.BadParameter(
@@ -184,6 +202,9 @@ def _parse_crosschecks(
                 f"choose from {', '.join(sorted(_CROSSCHECK_LEVELS))}"
             )
         if level == "off":
+            # A promotable finding kind is not part of the on/off enabled set
+            # (it comes from the --abi3 audit, not a toggleable engine check), so
+            # `off` only meaningfully applies to a real cross-check.
             enabled.discard(key)
         else:
             severities[key] = level
@@ -739,6 +760,18 @@ def _audit_exit_code(
     help="Single-build hygiene lint, no baseline (intra-version).",
 )
 @click.option(
+    "--abi3",
+    "abi3",
+    default=None,
+    metavar="VERSION",
+    help="Audit a CPython extension against a Py_LIMITED_API floor, e.g. `3.9`. "
+    "Classifies the module's imported CPython C-API against the stable ABI and "
+    "flags private/unstable imports and stable symbols newer than the floor as "
+    "`python_stable_abi_violation` (advisory; gate with "
+    "`--crosscheck python_stable_abi_violation=error`). Requires a CPython "
+    "extension module as the --binary.",
+)
+@click.option(
     "--estimate",
     "estimate",
     is_flag=True,
@@ -798,6 +831,7 @@ def scan_cmd(
     changed_paths_opt: tuple[str, ...],
     budget: str | None,
     audit: bool,
+    abi3: str | None,
     estimate: bool,
     crosschecks: tuple[str, ...],
     risk_rules_path: Path | None,
@@ -919,6 +953,16 @@ def scan_cmd(
         )
 
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
+    # --abi3: parse the target Py_LIMITED_API floor for the stable-ABI audit. An
+    # invalid floor (non-3 major, implausible minor, trailing junk) is a usage
+    # error; None means the audit is off.
+    abi3_floor: tuple[int, int] | None = None
+    if abi3 is not None:
+        from . import stable_abi
+
+        abi3_floor = stable_abi.parse_abi3_version(abi3)
+        if abi3_floor is None:
+            raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
     sm = SourceMethod(source_method) if source_method else None
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
     # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
@@ -1058,6 +1102,7 @@ def scan_cmd(
             pinned_explicit=_pinned_explicit,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
+            abi3_floor=abi3_floor,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -1163,6 +1208,7 @@ def run_scan_core(
     pinned_explicit: bool = False,
     compile_context: CompileContext | None = None,
     defer_cleanup: list[Callable[[], None]] | None = None,
+    abi3_floor: tuple[int, int] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1407,6 +1453,46 @@ def run_scan_core(
         ),
     )
     _record_stage("crosschecks", _stage)
+
+    # --- stable-ABI (abi3) audit (opt-in via --abi3) --------------------------
+    # A single-artifact audit of the candidate's CPython imports against a target
+    # Py_LIMITED_API floor. Its findings ride the cross-check stream: they are
+    # RISK `python_stable_abi_violation` rows, advisory by default (like every
+    # single-artifact check) and gated only via `--crosscheck
+    # python_stable_abi_violation=error`. Requires the --binary to be a CPython
+    # extension module; --abi3 on a plain library is a usage error.
+    if abi3_floor is not None:
+        py_ext = new_snap.python_ext
+        if py_ext is None or not py_ext.is_extension:
+            raise _EvidenceContractError(
+                f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+                f"'{binary.name}' is not a recognisable CPython extension module "
+                "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
+                "audit applies only to extension modules (Cython/pybind11/"
+                "nanobind/C)."
+            )
+        from .diff_python import audit_stable_abi_imports
+
+        abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)
+        cc.findings.extend(abi3_findings)
+        # Name the offending symbols in the coverage row (rendered verbatim in
+        # text and carried in JSON) so a CI artifact tells the user WHICH import
+        # to fix — the cross-check summary only reports a per-kind count, which
+        # would otherwise hide the symbol in Change.detail/new_value (Codex
+        # review). Capped so a pathological module cannot flood the report.
+        offending: list[str] = []
+        for f in abi3_findings:
+            offending.extend(f.new_value if isinstance(f.new_value, list) else [])
+        detail = (
+            f"{len(py_ext.cpython_imports)} CPython import(s) audited against "
+            f"Py_LIMITED_API {abi3_floor[0]}.{abi3_floor[1]}; "
+            f"{len(abi3_findings)} violation finding(s)"
+        )
+        if offending:
+            shown = ", ".join(offending[:20])
+            more = f" (+{len(offending) - 20} more)" if len(offending) > 20 else ""
+            detail += f" — outside the stable ABI: {shown}{more}"
+        cc.coverage.append({"layer": "abi3_audit", "status": "ran", "detail": detail})
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None

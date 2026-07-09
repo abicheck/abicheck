@@ -20,7 +20,7 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **269 `ChangeKind`s**
+thin on the breadth axes.** The "what changed" dimension — **273 `ChangeKind`s**
 in a 5-tier policy model, **129 calibrated example cases**, ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
@@ -66,7 +66,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 269 change kinds; 162 ground-truth entries; parity tests |
+| Change taxonomy | `complete` | 273 change kinds; 162 ground-truth entries; parity tests |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
@@ -124,7 +124,8 @@ planned row from drifting away from its plan.
 | Priority | Gap | Plan |
 |---|---|---|
 | High | G9 — wheel vendored-library pairing | [g9](plans/g9-wheel-vendored-matching.md) |
-| High | G14 — CPython `abi3` import-contract | [g14](plans/g14-stable-abi-subset.md) |
+| Done | G14 — CPython `abi3` import-contract (`scan --abi3`) | [g14](plans/g14-stable-abi-subset.md) |
+| Medium | G23 — Python-level API diff (`.pyi`/signature) for extensions | [g23](plans/g23-python-level-api-diff.md) |
 | Medium | G4 — header-only / inline-only analysis | [g4](plans/g4-header-ast-extractor.md) |
 | Medium | G11 — single-binary audit/lint | [g11](plans/g11-single-binary-audit.md) |
 | Medium | G15 — inline-namespace version stamp | [g15](plans/g15-inline-namespace-version.md) |

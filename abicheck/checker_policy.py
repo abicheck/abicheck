@@ -645,6 +645,15 @@ class ChangeKind(str, Enum):
     VTABLE_SLOT_COUNT_CHANGED = "vtable_slot_count_changed"  # _ZTV size delta → virtual method add/remove/reorder → BREAKING
     RTTI_INHERITANCE_CHANGED = "rtti_inheritance_changed"  # _ZTI size delta → base-class set/shape changed → BREAKING
 
+    # ── CPython extension modules (Cython / pybind11 / C-ext, abi3) ───────────
+    # Emitted by diff_python.py for a stable-ABI (abi3 / Py_LIMITED_API)
+    # extension module. The compatibility contract for such a module is the set
+    # of CPython C-API symbols it IMPORTS from libpython, not its exports (G14).
+    PYTHON_STABLE_ABI_VIOLATION = "python_stable_abi_violation"  # abi3 module gained an import outside the stable ABI (e.g. a private _Py* symbol) → won't load on a Limited-API interpreter → RISK
+    PYTHON_ABI3_DROPPED = "python_abi3_dropped"  # module was abi3 (loads on all interpreters ≥ its floor) but the new build is version-specific → drops every other interpreter it used to support → RISK
+    PYTHON_GIL_ABI_CHANGED = "python_gil_abi_changed"  # extension switched between the regular (GIL) and free-threaded (PEP 703, Py_GIL_DISABLED) CPython ABI → the two builds are not interchangeable, a consumer on the other interpreter can't load it → RISK
+    PYTHON_ABI3_FLOOR_RAISED = "python_abi3_floor_raised"  # both builds are abi3 but the new one's declared cpXY-abi3 tag floor is higher (e.g. cp39-abi3 → cp310-abi3) → interpreters in the dropped range can no longer load it → RISK
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

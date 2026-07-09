@@ -90,6 +90,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # count and inheritance shape, readable from .dynsym without DWARF/headers.
     "vtable_slot_count_changed": "L0",
     "rtti_inheritance_changed": "L0",
+    # CPython extension modules: the import table (undefined Py* symbols) and the
+    # PyInit_* export are both readable from the binary alone — no debug info or
+    # headers needed to see the stable-ABI contract (G14).
+    "python_stable_abi_violation": "L0",
+    "python_abi3_dropped": "L0",
+    "python_gil_abi_changed": "L0",
+    "python_abi3_floor_raised": "L0",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",
