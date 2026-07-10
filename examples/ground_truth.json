@@ -1503,6 +1503,10 @@
       "expected_kinds": [
         "polymorphic_type_non_virtual_dtor"
       ],
+      "known_gap": "macOS debug/header extraction currently misses the factory-based anti-pattern (the public factory's visibility is not resolved against the Mach-O export table the way the ELF path resolves it) and observes COMPATIBLE. Linux remains the blocking detector lane for polymorphic_type_non_virtual_dtor.",
+      "known_gap_platforms": [
+        "macos"
+      ],
       "min_evidence": "L1",
       "pattern_verdicts": true,
       "platforms": [
@@ -1569,6 +1573,11 @@
       "expected": "COMPATIBLE_WITH_RISK",
       "expected_kinds": [
         "overload_added"
+      ],
+      "known_gap": "macOS (Mach-O export/visibility handling) and Windows (MSVC '?name@@...' mangling is not parsed by the Itanium overload grouper, whose documented fallback keeps unparseable symbols in distinct groups) currently miss OVERLOAD_ADDED and observe plain COMPATIBLE. Linux remains the blocking detector lane.",
+      "known_gap_platforms": [
+        "macos",
+        "windows"
       ],
       "min_evidence": "L0",
       "platforms": [

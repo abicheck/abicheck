@@ -125,8 +125,10 @@ def test_method_rvalue_ref_qualifier_falls_back_to_mangling() -> None:
 
 
 def test_method_refqual_attribute_still_wins_when_present() -> None:
+    # Deliberately conflicting inputs: the mangling says && (O) while the
+    # attribute says lvalue — the attribute must win, proving precedence.
     fn = _parse_str_method(
-        _root_with_method("_ZNR14MessageBuilder3strEv", refqual="lvalue")
+        _root_with_method("_ZNO14MessageBuilder3strEv", refqual="lvalue")
     )
     assert fn.ref_qualifier == "&"
 
@@ -222,3 +224,35 @@ def test_has_virtual_destructor_matches_gcc_unified_dwarf_clone() -> None:
         vtable=["_ZN8RendererD4Ev", "_ZN8Renderer4drawEi"],
     )
     assert _has_virtual_destructor(rec)
+
+
+def test_method_literally_named_d4_is_not_a_destructor_clone() -> None:
+    # A virtual method *named* D4 mangles as _ZN1C2D4Ev — the D4 sits
+    # behind a "2" length prefix, so it is a source name, not a clone.
+    # Treating it as a destructor would suppress the
+    # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR risk for exactly the class of
+    # types the anti-pattern exists to catch (Codex review, PR #509).
+    rec = RecordType(name="C", kind="class", vtable=["_ZN1C2D4Ev"])
+    assert not _has_virtual_destructor(rec)
+
+
+@pytest.mark.parametrize(
+    "entry,is_dtor",
+    [
+        ("_ZN8RendererD1Ev", True),  # plain class
+        ("_ZN8RendererD4Ev", True),  # GCC unified clone
+        ("_ZN3ns18RendererD1Ev", True),  # nested namespace
+        ("_ZN3FooIiED1Ev", True),  # template class
+        ("_ZN3FooILi5EED2Ev", True),  # integer template arg (L…E literal)
+        ("_ZNSt6vectorIiSaIiEED1Ev", True),  # std:: substitutions
+        ("_ZN1C2D4Ev", False),  # method literally named D4
+        ("_ZN2D45resetEv", False),  # class literally named D4
+        ("_ZN8Renderer4drawEi", False),  # ordinary virtual method
+        ("_Z4freev", False),  # non-member function
+        ("stat", False),  # C symbol
+    ],
+)
+def test_is_itanium_dtor_symbol_structural(entry: str, is_dtor: bool) -> None:
+    from abicheck.idioms import _is_itanium_dtor_symbol
+
+    assert _is_itanium_dtor_symbol(entry) is is_dtor

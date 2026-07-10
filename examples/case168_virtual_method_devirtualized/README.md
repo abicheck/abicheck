@@ -10,7 +10,7 @@ The trap: the exported symbol `_ZN5Codec5flushEv` **survives with an identical
 signature**, so linking and loading succeed. But `flush()` left the vtable,
 and every slot after it shifts up one position:
 
-```
+```text
 v1 vtable: [~Codec D1] [~Codec D0] [encode] [flush] [reset]
 v2 vtable: [~Codec D1] [~Codec D0] [encode] [reset]
                                              ▲
