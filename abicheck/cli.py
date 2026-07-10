@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """CLI — abicheck dump | compare | compat (dump | check)."""
-
 from __future__ import annotations
 
 import logging
@@ -39,6 +38,7 @@ from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations, echo_reconciled
 from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
+    handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
@@ -183,9 +183,7 @@ def _stamp_provenance(
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
                 snap.git_commit = result.stdout.strip()
@@ -279,16 +277,11 @@ def _write_snapshot_output(
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
-
         embed_build_source(
-            snap,
-            build_info,
-            sources,
-            build_config=build_config,
-            allow_build_query=allow_build_query,
+            snap, build_info, sources,
+            build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
-            build_query=build_query,
-            build_compile_db=build_compile_db,
+            build_query=build_query, build_compile_db=build_compile_db,
             extractor=extractor,
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
@@ -304,13 +297,11 @@ def _write_snapshot_output(
                 "see the coverage rows for details.",
                 err=True,
             )
-    # A build-emitted Flow-2 pack (--inputs) is folded straight into the dump so
-    # the plugin/wrapper flow is one command (build → dump --inputs), with no
-    # separate `merge` step. Applied after any inline --sources/--build-info embed
-    # so both sources of facts combine.
+    # A build-emitted Flow-2 pack (--inputs) folds straight into the dump — the
+    # plugin/wrapper flow in one command, no separate `merge` (after any inline
+    # --sources/--build-info embed, so both fact sources combine).
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
-
         embed_inputs_pack(snap, inputs_pack, output)
     result = snapshot_to_json(snap)
     if output:
@@ -398,253 +389,113 @@ def main() -> None:
 
 @main.command("dump")
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
-@click.option(
-    "-H",
-    "--header",
-    "headers",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Public header file or directory (repeat for multiple).",
-)
-@click.option(
-    "-I",
-    "--include",
-    "includes",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Extra include directory for castxml.",
-)
+@click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
+              help="Public header file or directory (repeat for multiple).")
+@click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
+              help="Extra include directory for castxml.")
 # ── Declaration provenance (ADR-015) ─────────────────────────────────────────
-@click.option(
-    "--public-header",
-    "public_headers",
-    multiple=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Header treated as public for provenance classification (repeat for "
-    "multiple). Declarations are tagged public/private/system in the snapshot. "
-    "Opt-in: omitting this leaves every origin UNKNOWN.",
-)
-@click.option(
-    "--public-header-dir",
-    "public_header_dirs",
-    multiple=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Directory whose headers are treated as public for provenance "
-    "classification (repeat for multiple).",
-)
-@click.option(
-    "--version",
-    "version",
-    default="unknown",
-    show_default=True,
-    help="Library version string to embed in snapshot.",
-)
+@click.option("--public-header", "public_headers", multiple=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Header treated as public for provenance classification (repeat for "
+                   "multiple). Declarations are tagged public/private/system in the snapshot. "
+                   "Opt-in: omitting this leaves every origin UNKNOWN.")
+@click.option("--public-header-dir", "public_header_dirs", multiple=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Directory whose headers are treated as public for provenance "
+                   "classification (repeat for multiple).")
+@click.option("--version", "version", default="unknown", show_default=True,
+              help="Library version string to embed in snapshot.")
 @lang_option
-@click.option(
-    "-o",
-    "--output",
-    "output",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output JSON file. Defaults to stdout.",
-)
+@click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
+              help="Output JSON file. Defaults to stdout.")
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
 # --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
 # --sysroot / --nostdinc are defined once in cli_options.compile_context_options
 # so `dump` and `scan` never drift; applied as a decorator below.
-@click.option(
-    "--pdb-path",
-    "pdb_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Explicit path to PDB file for Windows PE debug info. "
-    "Overrides automatic PDB discovery from the PE debug directory.",
-)
-@click.option(
-    "--follow-deps",
-    is_flag=True,
-    default=False,
-    help="Resolve transitive DT_NEEDED dependencies and include the full "
-    "dependency graph and symbol binding status in the snapshot. "
-    "ELF only.",
-)
-@click.option(
-    "--search-path",
-    "search_paths",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Additional directory to search for shared libraries (with --follow-deps).",
-)
-@click.option(
-    "--ld-library-path",
-    "ld_library_path",
-    default="",
-    help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
-)
-@click.option(
-    "--dwarf-only",
-    is_flag=True,
-    default=False,
-    help="Force DWARF-only mode: use DWARF debug info as the primary "
-    "data source even when headers are available. Enables type-aware "
-    "artifact checks without requiring castxml.",
-)
-@click.option(
-    "--show-data-sources",
-    is_flag=True,
-    default=False,
-    help="Preview only: print which data layers (L0-L5) are available "
-    "for the binary and exit. No snapshot is written and no "
-    "L3/L4/L5 facts are embedded — re-run without this flag "
-    "(optionally with --build-info/--sources) to produce a snapshot.",
-)
-@click.option(
-    "--debug-format",
-    "debug_format_opt",
-    type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
-    default=None,
-    help="Force the ELF debug format (auto=pick best available). "
-    "Supersedes the individual --btf/--ctf/--dwarf flags.",
-)
-@click.option(
-    "--btf",
-    "debug_format",
-    flag_value="btf",
-    default=None,
-    hidden=True,
-    help="Force BTF debug format (ELF only).",
-)
-@click.option(
-    "--ctf",
-    "debug_format",
-    flag_value="ctf",
-    hidden=True,
-    help="Force CTF debug format (ELF only).",
-)
-@click.option(
-    "--dwarf",
-    "debug_format",
-    flag_value="dwarf",
-    hidden=True,
-    help="Force DWARF debug format (ELF only).",
-)
+@click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
+              help="Explicit path to PDB file for Windows PE debug info. "
+                   "Overrides automatic PDB discovery from the PE debug directory.")
+@click.option("--follow-deps", is_flag=True, default=False,
+              help="Resolve transitive DT_NEEDED dependencies and include the full "
+                   "dependency graph and symbol binding status in the snapshot. "
+                   "ELF only.")
+@click.option("--search-path", "search_paths", multiple=True,
+              type=click.Path(exists=True, path_type=Path),
+              help="Additional directory to search for shared libraries (with --follow-deps).")
+@click.option("--ld-library-path", "ld_library_path", default="",
+              help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
+@click.option("--dwarf-only", is_flag=True, default=False,
+              help="Force DWARF-only mode: use DWARF debug info as the primary "
+                   "data source even when headers are available. Enables type-aware "
+                   "artifact checks without requiring castxml.")
+@click.option("--show-data-sources", is_flag=True, default=False,
+              help="Preview only: print which data layers (L0-L5) are available "
+                   "for the binary and exit. No snapshot is written and no "
+                   "L3/L4/L5 facts are embedded — re-run without this flag "
+                   "(optionally with --build-info/--sources) to produce a snapshot.")
+@click.option("--debug-format", "debug_format_opt",
+              type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
+              help="Force the ELF debug format (auto=pick best available). "
+                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
+@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
+              help="Force BTF debug format (ELF only).")
+@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
+              help="Force CTF debug format (ELF only).")
+@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
+              help="Force DWARF debug format (ELF only).")
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
-@click.option(
-    "-p",
-    "--build-dir",
-    "compile_db_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Build directory containing compile_commands.json, or path to the "
-    "file itself. Enables deterministic header parsing with exact build "
-    "flags. Requires -H/--header.",
-)
-@click.option(
-    "--compile-db",
-    "compile_db_path_alt",
-    type=click.Path(path_type=Path),
-    default=None,
-    hidden=True,
-    help="Explicit path to compile_commands.json (alias for -p).",
-)
-@click.option(
-    "--compile-db-filter",
-    "compile_db_filter",
-    default=None,
-    help="Glob pattern to filter compile_commands.json entries by source file "
-    "(e.g. 'src/libfoo/**'). Useful for large databases.",
-)
+@click.option("-p", "--build-dir", "compile_db_path", type=click.Path(path_type=Path), default=None,
+              help="Build directory containing compile_commands.json, or path to the "
+                   "file itself. Enables deterministic header parsing with exact build "
+                   "flags. Requires -H/--header.")
+@click.option("--compile-db", "compile_db_path_alt", type=click.Path(path_type=Path), default=None,
+              hidden=True,
+              help="Explicit path to compile_commands.json (alias for -p).")
+@click.option("--compile-db-filter", "compile_db_filter", default=None,
+              help="Glob pattern to filter compile_commands.json entries by source file "
+                   "(e.g. 'src/libfoo/**'). Useful for large databases.")
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
-@click.option(
-    "--debug-root",
-    "debug_roots",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Directory containing separate debug files (build-id trees, "
-    "path-mirror debug files, or dSYM bundles). Can be repeated.",
-)
-@click.option(
-    "--debuginfod",
-    is_flag=True,
-    default=False,
-    help="Enable debuginfod network resolution for debug info (opt-in). "
-    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.",
-)
-@click.option(
-    "--debuginfod-url",
-    "debuginfod_url",
-    default=None,
-    help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).",
-)
+@click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
+              help="Directory containing separate debug files (build-id trees, "
+                   "path-mirror debug files, or dSYM bundles). Can be repeated.")
+@click.option("--debuginfod", is_flag=True, default=False,
+              help="Enable debuginfod network resolution for debug info (opt-in). "
+                   "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
+@click.option("--debuginfod-url", "debuginfod_url", default=None,
+              help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
-@click.option(
-    "--git-tag",
-    "git_tag",
-    default=None,
-    help="Git tag to embed in the snapshot (e.g. v2.0.0).",
-)
-@click.option(
-    "--build-id",
-    "build_id",
-    default=None,
-    help="Opaque build identifier (CI run ID, build number, etc.).",
-)
-@click.option(
-    "--no-git",
-    "no_git",
-    is_flag=True,
-    default=False,
-    help="Do not auto-detect git commit SHA.",
-)
+@click.option("--git-tag", "git_tag", default=None,
+              help="Git tag to embed in the snapshot (e.g. v2.0.0).")
+@click.option("--build-id", "build_id", default=None,
+              help="Opaque build identifier (CI run ID, build number, etc.).")
+@click.option("--no-git", "no_git", is_flag=True, default=False,
+              help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
-def dump_cmd(
-    so_path: Path | None,
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    public_headers: tuple[Path, ...],
-    public_header_dirs: tuple[Path, ...],
-    version: str,
-    lang: str,
-    header_backend: str,
-    output: Path | None,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-    sysroot: Path | None,
-    nostdinc: bool,
-    pdb_path: Path | None,
-    follow_deps: bool,
-    search_paths: tuple[Path, ...],
-    ld_library_path: str,
-    dwarf_only: bool,
-    show_data_sources: bool,
-    debug_format_opt: str | None,
-    debug_format: str | None,
-    compile_db_path: Path | None,
-    compile_db_path_alt: Path | None,
-    compile_db_filter: str | None,
-    debug_roots: tuple[Path, ...],
-    debuginfod: bool,
-    debuginfod_url: str | None,
-    verbose: bool,
-    git_tag: str | None,
-    build_id: str | None,
-    no_git: bool,
-    build_info: Path | None = None,
-    sources: Path | None = None,
-    build_config: Path | None = None,
-    allow_build_query: bool = False,
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    inputs_pack: Path | None = None,
-    depth: str | None = None,
-    max_depth: bool = False,
-    _resolved_compile_context: CompileContext | None = None,
-    _resolved_collect_mode: str | None = None,
-) -> None:
+def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
+             public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
+             version: str, lang: str, header_backend: str, output: Path | None,
+             gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_option_tokens: tuple[str, ...],
+             sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
+             follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
+             dwarf_only: bool, show_data_sources: bool,
+             debug_format_opt: str | None,
+             debug_format: str | None,
+             compile_db_path: Path | None, compile_db_path_alt: Path | None,
+             compile_db_filter: str | None,
+             debug_roots: tuple[Path, ...],
+             debuginfod: bool, debuginfod_url: str | None,
+             verbose: bool,
+             git_tag: str | None, build_id: str | None, no_git: bool,
+             build_info: Path | None = None, sources: Path | None = None,
+             build_config: Path | None = None, allow_build_query: bool = False,
+             build_query: str | None = None, build_compile_db: str | None = None,
+             inputs_pack: Path | None = None,
+             depth: str | None = None, max_depth: bool = False,
+             _resolved_compile_context: CompileContext | None = None,
+             _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -661,9 +512,7 @@ def dump_cmd(
     # from a config source.method, where --depth is None) and hands it over via
     # the private _resolved_collect_mode hook so we don't re-derive a different
     # default here (Codex review).
-    if (
-        _resolved_collect_mode is not None
-    ):  # pragma: no cover - only via compare's inline embed (integration)
+    if _resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
         collect_mode = _resolved_collect_mode
     else:
         collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
@@ -689,15 +538,14 @@ def dump_cmd(
     if (
         depth_requested
         and collect_mode != "off"
-        and sources is None
-        and build_info is None
+        and sources is None and build_info is None
         and inputs_pack is None
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "
             "--sources/--build-info/--inputs was given; the snapshot will carry "
-            "only L0-L2 data (no build/source/graph facts). Pass --sources, "
-            "--build-info, or --inputs, or use --depth headers for an L2-only dump.",
+            "only L0-L2 data. Pass --sources/--build-info/--inputs, or --depth "
+            "headers for an L2-only dump.",
             err=True,
         )
 
@@ -710,33 +558,15 @@ def dump_cmd(
             )
         if inputs_pack is not None:
             raise click.UsageError(
-                "--inputs folds a build-emitted pack against a binary's exports, so "
-                "it needs SO_PATH. For a source-only baseline from a pack, use "
-                "`abicheck merge <pack>/ <other>` instead."
+                "--inputs folds a pack against a binary's exports, so it needs "
+                "SO_PATH. For a source-only baseline, use `abicheck merge` instead."
             )
         from .cli_buildsource import dump_source_only
-
-        dump_source_only(
-            sources,
-            build_info,
-            version,
-            output,
-            build_config,
-            allow_build_query,
-            git_tag,
-            build_id,
-            no_git,
-            collect_mode,
-            build_query=build_query,
-            build_compile_db=build_compile_db,
-            extractor=header_backend,
-        )
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
-    effective_compile_db = resolve_dump_compile_db(
-        compile_db_path, compile_db_path_alt, headers
-    )
+    effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
 
     # --show-data-sources: diagnostic output and exit
     if show_data_sources:
@@ -775,68 +605,36 @@ def dump_cmd(
     else:
         _cc, includes = resolve_compile_context(
             click.get_current_context(),
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            header_backend=header_backend,
-            includes=includes,
-            build_config=build_config,
-            sources=sources,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+            header_backend=header_backend, includes=includes,
+            build_config=build_config, sources=sources,
         )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
-    gcc_option_tokens, sysroot, nostdinc = (
-        _cc.gcc_option_tokens,
-        _cc.sysroot,
-        _cc.nostdinc,
-    )
+    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
 
     if binary_fmt in ("pe", "macho"):
-        _handle_non_elf_dump(
-            so_path,
-            binary_fmt,
-            headers,
-            includes,
-            version,
-            lang,
-            pdb_path,
-            follow_deps,
-            git_tag,
-            build_id,
-            no_git,
-            output,
-            public_headers,
-            public_header_dirs,
-            build_info,
-            sources,
-            build_config,
-            allow_build_query,
-            collect_mode,
-            build_query,
-            build_compile_db,
-            header_backend=header_backend,
-            compile_context=_cc,
+        handle_non_elf_dump(
+            so_path, binary_fmt, headers, includes, version, lang, pdb_path,
+            follow_deps, git_tag, build_id, no_git, output,
+            _stamp_provenance, _write_snapshot_output,
+            public_headers, public_header_dirs, build_info, sources, build_config,
+            allow_build_query, collect_mode, build_query, build_compile_db,
+            header_backend=header_backend, compile_context=_cc,
             inputs_pack=inputs_pack,
         )
         return
 
     build_context_flags = _resolve_build_context_flags(
-        effective_compile_db,
-        headers,
-        compile_db_filter,
+        effective_compile_db, headers, compile_db_filter,
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Debug artifact resolution (ADR-021a): resolve before dump
     if debug_roots or debuginfod:
         artifact = _resolve_debug_artifact(
-            so_path,
-            debug_roots,
-            debuginfod,
-            debuginfod_url,
+            so_path, debug_roots, debuginfod, debuginfod_url,
         )
         if artifact:
             click.echo(f"Debug info: {artifact.source}", err=True)
@@ -883,71 +681,6 @@ def dump_cmd(
     )
 
 
-def _handle_non_elf_dump(
-    so_path: Path,
-    binary_fmt: str,
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    version: str,
-    lang: str,
-    pdb_path: Path | None,
-    follow_deps: bool,
-    git_tag: str | None,
-    build_id: str | None,
-    no_git: bool,
-    output: Path | None,
-    public_headers: tuple[Path, ...] = (),
-    public_header_dirs: tuple[Path, ...] = (),
-    build_info: Path | None = None,
-    sources: Path | None = None,
-    build_config: Path | None = None,
-    allow_build_query: bool = False,
-    collect_mode: str = "source-target",
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    header_backend: str = "auto",
-    compile_context: CompileContext | None = None,
-    inputs_pack: Path | None = None,
-) -> None:
-    """Handle PE/Mach-O native dump path and output writing."""
-    if follow_deps:
-        click.echo(
-            "Warning: --follow-deps is only supported for ELF binaries.", err=True
-        )
-    try:
-        snap = _dump_native_binary(
-            so_path,
-            binary_fmt,
-            list(headers),
-            list(includes),
-            version,
-            lang,
-            pdb_path=pdb_path,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-            header_backend=header_backend,
-            compile=compile_context,
-        )
-    except click.ClickException:
-        raise
-    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(
-        snap,
-        output,
-        build_info,
-        sources,
-        build_config,
-        allow_build_query,
-        collect_mode,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        extractor=header_backend,
-        inputs_pack=inputs_pack,
-    )
-
-
 def _resolve_debug_artifact(
     so_path: Path,
     debug_roots: tuple[Path, ...],
@@ -966,15 +699,12 @@ def _resolve_debug_artifact(
 
 
 def _validate_show_only(
-    ctx: click.Context,
-    param: click.Parameter,
-    value: str | None,
+    ctx: click.Context, param: click.Parameter, value: str | None,
 ) -> str | None:
     """Eagerly validate --show-only tokens so invalid ones surface early."""
     if value is None:
         return None
     from .reporter import ShowOnlyFilter
-
     try:
         ShowOnlyFilter.parse(value)
     except ValueError as exc:
@@ -999,26 +729,18 @@ def _render_output(
 ) -> str:
     """Render comparison result in the requested output format."""
     from .service import render_output
-
     return render_output(
-        fmt,
-        result,
-        old,
-        new,
-        follow_deps=follow_deps,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        stat=stat,
-        severity_config=severity_config,
+        fmt, result, old, new,
+        follow_deps=follow_deps, show_only=show_only,
+        report_mode=report_mode, show_impact=show_impact,
+        stat=stat, severity_config=severity_config,
         show_recommendation=show_recommendation,
         demangle=demangle,
     )
 
 
 def _load_probe_matrix_changes(
-    probe_matrix_old: Path | None,
-    probe_matrix_new: Path | None,
+    probe_matrix_old: Path | None, probe_matrix_new: Path | None,
 ) -> list[Change] | None:
     """Load build-config matrix snapshots and return diff_matrix() findings.
 
@@ -1048,11 +770,7 @@ def _load_probe_matrix_changes(
 def _warn_all_suppressed(result: DiffResult) -> None:
     """Warn if a suppression file swallowed all changes."""
     total_changes = len(result.changes) + result.suppressed_count
-    if (
-        result.suppression_file_provided
-        and total_changes > 0
-        and len(result.changes) == 0
-    ):
+    if result.suppression_file_provided and total_changes > 0 and len(result.changes) == 0:
         click.echo(
             "Warning: all ABI changes were suppressed by the suppression file. "
             "Verify your suppression rules are not too broad.",
@@ -1125,9 +843,7 @@ def _write_or_echo(output: Path | None, text: str) -> None:
 
 def _announce_exit_scheme(
     scheme: str,
-    *,
-    fmt: str = "markdown",
-    stat: bool = False,
+    *, fmt: str = "markdown", stat: bool = False,
 ) -> None:
     """Announce (on stderr) which exit-code scheme the compare command uses.
 
@@ -1155,13 +871,10 @@ def _announce_exit_scheme(
 
 
 def _exit_with_severity_or_verdict(
-    result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme."""
     from .severity import compute_exit_code, legacy_exit_code
-
     if scheme == "severity":
         assert sev_config is not None
         eff_sets = result._effective_kind_sets()
@@ -1181,12 +894,9 @@ def _exit_with_severity_or_verdict(
 
 
 def _log_one_side_debug(
-    label: str,
-    binary: Path,
-    droots: list[Path],
+    label: str, binary: Path, droots: list[Path],
     *,
-    debuginfod: bool,
-    debuginfod_url: str | None,
+    debuginfod: bool, debuginfod_url: str | None,
 ) -> None:
     """Resolve and log debug info for a single binary side, if applicable."""
     if _detect_binary_format(binary) is None or not (droots or debuginfod):
@@ -1204,42 +914,29 @@ def _log_one_side_debug(
 
 
 def _log_debug_resolution(
-    old_input: Path,
-    new_input: Path,
-    resolved_old_debug: list[Path],
-    resolved_new_debug: list[Path],
+    old_input: Path, new_input: Path,
+    resolved_old_debug: list[Path], resolved_new_debug: list[Path],
     *,
-    debuginfod: bool,
-    debuginfod_url: str | None,
+    debuginfod: bool, debuginfod_url: str | None,
 ) -> None:
     """Resolve and log per-side debug info (debug roots / debuginfod), if any."""
     if not (resolved_old_debug or resolved_new_debug or debuginfod):
         return
     _log_one_side_debug(
-        "old",
-        old_input,
-        resolved_old_debug,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
+        "old", old_input, resolved_old_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
     )
     _log_one_side_debug(
-        "new",
-        new_input,
-        resolved_new_debug,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
+        "new", new_input, resolved_new_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
     )
 
 
 def _finalize_compare_result(
-    result: DiffResult,
-    old_input: Path,
-    new_input: Path,
+    result: DiffResult, old_input: Path, new_input: Path,
     *,
-    show_redundant: bool,
-    show_filtered: bool,
-    annotate: bool,
-    annotate_additions: bool,
+    show_redundant: bool, show_filtered: bool,
+    annotate: bool, annotate_additions: bool,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression/annotation output."""
     result.old_metadata = _collect_metadata(old_input)
@@ -1505,259 +1202,142 @@ def _embed_inline_source_side(
 @two_sided_input_options
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
 @lang_option
-@click.option(
-    "--old-ast-frontend",
-    "old_header_backend",
-    default=None,
-    type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-    help="C/C++ AST frontend for the old side only (overrides "
-    "--ast-frontend for old). Use when the old release parses on "
-    "castxml but the new one needs clang (or vice versa).",
-)
-@click.option(
-    "--new-ast-frontend",
-    "new_header_backend",
-    default=None,
-    type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-    help="C/C++ AST frontend for the new side only (overrides --ast-frontend for new).",
-)
+@click.option("--old-ast-frontend", "old_header_backend",
+              default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="C/C++ AST frontend for the old side only (overrides "
+                   "--ast-frontend for old). Use when the old release parses on "
+                   "castxml but the new one needs clang (or vice versa).")
+@click.option("--new-ast-frontend", "new_header_backend",
+              default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="C/C++ AST frontend for the new side only (overrides "
+                   "--ast-frontend for new).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
     format_help="Output format. 'review' emits a compact GitHub-facing digest "
-    "(verdict + counts + release recommendation + manual-review banner) "
-    "suitable for a job summary or PR comment.",
+                "(verdict + counts + release recommendation + manual-review banner) "
+                "suitable for a job summary or PR comment.",
 )
-@click.option(
-    "--demangle/--no-demangle",
-    default=None,
-    help="Demangle C++ symbol names in markdown/review output (default "
-    "ON; use --no-demangle to turn off). json/sarif always keep raw "
-    "mangled names, and HTML is rendered structurally and is never "
-    "demangled regardless of this flag.",
-)
+@click.option("--demangle/--no-demangle", default=None,
+              help="Demangle C++ symbol names in markdown/review output (default "
+                   "ON; use --no-demangle to turn off). json/sarif always keep raw "
+                   "mangled names, and HTML is rendered structurally and is never "
+                   "demangled regardless of this flag.")
 # Policy + suppression family (ADR-037 D3); strict/justification stay inline.
 @policy_options
-@click.option(
-    "--strict-suppressions",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Fail with exit code 1 if any suppression rule has expired "
-    "(config: suppression.strict). Demoted to config (ADR-037 D4).",
-)
-@click.option(
-    "--require-justification",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Require every suppression rule to have a non-empty 'reason' "
-    "field (config: suppression.require_justification). Demoted to "
-    "config (ADR-037 D4).",
-)
-@click.option(
-    "--pdb-path",
-    "pdb_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
-    "Overrides automatic PDB discovery.",
-)
-@click.option(
-    "--old-pdb-path",
-    "old_pdb_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="PDB file path for old side only (overrides --pdb-path for old).",
-)
-@click.option(
-    "--new-pdb-path",
-    "new_pdb_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="PDB file path for new side only (overrides --pdb-path for new).",
-)
+@click.option("--strict-suppressions", is_flag=True, default=False, hidden=True,
+              help="Fail with exit code 1 if any suppression rule has expired "
+                   "(config: suppression.strict). Demoted to config (ADR-037 D4).")
+@click.option("--require-justification", is_flag=True, default=False, hidden=True,
+              help="Require every suppression rule to have a non-empty 'reason' "
+                   "field (config: suppression.require_justification). Demoted to "
+                   "config (ADR-037 D4).")
+@click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
+              help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
+                   "Overrides automatic PDB discovery.")
+@click.option("--old-pdb-path", "old_pdb_path", type=click.Path(path_type=Path), default=None,
+              help="PDB file path for old side only (overrides --pdb-path for old).")
+@click.option("--new-pdb-path", "new_pdb_path", type=click.Path(path_type=Path), default=None,
+              help="PDB file path for new side only (overrides --pdb-path for new).")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
-@click.option(
-    "--config",
-    "config",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
-    "nearest .abicheck.yml found from the current directory upward. "
-    "Supplies stable project settings (severity map, scope/FP "
-    "tuning, suppression policy, exit-code scheme); CLI flags "
-    "override it.",
-)
-@click.option(
-    "--exit-code-scheme",
-    "exit_code_scheme",
-    type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
-    default=None,
-    help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
-    "'severity' (per-category error levels), or 'auto' (severity "
-    "when a severity setting is in effect, else legacy). Declared "
-    "explicitly here so passing --severity-* no longer silently "
-    "changes the scheme. Default: config's exit_code_scheme, else auto.",
-)
-@click.option(
-    "--follow-deps",
-    is_flag=True,
-    default=False,
-    help="Resolve transitive dependencies for both old and new, compute symbol "
-    "bindings, and include a dependency-change section in the report. ELF only.",
-)
-@click.option(
-    "--search-path",
-    "search_paths",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Additional directory to search for shared libraries (with --follow-deps).",
-)
-@click.option(
-    "--ld-library-path",
-    "ld_library_path",
-    default="",
-    help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
-)
-@click.option(
-    "--show-redundant",
-    is_flag=True,
-    default=False,
-    help="Disable redundancy filtering and show all changes including those "
-    "derived from root type changes.",
-)
+@click.option("--config", "config", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
+                   "nearest .abicheck.yml found from the current directory upward. "
+                   "Supplies stable project settings (severity map, scope/FP "
+                   "tuning, suppression policy, exit-code scheme); CLI flags "
+                   "override it.")
+@click.option("--exit-code-scheme", "exit_code_scheme",
+              type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
+              default=None,
+              help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
+                   "'severity' (per-category error levels), or 'auto' (severity "
+                   "when a severity setting is in effect, else legacy). Declared "
+                   "explicitly here so passing --severity-* no longer silently "
+                   "changes the scheme. Default: config's exit_code_scheme, else auto.")
+@click.option("--follow-deps", is_flag=True, default=False,
+              help="Resolve transitive dependencies for both old and new, compute symbol "
+                   "bindings, and include a dependency-change section in the report. ELF only.")
+@click.option("--search-path", "search_paths", multiple=True,
+              type=click.Path(exists=True, path_type=Path),
+              help="Additional directory to search for shared libraries (with --follow-deps).")
+@click.option("--ld-library-path", "ld_library_path", default="",
+              help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
+@click.option("--show-redundant", is_flag=True, default=False,
+              help="Disable redundancy filtering and show all changes including those "
+                   "derived from root type changes.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
-@click.option(
-    "--collapse-versioned-symbols",
-    "collapse_versioned_symbols",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
-    "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
-    "reclassify those version-rename pairs as compatible so the verdict "
-    "reflects the real delta, not the rename churn. A real SONAME bump and "
-    "non-versioned removals still drive the verdict. Demoted to config "
-    "(scope.collapse_versioned_symbols, ADR-037 D4).",
-)
-@click.option(
-    "--show-filtered",
-    "show_filtered",
-    is_flag=True,
-    default=False,
-    help="List findings excluded by --scope-public-headers (audit trail).",
-)
-@click.option(
-    "--public-symbol",
-    "public_symbols",
-    multiple=True,
-    hidden=True,
-    help="Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled "
-    "name) into the public surface even when header provenance can't see it "
-    '(asm stubs, .def exports, extern "C" shims, MSVC-mangling gaps). '
-    "Repeatable. Only meaningful with --scope-public-headers. Demoted to "
-    "config (scope.public_symbols, ADR-037 D4).",
-)
-@click.option(
-    "--public-symbols-list",
-    "public_symbols_list",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    hidden=True,
-    help="File of symbols to force public (one per line; '#' comments and blank "
-    "lines ignored), à la abi-compliance-checker -symbols-list. "
-    "Merged with --public-symbol and scope.public_symbols (ADR-037 D4).",
-)
-@click.option(
-    "--post-manifest",
-    "post_manifest_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Scope the comparison to a POST Python export manifest's committed ABI "
-    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
-    "private __pp_* kernel churn and other non-committed exports are demoted "
-    "to the filtered ledger (see --show-filtered).",
-)
-@click.option(
-    "--probe-matrix-old",
-    "probe_matrix_old",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
-    "When given with --probe-matrix-new, build-config findings "
-    "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
-    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
-    "verdict and report (G2: probe -> compare).",
-)
-@click.option(
-    "--probe-matrix-new",
-    "probe_matrix_new",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).",
-)
-@click.option(
-    "--show-only",
-    "show_only",
-    default=None,
-    callback=_validate_show_only,
-    expose_value=True,
-    is_eager=False,
-    help="Comma-separated filter tokens to limit displayed changes. "
-    "Severity: breaking, api-break, risk, compatible. "
-    "Element: functions, variables, types, enums, elf. "
-    "Action: added, removed, changed. "
-    "AND across dimensions, OR within. Does not affect exit codes.",
-)
-@click.option(
-    "--stat",
-    is_flag=True,
-    default=False,
-    help="One-line summary output for CI gates. "
-    "With --format json, emits only the summary object.",
-)
-@click.option(
-    "--report-mode",
-    "report_mode",
-    type=click.Choice(["full", "leaf", "impact"], case_sensitive=True),
-    default="full",
-    show_default=True,
-    help="Report mode: 'full' lists all changes individually (default), "
-    "'leaf' groups by root type changes with impact lists, "
-    "'impact' behaves as 'full' with the impact summary table enabled "
-    "(equivalent to --report-mode full --show-impact).",
-)
-@click.option(
-    "--show-impact",
-    is_flag=True,
-    default=False,
-    help="Append an impact summary table showing root changes and affected interfaces.",
-)
-@click.option(
-    "--recommend",
-    is_flag=True,
-    default=False,
-    help="Append a release recommendation (semver bump + SONAME action) to the "
-    "report. Always present in --format json under 'release_recommendation'.",
-)
-@click.option(
-    "--annotate",
-    is_flag=True,
-    default=False,
-    help="Emit GitHub Actions workflow command annotations to stderr. "
-    "Annotations appear as inline comments on PR diffs. "
-    "Only effective when GITHUB_ACTIONS=true.",
-)
-@click.option(
-    "--annotate-additions",
-    is_flag=True,
-    default=False,
-    help="Include additions/compatible changes as ::notice annotations "
-    "(requires --annotate).",
-)
+@click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
+              hidden=True,
+              help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
+                   "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
+                   "reclassify those version-rename pairs as compatible so the verdict "
+                   "reflects the real delta, not the rename churn. A real SONAME bump and "
+                   "non-versioned removals still drive the verdict. Demoted to config "
+                   "(scope.collapse_versioned_symbols, ADR-037 D4).")
+@click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
+              help="List findings excluded by --scope-public-headers (audit trail).")
+@click.option("--public-symbol", "public_symbols", multiple=True, hidden=True,
+              help="Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled "
+                   "name) into the public surface even when header provenance can't see it "
+                   "(asm stubs, .def exports, extern \"C\" shims, MSVC-mangling gaps). "
+                   "Repeatable. Only meaningful with --scope-public-headers. Demoted to "
+                   "config (scope.public_symbols, ADR-037 D4).")
+@click.option("--public-symbols-list", "public_symbols_list",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              hidden=True,
+              help="File of symbols to force public (one per line; '#' comments and blank "
+                   "lines ignored), à la abi-compliance-checker -symbols-list. "
+                   "Merged with --public-symbol and scope.public_symbols (ADR-037 D4).")
+@click.option("--post-manifest", "post_manifest_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="Scope the comparison to a POST Python export manifest's committed ABI "
+                   "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
+                   "private __pp_* kernel churn and other non-committed exports are demoted "
+                   "to the filtered ledger (see --show-filtered).")
+@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
+                   "When given with --probe-matrix-new, build-config findings "
+                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
+                   "verdict and report (G2: probe -> compare).")
+@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
+@click.option("--show-only", "show_only", default=None,
+              callback=_validate_show_only, expose_value=True, is_eager=False,
+              help="Comma-separated filter tokens to limit displayed changes. "
+                   "Severity: breaking, api-break, risk, compatible. "
+                   "Element: functions, variables, types, enums, elf. "
+                   "Action: added, removed, changed. "
+                   "AND across dimensions, OR within. Does not affect exit codes.")
+@click.option("--stat", is_flag=True, default=False,
+              help="One-line summary output for CI gates. "
+                   "With --format json, emits only the summary object.")
+@click.option("--report-mode", "report_mode",
+              type=click.Choice(["full", "leaf", "impact"], case_sensitive=True),
+              default="full", show_default=True,
+              help="Report mode: 'full' lists all changes individually (default), "
+                   "'leaf' groups by root type changes with impact lists, "
+                   "'impact' behaves as 'full' with the impact summary table enabled "
+                   "(equivalent to --report-mode full --show-impact).")
+@click.option("--show-impact", is_flag=True, default=False,
+              help="Append an impact summary table showing root changes and affected interfaces.")
+@click.option("--recommend", is_flag=True, default=False,
+              help="Append a release recommendation (semver bump + SONAME action) to the "
+                   "report. Always present in --format json under 'release_recommendation'.")
+@click.option("--annotate", is_flag=True, default=False,
+              help="Emit GitHub Actions workflow command annotations to stderr. "
+                   "Annotations appear as inline comments on PR diffs. "
+                   "Only effective when GITHUB_ACTIONS=true.")
+@click.option("--annotate-additions", is_flag=True, default=False,
+              help="Include additions/compatible changes as ::notice annotations "
+                   "(requires --annotate).")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
@@ -1765,65 +1345,36 @@ def _embed_inline_source_side(
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
-@click.option(
-    "--reconcile-build-context",
-    is_flag=True,
-    default=False,
-    help="Clear context-free header-parse false positives using the build's "
-    "active preprocessor defines (ADR-039): a conditional field's phantom "
-    "add/remove/size change the build proves never happened is moved to an "
-    "audit bucket instead of the verdict. No-op unless snapshots carry "
-    "build_context_defines + per-field guards.",
-)
+@click.option("--reconcile-build-context", is_flag=True, default=False,
+              help="Clear context-free header-parse false positives using the build's "
+                   "active preprocessor defines (ADR-039): a conditional field's phantom "
+                   "add/remove/size change the build proves never happened is moved to an "
+                   "audit bucket instead of the verdict. No-op unless snapshots carry "
+                   "build_context_defines + per-field guards.")
 @verbose_option
 @click.pass_context
 def compare_cmd(
     ctx: click.Context,
-    old_input: Path,
-    new_input: Path,
-    jobs: int,
-    dso_only: bool,
-    output_dir: Path | None,
+    old_input: Path, new_input: Path,
+    jobs: int, dso_only: bool, output_dir: Path | None,
     fail_on_removed: bool,
-    debug_info1: Path | None,
-    debug_info2: Path | None,
-    devel_pkg1: Path | None,
-    devel_pkg2: Path | None,
-    include_private_dso: bool,
-    keep_extracted: bool,
-    manifest_path: Path | None,
-    bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...],
-    no_bundle_analysis: bool,
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    lang: str,
+    debug_info1: Path | None, debug_info2: Path | None,
+    devel_pkg1: Path | None, devel_pkg2: Path | None,
+    include_private_dso: bool, keep_extracted: bool,
+    manifest_path: Path | None, bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
+    headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-    sysroot: Path | None,
-    nostdinc: bool,
-    old_header_backend: str | None,
-    new_header_backend: str | None,
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...],
-    new_includes_only: tuple[Path, ...],
-    old_version: str,
-    new_version: str,
-    fmt: str,
-    demangle: bool | None,
-    output: Path | None,
-    suppress: Path | None,
-    strict_suppressions: bool,
-    require_justification: bool,
-    policy: str,
-    policy_file_path: Path | None,
-    pdb_path: Path | None,
-    old_pdb_path: Path | None,
-    new_pdb_path: Path | None,
+    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
+    old_header_backend: str | None, new_header_backend: str | None,
+    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
+    old_version: str, new_version: str,
+    fmt: str, demangle: bool | None, output: Path | None,
+    suppress: Path | None, strict_suppressions: bool, require_justification: bool,
+    policy: str, policy_file_path: Path | None,
+    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
     dwarf_only: bool,
     severity_preset: str | None,
     severity_abi_breaking: str | None,
@@ -1832,20 +1383,12 @@ def compare_cmd(
     severity_addition: str | None,
     config: Path | None,
     exit_code_scheme: str | None,
-    follow_deps: bool,
-    search_paths: tuple[Path, ...],
-    ld_library_path: str,
-    show_redundant: bool,
-    show_only: str | None,
-    stat: bool,
-    scope_public_headers: bool,
-    collapse_versioned_symbols: bool,
-    show_filtered: bool,
-    public_symbols: tuple[str, ...],
-    public_symbols_list: Path | None,
+    follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
+    show_redundant: bool, show_only: str | None, stat: bool,
+    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
+    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     post_manifest_path: Path | None,
-    report_mode: str,
-    show_impact: bool,
+    report_mode: str, show_impact: bool,
     recommend: bool,
     debug_format_opt: str | None,
     debug_format: str | None,
@@ -1862,12 +1405,9 @@ def compare_cmd(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     verbose: bool,
-    old_build_info: Path | None = None,
-    new_build_info: Path | None = None,
-    old_sources: Path | None = None,
-    new_sources: Path | None = None,
-    depth: str | None = None,
-    max_depth: bool = False,
+    old_build_info: Path | None = None, new_build_info: Path | None = None,
+    old_sources: Path | None = None, new_sources: Path | None = None,
+    depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
 ) -> None:
@@ -1956,9 +1496,7 @@ def compare_cmd(
         ),
         cli_public_symbols=public_symbols,
         cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
-        cli_require_justification=_cli_flag(
-            "require_justification", require_justification
-        ),
+        cli_require_justification=_cli_flag("require_justification", require_justification),
         cli_exit_code_scheme=exit_code_scheme,
     )
     sev_config = resolved_cfg.severity
@@ -2012,38 +1550,23 @@ def compare_cmd(
         _reject_evidence_flags_for_set_inputs(ctx)
         _dispatch_release_compare(
             ctx,
-            old_dir=old_input,
-            new_dir=new_input,
-            headers=headers,
-            includes=includes,
-            old_headers_only=old_headers_only,
-            new_headers_only=new_headers_only,
-            old_includes_only=old_includes_only,
-            new_includes_only=new_includes_only,
-            old_version=old_version,
-            new_version=new_version,
-            lang=lang,
-            fmt=fmt,
-            output=output,
-            output_dir=output_dir,
-            suppress=suppress,
-            strict_suppressions=strict_suppressions,
+            old_dir=old_input, new_dir=new_input,
+            headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_includes_only=old_includes_only, new_includes_only=new_includes_only,
+            old_version=old_version, new_version=new_version, lang=lang,
+            fmt=fmt, output=output, output_dir=output_dir,
+            suppress=suppress, strict_suppressions=strict_suppressions,
             require_justification=require_justification,
-            policy=policy,
-            policy_file_path=policy_file_path,
-            dso_only=dso_only,
-            jobs=jobs,
+            policy=policy, policy_file_path=policy_file_path,
+            dso_only=dso_only, jobs=jobs,
             fail_on_removed=fail_on_removed,
-            debug_info1=debug_info1,
-            debug_info2=debug_info2,
-            devel_pkg1=devel_pkg1,
-            devel_pkg2=devel_pkg2,
-            include_private_dso=include_private_dso,
-            keep_extracted=keep_extracted,
+            debug_info1=debug_info1, debug_info2=debug_info2,
+            devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
+            include_private_dso=include_private_dso, keep_extracted=keep_extracted,
             manifest_path=manifest_path,
             bundle_system_providers=bundle_system_providers,
-            bundle_cohorts=bundle_cohorts,
-            no_bundle_analysis=no_bundle_analysis,
+            bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
             scope_public_headers=scope_public_headers,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
@@ -2051,10 +1574,8 @@ def compare_cmd(
             severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
             severity_addition=resolved_cfg.merged_severity_addition,
             release_exit_code_scheme=resolved_cfg.exit_code_scheme,
-            probe_matrix_old=probe_matrix_old,
-            probe_matrix_new=probe_matrix_new,
-            annotate=annotate,
-            annotate_additions=annotate_additions,
+            probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
+            annotate=annotate, annotate_additions=annotate_additions,
             verbose=verbose,
         )
         return
@@ -2081,9 +1602,7 @@ def compare_cmd(
     # an explicit "auto" returns to auto-detection (None) even if a legacy flag
     # is also present; only when the selector is absent do the legacy flags apply.
     if debug_format_opt is not None:
-        effective_debug_format = (
-            None if debug_format_opt.lower() == "auto" else debug_format_opt
-        )
+        effective_debug_format = None if debug_format_opt.lower() == "auto" else debug_format_opt
     else:
         effective_debug_format = debug_format
 
@@ -2103,13 +1622,14 @@ def compare_cmd(
     # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
     # collection depth only when the user gave no explicit --depth/--max signal
     # (CLI > config).
-    if resolved_cfg.source_method and depth is None and not max_depth:
+    if (
+        resolved_cfg.source_method
+        and depth is None
+        and not max_depth
+    ):
         from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
-
         try:
-            collect_mode = method_to_collect_mode(
-                SourceMethod(resolved_cfg.source_method)
-            )
+            collect_mode = method_to_collect_mode(SourceMethod(resolved_cfg.source_method))
         except ValueError:
             raise click.UsageError(
                 f"source.method in .abicheck.yml is invalid: "
@@ -2127,22 +1647,16 @@ def compare_cmd(
 
     compile_context, merged_includes = resolve_compile_context(
         ctx,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        header_backend=header_backend,
-        includes=includes,
-        build_config=cfg_path,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes, build_config=cfg_path,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
     # override (which replaces the both-sides -I for that side). Keep them separate
     # and re-append after per-side resolution rather than folding into the shared
     # tuple, else the overridden side would lose them (Codex review).
-    config_includes = tuple(merged_includes[len(includes) :])
+    config_includes = tuple(merged_includes[len(includes):])
     # The merged frontend flows to both sides through the explicit header_backend
     # (so --old/new-ast-frontend can still override per side); neutralize the
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
@@ -2152,12 +1666,8 @@ def compare_cmd(
     side_compile_context = dataclasses.replace(compile_context, frontend="auto")
 
     old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
-        headers,
-        includes,
-        old_headers_only,
-        new_headers_only,
-        old_includes_only,
-        new_includes_only,
+        headers, includes, old_headers_only, new_headers_only,
+        old_includes_only, new_includes_only,
     )
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
@@ -2200,13 +1710,8 @@ def compare_cmd(
         # inline dump or _resolve_compare_snapshots raises before we return.
         ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
         old_input, old_sources, old_build_info = _embed_inline_source_side(
-            ctx,
-            input_path=old_input,
-            sources=old_sources,
-            headers=old_h,
-            includes=old_inc,
-            version=old_version,
-            lang=lang,
+            ctx, input_path=old_input, sources=old_sources,
+            headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or old_header_backend is not None,
@@ -2216,38 +1721,25 @@ def compare_cmd(
             # preserving.
             nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=old_build_info,
-            follow_deps=follow_deps,
-            search_paths=search_paths,
+            follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only,
-            debug_format=effective_debug_format,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=old_pdb_path or pdb_path,
-            collect_mode=collect_mode,
-            out_dir=Path(_src_tmp),
-            label="old",
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
-            ctx,
-            input_path=new_input,
-            sources=new_sources,
-            headers=new_h,
-            includes=new_inc,
-            version=new_version,
-            lang=lang,
+            ctx, input_path=new_input, sources=new_sources,
+            headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or new_header_backend is not None,
             nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=new_build_info,
-            follow_deps=follow_deps,
-            search_paths=search_paths,
+            follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only,
-            debug_format=effective_debug_format,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=new_pdb_path or pdb_path,
-            collect_mode=collect_mode,
-            out_dir=Path(_src_tmp),
-            label="new",
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
@@ -2266,48 +1758,28 @@ def compare_cmd(
                     f"for ELF binaries, but the {side} input is {bfmt.upper()}."
                 )
     _warn_ignored_flags(
-        old_fmt is not None,
-        new_fmt is not None,
-        headers,
-        includes,
-        old_headers_only,
-        new_headers_only,
-        old_includes_only,
-        new_includes_only,
+        old_fmt is not None, new_fmt is not None,
+        headers, includes,
+        old_headers_only, new_headers_only,
+        old_includes_only, new_includes_only,
     )
 
     # Resolve per-side debug roots: --debug-root1 overrides --debug-root for old, etc.
     resolved_old_debug = list(debug_roots_old) if debug_roots_old else list(debug_roots)
     resolved_new_debug = list(debug_roots_new) if debug_roots_new else list(debug_roots)
     _log_debug_resolution(
-        old_input,
-        new_input,
-        resolved_old_debug,
-        resolved_new_debug,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
+        old_input, new_input,
+        resolved_old_debug, resolved_new_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
     )
 
     old, new = _resolve_compare_snapshots(
-        old_input,
-        new_input,
-        old_fmt,
-        new_fmt,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_version,
-        new_version,
-        lang,
-        pdb_path,
-        old_pdb_path,
-        new_pdb_path,
-        dwarf_only,
-        effective_debug_format,
-        follow_deps,
-        search_paths,
-        ld_library_path,
+        old_input, new_input, old_fmt, new_fmt,
+        old_h, new_h, old_inc, new_inc,
+        old_version, new_version, lang,
+        pdb_path, old_pdb_path, new_pdb_path,
+        dwarf_only, effective_debug_format,
+        follow_deps, search_paths, ld_library_path,
         header_backend=header_backend,
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
@@ -2315,9 +1787,7 @@ def compare_cmd(
     )
 
     suppression, pf = _load_suppression_and_policy(
-        suppress,
-        policy,
-        policy_file_path,
+        suppress, policy, policy_file_path,
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
@@ -2337,17 +1807,10 @@ def compare_cmd(
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
-
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
-            old,
-            new,
-            collect_mode,
-            extra_changes,
-            old_build_info,
-            new_build_info,
-            old_sources,
-            new_sources,
+            old, new, collect_mode, extra_changes,
+            old_build_info, new_build_info, old_sources, new_sources,
             policy_file=pf,
         )
     )
@@ -2363,9 +1826,7 @@ def compare_cmd(
         try:
             manifest = load_manifest(post_manifest_path)
         except (ValueError, OSError) as exc:
-            raise click.UsageError(
-                f"--post-manifest {post_manifest_path}: {exc}"
-            ) from exc
+            raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
         # Union with the binaries' committed (pp_*) exports so a *removed* wrapper
         # — absent from a new manifest — stays in-surface instead of being
         # silently demoted (its symbol still lives in the old snapshot).
@@ -2373,17 +1834,12 @@ def compare_cmd(
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     from .service import compare_snapshots, load_env_matrix
-
     try:
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
     result = compare_snapshots(
-        old,
-        new,
-        suppression=suppression,
-        policy=policy,
-        policy_file=pf,
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
         env_matrix=env_matrix,
         scope_to_public_surface=scope_public_headers,
         force_public_symbols=force_public,
@@ -2404,28 +1860,17 @@ def compare_cmd(
         echo_pattern_modulations(result)
 
     _finalize_compare_result(
-        result,
-        old_input,
-        new_input,
-        show_redundant=show_redundant,
-        show_filtered=show_filtered,
-        annotate=annotate,
-        annotate_additions=annotate_additions,
+        result, old_input, new_input,
+        show_redundant=show_redundant, show_filtered=show_filtered,
+        annotate=annotate, annotate_additions=annotate_additions,
     )
 
     text = _render_output(
-        fmt,
-        result,
-        old,
-        new,
+        fmt, result, old, new,
         follow_deps=follow_deps,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        stat=stat,
-        severity_config=sev_config
-        if resolved_cfg.exit_code_scheme == "severity"
-        else None,
+        show_only=show_only, report_mode=report_mode,
+        show_impact=show_impact, stat=stat,
+        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_recommendation=recommend,
         demangle=demangle,
     )
@@ -2448,7 +1893,6 @@ def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
     this only scopes which optional evidence a CI job should collect.
     """
     from .buildsource.source_replay import recommend_collect_mode
-
     click.echo(recommend_collect_mode(paths))
 
 

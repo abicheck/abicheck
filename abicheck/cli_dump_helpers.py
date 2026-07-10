@@ -28,6 +28,7 @@ from .errors import AbicheckError
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
 
 
 class _ExpandHeaderInputs(Protocol):
@@ -197,6 +198,65 @@ def resolve_dump_compile_db(
             "Without headers, CastXML has nothing to parse."
         )
     return effective_compile_db
+
+
+def handle_non_elf_dump(
+    so_path: Path,
+    binary_fmt: str,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    version: str,
+    lang: str,
+    pdb_path: Path | None,
+    follow_deps: bool,
+    git_tag: str | None,
+    build_id: str | None,
+    no_git: bool,
+    output: Path | None,
+    stamp_provenance: _StampProvenance,
+    write_snapshot_output: _WriteSnapshotOutput,
+    public_headers: tuple[Path, ...] = (),
+    public_header_dirs: tuple[Path, ...] = (),
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    allow_build_query: bool = False,
+    collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    header_backend: str = "auto",
+    compile_context: CompileContext | None = None,
+    inputs_pack: Path | None = None,
+) -> None:
+    """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
+
+    ``stamp_provenance``/``write_snapshot_output`` are passed in from cli.py (same
+    import-cycle avoidance as ``perform_elf_dump``); ``_dump_native_binary`` is
+    imported lazily for the same reason.
+    """
+    from .cli_resolve import _dump_native_binary
+
+    if follow_deps:
+        click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
+    try:
+        snap = _dump_native_binary(
+            so_path, binary_fmt, list(headers), list(includes), version, lang,
+            pdb_path=pdb_path,
+            public_headers=list(public_headers),
+            public_header_dirs=list(public_header_dirs),
+            header_backend=header_backend,
+            compile=compile_context,
+        )
+    except click.ClickException:
+        raise
+    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    write_snapshot_output(
+        snap, output, build_info, sources, build_config, allow_build_query,
+        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend, inputs_pack=inputs_pack,
+    )
 
 
 def perform_elf_dump(

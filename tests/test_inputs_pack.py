@@ -260,6 +260,27 @@ def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None
     assert surface.coverage.get("unmatched_symbols", 1) == 0
 
 
+def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
+    # The dump CLI seam: _write_snapshot_output(..., inputs_pack=pack) folds the
+    # pack and serializes an embedded build_source (single-artifact UX), so a plain
+    # `dump <binary> --inputs pack/` needs no follow-up merge.
+    import json
+
+    from abicheck.cli import _write_snapshot_output
+    from abicheck.model import AbiSnapshot, Function
+
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    out = tmp_path / "baseline.json"
+    _write_snapshot_output(snap, out, inputs_pack=pack)
+
+    d = json.loads(out.read_text())
+    assert "build_source" in d, "embedded L3/L4/L5 facts should ride inline"
+    cov = d["build_source"]["source_abi"]["coverage"]
+    assert cov.get("matched_symbols", 0) >= 1
+
+
 def test_ingest_reads_compile_db_into_l3(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,

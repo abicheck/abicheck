@@ -870,6 +870,13 @@ def test_mangled_internal_linkage_marker() -> None:
     # Length-prefix parsing: an `L` that is the last char of a *source name*
     # (namespace `detailL`) must NOT be read as the linkage marker.
     assert not internal("_ZN7detailL8g_globalE")
+    # Bail-safe branches (all treated as external so a real export is never
+    # dropped): a non-Itanium name, a nested name with cv-qualifiers before the
+    # marker, an exotic/unparseable production, and a malformed length prefix.
+    assert not internal("plain_c_symbol")
+    assert internal("_ZNK2nsL7g_constE")  # cv-qualified nested, still internal
+    assert not internal("_Z1fIiEvv")  # template production -> bail to external
+    assert not internal("_ZN999999999999")  # malformed length -> bail to external
 
 
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:
