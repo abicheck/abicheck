@@ -60,8 +60,11 @@ _MIN_FRACTION = 0.6
 #: mangled symbols to count as the library-wide version stamp.
 _TOKEN_MAJORITY = 0.5
 
-_REMOVED_KINDS = (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY,
-                  ChangeKind.VAR_REMOVED)
+_REMOVED_KINDS = (
+    ChangeKind.FUNC_REMOVED,
+    ChangeKind.FUNC_REMOVED_ELF_ONLY,
+    ChangeKind.VAR_REMOVED,
+)
 _ADDED_KINDS = (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED)
 
 
@@ -132,32 +135,13 @@ def _scheme_key(name: str, tokens: tuple[str, str] | None) -> str | None:
     return _cpp_key(_cpp_key(dem, r_tok), a_tok)
 
 
-def analyze_versioned_scheme(changes: list[Change]) -> tuple[Change | None, list[Change]]:
-    """Analyze removed/added churn for a versioned-symbol scheme.
-
-    Handles two shapes: the **C-style** suffix (``u_strlen_75``→``u_strlen_78``,
-    blunt digit collapse) and the **mangled C++ inline-namespace** stamp
-    (``icu_75::``→``icu_78::``, found via demangling + a dominant-token majority).
-
-    Returns ``(advisory, matched)`` where *advisory* is the single
-    ``versioned_symbol_scheme_detected`` finding (or ``None``) and *matched* is
-    the removed **and** added ``Change`` objects forming the version-rename pairs
-    — the inputs the opt-in collapse preset reclassifies as compatible. Pure
-    except for an optional batched demangle of mangled candidates.
-    """
-    from .checker_types import Change
-
-    all_removed = [c for c in changes if c.kind in _REMOVED_KINDS]
-    all_added = [c for c in changes if c.kind in _ADDED_KINDS]
-    likely_n = sum(1 for c in changes if c.kind is ChangeKind.FUNC_LIKELY_RENAMED)
-    # Nothing to work with unless removed↔added pairing or rename findings could
-    # plausibly reach the floor.
-    if (len(all_removed) < _MIN_PAIRS or not all_added) and likely_n < _MIN_PAIRS:
-        return None, []
-
-    tokens = _cpp_tokens(all_removed, all_added)
-
-    # Pair removed↔added (funcs and vars) by their side-agnostic version key.
+def _match_removed_to_added(
+    all_removed: list[Change],
+    all_added: list[Change],
+    tokens: tuple[str, str] | None,
+) -> tuple[list[Change], list[Change], int]:
+    """Pair removed↔added (funcs and vars) by their side-agnostic version key;
+    return ``(matched_removed, matched_added, eligible_removed_count)``."""
     added_by_key: dict[str, list[Change]] = {}
     for a in all_added:
         k = _scheme_key(a.symbol, tokens)
@@ -181,7 +165,13 @@ def analyze_versioned_scheme(changes: list[Change]) -> tuple[Change | None, list
             if id(a) not in seen_added:
                 seen_added.add(id(a))
                 matched_added.append(a)
+    return matched_removed, matched_added, eligible
 
+
+def _match_version_renames(
+    changes: list[Change], tokens: tuple[str, str] | None
+) -> list[Change]:
+    """Collect ``func_likely_renamed`` findings that are version-renames under the scheme."""
     # func_likely_renamed already encodes a pair (old_value→new_value); collapse
     # the ones that are version-renames under the same scheme.
     matched_renamed: list[Change] = []
@@ -191,13 +181,14 @@ def analyze_versioned_scheme(changes: list[Change]) -> tuple[Change | None, list
             kn = _scheme_key(c.new_value, tokens)
             if ko is not None and ko == kn and c.old_value != c.new_value:
                 matched_renamed.append(c)
+    return matched_renamed
 
-    pairs = len(matched_removed) + len(matched_renamed)
-    eligible += len(matched_renamed)
-    if pairs < _MIN_PAIRS or eligible == 0 or pairs < _MIN_FRACTION * eligible:
-        return None, []
 
-    advisory = Change(
+def _build_scheme_advisory(pairs: int, eligible: int) -> Change:
+    """Build the single ``versioned_symbol_scheme_detected`` advisory finding."""
+    from .checker_types import Change
+
+    return Change(
         kind=ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
         symbol="<library>",
         description=(
@@ -210,6 +201,44 @@ def analyze_versioned_scheme(changes: list[Change]) -> tuple[Change | None, list
         old_value=f"{eligible} versioned symbols",
         new_value=f"{pairs} version-renamed",
     )
+
+
+def analyze_versioned_scheme(
+    changes: list[Change],
+) -> tuple[Change | None, list[Change]]:
+    """Analyze removed/added churn for a versioned-symbol scheme.
+
+    Handles two shapes: the **C-style** suffix (``u_strlen_75``→``u_strlen_78``,
+    blunt digit collapse) and the **mangled C++ inline-namespace** stamp
+    (``icu_75::``→``icu_78::``, found via demangling + a dominant-token majority).
+
+    Returns ``(advisory, matched)`` where *advisory* is the single
+    ``versioned_symbol_scheme_detected`` finding (or ``None``) and *matched* is
+    the removed **and** added ``Change`` objects forming the version-rename pairs
+    — the inputs the opt-in collapse preset reclassifies as compatible. Pure
+    except for an optional batched demangle of mangled candidates.
+    """
+    all_removed = [c for c in changes if c.kind in _REMOVED_KINDS]
+    all_added = [c for c in changes if c.kind in _ADDED_KINDS]
+    likely_n = sum(1 for c in changes if c.kind is ChangeKind.FUNC_LIKELY_RENAMED)
+    # Nothing to work with unless removed↔added pairing or rename findings could
+    # plausibly reach the floor.
+    if (len(all_removed) < _MIN_PAIRS or not all_added) and likely_n < _MIN_PAIRS:
+        return None, []
+
+    tokens = _cpp_tokens(all_removed, all_added)
+
+    matched_removed, matched_added, eligible = _match_removed_to_added(
+        all_removed, all_added, tokens
+    )
+    matched_renamed = _match_version_renames(changes, tokens)
+
+    pairs = len(matched_removed) + len(matched_renamed)
+    eligible += len(matched_renamed)
+    if pairs < _MIN_PAIRS or eligible == 0 or pairs < _MIN_FRACTION * eligible:
+        return None, []
+
+    advisory = _build_scheme_advisory(pairs, eligible)
     return advisory, matched_removed + matched_added + matched_renamed
 
 
