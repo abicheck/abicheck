@@ -891,6 +891,61 @@ def test_mangled_internal_linkage_marker() -> None:
     assert not internal("_ZN999999999999")  # malformed length -> bail to external
 
 
+def test_top_level_const_detection() -> None:
+    from abicheck.buildsource.source_extractors.clang import (
+        _is_top_level_const as tlc,
+    )
+
+    # top-level const objects (internal at namespace scope)
+    assert tlc("const int")
+    assert tlc("const ns::Foo")
+    assert tlc("int *const")
+    assert tlc("const char *const")
+    assert tlc("const int &")  # reference stripped, underlying const
+    # NOT top-level const (external): pointer/array to const, or plain
+    assert not tlc("const char *")
+    assert not tlc("const int[4]")
+    assert not tlc("int")
+    assert not tlc("ns::Foo *")
+
+
+def test_msvc_mangled_namespace_const_is_not_a_variable() -> None:
+    # A namespace-scope `const int c = 1` under clang-cl mangles as
+    # `?c@ns@@3HB` with no `L` marker and no storageClass — internal linkage that
+    # the Itanium marker cannot see. The MSVC/type fallback must drop it so it does
+    # not populate decls_without_symbol (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "mangledName": "?c@ns@@3HB",
+                        "type": {"qualType": "const int"},
+                    },
+                    # a non-const MSVC global stays external -> variable
+                    {
+                        "kind": "VarDecl",
+                        "name": "g",
+                        "loc": {"line": 3},
+                        "mangledName": "?g@ns@@3HA",
+                        "type": {"qualType": "int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == {"ns::g"}, got  # the internal const `c` is dropped
+
+
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:
     # A1 acceptance (gap G4): the eval reported `reachable_declarations: 0` /
     # `reachable_types: 0` on real C++ libs because the source surface came back

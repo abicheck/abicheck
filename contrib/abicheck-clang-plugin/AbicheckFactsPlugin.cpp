@@ -733,6 +733,28 @@ bool mangledHasInternalLinkage(const std::string &m) {
   return false;
 }
 
+// Port of clang.py::_is_top_level_const: true when a type spelling is
+// const-qualified at the top level (`const int`, `int *const`, `ns::Foo const`),
+// which at namespace scope without `extern` gives internal linkage in C++.
+// Pointer/reference-to-const (`const char *`) is NOT top-level const.
+bool isTopLevelConst(const std::string &qual) {
+  std::string q = qual;
+  size_t b = q.find_first_not_of(" \t");
+  size_t e = q.find_last_not_of(" \t");
+  q = (b == std::string::npos) ? "" : q.substr(b, e - b + 1);
+  while (!q.empty() && q.back() == '&')
+    q.pop_back();
+  b = q.find_first_not_of(" \t");
+  e = q.find_last_not_of(" \t");
+  q = (b == std::string::npos) ? "" : q.substr(b, e - b + 1);
+  const std::string kConst = "const";
+  if (q.size() >= kConst.size() &&
+      q.compare(q.size() - kConst.size(), kConst.size(), kConst) == 0)
+    return true;
+  return q.rfind("const ", 0) == 0 && q.find('*') == std::string::npos &&
+         q.find('[') == std::string::npos;
+}
+
 // clang.py::_signature over JSON: the node's type.qualType.
 std::string qualTypeFromJson(const Object &o) {
   if (const Object *t = o.getObject("type"))
@@ -1710,6 +1732,13 @@ public:
     // external (its lexical parent is a record), so keep it.
     if (vd->getStorageClass() == SC_Static &&
         !isa<CXXRecordDecl>(vd->getLexicalDeclContext()))
+      return true;
+    // MSVC / clang-cl mangling (`?name@...`) carries no Itanium internal-linkage
+    // marker, so a namespace-scope top-level `const` without `extern` (internal
+    // in C++) would slip through. Fall back to the type-based language rule
+    // (Codex review); mirrors clang.py's `_is_top_level_const` branch.
+    if (mangled.rfind("?", 0) == 0 && vd->getStorageClass() != SC_Extern &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()) && isTopLevelConst(sig))
       return true;
     std::string key = mangled.empty() ? name : mangled;
     Entity e;

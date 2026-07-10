@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import click
 
@@ -28,7 +28,6 @@ from .errors import AbicheckError
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
-    from .service_scan import CompileContext
 
 
 class _ExpandHeaderInputs(Protocol):
@@ -225,14 +224,17 @@ def handle_non_elf_dump(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     header_backend: str = "auto",
-    compile_context: CompileContext | None = None,
+    compile_context: Any = None,
     inputs_pack: Path | None = None,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
     ``stamp_provenance``/``write_snapshot_output`` are passed in from cli.py (same
     import-cycle avoidance as ``perform_elf_dump``); ``_dump_native_binary`` is
-    imported lazily for the same reason.
+    imported lazily for the same reason. ``compile_context`` is typed ``Any``
+    rather than ``CompileContext`` on purpose: a static import of the latter would
+    add a ``cli_dump_helpers → service_scan`` edge that closes the
+    ``cli → cli_dump_helpers → service_scan → cli_scan → cli`` import cycle.
     """
     from .cli_resolve import _dump_native_binary
 

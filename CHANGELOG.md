@@ -28,8 +28,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `source_binary_provenance_mismatch`: a C++ namespace/file-scope `static`, a
   namespace-scope `const` without `extern`, or an anonymous-namespace variable by
   their Itanium mangled linkage encoding (the `L` seniority marker or a
-  `_GLOBAL__N_` component), plus a C / `extern "C"` file-scope `static` (which
-  clang gives no mangled name) by an explicit storage-class filter; a `static`
+  `_GLOBAL__N_` component), a C / `extern "C"` file-scope `static` (which clang
+  gives no mangled name) by an explicit storage-class filter, and an
+  MSVC / clang-cl namespace-scope top-level `const` without `extern` (whose
+  `?…` mangling carries no Itanium marker) by a type-based fallback; a `static`
   data member stays external. `constexpr` keeps its own path. The
   `CLANG_EXTRACTOR_VERSION` bump (0.5→0.6) invalidates stale `--cache-dir` dumps
   that predate the `variables` field. The C.6

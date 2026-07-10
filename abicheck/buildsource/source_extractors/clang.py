@@ -1022,6 +1022,21 @@ def _mangled_has_internal_linkage(mangled: str) -> bool:
     return False
 
 
+def _is_top_level_const(qual: str) -> bool:
+    """Return ``True`` when a type spelling is const-qualified at the top level.
+
+    Top-level const (``const int``, ``ns::Foo const``, ``int *const``) marks the
+    *object* itself const — which at namespace scope without ``extern`` gives
+    internal linkage in C++. Pointer/reference-to-const (``const char *``) is NOT
+    top-level const (the pointer object is mutable, external), so it is excluded:
+    a leading ``const`` only counts when the type is not a pointer/array.
+    """
+    q = qual.strip().rstrip("&").strip()
+    if q.endswith("const"):  # e.g. ``int *const`` / ``ns::Foo const``
+        return True
+    return q.startswith("const ") and "*" not in q and "[" not in q
+
+
 def _is_variable_node(
     kind: str | None,
     name: str,
@@ -1054,12 +1069,25 @@ def _is_variable_node(
         return False
     if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
         return False
-    if _mangled_has_internal_linkage(_mangled(node)):
+    mangled = _mangled(node)
+    if _mangled_has_internal_linkage(mangled):
         return False
     # C / extern "C" file-scope static: no mangled name carries the marker, so
     # filter on storageClass directly. A static data member is external, so keep
     # it (its enclosing kind is a record).
     if node.get("storageClass") == "static" and enclosing_kind != "CXXRecordDecl":
+        return False
+    # MSVC / clang-cl mangling (`?name@...`) has no Itanium internal-linkage
+    # marker, so a namespace-scope top-level `const` without `extern` — internal
+    # linkage in C++ — would slip through the marker check. Fall back to the
+    # language rule from the type (Codex review). A static data member is
+    # external (enclosing record), and `extern` overrides, so both are excluded.
+    if (
+        mangled.startswith("?")
+        and enclosing_kind != "CXXRecordDecl"
+        and node.get("storageClass") != "extern"
+        and _is_top_level_const(_signature(node))
+    ):
         return False
     return True
 
