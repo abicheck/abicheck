@@ -474,6 +474,7 @@ def _run_abicheck_dump_compare(
         return ToolResult(verdict="SKIP")
 
     bdir = BUILD_DIR / case
+    bdir.mkdir(parents=True, exist_ok=True)
     snap1 = bdir / f"snap{suffix}_v1.json"
     snap2 = bdir / f"snap{suffix}_v2.json"
     _t_start = time.monotonic()
@@ -1290,7 +1291,7 @@ def _resolve_selected_tools(args: Any) -> set[str]:
     use_compat = not args.skip_compat
 
     selected: set[str] = set(args.tools or [
-        "abicheck", "abicheck_compat", "abicheck_strict",
+        "abicheck", "abicheck_full", "abicheck_compat", "abicheck_strict",
         "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml",
     ])
 
