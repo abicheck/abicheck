@@ -283,6 +283,7 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     assert targets == [f"{case}_v1", f"{case}_v2"]
     merges = [cmd for cmd in commands if "merge" in cmd]
     assert len(merges) == 2
+    assert merges[0][1:3] == ["-m", "abicheck"]
     assert "abicheck_inputs_v1" in " ".join(merges[0])
     assert "abicheck_inputs_v2" in " ".join(merges[1])
     assert not any("--sources" in cmd for cmd in commands)
