@@ -867,7 +867,15 @@ def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
         _bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0, stdout='{"actions":[]}')
     )
     merged, ext = BuildEvidence(), []
-    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    # Stub `which` so the test is hermetic: without it, a host that lacks a
+    # real `bazel` on PATH short-circuits to status "skipped" before the
+    # (mocked) query ever runs, and the test flips green/red by environment.
+    assert (
+        run_inferred_build_query(
+            tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+        )
+        is None
+    )
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "partial"  # no CppCompile actions
 
