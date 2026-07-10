@@ -213,51 +213,81 @@ using llvm::json::Array;
 using llvm::json::Object;
 using llvm::json::Value;
 
+// Append the \uXXXX escape (lowercase hex) for a single BMP code unit, matching
+// the CPython json encoder's ensure_ascii output.
+void appendJsonU(std::string &out, uint32_t cp) {
+  char b[8];
+  std::snprintf(b, sizeof(b), "\\u%04x", cp);
+  out += b;
+}
+
+// json.dumps escaping of one ASCII byte (c < 0x80): the six short escapes, a
+// \uXXXX for the remaining control chars, else the literal byte. Returns false
+// for a non-ASCII lead byte (c >= 0x80), which the caller decodes as UTF-8.
+bool appendPyStrAscii(std::string &out, unsigned char c) {
+  switch (c) {
+  case '"': out += "\\\""; return true;
+  case '\\': out += "\\\\"; return true;
+  case '\n': out += "\\n"; return true;
+  case '\r': out += "\\r"; return true;
+  case '\t': out += "\\t"; return true;
+  case '\b': out += "\\b"; return true;
+  case '\f': out += "\\f"; return true;
+  default: break;
+  }
+  if (c < 0x20) { appendJsonU(out, c); return true; }
+  if (c < 0x80) { out.push_back(static_cast<char>(c)); return true; }
+  return false;
+}
+
+// Decode the UTF-8 sequence starting at s[i]; on success set cp (the code point)
+// and len (bytes consumed) and return true. Returns false for an invalid lead
+// byte, a truncated sequence, or a bad continuation byte, leaving the caller to
+// emit the raw byte as a \uXX escape.
+bool decodeUtf8(llvm::StringRef s, size_t i, uint32_t &cp, int &len) {
+  unsigned char c = static_cast<unsigned char>(s[i]);
+  int extra = 0;
+  if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
+  else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+  else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+  else return false;
+  if (i + extra >= s.size()) return false;
+  for (int k = 1; k <= extra; k++) {
+    unsigned char cc = static_cast<unsigned char>(s[i + k]);
+    if ((cc & 0xC0) != 0x80) return false;
+    cp = (cp << 6) | (cc & 0x3F);
+  }
+  len = extra + 1;
+  return true;
+}
+
+// Emit a decoded code point as ensure_ascii \uXXXX escapes, using a UTF-16
+// surrogate pair for astral (> 0xFFFF) code points, matching CPython's encoder.
+void appendPyStrCodepoint(std::string &out, uint32_t cp) {
+  if (cp <= 0xFFFF) {
+    appendJsonU(out, cp);
+  } else {
+    cp -= 0x10000;
+    appendJsonU(out, 0xD800 + (cp >> 10));
+    appendJsonU(out, 0xDC00 + (cp & 0x3FF));
+  }
+}
+
 // json.dumps of a Python str: quoted, ensure_ascii=True (non-ASCII → \uXXXX,
 // with surrogate pairs for astral code points), lowercase hex — matching the
 // CPython json encoder defaults clang.py relies on.
 std::string pyStr(llvm::StringRef s) {
   std::string out = "\"";
   size_t i = 0, n = s.size();
-  auto emitU = [&](uint32_t cp) {
-    char b[8];
-    std::snprintf(b, sizeof(b), "\\u%04x", cp);
-    out += b;
-  };
   while (i < n) {
     unsigned char c = static_cast<unsigned char>(s[i]);
-    if (c == '"') { out += "\\\""; i++; continue; }
-    if (c == '\\') { out += "\\\\"; i++; continue; }
-    if (c == '\n') { out += "\\n"; i++; continue; }
-    if (c == '\r') { out += "\\r"; i++; continue; }
-    if (c == '\t') { out += "\\t"; i++; continue; }
-    if (c == '\b') { out += "\\b"; i++; continue; }
-    if (c == '\f') { out += "\\f"; i++; continue; }
-    if (c < 0x20) { emitU(c); i++; continue; }
-    if (c < 0x80) { out.push_back(static_cast<char>(c)); i++; continue; }
+    if (appendPyStrAscii(out, c)) { i++; continue; }
     // Decode a UTF-8 sequence to a code point and emit \uXXXX (ensure_ascii).
     uint32_t cp = 0;
-    int extra = 0;
-    if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
-    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
-    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
-    else { emitU(c); i++; continue; }
-    if (i + extra >= n) { emitU(c); i++; continue; }
-    bool ok = true;
-    for (int k = 1; k <= extra; k++) {
-      unsigned char cc = static_cast<unsigned char>(s[i + k]);
-      if ((cc & 0xC0) != 0x80) { ok = false; break; }
-      cp = (cp << 6) | (cc & 0x3F);
-    }
-    if (!ok) { emitU(c); i++; continue; }
-    i += extra + 1;
-    if (cp <= 0xFFFF) {
-      emitU(cp);
-    } else {
-      cp -= 0x10000;
-      emitU(0xD800 + (cp >> 10));
-      emitU(0xDC00 + (cp & 0x3FF));
-    }
+    int len = 0;
+    if (!decodeUtf8(s, i, cp, len)) { appendJsonU(out, c); i++; continue; }
+    appendPyStrCodepoint(out, cp);
+    i += len;
   }
   out += "\"";
   return out;
@@ -283,6 +313,51 @@ std::string pyFloat(double d) {
   return s;
 }
 
+std::string pyDumps(const Value &v); // recursive; used by the helpers below
+
+// Serialize an already-serialized {key: value} map as json.dumps would with
+// sort_keys=True and the default (', ', ': ') separators. The map is std::map,
+// so its keys are already in sorted (ASCII) order. Shared by pyDumps's object
+// case and the canonical serializer.
+std::string joinSortedObject(const std::map<std::string, std::string> &kv) {
+  std::string out = "{";
+  bool first = true;
+  for (auto &e : kv) {
+    if (!first) out += ", ";
+    first = false;
+    out += pyStr(e.first) + ": " + e.second;
+  }
+  return out + "}";
+}
+
+// json.dumps of a JSON number: an int verbatim, else a uint64 above
+// int64_t::max verbatim (getAsInteger rejects it), else a float via pyFloat.
+std::string pyDumpsNumber(const Value &v) {
+  if (auto i = v.getAsInteger())
+    return std::to_string(*i);
+  if (auto u = v.getAsUINT64())
+    return std::to_string(*u);
+  return pyFloat(*v.getAsNumber());
+}
+
+std::string pyDumpsArray(const Array &a) {
+  std::string out = "[";
+  bool first = true;
+  for (const Value &e : a) {
+    if (!first) out += ", ";
+    first = false;
+    out += pyDumps(e);
+  }
+  return out + "]";
+}
+
+std::string pyDumpsObject(const Object &obj) {
+  std::map<std::string, std::string> kv;
+  for (const auto &kvp : obj)
+    kv[llvm::StringRef(kvp.first).str()] = pyDumps(kvp.second);
+  return joinSortedObject(kv);
+}
+
 // json.dumps of an arbitrary JSON value with sort_keys=True and the default
 // (', ', ': ') separators — used to copy a scalar `value` verbatim inside the
 // canonical form.
@@ -293,38 +368,13 @@ std::string pyDumps(const Value &v) {
   case Value::Boolean:
     return *v.getAsBoolean() ? "true" : "false";
   case Value::Number:
-    if (auto i = v.getAsInteger())
-      return std::to_string(*i);
-    // A JSON number above int64_t::max is stored as uint64 and rejected by
-    // getAsInteger; render it exactly before falling back to float.
-    if (auto u = v.getAsUINT64())
-      return std::to_string(*u);
-    return pyFloat(*v.getAsNumber());
+    return pyDumpsNumber(v);
   case Value::String:
     return pyStr(*v.getAsString());
-  case Value::Array: {
-    std::string out = "[";
-    bool first = true;
-    for (const Value &e : *v.getAsArray()) {
-      if (!first) out += ", ";
-      first = false;
-      out += pyDumps(e);
-    }
-    return out + "]";
-  }
-  case Value::Object: {
-    std::map<std::string, std::string> kv;
-    for (const auto &kvp : *v.getAsObject())
-      kv[llvm::StringRef(kvp.first).str()] = pyDumps(kvp.second);
-    std::string out = "{";
-    bool first = true;
-    for (auto &e : kv) {
-      if (!first) out += ", ";
-      first = false;
-      out += pyStr(e.first) + ": " + e.second;
-    }
-    return out + "}";
-  }
+  case Value::Array:
+    return pyDumpsArray(*v.getAsArray());
+  case Value::Object:
+    return pyDumpsObject(*v.getAsObject());
   }
   return "null";
 }
@@ -428,72 +478,96 @@ const std::set<std::string> &commutativeOps() {
   return ops;
 }
 
-// Port of clang.py::_canonical → json.dumps(..., sort_keys=True) as one string.
-std::string canonical(const Value &node, const llvm::StringMap<std::string> &amap) {
-  const Object *o = node.getAsObject();
-  if (!o)
-    return pyDumps(node);
+std::string canonical(const Value &node,
+                      const llvm::StringMap<std::string> &amap); // recursive
 
-  std::map<std::string, std::string> kv; // std::map keeps keys sorted (ASCII)
-  std::optional<std::string> placeholder;
-  if (auto id = o->getString("id")) {
+// The node's own alpha-rename placeholder ($0, $1, …), if its `id` is a renamed
+// local binding; std::nullopt otherwise.
+std::optional<std::string>
+canonicalPlaceholder(const Object &o, const llvm::StringMap<std::string> &amap) {
+  if (auto id = o.getString("id")) {
     auto it = amap.find(*id);
     if (it != amap.end())
-      placeholder = it->second;
+      return it->second;
   }
+  return std::nullopt;
+}
+
+// The scalar/copy-through keys of a canonical node — kind/name/value/opcode/
+// castKind (with `name` replaced by the node's rename placeholder when it is a
+// renamed local) plus the flattened type.qualType.
+void canonicalScalarKeys(const Object &o,
+                         const std::optional<std::string> &placeholder,
+                         std::map<std::string, std::string> &kv) {
   for (const char *key : {"kind", "name", "value", "opcode", "castKind"}) {
-    if (const Value *v = o->get(key)) {
+    if (const Value *v = o.get(key)) {
       if (std::strcmp(key, "name") == 0 && placeholder)
         kv[key] = pyStr(*placeholder);
       else
         kv[key] = pyDumps(*v);
     }
   }
-  if (const Object *t = o->getObject("type"))
+  if (const Object *t = o.getObject("type"))
     if (auto q = t->getString("qualType"))
       kv["type"] = pyStr(*q);
-  if (const Object *ref = o->getObject("referencedDecl")) {
-    std::optional<std::string> refph;
-    if (auto rid = ref->getString("id")) {
-      auto it = amap.find(*rid);
-      if (it != amap.end())
-        refph = it->second;
-    }
-    if (refph)
-      kv["ref"] = pyStr(*refph);
-    else if (auto rn = ref->getString("name"); rn && !rn->empty())
-      kv["ref"] = pyStr(*rn);
-  }
-  if (const Array *inner = o->getArray("inner")) {
-    std::vector<std::string> children;
-    children.reserve(inner->size());
-    for (const Value &c : *inner)
-      children.push_back(canonical(c, amap));
-    // Commutative-operator normalization: sort the two operands of a
-    // commutative binary operator by their canonical serialization.
-    auto kind = o->getString("kind");
-    auto op = o->getString("opcode");
-    if (kind && *kind == "BinaryOperator" && op &&
-        commutativeOps().count(op->str()) && children.size() == 2)
-      std::sort(children.begin(), children.end());
-    std::string arr = "[";
-    for (size_t i = 0; i < children.size(); ++i) {
-      if (i) arr += ", ";
-      arr += children[i];
-    }
-    arr += "]";
-    kv["inner"] = arr;
-  }
+}
 
-  std::string out = "{";
-  bool first = true;
-  for (auto &e : kv) {
-    if (!first) out += ", ";
-    first = false;
-    out += pyStr(e.first) + ": " + e.second;
+// The already-serialized "ref" value for a node's referencedDecl: its
+// alpha-rename placeholder when the referenced id is a renamed local, else the
+// referenced decl's own (non-empty) name. std::nullopt when there is no ref.
+std::optional<std::string>
+canonicalRef(const Object &o, const llvm::StringMap<std::string> &amap) {
+  const Object *ref = o.getObject("referencedDecl");
+  if (!ref)
+    return std::nullopt;
+  if (auto rid = ref->getString("id")) {
+    auto it = amap.find(*rid);
+    if (it != amap.end())
+      return pyStr(it->second);
   }
-  out += "}";
-  return out;
+  if (auto rn = ref->getString("name"); rn && !rn->empty())
+    return pyStr(*rn);
+  return std::nullopt;
+}
+
+// The serialized `inner` array of a canonical node: each child canonicalized,
+// with the two operands of a commutative binary operator sorted by their
+// canonical serialization so operand order does not affect the hash.
+std::string canonicalInner(const Object &o, const Array &inner,
+                           const llvm::StringMap<std::string> &amap) {
+  std::vector<std::string> children;
+  children.reserve(inner.size());
+  for (const Value &c : inner)
+    children.push_back(canonical(c, amap));
+  auto kind = o.getString("kind");
+  auto op = o.getString("opcode");
+  if (kind && *kind == "BinaryOperator" && op &&
+      commutativeOps().count(op->str()) && children.size() == 2)
+    std::sort(children.begin(), children.end());
+  std::string arr = "[";
+  for (size_t i = 0; i < children.size(); ++i) {
+    if (i) arr += ", ";
+    arr += children[i];
+  }
+  arr += "]";
+  return arr;
+}
+
+// Port of clang.py::_canonical → json.dumps(..., sort_keys=True) as one string.
+std::string canonical(const Value &node,
+                      const llvm::StringMap<std::string> &amap) {
+  const Object *o = node.getAsObject();
+  if (!o)
+    return pyDumps(node);
+
+  std::map<std::string, std::string> kv; // std::map keeps keys sorted (ASCII)
+  std::optional<std::string> placeholder = canonicalPlaceholder(*o, amap);
+  canonicalScalarKeys(*o, placeholder, kv);
+  if (std::optional<std::string> ref = canonicalRef(*o, amap))
+    kv["ref"] = *ref;
+  if (const Array *inner = o->getArray("inner"))
+    kv["inner"] = canonicalInner(*o, *inner, amap);
+  return joinSortedObject(kv);
 }
 
 std::string subtreeHash(const Value &node, llvm::ArrayRef<std::string> paramIds) {
@@ -676,6 +750,20 @@ std::optional<Value> dumpDeclJson(const Decl *d) {
     return std::nullopt;
   }
   return std::move(*parsed);
+}
+
+// clang.py::_emit_type skips a type node whose JSON dump carries no `inner`
+// array — a forward declaration, or an empty enum with no enumerators. (An
+// empty struct still has implicit members in the JSON, so it is kept, mirroring
+// the backend.) Returns true when the node should be emitted. An absent dump
+// (json == nullopt) is treated as emittable — best-effort: type_hash then falls
+// back to empty and the caller records a diagnostic.
+bool jsonTypeHasMembers(const std::optional<Value> &json) {
+  if (!json)
+    return true;
+  const Object *o = json->getAsObject();
+  const Array *inner = o ? o->getArray("inner") : nullptr;
+  return inner && !inner->empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,15 +1582,8 @@ private:
     if (!classify(td, file, origin, visibility))
       return;
     std::optional<Value> json = dumpDeclJson(td);
-    if (json) {
-      const Object *o = json->getAsObject();
-      const Array *inner = o ? o->getArray("inner") : nullptr;
-      // clang.py::_emit_type skips a type node without `inner` (a forward decl,
-      // or an empty enum with no enumerators). An empty struct still has
-      // implicit members in the JSON, so it is kept — mirroring the backend.
-      if (!inner || inner->empty())
-        return;
-    }
+    if (!jsonTypeHasMembers(json))
+      return;
     Entity e;
     e.id = H({"type", name});
     e.kind = kind;
@@ -1641,45 +1722,66 @@ public:
 
     std::vector<Entity> macros = collectMacros(diags);
 
-    // Public-roots inference note (ADR-038 Flow C, Caveat A): when no explicit
-    // `public-roots=` was given, the roots were auto-derived from the compile's
-    // -I/-iquote include dirs. Record that per-TU (forensic) and tell the operator
-    // once — the inferred surface can be slightly broad, so an explicit
-    // public-roots= is the precise scoping knob. Not an error: a populated (broad)
-    // surface beats the silent empty pack the missing flag used to produce.
-    if (InferredRootCount > 0) {
-      std::string roots;
-      for (const std::string &r : Roots)
-        roots += (roots.empty() ? "" : ", ") + r;
-      std::string msg =
-          "abicheck-facts: no public-roots given; inferred " +
-          std::to_string(InferredRootCount) +
-          " public root(s) from the compile's -I/-iquote include dirs [" + roots +
-          "]. Pass public-roots=<dir> to scope the public surface precisely.";
-      diags.insert(msg);
-      if (claimFirstInferenceNote())
-        llvm::errs() << msg << "\n";
-    }
+    emitInferenceNote(diags);
 
-    // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
-    // but this TU emitted zero public entities *while* header-declared decls were
-    // rejected for not being under any root, public-roots may not match how the
-    // compiler resolves the public headers (e.g. it points at the installed
-    // `include/` while `-I..` makes `<pvxs/x.h>` resolve to `src/pvxs/`).
-    // Previously this produced an empty pack with exit 0 and no message.
-    //
-    // This signal is necessarily per-TU: an internal-implementation-only TU that
-    // includes a private header and defines nothing public trips the same
-    // condition even with correct roots — the plugin cannot see whether *other*
-    // TUs produced public facts (it runs once per compile). To keep the "fail
-    // loud" signal credible without crying wolf on every internal TU under `-j`,
-    // the human-facing stderr line is emitted **once per output pack** (a
-    // deterministic misconfiguration shows it on the first TU); the accurate
-    // per-TU note is still recorded in this TU's pack `diagnostics` as forensic
-    // data. A whole build whose pack ends up empty is the real confirmation.
     size_t publicCount = functions.size() + types.size() + templates.size() +
                          inlineBodies.size() + constexprValues.size() +
                          macros.size();
+    emitEmptyPackDiagnostics(visitor, publicCount, diags);
+
+    std::string source = resolveMainSource(sm);
+    const std::string &ctxHash = CtxHash;
+    std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
+    std::string tuId = "cu://" + source + "#cfg:" + cfg;
+    std::string targetId = Library.empty() ? "" : "target://" + Library;
+
+    if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
+                 inlineBodies, constexprValues, macros, diags))
+      llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
+                   << "\n";
+  }
+
+private:
+  // Public-roots inference note (ADR-038 Flow C, Caveat A): when no explicit
+  // `public-roots=` was given, the roots were auto-derived from the compile's
+  // -I/-iquote include dirs. Record that per-TU (forensic) and tell the operator
+  // once — the inferred surface can be slightly broad, so an explicit
+  // public-roots= is the precise scoping knob. Not an error: a populated (broad)
+  // surface beats the silent empty pack the missing flag used to produce.
+  void emitInferenceNote(std::set<std::string> &diags) {
+    if (InferredRootCount == 0)
+      return;
+    std::string roots;
+    for (const std::string &r : Roots)
+      roots += (roots.empty() ? "" : ", ") + r;
+    std::string msg =
+        "abicheck-facts: no public-roots given; inferred " +
+        std::to_string(InferredRootCount) +
+        " public root(s) from the compile's -I/-iquote include dirs [" + roots +
+        "]. Pass public-roots=<dir> to scope the public surface precisely.";
+    diags.insert(msg);
+    if (claimFirstInferenceNote())
+      llvm::errs() << msg << "\n";
+  }
+
+  // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
+  // but this TU emitted zero public entities *while* header-declared decls were
+  // rejected for not being under any root, public-roots may not match how the
+  // compiler resolves the public headers (e.g. it points at the installed
+  // `include/` while `-I..` makes `<pvxs/x.h>` resolve to `src/pvxs/`).
+  // Previously this produced an empty pack with exit 0 and no message.
+  //
+  // This signal is necessarily per-TU: an internal-implementation-only TU that
+  // includes a private header and defines nothing public trips the same
+  // condition even with correct roots — the plugin cannot see whether *other*
+  // TUs produced public facts (it runs once per compile). To keep the "fail
+  // loud" signal credible without crying wolf on every internal TU under `-j`,
+  // the human-facing stderr line is emitted **once per output pack** (a
+  // deterministic misconfiguration shows it on the first TU); the accurate
+  // per-TU note is still recorded in this TU's pack `diagnostics` as forensic
+  // data. A whole build whose pack ends up empty is the real confirmation.
+  void emitEmptyPackDiagnostics(const FactsVisitor &visitor, size_t publicCount,
+                                std::set<std::string> &diags) {
     bool emptyWithRejections =
         publicCount == 0 && visitor.rejectedHeaderDecls() > 0;
     if (emptyWithRejections && Roots.empty()) {
@@ -1720,7 +1822,9 @@ public:
     // them to fix a public-roots= they never set and (b) cry wolf on every
     // internal-only TU (Codex review). The authoritative empty-pack signal for the
     // inferred case is the project-level `merge` warning over the whole surface.
+  }
 
+  std::string resolveMainSource(SourceManager &sm) const {
     std::string source;
     if (auto fe = sm.getFileEntryRefForID(sm.getMainFileID())) {
       // Resolve to an absolute path: a relative main-file spelling (e.g.
@@ -1731,18 +1835,9 @@ public:
       llvm::sys::fs::make_absolute(abs);
       source = std::string(abs.str());
     }
-    const std::string &ctxHash = CtxHash;
-    std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
-    std::string tuId = "cu://" + source + "#cfg:" + cfg;
-    std::string targetId = Library.empty() ? "" : "target://" + Library;
-
-    if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
-                 inlineBodies, constexprValues, macros, diags))
-      llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
-                   << "\n";
+    return source;
   }
 
-private:
   std::vector<Entity> collectMacros(std::set<std::string> &diags) {
     std::vector<Entity> out;
     bool any = false;
