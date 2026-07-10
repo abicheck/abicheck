@@ -355,6 +355,7 @@ def _diff_pe_import_functions(o: Any, n: Any) -> list[Change]:
                     ChangeKind.IMPORTED_SYMBOL_REMOVED,
                     symbol=func,
                     name=func,
+                    detail=f" from {dll}",
                     old_value=f"{dll}!{func}",
                 )
             )

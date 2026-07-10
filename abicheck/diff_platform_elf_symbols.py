@@ -648,6 +648,7 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     old_names = {i.name for i in old_imports}
     new_names = {i.name for i in new_imports}
     new_by_name = {i.name: i for i in new_imports}
+    old_by_name = {i.name: i for i in old_imports}
 
     for name in sorted(new_names - old_names):
         imp = new_by_name[name]
@@ -665,12 +666,15 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
     for name in sorted(old_names - new_names):
+        version = getattr(old_by_name.get(name), "version", "")
+        detail = f"@{version}" if version else ""
         changes.append(
             make_change(
                 ChangeKind.IMPORTED_SYMBOL_REMOVED,
                 symbol=name,
                 name=name,
-                old_value=name,
+                detail=detail,
+                old_value=f"{name}{detail}",
             )
         )
     return changes

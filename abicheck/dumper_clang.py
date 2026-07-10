@@ -196,14 +196,59 @@ _CLANG_ATTR_TOKENS: dict[str, str] = {
 }
 
 
+def _clang_attr_arg_tokens(child: dict[str, Any]) -> list[str]:
+    """Ordered ABI-significant argument scalars of a clang attribute node.
+
+    clang ``-ast-dump=json`` nests an argument-bearing attribute's operands as
+    ``ConstantExpr`` / ``IntegerLiteral`` / ``StringLiteral`` children carrying
+    an evaluated ``value``. Collect those scalars in document order so the
+    normalized token keeps the same arguments castxml preserves — otherwise
+    ``nonnull(1)`` → ``nonnull(2)``, ``format(printf,1,2)`` → ``format(printf,2,3)``
+    or ``regparm(2)`` → ``regparm(3)`` would collapse to identical bare tokens
+    and the contract / calling-convention detectors would never fire (and the
+    two frontends would disagree). Once a node yields a ``value`` we do not
+    descend into it — clang wraps a literal inside its ``ConstantExpr`` with the
+    same value, so recursing would double-count it.
+    """
+    args: list[str] = []
+
+    def _walk(nodes: Any) -> None:
+        for sub in nodes or []:
+            if not isinstance(sub, dict):
+                continue
+            value = sub.get("value")
+            if isinstance(value, bool):
+                # JSON booleans are ints in Python; skip — not an ABI arg.
+                _walk(sub.get("inner", []))
+            elif isinstance(value, int):
+                args.append(str(value))
+            elif isinstance(value, str) and value:
+                # StringLiteral values arrive quoted (e.g. "printf"); strip them
+                # so the token matches castxml's bare-identifier spelling.
+                args.append(value.strip('"'))
+            else:
+                _walk(sub.get("inner", []))
+
+    _walk(child.get("inner", []))
+    return args
+
+
 def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
-    """Normalized contract/calling-convention attributes of a decl node."""
+    """Normalized contract/calling-convention attributes of a decl node.
+
+    Argument-bearing attributes keep their operands in the token
+    (``nonnull(1)``, ``format(printf,1,2)``), matching the castxml frontend, so
+    an argument-only change is still a detectable contract change.
+    """
     tokens: set[str] = set()
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
         token = _CLANG_ATTR_TOKENS.get(str(child.get("kind", "")))
         if token:
+            arg_tokens = _clang_attr_arg_tokens(child)
+            if arg_tokens:
+                token = f"{token}({','.join(arg_tokens)})"
             tokens.add(token)
     return sorted(tokens)
 

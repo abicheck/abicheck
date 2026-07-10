@@ -151,6 +151,24 @@ class TestPeImportFunctions:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_REMOVED in _kinds(r)
 
+    def test_same_func_removed_from_two_dlls_not_deduped(self):
+        # The DLL must be in the description, else the global (kind, description)
+        # exact-dedup collapses removals of the same name from different DLLs.
+        old = _pe(
+            imports={
+                "A.dll": ["CreateFileW", "GetProcAddress"],
+                "B.dll": ["CreateFileW", "LoadLibraryW"],
+            }
+        )
+        new = _pe(imports={"A.dll": ["GetProcAddress"], "B.dll": ["LoadLibraryW"]})
+        r = compare(_snap(old), _snap(new))
+        removed = [c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_REMOVED]
+        descriptions = {c.description for c in removed}
+        # Both CreateFileW removals survive with distinct, DLL-qualified text.
+        assert len(descriptions) == 2
+        assert any("A.dll" in d for d in descriptions)
+        assert any("B.dll" in d for d in descriptions)
+
     def test_ordinal_import_added(self):
         old = _pe(imports={"MFC42.dll": ["ordinal:1000"]})
         new = _pe(imports={"MFC42.dll": ["ordinal:1000", "ordinal:1001"]})

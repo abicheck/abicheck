@@ -43,7 +43,7 @@ COVERAGE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("imported_symbol_removed", _C,
        impact="The binary dropped an undefined (imported) symbol — one fewer "
               "external obligation. Existing consumers are unaffected.",
-       description_template="Imported symbol no longer required: {name}"),
+       description_template="Imported symbol no longer required: {name}{detail}"),
     _E("interpreter_changed", _R,
        impact="The ELF program interpreter (PT_INTERP) path changed. For an "
               "executable this repoints which dynamic linker runs it; a wrong "

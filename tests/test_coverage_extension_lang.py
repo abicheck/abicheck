@@ -386,6 +386,58 @@ class TestClangExtraction:
         node = {"inner": ["not-a-dict", {"kind": "NoReturnAttr"}]}
         assert _clang_contract_attributes(node) == ["noreturn"]
 
+    def test_contract_attribute_args_preserved(self):
+        # Argument-bearing attributes keep their operands (matching castxml), so
+        # nonnull(1) vs nonnull(2) is a detectable change, not a bare `nonnull`.
+        def _nonnull(idx: int) -> dict:
+            return {
+                "kind": "NonNullAttr",
+                "inner": [{"kind": "ConstantExpr", "value": idx}],
+            }
+
+        assert _clang_contract_attributes({"inner": [_nonnull(1)]}) == ["nonnull(1)"]
+        assert _clang_contract_attributes({"inner": [_nonnull(2)]}) == ["nonnull(2)"]
+
+    def test_contract_attribute_multi_arg_and_string(self):
+        # format(printf,1,2): archetype string + two indices, in source order.
+        node = {
+            "inner": [
+                {
+                    "kind": "FormatAttr",
+                    "inner": [
+                        {"kind": "StringLiteral", "value": '"printf"'},
+                        {"kind": "ConstantExpr", "value": 1},
+                        {"kind": "ConstantExpr", "value": 2},
+                    ],
+                }
+            ]
+        }
+        assert _clang_contract_attributes(node) == ["format(printf,1,2)"]
+
+    def test_contract_attribute_constantexpr_wrapping_not_double_counted(self):
+        # clang wraps a literal inside its ConstantExpr with the same value;
+        # taking the outer value and not descending avoids regparm(2,2).
+        node = {
+            "inner": [
+                {
+                    "kind": "RegparmAttr",
+                    "inner": [
+                        {
+                            "kind": "ConstantExpr",
+                            "value": 2,
+                            "inner": [{"kind": "IntegerLiteral", "value": 2}],
+                        }
+                    ],
+                }
+            ]
+        }
+        assert _clang_contract_attributes(node) == ["regparm(2)"]
+
+    def test_contract_attribute_no_args_stays_bare(self):
+        # Argless attributes (noreturn) render as bare tokens, matching castxml.
+        node = {"inner": [{"kind": "NoReturnAttr", "inner": []}]}
+        assert _clang_contract_attributes(node) == ["noreturn"]
+
     def test_var_alignment_integer_value(self):
         # clang may emit the evaluated constant as an int, not a string.
         node = {
