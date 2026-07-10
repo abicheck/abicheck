@@ -10,6 +10,16 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   in [`docs/user-guide/scan-levels.md`](../docs/user-guide/scan-levels.md) and
   [`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model-one-cliff-at-l4).
   Raw per-level data: `data/uxl_scan_results_2026-06.json`.
+- `uxl-plugin-source-scan-2026-07.md` — **plugin source-scan binary↔header symbol
+  mapping** across the six UXL/oneAPI plugin libraries (oneTBB, oneDNN, oneDAL,
+  oneCCL, level-zero, compute-runtime) on a clang-only L2 host: confirms the
+  `dump`→`surface-report`→`scan`→cross-check path runs on each and measures what
+  fraction of exported symbols resolve to a public-header declaration (100 % of the
+  declared public API maps; the unmapped remainder is leaked libstdc++/{fmt},
+  internal namespaces, RTTI, and template instantiations — the accidental-ABI
+  surface the scan is meant to catch). Raw data:
+  `data/uxl_plugin_source_scan_2026-07.json`; reusable audit:
+  `scripts/symbol_mapping_audit.py`.
 - `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
   live against the ABICC abi-laboratory oracle across 60 libraries / 185
   comparable pairs (94.1 % agreement, 0 confirmed defects).

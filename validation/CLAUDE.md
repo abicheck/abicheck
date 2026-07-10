@@ -18,6 +18,7 @@ evidence and is exercised by `.github/workflows/examples-validation.yml`.
 | `scripts/summarize_remeasurement.py` | Combines example / component-suite / real-world artifacts into the release-gate summary. |
 | `scripts/conda_harness.py`, `scripts/validate.py` | Fetch/extract + unified end-to-end validation loop. |
 | `scripts/fp_depth_demo.py` | Pure-Python (no toolchain/network) runnable demonstration of *which evidence depth clears a false positive*: the build-context/preprocessor-divergence FP that `binary`/`headers` raise and `build` clears, plus the honest negative that no pure source-only clear exists. Backs `false-positive-depth-analysis-2026-07.md`. |
+| `scripts/symbol_mapping_audit.py` | Binary↔header/source AST symbol-mapping audit over an existing dump snapshot + `.so`: runs abicheck's own `exported_not_public` cross-check uncapped (variant-aware ctor/dtor + ABI-tag matching) and buckets the unmapped remainder (leaked libstdc++/{fmt} / internal-namespace / RTTI / template-instantiation). Backs `uxl-plugin-source-scan-2026-07.md`. Pure measurement, no network. |
 | `data/*.json` | Raw per-`.so` results, run metadata, FP exemplars, dated UXL/oneDAL scans. |
 | `suppress_internal.yaml` | Internal-namespace suppression used in the reports. |
 | `*.md` (`REPORT.md`, `DESIGN_ANALYSIS.md`, `realworld-*.md`, `uxl-*.md`) | Curated findings + root-cause analyses; hand-edited narrative. |
