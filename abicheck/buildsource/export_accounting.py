@@ -44,8 +44,13 @@ _ALLOCATOR_INTERPOSER_MARKER = _TBB_MALLOC_PROXY_MARKER
 #: — ``malloc``/``free``/… and the global ``operator new``/``delete``. When the
 #: audited DSO is such an interposer (it exports :data:`_ALLOCATOR_INTERPOSER_MARKER`)
 #: these are native, not a leaked libc/libstdc++ dependency (Codex review).
+#: The interposer *marker* itself is part of the intentional proxy surface (the
+#: source linker treats it so), so it is native too — not a spurious undeclared
+#: export (Codex review).
 _ALLOCATOR_INTERPOSER_SYMBOLS = (
-    _TBB_MALLOC_PROXY_C_SYMBOLS | _TBB_MALLOC_PROXY_CPP_SYMBOLS
+    _TBB_MALLOC_PROXY_C_SYMBOLS
+    | _TBB_MALLOC_PROXY_CPP_SYMBOLS
+    | {_TBB_MALLOC_PROXY_MARKER}
 )
 
 # --------------------------------------------------------------------------- #
@@ -244,6 +249,12 @@ def _external_dependency_origin(
     # auditing the runtime library itself doesn't flag its own exports (Codex).
     if owner == "__gnu_cxx":
         runtime = "libstdc++.so.6"  # libstdc++-only extension namespace — never libc++
+    elif owner == "__cxxabiv1":
+        # The Itanium C++ ABI namespace is implemented by libc++abi (or libstdc++'s
+        # merged libsupc++), NOT the std runtime — so ``libc++abi`` is its correct
+        # owner and must not be excluded, else auditing libc++abi flags its own
+        # exports (Codex review).
+        runtime = _cxx_abi_runtime_lib(needed_libs, self_names)
     elif owner == "std" or owner in _STD_OWNER_NAMESPACES:
         runtime = _cxx_runtime_lib(symbol, needed_libs)
     else:
@@ -412,6 +423,36 @@ def _cxx_runtime_lib(symbol: str, needed_libs: list[str]) -> str:
         return "libc++.so.1"
     for base in needed_bases:
         if _is_libcxx(base):
+            return base
+    for base in needed_bases:
+        if base.startswith("libstdc++"):
+            return base
+    return "libstdc++.so.6"
+
+
+def _cxx_abi_runtime_lib(
+    needed_libs: list[str], self_names: tuple[str, ...] = ()
+) -> str:
+    """Which library owns a ``__cxxabiv1`` (Itanium C++ ABI) symbol.
+
+    The ABI runtime lives in ``libc++abi`` (libc++ toolchains) or, merged as
+    libsupc++, in ``libstdc++`` (GCC). Prefer whichever the binary actually links —
+    libc++abi is a valid owner here (unlike the ``std`` runtime picker, which
+    excludes it). When the audited library *is* libc++abi but has no self-dependency
+    in ``DT_NEEDED``, ``self_names`` lets it still be recognised so the self gate can
+    mark its own ABI exports native. Defaults to libstdc++ when neither is present.
+    """
+    needed_bases = [lib.rsplit("/", 1)[-1] for lib in needed_libs]
+    for base in needed_bases:
+        if base.startswith("libc++abi"):
+            return base
+    for name in self_names:
+        if name.startswith("libc++abi"):
+            return name
+    # A libc++ toolchain without a separate libc++abi in DT_NEEDED still owns its
+    # ABI symbols through the libc++ family, not libstdc++.
+    for base in needed_bases:
+        if base.startswith("libc++"):
             return base
     for base in needed_bases:
         if base.startswith("libstdc++"):

@@ -524,6 +524,26 @@ def test_external_dependency_origin_owner_based(symbol, expected):
             ["libc++abi.so.1", "libc++.so.1"],
             "libc++.so.1",
         ),
+        # a __cxxabiv1 ABI symbol is owned by libc++abi (NOT excluded like the std
+        # runtime), preferring the linked ABI library, else libstdc++ (Codex review).
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++abi.so.1",
+        ),
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libstdc++.so.6"],
+            "libstdc++.so.6",
+        ),
+        # no C++ runtime linked at all -> libstdc++ default.
+        ("_ZN10__cxxabiv121__vmi_class_type_infoD2Ev", [], "libstdc++.so.6"),
+        # a libc++ toolchain without a separate libc++abi still owns its ABI symbols.
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libc++.so.1"],
+            "libc++.so.1",
+        ),
         # covariant thunk with h/v-tagged call-offsets still resolves its owner.
         ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
     ],
@@ -639,6 +659,14 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         _external_dependency_origin("_ZN9__gnu_cxx5xyz_Ev", [], ("libstdc++.so.6",))
         is None
     )
+    # auditing libc++abi itself (no self-dep in DT_NEEDED): its own __cxxabiv1 ABI
+    # exports are native (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev", [], ("libc++abi.so.1",)
+        )
+        is None
+    )
     assert (
         _external_dependency_origin(
             "_ZN6google20ParseCommandLineFlagsEPiPPPcb", [], ("libgflags.so",)
@@ -736,10 +764,10 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
     counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
     assert counters.get("external_dependency", 0) == 0
     # accounted as a legitimate interposer category — and no finding advises hiding
-    # the allocator replacements.
-    assert counters.get("allocator_interposer", 0) == 2  # _Znwm + malloc
+    # the allocator replacements OR the proxy marker itself.
+    assert counters.get("allocator_interposer", 0) == 3  # marker + _Znwm + malloc
     finding_syms = {c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)}
-    assert "_Znwm" not in finding_syms and "malloc" not in finding_syms
+    assert not ({"_Znwm", "malloc", "__TBB_malloc_proxy"} & finding_syms)
 
     # The same operator new in a library that is NOT an interposer is a real leak.
     leaky = _snap(elf=_elf("_Znwm"))
