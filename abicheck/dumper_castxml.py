@@ -310,215 +310,235 @@ class _CastxmlParser:
                     ids.add(fid)
         return ids
 
+    # castxml emits non-member operator overloads as <OperatorFunction>
+    # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
+    # including hidden friends declared inside a class body).
+    _FUNCTION_TAGS: tuple[str, ...] = (
+        "Function",
+        "Method",
+        "Constructor",
+        "Destructor",
+        "Converter",
+        "OperatorFunction",
+        "OperatorMethod",
+    )
+
     def parse_functions(self) -> list[Function]:
-        funcs = []
+        funcs: list[Function] = []
         hidden_friend_ids = self._build_hidden_friend_ids()
-        # castxml emits non-member operator overloads as <OperatorFunction>
-        # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
-        # including hidden friends declared inside a class body).
-        function_tags = (
-            "Function",
-            "Method",
-            "Constructor",
-            "Destructor",
-            "Converter",
-            "OperatorFunction",
-            "OperatorMethod",
-        )
         for el in self._root:
-            # castxml emits user-defined conversion operators as <Converter>
-            # rather than <Method>. They carry mangled names (unlike
-            # constructors), `const`/`virtual`/`explicit` qualifiers, and an
-            # implicit empty name (which we synthesize as `operator <T>`).
-            if el.tag not in function_tags:
+            if el.tag not in self._FUNCTION_TAGS:
                 continue
-            name = el.get("name", "")
-            if not name and el.tag == "Converter":
-                # Synthesize a stable display name for conversion operators.
-                ret_id = el.get("returns", "")
-                ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
-                name = f"operator {ret_type_for_name}"
-            # castxml emits operator name as the bare symbol (e.g. "==", "+").
-            # Normalize to the canonical "operator==" form for readability and
-            # to match how the rest of the pipeline (and human reports)
-            # refer to operator overloads.
-            if (
-                name
-                and el.tag in ("OperatorFunction", "OperatorMethod")
-                and not name.startswith("operator")
-            ):
-                name = f"operator{name}"
-            if not name:
-                continue
-            # Skip compiler built-ins and command-line synthetic declarations
-            if self._is_builtin_element(el):
-                continue
-            raw_mangled = el.get("mangled", "")
+            func = self._parse_function_element(el, hidden_friend_ids)
+            if func is not None:
+                funcs.append(func)
+        return funcs
+
+    def _function_display_name(self, el: Element) -> str:
+        """Resolve a function element's display name, synthesizing/normalizing operator forms."""
+        # castxml emits user-defined conversion operators as <Converter>
+        # rather than <Method>. They carry mangled names (unlike
+        # constructors), `const`/`virtual`/`explicit` qualifiers, and an
+        # implicit empty name (which we synthesize as `operator <T>`).
+        name = el.get("name", "")
+        if not name and el.tag == "Converter":
+            # Synthesize a stable display name for conversion operators.
             ret_id = el.get("returns", "")
-            ret_type = self._type_name(ret_id) if ret_id else "void"
-            ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
+            ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
+            name = f"operator {ret_type_for_name}"
+        # castxml emits operator name as the bare symbol (e.g. "==", "+").
+        # Normalize to the canonical "operator==" form for readability and
+        # to match how the rest of the pipeline (and human reports)
+        # refer to operator overloads.
+        if (
+            name
+            and el.tag in ("OperatorFunction", "OperatorMethod")
+            and not name.startswith("operator")
+        ):
+            name = f"operator{name}"
+        return name
 
-            params = []
-            is_variadic = False
-            for arg in el:
-                if arg.tag == "Argument":
-                    p_name = arg.get("name", "")
-                    p_type_id = arg.get("type", "")
-                    p_type = self._type_name(p_type_id)
-                    p_depth = self._pointer_depth(p_type_id)
-                    # castxml emits default="<expr>" on Arguments that carry a
-                    # default value. Removing/changing a default is a source-API
-                    # (and silent-behaviour) concern even though the mangled name
-                    # is unchanged; capture it so the param_defaults detector can
-                    # fire. Absent attribute → None (no default).
-                    params.append(
-                        Param(
-                            name=p_name,
-                            type=p_type,
-                            pointer_depth=p_depth,
-                            default=arg.get("default"),
-                        )
+    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool]:
+        """Collect a function element's parameters and whether it is C-variadic."""
+        params: list[Param] = []
+        is_variadic = False
+        for arg in el:
+            if arg.tag == "Argument":
+                p_name = arg.get("name", "")
+                p_type_id = arg.get("type", "")
+                p_type = self._type_name(p_type_id)
+                p_depth = self._pointer_depth(p_type_id)
+                # castxml emits default="<expr>" on Arguments that carry a
+                # default value. Removing/changing a default is a source-API
+                # (and silent-behaviour) concern even though the mangled name
+                # is unchanged; capture it so the param_defaults detector can
+                # fire. Absent attribute → None (no default).
+                params.append(
+                    Param(
+                        name=p_name,
+                        type=p_type,
+                        pointer_depth=p_depth,
+                        default=arg.get("default"),
                     )
-                elif arg.tag == "Ellipsis":
-                    # Trailing C ellipsis (...) — the function is variadic.
-                    is_variadic = True
-
-            if raw_mangled:
-                mangled = raw_mangled
-            elif el.tag == "Constructor":
-                # CastXML may omit constructor mangled names even for public
-                # user-declared overloaded constructors.  Using the bare class
-                # name would collapse all overloads in AbiSnapshot.function_map,
-                # hiding constructor additions such as case111.  Synthesize a
-                # deterministic internal identity from the display name and
-                # normalized parameter types; it is intentionally not an ABI
-                # symbol, only a stable snapshot key for source-level overloads.
-                param_sig = ",".join(p.type for p in params)
-                mangled = f"__abicheck_ctor__{name}({param_sig})"
-            else:
-                mangled = name  # C functions: use plain name
-
-            vis = self._visibility(raw_mangled, name)
-            is_virtual = el.get("virtual") == "1"
-            noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
-            vtable_index = (
-                _parse_vtable_index(el.get("vtable_index")) if is_virtual else None
-            )
-
-            # Detect extern "C": explicit extern attribute OR no mangled name (C linkage)
-            is_extern_c = (
-                el.get("extern") == "1"
-                or (not raw_mangled and el.tag == "Function")  # C functions have no mangled name
-            )
-
-            # CastXML may store source location two ways:
-            #   1. Directly as ``file``/``line`` attributes on the declaration
-            #      element (modern compound-attribute form).
-            #   2. As ``location="loc1"`` referencing a separate ``Location``
-            #      element in the id map (legacy form).
-            # Try direct attrs first, then fall back to the id-map lookup so
-            # both formats are supported without losing source_location info.
-            file_id = el.get("file", "")
-            line = el.get("line", "")
-            loc_el: Element | None = None
-            if not (file_id and line):
-                loc_id = el.get("location", "")
-                loc_el = self._id_map.get(loc_id) if loc_id else None
-                if loc_el is not None:
-                    file_id = loc_el.get("file", "")
-                    line = loc_el.get("line", "")
-            file_el = self._id_map.get(file_id) if file_id else None
-            fname = file_el.get("name", "") if file_el is not None else ""
-            source_loc = f"{fname}:{line}" if fname and line else None
-
-            is_static = el.get("static") == "1"
-            is_const = el.get("const") == "1"
-            is_volatile = el.get("volatile") == "1"
-            is_pure_virtual = el.get("pure_virtual") == "1"
-            is_deleted = el.get("deleted") == "1"
-            # castxml emits inline="1" for inline functions/methods
-            is_inline = el.get("inline") == "1"
-            # castxml emits explicit="1" on Constructor / Method elements that
-            # carry the `explicit` specifier. Tri-state: only Constructor /
-            # Method tags can be explicit; for plain Function / Destructor the
-            # attribute is conceptually N/A and we leave is_explicit=None so
-            # the diff does not produce spurious findings.
-            is_explicit: bool | None
-            if el.tag in ("Constructor", "Method"):
-                is_explicit = el.get("explicit") == "1"
-            elif el.tag == "Converter":
-                is_explicit = (
-                    el.get("explicit") == "1"
-                    if el.get("explicit") is not None
-                    else self._source_line_has_explicit(loc_el, el)
                 )
-            else:
-                is_explicit = None
+            elif arg.tag == "Ellipsis":
+                # Trailing C ellipsis (...) — the function is variadic.
+                is_variadic = True
+        return params, is_variadic
 
-            # C++ ref-qualifier: newer castxml emits refqual="lvalue"/"rvalue",
-            # but released versions (≤0.6.x) omit the attribute entirely, so
-            # fall back to the Itanium mangling — the qualifier is encoded as
-            # R (&) / O (&&) right after the CV-qualifiers in <nested-name>.
-            refqual_raw = el.get("refqual", "")
-            ref_qualifier = {"lvalue": "&", "rvalue": "&&"}.get(
-                refqual_raw, ""
-            ) or _ref_qualifier_from_mangled(mangled)
+    @staticmethod
+    def _function_mangled_name(
+        el: Element, name: str, params: list[Param], raw_mangled: str
+    ) -> str:
+        """Pick the snapshot key for a function: mangled name, ctor synthesis, or plain name."""
+        if raw_mangled:
+            return raw_mangled
+        if el.tag == "Constructor":
+            # CastXML may omit constructor mangled names even for public
+            # user-declared overloaded constructors.  Using the bare class
+            # name would collapse all overloads in AbiSnapshot.function_map,
+            # hiding constructor additions such as case111.  Synthesize a
+            # deterministic internal identity from the display name and
+            # normalized parameter types; it is intentionally not an ABI
+            # symbol, only a stable snapshot key for source-level overloads.
+            param_sig = ",".join(p.type for p in params)
+            return f"__abicheck_ctor__{name}({param_sig})"
+        return name  # C functions: use plain name
 
+    def _function_source_location(
+        self, el: Element
+    ) -> tuple[str | None, Element | None]:
+        """Resolve a function element's ``file:line`` source location and Location element."""
+        # CastXML may store source location two ways:
+        #   1. Directly as ``file``/``line`` attributes on the declaration
+        #      element (modern compound-attribute form).
+        #   2. As ``location="loc1"`` referencing a separate ``Location``
+        #      element in the id map (legacy form).
+        # Try direct attrs first, then fall back to the id-map lookup so
+        # both formats are supported without losing source_location info.
+        file_id = el.get("file", "")
+        line = el.get("line", "")
+        loc_el: Element | None = None
+        if not (file_id and line):
+            loc_id = el.get("location", "")
+            loc_el = self._id_map.get(loc_id) if loc_id else None
+            if loc_el is not None:
+                file_id = loc_el.get("file", "")
+                line = loc_el.get("line", "")
+        file_el = self._id_map.get(file_id) if file_id else None
+        fname = file_el.get("name", "") if file_el is not None else ""
+        source_loc = f"{fname}:{line}" if fname and line else None
+        return source_loc, loc_el
+
+    def _function_is_explicit(self, el: Element, loc_el: Element | None) -> bool | None:
+        """Determine the tri-state `explicit` specifier for a function element."""
+        # castxml emits explicit="1" on Constructor / Method elements that
+        # carry the `explicit` specifier. Tri-state: only Constructor /
+        # Method tags can be explicit; for plain Function / Destructor the
+        # attribute is conceptually N/A and we leave is_explicit=None so
+        # the diff does not produce spurious findings.
+        if el.tag in ("Constructor", "Method"):
+            return el.get("explicit") == "1"
+        if el.tag == "Converter":
+            return (
+                el.get("explicit") == "1"
+                if el.get("explicit") is not None
+                else self._source_line_has_explicit(loc_el, el)
+            )
+        return None
+
+    @staticmethod
+    def _function_ref_qualifier(el: Element, mangled: str) -> str:
+        """Derive the &/&& ref-qualifier from the refqual attribute or the mangling."""
+        # C++ ref-qualifier: newer castxml emits refqual="lvalue"/"rvalue",
+        # but released versions (≤0.6.x) omit the attribute entirely, so
+        # fall back to the Itanium mangling — the qualifier is encoded as
+        # R (&) / O (&&) right after the CV-qualifiers in <nested-name>.
+        refqual_raw = el.get("refqual", "")
+        return {"lvalue": "&", "rvalue": "&&"}.get(
+            refqual_raw, ""
+        ) or _ref_qualifier_from_mangled(mangled)
+
+    def _function_exception_spec(self, el: Element) -> str:
+        """Render a function element's dynamic exception specification, if any."""
+        # Dynamic exception specification: castxml emits throw="" for
+        # `throw()` and a space-separated type-id list for `throw(T...)`.
+        # Absent attribute = no dynamic spec (captured as ""), keeping the
+        # tri-state None for dumpers that cannot know.
+        throw_attr = el.get("throw")
+        if throw_attr is None:
+            return ""
+        if not throw_attr.strip():
+            return "throw()"
+        thrown = ", ".join(self._type_name(tid) for tid in throw_attr.split())
+        return f"throw({thrown})"
+
+    def _parse_function_element(
+        self, el: Element, hidden_friend_ids: set[str]
+    ) -> Function | None:
+        """Build a Function from a castxml function-like element, or None if filtered."""
+        name = self._function_display_name(el)
+        if not name:
+            return None
+        # Skip compiler built-ins and command-line synthetic declarations
+        if self._is_builtin_element(el):
+            return None
+        raw_mangled = el.get("mangled", "")
+        ret_id = el.get("returns", "")
+        ret_type = self._type_name(ret_id) if ret_id else "void"
+        ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
+
+        params, is_variadic = self._parse_function_params(el)
+        mangled = self._function_mangled_name(el, name, params, raw_mangled)
+
+        is_virtual = el.get("virtual") == "1"
+        noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
+        vtable_index = (
+            _parse_vtable_index(el.get("vtable_index")) if is_virtual else None
+        )
+
+        # Detect extern "C": explicit extern attribute OR no mangled name (C linkage)
+        is_extern_c = (
+            el.get("extern") == "1"
+            or (
+                not raw_mangled and el.tag == "Function"
+            )  # C functions have no mangled name
+        )
+
+        source_loc, loc_el = self._function_source_location(el)
+
+        return Function(
+            name=name,
+            mangled=mangled,
+            return_type=ret_type,
+            params=params,
+            visibility=self._visibility(raw_mangled, name),
+            is_virtual=is_virtual,
+            is_noexcept=bool(noexcept_re),
+            is_extern_c=is_extern_c,
+            vtable_index=vtable_index,
+            source_location=source_loc,
+            is_static=el.get("static") == "1",
+            is_const=el.get("const") == "1",
+            is_volatile=el.get("volatile") == "1",
+            is_pure_virtual=el.get("pure_virtual") == "1",
+            is_deleted=el.get("deleted") == "1",
+            # castxml emits inline="1" for inline functions/methods
+            is_inline=el.get("inline") == "1",
+            access=self._access_level(el),
+            return_pointer_depth=ret_ptr_depth,
+            ref_qualifier=self._function_ref_qualifier(el, mangled),
+            is_explicit=self._function_is_explicit(el, loc_el),
             # Hidden-friend marker: castxml records the link via the
             # ``befriending`` attribute on the class element. We resolved
             # the referenced ids upfront and check membership here.
-            is_hidden_friend = el.get("id", "") in hidden_friend_ids
-
+            is_hidden_friend=el.get("id", "") in hidden_friend_ids,
+            is_variadic=is_variadic,
             # Semantic contract / calling-convention attributes, filtered from
             # the compound ``attributes`` string (same channel as noexcept).
-            contract_attributes = _extract_contract_attributes(
-                el.get("attributes", "")
-            )
-
-            # Dynamic exception specification: castxml emits throw="" for
-            # `throw()` and a space-separated type-id list for `throw(T...)`.
-            # Absent attribute = no dynamic spec (captured as ""), keeping the
-            # tri-state None for dumpers that cannot know.
-            throw_attr = el.get("throw")
-            if throw_attr is None:
-                exception_spec = ""
-            elif not throw_attr.strip():
-                exception_spec = "throw()"
-            else:
-                thrown = ", ".join(
-                    self._type_name(tid) for tid in throw_attr.split()
-                )
-                exception_spec = f"throw({thrown})"
-
-            funcs.append(
-                Function(
-                    name=name,
-                    mangled=mangled,
-                    return_type=ret_type,
-                    params=params,
-                    visibility=vis,
-                    is_virtual=is_virtual,
-                    is_noexcept=bool(noexcept_re),
-                    is_extern_c=is_extern_c,
-                    vtable_index=vtable_index,
-                    source_location=source_loc,
-                    is_static=is_static,
-                    is_const=is_const,
-                    is_volatile=is_volatile,
-                    is_pure_virtual=is_pure_virtual,
-                    is_deleted=is_deleted,
-                    is_inline=is_inline,
-                    access=self._access_level(el),
-                    return_pointer_depth=ret_ptr_depth,
-                    ref_qualifier=ref_qualifier,
-                    is_explicit=is_explicit,
-                    is_hidden_friend=is_hidden_friend,
-                    is_variadic=is_variadic,
-                    contract_attributes=contract_attributes,
-                    exception_spec=exception_spec,
-                )
-            )
-        return funcs
+            contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
+            exception_spec=self._function_exception_spec(el),
+        )
 
     def parse_variables(self) -> list[Variable]:
         variables = []
