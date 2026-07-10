@@ -79,6 +79,18 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import DEPTH_PARAM
+from .cli_scan_helpers import (
+    l4_coverage_advisories,
+    render_baseline_lines,
+    render_coverage_lines,
+    render_crosscheck_lines,
+    render_pattern_lines,
+    render_preprocessor_lines,
+    render_summary_lines,
+    render_verdict_lines,
+    resolve_effective_allow_query,
+    scan_pattern_roots,
+)
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -386,96 +398,15 @@ def _normalize_depth_inputs(
 
 
 def _render_text(out: ScanOutcome) -> str:
-    """Render the human-facing scan report."""
+    """Render the human-facing scan report by composing its section blocks."""
     lines: list[str] = []
-    lines.append(f"abicheck scan — {out.mode} mode")
-    lvl = f"  source-method={out.resolved_method}"
-    if out.depth:
-        lvl += f"  depth={out.depth}"
-    lvl += f"  collect-mode={out.collect_mode}"
-    if out.auto:
-        lvl += "  (auto)"
-    lines.append(lvl)
-    matched = ", ".join(f"{k}×{v}" for k, v in sorted(out.risk.matched.items()))
-    lines.append(
-        f"  risk score={out.risk.total} "
-        f"(auto→{out.risk.recommended_method})" + (f" [{matched}]" if matched else "")
-    )
-    lines.append(
-        f"  changed paths: {out.changed_path_count} ({out.changed_path_source})"
-    )
-    for note in out.advisories:
-        lines.append(f"  note: {note}")
-    if out.stage_timings:
-        timing = ", ".join(
-            f"{name}={seconds:.2f}s"
-            for name, seconds in sorted(out.stage_timings.items())
-        )
-        lines.append(f"  timings: {timing}")
-
-    poi_counts = out.poi.get("counts_by_reason") or {}
-    if poi_counts:
-        focus = ", ".join(f"{k}×{v}" for k, v in sorted(poi_counts.items()))
-        lines.append(
-            f"  focus (POI): {out.poi.get('total', 0)} point(s) "
-            f"[{focus}] → {len(out.poi.get('changed_paths') or [])} path(s), "
-            f"{len(out.poi.get('symbols') or [])} symbol(s)"
-        )
-
-    lines.append("")
-    lines.append("Coverage")
-    for row in out.coverage:
-        lines.append(
-            f"  {row['layer']:<18} {row['status']:<13} {row.get('detail', '')}"
-        )
-
-    if out.crosscheck.get("counts_by_check"):
-        lines.append("")
-        lines.append(
-            "ABI-hygiene catalog (intra-version, advisory)"
-            if out.audit
-            else "Cross-source findings (advisory)"
-        )
-        for kind, n in sorted(out.crosscheck["counts_by_check"].items()):
-            sev = out.crosscheck_severities.get(kind, "warning")
-            lines.append(f"  [{sev}] {kind}: {n}")
-
-    pat_counts = out.pattern.get("counts_by_kind") or {}
-    if pat_counts:
-        lines.append("")
-        lines.append("Pattern pre-scan facts (advisory)")
-        for kind, n in sorted(pat_counts.items()):
-            lines.append(f"  {kind}: {n}")
-
-    pp_div = out.preprocessor.get("divergences") or []
-    pp_leaks = out.preprocessor.get("leaks") or []
-    if pp_div or pp_leaks:
-        lines.append("")
-        lines.append("Preprocessor pre-scan facts (S2, advisory)")
-        for d in pp_div:
-            lines.append(
-                f"  macro divergence: {d['macro']} ({d['n_values']} values across TUs)"
-            )
-        for leak in pp_leaks:
-            lines.append(
-                f"  {leak['leak_class']}-header leak: "
-                f"{leak['public_header']} → {leak['leaked_header']}"
-            )
-
-    if out.diff_summary is not None:
-        lines.append("")
-        lines.append("Baseline comparison")
-        lines.append(
-            f"  breaking={out.diff_summary['breaking']} "
-            f"api_break={out.diff_summary['api_break']} "
-            f"risk={out.diff_summary['risk']} "
-            f"compatible={out.diff_summary['compatible']}"
-        )
-
-    lines.append("")
-    lines.append(f"Verdict: {out.verdict}")
-    if out.budget_s is not None:
-        lines.append(f"Elapsed: {out.elapsed_s:.2f}s / budget {out.budget_s:.0f}s")
+    lines += render_summary_lines(out)
+    lines += render_coverage_lines(out)
+    lines += render_crosscheck_lines(out)
+    lines += render_pattern_lines(out)
+    lines += render_preprocessor_lines(out)
+    lines += render_baseline_lines(out)
+    lines += render_verdict_lines(out)
     return "\n".join(lines)
 
 
@@ -1175,6 +1106,54 @@ class ScanCoreResult:
     snapshot: Any
 
 
+def _run_abi3_audit(
+    new_snap: Any,
+    abi3_floor: tuple[int, int],
+    binary: Path,
+    cc: Any,
+) -> None:
+    """Run the opt-in stable-ABI (abi3) audit, folding its findings into ``cc``.
+
+    A single-artifact audit of the candidate's CPython imports against a target
+    Py_LIMITED_API floor. Its findings ride the cross-check stream: they are
+    RISK ``python_stable_abi_violation`` rows, advisory by default (like every
+    single-artifact check) and gated only via ``--crosscheck
+    python_stable_abi_violation=error``. Requires the --binary to be a CPython
+    extension module; --abi3 on a plain library is a usage error.
+    """
+    py_ext = new_snap.python_ext
+    if py_ext is None or not py_ext.is_extension:
+        raise _EvidenceContractError(
+            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+            f"'{binary.name}' is not a recognisable CPython extension module "
+            "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
+            "audit applies only to extension modules (Cython/pybind11/"
+            "nanobind/C)."
+        )
+    from .diff_python import audit_stable_abi_imports
+
+    abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)
+    cc.findings.extend(abi3_findings)
+    # Name the offending symbols in the coverage row (rendered verbatim in
+    # text and carried in JSON) so a CI artifact tells the user WHICH import
+    # to fix — the cross-check summary only reports a per-kind count, which
+    # would otherwise hide the symbol in Change.detail/new_value (Codex
+    # review). Capped so a pathological module cannot flood the report.
+    offending: list[str] = []
+    for f in abi3_findings:
+        offending.extend(f.new_value if isinstance(f.new_value, list) else [])
+    detail = (
+        f"{len(py_ext.cpython_imports)} CPython import(s) audited against "
+        f"Py_LIMITED_API {abi3_floor[0]}.{abi3_floor[1]}; "
+        f"{len(abi3_findings)} violation finding(s)"
+    )
+    if offending:
+        shown = ", ".join(offending[:20])
+        more = f" (+{len(offending) - 20} more)" if len(offending) > 20 else ""
+        detail += f" — outside the stable ABI: {shown}{more}"
+    cc.coverage.append({"layer": "abi3_audit", "status": "ran", "detail": detail})
+
+
 def run_scan_core(
     *,
     start: float,
@@ -1229,12 +1208,7 @@ def run_scan_core(
     # set — an empty seed (no-op PR) scans nothing, preserving the empty-diff
     # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
     # back to the whole-tree scan (Codex review).
-    pattern_roots: list[Path] = [*headers]
-    if sources is not None and eff_depth_enum not in {
-        EvidenceDepth.BINARY,
-        EvidenceDepth.HEADERS,
-    }:
-        pattern_roots.append(sources)
+    pattern_roots = scan_pattern_roots(list(headers), sources, eff_depth_enum)
     _stage = time.monotonic()
     pattern = scan_files(pattern_roots, changed if seeded else None)
     _record_stage("pattern_scan", _stage)
@@ -1302,39 +1276,11 @@ def run_scan_core(
             "focused diff — cost grows with the project, not the change. Pass "
             "--since <ref> or --changed-path to scope both to the changed TUs."
         )
-    # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
-    # defines a build.query, together with an *explicitly pinned* deep level
-    # (--source-method/--depth, level_explicit), is itself consent to run that
-    # query — making the user pass --allow-build-query as well for a level they
-    # explicitly asked for is needless friction. Trusted = an explicit --config
-    # path (build_config is not None here; an auto-discovered source-tree config
-    # is resolved later in embed_build_source and never reaches this gate), so
-    # this never runs an attacker-controlled command. Crucially it does NOT fire
-    # for the default mode preset (a plain `scan`/`--audit` with `--sources` whose
-    # collect_mode is already non-off) — only an explicit deep level counts, so a
-    # --config passed purely for project settings never silently runs a subprocess
-    # (Codex review). No-op when the config defines no query.
-    effective_allow_query = allow_build_query
-    if (
-        not allow_build_query
-        and build_config is not None
-        and collect_mode != "off"
-        and level_explicit
-    ):
-        from .buildsource.inline import load_build_config
-
-        try:
-            _cfg = load_build_config(build_config)
-        except Exception:  # malformed config surfaces later in the real load
-            _cfg = None
-        if _cfg is not None and _cfg.query:
-            effective_allow_query = True
-            advisories.append(
-                f"level {resolved.value} with a trusted --config defining "
-                "build.query: auto-enabled the query to collect L3+ evidence "
-                "(equivalent to --allow-build-query). Pass --allow-build-query "
-                "explicitly to silence this note."
-            )
+    effective_allow_query, _query_advisory = resolve_effective_allow_query(
+        allow_build_query, build_config, collect_mode, level_explicit, resolved
+    )
+    if _query_advisory is not None:
+        advisories.append(_query_advisory)
 
     _stage = time.monotonic()
     new_snap = _build_new_snapshot(
@@ -1357,30 +1303,7 @@ def run_scan_core(
     )
     _record_stage("candidate_snapshot", _stage)
     l4_cov = _source_abi_coverage(new_snap)
-    if l4_cov.get("scope_widened_to_full"):
-        advisories.append(
-            "headers-only source replay widened to all compile units because no "
-            "include graph/public-header target ownership could narrow it. Provide "
-            "depfile/include graph evidence or seed with --since/--changed-path to "
-            "avoid full fanout."
-        )
-    uncovered = int(l4_cov.get("public_headers_uncovered", 0) or 0)
-    if uncovered:
-        advisories.append(
-            f"headers-only source replay used the include graph and skipped full "
-            f"fanout, but {uncovered} public header(s) were not reached by any "
-            "selected TU; source-only coverage is partial for those headers."
-        )
-    exported = int(l4_cov.get("exported_symbols", 0) or 0)
-    matched = int(l4_cov.get("matched_symbols", 0) or 0)
-    parsed = int(l4_cov.get("compile_units_parsed", 0) or 0)
-    if exported and parsed and matched == 0:
-        advisories.append(
-            f"L4 source replay parsed {parsed} TU(s) but matched 0/{exported} "
-            "exported symbol(s); source-link evidence is degraded. Check mangled "
-            "symbol matching/public-header roots before relying on source-only "
-            "findings."
-        )
+    advisories.extend(l4_coverage_advisories(l4_cov))
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
     # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
@@ -1455,44 +1378,8 @@ def run_scan_core(
     _record_stage("crosschecks", _stage)
 
     # --- stable-ABI (abi3) audit (opt-in via --abi3) --------------------------
-    # A single-artifact audit of the candidate's CPython imports against a target
-    # Py_LIMITED_API floor. Its findings ride the cross-check stream: they are
-    # RISK `python_stable_abi_violation` rows, advisory by default (like every
-    # single-artifact check) and gated only via `--crosscheck
-    # python_stable_abi_violation=error`. Requires the --binary to be a CPython
-    # extension module; --abi3 on a plain library is a usage error.
     if abi3_floor is not None:
-        py_ext = new_snap.python_ext
-        if py_ext is None or not py_ext.is_extension:
-            raise _EvidenceContractError(
-                f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
-                f"'{binary.name}' is not a recognisable CPython extension module "
-                "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
-                "audit applies only to extension modules (Cython/pybind11/"
-                "nanobind/C)."
-            )
-        from .diff_python import audit_stable_abi_imports
-
-        abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)
-        cc.findings.extend(abi3_findings)
-        # Name the offending symbols in the coverage row (rendered verbatim in
-        # text and carried in JSON) so a CI artifact tells the user WHICH import
-        # to fix — the cross-check summary only reports a per-kind count, which
-        # would otherwise hide the symbol in Change.detail/new_value (Codex
-        # review). Capped so a pathological module cannot flood the report.
-        offending: list[str] = []
-        for f in abi3_findings:
-            offending.extend(f.new_value if isinstance(f.new_value, list) else [])
-        detail = (
-            f"{len(py_ext.cpython_imports)} CPython import(s) audited against "
-            f"Py_LIMITED_API {abi3_floor[0]}.{abi3_floor[1]}; "
-            f"{len(abi3_findings)} violation finding(s)"
-        )
-        if offending:
-            shown = ", ".join(offending[:20])
-            more = f" (+{len(offending) - 20} more)" if len(offending) > 20 else ""
-            detail += f" — outside the stable ABI: {shown}{more}"
-        cc.coverage.append({"layer": "abi3_audit", "status": "ran", "detail": detail})
+        _run_abi3_audit(new_snap, abi3_floor, binary, cc)
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
