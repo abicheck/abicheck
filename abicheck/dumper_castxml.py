@@ -57,6 +57,21 @@ def _vt_sort_key(item: tuple[int | None, str]) -> tuple[int, int]:
     return (0, vi) if vi is not None else (1, 0)
 
 
+# Itanium <nested-name> ::= N [<CV-qualifiers: r/V/K>] [<ref-qualifier: R|O>] …
+# At this position an uppercase R/O is unambiguous: prefix components start
+# with a digit (source-name), S (substitution), T (template param), or a
+# lowercase operator code — never a bare R/O.
+_MANGLED_REF_QUAL = re.compile(r"^_ZN[rVK]*([RO])")
+
+
+def _ref_qualifier_from_mangled(mangled: str) -> str:
+    """Recover a member function's &/&& ref-qualifier from its Itanium mangling."""
+    m = _MANGLED_REF_QUAL.match(mangled)
+    if m is None:
+        return ""
+    return "&" if m.group(1) == "R" else "&&"
+
+
 class _CastxmlParser:
     """Parse castxml XML into ABI model objects."""
 
@@ -402,9 +417,14 @@ class _CastxmlParser:
             else:
                 is_explicit = None
 
-            # C++ ref-qualifier: castxml emits refqual="lvalue" or "rvalue"
+            # C++ ref-qualifier: newer castxml emits refqual="lvalue"/"rvalue",
+            # but released versions (≤0.6.x) omit the attribute entirely, so
+            # fall back to the Itanium mangling — the qualifier is encoded as
+            # R (&) / O (&&) right after the CV-qualifiers in <nested-name>.
             refqual_raw = el.get("refqual", "")
-            ref_qualifier = {"lvalue": "&", "rvalue": "&&"}.get(refqual_raw, "")
+            ref_qualifier = {"lvalue": "&", "rvalue": "&&"}.get(
+                refqual_raw, ""
+            ) or _ref_qualifier_from_mangled(mangled)
 
             # Hidden-friend marker: castxml records the link via the
             # ``befriending`` attribute on the class element. We resolved
@@ -886,6 +906,15 @@ class _CastxmlParser:
 
         for method_el in self._virtual_methods_by_class.get(cid, []):
             mangled_name = method_el.get("mangled", "")
+            if not mangled_name and method_el.tag == "Destructor":
+                # castxml <Destructor> elements carry no mangled attribute.
+                # Without a fallback every virtual destructor is silently
+                # dropped from the vtable, which makes each polymorphic type
+                # look like it lacks a destructor slot (false
+                # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR). The name attribute is
+                # the class name, so "~Name" is a stable, per-class entry.
+                name = method_el.get("name", "")
+                mangled_name = f"~{name}" if name else ""
             if not mangled_name:
                 continue
             idx = _parse_vtable_index(method_el.get("vtable_index"))

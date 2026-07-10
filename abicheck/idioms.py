@@ -422,13 +422,18 @@ def _is_std_by_value(type_str: str, pointer_depth: int, kind: ParamKind) -> bool
 def _has_virtual_destructor(rec: RecordType) -> bool:
     """Heuristic: does *rec*'s vtable carry a destructor slot?
 
-    Itanium mangles destructors with ``D0``/``D1``/``D2`` suffixes; MSVC uses
-    ``??1`` / ``vector deleting destructor``. A polymorphic type whose vtable
-    has no destructor slot has a non-virtual destructor — deleting through a
-    base pointer is UB.
+    Itanium mangles destructors with ``D0``/``D1``/``D2`` suffixes (GCC's
+    DWARF additionally uses the unified ``D4``/``D5`` clones); MSVC uses
+    ``??1`` / ``vector deleting destructor``; the castxml dumper falls back
+    to a ``~Name`` entry because castxml Destructor elements carry no
+    mangled attribute. A polymorphic type whose vtable has no destructor
+    slot has a non-virtual destructor — deleting through a base pointer
+    is UB.
     """
     for entry in rec.vtable:
-        if re.search(r"D[012]\b|D[012]Ev|\?\?1|deleting destructor", entry):
+        if entry.startswith("~"):
+            return True
+        if re.search(r"D[0-5]\b|D[0-5]Ev|\?\?1|deleting destructor", entry):
             return True
     return False
 
