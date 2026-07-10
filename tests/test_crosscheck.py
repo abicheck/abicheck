@@ -476,6 +476,15 @@ def test_external_dependency_origin_owner_based(symbol, expected):
         ("_ZN10__cxxabiv117__class_type_infoE", ["libc++.so.1"], "libc++.so.1"),
         # __gnu_cxx is libstdc++-only, even alongside a libc++ DT_NEEDED.
         ("_ZN9__gnu_cxx17__normal_iteratorEv", ["libc++.so.1"], "libstdc++.so.6"),
+        # no __1 marker, libc++ absent: skip past a non-runtime DT_NEEDED entry and
+        # pick the linked libstdc++.
+        (
+            "_ZGVZNSt3_V216generic_categoryEvE7c",
+            ["libz.so.1", "libstdc++.so.6"],
+            "libstdc++.so.6",
+        ),
+        # neither C++ runtime linked -> fall back to the libstdc++ default.
+        ("_ZGVZNSt3_V216generic_categoryEvE7c", ["libz.so.1"], "libstdc++.so.6"),
         # covariant thunk with h/v-tagged call-offsets still resolves its owner.
         ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
     ],
