@@ -393,13 +393,15 @@ def _index_added_fields(
 ) -> tuple[dict[int, TypeField], dict[str, list[TypeField]]]:
     """Index fields present only in new_fields by offset and by type for reserved-field matching."""
     # Build index of added fields by offset for reserved-field matching.
-    added_names = {fname for fname in new_fields if fname not in old_fields}
     added_by_offset: dict[int, TypeField] = {}
     # Also build an ordered list of added non-reserved fields for fallback
-    # when offset_bits is unavailable (e.g. DWARF-only mode).
+    # when offset_bits is unavailable (e.g. DWARF-only mode). Iterate
+    # new_fields (insertion == declaration order) rather than a set of names, so
+    # the per-type fallback lists are deterministic across runs.
     added_by_type: dict[str, list[TypeField]] = {}
-    for fname in added_names:
-        f = new_fields[fname]
+    for fname, f in new_fields.items():
+        if fname in old_fields:
+            continue
         if f.offset_bits is not None:
             added_by_offset[f.offset_bits] = f
         if not _RESERVED_FIELD_RE.match(fname):

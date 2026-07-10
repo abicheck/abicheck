@@ -1257,16 +1257,25 @@ def diff_source_graph_findings(
 ) -> list[Change]:
     """Map the graph delta onto ADR-031 D6 secondary risk findings.
 
-    Produces three RISK-tier ``ChangeKind``s, each stamped with the
-    ``[L5_SOURCE_GRAPH]`` evidence boundary so it reads as graph-derived, not an
-    artifact diff:
+    Aggregates the per-family helpers below, each producing RISK-tier
+    ``ChangeKind``s stamped with the ``[L5_SOURCE_GRAPH]`` evidence boundary so
+    they read as graph-derived, not an artifact diff:
 
-    - ``SOURCE_TO_BINARY_MAPPING_CHANGED`` — a declaration present in *both*
-      graphs now maps to a different exported symbol;
-    - ``PUBLIC_REACHABILITY_CHANGED`` — a declaration entered/left the
-      public-header reachability closure;
-    - ``GENERATED_HEADER_REACHES_PUBLIC_API`` — a generated file newly entered
-      the public declaration closure.
+    - ``SOURCE_TO_BINARY_MAPPING_CHANGED`` (:func:`_mapping_drift_findings`);
+    - ``PUBLIC_REACHABILITY_CHANGED`` (:func:`_public_reachability_findings`);
+    - ``GENERATED_HEADER_REACHES_PUBLIC_API``
+      (:func:`_generated_public_closure_findings`);
+    - ``CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED``
+      (:func:`_call_reachability_findings`);
+    - ``INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT``
+      (:func:`_include_graph_drift_findings`);
+    - ``BUILD_OPTION_REACHES_PUBLIC_SYMBOL``
+      (:func:`_build_option_reach_findings`);
+    - ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+      (:func:`_internal_dependency_findings`);
+    - ``TARGET_DEPENDENCY_ADDED`` (:func:`_target_dependency_findings`);
+    - ``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED``
+      (:func:`_symbol_owner_findings`).
 
     Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
     them into the verdict pipeline as ordinary RISK changes that never override

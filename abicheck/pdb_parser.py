@@ -954,17 +954,8 @@ class TypeDatabase:
             _, pos = _read_cstring(d, pos)
             return pos
 
-        if sub_leaf == LF_ONEMETHOD:
-            # attr(2) + type_ti(4) [+ vbaseoff(4) if virtual] + name(variable)
-            if pos + 6 > len(d):
-                return len(d)
-            (attr,) = struct.unpack_from("<H", d, pos)
-            pos += 6
-            mprop = (attr >> 2) & 0x07
-            if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
-                pos += 4
-            _, pos = _read_cstring(d, pos)
-            return pos
+        # LF_ONEMETHOD is dispatched to _parse_lf_onemethod by _parse_fieldlist
+        # before it reaches this fallback, so it is intentionally absent here.
 
         if sub_leaf == LF_METHOD:
             # count(2) + mlist_ti(4) + name(variable)

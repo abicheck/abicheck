@@ -157,7 +157,16 @@ def _match_removed_to_added(
         if k is None:
             continue
         eligible += 1
-        cands = [a for a in added_by_key.get(k, []) if a.symbol != r.symbol]
+        # Exclude added symbols already consumed by an earlier removed symbol so
+        # one added symbol cannot satisfy multiple removals — otherwise two
+        # removed symbols sharing a scheme key both count as matched while only
+        # one distinct added counterpart exists, overstating pairs and hiding a
+        # genuine removal.
+        cands = [
+            a
+            for a in added_by_key.get(k, [])
+            if a.symbol != r.symbol and id(a) not in seen_added
+        ]
         if not cands:
             continue
         matched_removed.append(r)
