@@ -627,6 +627,18 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         )
         == "libstdc++.so.6"
     )
+    # the owner-fallback runtime path (a guard variable / __gnu_cxx form the prefix
+    # table misses) is self-gated the same way (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZGVZNSt3_V216generic_categoryEvE7c", [], ("libstdc++.so.6",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin("_ZN9__gnu_cxx5xyz_Ev", [], ("libstdc++.so.6",))
+        is None
+    )
     assert (
         _external_dependency_origin(
             "_ZN6google20ParseCommandLineFlagsEPiPPPcb", [], ("libgflags.so",)

@@ -215,11 +215,17 @@ def _external_dependency_origin(
     owner = _mangled_owner_namespace(symbol)
     if owner is None:
         return None
+    # The owner-fallback runtime path (a guard variable / nested-std form the prefix
+    # table misses) is self-gated the same way as the prefix-table path above, so
+    # auditing the runtime library itself doesn't flag its own exports (Codex).
     if owner == "__gnu_cxx":
-        # libstdc++-only extension namespace — never libc++.
-        return "libstdc++.so.6"
-    if owner == "std" or owner in _STD_OWNER_NAMESPACES:
-        return _cxx_runtime_lib(symbol, needed_libs)
+        runtime = "libstdc++.so.6"  # libstdc++-only extension namespace — never libc++
+    elif owner == "std" or owner in _STD_OWNER_NAMESPACES:
+        runtime = _cxx_runtime_lib(symbol, needed_libs)
+    else:
+        runtime = None
+    if runtime is not None:
+        return None if _resolved_lib_is_self(runtime, self_names) else runtime
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
     if owner == "google" and _nested_component(symbol, 1) != "protobuf":
         # ``google::`` is shared by many Google libraries (glog's
