@@ -15,10 +15,11 @@ struct-field insertion corrupts memory also tells you what abicheck will report
 when it sees one.
 
 !!! tip "New to the topic? Don't start here — start with the on-ramp."
-    This hub is dense (it doubles as a deep reference, and points to a full
-    evidence-model walk-through on its own page —
-    [What Each Level Sees](what-each-level-sees.md)). If binary compatibility is
-    new to you, read the five-minute on-ramp first and follow the series in order:
+    This hub is a navigator: it maps the series, the deep-dive pages, and the
+    break families, and points each to its own page (e.g. the evidence-model
+    walk-through, [What Each Level Sees](what-each-level-sees.md)). If binary
+    compatibility is new to you, read the five-minute on-ramp first and follow
+    the series in order:
 
     1. [**ABI in Five Minutes**](abi-series/abi-in-5-minutes.md) — the gentlest introduction.
     2. [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) — the framing.
@@ -39,6 +40,13 @@ when it sees one.
 > every class-layout change (base offsets, EBO, vptr, vtable slots, RTTI,
 > standard-layout / trivially-copyable, packing) to the exact `ChangeKind`
 > abicheck emits, the evidence tier that reveals it, and a worked example.
+>
+> **Shipping one binary to several OS releases?** The
+> [Dependency & Runtime Floors guide](dependency-floors.md) covers the contract
+> *below* your library — why glibc/libstdc++ version requirements decide which
+> distros can load a release, how a mere rebuild raises that floor, the
+> macOS/Windows parallels, and the CPU-dispatch (oneDAL/OpenBLAS) scenario where
+> a new-hardware kernel moves the floor for every consumer.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
@@ -138,6 +146,7 @@ is the source of truth).
 | Transitive/dependency & `detail::` leaks | [18](../examples/case18_dependency_leak.md), [48](../examples/case48_leaf_struct_through_pointer.md), [74](../examples/case74_detail_base_class_changed.md), [75](../examples/case75_detail_embedded_by_value.md), [76](../examples/case76_detail_pimpl_vtable_changed.md), [77](../examples/case77_detail_templated_base_changed.md), [80](../examples/case80_pimpl_shared_to_unique.md), [97](../examples/case97_api_depends_on_consumer_env.md), [104](../examples/case104_glibcxx_dual_abi_flip.md), [112](../examples/case112_lp64_ilp64.md) | 🔴 BREAKING | [Part 6](abi-series/06-transitive-breaks.md) |
 | Source-only / API-level (rename, access, explicit, default args, hidden friends) | [31](../examples/case31_enum_rename.md), [34](../examples/case34_access_level.md), [96](../examples/case96_hidden_friend_removed.md), [106](../examples/case106_ctor_became_explicit.md), [123](../examples/case123_default_argument_removed.md), [124](../examples/case124_header_constant_value_changed.md) | 🟠 API_BREAK | [Part 6 §Source-only API breaks](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) |
 | Deployment risk (noexcept, ISA dispatch, version-require) | [15](../examples/case15_noexcept_change.md), [83](../examples/case83_cpu_dispatch_isa_dropped.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 4](abi-series/04-cpp-abi.md) |
+| Dependency / runtime floors & environment drift (glibc/libstdc++ floor, DT_RELR, RPATH type) | [170](../examples/case170_env_runtime_floor_raised.md) | 🟡 COMPATIBLE_WITH_RISK — 🔴 or 🟢 once a floor is declared; the 32-bit time64/LFS flip (`time64_abi_changed`) is always 🔴 BREAKING | [Dependency & Runtime Floors](dependency-floors.md) + [Environment & Toolchain Drift](environment-drift.md) |
 | Compatible additions & quality signals | [03](../examples/case03_compat_addition.md), [25](../examples/case25_enum_member_added.md), [26b](../examples/case26b_union_field_added_compatible.md), [27](../examples/case27_symbol_binding_weakened.md), [29](../examples/case29_ifunc_transition.md), [61](../examples/case61_var_added.md), [62](../examples/case62_type_field_added_compatible.md), [99](../examples/case99_experimental_graduated.md) | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
 | Scoped/non-public internal changes | [118](../examples/case118_internal_struct_field_added_scoped.md), [119](../examples/case119_internal_struct_field_removed_scoped.md), [120](../examples/case120_internal_struct_reordered_scoped.md) | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
 | Security-hardening & deployment metadata (RELRO, canary, exec-stack, RUNPATH, `DT_NEEDED`, TLS model, symbol binding) — artifact/linker facts (L0/L3) | [128](../examples/case128_symbol_binding_strengthened.md), [133](../examples/case133_tls_model_flip.md), [134](../examples/case134_relro_weakened.md), [135](../examples/case135_stack_canary_removed.md), [136](../examples/case136_executable_stack_removed.md), [137](../examples/case137_runpath_changed.md), [138](../examples/case138_needed_added.md) | mixed — 🟡 risk (RELRO/canary/TLS) or 🟢 COMPATIBLE (exec-stack/RUNPATH/`DT_NEEDED`/binding) | [Part 5](abi-series/05-linker-elf.md) |
@@ -184,94 +193,35 @@ pipeline works, and [Verdicts](verdicts.md) for the exit-code semantics.
 
 ### Runtime calls are not the same as ABI dependencies
 
-A public entry point may call a long chain of private helpers at runtime. That
-runtime call graph is **not** automatically the consumer's ABI contract. Existing
-binaries are bound only to the symbols, types, constants, layouts, and inline
-code that cross the **compile / link / load boundary**: what appears in installed
-public headers, what the consumer object directly references, and what the loader
-must resolve.
+A public entry point may call a long chain of private helpers at runtime — but
+that runtime call graph is **not** automatically the consumer's ABI contract.
+Existing binaries are bound only to what crosses the **compile / link / load
+boundary**: installed public headers, symbols the consumer object directly
+references, and what the loader must resolve. An internal helper is safe to
+change while it stays behind that boundary, and becomes contract the moment a
+public inline body references it or a public header exposes its type by value.
 
-```text
-Safe runtime call chain:
-app -> public_func
-       public_func -> hidden internal_helper
-
-Consumer binary depends on public_func only. internal_helper can change because
-it is not exported, not referenced by public headers, and not part of public
-layout or inline code.
-```
-
-The same private helper becomes an ABI dependency if the boundary shifts:
-
-```text
-Unsafe link-time dependency:
-inline public_func in an installed header -> detail::internal_helper
-
-The consumer object now directly references detail::internal_helper. Removing,
-renaming, hiding, or changing that helper can break already-built consumers.
-```
-
-Private types follow the same rule. A helper struct is safely private while it is
-fully hidden behind an opaque pointer or implementation file, but not when the
-public header exposes it by value:
-
-```text
-Unsafe compile-time layout dependency:
-public header exposes InternalType by value
-
-The consumer bakes sizeof(InternalType), alignment, field offsets, base-class
-layout, and calling-convention facts into its own object code.
-```
-
-Use this checklist before calling an internal change ABI-safe. A private change
-is safe only when **all** of these remain true:
-
-- the private symbol is not exported or otherwise load-resolvable by consumers;
-- public inline, template, `constexpr`, or macro bodies do not reference it;
-- it is not part of any public struct/class layout, base class, field, parameter,
-  return value, exception specification, allocator/deallocator rule, or calling
-  convention;
-- it is absent from installed public headers except behind an opaque declaration
-  that reveals no size, members, bases, or required helper symbols;
-- no plugin, callback, subclassing, serialization, or user-extension model
-  promises that consumers may provide or observe the changed detail;
-- the public behavior contract remains compatible, even if the binary boundary is
-  intact.
-
-This distinction is why [Part 5](abi-series/05-linker-elf.md) treats leaked
-private exports as dangerous, [Part 4](abi-series/04-cpp-abi.md) treats
-inline/template bodies as part of the contract, and
-[Part 6](abi-series/06-transitive-breaks.md) treats exposed dependency types as
-transitive ABI.
+➡️ The full deep-dive — the safe/unsafe boundary shifts, the six-point
+private-change safety checklist, and how public-surface scoping and
+`scan --audit` check the boundary — is on its own page:
+**[What Is Part of Your ABI Surface?](abi-surface.md)**
 
 ### App-swap (ASW): the consumer-scoped runtime check
 
 The most realistic *consumer-level* test is **application software swap (ASW)** —
 build an app against the old library, drop in the new one, and run it. abicheck
-exposes this as [`appcompat`](../user-guide/appcompat.md): it parses the app's
-required symbols, compares old/new in full mode, and **filters** findings to the
-changes that affect *that* app. ASW is powerful and narrow at the same time:
-
-- It **proves** real loader/linker behavior and tested execution paths — "this
-  app does not import the removed symbol", "this app needs symbol version X the
-  new lib lacks".
-- It **cannot** speak for the whole contract: untested public API, *future*
-  consumers, silent layout corruption a test never exercises, and source-only
-  (recompile) breaks all stay invisible.
-
-So ASW is **consumer-scoped** compatibility; library `compare`/`scan` is
-**contract-scoped**. Use both — `compare`/`scan` protect the library contract,
-ASW protects a specific deployment. ASW is one of several *methods*, each seeing
-different evidence; the full comparison of methods (libabigail, ABICC, app-swap,
-bundle scan) is in
-[Evidence & Detectability](evidence-and-detectability.md#2-methods-compared-by-the-evidence-they-use).
+exposes this as [`appcompat`](../user-guide/appcompat.md). ASW is
+**consumer-scoped** compatibility; library `compare`/`scan` is
+**contract-scoped** — use both. What app mode can and cannot conclude, and how
+it compares to the other methods (libabigail, ABICC, bundle scan), is in
+[Evidence & Detectability §4](evidence-and-detectability.md#4-app-mode-consumer-scoped-vs-library-compare-contract-scoped).
 
 ---
 
 ### Feed abicheck `.so` + debug info + headers for the best result
 
-abicheck's three analysis tiers are additive, and the highest-coverage setup is
-a single comparison of **debug-enabled libraries with their public headers
+abicheck's analysis tiers are additive, and the highest-coverage setup is a
+single comparison of **debug-enabled libraries with their public headers
 supplied**:
 
 ```bash
@@ -279,41 +229,14 @@ abicheck compare libfoo_v1.so libfoo_v2.so \
     --old-header include/v1/foo.h --new-header include/v2/foo.h   # both built with -g
 ```
 
-- **`.so` + DWARF (`-g` / `/Zi`)** gives the ground-truth *emitted* ABI — struct
-  layout, field offsets, alignment/packing, enum values, calling convention.
-- **public headers (castxml or clang, `--ast-frontend`)** add the source-level API surface the binary cannot
-  carry — `final`, access, ref-qualifiers, `noexcept`/`explicit`, default-argument
-  values, and `const`/`constexpr` constant values (the last two have *no symbol*,
-  so only header analysis can reach them).
-
 Comparing a **stripped binary with no headers** yields only symbol add/remove
-coverage and silently misses every layout and source-level break. If you ship
-stripped, build a debug copy purely as an analysis input and compare *that* with
-headers. A handful of changes remain invisible to any artifact comparison
-(`#define` macros, inline/template **bodies**, uninstantiated templates) — see
-[Limitations → Source-only changes](limitations.md#source-only-changes-invisible-to-binaryobject-analysis)
-for the full per-change detectability matrix.
-
-These three tiers are artifact layers **L0–L2**. Two optional layers go
-further without overriding an artifact-proven break: **L3** build context
-(`-p build/`) pins the exact ABI-affecting flags, and **L4** source/evidence
-packs recover several of the otherwise-invisible source-only facts above
-(macro/`constexpr` values, uninstantiated templates). See [Build & Source Packs](build-source-data.md) and the full [L0–L4
-model](evidence-and-detectability.md).
-
-> **The layering principle — more evidence cuts *both* error kinds.** Each layer
-> you add reduces **false negatives** (breaks a weaker input is blind to) **and**
-> **false positives** (internal churn a weaker input cannot scope) — not one at
-> the expense of the other. Symbols-only is blind to layout; add DWARF and it
-> sees layout but *over-reports* internal-type churn; add headers and that churn
-> is scoped out while every real break stays; add build context and it catches a
-> cross-toolchain break no artifact tier could see; add source (L4) and it
-> catches macro/`constexpr`/inline-body breaks **no artifact tier can *ever* see**.
-> The one rule that never bends: more evidence may *scope away* a false positive
-> but must never *hide* an artifact-proven break (the *authority rule*). abicheck
-> tracks each layer's FP/FN contribution as a CI gate — see
-> [Evidence & Detectability → What each layer buys](evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives)
-> for the tracked per-tier matrix.
+coverage and silently misses every layout and source-level break. The
+governing principle: **more evidence cuts *both* error kinds** — each layer
+you add reduces false negatives *and* false positives, and more evidence may
+scope away a false positive but never hide an artifact-proven break (the
+*authority rule*). What each layer contributes, the tracked per-tier FP/FN
+matrix, and the `--depth` dial that collects the layers are all on the model
+page: [Evidence & Detectability](evidence-and-detectability.md).
 
 ### Which input proves which family — and what each level actually sees
 
@@ -355,43 +278,21 @@ abicheck can read the build's compile database (**L3**) and replay the sources
 driver is `abicheck scan`. It has one evidence dial — `--depth`
 (`binary|headers|build|source|full`) — that selects how far down the `L0`–`L5`
 *evidence layers* (what it sees + authority) to collect; fully explained in
-[Evidence Layers & Scan Depth](scan-and-evidence-levels.md). The governing
+[Evidence & Detectability](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). The governing
 **authority rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes,
 or raises its own source-/API-level findings, but **never deletes an
 artifact-proven break**.
 
-**Who produces the source facts.** The default is a post-build
-`compile_commands.json` replay — nothing in your build changes (`abicheck scan`
-/ `dump --sources`). If you'd rather have the build *emit* the facts itself, two
-producers write the identical schema for `abicheck merge` to fold in: the
-portable **`abicheck-cc`** compiler wrapper, and — for large/template-heavy
-builds where a companion parse hurts — an optional **Clang plugin** that rides
-the compile's own AST (zero extra parse). The three are one interchangeable
-family; see [Build & Source data](build-source-data.md) for enable steps.
-
-`scan --depth` picks the evidence level: `source` (the per-PR gate — diff-seeded
-L4 replay + the L5 graph) and `full` (a full-depth release snapshot). Orthogonal
-to depth, `scan --audit` is an **intra-version single-build hygiene lint that
-needs no previous version**. Audit surfaces "bad ABI hygiene" visible from one
-build: accidental
-exports, private-header leaks, unversioned symbols, exported RTTI for internal
-types, and cross-source mismatches. Worked example cases:
-
-| Family | Example case | What it shows |
-|--------|--------------|---------------|
-| Accidental export (`exported_not_public`) | [case143](../examples/case143_audit_accidental_export.md) | symbol exported but in no public header |
-| Private-header leak (`private_header_leak`) | [case144](../examples/case144_audit_private_header_leak.md) | public API pulls an unshipped header |
-| Unversioned export (`unversioned_exported_symbol`) | [case145](../examples/case145_audit_unversioned_export.md) | export with no version node though a scheme exists |
-| Exported RTTI for internal type (`rtti_for_internal_type`) | [case146](../examples/case146_audit_rtti_for_internal.md) | `_ZTI`/`_ZTV` leaked for a private-header type |
-| Header/build mismatch (`header_build_context_mismatch`) | [case148](../examples/case148_xcheck_header_build_mismatch.md) | L2 macros ↔ L3 flags disagree |
-| ODR type variant (`odr_type_variant`) | [case149](../examples/case149_xcheck_odr_variant.md) | one type, two per-TU layouts (L4 ↔ L4) |
-| Bidirectional export ↔ decl (`exported_not_public`/`public_not_exported`) | [case150](../examples/case150_xcheck_export_public_pair.md) | L0 exports ↔ L2 decls, both directions |
-| Provider corroboration | [case151](../examples/case151_xcheck_provider_matrix.md) | confidence grows with how many sources agree |
-| Depth ladder | [case147](../examples/case147_scan_depth_ladder.md) | same input answered at S3 vs deeper, honest coverage |
-
-The throughline of the cross-source cases: a finding invisible or ambiguous to
-**any single source** resolves only by crosschecking two — and `case147` shows
-the scan stating the depth it *actually reached*, never a bare "scan failed".
+Orthogonal to depth, `scan --audit` is an **intra-version single-build hygiene
+lint that needs no previous version**: accidental exports, private-header
+leaks, unversioned symbols, exported RTTI for internal types, and cross-source
+mismatches. The worked cases (case143–151) with commands are in
+[Source-Scan Depth § single-build audit](../user-guide/scan-levels.md#single-build-audit-no-baseline);
+their throughline is that a finding invisible or ambiguous to **any single
+source** resolves only by crosschecking two, and that a scan always states the
+depth it *actually reached*
+([case147](../examples/case147_scan_depth_ladder.md)) — never a bare
+"scan failed".
 
 ### Now run it — the practical flow, plugin, and CI guides
 
@@ -404,7 +305,7 @@ project, the tool-track guides carry the exact commands, flags, and CI YAML:
 | Run `abicheck scan` and pin a depth | [Source-Scan Depth](../user-guide/scan-levels.md) |
 | *Produce* the source facts — post-build replay (Flow A), `abicheck-cc` wrapper (Flow B), or the Clang plugin (Flow C) | [Producing Source Facts](../user-guide/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
-| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action § Source scans](../user-guide/github-action.md#source-scans-build-source-evidence) |
+| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action: Source Scans](../user-guide/github-action-source-scans.md) |
 | Check a host↔plugin ABI contract | [Plugin Systems](../user-guide/plugin-systems.md) |
 | Gate CI on the right verdict tier (binary break vs. source/API break) | [CI Gating](../user-guide/ci-gating.md) |
 

@@ -340,7 +340,7 @@ tier (compiler-free pattern pre-scan + intra-version cross-source checks) → th
 pinned evidence level — and, when `baseline` is given, a compare against it.
 Returns one coverage-/confidence-annotated scan result. The authority rule is
 preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
-`BREAKING` on their own. See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)
+`BREAKING` on their own. See the [`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect)
 for the `depth` model (`mode`/`source_method` are deprecated aliases).
 
 **Parameters:**

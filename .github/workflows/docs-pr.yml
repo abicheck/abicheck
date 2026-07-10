@@ -24,7 +24,7 @@ jobs:
           cache: pip
 
       - name: Install MkDocs + Material theme
-        run: pip install mkdocs mkdocs-material
+        run: pip install mkdocs mkdocs-material mkdocs-redirects
 
       - name: Check generated examples docs are up to date
         run: python scripts/gen_examples_docs.py --check

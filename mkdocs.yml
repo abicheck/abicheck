@@ -48,6 +48,7 @@ nav:
     - CI & Gating:
       - CI Gating Pipeline: user-guide/ci-gating.md
       - GitHub Action: user-guide/github-action.md
+      - 'GitHub Action: Source Scans': user-guide/github-action-source-scans.md
       - GitHub PR Annotations: user-guide/annotations.md
       - Severity Configuration: user-guide/severity.md
       - Policy Profiles: user-guide/policies.md
@@ -58,7 +59,7 @@ nav:
       - Plugin Systems: user-guide/plugin-systems.md
       - POST Python Manifests: user-guide/post-python.md
       - Build Evidence Setup: user-guide/build-evidence-setup.md
-      - API Surface Intelligence: concepts/api-surface-intelligence.md
+      - API Surface Intelligence: user-guide/api-surface-intelligence.md
       - Kernel & eBPF (BTF): user-guide/kernel-btf.md
       - Python Extensions (abi3): user-guide/python-extensions.md
       - Security Hardening: user-guide/security-hardening.md
@@ -73,13 +74,10 @@ nav:
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
     - Verdicts: concepts/verdicts.md
-    - Verdicts and Exit Codes: concepts/verdicts-and-exit-codes.md
     - Evidence & Detectability: concepts/evidence-and-detectability.md
     - What Each Level Sees: concepts/what-each-level-sees.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
-    - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
-    - Class Layout ABI & API: concepts/class-layout-abi.md
     - Environment & Toolchain Drift: concepts/environment-drift.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
@@ -98,6 +96,10 @@ nav:
   - ABI/API Handling & Recommendations:
     - Overview: concepts/abi-api-handling.md
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
+    - Deep Dives:
+      - Your ABI Surface: concepts/abi-surface.md
+      - Class Layout ABI & API: concepts/class-layout-abi.md
+      - Dependency & Runtime Floors: concepts/dependency-floors.md
     - Learning Series:
       - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
@@ -196,6 +198,13 @@ exclude_docs: |
 
 plugins:
   - search
+  # Old URLs of pages merged/moved by the docs-structure consolidation keep
+  # working via client-side redirect stubs (external bookmarks, search hits).
+  - redirects:
+      redirect_maps:
+        concepts/scan-and-evidence-levels.md: concepts/evidence-and-detectability.md
+        concepts/verdicts-and-exit-codes.md: concepts/verdicts.md
+        concepts/api-surface-intelligence.md: user-guide/api-surface-intelligence.md
 
 markdown_extensions:
   - admonition

@@ -240,7 +240,7 @@ Recovered by passing two `Module.symvers` manifests to `compare` (recognized by 
 
 ### API-surface intelligence transitions (ADR-027)
 
-These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../concepts/api-surface-intelligence.md) guide.
+These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../user-guide/api-surface-intelligence.md) guide.
 
 | Kind | Description |
 |------|-------------|
@@ -459,7 +459,7 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 
 ### Surface-metric drift (ADR-027, opt-in `--surface-metrics`)
 
-Aggregate roll-up signals computed from the [API surface metrics](../concepts/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
+Aggregate roll-up signals computed from the [API surface metrics](../user-guide/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
 
 | Kind | Description |
 |------|-------------|
