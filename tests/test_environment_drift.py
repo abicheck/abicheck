@@ -652,6 +652,55 @@ class TestTime64AbiFlip:
         assert "ino_t" in changes[0].description
         assert "fsblkcnt_t" in changes[0].description
 
+    def test_variable_reference_counts_as_public_use(self) -> None:
+        from abicheck.model import Variable, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.variables = [Variable(
+                name="epoch", mangled="epoch", type="time_t",
+                visibility=Visibility.PUBLIC,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+
+    def test_hidden_function_does_not_seed_surface(self) -> None:
+        from abicheck.model import Function, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.functions = [Function(
+                name="internal", mangled="internal",
+                return_type="time_t", visibility=Visibility.HIDDEN,
+            )]
+        assert _diff_time64_abi(old, new) == []
+
+    def test_no_elf_metadata_assumes_64bit(self) -> None:
+        # Without ELF metadata the LP64 assumption holds: long and long long
+        # are both 64-bit, so a long -> long long change is not a width flip.
+        from abicheck.model import Function, Visibility
+
+        old = AbiSnapshot(library="l", version="1",
+                          typedefs={"time_t": "long int"},
+                          functions=[Function(name="f", mangled="f",
+                                              return_type="time_t",
+                                              visibility=Visibility.PUBLIC)])
+        new = AbiSnapshot(library="l", version="2",
+                          typedefs={"time_t": "long long int"},
+                          functions=[Function(name="f", mangled="f",
+                                              return_type="time_t",
+                                              visibility=Visibility.PUBLIC)])
+        assert _diff_time64_abi(old, new) == []
+
+    def test_non_string_underlying_ignored(self) -> None:
+        # Defensive: a malformed snapshot with a non-string underlying type
+        # must not crash (a detector exception disables it registry-wide).
+        old = _snap32({"time_t": 123})  # type: ignore[dict-item]
+        new = _snap32({"time_t": "long long int"})
+        assert _diff_time64_abi(old, new) == []
+
     def test_pe_snapshots_skipped(self) -> None:
         old = AbiSnapshot(library="x.dll", version="1", platform="pe",
                           typedefs={"time_t": "long int"})
