@@ -2,7 +2,7 @@
 
 > Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **312**, see the [Change Kind Reference](../reference/change-kinds.md).
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
-> Target: abicheck `examples/` (162 ground-truth entries today; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**312 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
+> Target: abicheck `examples/` (164 ground-truth entries today: 134 binary shared-library competitor lanes plus dedicated non-.so lanes, including fixture/source-only L2/L5/source cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**312 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
 >
 > **Analysis modes:** Abicheck uses **both** header comparison (via castxml) **and** binary analysis (ELF/DWARF).
 > The `dump()` function combines castxml header parsing (types, functions, enums, typedefs, constants) with
@@ -24,7 +24,7 @@
 | **Abicheck covers (has ChangeKind + tests)** | **66/66 (100%)** |
 | Abicheck ChangeKind enum members | **312 change kinds** (this table's per-rule mappings reflect an earlier snapshot) |
 | All ChangeKinds have assertion tests | **Yes** (enforced by `test_changekind_completeness.py`) |
-| Abicheck example cases | 129 |
+| Abicheck example cases | 164 total: 134 binary shared-library competitor lanes + 30 dedicated non-.so lanes (including fixture/source-only L2/L5/source cases) |
 | ABICC scenarios NOT in abicheck | **0** |
 
 ---
