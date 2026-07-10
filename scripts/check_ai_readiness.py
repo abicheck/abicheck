@@ -622,6 +622,11 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_stack"}),
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
+        # `compare`'s orchestration body lives in `cli_compare_helpers.run_compare`
+        # (size-split from cli.py); the thin click wrapper in `cli` imports it
+        # (function-local) to delegate, and `cli_compare_helpers` imports the shared
+        # option-parsing/render/exit helpers back from `cli`. By-design sibling split.
+        frozenset({"cli", "cli_compare_helpers"}),
         # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
         # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
         # cli imports cli_scan at its tail to register the command. All three edges
