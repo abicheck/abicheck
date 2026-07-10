@@ -446,28 +446,9 @@ def _diff_macho_exports(
     return changes
 
 
-@registry.detector(
-    "macho",
-    requires_support=lambda o, n: (
-        o.macho is not None and n.macho is not None,
-        "missing Mach-O metadata",
-    ),
-)
-def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Mach-O-specific detectors for macOS dylib ABI changes."""
-    from .macho_metadata import MachoMetadata
-
-    o: MachoMetadata = getattr(old, "macho", None) or MachoMetadata()
-    n: MachoMetadata = getattr(new, "macho", None) or MachoMetadata()
+def _diff_macho_install_name(o: Any, n: Any) -> list[Change]:
+    """Detect install name change (equivalent of SONAME change)."""
     changes: list[Change] = []
-
-    # Export deltas from Mach-O metadata can overlap with _diff_functions().
-    # Deduplicate per symbol to avoid double-reporting, but keep metadata-only
-    # changes that function model may miss.
-    if o.exports or n.exports:
-        changes.extend(_diff_macho_exports(old, new, o, n))
-
-    # Install name change (equivalent of SONAME change)
     if o.install_name != n.install_name and (o.install_name or n.install_name):
         changes.append(
             make_change(
@@ -478,7 +459,11 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 description=f"install name changed: {o.install_name} → {n.install_name}",
             )
         )
+    return changes
 
+
+def _diff_macho_arch_drift(o: Any, n: Any) -> list[Change]:
+    """Detect removal of a previously-shipped architecture slice."""
     # Architecture drift — only breaking when an architecture slice that used to
     # ship is GONE. Adding slices (single-arch → universal) keeps old clients
     # loadable, so a superset is not a break. ``cpu_types`` carries every slice
@@ -487,6 +472,7 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # *old* snapshot serialized before ``cpu_types`` existed records only its
     # selected slice, so dropping a non-selected slice of a then-universal
     # binary can go unseen. Re-dumping the old binary restores full detection.
+    changes: list[Change] = []
     old_arches = set(getattr(o, "cpu_types", None) or ()) or (
         {o.cpu_type} if o.cpu_type else set()
     )
@@ -504,8 +490,12 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 new=", ".join(sorted(new_arches)),
             )
         )
+    return changes
 
-    # Compatibility version change (LC_ID_DYLIB compat_version — binary contract)
+
+def _diff_macho_compat_version(o: Any, n: Any) -> list[Change]:
+    """Detect compatibility version change (LC_ID_DYLIB compat_version — binary contract)."""
+    changes: list[Change] = []
     if o.compat_version != n.compat_version and (o.compat_version or n.compat_version):
         changes.append(
             make_change(
@@ -515,8 +505,12 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 new=n.compat_version,
             )
         )
+    return changes
 
-    # Detect dependency changes
+
+def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
+    """Detect dependency changes."""
+    changes: list[Change] = []
     old_deps = set(o.dependent_libs)
     new_deps = set(n.dependent_libs)
     for dep in sorted(old_deps - new_deps):
@@ -535,11 +529,15 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 description=f"new dependency: {dep}",
             )
         )
+    return changes
 
-    # Detect re-exported dylib changes (LC_REEXPORT_DYLIB). A single
-    # removed+added pair is a *repoint* — the umbrella's surface is now
-    # sourced from a different dylib — reported as its own kind rather than
-    # an unrelated-looking remove/add pair.
+
+def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
+    """Detect re-exported dylib changes (LC_REEXPORT_DYLIB)."""
+    # A single removed+added pair is a *repoint* — the umbrella's surface is
+    # now sourced from a different dylib — reported as its own kind rather
+    # than an unrelated-looking remove/add pair.
+    changes: list[Change] = []
     old_reexports = set(o.reexported_libs)
     new_reexports = set(n.reexported_libs)
     removed_re = sorted(old_reexports - new_reexports)
@@ -572,7 +570,35 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     description=f"new re-exported dylib: {lib}",
                 )
             )
+    return changes
 
+
+@registry.detector(
+    "macho",
+    requires_support=lambda o, n: (
+        o.macho is not None and n.macho is not None,
+        "missing Mach-O metadata",
+    ),
+)
+def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Mach-O-specific detectors for macOS dylib ABI changes."""
+    from .macho_metadata import MachoMetadata
+
+    o: MachoMetadata = getattr(old, "macho", None) or MachoMetadata()
+    n: MachoMetadata = getattr(new, "macho", None) or MachoMetadata()
+    changes: list[Change] = []
+
+    # Export deltas from Mach-O metadata can overlap with _diff_functions().
+    # Deduplicate per symbol to avoid double-reporting, but keep metadata-only
+    # changes that function model may miss.
+    if o.exports or n.exports:
+        changes.extend(_diff_macho_exports(old, new, o, n))
+
+    changes.extend(_diff_macho_install_name(o, n))
+    changes.extend(_diff_macho_arch_drift(o, n))
+    changes.extend(_diff_macho_compat_version(o, n))
+    changes.extend(_diff_macho_dependencies(o, n))
+    changes.extend(_diff_macho_reexports(o, n))
     changes.extend(_diff_macho_loader_facts(o, n))
     changes.extend(_diff_macho_weak_exports(o, n))
 
