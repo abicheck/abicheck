@@ -195,23 +195,11 @@ def test_run_abicheck_skip_when_missing(tmp_path):
     assert result.verdict == "SKIP"
 
 
-def test_abicheck_baseline_and_full_build_distinct_commands(tmp_path):
-    """Baseline is binary+headers only; full adds source/build evidence."""
+def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
     mod = _load_benchmark()
     so = tmp_path / "lib.so"
-    hdr = tmp_path / "api.h"
-    src = tmp_path / "old" / "lib.c"
-    compile_db = tmp_path / "build" / "compile_commands.json"
-    snapshot_dir = tmp_path / "snapshots"
-    for path in (so, hdr, src):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
-    compile_db.parent.mkdir(parents=True, exist_ok=True)
-    compile_db.write_text(__import__("json").dumps([
-        {"directory": str(src.parent), "file": str(src), "command": "cc -c lib.c"},
-    ]))
-    snapshot_dir.mkdir()
-
+    header = tmp_path / "api.h"
+    so.touch(); header.touch()
     commands = []
 
     class Result:
@@ -225,95 +213,92 @@ def test_abicheck_baseline_and_full_build_distinct_commands(tmp_path):
             Path(cmd[cmd.index("-o") + 1]).touch()
         return Result()
 
-    with (
-        patch.object(mod, "_HAS_ABICHECK", True),
-        patch.object(mod, "BUILD_DIR", snapshot_dir),
-        patch.object(mod.subprocess, "run", side_effect=fake_run),
-    ):
-        mod.run_abicheck(so, so, hdr, hdr, "smoke_baseline", tmp_path)
-        baseline = commands[:]
-        commands.clear()
-        mod.run_abicheck_full(
-            so, so, hdr, hdr, "smoke_full", tmp_path,
-            case_dir=tmp_path, v1_src=src, v2_src=src, build_dir=compile_db,
-        )
-        full = commands[:]
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", tmp_path / "build"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+        mod.run_abicheck(so, so, header, header, "baseline", tmp_path)
 
-    assert len(baseline) == len(full) == 3
-    for dump in baseline[:2]:
+    assert len(commands) == 3
+    for dump in commands[:2]:
         assert "-H" in dump
         for option in ("--depth", "--sources", "--build-info", "-p"):
             assert option not in dump
 
-    for dump in full[:2]:
-        assert dump[dump.index("--depth") + 1] == "full"
-        assert dump[dump.index("--sources") + 1] == str(src.parent)
-        staged_db = Path(dump[dump.index("--build-info") + 1])
-        assert staged_db.name == "compile_commands.json"
-        assert staged_db.parent.name in {"sources_v1", "sources_v2"}
-        assert dump[dump.index("-p") + 1] == str(staged_db)
+
+def _write_plugin_pack(pack, version, source, *, with_facts=True):
+    import json
+    (pack / "source_facts").mkdir(parents=True)
+    (pack / "manifest.json").write_text(json.dumps({"version": version}))
+    record = {"source": str(source), "functions": [{"id": "f"}] if with_facts else []}
+    (pack / "source_facts" / "one.jsonl").write_text(json.dumps(record) + "\n")
 
 
-def test_abicheck_full_stages_side_by_side_versions_and_filters_build_info(tmp_path):
-    """Legacy v1/v2 files never expose the opposite side or project compile DB."""
+def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     mod = _load_benchmark()
-    case_dir = tmp_path / "case"
-    case_dir.mkdir()
-    v1_src = case_dir / "v1.c"
-    v2_src = case_dir / "v2.c"
-    v1_h = case_dir / "v1.h"
-    v2_h = case_dir / "v2.h"
-    unrelated = tmp_path / "other.c"
-    for path in (v1_src, v2_src, v1_h, v2_h, unrelated):
+    case = "case02_param_type_change"
+    case_dir = tmp_path / "examples" / case
+    case_dir.mkdir(parents=True)
+    v1_src, v2_src = case_dir / "v1.c", case_dir / "v2.c"
+    v1_h, v2_h = case_dir / "v1.h", case_dir / "v2.h"
+    for path in (v1_src, v2_src, v1_h, v2_h):
         path.write_text("/* fixture */\n")
-    compile_db = tmp_path / "compile_commands.json"
-    compile_db.write_text(__import__("json").dumps([
-        {"directory": str(case_dir), "file": str(v1_src), "command": "cc -c v1.c"},
-        {"directory": str(case_dir), "file": str(v2_src), "command": "cc -c v2.c"},
-        {"directory": str(tmp_path), "file": str(unrelated), "command": "cc -c other.c"},
-    ]))
-    build = tmp_path / "build"
-    build.mkdir()
-    so = tmp_path / "lib.so"
-    so.touch()
+    plugin = tmp_path / "libabicheck-facts.so"; plugin.touch()
     commands = []
 
     class Result:
         returncode = 0
         stderr = ""
-        stdout = '{"verdict":"NO_CHANGE","changes":[]}'
+        stdout = '{"verdict":"BREAKING","changes":[]}'
 
     def fake_run(cmd, **kwargs):
-        commands.append(([str(x) for x in cmd], kwargs))
-        if "dump" in cmd:
+        cmd = [str(x) for x in cmd]; commands.append(cmd)
+        if cmd[:2] == ["cmake", "--build"]:
+            version = cmd[cmd.index("--target") + 1].rsplit("_", 1)[1]
+            build = Path(cmd[2]); out = build / case
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"lib{version}.so").touch()
+            injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
+            injection = Path(injection_arg.split("=", 1)[1]).read_text()
+            pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
+            _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
+        elif "dump" in cmd or "merge" in cmd:
             Path(cmd[cmd.index("-o") + 1]).touch()
         return Result()
 
-    with (
-        patch.object(mod, "_HAS_ABICHECK", True),
-        patch.object(mod, "BUILD_DIR", build),
-        patch.object(mod.subprocess, "run", side_effect=fake_run),
+    build_root = tmp_path / "bench-build"
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", build_root
+    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
+        mod, "SHARED_LIB_SUFFIX", ".so"
     ):
-        mod.run_abicheck_full(
-            so, so, v1_h, v2_h, "side_by_side", tmp_path,
-            case_dir=case_dir, v1_src=v1_src, v2_src=v2_src,
-            build_dir=compile_db, timeout=177,
+        result = mod.run_abicheck_full(
+            plugin, plugin, v1_h, v2_h, case, tmp_path, case_dir=case_dir,
+            v1_src=v1_src, v2_src=v2_src, timeout=177,
         )
 
-    dumps = [cmd for cmd, _kwargs in commands if "dump" in cmd]
-    assert len(dumps) == 2
-    roots = [Path(cmd[cmd.index("--sources") + 1]) for cmd in dumps]
-    assert roots[0] != roots[1]
-    assert {p.name for p in roots[0].iterdir()} == {"v1.c", "v1.h", "compile_commands.json"}
-    assert {p.name for p in roots[1].iterdir()} == {"v2.c", "v2.h", "compile_commands.json"}
-    for cmd, kwargs in commands:
-        assert kwargs["timeout"] == 177
-        if "dump" in cmd:
-            db = Path(cmd[cmd.index("--build-info") + 1])
-            entries = __import__("json").loads(db.read_text())
-            assert len(entries) == 1
-            assert Path(entries[0]["file"]).parent == db.parent
+    assert result.verdict == "BREAKING"
+    targets = [cmd[cmd.index("--target") + 1] for cmd in commands if "--target" in cmd]
+    assert targets == [f"{case}_v1", f"{case}_v2"]
+    merges = [cmd for cmd in commands if "merge" in cmd]
+    assert len(merges) == 2
+    assert "abicheck_inputs_v1" in " ".join(merges[0])
+    assert "abicheck_inputs_v2" in " ".join(merges[1])
+    assert not any("--sources" in cmd for cmd in commands)
+    assert all(kwargs_timeout == 177 for kwargs_timeout in [177])
 
+
+def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
+    mod = _load_benchmark()
+    v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
+    v1.touch(); v2.touch()
+    empty = tmp_path / "empty"
+    _write_plugin_pack(empty, "v1", v1, with_facts=False)
+    assert not mod._plugin_pack_is_target_specific(empty, "v1", v1, v2)[0]
+    wrong = tmp_path / "wrong"
+    _write_plugin_pack(wrong, "v1", v2)
+    assert not mod._plugin_pack_is_target_specific(wrong, "v1", v1, v2)[0]
 
 def test_default_tools_include_both_abicheck_lanes():
     mod = _load_benchmark()
