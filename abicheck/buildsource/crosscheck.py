@@ -1373,33 +1373,41 @@ _ARTIFACT_OPERAND_PREFIXES = (
 _THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:[hv]?n?\d+_)+")
 
 
+def _encoding_after_prefixes(symbol: str) -> str:
+    """Strip ``_Z`` and any vtable/typeinfo/guard-variable/thunk prefix.
+
+    Returns the Itanium *encoding* that follows — the operand type for an artifact,
+    or the name+signature for a plain function/data — with the nested-name ``N``
+    intro left intact so callers can tell a nested name (``N3fmt…E``) from an
+    un-nested top-level name (``3fmt`` = a global ``fmt``, no namespace).
+    """
+    thunk = _THUNK_PREFIX_RE.match(symbol)
+    if thunk:
+        return symbol[thunk.end() :]
+    for pfx in _ARTIFACT_OPERAND_PREFIXES:
+        if symbol.startswith(pfx):
+            return symbol[len(pfx) :]
+    return symbol[2:] if symbol.startswith("_Z") else symbol
+
+
 def _mangled_owner_namespace(symbol: str) -> str | None:
     """The owning top-level namespace of an Itanium *symbol* (best-effort).
 
-    Peels any vtable/typeinfo/guard-variable/thunk prefix so the *operand* type's
-    owner is read, then returns ``"std"`` for a ``St``/``Ss``/… substitution or the
-    demangled top-level namespace name otherwise (``fmt`` for ``_ZN3fmt…``). The
-    owner is the entity's *definer* — not a type it merely references in a
-    parameter or template argument — so an internal function taking a ``std::``
-    argument is never mistaken for a ``std`` symbol. ``None`` when it cannot parse.
+    A namespace owner exists only for a **nested** name (a leading ``N`` after the
+    prefix peel) or a ``std`` substitution (``St…``, valid even un-nested). A plain
+    ``_Z<name>`` / ``_ZTV<name>`` top-level function or type has *no* namespace
+    owner, so a native global named ``fmt`` (``_Z3fmtv``) is never mistaken for the
+    ``{fmt}`` namespace (Codex review). The owner is the entity's *definer* — not a
+    type it merely references in a parameter/template argument. ``None`` when there
+    is no namespace owner or it cannot parse.
     """
     if not symbol.startswith("_Z"):
         return None
-    rest = symbol
-    thunk = _THUNK_PREFIX_RE.match(rest)
-    if thunk:
-        rest = rest[thunk.end() :]
-    else:
-        for pfx in _ARTIFACT_OPERAND_PREFIXES:
-            if rest.startswith(pfx):
-                rest = rest[len(pfx) :]
-                break
-        else:
-            if rest.startswith("_ZN"):
-                rest = rest[3:]
-            elif rest.startswith("_Z"):
-                rest = rest[2:]
-    rest = rest.lstrip("N")  # a nested-name ``N`` the prefix peel left behind
+    rest = _encoding_after_prefixes(symbol)
+    if rest.startswith("N"):
+        rest = rest[1:]  # enter the nested name; its head is the owner namespace
+    elif not rest.startswith(_STD_SUBSTITUTIONS):
+        return None  # un-nested top-level name — no namespace owner
     if rest.startswith(_STD_SUBSTITUTIONS):
         return "std"
     m = re.match(r"(\d+)([A-Za-z_]\w*)", rest)
@@ -1486,29 +1494,49 @@ def _account_undocumented_export(symbol: str) -> str:
 
 
 def _has_template_args(symbol: str) -> bool:
-    """Whether an Itanium *symbol* carries a template-argument list (``…I…E``).
+    """Whether the *entity* an Itanium *symbol* names is a template instantiation.
 
-    Walks the length-prefixed ``<len><name>`` source-name components and reports a
-    template-id only when a completed name component is immediately followed by an
-    ``I`` (the template-args opener). This ignores an ``I`` that merely appears
-    *inside* a name (``_ZN3lib10InitEngineEv`` is not a template), which a raw
-    substring scan would misclassify.
+    Scans only the encoded entity **name**, never the function signature's parameter
+    encodings: a plain ``foo(std::vector<int>)`` (``_ZN3lib3fooESt6vectorIiSaIiEE``)
+    is *not* a template instantiation even though a parameter type carries ``I…E``
+    (Codex review). For a nested name the entity is a template iff the ``E`` that
+    closes the nested name (at template-depth 0) is immediately preceded by a
+    template-args close — i.e. the final name component carries ``…I…E``. An ``I``
+    inside an ordinary identifier (``InitEngine``) is never a template opener.
     """
-    i, n = 0, len(symbol)
-    while i < n:
-        if not symbol[i].isdigit():
-            i += 1
-            continue
-        j = i
-        while j < n and symbol[j].isdigit():
-            j += 1
-        length = int(symbol[i:j])
-        end = j + length  # the source name occupies symbol[j:end]
-        if end < n and symbol[end] == "I":
-            return True
-        # Advance past this component; guard against a bogus/overlong length.
-        i = end if end > i else i + 1
-    return False
+    if not symbol.startswith("_Z"):
+        return False
+    rest = _encoding_after_prefixes(symbol)
+    if rest.startswith("N"):
+        # Walk the nested name tracking template-arg depth; the entity name ends at
+        # the first depth-0 ``E`` (parameters follow it and must not be scanned).
+        i, depth, prev = 1, 0, ""
+        while i < len(rest):
+            c = rest[i]
+            if c == "I":
+                depth += 1
+                prev, i = c, i + 1
+            elif c == "E":
+                if depth == 0:
+                    return prev == "E"  # final component ended in a template-args E
+                depth -= 1
+                prev, i = c, i + 1
+            elif c.isdigit():
+                j = i
+                while j < len(rest) and rest[j].isdigit():
+                    j += 1
+                i = j + int(rest[i:j])  # skip the source-name characters
+                prev = rest[i - 1] if 0 < i <= len(rest) else ""
+            else:
+                prev, i = c, i + 1
+        return False
+    # Un-nested ``_Z<len><name>…``: a template iff the single name is followed by an
+    # ``I`` template-args opener (``_Z9transformIdEv``); the tail is the signature.
+    m = re.match(r"(\d+)", rest)
+    if not m:
+        return False
+    end = m.end() + int(m.group(1))
+    return end < len(rest) and rest[end] == "I"
 
 
 def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:

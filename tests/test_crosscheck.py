@@ -437,6 +437,9 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
         ("_ZNSt6vectorIiSaIiEE9push_backEOi", "libstdc++.so.6"),  # std prefix
         ("_ZTVNSt7__cxx1112basic_stringIcEE", "libstdc++.so.6"),  # leaked std vtable
         ("_ZTISt9exception", "libstdc++.so.6"),  # leaked std typeinfo
+        # an un-nested std substitution the prefix table misses (Ss = std::string)
+        # resolves via the owner path.
+        ("_ZSsD1Ev", "libstdc++.so.6"),
         # std forms the _guess_symbol_origin prefix table misses, caught by the
         # owner-namespace check: a std guard variable and the libstdc++
         # implementation namespaces (__gnu_cxx / __cxxabiv1).
@@ -456,6 +459,11 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
         ("_ZN4dnnl4impl3fooENSt7__cxx1112basic_stringIcEE", None),
         ("_ZN3lib3barEv", None),  # native, nested
         ("_Z3fooi", None),  # native, non-nested (_Z, not _ZN)
+        # an un-nested global named after a vendor (a *function* fmt(), not the fmt
+        # namespace) has no namespace owner and must not be a vendored leak (Codex).
+        ("_Z3fmtv", None),
+        ("_Z6googlev", None),
+        ("_ZTV3Foo", None),  # vtable for a top-level class — no namespace owner
         ("_ZN", None),  # degenerate — owner unparseable
         ("plain_c_symbol", None),  # not mangled
     ],
@@ -505,10 +513,17 @@ def test_external_dependency_origin_runtime_and_covariant_thunk(
         ("_ZN12_GLOBAL__N_13fooEv", "internal_namespace"),
         ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
         ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
+        ("_Z9transformIdEv", "template_instantiation"),  # un-nested template fn
+        ("_ZNK3lib9transformIdEEv", "template_instantiation"),  # const template method
         # an ``I`` *inside* an identifier is not a template — must not be
         # misclassified (Codex review).
+        ("_ZL4mainv", "undeclared_export"),  # un-nested, no leading length digit
+        ("_ZN3foo", "undeclared_export"),  # truncated nested name (no closing E)
         ("_ZN3lib10InitEngineEv", "undeclared_export"),
         ("_ZN3lib9InterfaceEv", "undeclared_export"),
+        # a template argument in a *parameter* type does not make the entity a
+        # template instantiation — the entity (lib::foo) is not one (Codex review).
+        ("_ZN3lib3fooESt6vectorIiSaIiEE", "undeclared_export"),
         ("_Z3fooi", "undeclared_export"),
         ("raw_c_entry", "undeclared_export"),
     ],
