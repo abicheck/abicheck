@@ -616,6 +616,22 @@ def _attribute_synthesized_exports(
     func_names = {
         d.qualified_name for d in surface.reachable_declarations if d.qualified_name
     }
+    # Template-erased owner index (``ns::Box<>`` -> source owner label). A binary
+    # exports vtable/typeinfo *per concrete instantiation* (`format_object<char>`,
+    # `format_object<double>`, …) while the source captures only the class-template
+    # pattern, so the exact/base type check above never matches an instantiation.
+    # The pattern legitimately owns all its instantiations' RTTI, so when it is on
+    # the public surface the instantiation's synthesized symbol is attributed to it.
+    template_owners = _template_source_owner_index(surface)
+    # Only a genuine *template declaration* (not another concrete specialization)
+    # authorizes attributing an unseen instantiation's RTTI: with only `A<int>` on
+    # the surface, `A<char>`'s vtable must stay an orphan (it may be an exported,
+    # unchecked specialization) — mirrors `_owner_present`'s base-match guard.
+    template_pattern_keys = {
+        _template_pattern_key(t.qualified_name) or f"{t.qualified_name}<>"
+        for t in surface.reachable_templates
+        if t.qualified_name
+    }
     # Overload-specific index: a decl's real mangled name → its qualified name, so a
     # thunk is attributed to the EXACT overload it forwards to (Codex review). Keyed
     # Mach-O-normalized to line up with `_thunk_target_mangled`'s `_Z…` output.
@@ -651,6 +667,13 @@ def _attribute_synthesized_exports(
         if owner == "type":
             if _owner_present(target, type_names):
                 attributed[sym] = (kind, target)
+            else:
+                # Template instantiation whose concrete type is absent but whose
+                # class-template pattern is on the surface (e.g. vtable for
+                # `format_object<char>` -> template `format_object<T>`).
+                tkey = _template_pattern_key(target)
+                if tkey and tkey in template_pattern_keys:
+                    attributed[sym] = (kind, template_owners.get(tkey, target))
         elif kind == "thunk":
             # A thunk carries the FULL mangling of the function it forwards to, so
             # attribute to the exact overload rather than any same-named decl: a
@@ -747,11 +770,7 @@ def _template_pattern_key(name: str) -> str:
     depth = 0
     saw_template = False
     for i, c in enumerate(s):
-        if (
-            c == "<"
-            and depth == 0
-            and s[max(0, i - len("operator")) : i] == "operator"
-        ):
+        if c == "<" and depth == 0 and s[max(0, i - len("operator")) : i] == "operator":
             out.append(c)
             continue
         if c == "<":
@@ -1119,7 +1138,8 @@ def link_source_abi(
             sorted(template_instantiations.items())
         )
     allocator_interposers = _attribute_allocator_interposer_exports(
-        exported, exported - decl_matched - set(synthesized) - set(template_instantiations)
+        exported,
+        exported - decl_matched - set(synthesized) - set(template_instantiations),
     )
     if allocator_interposers:
         surface.mappings["allocator_interposer_symbol_to_owner"] = dict(

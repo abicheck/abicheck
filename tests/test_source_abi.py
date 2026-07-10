@@ -244,8 +244,12 @@ def test_linker_keeps_unmangled_overloads_distinct() -> None:
     # public overloads share the bare qualified_name "Widget". identity() folds
     # in signature_hash so they stay distinct instead of collapsing onto one key
     # and silently dropping an overload (Codex review #335, P2).
-    ctor_int = _entity("Widget", "function", mangled="", signature_hash="si", value="x=1")
-    ctor_dbl = _entity("Widget", "function", mangled="", signature_hash="sd", value="y=0")
+    ctor_int = _entity(
+        "Widget", "function", mangled="", signature_hash="si", value="x=1"
+    )
+    ctor_dbl = _entity(
+        "Widget", "function", mangled="", signature_hash="sd", value="y=0"
+    )
     assert ctor_int.identity() != ctor_dbl.identity()
     tu = SourceAbiTu(functions=[ctor_int, ctor_dbl])
     surface = link_source_abi([tu])
@@ -271,9 +275,10 @@ def test_identity_is_build_root_independent() -> None:
             visibility="public_header",
         )
 
-    assert _ctor("build/old/include/foo.h").identity() == _ctor(
-        "build/new/include/foo.h"
-    ).identity()
+    assert (
+        _ctor("build/old/include/foo.h").identity()
+        == _ctor("build/new/include/foo.h").identity()
+    )
 
 
 def test_diff_mappings_robust_to_build_root_path_shift() -> None:
@@ -406,12 +411,8 @@ def test_ctor_dtor_fold_does_not_touch_length_encoded_identifiers() -> None:
     assert _ctor_dtor_canonical("_ZN1N3AC1Ev") != _ctor_dtor_canonical("_ZN1N3AC2Ev")
     # Through the linker: AC1 is a real source decl; AC2 is exported without one.
     # AC2 must remain an orphan (symbols_without_decl), not be claimed by AC1.
-    tu = SourceAbiTu(
-        functions=[_entity("N::AC1", "function", mangled="_ZN1N3AC1Ev")]
-    )
-    surface = link_source_abi(
-        [tu], exported_symbols=["_ZN1N3AC1Ev", "_ZN1N3AC2Ev"]
-    )
+    tu = SourceAbiTu(functions=[_entity("N::AC1", "function", mangled="_ZN1N3AC1Ev")])
+    surface = link_source_abi([tu], exported_symbols=["_ZN1N3AC1Ev", "_ZN1N3AC2Ev"])
     assert surface.mappings["source_decl_to_binary_symbol"]["_ZN1N3AC1Ev"] == (
         "_ZN1N3AC1Ev"
     )
@@ -473,8 +474,7 @@ def test_ctor_dtor_fold_handles_nested_template_argument_names() -> None:
 
     # std::vector<std::string>::vector()  (C1 complete vs C2 base)
     vec_str = (
-        "_ZNSt6vectorINSt7__cxx1112basic_string"
-        "IcSt11char_traitsIcESaIcEEEE{tag}Ev"
+        "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE{tag}Ev"
     )
     assert _ctor_dtor_canonical(vec_str.format(tag="C1")) == _ctor_dtor_canonical(
         vec_str.format(tag="C2")
@@ -827,9 +827,7 @@ def test_guard_variable_attributed_to_enclosing_function() -> None:
     # function `foo` — the guard-owner (bare-name) path, distinct from the
     # overload-specific thunk path.
     tu = SourceAbiTu(functions=[_entity("foo", "function", mangled="_Z3foov")])
-    surface = link_source_abi(
-        [tu], exported_symbols=["_Z3foov", "_ZGVZ3foovE3bar"]
-    )
+    surface = link_source_abi([tu], exported_symbols=["_Z3foov", "_ZGVZ3foovE3bar"])
     assert surface.unmatched["symbols_without_decl"] == []
     assert surface.mappings["synthesized_symbol_to_owner"]["_ZGVZ3foovE3bar"] == {
         "kind": "guard",
@@ -855,6 +853,31 @@ def test_synthesized_attribution_requires_exact_specialization() -> None:
     tu2 = SourceAbiTu(types=[_entity("ns::A", "record", type_hash="t2")])
     surface2 = link_source_abi([tu2], exported_symbols=["_ZTVN2ns1AIiEE"])
     assert surface2.unmatched["symbols_without_decl"] == []
+
+
+@needs_demangler
+def test_synthesized_attribution_via_class_template_pattern() -> None:
+    # A binary exports vtable/typeinfo per concrete instantiation
+    # (`ns::A<int>`, `ns::A<char>`), but the source captures only the class
+    # *template* pattern `ns::A` (kind="template"). The pattern legitimately owns
+    # all its instantiations' RTTI, so both instantiation vtables attribute to it —
+    # closing the template-instantiation RTTI gap that dominated LLVM's unmatched
+    # vtable exports (`llvm::format_object<char>`, …).
+    tu = SourceAbiTu(templates=[_entity("ns::A", "template", body_hash="b1")])
+    surface = link_source_abi(
+        [tu], exported_symbols=["_ZTVN2ns1AIiEE", "_ZTVN2ns1AIcEE"]
+    )
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.coverage["synthesized_symbols_matched"] == 2
+
+    # But a *concrete* specialization alone is not a pattern: with only the
+    # `ns::A<int>` type present (no template entity), `ns::A<char>`'s vtable must
+    # still stay an orphan (the exact-specialization guard is not weakened).
+    tu2 = SourceAbiTu(types=[_entity("ns::A<int>", "record", type_hash="t1")])
+    surface2 = link_source_abi(
+        [tu2], exported_symbols=["_ZTVN2ns1AIiEE", "_ZTVN2ns1AIcEE"]
+    )
+    assert surface2.unmatched["symbols_without_decl"] == ["_ZTVN2ns1AIcEE"]
 
 
 @needs_demangler
@@ -969,8 +992,9 @@ def test_template_instantiation_exports_attribute_to_public_pattern() -> None:
     }
     # The evidence must survive baseline serialization.
     restored = SourceAbiSurface.from_dict(surface.to_dict())
-    assert restored.mappings["template_instantiation_symbol_to_decl"] == (
-        surface.mappings["template_instantiation_symbol_to_decl"]
+    assert (
+        restored.mappings["template_instantiation_symbol_to_decl"]
+        == (surface.mappings["template_instantiation_symbol_to_decl"])
     )
 
 
@@ -1100,7 +1124,9 @@ def test_allocator_interposer_exports_attribute_only_with_tbb_proxy_marker() -> 
 
 
 @needs_demangler
-def test_non_public_export_accounting_keeps_reasons_separate_from_decl_matches() -> None:
+def test_non_public_export_accounting_keeps_reasons_separate_from_decl_matches() -> (
+    None
+):
     exports = [
         "_ZNSt6vectorIiSaIiEEC1Ev",
         "_ZN3tbb6detail2r13fooEv",
@@ -1155,7 +1181,9 @@ def test_non_public_export_accounting_tolerates_demangler_failure(monkeypatch) -
     assert surface.coverage["non_public_symbols_classified"] == 0
 
 
-def test_non_public_export_accounting_without_surface_roots_stays_conservative() -> None:
+def test_non_public_export_accounting_without_surface_roots_stays_conservative() -> (
+    None
+):
     from abicheck.buildsource.source_link import (
         _classify_non_public_exports,
         _source_namespace_roots,
@@ -1212,9 +1240,7 @@ def test_stdlib_rtti_and_guard_exports_classified_as_stdlib() -> None:
 def test_template_pattern_key_edge_cases() -> None:
     from abicheck.buildsource.source_link import _template_pattern_key
 
-    assert _template_pattern_key("ns::Map<std::vector<int>>::get") == (
-        "ns::Map<>::get"
-    )
+    assert _template_pattern_key("ns::Map<std::vector<int>>::get") == ("ns::Map<>::get")
     assert _template_pattern_key("ns::Box<T>::operator<") == "ns::Box<>::operator<"
     assert _template_pattern_key("ns::Broken<T") == ""
     assert _template_pattern_key("plain") == ""
@@ -1235,19 +1261,28 @@ def test_template_instantiation_attribution_noop_edges(monkeypatch) -> None:
     surface = SourceAbiSurface()
     assert sl._template_instantiation_attribution(surface, [], set(), set()) == {}
     empty_name = SourceEntity(id="empty", kind="function", qualified_name="")
-    assert sl._template_instantiation_attribution(
-        surface, [empty_name], set(), {"_ZN2ns3BoxIiE3getEv"}
-    ) == {}
+    assert (
+        sl._template_instantiation_attribution(
+            surface, [empty_name], set(), {"_ZN2ns3BoxIiE3getEv"}
+        )
+        == {}
+    )
     pattern = _entity("ns::Box<T>::get", "function", mangled="")
-    assert sl._template_instantiation_attribution(
-        surface, [pattern], {"_ZN2ns3BoxIiE3getEv"}, {"_ZN2ns3BoxIiE3getEv"}
-    ) == {}
+    assert (
+        sl._template_instantiation_attribution(
+            surface, [pattern], {"_ZN2ns3BoxIiE3getEv"}, {"_ZN2ns3BoxIiE3getEv"}
+        )
+        == {}
+    )
     monkeypatch.setattr(
         sl, "_norm_itanium", lambda _s: (_ for _ in ()).throw(RuntimeError("boom"))
     )
-    assert sl._template_instantiation_attribution(
-        surface, [pattern], set(), {"_ZN2ns3BoxIiE3getEv"}
-    ) == {}
+    assert (
+        sl._template_instantiation_attribution(
+            surface, [pattern], set(), {"_ZN2ns3BoxIiE3getEv"}
+        )
+        == {}
+    )
 
 
 def test_linker_excludes_non_public_entities() -> None:
@@ -1733,12 +1768,16 @@ def test_pack_removes_stale_source_abi(tmp_path: object) -> None:
 
 
 def test_diff_public_typedef_target_changed() -> None:
-    old = _surface(reachable_types=[
-        _entity("handle_t", "typedef", value="int32_t", type_hash="h-old"),
-    ])
-    new = _surface(reachable_types=[
-        _entity("handle_t", "typedef", value="int64_t", type_hash="h-new"),
-    ])
+    old = _surface(
+        reachable_types=[
+            _entity("handle_t", "typedef", value="int32_t", type_hash="h-old"),
+        ]
+    )
+    new = _surface(
+        reachable_types=[
+            _entity("handle_t", "typedef", value="int64_t", type_hash="h-new"),
+        ]
+    )
     changes = diff_source_abi(old, new)
     assert [c.kind for c in changes] == [ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED]
     assert changes[0].old_value == "int32_t"
@@ -1748,13 +1787,18 @@ def test_diff_public_typedef_target_changed() -> None:
 
 def test_diff_typedef_unchanged_target_is_quiet() -> None:
     same = [_entity("handle_t", "typedef", value="int32_t", type_hash="h")]
-    assert diff_source_abi(_surface(reachable_types=same),
-                           _surface(reachable_types=list(same))) == []
+    assert (
+        diff_source_abi(
+            _surface(reachable_types=same), _surface(reachable_types=list(same))
+        )
+        == []
+    )
 
 
 def test_diff_typedef_never_breaking() -> None:
     # Authority rule (ADR-028 D3): an L4 source-only finding is never BREAKING.
     from abicheck.checker_policy import BREAKING_KINDS
+
     old = _surface(reachable_types=[_entity("h", "typedef", value="a", type_hash="1")])
     new = _surface(reachable_types=[_entity("h", "typedef", value="b", type_hash="2")])
     assert all(c.kind not in BREAKING_KINDS for c in diff_source_abi(old, new))
@@ -1762,14 +1806,30 @@ def test_diff_typedef_never_breaking() -> None:
 
 def test_diff_generated_typedef_not_double_reported() -> None:
     # A generated typedef change is reported once, as generated_header_changed.
-    old = _surface(reachable_types=[
-        _entity("cfg_t", "typedef", visibility="generated", origin="GENERATED",
-                value="int", type_hash="1"),
-    ])
-    new = _surface(reachable_types=[
-        _entity("cfg_t", "typedef", visibility="generated", origin="GENERATED",
-                value="long", type_hash="2"),
-    ])
+    old = _surface(
+        reachable_types=[
+            _entity(
+                "cfg_t",
+                "typedef",
+                visibility="generated",
+                origin="GENERATED",
+                value="int",
+                type_hash="1",
+            ),
+        ]
+    )
+    new = _surface(
+        reachable_types=[
+            _entity(
+                "cfg_t",
+                "typedef",
+                visibility="generated",
+                origin="GENERATED",
+                value="long",
+                type_hash="2",
+            ),
+        ]
+    )
     kinds = [c.kind for c in diff_source_abi(old, new)]
     assert kinds == [ChangeKind.GENERATED_HEADER_CHANGED]
 
