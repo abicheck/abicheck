@@ -422,14 +422,106 @@ def _is_std_by_value(type_str: str, pointer_depth: int, kind: ParamKind) -> bool
 def _has_virtual_destructor(rec: RecordType) -> bool:
     """Heuristic: does *rec*'s vtable carry a destructor slot?
 
-    Itanium mangles destructors with ``D0``/``D1``/``D2`` suffixes; MSVC uses
-    ``??1`` / ``vector deleting destructor``. A polymorphic type whose vtable
-    has no destructor slot has a non-virtual destructor — deleting through a
-    base pointer is UB.
+    Itanium mangles destructors with ``D0``/``D1``/``D2`` suffixes (GCC's
+    DWARF additionally uses the unified ``D4``/``D5`` clones); MSVC uses
+    ``??1`` / ``vector deleting destructor``; the castxml dumper falls back
+    to a ``~Name`` entry because castxml Destructor elements carry no
+    mangled attribute. A polymorphic type whose vtable has no destructor
+    slot has a non-virtual destructor — deleting through a base pointer
+    is UB.
     """
     for entry in rec.vtable:
-        if re.search(r"D[012]\b|D[012]Ev|\?\?1|deleting destructor", entry):
+        if entry.startswith("~"):
             return True
+        if _MSVC_DTOR_RE.search(entry):
+            return True
+        if _is_itanium_dtor_symbol(entry):
+            return True
+    return False
+
+
+_MSVC_DTOR_RE = re.compile(r"\?\?1|deleting destructor")
+
+
+def _is_itanium_dtor_symbol(entry: str) -> bool:
+    """True when *entry* mangles a destructor clone (``D0``–``D5``).
+
+    Structural walk of the Itanium ``<nested-name>``: length-prefixed source
+    names are skipped whole, so a member *named* ``D4`` (``_ZN1C2D4Ev`` —
+    the ``D4`` sits behind a ``2`` length prefix) is never mistaken for a
+    destructor; the ``D<digit>`` token is only recognised at a real
+    production boundary, after the class-name components.
+    """
+    if not entry.startswith("_ZN"):
+        return False
+    i, n = 3, len(entry)
+    while i < n:
+        ch = entry[i]
+        if ch.isdigit():
+            # <source-name> ::= <decimal length> <identifier> — skip whole.
+            j = i
+            while j < n and entry[j].isdigit():
+                j += 1
+            i = j + int(entry[i:j])
+            continue
+        if ch in "rVKRO":  # CV / ref qualifiers of the nested-name
+            i += 1
+            continue
+        if ch == "B":
+            # ABI tag: B <source-name>, may repeat (_ZN1CB1XD1Ev). Step over
+            # the marker; the following length-prefixed tag name is skipped
+            # by the digit branch on the next iteration.
+            i += 1
+            continue
+        if ch == "S":  # substitution: 2-char std abbrev or S<seq-id>_
+            nxt = entry[i + 1] if i + 1 < n else ""
+            if nxt in "abdiost":
+                i += 2
+                continue
+            j = i + 1
+            while j < n and entry[j] != "_":
+                j += 1
+            i = j + 1
+            continue
+        if ch == "I":
+            # Template args: skip the balanced group. I (args), N (nested
+            # names), and F (function types) all nest and close with E;
+            # length-prefixed names, substitutions, and L…E literals are
+            # skipped whole so their bytes can't be misread as structural
+            # I/N/F/E tokens.
+            depth = 1
+            j = i + 1
+            while j < n and depth:
+                cj = entry[j]
+                if cj.isdigit():
+                    k = j
+                    while k < n and entry[k].isdigit():
+                        k += 1
+                    j = k + int(entry[j:k])
+                elif cj == "S":
+                    nxt = entry[j + 1] if j + 1 < n else ""
+                    if nxt in "abdiost":
+                        j += 2
+                    else:
+                        while j < n and entry[j] != "_":
+                            j += 1
+                        j += 1
+                elif cj == "L":  # literal: L <type> <value> E
+                    while j < n and entry[j] != "E":
+                        j += 1
+                    j += 1
+                elif cj in "INF":
+                    depth += 1
+                    j += 1
+                elif cj == "E":
+                    depth -= 1
+                    j += 1
+                else:
+                    j += 1
+            i = j
+            continue
+        # Structural position: a destructor clone is D<digit> here.
+        return ch == "D" and i + 1 < n and entry[i + 1].isdigit()
     return False
 
 

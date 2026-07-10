@@ -11,6 +11,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Example catalog: five new cases (`case165`–`case169`)** giving five
+  previously example-less `ChangeKind`s a dedicated, compilable fixture:
+  `polymorphic_type_non_virtual_dtor` (new polymorphic factory type without a
+  virtual destructor, ADR-027 anti-pattern), `func_ref_qual_changed` (`str()`
+  → `str() &` renames the mangled symbol), `base_class_virtual_changed`
+  (non-virtual base becomes a virtual base), `func_virtual_removed`
+  (devirtualized method leaves the vtable while its symbol survives) and
+  `overload_added` (a new overload silently re-routes recompiled call sites).
+  `ground_truth.json` entries may now set `"pattern_verdicts": true` to
+  validate a case under the opt-in `--pattern-verdicts` analysis mode.
+
 - **G23 Phase D — ecosystem detectors (7 new `ChangeKind`s).**
   - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`
     manifests to `compare` (recognized by filename or content) to get
@@ -203,6 +214,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   are classified separately).
 
 ### Fixed
+
+- **castxml frontend: ref-qualifiers and virtual destructors recovered.**
+  Released castxml versions emit neither a `refqual` attribute on `<Method>`
+  nor a `mangled` attribute on `<Destructor>`. The &/&& ref-qualifier is now
+  derived from the Itanium mangling (so `func_ref_qual_changed` can fire on
+  the default AST frontend), and virtual destructors are kept in the
+  reconstructed vtable via a `~Name` fallback entry — previously every
+  polymorphic type looked destructor-less to the
+  `polymorphic_type_non_virtual_dtor` anti-pattern, producing false positives
+  on safe classes. The destructor-slot matcher also recognises GCC's unified
+  `D4`/`D5` clones recorded in DWARF linkage names.
 
 - **Python overload required→optional widening no longer a false break.**
   `_overload_covers` compared required parameter shapes with exact equality, so

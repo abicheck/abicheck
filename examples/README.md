@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **164 cases** (159 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **169 cases** (164 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,9 +20,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 95 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 15 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 23 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -75,11 +75,11 @@ Commands below use `PYTHONPATH=.`.
 
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
-| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 161 integration items | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 164 catalog cases | gcc: 132 PASS / 4 XFAIL / 28 SKIP; clang: 133 PASS / 4 XFAIL / 27 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 164 catalog cases | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 164 catalog cases | 132 PASS / 4 XFAIL / 28 SKIP | Informational, FP guard clean |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 164 catalog cases | 127 PASS / 3 FAIL / 6 XFAIL / 28 SKIP | Informational; three reduced-evidence signal-loss backlogs |
+| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 169 catalog cases | gcc: 137 PASS / 4 XFAIL / 28 SKIP; clang: 138 PASS / 4 XFAIL / 27 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 169 catalog cases | 76 DEMONSTRATED / 54 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 169 catalog cases | 137 PASS / 4 XFAIL / 28 SKIP | Informational, FP guard clean |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 169 catalog cases | 132 PASS / 3 FAIL / 6 XFAIL / 28 SKIP | Informational; three reduced-evidence signal-loss backlogs |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
 
 Default/debug skips are not accepted as green coverage. They are cases outside
@@ -287,6 +287,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [163](case163_python_kwarg_renamed/README.md) | Python-API break invisible to the C-ABI check | API Break | 🟠 API_BREAK |
 | [164](case164_preproc_conditional_field/README.md) | Preprocessor-conditional field: a header false positive only build context clears | No Change | ✅ NO_CHANGE |
+| [165](case165_polymorphic_nonvirtual_dtor/README.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [166](case166_ref_qualifier_added/README.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | Breaking | 🔴 BREAKING |
+| [167](case167_base_became_virtual/README.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | Breaking | 🔴 BREAKING |
+| [168](case168_virtual_method_devirtualized/README.md) | Virtual Method Devirtualized (flush() leaves the vtable) | Breaking | 🔴 BREAKING |
+| [169](case169_overload_added/README.md) | Overload Added to a Previously Unique Function | Risk | 🟡 COMPATIBLE_WITH_RISK |
 <!-- END GENERATED: case-index -->
 
 ---

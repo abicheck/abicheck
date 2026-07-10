@@ -181,15 +181,15 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **164 real-world ABI/API scenarios** (159 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **169 real-world ABI/API scenarios** (164 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
-Current CI full-catalog default/debug validation over 164 selected cases is green: **gcc 132 PASS / 4 XFAIL / 28 SKIP** and **clang 133 PASS / 4 XFAIL / 27 SKIP**. The skips are cases that are validated outside the default single-library debug lane (audit/cross-source snapshots, L3/L4/L5 build/source fixtures, bundle cases, BTF, or host feature gaps). Runtime smoke over the same catalog produces **73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP**. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known backlog.
+Current CI full-catalog default/debug validation over 169 selected cases is green: **gcc 137 PASS / 4 XFAIL / 28 SKIP** and **clang 138 PASS / 4 XFAIL / 27 SKIP**. The skips are cases that are validated outside the default single-library debug lane (audit/cross-source snapshots, L3/L4/L5 build/source fixtures, bundle cases, BTF, or host feature gaps). Runtime smoke over the same catalog produces **76 DEMONSTRATED / 54 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP**. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known backlog.
 
 ---
 
 ## Validation snapshot
 
-The main validation target is the full **164-case catalog**. To scan it for the current checkout:
+The main validation target is the full **169-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all
@@ -205,7 +205,7 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from `examples/ground_truth.json` minimum-evidence labels. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
+The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of all 169 catalog cases. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers
@@ -213,12 +213,12 @@ python scripts/benchmark_comparison.py --evidence-tiers
 
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 50 / 153 (33%) |
-| + Debug symbols (`L1`) | 115 / 153 (75%) |
-| + Public headers (`L2`) | 138 / 153 (90%) |
-| + Build data (`L3`) | 146 / 153 (95%) |
-| + Sources (`L4`) | 150 / 153 (98%) |
-| + Source graph (`L5`) | 153 / 153 (100%) |
+| Just the binary (`L0`) | 52 / 169 (31%) |
+| + Debug symbols (`L1`) | 119 / 169 (70%) |
+| + Public headers (`L2`) | 150 / 169 (89%) |
+| + Build data (`L3`) | 160 / 169 (95%) |
+| + Sources (`L4`) | 166 / 169 (98%) |
+| + Source graph (`L5`) | 169 / 169 (100%) |
 
 More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 

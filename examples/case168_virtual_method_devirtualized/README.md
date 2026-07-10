@@ -1,0 +1,125 @@
+# Case 168: Virtual Method Devirtualized (flush() leaves the vtable)
+
+**Category:** Class Layout / Vtable | **Verdict:** BREAKING
+
+## What breaks
+
+v2 removes the `virtual` keyword from `Codec::flush()` — a tempting
+"optimization" ("nobody overrides it, and non-virtual calls are faster").
+The trap: the exported symbol `_ZN5Codec5flushEv` **survives with an identical
+signature**, so linking and loading succeed. But `flush()` left the vtable,
+and every slot after it shifts up one position:
+
+```text
+v1 vtable: [~Codec D1] [~Codec D0] [encode] [flush] [reset]
+v2 vtable: [~Codec D1] [~Codec D0] [encode] [reset]
+                                             ▲
+                     old flush slot now holds reset
+```
+
+An app compiled against v1 calls `c->flush()` **virtually** — through the slot
+index frozen at its compile time — and lands in `reset()`. No loader error, no
+crash: just the wrong method, silently.
+
+## Why this matters
+
+- **It defeats the "does it still link?" smoke test.** Unlike a removed
+  symbol (case 12) or a shrunk vtable detected via pure addition/removal, the
+  call target still exists; only the *dispatch route* is stale. This is the
+  mirror image of case 68 (virtual added) — and just as one-way: virtuality is
+  part of the ABI contract forever.
+- **Consumer overrides die silently.** Any consumer class that overrode
+  `flush()` still compiles against the v2 header — but the library's internal
+  `flush()` calls are now direct and never reach the override. Behavior
+  changes with no diagnostic anywhere.
+- **The last-virtual case is worse.** If the devirtualized method was the
+  class's only virtual, the vptr itself disappears and every field shifts
+  (case 68 in reverse).
+
+## Code diff
+
+```cpp
+// v1
+class Codec {
+public:
+    virtual ~Codec();
+    virtual int encode(int value);
+    virtual int flush();    // vtable slot after encode
+    virtual int reset();
+};
+
+// v2
+class Codec {
+public:
+    virtual ~Codec();
+    virtual int encode(int value);
+    int flush();            // devirtualized — same symbol, no vtable slot
+    virtual int reset();    // slides into flush()'s old slot
+};
+```
+
+## Real Failure Demo
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, link to v2 `.so` without recompiling.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o liblib.so
+g++ -g app.cpp -L. -llib -Wl,-rpath,. -o app
+./app
+# → encode(21) = 42, 42 (expected 42, 42)
+# → flush()    = 2 (expected 2)
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o liblib.so
+./app
+# → encode(21) = 42, 42 (expected 42, 42)
+# → flush()    = -1 (expected 2)
+# → CORRUPTION: flush() dispatched to a different vtable slot —
+#   the pending count was silently discarded!
+```
+
+The app's virtual call lands in `reset()` (returns −1, zeroes the pending
+counter) instead of `flush()`. Data is lost while every call "succeeds".
+
+## How to fix
+
+1. **Don't devirtualize shipped methods.** If the cost of virtual dispatch
+   matters, add a non-virtual fast-path *alongside* (e.g. `flush_fast()`), or
+   devirtualize internally while keeping the vtable entry as a forwarding
+   definition.
+2. **Let the compiler do it invisibly**: `final` on the class/method enables
+   whole-program devirtualization at call sites *without* changing the vtable
+   layout — though adding `final` is itself a source-level API event
+   (case 125).
+3. **SONAME bump** if the slot must really go.
+
+## Real-world example
+
+The KDE binary-compatibility policy lists "unoverride a virtual function" and
+any change to the virtual-function order among its forbidden changes: vtable
+slot indexes are compiled into every caller. This is the same slot-shift
+mechanics as oneTBB's historical `task` vtable churn (case 108), triggered
+here by a single removed keyword rather than a removed class.
+
+## abicheck detection
+
+The mangled name is unchanged in both versions, so abicheck matches the
+function across snapshots and sees its virtuality flip in the header AST:
+it reports `func_virtual_removed` (BREAKING, `min_evidence: L2`). Lower
+evidence tiers still catch the break through its layout fallout —
+`type_vtable_changed` (vtable membership) and `vtable_slot_count_changed`
+from `_ZTV5Codec`'s shrunken size, the latter even on a stripped binary —
+they just can't name the devirtualized method.
+
+```bash
+abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+# Verdict: BREAKING (func_virtual_removed: flush)
+```
+
+## References
+
+- [Itanium C++ ABI §2.4 — Virtual Table Layout](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#vtable)
+- [KDE ABI Policy — Binary Compatibility Issues](https://community.kde.org/Policies/Binary_Compatibility_Issues_With_C%2B%2B)
