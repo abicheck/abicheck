@@ -77,7 +77,6 @@ nav:
     - What Each Level Sees: concepts/what-each-level-sees.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
-    - Class Layout ABI & API: concepts/class-layout-abi.md
     - Environment & Toolchain Drift: concepts/environment-drift.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
@@ -96,7 +95,10 @@ nav:
   - ABI/API Handling & Recommendations:
     - Overview: concepts/abi-api-handling.md
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
-    - Dependency & Runtime Floors: concepts/dependency-floors.md
+    - Deep Dives:
+      - Your ABI Surface: concepts/abi-surface.md
+      - Class Layout ABI & API: concepts/class-layout-abi.md
+      - Dependency & Runtime Floors: concepts/dependency-floors.md
     - Learning Series:
       - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
