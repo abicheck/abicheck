@@ -517,6 +517,13 @@ def test_external_dependency_origin_owner_based(symbol, expected):
             ["libc++abi.so.1", "libc++.so.1"],
             "libc++.so.1",
         ),
+        # even a plain std::__1 export the prefix table resolves to libc++abi first
+        # is normalized to the real libc++ runtime (Codex review).
+        (
+            "_ZNSt3__16vectorIiEE9push_backEOi",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++.so.1",
+        ),
         # covariant thunk with h/v-tagged call-offsets still resolves its owner.
         ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
     ],
@@ -563,6 +570,20 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     assert (
         _external_dependency_origin(sym, [], ("libmylib.so.1",))
         == "{fmt} (vendored third-party)"
+    )
+    # a wrapper/plugin whose name merely *contains* the token is NOT self — its
+    # leaked fmt surface must still flag (boundary-aware match, Codex review).
+    assert (
+        _external_dependency_origin(sym, [], ("libfmtshim.so",))
+        == "{fmt} (vendored third-party)"
+    )
+    # a per-component vendored lib (libboost_system) scanning its own boost:: is
+    # still recognised as self.
+    assert (
+        _external_dependency_origin(
+            "_ZN5boost6system3barEv", [], ("libboost_system.so.1",)
+        )
+        is None
     )
     # self-names are derived from library name / soname / Mach-O install-name.
     snap = _snap(library="libfmt", elf=ElfMetadata(symbols=[], soname="libfmt.so.9"))

@@ -200,6 +200,11 @@ def _external_dependency_origin(
 
     lib = _guess_symbol_origin(symbol, needed_libs)
     if lib is not None:
+        # libc++abi is the ABI support library, not libc++ itself. If the prefix
+        # table picked it (DT_NEEDED ordered libc++abi before libc++) for a libc++
+        # ``std::__1`` symbol, re-resolve to the real libc++ runtime (Codex review).
+        if lib.rsplit("/", 1)[-1].startswith("libc++abi") and "St3__1" in symbol:
+            return _cxx_runtime_lib(symbol, needed_libs)
         return lib
     owner = _mangled_owner_namespace(symbol)
     if owner is None:
@@ -210,9 +215,26 @@ def _external_dependency_origin(
     if owner == "std" or owner in _STD_OWNER_NAMESPACES:
         return _cxx_runtime_lib(symbol, needed_libs)
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
-    if vendored is not None and any(owner in name for name in self_names):
+    if vendored is not None and _owner_is_self_library(owner, self_names):
         return None  # the audited library *is* this vendored library — native
     return vendored
+
+
+def _owner_is_self_library(owner: str, self_names: tuple[str, ...]) -> bool:
+    """Whether a vendored *owner* names the audited library itself (not a wrapper).
+
+    Boundary-aware, not a bare substring: ``libfmt.so.9``/``libfmt`` is fmt, but a
+    wrapper/plugin like ``libfmtshim.so`` that statically re-exports ``fmt::`` is
+    NOT — its leaked fmt surface must still flag (Codex review). Matches when a
+    self-name, minus any ``lib`` prefix, is exactly the owner or the owner followed
+    by a ``.``/``_``/``-`` separator (``libboost_system`` → ``boost``).
+    """
+    boundary = re.compile(rf"{re.escape(owner)}([._-]|$)")
+    for name in self_names:
+        stem = name[3:] if name.startswith("lib") else name
+        if boundary.match(stem):
+            return True
+    return False
 
 
 def _library_self_names(snapshot: AbiSnapshot) -> tuple[str, ...]:
