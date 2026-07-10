@@ -91,6 +91,9 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
 from .diff_symbols import _PUBLIC_VIS
+from .diff_time64 import (  # noqa: F401 — triggers detector registration
+    _diff_time64_abi,
+)
 from .diff_types import (  # noqa: F401
     _diff_const_overloads,
     _diff_enum_renames,
@@ -124,6 +127,7 @@ from .model import AbiSnapshot
 from .policy_file import PolicyFile
 
 if TYPE_CHECKING:
+    from .environment_matrix import EnvironmentMatrix
     from .post_processing import PipelineContext
     from .suppression import SuppressionList
 
@@ -475,6 +479,7 @@ def compare(
     collapse_versioned_symbols: bool = False,
     public_surface_allowlist: set[str] | None = None,
     reconcile_build_context: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -489,6 +494,11 @@ def compare(
             for user-defined per-kind verdict overrides.  When provided,
             *policy* is used only as the ``base_policy`` fallback inside the
             file (i.e. the file's own ``base_policy`` field takes precedence).
+        env_matrix: Optional declared deployment constraints (ADR-020b). When
+            its ``runtime_floors`` field is set, new symbol-version
+            requirements are classified against the declared floors
+            (≤ floor → COMPATIBLE, > floor → BREAKING) instead of the default
+            deployment-RISK verdict.
     """
 
     # Discover any diff_* detector modules not already imported above, then run
@@ -557,6 +567,17 @@ def compare(
             pp_ctx.versioned_scheme_soname_relink_required
         ),
     )
+
+    # Declared-runtime-floor contract (ADR-020b): after the internal-node
+    # demotion inside _apply_soname_policy (whose effective_verdict, when set,
+    # wins) and before the verdict, so a floor-decided finding drives
+    # COMPATIBLE/BREAKING instead of the default deployment-RISK.
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_versioning import apply_runtime_floor_contract
+
+        apply_runtime_floor_contract(
+            kept + verdict_redundant, env_matrix.runtime_floors
+        )
 
     all_unsuppressed = kept + verdict_redundant
     verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file)

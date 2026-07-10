@@ -568,6 +568,29 @@ def verbose_option(func: F) -> F:
     return func
 
 
+def env_matrix_option(func: F) -> F:
+    """The ``--env-matrix`` option: declared deployment constraints (ADR-020b).
+
+    Defined here so ``cli.py`` stays under its size cap and any future
+    front-end shares one spelling/help. The value stays a path; loading and
+    validation happen in the Tier-2 service
+    (:func:`abicheck.service.load_env_matrix`) so CLI and request-API callers
+    surface identical errors.
+    """
+    func = click.option(
+        "--env-matrix",
+        "env_matrix_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help="Environment-matrix YAML declaring deployment constraints "
+             "(ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "
+             "\"2.28\"}'), a new symbol-version requirement is judged against "
+             "the declared floor: at/below it -> compatible, above it -> "
+             "breaking, instead of the default deployment-risk verdict.",
+    )(func)
+    return func
+
+
 def set_input_options(func: F) -> F:
     """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``.
 
@@ -1136,7 +1159,11 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: analysis capability (clearing context-free header-parse false positives from
 #: build defines), not a project setting demotable to ``.abicheck.yml`` — it is
 #: an invocation-time analysis toggle like ``--pattern-verdicts``.
-COMPARE_FLAG_BUDGET = 78
+#: Raised 78→79 for ``--env-matrix`` (ADR-020b runtime_floors): a genuine new
+#: analysis input (declared deployment constraints that turn version-requirement
+#: RISK findings into decidable COMPATIBLE/BREAKING verdicts), not a stable
+#: project setting — the matrix varies per deployment target being checked.
+COMPARE_FLAG_BUDGET = 79
 
 
 def count_visible_options(cmd: object) -> int:

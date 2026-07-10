@@ -148,6 +148,11 @@ class CompareRequest:
     # delta the build proves never changed). Opt-in; a no-op unless the snapshots
     # carry ``build_context_defines`` + per-field ``guard`` annotations.
     reconcile_build_context: bool = False
+    # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
+    # its ``runtime_floors`` are set, new symbol-version requirements classify
+    # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)
+    # instead of the default deployment-RISK verdict.
+    env_matrix_path: Path | None = None
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -181,6 +186,8 @@ class CompareRequest:
         # here (Tier 2), so CLI and MCP surface the same message before any work.
         if self.policy_file_path is not None and not Path(self.policy_file_path).exists():
             errors.append(f"policy file not found: {self.policy_file_path}")
+        if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
+            errors.append(f"environment matrix file not found: {self.env_matrix_path}")
         return errors
 
     def validate(self) -> CompareRequest:

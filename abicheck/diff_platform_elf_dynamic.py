@@ -188,7 +188,34 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
     changes.extend(_diff_needed_libraries(old_elf.needed, new_elf.needed))
-    if old_elf.rpath != new_elf.rpath:
+
+    # DT_RPATH ↔ DT_RUNPATH type flip (ld --enable-new-dtags default drift).
+    # The two tags carry different lookup semantics (subtree vs direct deps,
+    # LD_LIBRARY_PATH precedence), so a flip is reported as its own finding.
+    # When the path value is unchanged, the flip *replaces* the two individual
+    # value-change findings (they would just re-describe the flip as
+    # "path→''" + "''→path" noise); when the value changed too, both report.
+    rpath_type_flip = (bool(old_elf.rpath) and not old_elf.runpath
+                       and bool(new_elf.runpath) and not new_elf.rpath) or (
+                      bool(old_elf.runpath) and not old_elf.rpath
+                       and bool(new_elf.rpath) and not new_elf.runpath)
+    pure_type_flip = rpath_type_flip and (
+        (old_elf.rpath or old_elf.runpath) == (new_elf.rpath or new_elf.runpath)
+    )
+    if rpath_type_flip:
+        old_tag = "DT_RPATH" if old_elf.rpath else "DT_RUNPATH"
+        new_tag = "DT_RPATH" if new_elf.rpath else "DT_RUNPATH"
+        changes.append(
+            make_change(
+                ChangeKind.RPATH_TYPE_CHANGED,
+                symbol=new_tag,
+                old=old_tag,
+                new=new_tag,
+                old_value=old_elf.rpath or old_elf.runpath,
+                new_value=new_elf.rpath or new_elf.runpath,
+            )
+        )
+    if old_elf.rpath != new_elf.rpath and not pure_type_flip:
         changes.append(
             make_change(
                 ChangeKind.RPATH_CHANGED,
@@ -199,7 +226,7 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
                 new_value=new_elf.rpath,
             )
         )
-    if old_elf.runpath != new_elf.runpath:
+    if old_elf.runpath != new_elf.runpath and not pure_type_flip:
         changes.append(
             make_change(
                 ChangeKind.RUNPATH_CHANGED,
@@ -242,8 +269,99 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     changes.extend(_diff_elf_identity(old_elf, new_elf))
     changes.extend(_diff_static_tls(old_elf, new_elf))
     changes.extend(_diff_gnu_property(old_elf, new_elf))
+    changes.extend(_diff_dt_relr(old_elf, new_elf))
+    changes.extend(_diff_hash_styles(old_elf, new_elf))
 
     return changes
+
+
+def _linker_artifact_fields_captured(old_elf: Any, new_elf: Any) -> bool:
+    """True only when BOTH snapshots carry the linker-artifact fields.
+
+    ``hash_styles``/``has_dt_relr`` postdate the G23 identity fields, so
+    ``_both_captured_elf_identity`` alone cannot prove they were parsed. A
+    freshly parsed DSO always has at least one symbol hash section, so a
+    non-empty ``hash_styles`` on both sides is the generation marker: a legacy
+    JSON snapshot (or an ET_REL ``.o``, where neither DT_RELR nor hash-style
+    applies) rehydrates to an empty set and gates these detectors off instead
+    of fabricating an "introduced"/"removed" finding.
+    """
+    return (
+        _both_captured_elf_identity(old_elf, new_elf)
+        and bool(getattr(old_elf, "hash_styles", frozenset()))
+        and bool(getattr(new_elf, "hash_styles", frozenset()))
+    )
+
+
+def dt_relr_introduced(old_elf: Any, new_elf: Any) -> bool:
+    """True when the new binary gained DT_RELR (and both sides captured it).
+
+    Shared with the symbol-versioning diff so the synthetic
+    ``GLIBC_ABI_DT_RELR`` verneed marker can defer to the dedicated
+    ``DT_RELR_INTRODUCED`` finding instead of surfacing as a cryptic
+    unparseable-version requirement.
+    """
+    return (
+        _linker_artifact_fields_captured(old_elf, new_elf)
+        and not getattr(old_elf, "has_dt_relr", False)
+        and bool(getattr(new_elf, "has_dt_relr", False))
+    )
+
+
+def _diff_dt_relr(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect packed-relative-relocation (DT_RELR) drift.
+
+    Introducing DT_RELR (`-z pack-relative-relocs`, a binutils ≥ 2.38 distro
+    default) raises the loader floor to glibc ≥ 2.36 → RISK. Dropping it
+    broadens loader compatibility → COMPATIBLE.
+    """
+    if not _linker_artifact_fields_captured(old_elf, new_elf):
+        return []
+    old_relr = bool(getattr(old_elf, "has_dt_relr", False))
+    new_relr = bool(getattr(new_elf, "has_dt_relr", False))
+    if old_relr == new_relr:
+        return []
+    if new_relr:
+        return [
+            make_change(
+                ChangeKind.DT_RELR_INTRODUCED,
+                symbol="DT_RELR",
+                old_value="rel/rela",
+                new_value="relr",
+            )
+        ]
+    return [
+        make_change(
+            ChangeKind.DT_RELR_REMOVED,
+            symbol="DT_RELR",
+            old_value="relr",
+            new_value="rel/rela",
+        )
+    ]
+
+
+def _diff_hash_styles(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect a dropped symbol hash-table style (ld --hash-style drift).
+
+    Only the drop direction reports: gaining a style broadens compatibility.
+    Requires the new binary to still have at least one style (a DSO with no
+    hash section at all is malformed and is not this finding's story).
+    """
+    if not _linker_artifact_fields_captured(old_elf, new_elf):
+        return []
+    old_styles = frozenset(getattr(old_elf, "hash_styles", frozenset()))
+    new_styles = frozenset(getattr(new_elf, "hash_styles", frozenset()))
+    dropped = old_styles - new_styles
+    if not dropped:
+        return []
+    return [
+        make_change(
+            ChangeKind.HASH_STYLE_REMOVED,
+            symbol=".hash" if "sysv" in dropped else ".gnu.hash",
+            old="+".join(sorted(old_styles)),
+            new="+".join(sorted(new_styles)),
+        )
+    ]
 
 
 def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:

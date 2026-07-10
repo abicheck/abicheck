@@ -21,6 +21,46 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `overload_added` (a new overload silently re-routes recompiled call sites).
   `ground_truth.json` entries may now set `"pattern_verdicts": true` to
   validate a case under the opt-in `--pattern-verdicts` analysis mode.
+- **Toolchain / runtime environment drift (binutils & glibc skew — 6 new
+  `ChangeKind`s).** Rebuilding the same source on a newer distro/toolchain can
+  change where the binary loads without touching its interface; these findings
+  name that root cause. New concepts doc:
+  `docs/concepts/environment-drift.md`; Markdown reports gain an
+  **Environment & Toolchain Drift** section grouping these (plus the existing
+  toolchain/stdlib drift kinds) so "the API moved" and "the build environment
+  moved" are separable at a glance.
+  - **`runtime_floor_raised`** (RISK) — per provider-library/version-prefix
+    roll-up of `symbol_version_required_added`: one headline finding naming
+    the old → new deployment floor (e.g. `GLIBC_2.28 → GLIBC_2.34`) and the
+    imported symbols that pulled it up (`__libc_start_main@GLIBC_2.34` alone
+    means a pure relink artifact; a real API symbol means new runtime use).
+  - **`--env-matrix` / `EnvironmentMatrix.runtime_floors`** — declare target
+    runtime floors (`runtime_floors: {GLIBC: "2.28"}`) and version-requirement
+    findings become decidable: at/below the floor → COMPATIBLE, above it →
+    BREAKING, undeclared prefixes keep the RISK default (per-finding
+    `effective_verdict` modulation, rule `runtime_floor_contract`). Also
+    settles `dt_relr_introduced` via its implied glibc ≥ 2.36 requirement.
+    Available on the Python API (`compare(..., env_matrix=...)`,
+    `CompareRequest.env_matrix_path`).
+  - **`dt_relr_introduced`** (RISK) / **`dt_relr_removed`** (COMPATIBLE) —
+    packed relative relocations (`-z pack-relative-relocs`, binutils ≥ 2.38
+    distro default) require glibc ≥ 2.36 to load. The synthetic
+    `GLIBC_ABI_DT_RELR` verneed marker folds into this finding instead of
+    surfacing as a cryptic unparseable version requirement.
+  - **`rpath_type_changed`** (RISK) — `DT_RPATH` ↔ `DT_RUNPATH` flip
+    (`--enable-new-dtags` drift): same paths, different lookup semantics
+    (dependency subtree vs direct deps; `LD_LIBRARY_PATH` precedence). A pure
+    type flip replaces the `rpath_changed`+`runpath_changed` noise pair.
+  - **`hash_style_removed`** (RISK) — a symbol hash-table style (`.hash`
+    SysV / `.gnu.hash` GNU) present in the old binary was dropped
+    (`--hash-style` drift); loaders supporting only that style break.
+  - **`time64_abi_changed`** (BREAKING) — 32-bit time64/LFS flip:
+    `time_t`/`off_t`-family typedefs resized together (`_TIME_BITS=64` /
+    `_FILE_OFFSET_BITS=64`, glibc ≥ 2.34) — one root-cause diagnostic for the
+    mass per-symbol width churn, mirroring the ILP64 collapse detector.
+  - `ElfMetadata` now captures `has_dt_relr` and `hash_styles`
+    (serialization-compatible; detectors gate off on legacy snapshots so a
+    stale baseline never fabricates a finding).
 
 - **G23 Phase D — ecosystem detectors (7 new `ChangeKind`s).**
   - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`

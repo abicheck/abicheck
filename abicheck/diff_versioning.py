@@ -34,6 +34,33 @@ from .elf_metadata import ElfMetadata
 # deployment risk (a consumer who illegally linked them rebuilds), not a break.
 _INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
 
+_UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
+"""Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
+like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
+non-numeric requirement is always treated as potentially BREAKING — never
+silently COMPAT."""
+
+
+def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
+    """Parse a versioned symbol tag like ``GLIBC_2.34`` or ``GLIBCXX_3.4.19``
+    into a comparable integer tuple.
+
+    Only the numeric suffix after the last ``_`` is used:
+    ``GLIBC_2.34`` → ``(2, 34)``, ``GLIBCXX_3.4.19`` → ``(3, 4, 19)``.
+
+    Returns :data:`_UNPARSEABLE_VERSION` for non-numeric tags such as
+    ``GLIBC_PRIVATE`` — a very large sentinel that always compares as newer
+    than any real version, so such tags are conservatively treated as BREAKING.
+
+    Canonical home: previously lived in ``diff_platform_elf_symbols``; moved
+    here so both the per-node diff and the runtime-floor contract share it
+    without an import cycle (that module imports this one).
+    """
+    parts = ver.rsplit("_", 1)
+    numeric = parts[-1] if len(parts) > 1 else ver
+    result = tuple(int(x) for x in numeric.split(".") if x.isdigit())
+    return result if result else _UNPARSEABLE_VERSION
+
 # Change kinds whose ``symbol`` field is itself a version-node name (not a
 # symbol name) — for these, the node-name marker test applies directly.
 _VERSION_NODE_NAME_KINDS = frozenset(
@@ -139,6 +166,90 @@ def demote_internal_version_node_findings(
             "symbol bound to an internal/private ELF version node (not public ABI)"
         )
         change.modulation_rule = "internal_version_node_scope"
+    return changes
+
+
+#: Change kinds the declared-runtime-floor contract (ADR-020b
+#: ``runtime_floors``) can reclassify, and where each carries the offending
+#: version tag: SYMBOL_VERSION_REQUIRED_ADDED in ``symbol`` (e.g.
+#: ``GLIBC_2.34``), RUNTIME_FLOOR_RAISED in ``new_value``.
+#: DT_RELR_INTRODUCED carries an *implied* requirement: a DT_RELR binary
+#: needs glibc ≥ 2.36 to load, so a declared GLIBC floor decides it too.
+_RUNTIME_FLOOR_KINDS = frozenset(
+    {
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+        ChangeKind.RUNTIME_FLOOR_RAISED,
+        ChangeKind.DT_RELR_INTRODUCED,
+    }
+)
+
+#: The glibc release that introduced DT_RELR loader support.
+_DT_RELR_GLIBC_FLOOR_TAG = "GLIBC_2.36"
+
+
+def _floor_required_tag(change: Change) -> str:
+    """The version tag a floor-modulatable finding requires (or "")."""
+    if change.kind is ChangeKind.RUNTIME_FLOOR_RAISED:
+        return change.new_value or ""
+    if change.kind is ChangeKind.DT_RELR_INTRODUCED:
+        return _DT_RELR_GLIBC_FLOOR_TAG
+    return change.symbol or ""
+
+
+def apply_runtime_floor_contract(
+    changes: list[Change], runtime_floors: dict[str, str]
+) -> list[Change]:
+    """Classify version-requirement findings against declared runtime floors.
+
+    Without a declared deployment target, a new symbol-version requirement
+    (``SYMBOL_VERSION_REQUIRED_ADDED`` / ``RUNTIME_FLOOR_RAISED``) can only be
+    a *risk* — whether it breaks anyone depends on runtimes the tool cannot
+    see. ``runtime_floors`` (EnvironmentMatrix, e.g. ``{"GLIBC": "2.28"}``)
+    turns that into a checkable contract:
+
+    * required version ≤ declared floor → ``COMPATIBLE`` (every declared
+      target already ships it);
+    * required version > declared floor → ``BREAKING`` (a declared target can
+      no longer load the binary);
+    * prefix not declared, or an unparseable tag → left at the kind's default
+      (RISK).
+
+    Applied via the per-finding ``effective_verdict`` hook (ADR-025), like
+    :func:`demote_internal_version_node_findings`; findings already carrying a
+    modulation are left untouched. Mutates and returns *changes*.
+    """
+    if not runtime_floors:
+        return changes
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    for change in changes:
+        if change.kind not in _RUNTIME_FLOOR_KINDS:
+            continue
+        if change.effective_verdict is not None:
+            continue
+        tag = _floor_required_tag(change)
+        if "_" not in tag:
+            continue
+        prefix = tag.rsplit("_", 1)[0].upper()
+        floor = floors.get(prefix)
+        if floor is None:
+            continue
+        required = _parse_abi_version_tag(tag)
+        floor_tuple = tuple(int(x) for x in floor.split(".") if x.isdigit())
+        if required == _UNPARSEABLE_VERSION or not floor_tuple:
+            continue
+        if required <= floor_tuple:
+            change.effective_verdict = Verdict.COMPATIBLE
+            change.modulation_reason = (
+                f"within declared runtime floor ({prefix} ≥ {floor}): every "
+                f"declared deployment target already provides {tag}"
+            )
+        else:
+            change.effective_verdict = Verdict.BREAKING
+            change.modulation_reason = (
+                f"exceeds declared runtime floor ({prefix} {floor}): declared "
+                f"deployment targets cannot load a binary requiring {tag}"
+            )
+        change.modulation_rule = "runtime_floor_contract"
     return changes
 
 

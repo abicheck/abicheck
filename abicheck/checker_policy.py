@@ -741,6 +741,33 @@ class ChangeKind(str, Enum):
     PYTHON_API_CALLABLE_KIND_CHANGED = "python_api_callable_kind_changed"  # a callable's protocol changed — def↔async def (callers must/mustn't await), or method↔property / static↔class↔instance binding — so existing call/access sites break even with an unchanged parameter list → API_BREAK
     PYTHON_API_OVERLOAD_REMOVED = "python_api_overload_removed"  # an @overload signature variant was dropped from an overloaded function/method → typed callers that relied on that call shape lose it → API_BREAK
 
+    # ── Toolchain / runtime environment drift (binutils & glibc skew) ────────
+    # Artifacts of relinking on a different binutils or building against a
+    # different glibc/sysroot rather than a source-level interface change.
+    # The per-provider-lib synthesis of SYMBOL_VERSION_REQUIRED_ADDED noise:
+    # one headline finding naming the old→new deployment floor (e.g.
+    # GLIBC_2.28 → GLIBC_2.34) with the imported symbols that pulled it up.
+    RUNTIME_FLOOR_RAISED = "runtime_floor_raised"  # max required version node per provider lib rose → binary no longer loads on older runtimes → RISK
+    # Packed relative relocations (DT_RELR, `-z pack-relative-relocs`,
+    # binutils ≥ 2.38 default on some distros). A DT_RELR binary requires
+    # glibc ≥ 2.36 (or an equivalent loader) — glibc marks this with the
+    # synthetic GLIBC_ABI_DT_RELR verneed.
+    DT_RELR_INTRODUCED = "dt_relr_introduced"  # → RISK (raises loader floor)
+    DT_RELR_REMOVED = "dt_relr_removed"  # → COMPATIBLE (broadens loader compatibility)
+    # DT_RPATH ↔ DT_RUNPATH flip (ld --enable-new-dtags default drift):
+    # DT_RPATH applies to the whole dependency subtree and ignores
+    # LD_LIBRARY_PATH; DT_RUNPATH applies only to direct deps and is
+    # overridden by LD_LIBRARY_PATH — same paths, different lookup semantics.
+    RPATH_TYPE_CHANGED = "rpath_type_changed"  # → RISK
+    # A symbol-hash table style (.hash SysV / .gnu.hash GNU) present in the
+    # old binary is gone (ld --hash-style default drift). Loaders/tools that
+    # only support the dropped style can no longer resolve symbols.
+    HASH_STYLE_REMOVED = "hash_style_removed"  # → RISK
+    # time64/LFS ABI flip: time_t/off_t-family public typedefs flipped width
+    # together (_TIME_BITS=64 / _FILE_OFFSET_BITS=64, glibc ≥ 2.34 option) —
+    # one root cause behind mass parameter/field width churn on 32-bit targets.
+    TIME64_ABI_CHANGED = "time64_abi_changed"  # → BREAKING
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

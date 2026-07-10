@@ -64,6 +64,7 @@ from .cli_options import (
     build_source_dump_options,
     compile_context_options,
     debug_resolution_options,
+    env_matrix_option,
     evidence_options,
     lang_option,
     output_options,
@@ -1375,6 +1376,7 @@ def _embed_inline_source_side(
 @debug_resolution_options
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
+@env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @click.option("--reconcile-build-context", is_flag=True, default=False,
               help="Clear context-free header-parse false positives using the build's "
                    "active preprocessor defines (ADR-039): a conditional field's phantom "
@@ -1433,6 +1435,7 @@ def compare_cmd(
     explain_patterns: bool,
     surface_metrics: bool,
     reconcile_build_context: bool,
+    env_matrix_path: Path | None,
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
@@ -1853,9 +1856,14 @@ def compare_cmd(
         post_manifest_allowlist = contract_scope_allowlist(manifest, old, new)
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
-    from .service import compare_snapshots
+    from .service import compare_snapshots, load_env_matrix
+    try:
+        env_matrix = load_env_matrix(env_matrix_path)
+    except AbicheckError as exc:
+        raise click.UsageError(str(exc)) from exc
     result = compare_snapshots(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
+        env_matrix=env_matrix,
         scope_to_public_surface=scope_public_headers,
         force_public_symbols=force_public,
         extra_changes=extra_changes,

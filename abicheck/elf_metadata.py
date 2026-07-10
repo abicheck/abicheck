@@ -183,6 +183,16 @@ class ElfMetadata:
     # non-IBT/BTI DSO disables enforcement for the whole link map).
     gnu_properties: frozenset[str] = field(default_factory=frozenset)
 
+    # ── Linker artifact facts (binutils & glibc skew) ────────────────────
+    # DT_RELR packed relative relocations (`-z pack-relative-relocs`). A
+    # DT_RELR binary needs glibc ≥ 2.36 (or an equivalent loader) — glibc
+    # marks the requirement with a synthetic GLIBC_ABI_DT_RELR verneed.
+    has_dt_relr: bool = False
+    # Symbol hash-table styles present: subset of {"sysv", "gnu"}
+    # (.hash → "sysv", .gnu.hash → "gnu"; ld --hash-style). Dropping a style
+    # drops loaders/tools that only support that style.
+    hash_styles: frozenset[str] = field(default_factory=frozenset)
+
     @cached_property
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
@@ -606,6 +616,17 @@ def _process_section(
         # Captured but not parsed yet — only used as a fallback for
         # relocatable objects (.o) that have no .dynsym (see below).
         symtab_section = section
+    else:
+        name = getattr(section, "name", "")
+        if name == ".hash":
+            meta.hash_styles = meta.hash_styles | {"sysv"}
+        elif name == ".gnu.hash":
+            meta.hash_styles = meta.hash_styles | {"gnu"}
+        elif name == ".relr.dyn":
+            # Section-level fallback for DT_RELR (the dynamic tag is the
+            # primary signal; a stripped/static-pie image may only keep the
+            # section).
+            meta.has_dt_relr = True
     return dynsym_section, symtab_section, ver_sym_section
 
 
@@ -680,6 +701,7 @@ def _postprocess_metadata(
 
 
 # Dynamic-flag bit constants (elf.h).
+_DT_RELR = 36             # DT_RELR (packed relative relocations)
 _DF_BIND_NOW = 0x8        # DT_FLAGS
 _DF_STATIC_TLS = 0x10     # DT_FLAGS
 _DF_1_NOW = 0x1           # DT_FLAGS_1
@@ -710,6 +732,10 @@ def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
             if tag.entry.d_val & _DF_1_PIE:
                 # Tentative; gated on ET_DYN by the caller.
                 meta.is_pie = True
+        elif d_tag in ("DT_RELR", _DT_RELR):
+            # Packed relative relocations. pyelftools spells known tags as
+            # strings; an older release may pass the raw numeric through.
+            meta.has_dt_relr = True
 
 
 def _parse_version_def(section: GNUVerDefSection, meta: ElfMetadata) -> None:

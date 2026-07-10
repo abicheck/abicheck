@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .checker_types import Change
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
+    from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .severity import SeverityConfig
     from .suppression import SuppressionList
@@ -1050,6 +1051,27 @@ def load_suppression_and_policy(
     return suppression, pf
 
 
+def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
+    """Load an ADR-020b environment-matrix YAML, or None when *path* is None.
+
+    Tier-2 loader (mirrors :func:`load_suppression_and_policy`): parse/shape
+    errors surface as :class:`ValidationError` with identical text across
+    front-ends.
+    """
+    if path is None:
+        return None
+    import yaml
+
+    from .environment_matrix import EnvironmentMatrix
+
+    try:
+        return EnvironmentMatrix.from_yaml(Path(path))
+    except (TypeError, ValueError, yaml.YAMLError) as e:
+        raise ValidationError(f"Invalid environment matrix {path}: {e}") from e
+    except OSError as e:
+        raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e
+
+
 def compare_snapshots(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1065,6 +1087,7 @@ def compare_snapshots(
     collapse_versioned_symbols: bool = False,
     public_surface_allowlist: set[str] | None = None,
     reconcile_build_context: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1103,6 +1126,7 @@ def compare_snapshots(
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
         reconcile_build_context=reconcile_build_context,
+        env_matrix=env_matrix,
     )
 
 
@@ -1185,6 +1209,7 @@ def run_compare_request(
         ),
         pattern_verdicts=request.pattern_verdicts,
         reconcile_build_context=request.reconcile_build_context,
+        env_matrix=load_env_matrix(request.env_matrix_path),
     )
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)

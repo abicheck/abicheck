@@ -73,6 +73,37 @@ BINARY_ONLY_KINDS: frozenset[str] = frozenset({
     "cet_protection_weakened", "cet_protection_improved",
     "branch_protection_weakened", "branch_protection_improved",
     "symbol_binding_became_unique", "symbol_binding_lost_unique",
+    # Toolchain/runtime environment drift (binutils & glibc skew): the linker
+    # and sysroot leave these in the artifact; recompiling the same source with
+    # the same flags on the same toolchain cannot produce them.
+    "runtime_floor_raised",
+    "dt_relr_introduced", "dt_relr_removed",
+    "rpath_type_changed", "hash_style_removed",
+})
+
+#: Environment / toolchain drift kinds — findings caused by the *build
+#: environment* (compiler, binutils/linker defaults, glibc/sysroot version)
+#: rather than by a source-level interface change. Reporters group these into
+#: a dedicated section so a reader can immediately separate "the API moved"
+#: from "the build environment moved". Membership answers "did the environment
+#: cause it", not "is it safe" — the severity axis is orthogonal.
+ENVIRONMENT_DRIFT_KINDS: frozenset[str] = frozenset({
+    # Runtime deployment envelope (glibc & friends)
+    "runtime_floor_raised",
+    "symbol_version_required_added", "symbol_version_required_added_compat",
+    "symbol_version_required_removed",
+    # Linker (binutils) default drift
+    "dt_relr_introduced", "dt_relr_removed",
+    "rpath_type_changed", "hash_style_removed",
+    "cet_protection_weakened", "cet_protection_improved",
+    "branch_protection_weakened", "branch_protection_improved",
+    "static_tls_introduced", "static_tls_removed",
+    # Compiler / standard library / sysroot drift
+    "toolchain_version_changed", "toolchain_flag_drift",
+    "stdlib_implementation_changed", "stdlib_debug_mode_changed",
+    "libcpp_abi_version_changed", "glibcxx_dual_abi_flip_detected",
+    "time64_abi_changed", "integer_model_changed", "long_double_abi_changed",
+    "vector_abi_changed",
 })
 
 #: Canonical breaking kinds (single source of truth from checker_policy).

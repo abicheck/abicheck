@@ -7,7 +7,7 @@
 | **Verdict** | ⚠️ `COMPATIBLE_WITH_RISK` |
 | Breaking changes | 0 |
 | Source-level breaks | 0 |
-| Deployment risk changes | 1 |
+| Deployment risk changes | 2 |
 | Compatible changes | 0 |
 
 ## Analysis Confidence
@@ -37,6 +37,19 @@
 > your target environment before deploying.
 
 - **symbol_version_required_added**: New symbol version requirement: GLIBC_2.34 (from libc.so.6)
+- **runtime_floor_raised**: Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured))
+
+## 🛠️ Environment & Toolchain Drift
+
+> The findings below are artifacts of the **build environment** — a
+> different compiler, binutils/linker default, or glibc/sysroot —
+> rather than a change to the library's declared interface. They also
+> appear in their severity sections above; this view groups them by
+> root cause. If the source did not change, review the build
+> environment first.
+
+- **symbol_version_required_added**: New symbol version requirement: GLIBC_2.34 (from libc.so.6)
+- **runtime_floor_raised**: Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured))
 
 ---
 ## Legend

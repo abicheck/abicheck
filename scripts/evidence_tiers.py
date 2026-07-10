@@ -141,6 +141,16 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "elf_osabi_changed": "L0",
     "symbol_binding_became_unique": "L0",
     "symbol_binding_lost_unique": "L0",
+    # Toolchain / runtime environment drift (binutils & glibc skew). The
+    # verneed roll-up and the linker-artifact facts are pure dynamic-section /
+    # section-header reads; the time64/LFS flip needs typedef evidence
+    # (DWARF at minimum) to see the underlying width change.
+    "runtime_floor_raised": "L0",
+    "dt_relr_introduced": "L0",
+    "dt_relr_removed": "L0",
+    "rpath_type_changed": "L0",
+    "hash_style_removed": "L0",
+    "time64_abi_changed": "L1",
     # Python-level API of an extension module (G23): recovered from a `.pyi`
     # type stub — a declared-API surface analogous to public headers, and like
     # headers invisible in the binary/debug info. The `.so` export table shows
