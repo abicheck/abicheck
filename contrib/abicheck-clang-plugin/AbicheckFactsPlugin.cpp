@@ -1700,9 +1700,16 @@ public:
     std::string sig = qualTypeFromJson(o);
     std::string mangled = mangledFromJson(o);
     // Drop internal-linkage variables (clang's own linkage verdict, encoded as
-    // the Itanium `L` seniority marker) so a header `const`/file-`static` never
-    // shows up as a decl expected to map to an export (Codex review).
+    // the Itanium `L` seniority marker / `_GLOBAL__N_` component) so a header
+    // `const`/file-`static`/anon-namespace var never shows up as a decl expected
+    // to map to an export (Codex review).
     if (mangledHasInternalLinkage(mangled))
+      return true;
+    // C / extern "C" file-scope static: clang gives no mangled name to carry the
+    // marker, so filter on storageClass directly. A static data member is
+    // external (its lexical parent is a record), so keep it.
+    if (vd->getStorageClass() == SC_Static &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()))
       return true;
     std::string key = mangled.empty() ? name : mangled;
     Entity e;

@@ -23,12 +23,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   data members such as `llvm::raw_ostream::RED`) could never map to a source
   declaration. Both now emit `variable` entities keyed identically
   (`id=_hash("variable", mangled|name, type)`), gated to external linkage:
-  block-scope locals and internal-linkage variables — a namespace/file-scope
-  `static`, a namespace-scope `const` without `extern`, or an anonymous-namespace
-  variable — are dropped by their Itanium mangled linkage encoding (the `L`
-  seniority marker or a `_GLOBAL__N_` component), clang's own linkage verdict, so
-  a header constant never inflates `decls_without_symbol` or triggers a spurious
-  `source_binary_provenance_mismatch`; `constexpr` keeps its own path. The C.6
+  block-scope locals and internal-linkage variables are dropped so a header
+  constant never inflates `decls_without_symbol` or triggers a spurious
+  `source_binary_provenance_mismatch`: a C++ namespace/file-scope `static`, a
+  namespace-scope `const` without `extern`, or an anonymous-namespace variable by
+  their Itanium mangled linkage encoding (the `L` seniority marker or a
+  `_GLOBAL__N_` component), plus a C / `extern "C"` file-scope `static` (which
+  clang gives no mangled name) by an explicit storage-class filter; a `static`
+  data member stays external. `constexpr` keeps its own path. The
+  `CLANG_EXTRACTOR_VERSION` bump (0.5→0.6) invalidates stale `--cache-dir` dumps
+  that predate the `variables` field. The C.6
   differential-conformance fixture gains globals, a static member, and an
   internal `const` so the gate covers variables. Measured on LLVM 18.1.3
   `LLVMSupport`: +24 exported symbols now map.

@@ -96,8 +96,10 @@ from .clang_public_roots import (  # noqa: F401
 )
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
-#: folded into the per-TU cache key (ADR-030 D8).
-CLANG_EXTRACTOR_VERSION = "0.5"
+#: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
+#: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
+#: from an older recipe. 0.6: emit external-linkage ``variables``.
+CLANG_EXTRACTOR_VERSION = "0.6"
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -1036,11 +1038,15 @@ def _is_variable_node(
 
     A block-scope local (enclosing kind is a statement, not a decl container) has
     no linkage and is dropped. Internal-linkage variables never appear in the
-    dynamic symbol table, so they are dropped by their mangled-name marker: a
-    *namespace/file-scope* ``static`` **and** a namespace-scope ``const`` without
-    ``extern`` both carry it, while a ``static`` data member (external) does not.
-    The mangled name is clang's own linkage verdict, so this stays authoritative
-    without re-deriving C++ linkage rules.
+    dynamic symbol table, so they are dropped two ways: (1) the mangled-name
+    marker — a C++ *namespace/file-scope* ``static``, a namespace-scope ``const``
+    without ``extern``, or an anonymous-namespace variable all carry it; and
+    (2) an explicit ``storageClass == "static"`` filter for the case clang gives
+    **no** mangled name (a C / ``extern "C"`` file-scope ``static``, whose
+    ``mangledName`` is absent or equals ``name``), which (1) cannot see. A
+    ``static`` **data member** (enclosing ``CXXRecordDecl``) has external linkage
+    and is kept by both. The mangled name is clang's own linkage verdict, so this
+    stays authoritative without re-deriving C++ linkage rules.
     """
     if kind != "VarDecl" or not name or not accessible:
         return False
@@ -1049,6 +1055,11 @@ def _is_variable_node(
     if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
         return False
     if _mangled_has_internal_linkage(_mangled(node)):
+        return False
+    # C / extern "C" file-scope static: no mangled name carries the marker, so
+    # filter on storageClass directly. A static data member is external, so keep
+    # it (its enclosing kind is a record).
+    if node.get("storageClass") == "static" and enclosing_kind != "CXXRecordDecl":
         return False
     return True
 

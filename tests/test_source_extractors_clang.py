@@ -770,6 +770,16 @@ def _var_ast() -> dict:
                         "mangledName": "_ZN2nsL6gConstE",
                         "type": {"qualType": "const int"},
                     },
+                    # C / extern "C" file-scope static: storageClass "static" but
+                    # NO mangledName (the marker cannot see it), so the explicit
+                    # storageClass filter must drop it (Codex review).
+                    {
+                        "kind": "VarDecl",
+                        "name": "cStatic",
+                        "loc": {"line": 5},
+                        "storageClass": "static",
+                        "type": {"qualType": "int"},
+                    },
                     # constexpr -> constexpr_values, not variables
                     {
                         "kind": "VarDecl",
@@ -841,10 +851,12 @@ def test_ast_mapping_emits_external_linkage_variables_only() -> None:
     assert got["ns::C::sMember"].mangled_name == "_ZN2ns1C7sMemberE"
     assert got["ns::gCount"].kind == "variable"
     assert got["ns::gCount"].type_hash.startswith("sha256:")
-    # internal-linkage namespace static, a namespace `const` (Codex review),
-    # constexpr, and the stack local are NOT variables
+    # internal-linkage namespace static, a namespace `const`, a C-style
+    # file-scope static with no mangled name (Codex reviews), constexpr, and the
+    # stack local are NOT variables
     assert "ns::gPriv" not in got
     assert "ns::gConst" not in got
+    assert "ns::cStatic" not in got
     assert "ns::kN" not in got
     assert all("local" not in n for n in got)
     # constexpr still routes to constexpr_values
