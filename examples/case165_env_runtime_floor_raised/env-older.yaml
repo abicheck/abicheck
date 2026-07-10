@@ -1,0 +1,4 @@
+# Deployment targets include glibc 2.28 (e.g. RHEL 8, Ubuntu 20.04's 2.31
+# would also do): a binary requiring GLIBC_2.34 cannot load there -> BREAKING.
+runtime_floors:
+  GLIBC: "2.28"

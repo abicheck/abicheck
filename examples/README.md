@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **169 cases** (164 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **170 cases** (165 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -22,7 +22,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 95 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 15 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 26 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -287,6 +287,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [163](case163_python_kwarg_renamed/README.md) | Python-API break invisible to the C-ABI check | API Break | 🟠 API_BREAK |
 | [164](case164_preproc_conditional_field/README.md) | Preprocessor-conditional field: a header false positive only build context clears | No Change | ✅ NO_CHANGE |
+| [165](case165_env_runtime_floor_raised/README.md) | Runtime Floor Raised (glibc relink drift) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [165](case165_polymorphic_nonvirtual_dtor/README.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [166](case166_ref_qualifier_added/README.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | Breaking | 🔴 BREAKING |
 | [167](case167_base_became_virtual/README.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | Breaking | 🔴 BREAKING |

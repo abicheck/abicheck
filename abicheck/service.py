@@ -1060,13 +1060,13 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
     """
     if path is None:
         return None
-    import yaml
-
     from .environment_matrix import EnvironmentMatrix
 
     try:
+        # from_yaml converts malformed YAML to ValueError, so no yaml import
+        # is needed here (abicheck.service has no import-untyped override).
         return EnvironmentMatrix.from_yaml(Path(path))
-    except (TypeError, ValueError, yaml.YAMLError) as e:
+    except (TypeError, ValueError) as e:
         raise ValidationError(f"Invalid environment matrix {path}: {e}") from e
     except OSError as e:
         raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e

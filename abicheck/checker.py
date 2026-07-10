@@ -554,6 +554,18 @@ def compare(
     if reconcile_build_context:
         kept, reconciled = reconcile_build_context_findings(kept, old, new)
 
+    # Declared-runtime-floor contract (ADR-020b): before the SONAME policy so
+    # a floor-decided BREAKING finding also drives the soname_bump_recommended
+    # advisory (check_soname_bump_policy honors effective_verdict), and so the
+    # internal-node demotion inside _apply_soname_policy — which skips findings
+    # already carrying an effective_verdict — cannot race it (Codex review #510).
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_versioning import apply_runtime_floor_contract
+
+        apply_runtime_floor_contract(
+            kept + verdict_redundant, env_matrix.runtime_floors
+        )
+
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
     kept = _apply_soname_policy(
@@ -567,17 +579,6 @@ def compare(
             pp_ctx.versioned_scheme_soname_relink_required
         ),
     )
-
-    # Declared-runtime-floor contract (ADR-020b): after the internal-node
-    # demotion inside _apply_soname_policy (whose effective_verdict, when set,
-    # wins) and before the verdict, so a floor-decided finding drives
-    # COMPATIBLE/BREAKING instead of the default deployment-RISK.
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_versioning import apply_runtime_floor_contract
-
-        apply_runtime_floor_contract(
-            kept + verdict_redundant, env_matrix.runtime_floors
-        )
 
     all_unsuppressed = kept + verdict_redundant
     verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file)

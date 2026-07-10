@@ -3,7 +3,7 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_25 case(s)._ [← back to all examples](../index.md)
+_26 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -30,5 +30,6 @@ _25 case(s)._ [← back to all examples](../index.md)
 | [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case161_target_dependency_added](../case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case165_env_runtime_floor_raised](../case165_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case165_polymorphic_nonvirtual_dtor](../case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case169_overload_added](../case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |

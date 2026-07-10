@@ -213,9 +213,17 @@ class EnvironmentMatrix:
 
     @classmethod
     def from_yaml(cls, path: Path) -> EnvironmentMatrix:
-        """Load from a YAML file."""
+        """Load from a YAML file.
+
+        Malformed YAML raises :class:`ValueError` (like the shape errors from
+        :meth:`from_dict`), so callers need not depend on the ``yaml`` package
+        for their error handling.
+        """
         import yaml
 
         with open(path) as f:
-            data = yaml.safe_load(f) or {}
+            try:
+                data = yaml.safe_load(f) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"malformed YAML: {exc}") from exc
         return cls.from_dict(data)

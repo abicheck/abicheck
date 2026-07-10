@@ -63,12 +63,23 @@ def _is_32bit_elf(snap: AbiSnapshot) -> bool:
 
 
 def _bucket(type_str: str, bits32: bool) -> str | None:
-    """Width bucket for *type_str*, resolving the ``long`` family per target."""
+    """Width bucket for *type_str*, resolving the ``long`` family per target.
+
+    DWARF/AST producers spell the long family many ways (``long``,
+    ``long int``, ``unsigned long int``, ``long unsigned int``, …), so the
+    spelling is normalized to its core words before classification — the
+    delegated :func:`_int_width_bucket` only knows a fixed subset of
+    spellings and would silently drop e.g. an ``ino_t`` LFS flip written as
+    ``unsigned long int`` → ``unsigned long long int`` (Codex review #510).
+    """
     if not isinstance(type_str, str):
         return None
-    t = type_str.strip()
-    if bits32 and t in ("long", "long int", "signed long", "unsigned long"):
-        return "32"
+    t = " ".join(type_str.split())
+    core = " ".join(w for w in t.split() if w not in ("unsigned", "signed", "int"))
+    if core == "long long":
+        return "64"
+    if core == "long":
+        return "32" if bits32 else "64"
     return _int_width_bucket(t, is_llp64=False)
 
 

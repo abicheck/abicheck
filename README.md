@@ -181,7 +181,7 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **169 real-world ABI/API scenarios** (164 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **170 real-world ABI/API scenarios** (165 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 Current CI full-catalog default/debug validation over 169 selected cases is green: **gcc 137 PASS / 4 XFAIL / 28 SKIP** and **clang 138 PASS / 4 XFAIL / 27 SKIP**. The skips are cases that are validated outside the default single-library debug lane (audit/cross-source snapshots, L3/L4/L5 build/source fixtures, bundle cases, BTF, or host feature gaps). Runtime smoke over the same catalog produces **76 DEMONSTRATED / 54 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP**. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known backlog.
 
@@ -189,7 +189,7 @@ Current CI full-catalog default/debug validation over 169 selected cases is gree
 
 ## Validation snapshot
 
-The main validation target is the full **169-case catalog**. To scan it for the current checkout:
+The main validation target is the full **170-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all

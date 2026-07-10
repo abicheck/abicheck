@@ -188,6 +188,45 @@ class TestRuntimeFloorContract:
         result = compare(old, new, env_matrix=matrix)
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
+    def test_floor_breaking_triggers_soname_bump_advisory(self) -> None:
+        # The floor contract runs BEFORE the SONAME policy, so a floor-decided
+        # BREAKING on an unchanged SONAME also yields the bump advisory
+        # (Codex review #510).
+        old, new = self._pair()
+        old.elf.soname = new.elf.soname = "libtest.so.1"
+        result = compare(old, new, env_matrix=EnvironmentMatrix(
+            runtime_floors={"GLIBC": "2.28"}
+        ))
+        assert result.verdict is Verdict.BREAKING
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED in _kinds(result.changes)
+
+    def test_unparseable_floor_value_left_at_default(self) -> None:
+        # A floor that parses to no numeric components (possible via direct
+        # construction, bypassing from_dict validation) must not modulate.
+        old, new = self._pair()
+        result = compare(old, new, env_matrix=EnvironmentMatrix(
+            runtime_floors={"GLIBC": "unknown"}
+        ))
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+    def test_tag_without_underscore_skipped(self) -> None:
+        from abicheck.diff_helpers import make_change
+
+        change = make_change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="NOUNDERSCORE",
+            name="NOUNDERSCORE",
+            detail="libc.so.6",
+        )
+        apply_runtime_floor_contract([change], {"GLIBC": "2.36"})
+        assert change.effective_verdict is None
+
+    def test_empty_floors_no_op(self) -> None:
+        old, new = self._pair()
+        changes = list(compare(old, new).changes)
+        assert apply_runtime_floor_contract(changes, {}) is changes
+        assert all(c.modulation_rule != "runtime_floor_contract" for c in changes)
+
     def test_floor_keys_case_insensitive(self) -> None:
         changes = [
             c for c in compare(*self._pair()).changes
@@ -237,6 +276,62 @@ class TestEnvironmentMatrixRuntimeFloors:
         # YAML users will write `GLIBC: 2.28` (a float) as often as a string.
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 2.28}})
         assert m.runtime_floors == {"GLIBC": "2.28"}
+
+
+class TestLoadEnvMatrix:
+    """Tier-2 loader: identical error text across front-ends (service layer)."""
+
+    def test_none_path_returns_none(self) -> None:
+        from abicheck.service import load_env_matrix
+
+        assert load_env_matrix(None) is None
+
+    def test_valid_yaml_loads(self, tmp_path) -> None:
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        matrix = load_env_matrix(p)
+        assert matrix is not None
+        assert matrix.runtime_floors == {"GLIBC": "2.28"}
+
+    def test_malformed_yaml_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        with pytest.raises(ValidationError, match="Invalid environment matrix"):
+            load_env_matrix(p)
+
+    def test_bad_shape_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text("runtime_floors:\n  GLIBC: latest\n")
+        with pytest.raises(ValidationError, match="dotted numeric"):
+            load_env_matrix(p)
+
+    def test_missing_file_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            load_env_matrix(tmp_path / "nope.yaml")
+
+    def test_compare_request_validates_path_exists(self, tmp_path) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=tmp_path / "missing.yaml",
+        )
+        assert any(
+            "environment matrix file not found" in e
+            for e in req.validation_errors()
+        )
 
 
 # ── DT_RELR drift ────────────────────────────────────────────────────────────
@@ -396,6 +491,19 @@ class TestTime64AbiFlip:
         new = _snap32({"my_handle_t": "long long int"})
         assert _diff_time64_abi(old, new) == []
 
+    def test_unsigned_long_spellings_bucketed(self) -> None:
+        # DWARF spells the LFS typedefs many ways: `unsigned long int`,
+        # `long unsigned int`, … — all must bucket, or an ino_t/fsblkcnt_t
+        # flip is silently missed (Codex review #510).
+        old = _snap32({"ino_t": "unsigned long int",
+                       "fsblkcnt_t": "long unsigned int"})
+        new = _snap32({"ino_t": "unsigned long long int",
+                       "fsblkcnt_t": "unsigned long long int"})
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+        assert "ino_t" in changes[0].description
+        assert "fsblkcnt_t" in changes[0].description
+
     def test_pe_snapshots_skipped(self) -> None:
         old = AbiSnapshot(library="x.dll", version="1", platform="pe",
                           typedefs={"time_t": "long int"})
@@ -432,6 +540,62 @@ class TestSerializationRoundtrip:
         restored = snapshot_from_dict(d)
         assert restored.elf.has_dt_relr is False
         assert restored.elf.hash_styles == frozenset()
+
+
+# ── examples/case165 — committed snapshot-pair fixture (compiler-free) ──────
+
+
+class TestCase165Example:
+    """Validate the environment-drift catalog case against its ground truth.
+
+    The case ships a committed AbiSnapshot pair instead of a compilable
+    v1/v2 source pair (producing a glibc verneed-floor raise for real would
+    need two sysroots), so this is its compiler-free validation lane —
+    mirroring how tests/test_g20_catalog.py validates the audit corpus.
+    """
+
+    CASE = "case165_env_runtime_floor_raised"
+
+    @pytest.fixture()
+    def snapshots(self):
+        import json
+        from pathlib import Path
+
+        from abicheck.serialization import snapshot_from_dict
+
+        case_dir = Path(__file__).parent.parent / "examples" / self.CASE
+        old = snapshot_from_dict(json.loads((case_dir / "old.abi.json").read_text()))
+        new = snapshot_from_dict(json.loads((case_dir / "new.abi.json").read_text()))
+        return old, new
+
+    def test_matches_ground_truth(self, snapshots) -> None:
+        import json
+        from pathlib import Path
+
+        gt = json.loads(
+            (Path(__file__).parent.parent / "examples" / "ground_truth.json").read_text()
+        )["verdicts"][self.CASE]
+        result = compare(*snapshots)
+        assert result.verdict.value == gt["expected"]
+        kinds = {c.kind.value for c in result.changes}
+        assert kinds == set(gt["expected_kinds"])
+
+    def test_floor_evidence_names_relink_artifact(self, snapshots) -> None:
+        result = compare(*snapshots)
+        floor = next(c for c in result.changes
+                     if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
+        assert "__libc_start_main@GLIBC_2.34" in floor.description
+        assert floor.old_value == "GLIBC_2.28"
+        assert floor.new_value == "GLIBC_2.34"
+
+    def test_env_matrix_files_settle_the_verdict(self, snapshots) -> None:
+        from pathlib import Path
+
+        case_dir = Path(__file__).parent.parent / "examples" / self.CASE
+        newer = EnvironmentMatrix.from_yaml(case_dir / "env-newer.yaml")
+        older = EnvironmentMatrix.from_yaml(case_dir / "env-older.yaml")
+        assert compare(*snapshots, env_matrix=newer).verdict is Verdict.COMPATIBLE
+        assert compare(*snapshots, env_matrix=older).verdict is Verdict.BREAKING
 
 
 # ── Markdown environment-drift section ───────────────────────────────────────

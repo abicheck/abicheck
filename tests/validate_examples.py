@@ -942,6 +942,15 @@ def _check_case_preconditions(
                           "L3/L4/L5 build/source-only case — validated by "
                           "tests/test_l3l4l5_examples.py")
 
+    # Environment-drift cases ship a committed AbiSnapshot pair
+    # (old.abi.json/new.abi.json) — producing e.g. a glibc verneed-floor raise
+    # for real would need two different sysroots, not two sources. Validated
+    # compiler-free by tests/test_environment_drift.py.
+    if entry.get("mode") == "snapshot-pair":
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "snapshot-pair case — validated by "
+                          "tests/test_environment_drift.py")
+
     # Bundle cases (ADR-023) are multi-library and use a different layout
     # (per-side dirs under examples/<case>/{old,new}/<libname>.cpp).
     # The v1/v2-pair compile path in this script can't build them; they

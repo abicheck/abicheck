@@ -1,0 +1,4 @@
+# Deployment targets all ship glibc >= 2.36 (e.g. Ubuntu 24.04+, Fedora 37+):
+# a new GLIBC_2.34 requirement is already satisfied everywhere -> COMPATIBLE.
+runtime_floors:
+  GLIBC: "2.36"

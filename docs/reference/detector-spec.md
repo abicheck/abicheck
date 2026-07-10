@@ -204,7 +204,7 @@ One row per `ChangeKind` (318 total). Columns fuse the verdict partition (`check
 | `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` | — |
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](../examples/case131_rtti_mode_flip.md) |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](../examples/case137_runpath_changed.md) |
-| `runtime_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_floor_raised` | — |
+| `runtime_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_floor_raised` | [case165](../examples/case165_env_runtime_floor_raised.md) |
 | `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |
 | `secondary_vtable_group_changed` | breaking | `BREAKING` | `error` | L1 | `secondary_vtable_group_changed` | — |
 | `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` | [case81](../examples/case81_serialization_tag_reassigned.md) |
@@ -257,7 +257,7 @@ One row per `ChangeKind` (318 total). Columns fuse the verdict partition (`check
 | `symbol_version_defined_added` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_defined_added` | — |
 | `symbol_version_defined_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_defined_removed` | [case65](../examples/case65_symbol_version_removed.md) |
 | `symbol_version_node_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_node_removed` | [case139](../examples/case139_symbol_version_node_removed.md) |
-| `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_required_added` | — |
+| `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `symbol_version_required_added` | [case165](../examples/case165_env_runtime_floor_raised.md) |
 | `symbol_version_required_added_compat` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_added_compat` | — |
 | `symbol_version_required_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_removed` | — |
 | `tag_type_renamed` | breaking | `BREAKING` | `error` | L0 | `tag_type_renamed` | [case86](../examples/case86_tag_struct_renamed.md) |
