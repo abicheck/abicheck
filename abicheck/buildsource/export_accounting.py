@@ -220,16 +220,28 @@ def _external_dependency_origin(
     return vendored
 
 
+#: Library-name stems a vendored owner may ship under, when they differ from the
+#: owner token. protobuf's ``google::protobuf`` namespace lives in ``libprotobuf``,
+#: so auditing libprotobuf must recognise a ``google``/``protobuf`` owner as self
+#: (Codex review). Owners absent here self-match on the owner token itself.
+_VENDORED_SELF_ALIASES: dict[str, tuple[str, ...]] = {
+    "google": ("google", "protobuf"),
+    "protobuf": ("protobuf", "google"),
+}
+
+
 def _owner_is_self_library(owner: str, self_names: tuple[str, ...]) -> bool:
     """Whether a vendored *owner* names the audited library itself (not a wrapper).
 
     Boundary-aware, not a bare substring: ``libfmt.so.9``/``libfmt`` is fmt, but a
     wrapper/plugin like ``libfmtshim.so`` that statically re-exports ``fmt::`` is
     NOT — its leaked fmt surface must still flag (Codex review). Matches when a
-    self-name, minus any ``lib`` prefix, is exactly the owner or the owner followed
-    by a ``.``/``_``/``-`` separator (``libboost_system`` → ``boost``).
+    self-name, minus any ``lib`` prefix, is exactly one of the owner's library-name
+    stems (:data:`_VENDORED_SELF_ALIASES`, e.g. ``google`` → ``libprotobuf``) or that
+    stem followed by a ``.``/``_``/``-`` separator (``libboost_system`` → ``boost``).
     """
-    boundary = re.compile(rf"{re.escape(owner)}([._-]|$)")
+    stems = _VENDORED_SELF_ALIASES.get(owner, (owner,))
+    boundary = re.compile("(?:" + "|".join(re.escape(s) for s in stems) + r")([._-]|$)")
     for name in self_names:
         stem = name[3:] if name.startswith("lib") else name
         if boundary.match(stem):
@@ -324,8 +336,16 @@ def _account_undocumented_export(symbol: str) -> str:
     return ACCOUNT_UNDECLARED
 
 
-#: Namespace/class name fragments that mark an internal-implementation surface.
-_INTERNAL_NS_TOKENS = ("impl", "internal", "detail")
+#: Namespace/class component names that mark an internal-implementation surface.
+#: Matched **exactly** against a whole name component (not a substring): an
+#: ordinary name like ``Simple`` merely *containing* ``impl`` is not internal
+#: (Codex review). The anonymous namespace (``_GLOBAL__N_…``) is handled separately.
+_INTERNAL_NS_NAMES = frozenset({"impl", "internal", "detail"})
+
+
+def _is_internal_ns_component(name: str) -> bool:
+    """Whether a mangled name component is an internal namespace/anonymous namespace."""
+    return name in _INTERNAL_NS_NAMES or name.startswith("_GLOBAL__N_")
 
 
 def _entity_owner_is_internal(symbol: str) -> bool:
@@ -345,7 +365,7 @@ def _entity_owner_is_internal(symbol: str) -> bool:
         if not m:
             return False
         name = rest[m.end() : m.end() + int(m.group(1))]
-        return "_GLOBAL__N_" in name or any(t in name for t in _INTERNAL_NS_TOKENS)
+        return _is_internal_ns_component(name)
     # Nested name: check each depth-0 component up to the closing ``E`` (parameters
     # follow it). Template arguments (depth > 0) are skipped, not treated as owners.
     rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
@@ -367,9 +387,7 @@ def _entity_owner_is_internal(symbol: str) -> bool:
             length = int(rest[i:j])
             name = rest[j : j + length]
             i = j + length
-            if depth == 0 and (
-                "_GLOBAL__N_" in name or any(t in name for t in _INTERNAL_NS_TOKENS)
-            ):
+            if depth == 0 and _is_internal_ns_component(name):
                 return True
         else:
             i += 1

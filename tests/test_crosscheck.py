@@ -585,6 +585,20 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         )
         is None
     )
+    # protobuf's google::protobuf namespace ships in libprotobuf — auditing it is
+    # self, not a leaked Google/protobuf dependency (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libprotobuf.so.32",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libother.so",)
+        )
+        == "Google/protobuf (vendored third-party)"
+    )
     # self-names are derived from library name / soname / Mach-O install-name.
     snap = _snap(library="libfmt", elf=ElfMetadata(symbols=[], soname="libfmt.so.9"))
     assert set(_library_self_names(snap)) == {"libfmt", "libfmt.so.9"}
@@ -604,6 +618,10 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         # a parameter type referencing an internal namespace does NOT make the
         # exported entity internal — only the entity's own name counts (Codex).
         ("_ZN3lib3fooEPN3lib6detail4TypeE", "undeclared_export"),
+        # a name merely *containing* an internal token is not internal — the match
+        # is against a whole component, not a substring (Codex review).
+        ("_ZN3lib6SimpleEv", "undeclared_export"),  # "Simple" contains "impl"
+        ("_ZN3lib11implementEv", "undeclared_export"),  # "implement" ≠ "impl"
         ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
         ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
         ("_Z9transformIdEv", "template_instantiation"),  # un-nested template fn
