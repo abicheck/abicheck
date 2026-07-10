@@ -165,7 +165,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
           new-library: build/libfoo.so
           header: include/
           sources: .
-          depth: source                 # full L3+L4+L5 for a baseline
+          depth: full                   # whole-library L3+L4+L5 for a baseline (unseeded `source` falls back to a headers-only replay)
           output-file: abi-baseline.json
 ```
 
