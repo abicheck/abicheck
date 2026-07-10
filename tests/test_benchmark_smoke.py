@@ -203,9 +203,13 @@ def test_abicheck_baseline_and_full_build_distinct_commands(tmp_path):
     src = tmp_path / "old" / "lib.c"
     compile_db = tmp_path / "build" / "compile_commands.json"
     snapshot_dir = tmp_path / "snapshots"
-    for path in (so, hdr, src, compile_db):
+    for path in (so, hdr, src):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
+    compile_db.parent.mkdir(parents=True, exist_ok=True)
+    compile_db.write_text(__import__("json").dumps([
+        {"directory": str(src.parent), "file": str(src), "command": "cc -c lib.c"},
+    ]))
     snapshot_dir.mkdir()
 
     commands = []
@@ -244,8 +248,10 @@ def test_abicheck_baseline_and_full_build_distinct_commands(tmp_path):
     for dump in full[:2]:
         assert dump[dump.index("--depth") + 1] == "full"
         assert dump[dump.index("--sources") + 1] == str(src.parent)
-        assert dump[dump.index("--build-info") + 1] == str(compile_db)
-        assert dump[dump.index("-p") + 1] == str(compile_db)
+        staged_db = Path(dump[dump.index("--build-info") + 1])
+        assert staged_db.name == "compile_commands.json"
+        assert staged_db.parent.name in {"sources_v1", "sources_v2"}
+        assert dump[dump.index("-p") + 1] == str(staged_db)
 
 
 def test_abicheck_full_stages_side_by_side_versions_and_filters_build_info(tmp_path):
