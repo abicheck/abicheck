@@ -28,12 +28,14 @@ carries no ``typedefs`` map, so the detector is naturally silent there.
 """
 from __future__ import annotations
 
+import re
+
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
-from .model import AbiSnapshot
+from .model import AbiSnapshot, Visibility
 
 #: Typedefs resized by glibc's ``_TIME_BITS=64`` (time64) option.
 _TIME64_TYPEDEFS = frozenset({"time_t", "suseconds_t"})
@@ -83,14 +85,40 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
     return _int_width_bucket(t, is_llp64=False)
 
 
+def _public_surface_type_text(snap: AbiSnapshot) -> str:
+    """Concatenated type spellings of the snapshot's public surface.
+
+    Public function returns/parameters, public variables, and record fields —
+    the places a resized ``time_t``/``off_t`` typedef must appear in for the
+    flip to affect anyone. Used as a reference oracle only (word search), not
+    parsed.
+    """
+    parts: list[str] = []
+    for fn in snap.functions:
+        if fn.visibility is not Visibility.PUBLIC:
+            continue
+        parts.append(fn.return_type or "")
+        parts.extend(getattr(p, "type", "") or "" for p in fn.params)
+    for var in snap.variables:
+        if getattr(var, "visibility", Visibility.PUBLIC) is not Visibility.PUBLIC:
+            continue
+        parts.append(var.type or "")
+    for rec in snap.types:
+        parts.extend(getattr(fld, "type", "") or "" for fld in rec.fields)
+    return " | ".join(parts)
+
+
 @registry.detector("time64_abi")
 def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a time64/LFS ABI flip from resized time/offset-family typedefs.
 
-    Fires when at least one public typedef in the ``time_t``/``off_t`` family
-    changed its underlying width between the snapshots. One grouped finding is
-    emitted; the per-symbol layout findings remain separate (they share this
-    root cause).
+    Fires when at least one typedef in the ``time_t``/``off_t`` family changed
+    its underlying width between the snapshots AND is referenced by the public
+    surface (a function signature, public variable, or record field). A
+    resized system typedef nothing public carries is not this library's ABI
+    story and must not drive a BREAKING verdict (Codex review #510). One
+    grouped finding is emitted; the per-symbol layout findings remain separate
+    (they share this root cause).
     """
     # A glibc story: skip PE/Mach-O snapshots outright.
     if "pe" in (old.platform, new.platform) or "macho" in (old.platform, new.platform):
@@ -98,6 +126,7 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     old_32 = _is_32bit_elf(old)
     new_32 = _is_32bit_elf(new)
+    surface_text = _public_surface_type_text(old) + " | " + _public_surface_type_text(new)
 
     flipped: list[str] = []
     up = down = 0
@@ -110,6 +139,10 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         ob = _bucket(old_under, old_32)
         nb = _bucket(new_under, new_32)
         if ob is None or nb is None or ob == nb:
+            continue
+        if not re.search(rf"\b{re.escape(name)}\b", surface_text):
+            # Present-but-unused system typedef — not part of this library's
+            # public ABI, so its resize must not roll up to a break.
             continue
         flipped.append(f"{name} ({old_under} → {new_under})")
         if nb == "64":

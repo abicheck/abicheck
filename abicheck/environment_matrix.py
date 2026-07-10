@@ -192,6 +192,17 @@ class EnvironmentMatrix:
             )
         runtime_floors: dict[str, str] = {}
         for key, value in floors_raw.items():
+            if isinstance(value, float):
+                # An unquoted YAML floor has already been lossily parsed:
+                # `GLIBC: 2.40` reaches us as the float 2.4, which would
+                # silently declare a *lower* floor than the user wrote.
+                # Reject rather than guess (Codex review #510).
+                raise ValueError(
+                    f"'runtime_floors.{key}' must be a quoted string version: "
+                    f"unquoted YAML floats lose trailing zeros "
+                    f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
+                    f"with the intended digits."
+                )
             floor = str(value)
             if not any(part.isdigit() for part in floor.replace(".", " ").split()):
                 raise ValueError(

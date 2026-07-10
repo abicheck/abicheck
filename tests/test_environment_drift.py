@@ -272,10 +272,17 @@ class TestEnvironmentMatrixRuntimeFloors:
         with pytest.raises(ValueError, match="dotted numeric"):
             EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": "latest"}})
 
-    def test_yaml_float_floor_accepted(self) -> None:
-        # YAML users will write `GLIBC: 2.28` (a float) as often as a string.
-        m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 2.28}})
-        assert m.runtime_floors == {"GLIBC": "2.28"}
+    def test_yaml_float_floor_rejected(self) -> None:
+        # An unquoted YAML floor is lossy BEFORE we see it: `GLIBC: 2.40`
+        # arrives as the float 2.4 — silently a lower floor than written.
+        # Reject with a quote-it message instead of guessing.
+        with pytest.raises(ValueError, match="quoted string"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 2.28}})
+
+    def test_int_floor_accepted(self) -> None:
+        # Integers are not lossy — accept them.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 3}})
+        assert m.runtime_floors == {"GLIBC": "3"}
 
 
 class TestLoadEnvMatrix:
@@ -458,9 +465,31 @@ class TestHashStyles:
 # ── time64 / LFS ABI flip ────────────────────────────────────────────────────
 
 
-def _snap32(typedefs: dict[str, str]) -> AbiSnapshot:
+def _snap32(
+    typedefs: dict[str, str], *, referenced: bool = True
+) -> AbiSnapshot:
+    """32-bit ELF snapshot with the given typedefs.
+
+    By default each typedef is referenced by a public function's return type —
+    the detector only rolls up flips the public surface actually carries.
+    """
+    from abicheck.model import Function, Visibility
+
+    functions = (
+        [
+            Function(
+                name=f"use_{n}", mangled=f"use_{n}",
+                return_type=n, visibility=Visibility.PUBLIC,
+            )
+            for n in typedefs
+        ]
+        if referenced
+        else []
+    )
     return _snap(
-        _elf(machine="EM_ARM", elf_class=32, pointer_size=4), typedefs=typedefs
+        _elf(machine="EM_ARM", elf_class=32, pointer_size=4),
+        typedefs=typedefs,
+        functions=functions,
     )
 
 
@@ -490,6 +519,27 @@ class TestTime64AbiFlip:
         old = _snap32({"my_handle_t": "long int"})
         new = _snap32({"my_handle_t": "long long int"})
         assert _diff_time64_abi(old, new) == []
+
+    def test_unused_family_typedef_flip_silent(self) -> None:
+        # A resized system typedef nothing public carries (header-scoped or
+        # DWARF-rich runs pick up unused system typedefs) must not roll up to
+        # a BREAKING pseudo-symbol (Codex review #510).
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        assert _diff_time64_abi(old, new) == []
+
+    def test_struct_field_reference_counts_as_public_use(self) -> None:
+        from abicheck.model import RecordType, TypeField
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [RecordType(
+                name="event", kind="struct",
+                fields=[TypeField(name="stamp", type="time_t")],
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
     def test_unsigned_long_spellings_bucketed(self) -> None:
         # DWARF spells the LFS typedefs many ways: `unsigned long int`,
