@@ -599,11 +599,33 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         )
         == "Google/protobuf (vendored third-party)"
     )
+    # protobuf's library is libprotobuf, not any libgoogle_* — a wrapper like
+    # libgoogle_cloud_cpp that re-exports protobuf must still flag (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libgoogle_cloud_cpp.so",)
+        )
+        == "Google/protobuf (vendored third-party)"
+    )
     # ``google::`` is shared by many Google libraries — only google::protobuf is
     # protobuf. glog's google::LogMessage / gflags are native, not a leak (Codex).
     assert (
         _external_dependency_origin("_ZN6google10LogMessageEv", [], ("libglog.so",))
         is None
+    )
+    # auditing a runtime library itself: its own std/runtime exports are native,
+    # not a leak — the self gate covers the _guess_symbol_origin path too (Codex).
+    assert (
+        _external_dependency_origin(
+            "_ZNSt6vectorIiEE9push_backEOi", ["libstdc++.so.6"], ("libstdc++.so.6",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZNSt6vectorIiEE9push_backEOi", ["libstdc++.so.6"], ("libmylib.so",)
+        )
+        == "libstdc++.so.6"
     )
     assert (
         _external_dependency_origin(

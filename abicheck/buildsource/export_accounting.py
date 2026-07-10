@@ -204,7 +204,13 @@ def _external_dependency_origin(
         # table picked it (DT_NEEDED ordered libc++abi before libc++) for a libc++
         # ``std::__1`` symbol, re-resolve to the real libc++ runtime (Codex review).
         if lib.rsplit("/", 1)[-1].startswith("libc++abi") and "St3__1" in symbol:
-            return _cxx_runtime_lib(symbol, needed_libs)
+            lib = _cxx_runtime_lib(symbol, needed_libs)
+        # If the resolved runtime library *is* the audited library (auditing
+        # libstdc++/libc++ itself), its own std/runtime symbols are native, not a
+        # leak — the self gate covers the runtime path too, not only vendored
+        # namespaces (Codex review).
+        if _resolved_lib_is_self(lib, self_names):
+            return None
         return lib
     owner = _mangled_owner_namespace(symbol)
     if owner is None:
@@ -265,14 +271,33 @@ def _nested_component(symbol: str, index: int) -> str | None:
     return None
 
 
-#: Library-name stems a vendored owner may ship under, when they differ from the
-#: owner token. protobuf's ``google::protobuf`` namespace lives in ``libprotobuf``,
-#: so auditing libprotobuf must recognise a ``google``/``protobuf`` owner as self
-#: (Codex review). Owners absent here self-match on the owner token itself.
+#: Library-name stems a vendored owner ships under, when they differ from the owner
+#: token. protobuf's ``google::protobuf`` namespace lives in ``libprotobuf`` — so
+#: the self-match for a ``google``/``protobuf`` owner is the **protobuf** library,
+#: NOT any ``libgoogle_*`` (a ``libgoogle_cloud_cpp`` wrapper that re-exports
+#: protobuf must still flag; Codex review). Owners absent here self-match on the
+#: owner token itself.
 _VENDORED_SELF_ALIASES: dict[str, tuple[str, ...]] = {
-    "google": ("google", "protobuf"),
-    "protobuf": ("protobuf", "google"),
+    "google": ("protobuf",),
+    "protobuf": ("protobuf",),
 }
+
+
+def _library_stem(name: str) -> str:
+    """A library basename minus its ``.so``/``.dylib`` extension and version.
+
+    ``libstdc++.so.6`` → ``libstdc++``; ``libc++.1.dylib`` → ``libc++``;
+    ``libfmt.so.9`` → ``libfmt``. Used to compare a resolved runtime name against
+    the audited library's own identity.
+    """
+    base = name.rsplit("/", 1)[-1]
+    return re.sub(r"(?:\.\d+)*\.(?:so|dylib)(?:\.\d+)*$", "", base).lower()
+
+
+def _resolved_lib_is_self(lib: str, self_names: tuple[str, ...]) -> bool:
+    """Whether a resolved dependency *lib* is the audited library itself."""
+    stem = _library_stem(lib)
+    return any(_library_stem(n) == stem for n in self_names)
 
 
 def _owner_is_self_library(owner: str, self_names: tuple[str, ...]) -> bool:
