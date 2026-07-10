@@ -304,7 +304,7 @@ project, the tool-track guides carry the exact commands, flags, and CI YAML:
 | Run `abicheck scan` and pin a depth | [Source-Scan Depth](../user-guide/scan-levels.md) |
 | *Produce* the source facts — post-build replay (Flow A), `abicheck-cc` wrapper (Flow B), or the Clang plugin (Flow C) | [Producing Source Facts](../user-guide/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
-| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action § Source scans](../user-guide/github-action.md#source-scans-build-source-evidence) |
+| Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action: Source Scans](../user-guide/github-action-source-scans.md) |
 | Check a host↔plugin ABI contract | [Plugin Systems](../user-guide/plugin-systems.md) |
 | Gate CI on the right verdict tier (binary break vs. source/API break) | [CI Gating](../user-guide/ci-gating.md) |
 
