@@ -239,6 +239,25 @@ def test_linker_keeps_overloads_distinct() -> None:
     assert surface.unmatched["decls_without_symbol"] == ["ns::f"]
 
 
+def test_linker_dedups_identical_entities_across_tus() -> None:
+    # A per-TU Flow-2 pack re-emits the same public-header decl once per compile
+    # (a ~20x blow-up on template-heavy libraries). Byte-identical repeats fold to
+    # one surface entity; a genuine ODR variant (same name, divergent type_hash)
+    # is NOT folded and still fires a conflict. Overloads (above) also stay split.
+    dup = _entity("ns::g", "function", mangled="_ZN2ns1gEv", signature_hash="s1")
+    tus = [SourceAbiTu(functions=[dup]) for _ in range(5)]  # same decl in 5 TUs
+    # plus a type that two TUs define differently (ODR conflict)
+    tus.append(SourceAbiTu(types=[_entity("ns::W", "record", type_hash="h1")]))
+    tus.append(SourceAbiTu(types=[_entity("ns::W", "record", type_hash="h2")]))
+    surface = link_source_abi(tus, exported_symbols=["_ZN2ns1gEv"])
+    # 5 identical function facts collapse to one
+    assert [e.qualified_name for e in surface.reachable_declarations] == ["ns::g"]
+    # the two divergent ns::W definitions are both kept (dedup key includes
+    # type_hash) so ODR detection still sees the conflict
+    assert len(surface.reachable_types) == 2
+    assert surface.odr_conflicts, "divergent same-name type must still conflict"
+
+
 def test_linker_keeps_unmangled_overloads_distinct() -> None:
     # castxml omits a mangled name for some decls (notably constructors), so two
     # public overloads share the bare qualified_name "Widget". identity() folds

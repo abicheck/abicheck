@@ -969,21 +969,31 @@ _VARIABLE_SCOPE_KINDS = frozenset(
 def _mangled_has_internal_linkage(mangled: str) -> bool:
     """Return ``True`` when an Itanium *mangled* name marks internal linkage.
 
-    clang has already done the linkage analysis and encoded it: an
-    internal-linkage entity's own ``<unqualified-name>`` is prefixed with the
-    GCC/clang seniority marker ``L`` (a namespace/file-scope ``static`` *or* a
-    namespace-scope ``const`` without ``extern`` — e.g. ``_ZN2nsL7g_constE``,
-    ``_ZL1xE``). Such an entity never appears in the dynamic symbol table, so
-    emitting it as a ``variable`` would populate ``decls_without_symbol`` and risk
-    a spurious ``source_binary_provenance_mismatch`` against the correct binary
-    (Codex review). This parses by Itanium length prefixes — so an ``L`` *inside*
-    a source name (a namespace literally ending in ``L``) is never miscounted —
-    and bails to ``False`` (external, keep) on any exotic production, so a real
-    export is never dropped.
+    clang has already done the linkage analysis and encoded it two ways, both
+    handled here:
+
+    * the GCC/clang seniority marker ``L`` prefixing the entity's own
+      ``<unqualified-name>`` — a namespace/file-scope ``static`` *or* a
+      namespace-scope ``const`` without ``extern`` (``_ZN2nsL7g_constE``,
+      ``_ZL1xE``);
+    * an **anonymous-namespace** component ``_GLOBAL__N_`` (``namespace { int x; }``
+      mangles as ``_ZN12_GLOBAL__N_11xE``) — internal linkage with *no* ``L``
+      marker (Codex review).
+
+    Such an entity never appears in the dynamic symbol table, so emitting it as a
+    ``variable`` would populate ``decls_without_symbol`` and risk a spurious
+    ``source_binary_provenance_mismatch`` against the correct binary. This parses
+    by Itanium length prefixes — so an ``L`` *inside* a source name (a namespace
+    literally ending in ``L``) is never miscounted — and bails to ``False``
+    (external, keep) on any exotic production, so a real export is never dropped.
     """
     m = mangled
     if not m.startswith("_Z"):
         return False
+    # Anonymous namespace: a reserved compiler component, so a plain substring
+    # test is unambiguous (a user cannot name an entity `_GLOBAL__N_`).
+    if "_GLOBAL__N_" in m:
+        return True
     i = 2
     n = len(m)
     if i < n and m[i] == "N":  # nested-name: N [CV/ref] <prefix> <name> E

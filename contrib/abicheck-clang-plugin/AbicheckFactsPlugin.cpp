@@ -700,6 +700,11 @@ std::string mangledFromJson(const Object &o) {
 bool mangledHasInternalLinkage(const std::string &m) {
   if (m.rfind("_Z", 0) != 0)
     return false;
+  // Anonymous namespace (`namespace { ... }` -> `_ZN12_GLOBAL__N_1...`): internal
+  // linkage with no `L` marker. The component is compiler-reserved, so a plain
+  // substring test is unambiguous (Codex review).
+  if (m.find("_GLOBAL__N_") != std::string::npos)
+    return true;
   size_t i = 2, n = m.size();
   if (i < n && m[i] == 'N') {
     ++i;

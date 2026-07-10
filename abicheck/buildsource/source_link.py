@@ -1099,6 +1099,27 @@ def link_source_abi(
         for entity in tu.all_entities():
             if not (_is_public(entity) or entity.qualified_name in forced):
                 continue
+            # Fold byte-identical entities re-emitted by every TU that includes
+            # the same public header. The key carries every identity- and
+            # hash-bearing field, so overloads (same name, different mangled/sig),
+            # ODR variants (same name/id but a divergent type_hash/body_hash — the
+            # type id intentionally excludes the content hash), and any other
+            # semantic difference still route and are detected; only true
+            # duplicates are dropped. Shrinks the surface, its content-hash
+            # json.dumps, and the relink work proportionally.
+            key = (
+                entity.kind,
+                entity.qualified_name,
+                entity.mangled_name,
+                entity.id,
+                entity.signature_hash,
+                entity.type_hash,
+                entity.body_hash,
+                entity.value,
+            )
+            if key in state.seen_entity_keys:
+                continue
+            state.seen_entity_keys.add(key)
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
 
@@ -1321,6 +1342,10 @@ class _LinkState:
     odr_conflicts: list[dict[str, str]] = field(default_factory=list)
     public_decl_ids: list[str] = field(default_factory=list)
     matched_symbols: set[str] = field(default_factory=set)
+    #: full-identity dedup keys of entities already routed — a per-TU Flow-2 pack
+    #: re-emits each public-header decl once per compile (a ~20x blow-up on
+    #: template-heavy libraries), so byte-identical repeats are folded to one.
+    seen_entity_keys: set[tuple[str, ...]] = field(default_factory=set)
     #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)

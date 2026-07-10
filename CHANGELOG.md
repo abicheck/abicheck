@@ -23,10 +23,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   data members such as `llvm::raw_ostream::RED`) could never map to a source
   declaration. Both now emit `variable` entities keyed identically
   (`id=_hash("variable", mangled|name, type)`), gated to external linkage:
-  block-scope locals and internal-linkage variables (a namespace/file-scope
-  `static` **or** a namespace-scope `const` without `extern`) are dropped by
-  their Itanium mangled `L` marker — clang's own linkage verdict — so a header
-  constant never inflates `decls_without_symbol` or triggers a spurious
+  block-scope locals and internal-linkage variables — a namespace/file-scope
+  `static`, a namespace-scope `const` without `extern`, or an anonymous-namespace
+  variable — are dropped by their Itanium mangled linkage encoding (the `L`
+  seniority marker or a `_GLOBAL__N_` component), clang's own linkage verdict, so
+  a header constant never inflates `decls_without_symbol` or triggers a spurious
   `source_binary_provenance_mismatch`; `constexpr` keeps its own path. The C.6
   differential-conformance fixture gains globals, a static member, and an
   internal `const` so the gate covers variables. Measured on LLVM 18.1.3
@@ -42,6 +43,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **`merge` / `dump --inputs`: fold identical facts once (perf).** A per-TU Flow-2
+  pack re-emits each public-header decl once per compile — a ~20× blow-up on
+  template-heavy libraries — and `link_source_abi` kept every copy, so the linked
+  surface, its content-hash `json.dumps`, and the relink all scaled with the
+  duplication. The linker now folds byte-identical entities on a full-identity key
+  (name + mangled + all `*_hash` fields), so overloads and genuine ODR variants
+  stay split while true duplicates collapse. Measured on LLVM 18.1.3 `LLVMSupport`
+  (174-TU pack): fold time **~120 s → ~16 s**, linked surface **130 512 → 6 599**
+  declarations, embedded baseline **362 MB → 35 MB**, with byte-identical symbol
+  mapping (1656/2613).
 - **Clang plugin: prune the AST-dump JSON parse (perf).** The plugin hashes AST
   subtrees by dumping them to clang's JSON and canonicalizing; it now parses
   that JSON keeping only the ~11 hash-relevant keys and skipping the rest

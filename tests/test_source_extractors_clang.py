@@ -865,6 +865,8 @@ def test_mangled_internal_linkage_marker() -> None:
     assert internal("_ZN2nsL8g_staticE")
     assert internal("_ZN2nsL7g_constE")
     assert internal("_ZL1xE")
+    # Anonymous namespace: internal linkage with NO `L` marker (Codex review).
+    assert internal("_ZN12_GLOBAL__N_11xE")
     # Length-prefix parsing: an `L` that is the last char of a *source name*
     # (namespace `detailL`) must NOT be read as the linkage marker.
     assert not internal("_ZN7detailL8g_globalE")
