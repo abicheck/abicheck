@@ -599,6 +599,18 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         )
         == "Google/protobuf (vendored third-party)"
     )
+    # ``google::`` is shared by many Google libraries — only google::protobuf is
+    # protobuf. glog's google::LogMessage / gflags are native, not a leak (Codex).
+    assert (
+        _external_dependency_origin("_ZN6google10LogMessageEv", [], ("libglog.so",))
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZN6google20ParseCommandLineFlagsEPiPPPcb", [], ("libgflags.so",)
+        )
+        is None
+    )
     # self-names are derived from library name / soname / Mach-O install-name.
     snap = _snap(library="libfmt", elf=ElfMetadata(symbols=[], soname="libfmt.so.9"))
     assert set(_library_self_names(snap)) == {"libfmt", "libfmt.so.9"}
@@ -607,6 +619,25 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
         macho=MachoMetadata(exports=[], install_name="/usr/lib/libboost.dylib"),
     )
     assert _library_self_names(macho_snap) == ("libboost.dylib",)
+
+
+@pytest.mark.parametrize(
+    "symbol, index, expected",
+    [
+        ("_ZN6google8protobuf7MessageEv", 0, "google"),
+        ("_ZN6google8protobuf7MessageEv", 1, "protobuf"),
+        ("_ZN6google8protobuf7MessageEv", 2, "Message"),
+        ("_ZN6google8protobuf7MessageEv", 3, None),  # past the last component
+        # template arguments on a component are skipped, not counted as components.
+        ("_ZN3lib3BoxIiE3barEv", 1, "Box"),
+        ("_ZN3lib3BoxIiE3barEv", 2, "bar"),
+        ("_Z3fooi", 0, None),  # un-nested name has no nested components
+    ],
+)
+def test_nested_component(symbol, index, expected):
+    from abicheck.buildsource.export_accounting import _nested_component
+
+    assert _nested_component(symbol, index) == expected
 
 
 @pytest.mark.parametrize(

@@ -215,9 +215,54 @@ def _external_dependency_origin(
     if owner == "std" or owner in _STD_OWNER_NAMESPACES:
         return _cxx_runtime_lib(symbol, needed_libs)
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
+    if owner == "google" and _nested_component(symbol, 1) != "protobuf":
+        # ``google::`` is shared by many Google libraries (glog's
+        # ``google::LogMessage``, gflags, googletest, …); only ``google::protobuf``
+        # is Protocol Buffers. A bare ``google::`` owner is not a protobuf leak
+        # (Codex review) — leave it native (undeclared/internal).
+        vendored = None
     if vendored is not None and _owner_is_self_library(owner, self_names):
         return None  # the audited library *is* this vendored library — native
     return vendored
+
+
+def _nested_component(symbol: str, index: int) -> str | None:
+    """The *index*-th (0-based) depth-0 component of an Itanium nested name.
+
+    Reads only the entity-name qualifiers (skipping template arguments and stopping
+    at the nested-name close), so ``_ZN6google8protobuf7MessageEv`` yields
+    ``google`` at 0 and ``protobuf`` at 1. ``None`` for an un-nested name or when the
+    component does not exist.
+    """
+    rest = _encoding_after_prefixes(symbol)
+    if not rest.startswith("N"):
+        return None
+    rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
+    i, depth, seen = 0, 0, 0
+    while i < len(rest):
+        c = rest[i]
+        if c == "I":
+            depth += 1
+            i += 1
+        elif c == "E":
+            if depth == 0:
+                break
+            depth -= 1
+            i += 1
+        elif c.isdigit():
+            j = i
+            while j < len(rest) and rest[j].isdigit():
+                j += 1
+            length = int(rest[i:j])
+            name = rest[j : j + length]
+            i = j + length
+            if depth == 0:
+                if seen == index:
+                    return name
+                seen += 1
+        else:
+            i += 1
+    return None
 
 
 #: Library-name stems a vendored owner may ship under, when they differ from the
