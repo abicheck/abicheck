@@ -76,6 +76,7 @@ from ..model import (
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
 # keep importing these names from ``crosscheck``.
 from .export_accounting import (
+    _ALLOCATOR_INTERPOSER_MARKER,
     _UNDOCUMENTED_ACCOUNTS,
     ACCOUNT_CXX_ARTIFACT,
     ACCOUNT_EXTERNAL_DEP,
@@ -301,6 +302,9 @@ def _check_exported_not_public(
     # The audited library's own identity — a vendored namespace (fmt/boost/…) that
     # is the library *being scanned* is native, not a leaked dependency.
     self_names = _library_self_names(snapshot)
+    # An allocator-interposition library (malloc proxy) deliberately exports
+    # malloc/operator-new/… replacements; those are native, not a leaked dependency.
+    interposer = _ALLOCATOR_INTERPOSER_MARKER in exported
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
@@ -318,7 +322,9 @@ def _check_exported_not_public(
         # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
         # exempting it as a class artifact would silently undercount it (Codex
         # review). Only a *native* class's artifact is then exempted below.
-        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
+        origin_lib = _external_dependency_origin(
+            sym, needed_libs, self_names, interposer=interposer
+        )
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(

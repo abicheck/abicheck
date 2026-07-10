@@ -29,6 +29,24 @@ from __future__ import annotations
 import re
 
 from ..model import AbiSnapshot
+from .source_link import (
+    _TBB_MALLOC_PROXY_C_SYMBOLS,
+    _TBB_MALLOC_PROXY_CPP_SYMBOLS,
+    _TBB_MALLOC_PROXY_MARKER,
+)
+
+#: The exported symbol marking a library as an allocator-interposition proxy.
+#: Re-exported for :mod:`crosscheck`'s ``_check_exported_not_public`` loop.
+_ALLOCATOR_INTERPOSER_MARKER = _TBB_MALLOC_PROXY_MARKER
+
+#: Symbols an allocator-interposition library (a malloc proxy such as
+#: ``libtbbmalloc_proxy``) intentionally *defines* to replace the global allocator
+#: — ``malloc``/``free``/… and the global ``operator new``/``delete``. When the
+#: audited DSO is such an interposer (it exports :data:`_ALLOCATOR_INTERPOSER_MARKER`)
+#: these are native, not a leaked libc/libstdc++ dependency (Codex review).
+_ALLOCATOR_INTERPOSER_SYMBOLS = (
+    _TBB_MALLOC_PROXY_C_SYMBOLS | _TBB_MALLOC_PROXY_CPP_SYMBOLS
+)
 
 # --------------------------------------------------------------------------- #
 # Export accounting (ADR-035 D4) — every exported symbol gets a precise reason.
@@ -175,7 +193,10 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
 
 
 def _external_dependency_origin(
-    symbol: str, needed_libs: list[str], self_names: tuple[str, ...] = ()
+    symbol: str,
+    needed_libs: list[str],
+    self_names: tuple[str, ...] = (),
+    interposer: bool = False,
 ) -> str | None:
     """Name the external dependency *symbol* leaked from, or ``None`` if native.
 
@@ -198,6 +219,11 @@ def _external_dependency_origin(
     """
     from ..elf_metadata import _guess_symbol_origin
 
+    if interposer and symbol in _ALLOCATOR_INTERPOSER_SYMBOLS:
+        # The audited library deliberately replaces the global allocator
+        # (``malloc``/``operator new``/…); those are its own native entry points,
+        # not a leaked libc/libstdc++ dependency (Codex review).
+        return None
     lib = _guess_symbol_origin(symbol, needed_libs)
     if lib is not None:
         # libc++abi is the ABI support library, not libc++ itself. If the prefix
@@ -431,8 +457,15 @@ def _entity_owner_is_internal(symbol: str) -> bool:
     namespace or an anonymous ``_GLOBAL__N_`` namespace), never a parameter type
     that merely *references* such a namespace — so ``foo(lib::detail::Type*)``
     (``_ZN3lib3fooEPN3lib6detail4TypeE``) is not mis-bucketed as internal (Codex
-    review). Mirrors :func:`_has_template_args`'s entity-name scoping.
+    review). Mirrors :func:`_has_template_args`'s entity-name scoping. Also handles
+    MSVC decorated names (``?name@scope@…@@type``) so PE/COFF exports keep the
+    precise internal-namespace reason instead of collapsing to undeclared (Codex).
     """
+    if symbol.startswith("?"):
+        # MSVC: ``?<name>@<scope>@…@@<type>`` — the ``@``-separated components before
+        # ``@@`` are the entity name and its enclosing class/namespace scopes.
+        head = symbol.lstrip("?").split("@@", 1)[0]
+        return any(_is_internal_ns_component(c) for c in head.split("@") if c)
     if not symbol.startswith("_Z"):
         return False
     rest = _encoding_after_prefixes(symbol)

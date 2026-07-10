@@ -709,12 +709,34 @@ def test_nested_component(symbol, index, expected):
         ("_ZN3lib3fooESt6vectorIiSaIiEE", "undeclared_export"),
         ("_Z3fooi", "undeclared_export"),
         ("raw_c_entry", "undeclared_export"),
+        # MSVC decorated names keep the internal-namespace reason on PE/COFF (Codex).
+        ("?secret@detail@lib@@YAXXZ", "internal_namespace"),
+        ("?Compute@impl@dnnl@@YAXXZ", "internal_namespace"),
+        ("?PublicApi@dnnl@@YAXXZ", "undeclared_export"),
     ],
 )
 def test_account_undocumented_export_categories(symbol, expected):
     from abicheck.buildsource.crosscheck import _account_undocumented_export
 
     assert _account_undocumented_export(symbol) == expected
+
+
+def test_exported_not_public_allocator_interposer_is_native_not_leak():
+    # A malloc-proxy library (it exports the __TBB_malloc_proxy marker) deliberately
+    # replaces the global allocator; its operator new / malloc exports are native,
+    # not a leaked libstdc++/libc dependency (Codex review).
+    proxy = _snap(elf=_elf("__TBB_malloc_proxy", "_Znwm", "malloc"))
+    proxy.functions = [_public_fn()]
+    res = run_crosschecks(proxy, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters.get("external_dependency", 0) == 0
+
+    # The same operator new in a library that is NOT an interposer is a real leak.
+    leaky = _snap(elf=_elf("_Znwm"))
+    leaky.functions = [_public_fn()]
+    res2 = run_crosschecks(leaky, CrosscheckConfig(max_per_check=0))
+    counters2 = _coverage(res2, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters2.get("external_dependency", 0) == 1
 
 
 # --------------------------------------------------------------------------- #
