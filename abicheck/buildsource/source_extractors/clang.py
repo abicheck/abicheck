@@ -1027,14 +1027,21 @@ def _is_top_level_const(qual: str) -> bool:
 
     Top-level const (``const int``, ``ns::Foo const``, ``int *const``) marks the
     *object* itself const — which at namespace scope without ``extern`` gives
-    internal linkage in C++. Pointer/reference-to-const (``const char *``) is NOT
-    top-level const (the pointer object is mutable, external), so it is excluded:
-    a leading ``const`` only counts when the type is not a pointer/array.
+    internal linkage in C++. An **array** is const iff its element type is const,
+    so it is reduced to that element type (``const int[2]`` / ``const char[8]``
+    are internal; an array of mutable pointers ``const char *[2]`` is not).
+    Pointer/reference-to-const (``const char *``) is NOT top-level const (the
+    pointer object is mutable, external), so a leading ``const`` only counts when
+    the reduced element type is not a pointer.
     """
     q = qual.strip().rstrip("&").strip()
+    # Array: reduce to the element type (spelled before the first ``[``).
+    bracket = q.find("[")
+    if bracket != -1:
+        q = q[:bracket].strip()
     if q.endswith("const"):  # e.g. ``int *const`` / ``ns::Foo const``
         return True
-    return q.startswith("const ") and "*" not in q and "[" not in q
+    return q.startswith("const ") and "*" not in q
 
 
 def _is_variable_node(

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -212,6 +213,7 @@ def handle_non_elf_dump(
     build_id: str | None,
     no_git: bool,
     output: Path | None,
+    dump_native_binary: Callable[..., AbiSnapshot],
     stamp_provenance: _StampProvenance,
     write_snapshot_output: _WriteSnapshotOutput,
     public_headers: tuple[Path, ...] = (),
@@ -229,19 +231,18 @@ def handle_non_elf_dump(
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
-    ``stamp_provenance``/``write_snapshot_output`` are passed in from cli.py (same
-    import-cycle avoidance as ``perform_elf_dump``); ``_dump_native_binary`` is
-    imported lazily for the same reason. ``compile_context`` is typed ``Any``
-    rather than ``CompileContext`` on purpose: a static import of the latter would
-    add a ``cli_dump_helpers → service_scan`` edge that closes the
-    ``cli → cli_dump_helpers → service_scan → cli_scan → cli`` import cycle.
+    ``dump_native_binary``/``stamp_provenance``/``write_snapshot_output`` are all
+    passed in from cli.py rather than imported, mirroring ``perform_elf_dump`` —
+    the AST-based import-cycle gate counts *any* import (including a lazy
+    function-body ``from .cli_resolve import …`` and a ``TYPE_CHECKING`` import),
+    so importing them here would close a ``cli → cli_dump_helpers → … → cli``
+    cycle. ``compile_context`` is typed ``Any`` for the same reason (its concrete
+    ``CompileContext`` lives in ``service_scan``).
     """
-    from .cli_resolve import _dump_native_binary
-
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
     try:
-        snap = _dump_native_binary(
+        snap = dump_native_binary(
             so_path, binary_fmt, list(headers), list(includes), version, lang,
             pdb_path=pdb_path,
             public_headers=list(public_headers),

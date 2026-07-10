@@ -738,21 +738,24 @@ bool mangledHasInternalLinkage(const std::string &m) {
 // which at namespace scope without `extern` gives internal linkage in C++.
 // Pointer/reference-to-const (`const char *`) is NOT top-level const.
 bool isTopLevelConst(const std::string &qual) {
-  std::string q = qual;
-  size_t b = q.find_first_not_of(" \t");
-  size_t e = q.find_last_not_of(" \t");
-  q = (b == std::string::npos) ? "" : q.substr(b, e - b + 1);
+  auto trim = [](std::string s) {
+    size_t b = s.find_first_not_of(" \t");
+    size_t e = s.find_last_not_of(" \t");
+    return (b == std::string::npos) ? std::string() : s.substr(b, e - b + 1);
+  };
+  std::string q = trim(qual);
   while (!q.empty() && q.back() == '&')
     q.pop_back();
-  b = q.find_first_not_of(" \t");
-  e = q.find_last_not_of(" \t");
-  q = (b == std::string::npos) ? "" : q.substr(b, e - b + 1);
+  q = trim(q);
+  // Array: const iff the element type (spelled before the first `[`) is const.
+  size_t bracket = q.find('[');
+  if (bracket != std::string::npos)
+    q = trim(q.substr(0, bracket));
   const std::string kConst = "const";
   if (q.size() >= kConst.size() &&
       q.compare(q.size() - kConst.size(), kConst.size(), kConst) == 0)
     return true;
-  return q.rfind("const ", 0) == 0 && q.find('*') == std::string::npos &&
-         q.find('[') == std::string::npos;
+  return q.rfind("const ", 0) == 0 && q.find('*') == std::string::npos;
 }
 
 // clang.py::_signature over JSON: the node's type.qualType.

@@ -618,7 +618,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output,
-            _stamp_provenance, _write_snapshot_output,
+            _dump_native_binary, _stamp_provenance, _write_snapshot_output,
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,

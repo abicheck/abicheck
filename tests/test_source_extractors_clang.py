@@ -902,9 +902,14 @@ def test_top_level_const_detection() -> None:
     assert tlc("int *const")
     assert tlc("const char *const")
     assert tlc("const int &")  # reference stripped, underlying const
-    # NOT top-level const (external): pointer/array to const, or plain
+    # const arrays: const iff the element type is const (Codex review)
+    assert tlc("const int[4]")
+    assert tlc("const char[8]")
+    assert tlc("int *const[2]")  # array of const pointers
+    # NOT top-level const (external): pointer-to-const, array of mutable
+    # pointers, or plain
     assert not tlc("const char *")
-    assert not tlc("const int[4]")
+    assert not tlc("const char *[2]")  # array of (mutable) pointers to const
     assert not tlc("int")
     assert not tlc("ns::Foo *")
 
