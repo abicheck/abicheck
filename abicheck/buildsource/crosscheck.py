@@ -1347,34 +1347,35 @@ _VENDORED_OWNER_NAMESPACES: dict[str, str] = {
 }
 
 #: Itanium prefixes whose *operand* is a type whose owning namespace decides
-#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT/thunk (``_ZTV``/``_ZTI``/
-#: ``_ZTS``/``_ZTT``/``_ZTc``/``_ZTh``/``_ZTv``) and a guard variable (``_ZGV``).
+#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT (``_ZTV``/``_ZTI``/
+#: ``_ZTS``/``_ZTT``) and a guard variable (``_ZGV``, ``_ZGVZ`` for a local static).
 #: Peeling them lets a leaked *dependency* vtable/typeinfo (``_ZTVNSt…``,
 #: ``_ZTIN3fmt…``) be attributed to the dependency instead of exempted as this
-#: library's own class artifact (Codex review).
+#: library's own class artifact (Codex review). Thunks carry a numeric call-offset
+#: before the operand and are peeled by :data:`_THUNK_PREFIX_RE` instead.
 _ARTIFACT_OPERAND_PREFIXES = (
-    "_ZTVN",
-    "_ZTIN",
-    "_ZTSN",
-    "_ZTTN",
-    "_ZTcN",
-    "_ZThn",
-    "_ZTvn",
-    "_ZGVN",
-    "_ZGVZN",
     "_ZTV",
     "_ZTI",
     "_ZTS",
     "_ZTT",
+    "_ZGVZ",
     "_ZGV",
 )
+
+#: A non-virtual/virtual/covariant thunk prefix (``_ZTh``/``_ZTv``/``_ZTc``)
+#: followed by its call-offset run (``n?<num>_`` one or more times). Peeling the
+#: whole run — not just the ``_ZTh`` letters — leaves the nested-name operand, so a
+#: leaked dependency thunk (``_ZThn16_N3fmt…``, ``_ZTv0_n24_N5boost…``) attributes
+#: to its dependency instead of falling through to the artifact exemption (Codex
+#: review).
+_THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:n?\d+_)+")
 
 
 def _mangled_owner_namespace(symbol: str) -> str | None:
     """The owning top-level namespace of an Itanium *symbol* (best-effort).
 
-    Peels any vtable/typeinfo/guard-variable prefix so the *operand* type's owner
-    is read, then returns ``"std"`` for a ``St``/``Ss``/… substitution or the
+    Peels any vtable/typeinfo/guard-variable/thunk prefix so the *operand* type's
+    owner is read, then returns ``"std"`` for a ``St``/``Ss``/… substitution or the
     demangled top-level namespace name otherwise (``fmt`` for ``_ZN3fmt…``). The
     owner is the entity's *definer* — not a type it merely references in a
     parameter or template argument — so an internal function taking a ``std::``
@@ -1383,15 +1384,19 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
     if not symbol.startswith("_Z"):
         return None
     rest = symbol
-    for pfx in _ARTIFACT_OPERAND_PREFIXES:
-        if rest.startswith(pfx):
-            rest = rest[len(pfx) :]
-            break
+    thunk = _THUNK_PREFIX_RE.match(rest)
+    if thunk:
+        rest = rest[thunk.end() :]
     else:
-        if rest.startswith("_ZN"):
-            rest = rest[3:]
-        elif rest.startswith("_Z"):
-            rest = rest[2:]
+        for pfx in _ARTIFACT_OPERAND_PREFIXES:
+            if rest.startswith(pfx):
+                rest = rest[len(pfx) :]
+                break
+        else:
+            if rest.startswith("_ZN"):
+                rest = rest[3:]
+            elif rest.startswith("_Z"):
+                rest = rest[2:]
     rest = rest.lstrip("N")  # a nested-name ``N`` the prefix peel left behind
     if rest.startswith(_STD_SUBSTITUTIONS):
         return "std"

@@ -410,7 +410,9 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
             "_Z3fooi",  # documented
             "_ZTVNSt7__cxx1112basic_stringIcEE",  # leaked std vtable -> external
             "_ZTIN3fmt3v106detail5errorE",  # leaked {fmt} typeinfo -> external
+            "_ZThn16_N3fmt3v106detail5errorE",  # leaked {fmt} thunk -> external
             "_ZTV6Widget",  # native class vtable -> cxx artifact
+            "_ZThn8_N6Widget3fooEv",  # native class thunk -> cxx artifact
         )
     )
     snap.functions = [_public_fn()]
@@ -419,13 +421,14 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
     ]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
     counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
-    assert counters["external_dependency"] == 2
-    assert counters["cxx_abi_artifact"] == 1  # only the native Widget vtable
+    assert counters["external_dependency"] == 3  # std vtable + fmt typeinfo + fmt thunk
+    assert counters["cxx_abi_artifact"] == 2  # native Widget vtable + native thunk
     ext = {
         c.symbol: c.old_value for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
     }
     assert ext["_ZTVNSt7__cxx1112basic_stringIcEE"] == "libstdc++.so.6"
     assert ext["_ZTIN3fmt3v106detail5errorE"] == "{fmt} (vendored third-party)"
+    assert ext["_ZThn16_N3fmt3v106detail5errorE"] == "{fmt} (vendored third-party)"
 
 
 @pytest.mark.parametrize(
@@ -434,9 +437,20 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
         ("_ZNSt6vectorIiSaIiEE9push_backEOi", "libstdc++.so.6"),  # std prefix
         ("_ZTVNSt7__cxx1112basic_stringIcEE", "libstdc++.so.6"),  # leaked std vtable
         ("_ZTISt9exception", "libstdc++.so.6"),  # leaked std typeinfo
+        # std forms the _guess_symbol_origin prefix table misses, caught by the
+        # owner-namespace check: a std guard variable and the libstdc++
+        # implementation namespaces (__gnu_cxx / __cxxabiv1).
+        ("_ZGVZNSt3_V216generic_categoryEvE7c", "libstdc++.so.6"),
+        ("_ZN9__gnu_cxx17__normal_iteratorEv", "libstdc++.so.6"),
+        ("_ZN10__cxxabiv117__class_type_infoE", "libstdc++.so.6"),
         ("_ZGVZN3fmt3v107formatterISt6localeEE", "{fmt} (vendored third-party)"),
         ("_ZN5boost6system10error_codeC1Ev", "Boost (vendored third-party)"),
         ("_ZN4absl4TimeEv", "Abseil (vendored third-party)"),
+        # thunks: the numeric call-offset before the operand must be peeled so the
+        # dependency owner is still read (Codex review).
+        ("_ZThn16_N3fmt3v106detail5errorE", "{fmt} (vendored third-party)"),
+        ("_ZTv0_n24_N5boost6system5errorE", "Boost (vendored third-party)"),
+        ("_ZThn8_N6Widget3fooEv", None),  # native thunk -> stays a class artifact
         # a native internal symbol that merely *references* std in a parameter is
         # NOT external — the owner (dnnl), not the argument type, decides.
         ("_ZN4dnnl4impl3fooENSt7__cxx1112basic_stringIcEE", None),
