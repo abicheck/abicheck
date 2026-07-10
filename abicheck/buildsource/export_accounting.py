@@ -77,6 +77,10 @@ ACCOUNT_TEMPLATE_INST = "template_instantiation"
 #: An undocumented export none of the finer reasons explain — a bare accidental
 #: entry point (often ``extern "C"``) with no public declaration.
 ACCOUNT_UNDECLARED = "undeclared_export"
+#: A deliberate allocator-interposition export (``malloc``/``operator new``/… on a
+#: malloc-proxy library that exports :data:`_ALLOCATOR_INTERPOSER_MARKER`). Native
+#: and intentional — accounted as legitimate, never a finding (Codex review).
+ACCOUNT_ALLOCATOR_INTERPOSER = "allocator_interposer"
 
 #: The account categories that constitute *undocumented* surface (each yields an
 #: ``exported_not_public`` finding), in report order.
@@ -196,7 +200,6 @@ def _external_dependency_origin(
     symbol: str,
     needed_libs: list[str],
     self_names: tuple[str, ...] = (),
-    interposer: bool = False,
 ) -> str | None:
     """Name the external dependency *symbol* leaked from, or ``None`` if native.
 
@@ -219,11 +222,6 @@ def _external_dependency_origin(
     """
     from ..elf_metadata import _guess_symbol_origin
 
-    if interposer and symbol in _ALLOCATOR_INTERPOSER_SYMBOLS:
-        # The audited library deliberately replaces the global allocator
-        # (``malloc``/``operator new``/…); those are its own native entry points,
-        # not a leaked libc/libstdc++ dependency (Codex review).
-        return None
     lib = _guess_symbol_origin(symbol, needed_libs)
     if lib is not None:
         # libc++abi is the ABI support library, not libc++ itself. If the prefix
@@ -451,33 +449,29 @@ def _is_internal_ns_component(name: str) -> bool:
 
 
 def _entity_owner_is_internal(symbol: str) -> bool:
-    """Whether the entity's own name sits in an internal namespace.
+    """Whether the entity's *enclosing* namespace/class is an internal one.
 
-    Scans only the **entity name** components (an ``impl``/``internal``/``detail``
-    namespace or an anonymous ``_GLOBAL__N_`` namespace), never a parameter type
-    that merely *references* such a namespace — so ``foo(lib::detail::Type*)``
-    (``_ZN3lib3fooEPN3lib6detail4TypeE``) is not mis-bucketed as internal (Codex
-    review). Mirrors :func:`_has_template_args`'s entity-name scoping. Also handles
-    MSVC decorated names (``?name@scope@…@@type``) so PE/COFF exports keep the
-    precise internal-namespace reason instead of collapsing to undeclared (Codex).
+    Only the enclosing namespace/class components decide — never the entity's own
+    final name (so an ordinary ``lib::detail()`` function is not internal; only
+    ``lib::detail::foo`` is; Codex review) and never a parameter type that merely
+    *references* an internal namespace (``foo(lib::detail::Type*)``; Codex review).
+    Handles Itanium and MSVC decorated names; an un-nested name has no enclosing
+    scope and is therefore never internal.
     """
     if symbol.startswith("?"):
-        # MSVC: ``?<name>@<scope>@…@@<type>`` — the ``@``-separated components before
-        # ``@@`` are the entity name and its enclosing class/namespace scopes.
-        head = symbol.lstrip("?").split("@@", 1)[0]
-        return any(_is_internal_ns_component(c) for c in head.split("@") if c)
+        # MSVC ``?<name>@<scope>@…@@<type>``: the FIRST ``@``-component is the entity
+        # name; only the enclosing scopes that follow decide internal-ness.
+        comps = symbol.lstrip("?").split("@@", 1)[0].split("@")
+        return any(_is_internal_ns_component(c) for c in comps[1:] if c)
     if not symbol.startswith("_Z"):
         return False
     rest = _encoding_after_prefixes(symbol)
     if not rest.startswith("N"):
-        m = re.match(r"(\d+)", rest)
-        if not m:
-            return False
-        name = rest[m.end() : m.end() + int(m.group(1))]
-        return _is_internal_ns_component(name)
-    # Nested name: check each depth-0 component up to the closing ``E`` (parameters
-    # follow it). Template arguments (depth > 0) are skipped, not treated as owners.
+        return False  # un-nested name has no enclosing namespace
+    # Collect the depth-0 nested-name components up to the closing ``E`` (parameters
+    # follow it); template arguments (depth > 0) are skipped, not treated as scopes.
     rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
+    components: list[str] = []
     i, depth = 0, 0
     while i < len(rest):
         c = rest[i]
@@ -494,13 +488,14 @@ def _entity_owner_is_internal(symbol: str) -> bool:
             while j < len(rest) and rest[j].isdigit():
                 j += 1
             length = int(rest[i:j])
-            name = rest[j : j + length]
             i = j + length
-            if depth == 0 and _is_internal_ns_component(name):
-                return True
+            if depth == 0:
+                components.append(rest[j : j + length])
         else:
             i += 1
-    return False
+    # The last depth-0 component is the entity's own name; only its enclosing
+    # namespace/class components decide internal-ness (Codex review).
+    return any(_is_internal_ns_component(c) for c in components[:-1])
 
 
 def _has_template_args(symbol: str) -> bool:

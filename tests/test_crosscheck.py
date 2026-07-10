@@ -709,10 +709,15 @@ def test_nested_component(symbol, index, expected):
         ("_ZN3lib3fooESt6vectorIiSaIiEE", "undeclared_export"),
         ("_Z3fooi", "undeclared_export"),
         ("raw_c_entry", "undeclared_export"),
+        # a function whose *own name* is detail/impl but whose enclosing namespace
+        # is not internal is NOT internal — only enclosing scopes count (Codex).
+        ("_ZN3lib6detailEv", "undeclared_export"),  # lib::detail()
+        ("_ZN3lib4implEv", "undeclared_export"),  # lib::impl()
         # MSVC decorated names keep the internal-namespace reason on PE/COFF (Codex).
         ("?secret@detail@lib@@YAXXZ", "internal_namespace"),
         ("?Compute@impl@dnnl@@YAXXZ", "internal_namespace"),
         ("?PublicApi@dnnl@@YAXXZ", "undeclared_export"),
+        ("?detail@lib@@YAXXZ", "undeclared_export"),  # lib::detail() — name, not scope
     ],
 )
 def test_account_undocumented_export_categories(symbol, expected):
@@ -730,6 +735,11 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
     res = run_crosschecks(proxy, CrosscheckConfig(max_per_check=0))
     counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
     assert counters.get("external_dependency", 0) == 0
+    # accounted as a legitimate interposer category — and no finding advises hiding
+    # the allocator replacements.
+    assert counters.get("allocator_interposer", 0) == 2  # _Znwm + malloc
+    finding_syms = {c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)}
+    assert "_Znwm" not in finding_syms and "malloc" not in finding_syms
 
     # The same operator new in a library that is NOT an interposer is a real leak.
     leaky = _snap(elf=_elf("_Znwm"))

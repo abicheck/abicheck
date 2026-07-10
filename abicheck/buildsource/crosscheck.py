@@ -77,7 +77,9 @@ from ..model import (
 # keep importing these names from ``crosscheck``.
 from .export_accounting import (
     _ALLOCATOR_INTERPOSER_MARKER,
+    _ALLOCATOR_INTERPOSER_SYMBOLS,
     _UNDOCUMENTED_ACCOUNTS,
+    ACCOUNT_ALLOCATOR_INTERPOSER,
     ACCOUNT_CXX_ARTIFACT,
     ACCOUNT_EXTERNAL_DEP,
     ACCOUNT_INTERNAL_NS,
@@ -317,14 +319,18 @@ def _check_exported_not_public(
         if sym in public_syms:
             account[ACCOUNT_PUBLIC] += 1
             continue
+        # A malloc-proxy library deliberately exports allocator replacements
+        # (``malloc``/``operator new``/…); they are native + intentional, so account
+        # them as legitimate and emit no finding — never advise hiding them (Codex).
+        if interposer and sym in _ALLOCATOR_INTERPOSER_SYMBOLS:
+            account[ACCOUNT_ALLOCATOR_INTERPOSER] += 1
+            continue
         # The external-dependency check runs *before* the C++ compiler-artifact
         # exemption: a leaked libstdc++/{fmt} vtable or typeinfo (``_ZTVNSt…``,
         # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
         # exempting it as a class artifact would silently undercount it (Codex
         # review). Only a *native* class's artifact is then exempted below.
-        origin_lib = _external_dependency_origin(
-            sym, needed_libs, self_names, interposer=interposer
-        )
+        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(
@@ -342,7 +348,11 @@ def _check_exported_not_public(
             _exported_not_public_finding(sym, category, None, decl_by_sym.get(sym))
         )
 
-    documented = account[ACCOUNT_PUBLIC] + account[ACCOUNT_CXX_ARTIFACT]
+    documented = (
+        account[ACCOUNT_PUBLIC]
+        + account[ACCOUNT_CXX_ARTIFACT]
+        + account[ACCOUNT_ALLOCATOR_INTERPOSER]
+    )
     breakdown = ", ".join(
         f"{cat}={account[cat]}" for cat in _UNDOCUMENTED_ACCOUNTS if account[cat]
     )
