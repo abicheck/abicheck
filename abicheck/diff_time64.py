@@ -126,15 +126,24 @@ def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
             continue
         _add(var.type)
 
-    # Expand through name-reachable records to a fixpoint; each record is
-    # folded in at most once.
-    remaining = {rec.name: rec for rec in snap.types if rec.name}
+    # Expand through name-reachable typedef aliases AND records to a fixpoint;
+    # each is folded in at most once. Typedefs participate because a public
+    # signature often reaches a record only through an alias (`typedef struct
+    # stat Stat;` + `f(Stat *)` puts "Stat" in the tokens while the record map
+    # is keyed "stat") — without resolving the alias the record's fields would
+    # never be visited (Codex review #510, round 5).
+    remaining_aliases = dict(snap.typedefs)
+    remaining_records = {rec.name: rec for rec in snap.types if rec.name}
     changed = True
-    while changed and remaining:
+    while changed and (remaining_aliases or remaining_records):
         changed = False
-        for name in list(remaining):
+        for alias in list(remaining_aliases):
+            if alias in tokens:
+                _add(remaining_aliases.pop(alias))
+                changed = True
+        for name in list(remaining_records):
             if name in tokens:
-                rec = remaining.pop(name)
+                rec = remaining_records.pop(name)
                 for fld in rec.fields:
                     _add(getattr(fld, "type", ""))
                 changed = True

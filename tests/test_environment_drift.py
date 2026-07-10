@@ -619,6 +619,46 @@ class TestTime64AbiFlip:
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
+    def test_typedef_alias_reaches_record_fields(self) -> None:
+        # A public signature reaching the record only through a typedef alias
+        # (`typedef struct stat_rec Stat;` + `f(Stat)`) must still fold the
+        # record's time_t field into the surface (Codex review #510, round 5).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.typedefs["Stat"] = "stat_rec"
+            snap.types = [RecordType(
+                name="stat_rec", kind="struct",
+                fields=[TypeField(name="mtime", type="time_t")],
+            )]
+            snap.functions = [Function(
+                name="get_stat", mangled="get_stat",
+                return_type="Stat", visibility=Visibility.PUBLIC,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+
+    def test_unused_alias_does_not_widen_surface(self) -> None:
+        # An alias nothing public references must not pull its underlying
+        # record (and its time_t field) into the surface.
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.typedefs["Stat"] = "stat_rec"
+            snap.types = [RecordType(
+                name="stat_rec", kind="struct",
+                fields=[TypeField(name="mtime", type="time_t")],
+            )]
+            snap.functions = [Function(
+                name="api", mangled="api",
+                return_type="int", visibility=Visibility.PUBLIC,
+            )]
+        assert _diff_time64_abi(old, new) == []
+
     def test_nested_record_reachability(self) -> None:
         # Reachability is transitive: public fn -> outer -> inner(time_t).
         from abicheck.model import Function, RecordType, TypeField, Visibility
