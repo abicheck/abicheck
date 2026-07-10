@@ -118,11 +118,16 @@ machine-checkable from the artifact alone
   keep-the-floor-down patterns are `LoadLibrary`/`GetProcAddress` and
   **delay-loading** — the dynamic counterparts of macOS weak linking.
 
-The detection asymmetry follows the evidence: unversioned imports (Windows,
-and any ELF dependency that doesn't version its symbols) surface only as
-`needed_added`/`needed_removed` and export-set diffs — there is no per-version
-fact in the artifact to compare — while ELF's versioned deps give abicheck
-enough to name the exact old → new floor and the symbols responsible.
+The detection asymmetry follows the evidence. ELF's versioned deps give
+abicheck enough to name the exact old → new floor and the symbols responsible.
+Unversioned imports (Windows, and any ELF dependency that doesn't version its
+symbols) leave less to compare: adding or dropping a whole dependency surfaces
+as `needed_added`/`needed_removed`, but starting to import a **new function
+from an existing dependency** — the way a Windows floor usually rises — leaves
+no per-version fact in the artifact and currently produces **no finding**.
+Treat unversioned floors as a blind spot: cover them with a load test on your
+oldest supported target (a plain "does it start?" smoke test on the oldest
+Windows/macOS/distro tier), not with artifact diffing alone.
 
 ## Adopting new runtime features on purpose
 
