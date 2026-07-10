@@ -400,6 +400,75 @@ def test_exported_not_public_accounting_sums_to_all_exports():
     }
 
 
+def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
+    # Regression (Codex review): a leaked libstdc++/{fmt} vtable or typeinfo is
+    # checked for external origin BEFORE the C++ compiler-artifact exemption, so it
+    # counts as the leaked surface these counters measure — not silently exempted
+    # as a legitimate class artifact. A *native* class's vtable still is exempted.
+    snap = _snap(
+        elf=_elf(
+            "_Z3fooi",  # documented
+            "_ZTVNSt7__cxx1112basic_stringIcEE",  # leaked std vtable -> external
+            "_ZTIN3fmt3v106detail5errorE",  # leaked {fmt} typeinfo -> external
+            "_ZTV6Widget",  # native class vtable -> cxx artifact
+        )
+    )
+    snap.functions = [_public_fn()]
+    snap.types = [
+        RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 2
+    assert counters["cxx_abi_artifact"] == 1  # only the native Widget vtable
+    ext = {
+        c.symbol: c.old_value for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    }
+    assert ext["_ZTVNSt7__cxx1112basic_stringIcEE"] == "libstdc++.so.6"
+    assert ext["_ZTIN3fmt3v106detail5errorE"] == "{fmt} (vendored third-party)"
+
+
+@pytest.mark.parametrize(
+    "symbol, expected",
+    [
+        ("_ZNSt6vectorIiSaIiEE9push_backEOi", "libstdc++.so.6"),  # std prefix
+        ("_ZTVNSt7__cxx1112basic_stringIcEE", "libstdc++.so.6"),  # leaked std vtable
+        ("_ZTISt9exception", "libstdc++.so.6"),  # leaked std typeinfo
+        ("_ZGVZN3fmt3v107formatterISt6localeEE", "{fmt} (vendored third-party)"),
+        ("_ZN5boost6system10error_codeC1Ev", "Boost (vendored third-party)"),
+        ("_ZN4absl4TimeEv", "Abseil (vendored third-party)"),
+        # a native internal symbol that merely *references* std in a parameter is
+        # NOT external — the owner (dnnl), not the argument type, decides.
+        ("_ZN4dnnl4impl3fooENSt7__cxx1112basic_stringIcEE", None),
+        ("_ZN3lib3barEv", None),  # native, nested
+        ("_Z3fooi", None),  # native, non-nested (_Z, not _ZN)
+        ("_ZN", None),  # degenerate — owner unparseable
+        ("plain_c_symbol", None),  # not mangled
+    ],
+)
+def test_external_dependency_origin_owner_based(symbol, expected):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, ["libstdc++.so.6"]) == expected
+
+
+@pytest.mark.parametrize(
+    "symbol, expected",
+    [
+        ("_ZN3lib4impl6secretEv", "internal_namespace"),
+        ("_ZN3lib8internal6secretEv", "internal_namespace"),
+        ("_ZN12_GLOBAL__N_13fooEv", "internal_namespace"),
+        ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
+        ("_Z3fooi", "undeclared_export"),
+        ("raw_c_entry", "undeclared_export"),
+    ],
+)
+def test_account_undocumented_export_categories(symbol, expected):
+    from abicheck.buildsource.crosscheck import _account_undocumented_export
+
+    assert _account_undocumented_export(symbol) == expected
+
+
 # --------------------------------------------------------------------------- #
 # public_not_exported
 # --------------------------------------------------------------------------- #

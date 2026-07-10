@@ -292,16 +292,27 @@ def _check_exported_not_public(
         if sym in public_syms:
             account[ACCOUNT_PUBLIC] += 1
             continue
+        # The external-dependency check runs *before* the C++ compiler-artifact
+        # exemption: a leaked libstdc++/{fmt} vtable or typeinfo (``_ZTVNSt…``,
+        # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
+        # exempting it as a class artifact would silently undercount it (Codex
+        # review). Only a *native* class's artifact is then exempted below.
+        origin_lib = _external_dependency_origin(sym, needed_libs)
+        if origin_lib is not None:
+            account[ACCOUNT_EXTERNAL_DEP] += 1
+            findings.append(
+                _exported_not_public_finding(
+                    sym, ACCOUNT_EXTERNAL_DEP, origin_lib, decl_by_sym.get(sym)
+                )
+            )
+            continue
         if _is_cxx_implementation_symbol(sym):
             account[ACCOUNT_CXX_ARTIFACT] += 1
             continue
-        origin_lib = _external_dependency_origin(sym, needed_libs)
-        category = _account_undocumented_export(sym, origin_lib)
+        category = _account_undocumented_export(sym)
         account[category] += 1
         findings.append(
-            _exported_not_public_finding(
-                sym, category, origin_lib, decl_by_sym.get(sym)
-            )
+            _exported_not_public_finding(sym, category, None, decl_by_sym.get(sym))
         )
 
     documented = account[ACCOUNT_PUBLIC] + account[ACCOUNT_CXX_ARTIFACT]
@@ -1310,75 +1321,122 @@ _UNDOCUMENTED_ACCOUNTS: tuple[str, ...] = (
     ACCOUNT_UNDECLARED,
 )
 
-#: Vendored third-party libraries whose Itanium namespace component (``<len><ns>``)
-#: is a strong "statically linked and re-exported" signal — the C++ runtime is
-#: handled by :func:`~abicheck.elf_metadata._guess_symbol_origin`, this table adds
-#: the common header/impl libraries that ship no ``DT_NEEDED`` of their own.
-_VENDORED_NAMESPACE_TOKENS: tuple[tuple[str, str], ...] = (
-    ("3fmt", "{fmt} (vendored third-party)"),
-    ("5boost", "Boost (vendored third-party)"),
-    ("4absl", "Abseil (vendored third-party)"),
-    ("2re2", "RE2 (vendored third-party)"),
-    ("6spdlog", "spdlog (vendored third-party)"),
-    ("4grpc", "gRPC (vendored third-party)"),
-    ("8protobuf", "Protocol Buffers (vendored third-party)"),
+#: Itanium ``<substitution>`` abbreviations for ``std`` and its members
+#: (``St`` = ``std``, ``Ss`` = ``std::string``, ``Si``/``So``/``Sd`` = the
+#: iostream types, ``Sa``/``Sb`` = allocator/basic_string). A leading one marks a
+#: C++-runtime owner.
+_STD_SUBSTITUTIONS = ("St", "Ss", "Si", "So", "Sd", "Sa", "Sb")
+
+#: Owner namespaces that belong to the C++ runtime (map to libstdc++). ``__cxx11``
+#: /``__gnu_cxx``/``__cxxabiv1`` are libstdc++ inline/implementation namespaces.
+_STD_OWNER_NAMESPACES = frozenset({"__cxx11", "__gnu_cxx", "__cxxabiv1"})
+
+#: Vendored third-party libraries keyed by their **owner namespace** (the demangled
+#: top-level namespace, e.g. ``fmt``). These commonly get statically linked and
+#: re-exported while shipping no ``DT_NEEDED`` of their own, so
+#: :func:`~abicheck.elf_metadata._guess_symbol_origin` cannot see them.
+_VENDORED_OWNER_NAMESPACES: dict[str, str] = {
+    "fmt": "{fmt} (vendored third-party)",
+    "boost": "Boost (vendored third-party)",
+    "absl": "Abseil (vendored third-party)",
+    "re2": "RE2 (vendored third-party)",
+    "spdlog": "spdlog (vendored third-party)",
+    "grpc": "gRPC (vendored third-party)",
+    "google": "Google/protobuf (vendored third-party)",
+    "protobuf": "Protocol Buffers (vendored third-party)",
+}
+
+#: Itanium prefixes whose *operand* is a type whose owning namespace decides
+#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT/thunk (``_ZTV``/``_ZTI``/
+#: ``_ZTS``/``_ZTT``/``_ZTc``/``_ZTh``/``_ZTv``) and a guard variable (``_ZGV``).
+#: Peeling them lets a leaked *dependency* vtable/typeinfo (``_ZTVNSt…``,
+#: ``_ZTIN3fmt…``) be attributed to the dependency instead of exempted as this
+#: library's own class artifact (Codex review).
+_ARTIFACT_OPERAND_PREFIXES = (
+    "_ZTVN",
+    "_ZTIN",
+    "_ZTSN",
+    "_ZTTN",
+    "_ZTcN",
+    "_ZThn",
+    "_ZTvn",
+    "_ZGVN",
+    "_ZGVZN",
+    "_ZTV",
+    "_ZTI",
+    "_ZTS",
+    "_ZTT",
+    "_ZGV",
 )
 
-#: C++ standard-library signals a bare ``_guess_symbol_origin`` prefix check misses
-#: on an already-defined (leaked) export: guard variables / thread-local wrappers
-#: for a ``std`` entity, and the ``__cxx11`` / ``__gnu_cxx`` / ``__cxxabiv1``
-#: inline/implementation namespaces that appear mid-name rather than as the prefix.
-_STDLIB_MANGLED_MARKERS: tuple[str, ...] = (
-    "7__cxx11",
-    "9__gnu_cxx",
-    "10__cxxabiv1",
-)
+
+def _mangled_owner_namespace(symbol: str) -> str | None:
+    """The owning top-level namespace of an Itanium *symbol* (best-effort).
+
+    Peels any vtable/typeinfo/guard-variable prefix so the *operand* type's owner
+    is read, then returns ``"std"`` for a ``St``/``Ss``/… substitution or the
+    demangled top-level namespace name otherwise (``fmt`` for ``_ZN3fmt…``). The
+    owner is the entity's *definer* — not a type it merely references in a
+    parameter or template argument — so an internal function taking a ``std::``
+    argument is never mistaken for a ``std`` symbol. ``None`` when it cannot parse.
+    """
+    if not symbol.startswith("_Z"):
+        return None
+    rest = symbol
+    for pfx in _ARTIFACT_OPERAND_PREFIXES:
+        if rest.startswith(pfx):
+            rest = rest[len(pfx) :]
+            break
+    else:
+        if rest.startswith("_ZN"):
+            rest = rest[3:]
+        elif rest.startswith("_Z"):
+            rest = rest[2:]
+    rest = rest.lstrip("N")  # a nested-name ``N`` the prefix peel left behind
+    if rest.startswith(_STD_SUBSTITUTIONS):
+        return "std"
+    m = re.match(r"(\d+)([A-Za-z_]\w*)", rest)
+    if m:
+        return m.group(2)[: int(m.group(1))]
+    return None
 
 
 def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | None:
     """Name the external dependency *symbol* leaked from, or ``None`` if native.
 
-    Layers three signals, cheapest first: the shared
+    Two signals, cheapest first: the shared
     :func:`~abicheck.elf_metadata._guess_symbol_origin` runtime-prefix table
-    (libstdc++/libc/libgcc/…), then the C++ standard-library markers it misses on
-    leaked definitions (guard variables, ``__cxx11``/``__gnu_cxx``/``__cxxabiv1``),
-    then the vendored-third-party namespace table. Conservative: only a positive
-    match returns a name, so a native symbol is never mislabelled as external.
+    (libc/libgcc/libmvec/fundamental-RTTI/``operator new`` and the ``_ZNSt``/
+    ``_ZTVSt`` std prefixes), then an **owner-namespace** check that also covers the
+    leaked-definition forms the prefix table misses — a std/libstdc++ vtable,
+    typeinfo, or guard variable for a *nested* std type (``_ZTVNSt…``,
+    ``_ZGVZNSt…``) and a vendored third-party owner (``fmt``/``boost``/…). Reading
+    the *owner* (not any referenced type) keeps a native symbol that merely takes a
+    ``std`` argument from being mislabelled external. Conservative: only a positive
+    match returns a name.
     """
     from ..elf_metadata import _guess_symbol_origin
 
     lib = _guess_symbol_origin(symbol, needed_libs)
     if lib is not None:
         return lib
-    if symbol.startswith("_Z"):
-        # A vendored library's namespace component (``3fmt``/``5boost``) is a
-        # stronger owner signal than an incidental ``St`` the entity merely
-        # *references* (e.g. a ``{fmt}`` guard variable for ``fmt::…<std::locale>``),
-        # so the vendored table is consulted before the ``std`` heuristics below.
-        for token, label in _VENDORED_NAMESPACE_TOKENS:
-            if token in symbol:
-                return label
-        if any(marker in symbol for marker in _STDLIB_MANGLED_MARKERS):
-            return "libstdc++.so.6"
-        # A guard variable whose *owner* is a ``std`` entity (``_ZGVNSt…`` /
-        # ``_ZGVZNSt…``) is a leaked C++-runtime artifact.
-        if symbol.startswith(("_ZGVNSt", "_ZGVNKSt", "_ZGVZNSt", "_ZGVZNKSt")):
-            return "libstdc++.so.6"
-    return None
+    owner = _mangled_owner_namespace(symbol)
+    if owner is None:
+        return None
+    if owner == "std" or owner in _STD_OWNER_NAMESPACES:
+        return "libstdc++.so.6"
+    return _VENDORED_OWNER_NAMESPACES.get(owner)
 
 
-def _account_undocumented_export(symbol: str, origin_lib: str | None) -> str:
-    """Classify an *undocumented* export into one precise account category.
+def _account_undocumented_export(symbol: str) -> str:
+    """Classify a *non-external*, undocumented export into one account category.
 
-    The caller has already excluded documented (:data:`ACCOUNT_PUBLIC`) and
-    compiler-artifact (:data:`ACCOUNT_CXX_ARTIFACT`) symbols; this decides between
-    external-dependency, internal-namespace, template-instantiation, and a bare
-    undeclared export, using only the mangled name (+ any resolved *origin_lib*) so
-    it needs no demangler and stays deterministic. Order matters: a symbol that is
-    *both* a leaked ``std`` entity and template-shaped is reported as external.
+    The caller has already excluded documented (:data:`ACCOUNT_PUBLIC`), compiler-
+    artifact (:data:`ACCOUNT_CXX_ARTIFACT`), and external-dependency
+    (:data:`ACCOUNT_EXTERNAL_DEP`) symbols; this decides between an internal-
+    namespace escape, a template instantiation, and a bare undeclared export using
+    only the mangled name, so it needs no demangler and stays deterministic.
     """
-    if origin_lib is not None:
-        return ACCOUNT_EXTERNAL_DEP
     if symbol.startswith("_ZN"):
         # Itanium nested name: the library's own internal namespace component
         # (``4impl``/``8internal``/``6detail``) or an anonymous namespace
