@@ -41,6 +41,8 @@ from .diff_platform_elf_symbols import (
     _check_func_visibility_protected as _check_func_visibility_protected,
     _check_ifunc_type_change as _check_ifunc_type_change,
     _check_symbol_size_change as _check_symbol_size_change,
+    _diff_allocator_replacement as _diff_allocator_replacement,
+    _diff_elf_import_set as _diff_elf_import_set,
     _diff_elf_symbol_metadata as _diff_elf_symbol_metadata,
     _diff_elf_symbol_pair as _diff_elf_symbol_pair,
     _diff_elf_symbol_versioning as _diff_elf_symbol_versioning,
@@ -102,6 +104,8 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(detect_version_node_changes(o, n))
     changes.extend(_diff_elf_symbol_versioning(o, n))
     changes.extend(_diff_elf_symbol_metadata(old, new, o, n))
+    changes.extend(_diff_elf_import_set(o, n))
+    changes.extend(_diff_allocator_replacement(o, n))
     changes.extend(_diff_visibility_leak(old, new))
     changes.extend(_diff_leaked_dependency_symbols(o, n))
     changes.extend(detect_version_script_missing(o, n))
@@ -229,6 +233,165 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
         )
 
+    changes.extend(_diff_pe_delay_imports(o, n))
+    changes.extend(_diff_pe_import_functions(o, n))
+    changes.extend(_diff_pe_hardening(o, n))
+    changes.extend(_diff_pe_versions(o, n))
+
+    return changes
+
+
+#: Exploit-mitigation bits in OPTIONAL_HEADER.DllCharacteristics — the PE
+#: counterpart of the ELF RELRO/PIE/canary/CET hardening family.
+_PE_HARDENING_BITS: tuple[tuple[int, str], ...] = (
+    (0x0020, "HIGH_ENTROPY_VA"),
+    (0x0040, "DYNAMIC_BASE"),   # ASLR
+    (0x0100, "NX_COMPAT"),      # DEP
+    (0x4000, "GUARD_CF"),       # Control Flow Guard
+)
+
+
+def _diff_pe_hardening(o: Any, n: Any) -> list[Change]:
+    """Detect DllCharacteristics exploit-mitigation drift.
+
+    Weakening and improvement are distinct kinds (mirroring the ELF
+    executable-stack pair) so a security policy can gate the regression
+    without failing a fix. Gated on both sides carrying PE identity
+    (machine != "") so a parse-failed/legacy side never reads as "all
+    mitigations off".
+    """
+    if not (o.machine and n.machine):
+        return []
+    old_bits = int(getattr(o, "dll_characteristics", 0))
+    new_bits = int(getattr(n, "dll_characteristics", 0))
+    if old_bits == new_bits:
+        return []
+    lost = [name for bit, name in _PE_HARDENING_BITS if old_bits & bit and not new_bits & bit]
+    gained = [name for bit, name in _PE_HARDENING_BITS if new_bits & bit and not old_bits & bit]
+    changes: list[Change] = []
+    if lost:
+        changes.append(
+            make_change(
+                ChangeKind.PE_HARDENING_WEAKENED,
+                symbol="DllCharacteristics",
+                detail=", ".join(lost),
+                old_value=hex(old_bits),
+                new_value=hex(new_bits),
+            )
+        )
+    if gained:
+        changes.append(
+            make_change(
+                ChangeKind.PE_HARDENING_IMPROVED,
+                symbol="DllCharacteristics",
+                detail=", ".join(gained),
+                old_value=hex(old_bits),
+                new_value=hex(new_bits),
+            )
+        )
+    return changes
+
+
+def _diff_pe_delay_imports(o: Any, n: Any) -> list[Change]:
+    """Diff the delay-loaded DLL dependency set (lazily bound, fails late)."""
+    old_deps = set(getattr(o, "delay_imports", None) or {})
+    new_deps = set(getattr(n, "delay_imports", None) or {})
+    changes: list[Change] = []
+    for dep in sorted(old_deps - new_deps):
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_REMOVED,
+                symbol=dep,
+                description=f"delay-load import dependency removed: {dep}",
+            )
+        )
+    for dep in sorted(new_deps - old_deps):
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_ADDED,
+                symbol=dep,
+                description=f"new delay-load import dependency: {dep}",
+            )
+        )
+    return changes
+
+
+def _diff_pe_import_functions(o: Any, n: Any) -> list[Change]:
+    """Diff per-DLL imported function sets (incl. import-by-ordinal entries).
+
+    Only DLLs present on both sides are compared — a wholly added/removed DLL
+    is already reported as NEEDED_ADDED/REMOVED, and repeating every one of
+    its functions would be noise. Requires import evidence on both sides.
+    """
+    old_imports: dict[str, list[str]] = getattr(o, "imports", None) or {}
+    new_imports: dict[str, list[str]] = getattr(n, "imports", None) or {}
+    if not old_imports or not new_imports:
+        return []
+    changes: list[Change] = []
+    for dll in sorted(set(old_imports) & set(new_imports)):
+        old_funcs = set(old_imports[dll])
+        new_funcs = set(new_imports[dll])
+        for func in sorted(new_funcs - old_funcs):
+            changes.append(
+                make_change(
+                    ChangeKind.IMPORTED_SYMBOL_ADDED,
+                    symbol=func,
+                    name=func,
+                    detail=f" from {dll}",
+                    new_value=f"{dll}!{func}",
+                )
+            )
+        for func in sorted(old_funcs - new_funcs):
+            changes.append(
+                make_change(
+                    ChangeKind.IMPORTED_SYMBOL_REMOVED,
+                    symbol=func,
+                    name=func,
+                    old_value=f"{dll}!{func}",
+                )
+            )
+    return changes
+
+
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    """Parse a dotted version string into a comparable tuple, or None."""
+    try:
+        return tuple(int(p) for p in version.split("."))
+    except ValueError:
+        return None
+
+
+def _diff_pe_versions(o: Any, n: Any) -> list[Change]:
+    """Detect version regressions and a raised subsystem (OS) floor."""
+    changes: list[Change] = []
+
+    old_fv = _version_tuple(getattr(o, "file_version", ""))
+    new_fv = _version_tuple(getattr(n, "file_version", ""))
+    if old_fv is not None and new_fv is not None and new_fv < old_fv:
+        changes.append(
+            make_change(
+                ChangeKind.LIBRARY_VERSION_DOWNGRADED,
+                symbol="VS_FIXEDFILEINFO",
+                old=o.file_version,
+                new=n.file_version,
+                old_value=o.file_version,
+                new_value=n.file_version,
+            )
+        )
+
+    old_sv = _version_tuple(getattr(o, "subsystem_version", ""))
+    new_sv = _version_tuple(getattr(n, "subsystem_version", ""))
+    if old_sv is not None and new_sv is not None and new_sv > old_sv:
+        changes.append(
+            make_change(
+                ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
+                symbol="SubsystemVersion",
+                old=f"Windows subsystem {o.subsystem_version}",
+                new=f"Windows subsystem {n.subsystem_version}",
+                old_value=o.subsystem_version,
+                new_value=n.subsystem_version,
+            )
+        )
     return changes
 
 
@@ -364,26 +527,188 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
         )
 
-    # Detect re-exported dylib changes (LC_REEXPORT_DYLIB)
+    # Detect re-exported dylib changes (LC_REEXPORT_DYLIB). A single
+    # removed+added pair is a *repoint* — the umbrella's surface is now
+    # sourced from a different dylib — reported as its own kind rather than
+    # an unrelated-looking remove/add pair.
     old_reexports = set(o.reexported_libs)
     new_reexports = set(n.reexported_libs)
-    for lib in sorted(old_reexports - new_reexports):
+    removed_re = sorted(old_reexports - new_reexports)
+    added_re = sorted(new_reexports - old_reexports)
+    if len(removed_re) == 1 and len(added_re) == 1:
         changes.append(
             make_change(
-                ChangeKind.NEEDED_REMOVED,
-                symbol=lib,
-                description=f"re-exported dylib removed: {lib}",
+                ChangeKind.MACHO_REEXPORT_CHANGED,
+                symbol="LC_REEXPORT_DYLIB",
+                old=removed_re[0],
+                new=added_re[0],
+                old_value=removed_re[0],
+                new_value=added_re[0],
             )
         )
-    for lib in sorted(new_reexports - old_reexports):
+    else:
+        for lib in removed_re:
+            changes.append(
+                make_change(
+                    ChangeKind.NEEDED_REMOVED,
+                    symbol=lib,
+                    description=f"re-exported dylib removed: {lib}",
+                )
+            )
+        for lib in added_re:
+            changes.append(
+                make_change(
+                    ChangeKind.NEEDED_ADDED,
+                    symbol=lib,
+                    description=f"new re-exported dylib: {lib}",
+                )
+            )
+
+    changes.extend(_diff_macho_loader_facts(o, n))
+    changes.extend(_diff_macho_weak_exports(o, n))
+
+    return changes
+
+
+#: Mach-O header flags that change symbol-resolution / linkage semantics.
+_MACHO_LINKAGE_FLAG_BITS: tuple[tuple[int, str], ...] = (
+    (0x00000080, "MH_TWOLEVEL"),
+    (0x00008000, "MH_WEAK_DEFINES"),
+    (0x00010000, "MH_BINDS_TO_WEAK"),
+    (0x00100000, "MH_NO_REEXPORTED_DYLIBS"),
+)
+
+
+def _diff_macho_loader_facts(o: Any, n: Any) -> list[Change]:
+    """Mach-O loader-contract drift: filetype, linkage flags, rpaths, versions.
+
+    Gated on both sides carrying Mach-O identity (cpu_type != "") so a
+    parse-failed or legacy side never reads as "flags all zero".
+    """
+    changes: list[Change] = []
+
+    if o.filetype and n.filetype and o.filetype != n.filetype:
         changes.append(
             make_change(
-                ChangeKind.NEEDED_ADDED,
-                symbol=lib,
-                description=f"new re-exported dylib: {lib}",
+                ChangeKind.MACHO_FILETYPE_CHANGED,
+                symbol="MACHO_HEADER",
+                old=o.filetype,
+                new=n.filetype,
+                old_value=o.filetype,
+                new_value=n.filetype,
             )
         )
 
+    if o.cpu_type and n.cpu_type:
+        old_bits = int(getattr(o, "flags", 0))
+        new_bits = int(getattr(n, "flags", 0))
+        flipped = [
+            name
+            for bit, name in _MACHO_LINKAGE_FLAG_BITS
+            if (old_bits & bit) != (new_bits & bit)
+        ]
+        if flipped:
+            detail = ", ".join(
+                f"{'+' if new_bits & bit else '-'}{name}"
+                for bit, name in _MACHO_LINKAGE_FLAG_BITS
+                if (old_bits & bit) != (new_bits & bit)
+            )
+            changes.append(
+                make_change(
+                    ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED,
+                    symbol="MACHO_HEADER",
+                    detail=detail,
+                    old_value=hex(old_bits),
+                    new_value=hex(new_bits),
+                )
+            )
+
+    old_rpaths = getattr(o, "rpaths", None) or []
+    new_rpaths = getattr(n, "rpaths", None) or []
+    if (old_rpaths or new_rpaths) and old_rpaths != new_rpaths:
+        changes.append(
+            make_change(
+                ChangeKind.RPATH_CHANGED,
+                symbol="LC_RPATH",
+                old=repr(":".join(old_rpaths)),
+                new=repr(":".join(new_rpaths)),
+                old_value=":".join(old_rpaths),
+                new_value=":".join(new_rpaths),
+            )
+        )
+
+    old_minos = _version_tuple(getattr(o, "min_os_version", ""))
+    new_minos = _version_tuple(getattr(n, "min_os_version", ""))
+    if old_minos is not None and new_minos is not None and new_minos > old_minos:
+        changes.append(
+            make_change(
+                ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
+                symbol="LC_BUILD_VERSION",
+                old=f"macOS {o.min_os_version}",
+                new=f"macOS {n.min_os_version}",
+                old_value=o.min_os_version,
+                new_value=n.min_os_version,
+            )
+        )
+
+    old_cur = _version_tuple(getattr(o, "current_version", ""))
+    new_cur = _version_tuple(getattr(n, "current_version", ""))
+    if old_cur is not None and new_cur is not None and new_cur < old_cur:
+        changes.append(
+            make_change(
+                ChangeKind.LIBRARY_VERSION_DOWNGRADED,
+                symbol="LC_ID_DYLIB",
+                old=o.current_version,
+                new=n.current_version,
+                old_value=o.current_version,
+                new_value=n.current_version,
+            )
+        )
+
+    return changes
+
+
+def _diff_macho_weak_exports(o: Any, n: Any) -> list[Change]:
+    """Detect strong↔weak flips on exports retained across versions.
+
+    Mirrors the ELF GLOBAL↔WEAK pair: becoming weak means another image's
+    definition can now win (SYMBOL_BINDING_CHANGED); becoming strong is the
+    safe direction (SYMBOL_BINDING_STRENGTHENED).
+    """
+    changes: list[Change] = []
+    # Build the maps from the raw export lists (not the cached export_map
+    # property) so duck-typed metadata objects in tests keep working.
+    old_map = {e.name: e for e in (getattr(o, "exports", None) or []) if e.name}
+    new_map = {e.name: e for e in (getattr(n, "exports", None) or []) if e.name}
+    if not old_map or not new_map:
+        return []
+    for name in sorted(old_map.keys() & new_map.keys()):
+        old_weak = old_map[name].is_weak
+        new_weak = new_map[name].is_weak
+        if old_weak == new_weak:
+            continue
+        if new_weak:
+            changes.append(
+                make_change(
+                    ChangeKind.SYMBOL_BINDING_CHANGED,
+                    symbol=name,
+                    name=name,
+                    description=f"export became weak definition: {name}",
+                    old_value="strong",
+                    new_value="weak",
+                )
+            )
+        else:
+            changes.append(
+                make_change(
+                    ChangeKind.SYMBOL_BINDING_STRENGTHENED,
+                    symbol=name,
+                    name=name,
+                    description=f"weak export became strong definition: {name}",
+                    old_value="weak",
+                    new_value="strong",
+                )
+            )
     return changes
 
 

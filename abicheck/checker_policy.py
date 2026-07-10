@@ -768,6 +768,38 @@ class ChangeKind(str, Enum):
     # one root cause behind mass parameter/field width churn on 32-bit targets.
     TIME64_ABI_CHANGED = "time64_abi_changed"  # → BREAKING
 
+    # ── Coverage extension: dynamic-loader / import-surface facts ────────────
+    IMPORTED_SYMBOL_ADDED = "imported_symbol_added"  # binary gained an undefined (imported) symbol — new obligation on the consumer's link environment → RISK
+    IMPORTED_SYMBOL_REMOVED = "imported_symbol_removed"  # binary dropped an undefined (imported) symbol — one fewer external obligation → COMPATIBLE (quality)
+    INTERPRETER_CHANGED = "interpreter_changed"  # PT_INTERP program interpreter path changed → RISK
+    BIND_NOW_DISABLED = "bind_now_disabled"  # DT_BIND_NOW/DF_BIND_NOW/DF_1_NOW dropped — eager→lazy binding, unresolved symbols surface at call time instead of load time → RISK
+    ELF_ENDIANNESS_CHANGED = "elf_endianness_changed"  # EI_DATA byte order flipped (LSB ↔ MSB) → BREAKING
+    X86_ISA_BASELINE_RAISED = "x86_isa_baseline_raised"  # GNU_PROPERTY_X86_ISA_1_NEEDED gained a level (e.g. x86-64-v2 → v3) — old CPUs can no longer run the library → RISK
+    OS_DEPLOYMENT_FLOOR_RAISED = "os_deployment_floor_raised"  # minimum OS/kernel floor raised (Mach-O minos, PE subsystem version, ELF NT_GNU_ABI_TAG) → RISK
+    DYNAMIC_LOADING_FLAGS_CHANGED = "dynamic_loading_flags_changed"  # DF_1_NODELETE / DF_1_NOOPEN / DF_1_ORIGIN toggled — dlopen/dlclose contract changed → RISK
+    EXPORTED_OBJECT_ALIGNMENT_REDUCED = "exported_object_alignment_reduced"  # exported data object's address alignment dropped — copy-relocation / aligned-access hazard → RISK
+    ELF_INIT_FINI_CHANGED = "elf_init_fini_changed"  # DT_INIT/DT_FINI/DT_INIT_ARRAY/DT_FINI_ARRAY presence changed — load/unload-time code contract changed → RISK
+    ALLOCATOR_REPLACEMENT_ADDED = "allocator_replacement_added"  # library newly exports global operator new/delete — hijacks allocation for the whole process → RISK
+    ALLOCATOR_REPLACEMENT_REMOVED = "allocator_replacement_removed"  # library stopped exporting global operator new/delete — consumers relying on the replacement get the default allocator → RISK
+
+    # ── Coverage extension: PE/COFF (Windows) ────────────────────────────────
+    PE_HARDENING_WEAKENED = "pe_hardening_weakened"  # DllCharacteristics lost NX/ASLR/CFG/HIGH_ENTROPY_VA hardening bits → RISK
+    PE_HARDENING_IMPROVED = "pe_hardening_improved"  # DllCharacteristics gained hardening bits → COMPATIBLE (quality)
+    LIBRARY_VERSION_DOWNGRADED = "library_version_downgraded"  # embedded library version regressed (PE VS_FIXEDFILEINFO / Mach-O LC_ID_DYLIB current_version) → RISK
+
+    # ── Coverage extension: Mach-O (macOS) ───────────────────────────────────
+    MACHO_FILETYPE_CHANGED = "macho_filetype_changed"  # Mach-O filetype changed (e.g. MH_DYLIB → MH_BUNDLE): no longer linkable the same way → BREAKING
+    MACHO_LINKAGE_FLAGS_CHANGED = "macho_linkage_flags_changed"  # MH_TWOLEVEL / MH_WEAK_DEFINES / MH_BINDS_TO_WEAK / MH_NO_REEXPORTED_DYLIBS flipped → RISK
+    MACHO_REEXPORT_CHANGED = "macho_reexport_changed"  # LC_REEXPORT_DYLIB target repointed — same re-export slot now sourced from a different dylib → RISK
+
+    # ── Coverage extension: language-level contracts ─────────────────────────
+    FUNC_VARIADIC_ADDED = "func_variadic_added"  # function gained a C ellipsis (...) — variadic call convention differs (%al on SysV x86-64, stack on AArch64 Darwin) → BREAKING
+    FUNC_VARIADIC_REMOVED = "func_variadic_removed"  # function lost its C ellipsis (...) — callers passing extra args break → BREAKING
+    FUNC_CONTRACT_ATTRIBUTE_ADDED = "func_contract_attribute_added"  # function gained a semantic contract attribute (nonnull/noreturn/format/alloc_size/malloc/warn_unused_result/...) → RISK
+    FUNC_CONTRACT_ATTRIBUTE_REMOVED = "func_contract_attribute_removed"  # function lost a semantic contract attribute callers may rely on → RISK
+    VAR_ALIGNMENT_CHANGED = "var_alignment_changed"  # exported variable's declared alignment changed → BREAKING
+    FUNC_EXCEPTION_SPEC_CHANGED = "func_exception_spec_changed"  # dynamic exception specification (throw(...)) changed in a way not covered by the noexcept kinds → RISK
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

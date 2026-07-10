@@ -1,0 +1,302 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Coverage-extension language-level detectors and dumper extraction.
+
+Covers C-ellipsis variadic transitions, semantic contract attributes,
+calling-convention attribute flips, dynamic exception specifications,
+variable alignment, per-function vtable-index moves, the BTF/CTF
+function/typedef bridge, and the castxml/clang extraction helpers.
+"""
+from __future__ import annotations
+
+from xml.etree.ElementTree import fromstring
+
+from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.dumper_castxml import _CastxmlParser, _extract_contract_attributes
+from abicheck.dumper_clang import (
+    _clang_contract_attributes,
+    _clang_exception_spec,
+    _clang_var_alignment_bits,
+)
+from abicheck.model import AbiSnapshot, Function, Variable
+from abicheck.service import _typeinfo_functions
+from abicheck.type_metadata import FuncProto
+
+
+def _snap(functions=None, variables=None) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version="1.0",
+        functions=functions or [],
+        variables=variables or [],
+        types=[],
+        enums=[],
+        typedefs={},
+    )
+
+
+def _kinds(result) -> set[ChangeKind]:
+    return {c.kind for c in result.changes}
+
+
+def _fn(**kwargs) -> Function:
+    kwargs.setdefault("name", "log_message")
+    kwargs.setdefault("mangled", "log_message")
+    kwargs.setdefault("return_type", "void")
+    return Function(**kwargs)
+
+
+def _var(**kwargs) -> Variable:
+    kwargs.setdefault("name", "g_state")
+    kwargs.setdefault("mangled", "g_state")
+    kwargs.setdefault("type", "int")
+    return Variable(**kwargs)
+
+
+# ── Variadic transitions ─────────────────────────────────────────────────────
+
+class TestVariadic:
+    def test_added_is_breaking(self):
+        r = compare(
+            _snap([_fn(is_variadic=False)]),
+            _snap([_fn(is_variadic=True)]),
+        )
+        assert ChangeKind.FUNC_VARIADIC_ADDED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
+    def test_removed_is_breaking(self):
+        r = compare(
+            _snap([_fn(is_variadic=True)]),
+            _snap([_fn(is_variadic=False)]),
+        )
+        assert ChangeKind.FUNC_VARIADIC_REMOVED in _kinds(r)
+
+    def test_unknown_side_skipped(self):
+        r = compare(
+            _snap([_fn(is_variadic=None)]),
+            _snap([_fn(is_variadic=True)]),
+        )
+        assert ChangeKind.FUNC_VARIADIC_ADDED not in _kinds(r)
+
+
+# ── Contract attributes ──────────────────────────────────────────────────────
+
+class TestContractAttributes:
+    def test_attribute_added(self):
+        r = compare(
+            _snap([_fn(contract_attributes=[])]),
+            _snap([_fn(contract_attributes=["nonnull(1)"])]),
+        )
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED in _kinds(r)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED
+        )
+        assert "nonnull(1)" in change.description
+
+    def test_attribute_removed(self):
+        r = compare(
+            _snap([_fn(contract_attributes=["returns_nonnull"])]),
+            _snap([_fn(contract_attributes=[])]),
+        )
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED in _kinds(r)
+
+    def test_uncaptured_side_skipped(self):
+        r = compare(
+            _snap([_fn(contract_attributes=None)]),
+            _snap([_fn(contract_attributes=["noreturn"])]),
+        )
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED not in _kinds(r)
+
+    def test_cc_attribute_flip_is_calling_convention_changed(self):
+        r = compare(
+            _snap([_fn(contract_attributes=["stdcall"])]),
+            _snap([_fn(contract_attributes=["cdecl"])]),
+        )
+        kinds = _kinds(r)
+        assert ChangeKind.CALLING_CONVENTION_CHANGED in kinds
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED not in kinds
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED not in kinds
+
+    def test_regparm_value_change_is_calling_convention_changed(self):
+        r = compare(
+            _snap([_fn(contract_attributes=["regparm(2)"])]),
+            _snap([_fn(contract_attributes=["regparm(3)"])]),
+        )
+        assert ChangeKind.CALLING_CONVENTION_CHANGED in _kinds(r)
+
+
+# ── Dynamic exception specifications ─────────────────────────────────────────
+
+class TestExceptionSpec:
+    def test_spec_changed(self):
+        r = compare(
+            _snap([_fn(exception_spec="throw()")]),
+            _snap([_fn(exception_spec="")]),
+        )
+        assert ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED in _kinds(r)
+
+    def test_stable_spec_no_finding(self):
+        r = compare(
+            _snap([_fn(exception_spec="throw(int)")]),
+            _snap([_fn(exception_spec="throw(int)")]),
+        )
+        assert ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED not in _kinds(r)
+
+    def test_uncaptured_side_skipped(self):
+        r = compare(
+            _snap([_fn(exception_spec=None)]),
+            _snap([_fn(exception_spec="throw()")]),
+        )
+        assert ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED not in _kinds(r)
+
+
+# ── Variable alignment ───────────────────────────────────────────────────────
+
+class TestVariableAlignment:
+    def test_changed_is_breaking(self):
+        r = compare(
+            _snap(variables=[_var(alignment_bits=512)]),
+            _snap(variables=[_var(alignment_bits=64)]),
+        )
+        assert ChangeKind.VAR_ALIGNMENT_CHANGED in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
+    def test_uncaptured_side_skipped(self):
+        r = compare(
+            _snap(variables=[_var(alignment_bits=None)]),
+            _snap(variables=[_var(alignment_bits=64)]),
+        )
+        assert ChangeKind.VAR_ALIGNMENT_CHANGED not in _kinds(r)
+
+
+# ── vtable index moves ───────────────────────────────────────────────────────
+
+class TestVtableIndexMove:
+    def test_slot_move_reports_vtable_changed(self):
+        old = _fn(
+            name="Widget::draw", mangled="_ZN6Widget4drawEv",
+            is_virtual=True, vtable_index=2,
+        )
+        new = _fn(
+            name="Widget::draw", mangled="_ZN6Widget4drawEv",
+            is_virtual=True, vtable_index=3,
+        )
+        r = compare(_snap([old]), _snap([new]))
+        assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(r)
+
+    def test_unknown_index_skipped(self):
+        old = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=None)
+        new = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=3)
+        r = compare(_snap([old]), _snap([new]))
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in _kinds(r)
+
+
+# ── BTF/CTF function bridge ──────────────────────────────────────────────────
+
+class TestTypeinfoFunctionBridge:
+    def test_protos_become_functions(self):
+        protos = {
+            "frob": FuncProto(name="frob", return_type="int", params=[("a", "int")]),
+        }
+        funcs = _typeinfo_functions(protos)
+        assert len(funcs) == 1
+        assert funcs[0].mangled == "frob"
+        assert funcs[0].return_type == "int"
+        assert funcs[0].params[0].type == "int"
+        assert funcs[0].is_extern_c
+
+    def test_param_change_detected_through_bridge(self):
+        old = _snap(_typeinfo_functions(
+            {"frob": FuncProto(name="frob", return_type="int", params=[("a", "int")])}
+        ))
+        new = _snap(_typeinfo_functions(
+            {"frob": FuncProto(name="frob", return_type="int", params=[("a", "long")])}
+        ))
+        r = compare(old, new)
+        assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
+
+
+# ── castxml extraction ───────────────────────────────────────────────────────
+
+_CASTXML_DOC = """
+<CastXML version="1.0">
+  <Function id="_f1" name="logf" returns="_t1" mangled="logf"
+            attributes="gnu:nonnull(1) gnu:noreturn other"
+            throw="_t1 _t2">
+    <Argument name="fmt" type="_t2"/>
+    <Ellipsis/>
+  </Function>
+  <Variable id="_v1" name="g_buf" type="_t1" mangled="g_buf" align="64"/>
+  <FundamentalType id="_t1" name="int"/>
+  <FundamentalType id="_t2" name="char"/>
+</CastXML>
+"""
+
+
+class TestCastxmlExtraction:
+    def _parser(self) -> _CastxmlParser:
+        return _CastxmlParser(
+            fromstring(_CASTXML_DOC), exported_dynamic=set(), exported_static=set()
+        )
+
+    def test_variadic_and_attributes_and_throw(self):
+        funcs = self._parser().parse_functions()
+        assert len(funcs) == 1
+        fn = funcs[0]
+        assert fn.is_variadic is True
+        assert fn.contract_attributes == ["nonnull(1)", "noreturn"]
+        assert fn.exception_spec == "throw(int, char)"
+
+    def test_variable_alignment(self):
+        variables = self._parser().parse_variables()
+        assert len(variables) == 1
+        assert variables[0].alignment_bits == 64
+
+    def test_extract_contract_attributes_filters_unknown(self):
+        assert _extract_contract_attributes("noexcept final gnu:malloc") == ["malloc"]
+        assert _extract_contract_attributes("") == []
+        assert _extract_contract_attributes("stdcall") == ["stdcall"]
+
+
+# ── clang extraction helpers ─────────────────────────────────────────────────
+
+class TestClangExtraction:
+    def test_contract_attributes(self):
+        node = {
+            "inner": [
+                {"kind": "NonNullAttr"},
+                {"kind": "WarnUnusedResultAttr"},
+                {"kind": "ParmVarDecl"},
+            ]
+        }
+        assert _clang_contract_attributes(node) == ["nonnull", "warn_unused_result"]
+
+    def test_exception_spec(self):
+        assert _clang_exception_spec(" throw(int, char)") == "throw(int, char)"
+        assert _clang_exception_spec(" throw()") == "throw()"
+        assert _clang_exception_spec(" const noexcept") == ""
+
+    def test_var_alignment(self):
+        node = {
+            "inner": [
+                {
+                    "kind": "AlignedAttr",
+                    "inner": [{"kind": "ConstantExpr", "value": "64"}],
+                }
+            ]
+        }
+        assert _clang_var_alignment_bits(node) == 512
+        assert _clang_var_alignment_bits({"inner": []}) is None

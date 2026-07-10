@@ -44,6 +44,7 @@ from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from .pdb_parser import (
     CvEnumerator,
     CvMember,
+    CvOneMethod,
     CvStruct,
     PdbFile,
     TypeDatabase,
@@ -176,6 +177,7 @@ def _extract_struct_layouts(
             adv.all_struct_names.add(cv_struct.name)
             if cv_struct.is_packed:
                 adv.packed_structs.add(cv_struct.name)
+            _extract_method_calling_conventions(types, cv_struct, adv)
 
         layout = StructLayout(
             name=cv_struct.name,
@@ -187,6 +189,30 @@ def _extract_struct_layouts(
         )
 
         meta.structs[cv_struct.name] = layout
+
+
+def _extract_method_calling_conventions(
+    types: TypeDatabase, cv_struct: CvStruct, adv: AdvancedDwarfMetadata
+) -> None:
+    """Record per-method calling conventions into *adv* (PDB → DWARF bridge).
+
+    A PDB has no DWARF-style per-symbol linkage records in the streams we
+    parse, but each class fieldlist names its non-overloaded methods
+    (LF_ONEMETHOD) alongside their LF_MFUNCTION type — enough to feed
+    ``AdvancedDwarfMetadata.calling_conventions`` keyed ``Class::method`` so
+    ``CALLING_CONVENTION_CHANGED`` fires on MSVC builds too. Free functions
+    (which would need the globals symbol stream) remain a documented gap.
+    """
+    if cv_struct.field_list_ti == 0:
+        return
+    for member in types.get_fieldlist(cv_struct.field_list_ti):
+        if not isinstance(member, CvOneMethod):
+            continue
+        cc = types.function_calling_convention(member.type_ti)
+        if cc is None:
+            continue
+        key = f"{cv_struct.name}::{member.name}"
+        adv.calling_conventions.setdefault(key, types.calling_convention_name(cc))
 
 
 def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]:

@@ -567,6 +567,34 @@ def _check_func_visibility_protected(
     ]
 
 
+def _check_object_alignment_reduced(
+    sym_name: str, s_old: Any, s_new: Any
+) -> list[Change]:
+    """Detect exported data objects whose address alignment dropped.
+
+    Alignment is derived from st_value (power-of-two factor, page-capped) at
+    parse time; 0 means unknown (legacy snapshot), so both sides must carry a
+    positive value. Only data objects matter (copy relocations / aligned data
+    access); function alignment is a codegen artifact. Only the reduction
+    direction is a hazard — a stricter alignment satisfies every old consumer.
+    """
+    if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.TLS):
+        return []
+    old_align = getattr(s_old, "value_alignment", 0)
+    new_align = getattr(s_new, "value_alignment", 0)
+    if not (old_align > 0 and new_align > 0 and new_align < old_align):
+        return []
+    return [
+        make_change(
+            ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED,
+            symbol=sym_name,
+            name=sym_name,
+            old=str(old_align),
+            new=str(new_align),
+        )
+    ]
+
+
 def _diff_elf_symbol_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -580,4 +608,104 @@ def _diff_elf_symbol_pair(
     changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
     changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
     changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
+    changes.extend(_check_object_alignment_reduced(sym_name, s_old, s_new))
     return changes
+
+
+# ── Import-surface and allocator-replacement detectors (coverage extension) ──
+
+#: Itanium manglings of the *global* (non-placement, non-member) operator
+#: new/delete family: _Znw/_Zna = operator new/new[], _Zdl/_Zda = delete/
+#: delete[] (plain, aligned, nothrow, and sized variants all share these
+#: prefixes). Member operators mangle inside their class (_ZN...) and never
+#: start with these tokens.
+_ALLOCATOR_MANGLING_PREFIXES = ("_Znw", "_Zna", "_Zdl", "_Zda")
+
+
+def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Diff the undefined-symbol (import) surface of the two binaries.
+
+    A newly-imported symbol is a new obligation on the consumer's link
+    environment — if no loaded dependency provides it, the dynamic linker
+    fails. Weak imports are skipped in the added direction (they resolve to
+    null rather than failing). Requires ELF evidence on both sides so a
+    header-only or legacy baseline never reads as "imported nothing".
+    """
+    old_imports = getattr(old_elf, "imports", None) or []
+    new_imports = getattr(new_elf, "imports", None) or []
+    if not old_imports or not new_imports:
+        return []
+
+    changes: list[Change] = []
+    old_names = {i.name for i in old_imports}
+    new_names = {i.name for i in new_imports}
+    new_by_name = {i.name: i for i in new_imports}
+
+    for name in sorted(new_names - old_names):
+        imp = new_by_name[name]
+        if imp.binding == SymbolBinding.WEAK:
+            continue
+        version = getattr(imp, "version", "")
+        detail = f"@{version}" if version else ""
+        changes.append(
+            make_change(
+                ChangeKind.IMPORTED_SYMBOL_ADDED,
+                symbol=name,
+                name=name,
+                detail=detail,
+                new_value=f"{name}{detail}",
+            )
+        )
+    for name in sorted(old_names - new_names):
+        changes.append(
+            make_change(
+                ChangeKind.IMPORTED_SYMBOL_REMOVED,
+                symbol=name,
+                name=name,
+                old_value=name,
+            )
+        )
+    return changes
+
+
+def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect a library starting/stopping to export global operator new/delete.
+
+    These symbols interpose allocation for the whole process, so their
+    presence flipping is a loader-level contract change even though the
+    symbol-level diff also reports the individual adds/removes. Fires once per
+    direction at the library level.
+    """
+    old_syms = getattr(old_elf, "symbols", None) or []
+    new_syms = getattr(new_elf, "symbols", None) or []
+    if not old_syms or not new_syms:
+        return []
+    old_alloc = sorted(
+        s.name for s in old_syms if s.name.startswith(_ALLOCATOR_MANGLING_PREFIXES)
+    )
+    new_alloc = sorted(
+        s.name for s in new_syms if s.name.startswith(_ALLOCATOR_MANGLING_PREFIXES)
+    )
+    if bool(old_alloc) == bool(new_alloc):
+        return []
+    if new_alloc:
+        first = new_alloc[0]
+        suffix = f" (+{len(new_alloc) - 1} more)" if len(new_alloc) > 1 else ""
+        return [
+            make_change(
+                ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
+                symbol=first,
+                detail=f"{first}{suffix}",
+                new_value=str(len(new_alloc)),
+            )
+        ]
+    first = old_alloc[0]
+    suffix = f" (+{len(old_alloc) - 1} more)" if len(old_alloc) > 1 else ""
+    return [
+        make_change(
+            ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED,
+            symbol=first,
+            detail=f"{first}{suffix}",
+            old_value=str(len(old_alloc)),
+        )
+    ]

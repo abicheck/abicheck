@@ -171,6 +171,75 @@ def _is_noexcept_qualifier(quals: str) -> bool:
     return expr.strip() not in ("false", "0")
 
 
+#: clang attribute node kinds → normalized contract-attribute tokens (matching
+#: the castxml spellings so cross-frontend snapshots stay comparable).
+_CLANG_ATTR_TOKENS: dict[str, str] = {
+    "NoReturnAttr": "noreturn",
+    "C11NoReturnAttr": "noreturn",
+    "NonNullAttr": "nonnull",
+    "ReturnsNonNullAttr": "returns_nonnull",
+    "RestrictAttr": "malloc",
+    "FormatAttr": "format",
+    "FormatArgAttr": "format_arg",
+    "AllocSizeAttr": "alloc_size",
+    "AllocAlignAttr": "alloc_align",
+    "WarnUnusedResultAttr": "warn_unused_result",
+    "SentinelAttr": "sentinel",
+    "CDeclAttr": "cdecl",
+    "StdCallAttr": "stdcall",
+    "FastCallAttr": "fastcall",
+    "ThisCallAttr": "thiscall",
+    "VectorCallAttr": "vectorcall",
+    "MSABIAttr": "ms_abi",
+    "SysVABIAttr": "sysv_abi",
+    "RegparmAttr": "regparm",
+}
+
+
+def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
+    """Normalized contract/calling-convention attributes of a decl node."""
+    tokens: set[str] = set()
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        token = _CLANG_ATTR_TOKENS.get(str(child.get("kind", "")))
+        if token:
+            tokens.add(token)
+    return sorted(tokens)
+
+
+def _clang_exception_spec(quals: str) -> str:
+    """The dynamic exception-specification spelling from trailing qualifiers.
+
+    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
+    separately by :func:`_is_noexcept_qualifier`).
+    """
+    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
+    if m is None:
+        return ""
+    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
+    return f"throw({inner})"
+
+
+def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
+    """Explicit alignment (bits) from an AlignedAttr, when evaluable."""
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict) or child.get("kind") != "AlignedAttr":
+            continue
+        stack: list[Any] = list(child.get("inner", []) or [])
+        while stack:
+            sub = stack.pop()
+            if not isinstance(sub, dict):
+                continue
+            value = sub.get("value")
+            if isinstance(value, int):
+                return value * 8
+            if isinstance(value, str) and value.isdigit():
+                return int(value) * 8
+            stack.extend(sub.get("inner", []) or [])
+    return None
+
+
 def _function_qualifiers(qualtype: str) -> str:
     """The trailing cv/ref/exception qualifiers after a function's parameter list.
 
@@ -463,6 +532,11 @@ class _ClangAstParser:
                     ref_qualifier=ref_qualifier,
                     is_explicit=is_explicit,
                     is_hidden_friend=entry.in_friend,
+                    # clang stamps "variadic": true on FunctionDecl; the
+                    # qualtype spelling ("void (int, ...)") is the fallback.
+                    is_variadic=bool(node.get("variadic")) or "..." in qualtype,
+                    contract_attributes=_clang_contract_attributes(node),
+                    exception_spec=_clang_exception_spec(quals),
                 )
             )
         return funcs
@@ -493,6 +567,7 @@ class _ClangAstParser:
                     is_const=bool(node.get("constexpr"))
                     or bool(re.search(r"\bconst\b", type_name)),
                     source_location=self._source_location(entry),
+                    alignment_bits=_clang_var_alignment_bits(node),
                 )
             )
         return variables

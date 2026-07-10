@@ -215,6 +215,7 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
             version=s.get("version", ""),
             is_default=s.get("is_default", True),
             visibility=s.get("visibility", "default"),
+            value_alignment=s.get("value_alignment", 0),
         )
         for s in e.get("symbols", [])
     ]
@@ -260,6 +261,15 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         gnu_properties=frozenset(e.get("gnu_properties", [])),
         has_dt_relr=e.get("has_dt_relr", False),
         hash_styles=frozenset(e.get("hash_styles", [])),
+        ei_data=e.get("ei_data", ""),
+        min_kernel_version=e.get("min_kernel_version", ""),
+        # Tri-state loader-contract fields: absent key (legacy snapshot) must
+        # stay None ("not captured"), not default to a comparable value.
+        dynamic_flags=(
+            frozenset(e["dynamic_flags"]) if e.get("dynamic_flags") is not None else None
+        ),
+        has_init=e.get("has_init"),
+        has_fini=e.get("has_fini"),
     )
 
 
@@ -281,8 +291,10 @@ def _pe_from_dict(e: dict[str, Any]) -> Any:
         dll_characteristics=e.get("dll_characteristics", 0),
         exports=exports,
         imports=e.get("imports", {}),
+        delay_imports=e.get("delay_imports", {}),
         file_version=e.get("file_version", ""),
         product_version=e.get("product_version", ""),
+        subsystem_version=e.get("subsystem_version", ""),
     )
 
 
@@ -310,6 +322,7 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
         current_version=e.get("current_version", ""),
         compat_version=e.get("compat_version", ""),
         min_os_version=e.get("min_os_version", ""),
+        rpaths=e.get("rpaths", []),
     )
 
 
@@ -553,6 +566,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             # Provenance (v6) — missing on older snapshots → None / UNKNOWN.
             source_header=f.get("source_header"),
             origin=_scope_origin_or_unknown(f.get("origin")),
+            # Tri-state language-contract fields (coverage extension) —
+            # missing keys on older snapshots load as None and suppress the
+            # corresponding transition detectors.
+            is_variadic=f.get("is_variadic"),
+            contract_attributes=f.get("contract_attributes"),
+            exception_spec=f.get("exception_spec"),
         )
         for f in d.get("functions", [])
     ]
@@ -571,6 +590,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             else None,
             source_header=v.get("source_header"),
             origin=_scope_origin_or_unknown(v.get("origin")),
+            alignment_bits=v.get("alignment_bits"),
         )
         for v in d.get("variables", [])
     ]

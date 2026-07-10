@@ -507,3 +507,38 @@ Aggregate roll-up signals computed from the [API surface metrics](../concepts/ap
 |------|-------------|
 | `hidden_friend_added` | A new in-class `friend` declaration (a "hidden friend", findable only via ADL on one of its argument types) was added. Purely additive: existing code keeps compiling, no symbol disappears, and the new function only joins overload resolution at ADL call sites. The additive dual of `hidden_friend_removed`. |
 | `typedef_version_sentinel` | A removed typedef whose name encodes a version number (e.g. `png_libpng_version_1_6_46`) was recognised as a compile-time version sentinel, not real API. Such typedefs are never exported as ELF symbols and change every release by design, so their removal is not an ABI break. |
+
+### Loader Contract and Import Surface
+
+| Kind | Description |
+|------|-------------|
+| `imported_symbol_added` | The binary gained an undefined (imported) symbol — a new obligation the consumer's link environment must satisfy at load time (`COMPATIBLE_WITH_RISK`). Weak imports are exempt. On PE, per-DLL imported-function drift (including import-by-ordinal) reports the same kind. |
+| `imported_symbol_removed` | An undefined symbol is no longer required — one fewer external obligation (`COMPATIBLE`). |
+| `interpreter_changed` | The ELF program interpreter (`PT_INTERP`) path changed (`COMPATIBLE_WITH_RISK`). |
+| `bind_now_disabled` | Eager binding (`DT_BIND_NOW`/`DF_1_NOW`) was dropped with the RELRO level unchanged: unresolved symbols now fail at first call instead of load time (`COMPATIBLE_WITH_RISK`). |
+| `dynamic_loading_flags_changed` | `DF_1_NODELETE` / `DF_1_NOOPEN` / `DF_1_ORIGIN` toggled — the dlopen/dlclose contract changed (`COMPATIBLE_WITH_RISK`). |
+| `elf_init_fini_changed` | Load/unload-time code (`DT_INIT`/`DT_FINI`/init- and fini-arrays) appeared or disappeared (`COMPATIBLE_WITH_RISK`). |
+| `allocator_replacement_added` / `allocator_replacement_removed` | The library started/stopped exporting a global `operator new`/`operator delete` replacement, interposing allocation for the whole process (`COMPATIBLE_WITH_RISK`). |
+| `exported_object_alignment_reduced` | An exported data object's address alignment dropped — a copy-relocation / aligned-access hazard (`COMPATIBLE_WITH_RISK`). |
+
+### Platform Identity and Deployment Floors
+
+| Kind | Description |
+|------|-------------|
+| `elf_endianness_changed` | The ELF `EI_DATA` byte order flipped (LSB ↔ MSB) — a different binary contract entirely (`BREAKING`). |
+| `x86_isa_baseline_raised` | `GNU_PROPERTY_X86_ISA_1_NEEDED` gained a micro-architecture level (e.g. x86-64-v2 → v3): older CPUs can no longer run the library (`COMPATIBLE_WITH_RISK`). |
+| `os_deployment_floor_raised` | The minimum OS/kernel floor was raised — Mach-O `LC_BUILD_VERSION` minos, PE `MajorSubsystemVersion`, or the ELF `NT_GNU_ABI_TAG` kernel floor (`COMPATIBLE_WITH_RISK`). |
+| `pe_hardening_weakened` / `pe_hardening_improved` | PE `DllCharacteristics` exploit mitigations (DEP, ASLR, HIGH_ENTROPY_VA, Control Flow Guard) lost or gained — see [Security Hardening](../user-guide/security-hardening.md). |
+| `library_version_downgraded` | The embedded version regressed (PE `VS_FIXEDFILEINFO` or Mach-O `LC_ID_DYLIB` current_version) (`COMPATIBLE_WITH_RISK`). |
+| `macho_filetype_changed` | The Mach-O filetype changed (e.g. `MH_DYLIB` → `MH_BUNDLE`): a bundle cannot be linked against at build time (`BREAKING`). |
+| `macho_linkage_flags_changed` | Mach-O two-level-namespace / weak-definition linkage flags flipped (`COMPATIBLE_WITH_RISK`). |
+| `macho_reexport_changed` | An `LC_REEXPORT_DYLIB` re-export was repointed to a different target dylib (`COMPATIBLE_WITH_RISK`). |
+
+### Language Contracts (header tier)
+
+| Kind | Description |
+|------|-------------|
+| `func_variadic_added` / `func_variadic_removed` | A function gained or lost a trailing C ellipsis (`...`). Variadic and fixed-arity calls use different conventions on common ABIs (SysV x86-64 `%al`, Apple AArch64 stack args), so both directions are `BREAKING`. |
+| `func_contract_attribute_added` / `func_contract_attribute_removed` | A semantic contract attribute (`nonnull`, `noreturn`, `format`, `alloc_size`, `malloc`, `returns_nonnull`, `warn_unused_result`, `sentinel`, …) was gained or lost (`COMPATIBLE_WITH_RISK`). Calling-convention attribute flips (`stdcall`, `regparm`, `ms_abi`, …) report the dedicated `calling_convention_changed` kind instead. |
+| `func_exception_spec_changed` | The dynamic exception specification (`throw(...)`) changed in a way the `noexcept` kinds do not cover (`COMPATIBLE_WITH_RISK`). |
+| `var_alignment_changed` | An exported variable's declared alignment (`alignas`) changed — consumers baked the old alignment into copy relocations and aligned loads (`BREAKING`). |

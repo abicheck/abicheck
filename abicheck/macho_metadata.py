@@ -35,9 +35,12 @@ from typing import Any
 from macholib.mach_o import (  # type: ignore[import-untyped]
     CPU_TYPE_NAMES,
     LC_BUILD_VERSION,
+    LC_DYLD_INFO,
+    LC_DYLD_INFO_ONLY,
     LC_ID_DYLIB,
     LC_LOAD_DYLIB,
     LC_REEXPORT_DYLIB,
+    LC_RPATH,
     LC_SEGMENT,
     LC_SEGMENT_64,
     LC_VERSION_MIN_MACOSX,
@@ -120,6 +123,9 @@ class MachoMetadata:
     # Minimum OS version
     min_os_version: str = ""             # from LC_VERSION_MIN_MACOSX or LC_BUILD_VERSION
 
+    # Runtime search paths (LC_RPATH) — the Mach-O analogue of ELF DT_RUNPATH.
+    rpaths: list[str] = field(default_factory=list)
+
     @cached_property
     def export_map(self) -> dict[str, MachoExport]:
         """Name → MachoExport mapping (built once, cached on first access)."""
@@ -174,6 +180,21 @@ def _version_field_to_str(value: Any) -> str:
     return _version_str(int(value))
 
 
+# CPU_SUBTYPE_ARM64E (2) selects the pointer-authenticating arm64e ABI — a
+# distinct, non-interchangeable ABI from plain arm64 for dylibs. The high bits
+# of cpusubtype are capability flags (e.g. versioned-ABI markers), masked off.
+_CPU_TYPE_ARM64 = 0x0100000C
+_CPU_SUBTYPE_ARM64E = 2
+_CPU_SUBTYPE_MASK = 0x00FFFFFF
+
+
+def _cpu_slice_name(cputype: int, cpusubtype: int) -> str:
+    """Human-readable architecture name for a slice, arm64e-aware."""
+    if cputype == _CPU_TYPE_ARM64 and (cpusubtype & _CPU_SUBTYPE_MASK) == _CPU_SUBTYPE_ARM64E:
+        return "ARM64E"
+    return str(CPU_TYPE_NAMES.get(cputype, f"0x{cputype:x}"))
+
+
 def _dylib_name_from_cmd(data: bytes) -> str:
     """Extract the library name string from dylib load command data.
 
@@ -187,6 +208,128 @@ def _dylib_name_from_cmd(data: bytes) -> str:
     if end < 0:
         end = len(data)
     return data[:end].decode("utf-8", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# dyld export trie (LC_DYLD_INFO / LC_DYLD_EXPORTS_TRIE)
+# ---------------------------------------------------------------------------
+
+# linkedit_data_command holding just the export trie (modern linkers emit this
+# instead of LC_DYLD_INFO). Defined locally — older macholib lacks the name.
+_LC_DYLD_EXPORTS_TRIE = 0x80000033
+
+_EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION = 0x04
+_EXPORT_SYMBOL_FLAGS_REEXPORT = 0x08
+_EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER = 0x10
+
+_TRIE_MAX_DEPTH = 128
+
+
+def _read_uleb128(data: bytes, off: int) -> tuple[int, int]:
+    """Read a ULEB128 value; returns (value, next_offset)."""
+    result = 0
+    shift = 0
+    while off < len(data):
+        byte = data[off]
+        off += 1
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return result, off
+        shift += 7
+        if shift > 63:
+            break
+    raise ValueError("malformed ULEB128 in export trie")
+
+
+def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
+    """Walk a dyld export trie, returning ``(symbol_name, flags)`` pairs.
+
+    The classic symbol table misses trie-only facts (weak-def, re-export,
+    stub-and-resolver flags on modern binaries whose nlist entries are
+    stripped), so exports recovered here complement `_parse_macho_symbols`.
+    Malformed input raises ValueError (caught by the caller).
+    """
+    results: list[tuple[str, int]] = []
+    visited: set[int] = set()
+
+    def visit(off: int, prefix: str, depth: int) -> None:
+        if depth > _TRIE_MAX_DEPTH or off in visited or off >= len(data):
+            return
+        visited.add(off)
+        terminal_size, pos = _read_uleb128(data, off)
+        if terminal_size > 0:
+            flags, _ = _read_uleb128(data, pos)
+            results.append((prefix, flags))
+        # The terminal payload occupies exactly terminal_size bytes after the
+        # size field; the child list starts right past it.
+        pos += terminal_size
+        if pos >= len(data):
+            return
+        child_count = data[pos]
+        pos += 1
+        for _ in range(child_count):
+            end = data.find(b"\x00", pos)
+            if end < 0:
+                return
+            edge = data[pos:end].decode("utf-8", errors="replace")
+            pos = end + 1
+            child_off, pos = _read_uleb128(data, pos)
+            visit(child_off, prefix + edge, depth + 1)
+
+    visit(0, "", 0)
+    return results
+
+
+def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> None:
+    """Merge dyld-export-trie facts into *meta.exports*.
+
+    Adds trie-only exports the classic symbol table missed and upgrades the
+    weak / re-export flags of exports already seen there.
+    """
+    export_off = export_size = 0
+    for lc, cmd, _data in header.commands:
+        if lc.cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY):
+            export_off = int(getattr(cmd, "export_off", 0))
+            export_size = int(getattr(cmd, "export_size", 0))
+            break
+        if lc.cmd == _LC_DYLD_EXPORTS_TRIE:
+            export_off = int(getattr(cmd, "dataoff", 0))
+            export_size = int(getattr(cmd, "datasize", 0))
+            break
+    if not export_off or not export_size or export_size > 64 * 1024 * 1024:
+        return
+    try:
+        with open(dylib_path, "rb") as f:
+            f.seek(int(getattr(header, "offset", 0)) + export_off)
+            trie = f.read(export_size)
+        entries = _walk_export_trie(trie)
+    except (OSError, ValueError) as exc:
+        log.debug("parse_macho_metadata: export trie unreadable for %s: %s", dylib_path, exc)
+        return
+
+    by_name = {e.name: e for e in meta.exports if e.name}
+    for raw_name, flags in entries:
+        name = raw_name[1:] if raw_name.startswith("_") else raw_name
+        if not name:
+            continue
+        is_weak = bool(flags & _EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION)
+        is_reexport = bool(flags & _EXPORT_SYMBOL_FLAGS_REEXPORT)
+        existing = by_name.get(name)
+        if existing is not None:
+            if is_weak and not existing.is_weak:
+                existing.is_weak = True
+                existing.sym_type = MachoSymbolType.WEAK
+            if is_reexport:
+                existing.sym_type = MachoSymbolType.REEXPORT
+            continue
+        sym_type = (
+            MachoSymbolType.REEXPORT
+            if is_reexport
+            else MachoSymbolType.WEAK if is_weak else MachoSymbolType.EXPORTED
+        )
+        export = MachoExport(name=name, sym_type=sym_type, is_weak=is_weak)
+        meta.exports.append(export)
+        by_name[name] = export
 
 
 # ---------------------------------------------------------------------------
@@ -252,14 +395,16 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     meta = MachoMetadata()
     hdr = header.header
 
-    # Basic header info
+    # Basic header info. Slice names are arm64e-aware: arm64 vs arm64e are
+    # distinct, non-interchangeable ABIs (pointer authentication), so they
+    # must not collapse into the same "ARM64" label.
     cputype = int(hdr.cputype)
-    meta.cpu_type = CPU_TYPE_NAMES.get(cputype, f"0x{cputype:x}")
+    meta.cpu_type = _cpu_slice_name(cputype, int(getattr(hdr, "cpusubtype", 0)))
     # All architectures present (fat/universal binaries carry several). Used by
     # the arch-drift detector so adding a slice (single-arch → universal) is not
     # mistaken for an architecture change when the original slice still ships.
     meta.cpu_types = [
-        CPU_TYPE_NAMES.get(int(h.header.cputype), f"0x{int(h.header.cputype):x}")
+        _cpu_slice_name(int(h.header.cputype), int(getattr(h.header, "cpusubtype", 0)))
         for h in macho.headers
     ]
     filetype = int(hdr.filetype)
@@ -291,6 +436,11 @@ def _parse(dylib_path: Path) -> MachoMetadata:
         elif cmd_type == LC_BUILD_VERSION:
             meta.min_os_version = _version_str(int(cmd.minos))  # p_uint32
 
+        elif cmd_type == LC_RPATH:
+            path = _dylib_name_from_cmd(data)
+            if path:
+                meta.rpaths.append(path)
+
     # Build section ordinal → segment name mapping so we can distinguish
     # __TEXT (function) from __DATA (variable) symbols via nlist n_sect.
     _section_segment: dict[int, str] = {}  # 1-based ordinal → segment name
@@ -306,6 +456,9 @@ def _parse(dylib_path: Path) -> MachoMetadata:
 
     # Parse exported symbols via SymbolTable
     _parse_macho_symbols(macho, header, _section_segment, meta, dylib_path)
+
+    # Merge dyld export-trie facts (trie-only exports, weak/re-export flags).
+    _parse_export_trie(dylib_path, header, meta)
 
     return meta
 

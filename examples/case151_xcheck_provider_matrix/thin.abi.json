@@ -12,12 +12,16 @@
   "elf": {
     "abi_flags": [],
     "bind_now": false,
+    "dynamic_flags": null,
     "e_flags": 0,
+    "ei_data": "",
     "elf_class": 64,
     "gnu_properties": [],
     "has_dt_relr": false,
     "has_executable_stack": false,
+    "has_fini": null,
     "has_fortify_source": false,
+    "has_init": null,
     "has_stack_canary": false,
     "has_static_tls": false,
     "has_tls_symbols": false,
@@ -27,6 +31,7 @@
     "interpreter": "",
     "is_pie": false,
     "machine": "",
+    "min_kernel_version": "",
     "needed": [],
     "osabi": "",
     "pointer_size": 8,
@@ -42,6 +47,7 @@
         "origin_lib": null,
         "size": 0,
         "sym_type": "func",
+        "value_alignment": 0,
         "version": "",
         "visibility": "default"
       }
@@ -55,8 +61,10 @@
   "functions": [
     {
       "access": "public",
+      "contract_attributes": null,
       "deleted_from_dwarf": false,
       "elf_visibility": null,
+      "exception_spec": null,
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
@@ -66,6 +74,7 @@
       "is_noexcept": false,
       "is_pure_virtual": false,
       "is_static": false,
+      "is_variadic": null,
       "is_virtual": false,
       "is_volatile": false,
       "mangled": "_Z11make_widgetv",

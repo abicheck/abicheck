@@ -75,6 +75,11 @@ class ElfSymbol:
     is_default: bool = True
     visibility: str = "default"  # default / hidden / protected / internal
     origin_lib: str | None = None  # Detected source library, None = native
+    # Power-of-two address alignment derived from st_value (capped at the page
+    # size, 4096). Segments load page-aligned, so alignment up to a page is
+    # preserved at runtime. 0 = unknown (st_value 0, or a legacy snapshot).
+    # Used to detect exported-data alignment reductions (copy-reloc hazard).
+    value_alignment: int = 0
 
 
 @dataclass
@@ -118,6 +123,20 @@ class ElfMetadata:
 
     # ELF interpreter (PT_INTERP, e.g. /lib64/ld-linux-x86-64.so.2)
     interpreter: str = ""
+    # ELF data encoding from EI_DATA: "LSB" (little) / "MSB" (big).
+    # "" = not captured (legacy snapshot) — detectors must skip, not compare.
+    ei_data: str = ""
+    # Minimum kernel version from the NT_GNU_ABI_TAG note (.note.ABI-tag),
+    # e.g. "3.2.0". "" = note absent or not captured.
+    min_kernel_version: str = ""
+    # dlopen/dlclose-contract flags decoded from DT_FLAGS/DT_FLAGS_1:
+    # subset of {"NODELETE", "NOOPEN", "ORIGIN"}. None = not captured
+    # (legacy snapshot); frozenset() = captured, none set.
+    dynamic_flags: frozenset[str] | None = None
+    # Load/unload-time code presence (DT_INIT/DT_INIT_ARRAY and
+    # DT_FINI/DT_FINI_ARRAY). None = not captured (legacy snapshot).
+    has_init: bool | None = None
+    has_fini: bool | None = None
 
     # PT_GNU_STACK: True when the ELF has an executable stack (RWE flags).
     # This is a security bad practice (disables NX protection).
@@ -267,6 +286,7 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     meta.pointer_size = _read_pointer_size(elf, so_path)
     _read_identity(elf, meta, so_path)
     _parse_gnu_property(elf, meta, so_path)
+    _parse_abi_tag(elf, meta, so_path)
     has_relro_segment, is_et_dyn = _parse_segments(elf, meta, so_path)
 
     ver_sym_section, dynsym_section, ver_index_map = _parse_all_sections(elf, meta, so_path)
@@ -348,6 +368,7 @@ def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         meta.osabi = elf["e_ident"]["EI_OSABI"]
         meta.e_flags = int(elf["e_flags"])
         meta.abi_flags = _decode_abi_flags(meta.machine, meta.e_flags)
+        meta.ei_data = "LSB" if elf.little_endian else "MSB"
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read ELF identity from %s: %s", so_path, exc)
 
@@ -363,6 +384,15 @@ _GNU_PROPERTY_X86_FEATURE_1_SHSTK = 0x2
 _GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xC0000000
 _GNU_PROPERTY_AARCH64_FEATURE_1_BTI = 0x1
 _GNU_PROPERTY_AARCH64_FEATURE_1_PAC = 0x2
+# Required micro-architecture level (glibc-hwcaps builds, -march=x86-64-vN).
+# A raised level means older CPUs can no longer run the library at all.
+_GNU_PROPERTY_X86_ISA_1_NEEDED = 0xC0008002
+_X86_ISA_1_LEVEL_TOKENS: tuple[tuple[int, str], ...] = (
+    (0x1, "x86-64-baseline"),
+    (0x2, "x86-64-v2"),
+    (0x4, "x86-64-v3"),
+    (0x8, "x86-64-v4"),
+)
 
 
 def _decode_gnu_property_desc(desc: bytes, little_endian: bool, align: int = 8) -> frozenset[str]:
@@ -396,9 +426,58 @@ def _decode_gnu_property_desc(desc: bytes, little_endian: bool, align: int = 8) 
                 tokens.add("BTI")
             if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_PAC:
                 tokens.add("PAC")
+        elif pr_type == _GNU_PROPERTY_X86_ISA_1_NEEDED and pr_datasz >= 4:
+            (bits,) = struct.unpack_from(endian + "I", data, 0)
+            for bit, token in _X86_ISA_1_LEVEL_TOKENS:
+                if bits & bit:
+                    tokens.add(token)
         # Advance past pr_data, padded up to the class alignment.
         off += (pr_datasz + align - 1) & ~(align - 1)
     return frozenset(tokens)
+
+
+# NT_GNU_ABI_TAG (n_type 1, name "GNU"): 4 words — OS id (0 = Linux) followed
+# by the minimum required kernel version (major, minor, subminor).
+_NT_GNU_ABI_TAG_NAMES = frozenset({1, "NT_GNU_ABI_TAG"})
+_ELF_OSABI_TAG_LINUX = 0
+
+
+def _decode_abi_tag_desc(desc: bytes, little_endian: bool) -> str:
+    """Decode an NT_GNU_ABI_TAG description into a kernel-floor string.
+
+    Returns ``"major.minor.subminor"`` for a Linux tag, ``""`` for a non-Linux
+    OS id or a malformed description.
+    """
+    if len(desc) < 16:
+        return ""
+    endian = "<" if little_endian else ">"
+    os_id, major, minor, subminor = struct.unpack_from(endian + "IIII", desc, 0)
+    if os_id != _ELF_OSABI_TAG_LINUX:
+        return ""
+    return f"{major}.{minor}.{subminor}"
+
+
+def _parse_abi_tag(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
+    """Read the minimum-kernel floor from the .note.ABI-tag section."""
+    try:
+        section = elf.get_section_by_name(".note.ABI-tag")
+        if section is None or not hasattr(section, "iter_notes"):
+            return
+        for note in section.iter_notes():
+            if note.get("n_type") not in _NT_GNU_ABI_TAG_NAMES:
+                continue
+            if note.get("n_name") not in (None, "GNU"):
+                continue
+            desc = note.get("n_descdata") or note.get("n_desc")
+            if isinstance(desc, str):
+                desc = desc.encode("latin-1", "replace")
+            if isinstance(desc, (bytes, bytearray)):
+                floor = _decode_abi_tag_desc(bytes(desc), elf.little_endian)
+                if floor:
+                    meta.min_kernel_version = floor
+                    return
+    except Exception as exc:  # noqa: BLE001
+        log.warning("parse_elf_metadata: failed to read .note.ABI-tag from %s: %s", so_path, exc)
 
 
 def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
@@ -702,13 +781,30 @@ def _postprocess_metadata(
 
 # Dynamic-flag bit constants (elf.h).
 _DT_RELR = 36             # DT_RELR (packed relative relocations)
+_DF_ORIGIN = 0x1          # DT_FLAGS
 _DF_BIND_NOW = 0x8        # DT_FLAGS
 _DF_STATIC_TLS = 0x10     # DT_FLAGS
 _DF_1_NOW = 0x1           # DT_FLAGS_1
+_DF_1_NODELETE = 0x8      # DT_FLAGS_1
+_DF_1_NOOPEN = 0x10       # DT_FLAGS_1
+_DF_1_ORIGIN = 0x80       # DT_FLAGS_1
 _DF_1_PIE = 0x08000000    # DT_FLAGS_1
+
+# Dynamic tags that mark load/unload-time code. The *SZ tags are checked too:
+# lld emits DT_INIT_ARRAY even when empty, so a zero size must not count.
+_INIT_TAGS = frozenset({"DT_INIT", "DT_PREINIT_ARRAY"})
+_FINI_TAGS = frozenset({"DT_FINI"})
 
 
 def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
+    # A dynamic section exists — the loader-contract fields below are now
+    # *captured* (tri-state None → concrete), so detectors may compare them.
+    dyn_flags: set[str] = set(meta.dynamic_flags or ())
+    meta.has_init = bool(meta.has_init)
+    meta.has_fini = bool(meta.has_fini)
+    init_array_sz: int | None = None  # None = no DT_INIT_ARRAYSZ tag seen
+    fini_array_sz: int | None = None
+    has_init_array = has_fini_array = False
     for tag in section.iter_tags():
         d_tag = tag.entry.d_tag
         if d_tag == "DT_SONAME":
@@ -721,21 +817,46 @@ def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
             meta.runpath = tag.runpath
         elif d_tag == "DT_BIND_NOW":
             meta.bind_now = True
+        elif d_tag in _INIT_TAGS:
+            meta.has_init = True
+        elif d_tag in _FINI_TAGS:
+            meta.has_fini = True
+        elif d_tag == "DT_INIT_ARRAY":
+            has_init_array = True
+        elif d_tag == "DT_FINI_ARRAY":
+            has_fini_array = True
+        elif d_tag == "DT_INIT_ARRAYSZ":
+            init_array_sz = int(tag.entry.d_val)
+        elif d_tag == "DT_FINI_ARRAYSZ":
+            fini_array_sz = int(tag.entry.d_val)
         elif d_tag == "DT_FLAGS":
             if tag.entry.d_val & _DF_BIND_NOW:
                 meta.bind_now = True
             if tag.entry.d_val & _DF_STATIC_TLS:
                 meta.has_static_tls = True
+            if tag.entry.d_val & _DF_ORIGIN:
+                dyn_flags.add("ORIGIN")
         elif d_tag == "DT_FLAGS_1":
             if tag.entry.d_val & _DF_1_NOW:
                 meta.bind_now = True
             if tag.entry.d_val & _DF_1_PIE:
                 # Tentative; gated on ET_DYN by the caller.
                 meta.is_pie = True
+            if tag.entry.d_val & _DF_1_NODELETE:
+                dyn_flags.add("NODELETE")
+            if tag.entry.d_val & _DF_1_NOOPEN:
+                dyn_flags.add("NOOPEN")
+            if tag.entry.d_val & _DF_1_ORIGIN:
+                dyn_flags.add("ORIGIN")
         elif d_tag in ("DT_RELR", _DT_RELR):
             # Packed relative relocations. pyelftools spells known tags as
             # strings; an older release may pass the raw numeric through.
             meta.has_dt_relr = True
+    if has_init_array and (init_array_sz is None or init_array_sz > 0):
+        meta.has_init = True
+    if has_fini_array and (fini_array_sz is None or fini_array_sz > 0):
+        meta.has_fini = True
+    meta.dynamic_flags = frozenset(dyn_flags)
 
 
 def _parse_version_def(section: GNUVerDefSection, meta: ElfMetadata) -> None:
@@ -949,6 +1070,22 @@ def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
     return None  # likely native to this library
 
 
+# Alignment derived from a symbol address is only meaningful up to the page
+# size — PT_LOAD segments map page-aligned, so intra-page alignment survives
+# relocation while anything larger is a load-address accident.
+_PAGE_ALIGNMENT_CAP = 4096
+
+
+def _value_alignment(st_value: int) -> int:
+    """Power-of-two alignment of *st_value*, capped at the page size.
+
+    0 means unknown (st_value of 0 carries no alignment information).
+    """
+    if st_value <= 0:
+        return 0
+    return min(st_value & -st_value, _PAGE_ALIGNMENT_CAP)
+
+
 def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
     for sym in section.iter_symbols():
         binding_str = sym.entry.st_info.bind
@@ -1006,6 +1143,7 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
             is_default=True,
             visibility=vis_str.replace("STV_", "").lower(),
             origin_lib=_guess_symbol_origin(name, meta.needed),
+            value_alignment=_value_alignment(int(sym.entry.st_value)),
         ))
 
 

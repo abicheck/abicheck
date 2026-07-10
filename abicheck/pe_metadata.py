@@ -62,10 +62,17 @@ class PeMetadata:
     # Imports and exports
     exports: list[PeExport] = field(default_factory=list)
     imports: dict[str, list[str]] = field(default_factory=dict)  # dll_name → [func_names]
+    # Delay-loaded imports (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT): resolved on
+    # first call rather than at load time, so a missing DLL fails late.
+    delay_imports: dict[str, list[str]] = field(default_factory=dict)
 
     # Version resource (VS_FIXEDFILEINFO)
     file_version: str = ""      # e.g. "10.0.19041.1"
     product_version: str = ""   # e.g. "10.0.19041.1"
+
+    # Minimum OS floor: OPTIONAL_HEADER.MajorSubsystemVersion.MinorSubsystemVersion
+    # (e.g. "6.1" = Windows 7). "" = not captured (legacy snapshot).
+    subsystem_version: str = ""
 
     @cached_property
     def export_map(self) -> dict[str, PeExport]:
@@ -128,9 +135,14 @@ def _parse(dll_path: Path) -> PeMetadata:
     try:
         pe.parse_data_directories(
             directories=[
-                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
-                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
-                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"],
+                pefile.DIRECTORY_ENTRY[key]
+                for key in (
+                    "IMAGE_DIRECTORY_ENTRY_EXPORT",
+                    "IMAGE_DIRECTORY_ENTRY_IMPORT",
+                    "IMAGE_DIRECTORY_ENTRY_RESOURCE",
+                    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT",
+                )
+                if key in pefile.DIRECTORY_ENTRY
             ]
         )
 
@@ -143,6 +155,10 @@ def _parse(dll_path: Path) -> PeMetadata:
         meta.characteristics = pe.FILE_HEADER.Characteristics
         if hasattr(pe, "OPTIONAL_HEADER"):
             meta.dll_characteristics = getattr(pe.OPTIONAL_HEADER, "DllCharacteristics", 0)
+            major = getattr(pe.OPTIONAL_HEADER, "MajorSubsystemVersion", None)
+            minor = getattr(pe.OPTIONAL_HEADER, "MinorSubsystemVersion", None)
+            if major is not None and minor is not None:
+                meta.subsystem_version = f"{major}.{minor}"
 
         # Exports
         if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
@@ -174,6 +190,18 @@ def _parse(dll_path: Path) -> PeMetadata:
                         # Ordinal-only import (name=None, import_by_ordinal=True)
                         funcs.append(f"ordinal:{imp.ordinal}")
                 meta.imports[dll_name] = funcs
+
+        # Delay-load imports (resolved lazily at first call, not at load time)
+        if hasattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT"):
+            for entry in pe.DIRECTORY_ENTRY_DELAY_IMPORT:
+                dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
+                funcs = []
+                for imp in entry.imports:
+                    if imp.name:
+                        funcs.append(imp.name.decode("utf-8", errors="replace"))
+                    elif getattr(imp, "import_by_ordinal", False):
+                        funcs.append(f"ordinal:{imp.ordinal}")
+                meta.delay_imports[dll_name] = funcs
 
         # Version resource
         if hasattr(pe, "VS_FIXEDFILEINFO"):

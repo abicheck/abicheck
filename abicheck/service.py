@@ -28,7 +28,7 @@ import hashlib
 import logging
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, InputSpec
 from .checker import compare
@@ -118,6 +118,26 @@ def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
     return AbiSnapshot(library=path.name, version=version, kabi=kabi)
 
 
+def _typeinfo_functions(func_protos: dict[str, Any]) -> list[Function]:
+    """Convert BTF/CTF function prototypes into snapshot Function records.
+
+    BTF/CTF names are C-linkage; the plain name doubles as the symbol key
+    (matching the C-function convention used by the header dumpers).
+    """
+    from .model import Param
+
+    return [
+        Function(
+            name=name,
+            mangled=name,
+            return_type=proto.return_type,
+            params=[Param(name=p_name, type=p_type) for p_name, p_type in proto.params],
+            is_extern_c=True,
+        )
+        for name, proto in sorted(func_protos.items())
+    ]
+
+
 def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     """Parse a bare BTF or CTF blob into a snapshot, or return None.
 
@@ -156,7 +176,14 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
                 _logger.warning("raw BTF blob %s has no type records; ignoring", path)
                 return None
             return AbiSnapshot(
-                library=path.name, version=version, dwarf=btf.to_dwarf_metadata()
+                library=path.name,
+                version=version,
+                dwarf=btf.to_dwarf_metadata(),
+                # Bridge the full BTF surface: prototypes feed the function
+                # detectors (FUNC_PARAMS_CHANGED, ...) and typedef targets feed
+                # TYPEDEF_BASE_CHANGED — previously dropped at this boundary.
+                functions=_typeinfo_functions(btf.func_protos),
+                typedefs=dict(btf.typedefs),
             )
         if magic_le == CTF_MAGIC:
             ctf = parse_ctf_from_bytes(data)
@@ -164,7 +191,11 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
                 _logger.warning("raw CTF blob %s has no type records; ignoring", path)
                 return None
             return AbiSnapshot(
-                library=path.name, version=version, dwarf=ctf.to_dwarf_metadata()
+                library=path.name,
+                version=version,
+                dwarf=ctf.to_dwarf_metadata(),
+                functions=_typeinfo_functions(ctf.func_protos),
+                typedefs=dict(ctf.typedefs),
             )
     except (ValueError, OSError) as exc:
         _logger.warning("failed to parse raw type-info blob %s: %s", path, exc)
