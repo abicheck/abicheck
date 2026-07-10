@@ -98,7 +98,7 @@ cheap tier for a fast CI gate.
 
 The scan-depth table is scoped to the comparable v1/v2 shared-library targets.
 That scope is complete: **141/141 targets scanned at every pinned depth**. The
-full catalog has 162 cases, but audit, cross-source, bundle, BTF, and snapshot
+full catalog is larger, but audit, cross-source, bundle, BTF, and snapshot
 cases run through their dedicated proof lanes rather than this compare-style
 scan matrix. `Eval targets` now covers that whole comparable-target scope: the
 `NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes, and the

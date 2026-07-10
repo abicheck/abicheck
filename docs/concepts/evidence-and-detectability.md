@@ -77,7 +77,7 @@ per-library expected verdicts.
 | `source` | 141 | 141 | 100.0% | 0 | 0 | Highest recall; source-smoke proofs cover consumer-only API hazards. |
 | `full` | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
 
-The full 162-case catalog is covered by multiple proof lanes. This table is only
+The full example catalog is covered by multiple proof lanes. This table is only
 the compare-style scan-depth lane, so its compare-style scope is complete at 141/141.
 
 Across the full staircase, adding evidence drives **both** error axes down — it

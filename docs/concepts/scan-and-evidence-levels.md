@@ -231,7 +231,7 @@ _See also: [Source-Scan Depth (user guide)](../user-guide/scan-levels.md) ·
 
 The scan-depth matrix is scoped to comparable v1/v2 shared-library targets. It
 scans that scope completely: **141/141 targets at every pinned depth**. The full
-162-case catalog includes audit, cross-source, bundle, BTF, and snapshot cases
+example catalog includes audit, cross-source, bundle, BTF, and snapshot cases
 that are validated by their dedicated lanes, not by this compare-style matrix.
 
 | Depth | Capability status | Comparable targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | Recommended use |
