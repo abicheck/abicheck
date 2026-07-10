@@ -449,6 +449,9 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
         ("_ZGVZN3fmt3v107formatterISt6localeEE", "{fmt} (vendored third-party)"),
         ("_ZN5boost6system10error_codeC1Ev", "Boost (vendored third-party)"),
         ("_ZN4absl4TimeEv", "Abseil (vendored third-party)"),
+        # CV-/ref-qualified member exports keep their namespace owner (Codex review).
+        ("_ZNK3fmt9formatterEv", "{fmt} (vendored third-party)"),
+        ("_ZNKO5boost3barEv", "Boost (vendored third-party)"),
         # thunks: the numeric call-offset before the operand must be peeled so the
         # dependency owner is still read (Codex review).
         ("_ZThn16_N3fmt3v106detail5errorE", "{fmt} (vendored third-party)"),
@@ -493,6 +496,20 @@ def test_external_dependency_origin_owner_based(symbol, expected):
         ),
         # neither C++ runtime linked -> fall back to the libstdc++ default.
         ("_ZGVZNSt3_V216generic_categoryEvE7c", ["libz.so.1"], "libstdc++.so.6"),
+        # Mach-O libc++ names the actual loaded dylib, not a hard-coded ELF soname.
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["/usr/lib/libc++.1.dylib"],
+            "libc++.1.dylib",
+        ),
+        # a libc++ marker skips a non-runtime dependency before matching the dylib.
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["libz.so.1", "/usr/lib/libc++.1.dylib"],
+            "libc++.1.dylib",
+        ),
+        # a libc++ marker with no dependency list falls back to the canonical soname.
+        ("_ZGVZNSt3__116generic_categoryEvE3loc", [], "libc++.so.1"),
         # covariant thunk with h/v-tagged call-offsets still resolves its owner.
         ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
     ],
@@ -505,6 +522,24 @@ def test_external_dependency_origin_runtime_and_covariant_thunk(
     assert _external_dependency_origin(symbol, needed) == expected
 
 
+def test_linked_library_names_across_platforms():
+    # The linked-library list is gathered from whichever binary format the snapshot
+    # carries (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE imports) so the C++-runtime
+    # picker can name the real dependency on each platform.
+    from abicheck.buildsource.crosscheck import _linked_library_names
+
+    elf_snap = _snap(elf=ElfMetadata(symbols=[], needed=["libstdc++.so.6"]))
+    assert _linked_library_names(elf_snap) == ["libstdc++.so.6"]
+
+    macho_snap = _snap(
+        macho=MachoMetadata(exports=[], dependent_libs=["/usr/lib/libc++.1.dylib"])
+    )
+    assert _linked_library_names(macho_snap) == ["/usr/lib/libc++.1.dylib"]
+
+    pe_snap = _snap(pe=PeMetadata(exports=[], imports={"msvcp140.dll": ["?x@@"]}))
+    assert _linked_library_names(pe_snap) == ["msvcp140.dll"]
+
+
 @pytest.mark.parametrize(
     "symbol, expected",
     [
@@ -515,6 +550,13 @@ def test_external_dependency_origin_runtime_and_covariant_thunk(
         ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
         ("_Z9transformIdEv", "template_instantiation"),  # un-nested template fn
         ("_ZNK3lib9transformIdEEv", "template_instantiation"),  # const template method
+        # a member of an enclosing class-template specialization is a template
+        # instantiation even though the final component isn't templated (Codex).
+        ("_ZN3lib3BoxIiE3barEv", "template_instantiation"),
+        ("_ZNK3lib3BoxIiE3barEv", "template_instantiation"),
+        # nested template arguments (Box<vector<int>>) keep the depth bookkeeping
+        # correct — still one template instantiation.
+        ("_ZN3lib3BoxISt6vectorIiEEE3barEv", "template_instantiation"),
         # an ``I`` *inside* an identifier is not a template — must not be
         # misclassified (Codex review).
         ("_ZL4mainv", "undeclared_export"),  # un-nested, no leading length digit

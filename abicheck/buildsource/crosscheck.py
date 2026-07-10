@@ -277,9 +277,11 @@ def _check_exported_not_public(
             if d.origin == ScopeOrigin.PUBLIC_HEADER:
                 public_syms.add(sym)
 
-    # DT_NEEDED list feeds the external-dependency origin finders (a leaked
-    # libstdc++ symbol names the libstdc++ the binary actually links).
-    needed_libs = list(getattr(snapshot.elf, "needed", []) or [])
+    # The binary's linked-library list (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE
+    # imports) feeds the external-dependency origin finders, so a leaked C++-runtime
+    # symbol names the runtime the binary actually links (e.g. the ``libc++.1.dylib``
+    # dylib on macOS rather than a hard-coded ELF soname).
+    needed_libs = _linked_library_names(snapshot)
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
@@ -1372,6 +1374,12 @@ _ARTIFACT_OPERAND_PREFIXES = (
 #: to the artifact exemption (Codex review).
 _THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:[hv]?n?\d+_)+")
 
+#: Itanium nested-name CV-qualifiers (``r`` restrict / ``V`` volatile / ``K`` const)
+#: and ref-qualifiers (``R`` ``&`` / ``O`` ``&&``) that sit between the ``N`` intro
+#: and the first name component. Skipped before reading the owner so a const/ref
+#: member export (``_ZNK3fmt…``) still resolves its namespace (Codex review).
+_NESTED_QUALIFIERS_RE = re.compile(r"^[rVK]*[RO]?")
+
 
 def _encoding_after_prefixes(symbol: str) -> str:
     """Strip ``_Z`` and any vtable/typeinfo/guard-variable/thunk prefix.
@@ -1405,7 +1413,11 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
         return None
     rest = _encoding_after_prefixes(symbol)
     if rest.startswith("N"):
-        rest = rest[1:]  # enter the nested name; its head is the owner namespace
+        # Enter the nested name and skip any leading CV-/ref-qualifiers
+        # (``r``/``V``/``K`` then ``R``/``O``) so a const member export like
+        # ``_ZNK3fmt…`` still reads ``fmt`` as its owner (Codex review). None of
+        # those letters can begin a length-prefixed name or an ``St`` substitution.
+        rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
     elif not rest.startswith(_STD_SUBSTITUTIONS):
         return None  # un-nested top-level name — no namespace owner
     if rest.startswith(_STD_SUBSTITUTIONS):
@@ -1446,17 +1458,42 @@ def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | No
     return _VENDORED_OWNER_NAMESPACES.get(owner)
 
 
+def _linked_library_names(snapshot: AbiSnapshot) -> list[str]:
+    """The binary's linked-library names across ELF / Mach-O / PE.
+
+    ELF ``DT_NEEDED``, Mach-O ``LC_LOAD_DYLIB`` (``dependent_libs``), and PE import
+    DLL names — so the C++-runtime origin picker can name the dependency the binary
+    actually links (a ``libc++.1.dylib`` dylib on macOS, not a hard-coded ELF
+    soname; Codex review). Best-effort: an absent table contributes nothing.
+    """
+    names: list[str] = []
+    if snapshot.elf is not None:
+        names.extend(getattr(snapshot.elf, "needed", []) or [])
+    if snapshot.macho is not None:
+        names.extend(getattr(snapshot.macho, "dependent_libs", []) or [])
+        names.extend(getattr(snapshot.macho, "reexported_libs", []) or [])
+    if snapshot.pe is not None:
+        names.extend((getattr(snapshot.pe, "imports", {}) or {}).keys())
+    return names
+
+
 def _cxx_runtime_lib(symbol: str, needed_libs: list[str]) -> str:
     """Which C++ runtime a leaked ``std`` symbol belongs to (libc++ vs libstdc++).
 
     libc++ mangles ``std`` through its ``std::__1`` inline namespace (``…St3__1…``);
-    libstdc++ does not. When the marker is absent, prefer whichever runtime the
-    binary actually links (``DT_NEEDED``) so a libc++ build is not mislabelled as
-    libstdc++ (Codex review), defaulting to libstdc++ only when neither is linked.
+    libstdc++ does not. Prefer whichever runtime the binary actually links (from the
+    platform's linked-library list) — so a macOS build names its real
+    ``libc++.1.dylib`` dylib and a libc++ ELF build is not mislabelled libstdc++
+    (Codex review) — falling back to a canonical soname only when the dependency
+    list does not carry a match.
     """
-    if "St3__1" in symbol:
-        return "libc++.so.1"
+    libcxx_marker = "St3__1" in symbol
     needed_bases = [lib.rsplit("/", 1)[-1] for lib in needed_libs]
+    if libcxx_marker:
+        for base in needed_bases:
+            if base.startswith("libc++"):
+                return base
+        return "libc++.so.1"
     for base in needed_bases:
         if base.startswith("libc++"):
             return base
@@ -1499,9 +1536,10 @@ def _has_template_args(symbol: str) -> bool:
     Scans only the encoded entity **name**, never the function signature's parameter
     encodings: a plain ``foo(std::vector<int>)`` (``_ZN3lib3fooESt6vectorIiSaIiEE``)
     is *not* a template instantiation even though a parameter type carries ``I…E``
-    (Codex review). For a nested name the entity is a template iff the ``E`` that
-    closes the nested name (at template-depth 0) is immediately preceded by a
-    template-args close — i.e. the final name component carries ``…I…E``. An ``I``
+    (Codex review). For a nested name the entity is a template iff **any** of its
+    components carries template arguments — including an enclosing class-template
+    specialization whose member is exported (``lib::Box<int>::bar()`` =
+    ``_ZN3lib3BoxIiE3barEv``), not only the final component (Codex review). An ``I``
     inside an ordinary identifier (``InitEngine``) is never a template opener.
     """
     if not symbol.startswith("_Z"):
@@ -1509,27 +1547,30 @@ def _has_template_args(symbol: str) -> bool:
     rest = _encoding_after_prefixes(symbol)
     if rest.startswith("N"):
         # Walk the nested name tracking template-arg depth; the entity name ends at
-        # the first depth-0 ``E`` (parameters follow it and must not be scanned).
-        i, depth, prev = 1, 0, ""
+        # the first depth-0 ``E`` (parameters follow it and must not be scanned). A
+        # template-args opener (``I`` at depth 0) on *any* component makes the entity
+        # a template instantiation.
+        i, depth, saw_template = 1, 0, False
         while i < len(rest):
             c = rest[i]
             if c == "I":
+                if depth == 0:
+                    saw_template = True
                 depth += 1
-                prev, i = c, i + 1
+                i += 1
             elif c == "E":
                 if depth == 0:
-                    return prev == "E"  # final component ended in a template-args E
+                    return saw_template  # depth-0 ``E`` closes the nested name
                 depth -= 1
-                prev, i = c, i + 1
+                i += 1
             elif c.isdigit():
                 j = i
                 while j < len(rest) and rest[j].isdigit():
                     j += 1
                 i = j + int(rest[i:j])  # skip the source-name characters
-                prev = rest[i - 1] if 0 < i <= len(rest) else ""
             else:
-                prev, i = c, i + 1
-        return False
+                i += 1
+        return saw_template
     # Un-nested ``_Z<len><name>…``: a template iff the single name is followed by an
     # ``I`` template-args opener (``_Z9transformIdEv``); the tail is the signature.
     m = re.match(r"(\d+)", rest)
