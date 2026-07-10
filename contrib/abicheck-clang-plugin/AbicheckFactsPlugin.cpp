@@ -1483,7 +1483,6 @@ public:
   }
 
 private:
-
   void emitType(const TagDecl *td, const std::string &name,
                 const std::string &kind) {
     // Anonymous records/enums have an empty qualified name; clang.py only treats
