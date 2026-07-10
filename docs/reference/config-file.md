@@ -105,7 +105,7 @@ Per-category levels override the preset. When any severity value is in effect,
 ### `scope:`
 
 Public-surface scoping — the main false-positive control. See
-[API-surface intelligence](../concepts/api-surface-intelligence.md).
+[API-surface intelligence](../user-guide/api-surface-intelligence.md).
 
 | Sub-key | Type | Default (effective) | Purpose |
 |---------|------|---------------------|---------|

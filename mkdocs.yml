@@ -58,7 +58,7 @@ nav:
       - Plugin Systems: user-guide/plugin-systems.md
       - POST Python Manifests: user-guide/post-python.md
       - Build Evidence Setup: user-guide/build-evidence-setup.md
-      - API Surface Intelligence: concepts/api-surface-intelligence.md
+      - API Surface Intelligence: user-guide/api-surface-intelligence.md
       - Kernel & eBPF (BTF): user-guide/kernel-btf.md
       - Python Extensions (abi3): user-guide/python-extensions.md
       - Security Hardening: user-guide/security-hardening.md
