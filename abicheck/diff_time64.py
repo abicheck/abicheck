@@ -86,11 +86,14 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
 
 
 def _public_surface_type_text(snap: AbiSnapshot) -> str:
-    """Concatenated type spellings of the snapshot's public surface.
+    """Concatenated type spellings of the snapshot's *reachable* public surface.
 
-    Public function returns/parameters, public variables, and record fields —
-    the places a resized ``time_t``/``off_t`` typedef must appear in for the
-    flip to affect anyone. Used as a reference oracle only (word search), not
+    Seeded from public function returns/parameters and public variables, then
+    expanded through record types transitively reachable by name from that
+    seed (a struct is in the surface only when a public signature — or an
+    already-reachable record's field — spells its name). A private struct the
+    public API never references stays out, so its ``time_t`` field cannot
+    drive the roll-up (Codex review #510). Word-search oracle only, not
     parsed.
     """
     parts: list[str] = []
@@ -103,9 +106,22 @@ def _public_surface_type_text(snap: AbiSnapshot) -> str:
         if getattr(var, "visibility", Visibility.PUBLIC) is not Visibility.PUBLIC:
             continue
         parts.append(var.type or "")
-    for rec in snap.types:
-        parts.extend(getattr(fld, "type", "") or "" for fld in rec.fields)
-    return " | ".join(parts)
+    text = " | ".join(parts)
+
+    # Expand through name-reachable records to a fixpoint. Each record is
+    # folded in at most once, so this is O(records²) word searches at worst.
+    remaining = {rec.name: rec for rec in snap.types if rec.name}
+    changed = True
+    while changed and remaining:
+        changed = False
+        for name in list(remaining):
+            if re.search(rf"\b{re.escape(name)}\b", text):
+                rec = remaining.pop(name)
+                text += " | " + " | ".join(
+                    getattr(fld, "type", "") or "" for fld in rec.fields
+                )
+                changed = True
+    return text
 
 
 @registry.detector("time64_abi")

@@ -204,10 +204,15 @@ class EnvironmentMatrix:
                     f"with the intended digits."
                 )
             floor = str(value)
-            if not any(part.isdigit() for part in floor.replace(".", " ").split()):
+            # Every dot-separated component must be purely numeric: the floor
+            # contract parses with int() per component, so a "2.28-1" or "2.x"
+            # would silently truncate to (2,) and flip verdicts. Reject
+            # malformed text here instead (Codex review #510).
+            components = floor.split(".")
+            if not components or not all(p.isdigit() for p in components):
                 raise ValueError(
                     f"'runtime_floors.{key}' must be a dotted numeric version "
-                    f"(e.g. '2.28'), got {value!r}"
+                    f"(digits and dots only, e.g. '2.28'), got {value!r}"
                 )
             runtime_floors[str(key).upper()] = floor
 

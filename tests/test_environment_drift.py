@@ -284,6 +284,33 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 3}})
         assert m.runtime_floors == {"GLIBC": "3"}
 
+    @pytest.mark.parametrize("bad", ["2.28-1", "2.x", "v2.28", "2..28", ""])
+    def test_partially_numeric_floor_rejected(self, bad: str) -> None:
+        # The floor contract parses per dot-component with int(); a floor like
+        # "2.28-1" would silently truncate to (2,) and flip verdicts — reject
+        # anything that is not digits-and-dots (Codex review #510, round 3).
+        with pytest.raises(ValueError, match="digits and dots"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": bad}})
+
+    def test_env_matrix_rejected_for_release_set_inputs(self, tmp_path) -> None:
+        # Directory/package comparisons fan out through the release path,
+        # which does not thread the runtime-floor contract; the flag must be
+        # rejected loudly, not silently ignored (Codex review #510, round 3).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        (tmp_path / "old").mkdir()
+        (tmp_path / "new").mkdir()
+        matrix = tmp_path / "env.yaml"
+        matrix.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        result = CliRunner().invoke(main, [
+            "compare", str(tmp_path / "old"), str(tmp_path / "new"),
+            "--env-matrix", str(matrix),
+        ])
+        assert result.exit_code != 0
+        assert "--env-matrix is not supported for directory/package" in result.output
+
 
 class TestLoadEnvMatrix:
     """Tier-2 loader: identical error text across front-ends (service layer)."""
@@ -528,8 +555,10 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         assert _diff_time64_abi(old, new) == []
 
-    def test_struct_field_reference_counts_as_public_use(self) -> None:
-        from abicheck.model import RecordType, TypeField
+    def test_reachable_struct_field_counts_as_public_use(self) -> None:
+        # `event` carries time_t and is itself referenced by a public
+        # function, so the flip is public ABI — the roll-up fires.
+        from abicheck.model import Function, RecordType, TypeField, Visibility
 
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
@@ -537,6 +566,49 @@ class TestTime64AbiFlip:
             snap.types = [RecordType(
                 name="event", kind="struct",
                 fields=[TypeField(name="stamp", type="time_t")],
+            )]
+            snap.functions = [Function(
+                name="get_event", mangled="get_event",
+                return_type="event", visibility=Visibility.PUBLIC,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+
+    def test_unreachable_private_struct_field_is_silent(self) -> None:
+        # A private struct nothing public references still carries time_t —
+        # its resize must not roll up to a BREAKING pseudo-symbol
+        # (Codex review #510, round 3).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [RecordType(
+                name="_private_event", kind="struct",
+                fields=[TypeField(name="stamp", type="time_t")],
+            )]
+            snap.functions = [Function(
+                name="api", mangled="api",
+                return_type="int", visibility=Visibility.PUBLIC,
+            )]
+        assert _diff_time64_abi(old, new) == []
+
+    def test_nested_record_reachability(self) -> None:
+        # Reachability is transitive: public fn -> outer -> inner(time_t).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [
+                RecordType(name="inner", kind="struct",
+                           fields=[TypeField(name="stamp", type="time_t")]),
+                RecordType(name="outer", kind="struct",
+                           fields=[TypeField(name="detail", type="inner")]),
+            ]
+            snap.functions = [Function(
+                name="get_outer", mangled="get_outer",
+                return_type="outer", visibility=Visibility.PUBLIC,
             )]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}

@@ -1569,6 +1569,15 @@ def compare_cmd(
                 "(release) comparisons; it applies to single-file / snapshot "
                 "inputs. Compare the libraries individually to use it."
             )
+        # --env-matrix (ADR-020b) is likewise not threaded through the release
+        # fan-out; a silently ignored runtime floor would leave the default
+        # RISK verdicts in place while the user believes the contract applied.
+        if env_matrix_path is not None:
+            raise click.UsageError(
+                "--env-matrix is not supported for directory/package (release) "
+                "comparisons yet; it applies to single-file / snapshot inputs. "
+                "Compare the libraries individually to use it."
+            )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
         _dispatch_release_compare(
