@@ -604,7 +604,10 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                 return ToolResult(verdict="ERROR", raw_output=dr.stderr or dr.stdout,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
             mr = subprocess.run(
-                [_PYTHON, "-m", "abicheck.cli", "merge", str(base), str(pack),
+                # ``abicheck.cli`` invokes Click before late subcommand modules
+                # register ``merge``; the package entry point imports the full
+                # module first and therefore exposes build-source commands.
+                [_PYTHON, "-m", "abicheck", "merge", str(base), str(pack),
                  "-o", str(final), "--on-conflict", "error"],
                 capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
             )
