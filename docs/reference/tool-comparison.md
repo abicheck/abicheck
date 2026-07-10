@@ -6,18 +6,21 @@ benchmark results across real-world test cases, and why the numbers come out the
 > **Note:** abicheck detects 342 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full
-> `examples/ground_truth.json` catalog now has 162 entries (153 compare-mode
-> cases plus 9 single-build audit/cross-source cases), split as 157
-> single-library cases plus 5 multi-library bundle cases. The subset is pinned
-> so accuracy numbers stay reproducible across releases.
+> `examples/ground_truth.json` catalog now has 164 entries. Tool-to-tool
+> competitor scans use the 134 binary shared-library `.so` lanes; fixture/source
+> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`) and the other
+> audit, cross-source, bundle, BTF, and snapshot cases are tracked in dedicated
+> non-`.so` lanes. The subset is pinned so accuracy numbers stay reproducible
+> across releases.
 >
-> **Which denominator is which.** **162** is the whole catalog. The scan-depth
-> matrix is compare-style and intentionally uses only comparable v1/v2
-> shared-library targets: **141/141** of that scope are scanned at every depth.
-> FP/FN math now uses all **141** comparable targets: `NO_CHANGE` sentinel
-> cases are checked as compatible/no-change outcomes, and bundle cases are
-> checked against their per-library expected verdicts. Other dedicated lanes
-> cover audit, cross-source, bundle, BTF, and snapshot cases.
+> **Which denominator is which.** **164** is the whole catalog. The binary
+> competitor lane is **134** shared-library pairs. The scan-depth matrix is
+> compare-style and intentionally uses only comparable v1/v2 shared-library
+> targets: **141/141** of that scope are scanned at every depth. FP/FN math now
+> uses all **141** comparable targets: `NO_CHANGE` sentinel cases are checked as
+> compatible/no-change outcomes, and bundle cases are checked against their
+> per-library expected verdicts. Dedicated lanes cover fixture/source-only L2/L5
+> cases, audit, cross-source, bundle, BTF, and snapshot cases.
 
 > **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
 > story: each tool sees a different subset of the binary/debug/header inputs. For
@@ -36,15 +39,16 @@ ABICC/libabigail on a stable cross-tool corpus?"
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Catalog metadata | 162 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 153 compare / 9 audit-cross-source | Single source of truth for examples, verdicts, expected kinds, and minimum evidence |
+| Catalog metadata | 164 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 134 binary competitor `.so` lanes + 30 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; fixture/source-only L2/L5/source cases are not counted as binary competitor pairs |
 | Build/autodiscovery | 161 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` in CI | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
-| Full example proof matrix | 162 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | 159 COVERED / 3 UNRESOLVED | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
-| Default/debug verdicts | 162 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | gcc: 132 PASS / 4 XFAIL / 26 SKIP; clang: 133 PASS / 4 XFAIL / 25 SKIP | Single-library debug lane only; XFAIL is not green full-matrix scope |
+| Full example proof matrix | 164 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
+| Default/debug verdicts | 164 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | Single-library debug lane; dedicated non-`.so` cases skip here by design | Single-library debug lane only; XFAIL is not green full-matrix scope |
 | Bundle release verdicts | 5 bundle cases | `PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json` | 5 PASS | Runs the ADR-023 multi-library examples through `abicheck compare old/ new/` |
-| Runtime smoke | 162 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | 73 DEMONSTRATED / 52 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 29 SKIP | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
-| Release headers | 162 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | 132 PASS / 4 XFAIL / 26 SKIP | Reduced-evidence informational lane; false-positive guard passed |
-| Stripped headers | 162 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | 127 PASS / 3 FAIL / 6 XFAIL / 26 SKIP | Reduced-evidence informational lane; three expected signal-loss backlogs remain |
+| Runtime smoke | 164 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
+| Release headers | 164 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
+| Stripped headers | 164 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
 | Build/source smoke | 7 representative cases | `validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 7 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
+| Binary competitor scan | 134 shared-library pairs × 2 external tools | abicc/ABI Compliance Checker and libabigail `abidiff` over built `.so` pairs | 268 tool results: abicc 134, abidiff 134 | Competitor `.so` lane only; fixture/source-only L2/L5/source cases are represented in dedicated lanes, not as missing `.so` results |
 | Scan-depth matrix | 141 comparable targets × 5 depths | `abicheck scan --depth {binary,headers,build,source,full}` | 141/141 scans completed at each depth. Correct/FP/FN on all 141 comparable targets: binary 79 / 1 / 61; headers 115 / 0 / 26; build 115 / 0 / 26; source 141 / 0 / 0; full 141 / 0 / 0 | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 Current unresolved full-example cases: `case97_api_depends_on_consumer_env`,
 `case105_concept_tightening`, and
@@ -316,17 +320,16 @@ Each case in `examples/ground_truth.json`
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
 `scripts/evidence_tiers.py`
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153-case
-compare-mode catalog, that yields the cumulative minimum-evidence coverage:
+and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
 | Just the binary | L0 | 50 | **50 / 153 (33%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
 | + Debug symbols | L1 | 65 | **115 / 153 (75%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
-| + Public headers | L2 | 22 | **137 / 153 (90%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 8 | **145 / 153 (95%)** | build-mode flips: exceptions ([130](../examples/case130_exceptions_mode_flip.md)), RTTI ([131](../examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](../examples/case132_threadsafe_statics_flip.md)), TLS model ([133](../examples/case133_tls_model_flip.md)), enum size ([152](../examples/case152_enum_size_flag_flip.md)), struct packing ([153](../examples/case153_struct_packing_flip.md)), LTO ([154](../examples/case154_lto_mode_flip.md)), char signedness ([155](../examples/case155_char_signedness_flip.md)) |
+| + Public headers | L2 | 22 + dedicated fixture/source cases | **137 / 153 (90%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 8, including fixture/source-only cases | **145 / 153 (95%)** | build-mode flips: exceptions ([130](../examples/case130_exceptions_mode_flip.md)), RTTI ([131](../examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](../examples/case132_threadsafe_statics_flip.md)), TLS model ([133](../examples/case133_tls_model_flip.md)), enum size ([152](../examples/case152_enum_size_flag_flip.md)), struct packing ([153](../examples/case153_struct_packing_flip.md)), LTO ([154](../examples/case154_lto_mode_flip.md)), char signedness ([155](../examples/case155_char_signedness_flip.md)) |
 | + Sources | L4 | 5 | **150 / 153 (98%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](../examples/case156_public_macro_removed.md)), inline function removed ([157](../examples/case157_inline_function_removed.md)), concept tightening ([105](../examples/case105_concept_tightening.md)), public typedef removed ([158](../examples/case158_public_typedef_removed.md)) |
-| + Source graph | L5 | 3 | **153 / 153 (100%)** | public API internal dependency ([160](../examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](../examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](../examples/case162_symbol_source_owner_changed.md)) |
+| + Source graph | L5 | 3 fixture/source-only cases | **153 / 153 (100%)** | public API internal dependency ([160](../examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](../examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](../examples/case162_symbol_source_owner_changed.md)); additional dedicated source fixture examples include Python keyword rename ([163](../examples/case163_python_kwarg_renamed.md)) and preprocessor-conditional field guard ([164](../examples/case164_preproc_conditional_field.md)) |
 
 > **Why L3 now matters.** Earlier snapshots had no standalone L3-only catalog
 > cases. The current compare-mode catalog includes build-mode flips whose
