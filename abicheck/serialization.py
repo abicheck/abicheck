@@ -291,7 +291,8 @@ def _pe_from_dict(e: dict[str, Any]) -> Any:
         dll_characteristics=e.get("dll_characteristics", 0),
         exports=exports,
         imports=e.get("imports", {}),
-        delay_imports=e.get("delay_imports", {}),
+        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
+        delay_imports=e.get("delay_imports"),
         file_version=e.get("file_version", ""),
         product_version=e.get("product_version", ""),
         subsystem_version=e.get("subsystem_version", ""),
@@ -322,7 +323,8 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
         current_version=e.get("current_version", ""),
         compat_version=e.get("compat_version", ""),
         min_os_version=e.get("min_os_version", ""),
-        rpaths=e.get("rpaths", []),
+        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
+        rpaths=e.get("rpaths"),
     )
 
 

@@ -627,6 +627,9 @@ def _extract_func_protos(
                 name=name,
                 return_type=ret_type,
                 params=params,
+                # BTF_KIND_FUNC reuses vlen for linkage (0 static, 1 global,
+                # 2 extern); the consumer decides whether a 0 is trustworthy.
+                linkage=t.vlen,
             )
 
     return funcs

@@ -293,9 +293,17 @@ def _diff_pe_hardening(o: Any, n: Any) -> list[Change]:
 
 
 def _diff_pe_delay_imports(o: Any, n: Any) -> list[Change]:
-    """Diff the delay-loaded DLL dependency set (lazily bound, fails late)."""
-    old_deps = set(getattr(o, "delay_imports", None) or {})
-    new_deps = set(getattr(n, "delay_imports", None) or {})
+    """Diff the delay-loaded DLL dependency set (lazily bound, fails late).
+
+    Tri-state field: None means the snapshot predates delay-import capture,
+    so a legacy baseline is never read as "verified no delay imports".
+    """
+    old_di = getattr(o, "delay_imports", None)
+    new_di = getattr(n, "delay_imports", None)
+    if old_di is None or new_di is None:
+        return []
+    old_deps = set(old_di)
+    new_deps = set(new_di)
     changes: list[Change] = []
     for dep in sorted(old_deps - new_deps):
         changes.append(
@@ -623,9 +631,11 @@ def _diff_macho_loader_facts(o: Any, n: Any) -> list[Change]:
                 )
             )
 
-    old_rpaths = getattr(o, "rpaths", None) or []
-    new_rpaths = getattr(n, "rpaths", None) or []
-    if (old_rpaths or new_rpaths) and old_rpaths != new_rpaths:
+    # Tri-state field: None means the snapshot predates LC_RPATH capture, so
+    # a legacy baseline is never read as "verified no rpaths".
+    old_rpaths = getattr(o, "rpaths", None)
+    new_rpaths = getattr(n, "rpaths", None)
+    if old_rpaths is not None and new_rpaths is not None and old_rpaths != new_rpaths:
         changes.append(
             make_change(
                 ChangeKind.RPATH_CHANGED,

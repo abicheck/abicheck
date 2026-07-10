@@ -114,6 +114,22 @@ class TestMachoRpath:
         r = compare(_snap(_macho()), _snap(_macho()))
         assert ChangeKind.RPATH_CHANGED not in _kinds(r)
 
+    def test_uncaptured_legacy_side_skipped(self):
+        # rpaths=None (legacy snapshot, LC_RPATH never captured) is unknown,
+        # not "verified no rpaths" — no fabricated finding.
+        old = _macho()  # rpaths defaults to None
+        new = _macho(rpaths=["@loader_path/../lib"])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.RPATH_CHANGED not in _kinds(r)
+
+    def test_captured_empty_side_is_evidence(self):
+        # A parsed Mach-O with zero LC_RPATH commands ([]) is real evidence;
+        # gaining a first rpath reports.
+        old = _macho(rpaths=[])
+        new = _macho(rpaths=["@loader_path/../lib"])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.RPATH_CHANGED in _kinds(r)
+
 
 # ── Deployment floor / versions ──────────────────────────────────────────────
 
@@ -362,6 +378,12 @@ class TestParseRpaths:
         commands = [
             (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"@loader_path/../lib\x00"),
             (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"\x00"),  # empty → dropped
+            # A segment with one section exercises the ordinal → segment map.
+            (
+                SimpleNamespace(cmd=mm.LC_SEGMENT_64),
+                SimpleNamespace(segname=b"__DATA\x00"),
+                [SimpleNamespace()],
+            ),
         ]
         header = SimpleNamespace(header=hdr, commands=commands, offset=0)
         monkeypatch.setattr(

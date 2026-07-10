@@ -261,6 +261,35 @@ class TestTypeinfoFunctionBridge:
         r = compare(old, new)
         assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
 
+    def test_static_funcs_filtered_in_linkage_aware_blob(self):
+        # BTF_KIND_FUNC vlen: 0 = static, 1 = global. A blob that carries
+        # non-zero linkages distinguishes them, so file-local helpers must
+        # not surface as public ABI functions.
+        protos = {
+            "helper": FuncProto(name="helper", return_type="void", params=[], linkage=0),
+            "api_fn": FuncProto(name="api_fn", return_type="int", params=[], linkage=1),
+        }
+        funcs = _typeinfo_functions(protos)
+        assert [f.name for f in funcs] == ["api_fn"]
+
+    def test_legacy_all_zero_linkage_keeps_everything(self):
+        # Legacy BTF encoders wrote linkage 0 for every function; treating
+        # that as "all static" would silently drop the whole surface.
+        protos = {
+            "a_fn": FuncProto(name="a_fn", return_type="void", params=[], linkage=0),
+            "b_fn": FuncProto(name="b_fn", return_type="int", params=[], linkage=0),
+        }
+        assert len(_typeinfo_functions(protos)) == 2
+
+    def test_ctf_protos_without_linkage_kept(self):
+        # CTF doesn't encode linkage (None) — always kept, even alongside
+        # linkage-aware entries.
+        protos = {
+            "c_fn": FuncProto(name="c_fn", return_type="void", params=[]),
+            "api_fn": FuncProto(name="api_fn", return_type="int", params=[], linkage=1),
+        }
+        assert [f.name for f in _typeinfo_functions(protos)] == ["api_fn", "c_fn"]
+
 
 # ── castxml extraction ───────────────────────────────────────────────────────
 

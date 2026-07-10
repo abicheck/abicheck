@@ -124,7 +124,9 @@ class MachoMetadata:
     min_os_version: str = ""             # from LC_VERSION_MIN_MACOSX or LC_BUILD_VERSION
 
     # Runtime search paths (LC_RPATH) — the Mach-O analogue of ELF DT_RUNPATH.
-    rpaths: list[str] = field(default_factory=list)
+    # Tri-state: None = not captured (legacy snapshot written before this
+    # field existed); [] = parsed Mach-O carrying no LC_RPATH commands.
+    rpaths: list[str] | None = None
 
     @cached_property
     def export_map(self) -> dict[str, MachoExport]:
@@ -411,7 +413,10 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     meta.filetype = _FILETYPE_NAMES.get(filetype, f"0x{filetype:x}")
     meta.flags = int(hdr.flags)
 
-    # Parse load commands
+    # Parse load commands. A successful parse captures the LC_RPATH surface
+    # even when no such command exists ([] = "verified none"), keeping None
+    # reserved for legacy snapshots where it was never looked at.
+    rpaths: list[str] = []
     for lc, cmd, data in header.commands:
         cmd_type = lc.cmd
 
@@ -439,7 +444,8 @@ def _parse(dylib_path: Path) -> MachoMetadata:
         elif cmd_type == LC_RPATH:
             path = _dylib_name_from_cmd(data)
             if path:
-                meta.rpaths.append(path)
+                rpaths.append(path)
+    meta.rpaths = rpaths
 
     # Build section ordinal → segment name mapping so we can distinguish
     # __TEXT (function) from __DATA (variable) symbols via nlist n_sect.

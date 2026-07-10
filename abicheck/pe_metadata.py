@@ -64,7 +64,9 @@ class PeMetadata:
     imports: dict[str, list[str]] = field(default_factory=dict)  # dll_name → [func_names]
     # Delay-loaded imports (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT): resolved on
     # first call rather than at load time, so a missing DLL fails late.
-    delay_imports: dict[str, list[str]] = field(default_factory=dict)
+    # Tri-state: None = not captured (legacy snapshot written before this
+    # field existed); {} = parsed PE with no delay-load directory.
+    delay_imports: dict[str, list[str]] | None = None
 
     # Version resource (VS_FIXEDFILEINFO)
     file_version: str = ""      # e.g. "10.0.19041.1"
@@ -147,6 +149,10 @@ def _parse(dll_path: Path) -> PeMetadata:
         )
 
         meta = PeMetadata()
+        # A successful parse captures the delay-load surface even when the
+        # directory is absent ({} = "verified none"), keeping None reserved
+        # for legacy snapshots where it was never looked at.
+        meta.delay_imports = {}
 
         # Machine type
         meta.machine = pefile.MACHINE_TYPE.get(
@@ -193,6 +199,7 @@ def _parse(dll_path: Path) -> PeMetadata:
 
         # Delay-load imports (resolved lazily at first call, not at load time)
         if hasattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT"):
+            delay_imports: dict[str, list[str]] = {}
             for entry in pe.DIRECTORY_ENTRY_DELAY_IMPORT:
                 dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
                 funcs = []
@@ -201,7 +208,8 @@ def _parse(dll_path: Path) -> PeMetadata:
                         funcs.append(imp.name.decode("utf-8", errors="replace"))
                     elif getattr(imp, "import_by_ordinal", False):
                         funcs.append(f"ordinal:{imp.ordinal}")
-                meta.delay_imports[dll_name] = funcs
+                delay_imports[dll_name] = funcs
+            meta.delay_imports = delay_imports
 
         # Version resource
         if hasattr(pe, "VS_FIXEDFILEINFO"):

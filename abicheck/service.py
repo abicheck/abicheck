@@ -123,9 +123,19 @@ def _typeinfo_functions(func_protos: dict[str, Any]) -> list[Function]:
 
     BTF/CTF names are C-linkage; the plain name doubles as the symbol key
     (matching the C-function convention used by the header dumpers).
+
+    Static (file-local) BTF functions are not exported ABI, so they are
+    skipped — but only when the blob is linkage-aware. BTF_KIND_FUNC linkage
+    lives in the record's vlen field (0 static, 1 global, 2 extern); legacy
+    encoders wrote 0 for *every* function, so an all-zero blob means
+    "linkage unknown" and everything is kept rather than dropping the whole
+    surface. CTF carries no linkage (None) and is always kept.
     """
     from .model import Param
 
+    linkage_aware = any(
+        getattr(p, "linkage", None) not in (0, None) for p in func_protos.values()
+    )
     return [
         Function(
             name=name,
@@ -135,6 +145,7 @@ def _typeinfo_functions(func_protos: dict[str, Any]) -> list[Function]:
             is_extern_c=True,
         )
         for name, proto in sorted(func_protos.items())
+        if not (linkage_aware and getattr(proto, "linkage", None) == 0)
     ]
 
 

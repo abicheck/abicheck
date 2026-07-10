@@ -125,6 +125,14 @@ class TestDelayImports:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.NEEDED_REMOVED in _kinds(r)
 
+    def test_uncaptured_legacy_side_skipped(self):
+        # A legacy snapshot (delay_imports never captured → None) must not
+        # read as "verified no delay imports".
+        old = _pe()  # delay_imports defaults to None
+        new = _pe(delay_imports={"DBGHELP.dll": ["MiniDumpWriteDump"]})
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.NEEDED_ADDED not in _kinds(r)
+
 
 # ── Per-DLL imported functions ───────────────────────────────────────────────
 

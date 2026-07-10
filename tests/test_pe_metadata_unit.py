@@ -328,7 +328,16 @@ class TestParsePeMetadata:
         imp_entry.dll = b"KERNEL32.dll"
         imp_func = MagicMock()
         imp_func.name = b"LoadLibraryA"
-        imp_entry.imports = [imp_func]
+        # Ordinal-only import (name=None) — recorded as ordinal:N.
+        imp_ord = MagicMock()
+        imp_ord.name = None
+        imp_ord.import_by_ordinal = True
+        imp_ord.ordinal = 7
+        # Nameless import that is not by-ordinal either — must be skipped.
+        imp_skip = MagicMock()
+        imp_skip.name = None
+        imp_skip.import_by_ordinal = False
+        imp_entry.imports = [imp_func, imp_ord, imp_skip]
         mock_pe.DIRECTORY_ENTRY_IMPORT = [imp_entry]
 
         # No version resource, no delay-load import directory
@@ -354,7 +363,7 @@ class TestParsePeMetadata:
         assert meta.exports[0].name == "my_func"
         assert meta.exports[1].sym_type == PeSymbolType.FORWARDED
         assert meta.exports[1].forwarder == "OTHER.init"
-        assert meta.imports == {"KERNEL32.dll": ["LoadLibraryA"]}
+        assert meta.imports == {"KERNEL32.dll": ["LoadLibraryA", "ordinal:7"]}
         mock_pe.close.assert_called_once()
 
     def test_parse_with_version_resource(self, tmp_path):
