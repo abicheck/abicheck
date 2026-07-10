@@ -126,6 +126,59 @@ def compat_group() -> None:
     """
 
 
+_CROSS_COMPILATION_OPTIONS = (
+    click.option(
+        "-gcc-path",
+        "-cross-gcc",
+        "gcc_path",
+        default=None,
+        help="Path to GCC/G++ cross-compiler binary.",
+    ),
+    click.option(
+        "-gcc-prefix",
+        "-cross-prefix",
+        "gcc_prefix",
+        default=None,
+        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
+    ),
+    click.option(
+        "-gcc-options",
+        "gcc_options",
+        default=None,
+        help="Extra compiler flags passed through to castxml.",
+    ),
+    click.option(
+        "-sysroot",
+        "sysroot",
+        default=None,
+        type=click.Path(path_type=Path),
+        help="Alternative system root directory.",
+    ),
+    click.option(
+        "-nostdinc",
+        "nostdinc",
+        is_flag=True,
+        default=False,
+        help="Do not search standard system include paths.",
+    ),
+    click.option("-lang", "lang", default=None, help="Force language: C or C++."),
+    click.option(
+        "-arch", "arch", default=None, help="Target architecture (informational)."
+    ),
+)
+
+
+def cross_compilation_options(f: Any) -> Any:
+    """Apply the ABICC cross-compilation/toolchain flags shared by check and dump.
+
+    One canonical definition keeps the two subcommands' flag spellings, defaults,
+    and help text from drifting apart.
+    """
+    for opt in reversed(_CROSS_COMPILATION_OPTIONS):
+        f = opt(f)
+    return f
+
+
 # ── compat dump subcommand ────────────────────────────────────────────────────
 
 
@@ -153,44 +206,7 @@ def compat_group() -> None:
 )
 @click.option("-vnum", "vnum", default=None, help="Override version label.")
 # ── Cross-compilation flags ───────────────────────────────────────────────────
-@click.option(
-    "-gcc-path",
-    "-cross-gcc",
-    "gcc_path",
-    default=None,
-    help="Path to GCC/G++ cross-compiler binary.",
-)
-@click.option(
-    "-gcc-prefix",
-    "-cross-prefix",
-    "gcc_prefix",
-    default=None,
-    help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
-)
-@click.option(
-    "-gcc-options",
-    "gcc_options",
-    default=None,
-    help="Extra compiler flags passed through to castxml.",
-)
-@click.option(
-    "-sysroot",
-    "sysroot",
-    default=None,
-    type=click.Path(path_type=Path),
-    help="Alternative system root directory.",
-)
-@click.option(
-    "-nostdinc",
-    "nostdinc",
-    is_flag=True,
-    default=False,
-    help="Do not search standard system include paths.",
-)
-@click.option("-lang", "lang", default=None, help="Force language: C or C++.")
-@click.option(
-    "-arch", "arch", default=None, help="Target architecture (informational)."
-)
+@cross_compilation_options
 @click.option(
     "-relpath",
     "relpath",
@@ -634,44 +650,7 @@ def _apply_result_transforms(
     help="Report changes in reserved fields.",
 )
 # ── Cross-compilation / toolchain flags ──────────────────────────────────────
-@click.option(
-    "-gcc-path",
-    "-cross-gcc",
-    "gcc_path",
-    default=None,
-    help="Path to GCC/G++ cross-compiler binary.",
-)
-@click.option(
-    "-gcc-prefix",
-    "-cross-prefix",
-    "gcc_prefix",
-    default=None,
-    help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
-)
-@click.option(
-    "-gcc-options",
-    "gcc_options",
-    default=None,
-    help="Extra compiler flags passed through to castxml.",
-)
-@click.option(
-    "-sysroot",
-    "sysroot",
-    default=None,
-    type=click.Path(path_type=Path),
-    help="Alternative system root directory.",
-)
-@click.option(
-    "-nostdinc",
-    "nostdinc",
-    is_flag=True,
-    default=False,
-    help="Do not search standard system include paths.",
-)
-@click.option("-lang", "lang", default=None, help="Force language: C or C++.")
-@click.option(
-    "-arch", "arch", default=None, help="Target architecture (informational)."
-)
+@cross_compilation_options
 # ── Relpath flags ────────────────────────────────────────────────────────────
 @click.option(
     "-relpath",
