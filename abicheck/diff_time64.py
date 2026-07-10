@@ -85,43 +85,60 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
     return _int_width_bucket(t, is_llp64=False)
 
 
-def _public_surface_type_text(snap: AbiSnapshot) -> str:
-    """Concatenated type spellings of the snapshot's *reachable* public surface.
+#: ABI-visible function/variable visibilities — mirrors
+#: ``diff_symbols._PUBLIC_VIS`` (kept local so this leaf detector does not
+#: import the heavy symbol-diff module). ELF_ONLY covers the DWARF/binary
+#: path without headers, where exported signatures are just as much public
+#: ABI as header-proven ones (Codex review #510).
+_ABI_VISIBLE = (Visibility.PUBLIC, Visibility.ELF_ONLY)
 
-    Seeded from public function returns/parameters and public variables, then
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
+    """Identifier tokens of the snapshot's *reachable* public surface.
+
+    Seeded from ABI-visible function returns/parameters and variables, then
     expanded through record types transitively reachable by name from that
-    seed (a struct is in the surface only when a public signature — or an
-    already-reachable record's field — spells its name). A private struct the
-    public API never references stays out, so its ``time_t`` field cannot
-    drive the roll-up (Codex review #510). Word-search oracle only, not
-    parsed.
-    """
-    parts: list[str] = []
-    for fn in snap.functions:
-        if fn.visibility is not Visibility.PUBLIC:
-            continue
-        parts.append(fn.return_type or "")
-        parts.extend(getattr(p, "type", "") or "" for p in fn.params)
-    for var in snap.variables:
-        if getattr(var, "visibility", Visibility.PUBLIC) is not Visibility.PUBLIC:
-            continue
-        parts.append(var.type or "")
-    text = " | ".join(parts)
+    seed (a struct is in the surface only when an ABI-visible signature — or
+    an already-reachable record's field — spells its name). A private struct
+    the public API never references stays out, so its ``time_t`` field cannot
+    drive the roll-up (Codex review #510).
 
-    # Expand through name-reachable records to a fixpoint. Each record is
-    # folded in at most once, so this is O(records²) word searches at worst.
+    Token-set based (not text search) so the fixpoint stays near-linear in
+    the number of spellings — this runs inside every ``compare`` and must not
+    regress the scaling benchmarks.
+    """
+    tokens: set[str] = set()
+
+    def _add(spelling: object) -> None:
+        if isinstance(spelling, str) and spelling:
+            tokens.update(_IDENTIFIER_RE.findall(spelling))
+
+    for fn in snap.functions:
+        if fn.visibility not in _ABI_VISIBLE:
+            continue
+        _add(fn.return_type)
+        for p in fn.params:
+            _add(getattr(p, "type", ""))
+    for var in snap.variables:
+        if getattr(var, "visibility", Visibility.PUBLIC) not in _ABI_VISIBLE:
+            continue
+        _add(var.type)
+
+    # Expand through name-reachable records to a fixpoint; each record is
+    # folded in at most once.
     remaining = {rec.name: rec for rec in snap.types if rec.name}
     changed = True
     while changed and remaining:
         changed = False
         for name in list(remaining):
-            if re.search(rf"\b{re.escape(name)}\b", text):
+            if name in tokens:
                 rec = remaining.pop(name)
-                text += " | " + " | ".join(
-                    getattr(fld, "type", "") or "" for fld in rec.fields
-                )
+                for fld in rec.fields:
+                    _add(getattr(fld, "type", ""))
                 changed = True
-    return text
+    return tokens
 
 
 @registry.detector("time64_abi")
@@ -142,10 +159,11 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     old_32 = _is_32bit_elf(old)
     new_32 = _is_32bit_elf(new)
-    surface_text = _public_surface_type_text(old) + " | " + _public_surface_type_text(new)
 
-    flipped: list[str] = []
-    up = down = 0
+    # Cheap pass first: candidate family-typedef flips. The vast majority of
+    # comparisons have none, and the surface scan below must not run for them
+    # (it walks every signature/record and would tax the scaling benchmarks).
+    candidates: list[tuple[str, str, str, str]] = []
     for name, old_under in old.typedefs.items():
         if name not in _FAMILY:
             continue
@@ -156,7 +174,17 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         nb = _bucket(new_under, new_32)
         if ob is None or nb is None or ob == nb:
             continue
-        if not re.search(rf"\b{re.escape(name)}\b", surface_text):
+        candidates.append((name, old_under, new_under, nb))
+
+    if not candidates:
+        return []
+
+    surface_tokens = _public_surface_tokens(old) | _public_surface_tokens(new)
+
+    flipped: list[str] = []
+    up = down = 0
+    for name, old_under, new_under, nb in candidates:
+        if name not in surface_tokens:
             # Present-but-unused system typedef — not part of this library's
             # public ABI, so its resize must not roll up to a break.
             continue

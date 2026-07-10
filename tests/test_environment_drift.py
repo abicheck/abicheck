@@ -227,6 +227,16 @@ class TestRuntimeFloorContract:
         assert apply_runtime_floor_contract(changes, {}) is changes
         assert all(c.modulation_rule != "runtime_floor_contract" for c in changes)
 
+    def test_malformed_direct_floor_left_at_default(self) -> None:
+        # A prebuilt dict bypasses from_dict validation; the contract must not
+        # truncate '2.28-1' to (2,) and flip verdicts — it leaves the finding
+        # at its default RISK instead (Codex review #510, round 4).
+        old, new = self._pair()
+        result = compare(old, new, env_matrix=EnvironmentMatrix(
+            runtime_floors={"GLIBC": "2.28-1"}
+        ))
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
     def test_floor_keys_case_insensitive(self) -> None:
         changes = [
             c for c in compare(*self._pair()).changes
@@ -592,6 +602,22 @@ class TestTime64AbiFlip:
                 return_type="int", visibility=Visibility.PUBLIC,
             )]
         assert _diff_time64_abi(old, new) == []
+
+    def test_elf_only_visibility_counts_as_public_use(self) -> None:
+        # DWARF/binary-path snapshots mark exported functions ELF_ONLY; the
+        # rest of the diff treats PUBLIC/ELF_ONLY as ABI-visible, and so must
+        # this gate (Codex review #510, round 4).
+        from abicheck.model import Function, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.functions = [Function(
+                name="get_stamp", mangled="get_stamp",
+                return_type="time_t", visibility=Visibility.ELF_ONLY,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
     def test_nested_record_reachability(self) -> None:
         # Reachability is transitive: public fn -> outer -> inner(time_t).

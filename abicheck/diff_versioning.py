@@ -234,8 +234,16 @@ def apply_runtime_floor_contract(
         if floor is None:
             continue
         required = _parse_abi_version_tag(tag)
-        floor_tuple = tuple(int(x) for x in floor.split(".") if x.isdigit())
-        if required == _UNPARSEABLE_VERSION or not floor_tuple:
+        # Every dot component of the floor must be purely numeric. YAML
+        # loading (EnvironmentMatrix.from_dict) already enforces this, but a
+        # caller can hand a prebuilt dict straight to compare(); truncating a
+        # "2.28-1" to (2,) here would silently flip verdicts, so a malformed
+        # floor leaves the finding at its default instead (Codex review #510).
+        floor_parts = floor.split(".")
+        if not floor_parts or not all(p.isdigit() for p in floor_parts):
+            continue
+        floor_tuple = tuple(int(p) for p in floor_parts)
+        if required == _UNPARSEABLE_VERSION:
             continue
         if required <= floor_tuple:
             change.effective_verdict = Verdict.COMPATIBLE
