@@ -132,20 +132,33 @@ def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
     # stat Stat;` + `f(Stat *)` puts "Stat" in the tokens while the record map
     # is keyed "stat") — without resolving the alias the record's fields would
     # never be visited (Codex review #510, round 5).
+    def _reachable(name: str) -> bool:
+        # The tokenizer splits qualified spellings (`ns::Event` -> ns, Event),
+        # while records/aliases may be keyed by the qualified name — match on
+        # the terminal component as well so a namespaced public type still
+        # folds in (Codex review #510, round 6). Over-inclusion (an unrelated
+        # same-named type) errs toward reporting, the safe direction here.
+        return name in tokens or name.rsplit("::", 1)[-1] in tokens
+
     remaining_aliases = dict(snap.typedefs)
     remaining_records = {rec.name: rec for rec in snap.types if rec.name}
     changed = True
     while changed and (remaining_aliases or remaining_records):
         changed = False
         for alias in list(remaining_aliases):
-            if alias in tokens:
+            if _reachable(alias):
                 _add(remaining_aliases.pop(alias))
                 changed = True
         for name in list(remaining_records):
-            if name in tokens:
+            if _reachable(name):
                 rec = remaining_records.pop(name)
                 for fld in rec.fields:
                     _add(getattr(fld, "type", ""))
+                # Inherited layout is public layout: fold base-class names in
+                # so a base carrying time_t/off_t is visited too (Codex
+                # review #510, round 6).
+                for base in list(rec.bases) + list(rec.virtual_bases):
+                    _add(base)
                 changed = True
     return tokens
 

@@ -1791,7 +1791,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "runtime_floor_raised",
-      "examples": "case165_env_runtime_floor_raised"
+      "examples": "case170_env_runtime_floor_raised"
     },
     {
       "kind": "sanitizer_mode_changed",
@@ -2268,7 +2268,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "symbol_version_required_added",
-      "examples": "case165_env_runtime_floor_raised"
+      "examples": "case170_env_runtime_floor_raised"
     },
     {
       "kind": "symbol_version_required_added_compat",

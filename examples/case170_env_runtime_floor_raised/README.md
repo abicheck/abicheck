@@ -1,4 +1,4 @@
-# case165 — Runtime Floor Raised (glibc relink drift)
+# case170 — Runtime Floor Raised (glibc relink drift)
 
 **Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Category:** risk · **Evidence tier:** L0
 

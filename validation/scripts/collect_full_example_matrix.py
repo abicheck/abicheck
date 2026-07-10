@@ -51,7 +51,7 @@ SPECIAL_PROOFS = {
     },
     "snapshot_pair": {
         "lane": "environment-drift-snapshot-pair",
-        "proof": "tests/test_environment_drift.py::TestCase165Example",
+        "proof": "tests/test_environment_drift.py::TestCase170Example",
     },
 }
 

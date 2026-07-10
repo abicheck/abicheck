@@ -52,9 +52,67 @@ A new requirement **at or below** a declared floor is `COMPATIBLE` (every
 declared target already ships it); one **above** the floor is `BREAKING` (a
 declared target can no longer load the binary); prefixes you did not declare
 keep the default `COMPATIBLE_WITH_RISK`. Keys are ELF version-node prefixes
-(`GLIBC`, `GLIBCXX`, `CXXABI`, …), matched case-insensitively. A declared
-`GLIBC` floor also settles `dt_relr_introduced` (implied requirement:
-glibc ≥ 2.36).
+(`GLIBC`, `GLIBCXX`, `CXXABI`, …), matched case-insensitively — quote the
+versions (`"2.40"` unquoted is YAML for `2.4`). A declared `GLIBC` floor also
+settles `dt_relr_introduced` (implied requirement: glibc ≥ 2.36).
+
+### Not just glibc: any versioned dependency
+
+The floor detection and the contract are **generic over every `DT_NEEDED`
+dependency that uses ELF symbol versioning**, not special-cased to glibc.
+`runtime_floor_raised` fires per *(provider library, version-tag prefix)*, so
+a rebuild that starts requiring `OPENSSL_3.0` from `libssl.so.3`, a newer
+`ZLIB_1.2.9` node, or a newer `LIBFOO_2` node from your own SDK dependency is
+reported the same way — and `runtime_floors: {OPENSSL: "3.0"}` gates it the
+same way. glibc/libstdc++ dominate the examples only because relinking on a
+newer distro moves them silently. The limits: a dependency that does *not*
+version its symbols only surfaces through `needed_added`/`needed_removed` and
+SONAME changes (there is no per-version evidence in the artifact to compare),
+and non-library requirements (kernel version, drivers) are outside what a
+binary records — the [environment matrix](../concepts/environment-drift.md)'s
+SYCL/CUDA blocks exist for declaring those constraints explicitly.
+
+### Warn by default, gate by choice
+
+You do **not** need a matrix to be told about drift. Without one, every
+finding on this page is still detected and reported — as
+`COMPATIBLE_WITH_RISK`, which under the default (legacy) exit-code scheme
+exits **0**: CI stays green, the report and the
+`Environment & Toolchain Drift` section carry the warning. Declaring floors
+is the opt-in that turns the warning into a gate (`BREAKING`, exit 4) when a
+declared target is actually cut off. Teams that want risk findings to block
+CI even without floors can do that independently via the severity knobs
+(`--severity-potential-breaking error`).
+
+### Why a separate file and not `.abicheck.yml`?
+
+The environment matrix (ADR-020b) describes a **deployment target**, while
+`.abicheck.yml` describes the **project**. One project routinely checks the
+same pair of binaries against several targets — "does this break our RHEL 8
+tier?" and "our Ubuntu 24.04 tier?" are two invocations with two matrices and
+possibly two different verdicts — so the matrix rides per-invocation
+(`--env-matrix <file>`), like `--policy-file`, rather than being a single
+project-wide setting. It is also the same file that declares SYCL/CUDA
+deployment constraints, which are equally target-specific. A convenience
+`environment:` block in `.abicheck.yml` for single-target projects would be a
+reasonable follow-up, but the per-target file stays the primitive.
+
+### CI / GitHub Action usage
+
+Commit the matrix next to your workflow and pass it through; with the
+[GitHub Action](../user-guide/github-action.md), use `extra-args`:
+
+```yaml
+- uses: abicheck/abicheck-action@v1
+  with:
+    old: baseline/libfoo.so
+    new: build/libfoo.so
+    extra-args: '--env-matrix .github/env-rhel8.yaml'
+```
+
+Run the step once per supported target (matrix strategy over
+`env-*.yaml` files) to gate each deployment tier independently; drop
+`extra-args` to keep drift findings warning-only.
 
 ## The binutils side: linker default drift
 

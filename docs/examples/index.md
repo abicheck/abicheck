@@ -211,9 +211,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python-API break invisible to the C-ABI check | 🟠 API_BREAK | API Break |
 | [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-conditional field: a header false positive only build context clears | ✅ NO_CHANGE | No Change |
-| [case165_env_runtime_floor_raised](case165_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case165_polymorphic_nonvirtual_dtor](case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case166_ref_qualifier_added](case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
 | [case168_virtual_method_devirtualized](case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
 | [case169_overload_added](case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case170_env_runtime_floor_raised](case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |

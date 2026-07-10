@@ -659,6 +659,48 @@ class TestTime64AbiFlip:
             )]
         assert _diff_time64_abi(old, new) == []
 
+    def test_namespaced_record_reachable(self) -> None:
+        # `ns::Event` in a public signature tokenizes to {ns, Event}; the
+        # record keyed by its qualified name must still fold in
+        # (Codex review #510, round 6).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [RecordType(
+                name="ns::Event", kind="struct",
+                fields=[TypeField(name="stamp", type="time_t")],
+            )]
+            snap.functions = [Function(
+                name="get_event", mangled="get_event",
+                return_type="ns::Event", visibility=Visibility.PUBLIC,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+
+    def test_base_class_fields_reachable(self) -> None:
+        # Inherited layout is public layout: an exported Derived whose Base
+        # carries the resized time_t must still roll up
+        # (Codex review #510, round 6).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [
+                RecordType(name="Base", kind="struct",
+                           fields=[TypeField(name="stamp", type="time_t")]),
+                RecordType(name="Derived", kind="struct",
+                           fields=[], bases=["Base"]),
+            ]
+            snap.functions = [Function(
+                name="get_derived", mangled="get_derived",
+                return_type="Derived", visibility=Visibility.PUBLIC,
+            )]
+        changes = _diff_time64_abi(old, new)
+        assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
+
     def test_nested_record_reachability(self) -> None:
         # Reachability is transitive: public fn -> outer -> inner(time_t).
         from abicheck.model import Function, RecordType, TypeField, Visibility
@@ -782,7 +824,7 @@ class TestSerializationRoundtrip:
 # ── examples/case165 — committed snapshot-pair fixture (compiler-free) ──────
 
 
-class TestCase165Example:
+class TestCase170Example:
     """Validate the environment-drift catalog case against its ground truth.
 
     The case ships a committed AbiSnapshot pair instead of a compilable
@@ -791,7 +833,7 @@ class TestCase165Example:
     mirroring how tests/test_g20_catalog.py validates the audit corpus.
     """
 
-    CASE = "case165_env_runtime_floor_raised"
+    CASE = "case170_env_runtime_floor_raised"
 
     @pytest.fixture()
     def snapshots(self):

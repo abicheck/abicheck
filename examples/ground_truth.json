@@ -1493,29 +1493,6 @@
    ],
    "scope_public_headers": true
   },
-  "case165_env_runtime_floor_raised": {
-   "abi_break": false,
-   "api_break": false,
-   "bad_practice": false,
-   "category": "risk",
-   "description": "Identical exported interface in both versions, but v2 was relinked on a newer distro: its libc.so.6 verneed set gains GLIBC_2.34 (newer than the old maximum GLIBC_2.28) because __libc_start_main rebinds to @GLIBC_2.34. The per-node symbol_version_required_added finding reports the fact; the runtime_floor_raised roll-up names the old->new deployment floor and the imported symbols that pulled it up. Environment drift (binutils/glibc skew), not an interface change: binary-compatible for existing consumers, but no longer loads on runtimes older than glibc 2.34. With a declared --env-matrix runtime floor the risk becomes decidable (>= 2.34 available everywhere -> COMPATIBLE; a declared 2.28 target -> BREAKING).",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_kinds": [
-    "runtime_floor_raised",
-    "symbol_version_required_added"
-   ],
-   "fixtures": [
-    "old.abi.json",
-    "new.abi.json"
-   ],
-   "min_evidence": "L0",
-   "mode": "snapshot-pair",
-   "platforms": [
-    "linux",
-    "macos",
-    "windows"
-   ]
-  },
   "case165_polymorphic_nonvirtual_dtor": {
    "abi_break": false,
    "api_break": false,
@@ -1618,6 +1595,29 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ]
+  },
+  "case170_env_runtime_floor_raised": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "risk",
+   "description": "Identical exported interface in both versions, but v2 was relinked on a newer distro: its libc.so.6 verneed set gains GLIBC_2.34 (newer than the old maximum GLIBC_2.28) because __libc_start_main rebinds to @GLIBC_2.34. The per-node symbol_version_required_added finding reports the fact; the runtime_floor_raised roll-up names the old->new deployment floor and the imported symbols that pulled it up. Environment drift (binutils/glibc skew), not an interface change: binary-compatible for existing consumers, but no longer loads on runtimes older than glibc 2.34. With a declared --env-matrix runtime floor the risk becomes decidable (>= 2.34 available everywhere -> COMPATIBLE; a declared 2.28 target -> BREAKING).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "runtime_floor_raised",
+    "symbol_version_required_added"
+   ],
+   "fixtures": [
+    "old.abi.json",
+    "new.abi.json"
+   ],
+   "min_evidence": "L0",
+   "mode": "snapshot-pair",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
    ]
   },
   "case17_template_abi": {

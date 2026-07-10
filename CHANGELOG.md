@@ -61,7 +61,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   - `ElfMetadata` now captures `has_dt_relr` and `hash_styles`
     (serialization-compatible; detectors gate off on legacy snapshots so a
     stale baseline never fabricates a finding).
-  - **Catalog case 165** (`examples/case165_env_runtime_floor_raised`) — a
+  - **Catalog case 170** (`examples/case170_env_runtime_floor_raised`) — a
     committed snapshot pair encoding the relink-on-newer-distro scenario
     (same interface, `__libc_start_main` rebinds `GLIBC_2.28` → `GLIBC_2.34`),
     with `env-newer.yaml`/`env-older.yaml` matrices showing the floor contract
