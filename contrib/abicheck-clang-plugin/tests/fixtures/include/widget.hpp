@@ -37,6 +37,14 @@ struct Point {
 constexpr int kMaxItems = 128;
 constexpr int kComputed = 4 * 32 + 1;  // non-literal init -> subtree hash
 
+// External-linkage data variables — become exported OBJECT symbols, so both
+// producers emit them as `variable` entities (ADR-030 D4). A namespace-scope
+// `static` (internal linkage) and a block-scope local are NOT variables and are
+// dropped by both; a static data member IS external and is kept.
+int gCounter;                          // namespace global -> variable
+extern int gShared;                    // extern global -> variable
+static int gInternal = 0;              // internal linkage -> dropped by both
+
 int add(int a, int b = 1);             // default arg (literal int)
 bool toggle(bool on = true);           // default arg (literal bool)
 
@@ -72,6 +80,7 @@ class Widget {
 public:
   Widget();
   int area() const;
+  static int sInstances;   // static data member -> external OBJECT -> variable
 
 private:
   struct Impl {          // private nested type; its public members stay hidden

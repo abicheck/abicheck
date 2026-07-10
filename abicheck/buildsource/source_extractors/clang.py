@@ -631,7 +631,11 @@ def _template_param_name(node: dict[str, Any], position: int) -> str:
     if name:
         return name
     kind = str(node.get("kind") or "")
-    return "N" + str(position) if kind == "NonTypeTemplateParmDecl" else "T" + str(position)
+    return (
+        "N" + str(position)
+        if kind == "NonTypeTemplateParmDecl"
+        else "T" + str(position)
+    )
 
 
 def _template_params(node: dict[str, Any]) -> list[str]:
@@ -953,6 +957,49 @@ def _is_constexpr_var_node(
     )
 
 
+#: Decl containers whose direct ``VarDecl`` children have linkage (become real
+#: symbols). A ``VarDecl`` reached anywhere else in the walk — inside a function
+#: body's ``CompoundStmt``/``DeclStmt`` — is a stack local with no symbol and is
+#: never an ABI variable (``TranslationUnitDecl`` is the walk root's own kind).
+_VARIABLE_SCOPE_KINDS = frozenset(
+    {"TranslationUnitDecl", "NamespaceDecl", "CXXRecordDecl", "LinkageSpecDecl"}
+)
+
+
+def _is_variable_node(
+    kind: str | None,
+    name: str,
+    node: dict[str, Any],
+    accessible: bool,
+    enclosing_kind: str | None,
+) -> bool:
+    """Return ``True`` for a named, accessible **externally-linked** data variable.
+
+    These are the globals and static data members that become exported ``OBJECT``
+    symbols (e.g. ``llvm::raw_ostream::RED``), so capturing them lets a binary
+    data export map back to a source declaration (ADR-030 D4). ``constexpr``
+    variables are handled by ``_emit_constexpr`` and excluded here.
+
+    A block-scope local (enclosing kind is a statement, not a decl container) has
+    no linkage and is dropped. Internal-linkage variables never appear in the
+    dynamic symbol table, so a *namespace/file-scope* ``static`` is dropped; a
+    ``static`` **data member** (enclosing ``CXXRecordDecl``) has external linkage
+    and is kept. Namespace-scope ``const`` without ``extern`` is internal in C++
+    but harmless to over-emit (it simply matches no export); the rule errs toward
+    emitting so a real export is never dropped.
+    """
+    if kind != "VarDecl" or not name or not accessible:
+        return False
+    if node.get("constexpr"):
+        return False
+    if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
+        return False
+    in_record = enclosing_kind == "CXXRecordDecl"
+    if node.get("storageClass") == "static" and not in_record:
+        return False
+    return True
+
+
 def _is_type_node(kind: str | None, name: str, accessible: bool) -> bool:
     """Return ``True`` for a named, accessible record or enum declaration."""
     return kind in ("CXXRecordDecl", "EnumDecl") and bool(name) and accessible
@@ -977,6 +1024,7 @@ def _emit_node(
     kind: str | None,
     name: str,
     accessible: bool,
+    enclosing_kind: str | None = None,
 ) -> bool:
     """Dispatch a single AST node to the appropriate emit helper.
 
@@ -996,6 +1044,8 @@ def _emit_node(
         _emit_function(node, ctx, tu, scope, file)
     elif _is_constexpr_var_node(kind, name, node, accessible):
         _emit_constexpr(node, ctx, tu, scope, file)
+    elif _is_variable_node(kind, name, node, accessible, enclosing_kind):
+        _emit_variable(node, ctx, tu, scope, file)
     elif _is_type_node(kind, name, accessible):
         _emit_type(node, ctx, tu, scope, file)
     elif _is_typedef_node(kind, name, accessible):
@@ -1037,11 +1087,15 @@ def _walk_children(
     file: str,
     accessible: bool,
     running_access: str,
+    enclosing_kind: str | None = None,
 ) -> str:
     """Iterate a node's ``inner`` list, threading the sticky ``file`` forward.
 
     Handles ``AccessSpecDecl`` sections that switch the running C++ access for
     subsequent siblings. Returns the last file seen in any child's subtree.
+    ``enclosing_kind`` is this node's kind, forwarded so a child ``VarDecl`` knows
+    whether it is a static data member (``CXXRecordDecl`` parent → external
+    linkage) vs a namespace-scope ``static`` (internal linkage).
     """
     for child in node.get("inner", []):
         if not isinstance(child, dict):
@@ -1061,6 +1115,7 @@ def _walk_children(
             scope=child_scope,
             current_file=file,
             access=child.get("access", running_access),
+            enclosing_kind=enclosing_kind,
         )
     return file
 
@@ -1073,6 +1128,7 @@ def _walk(
     scope: list[str],
     current_file: str,
     access: str = "public",
+    enclosing_kind: str | None = None,
 ) -> str:
     """Pre-order traversal that emits public entities, tracking file + scope.
 
@@ -1096,7 +1152,9 @@ def _walk(
     name = node.get("name", "") or ""
     accessible = _is_accessible(access)
 
-    is_template = _emit_node(node, ctx, tu, scope, file, kind, name, accessible)
+    is_template = _emit_node(
+        node, ctx, tu, scope, file, kind, name, accessible, enclosing_kind
+    )
     if is_template:
         return file
 
@@ -1108,6 +1166,7 @@ def _walk(
         file=file,
         accessible=accessible,
         running_access=_initial_running_access(accessible, kind, node, access),
+        enclosing_kind=kind,
     )
 
 
@@ -1163,8 +1222,7 @@ def _emit_function(
     mangled = _mangled(node)
     loc = _location(file, _node_line(node), origin)
     relations = {
-        str(k): str(v)
-        for k, v in dict(node.get("_abicheck_relations", {})).items()
+        str(k): str(v) for k, v in dict(node.get("_abicheck_relations", {})).items()
     }
     # A function entity always carries the signature + default-argument value so
     # default_argument_changed fires; a body present in a public header
@@ -1330,6 +1388,43 @@ def _emit_constexpr(
             qualified_name=name,
             mangled_name=mangled,
             value=value,
+            names=_entity_names(name, mangled),
+            ownership=_entity_ownership(visibility, origin),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=LayerConfidence.HIGH,
+        )
+    )
+
+
+def _emit_variable(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    """Emit an external-linkage data variable / static data member entity.
+
+    Mirrors the castxml ``entity_from_variable`` recipe (``base.py``): identity is
+    keyed on the mangled name (or qualified name) and the variable's type, so a
+    binary ``OBJECT`` export links to it by mangled name and ``variable_type_changed``
+    can fire on a type change.
+    """
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    type_repr = _signature(node)
+    mangled = _mangled(node)
+    tu.variables.append(
+        SourceEntity(
+            id=_hash("variable", mangled or name, type_repr),
+            kind="variable",
+            qualified_name=name,
+            mangled_name=mangled,
+            type_hash=_hash("type", type_repr),
             names=_entity_names(name, mangled),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),

@@ -62,6 +62,11 @@ Implemented and matching `clang.py`, validated by the C.6 CI matrix:
   `relations`, and `ownership` dictionaries; the plugin fills Clang USR /
   canonical USR when available, and both producer paths stamp template-owner and
   public-root ownership hints for later policy/matching layers;
+- **external-linkage variables** — namespace-scope globals and `static` data
+  members (which become exported `OBJECT` symbols) are emitted as `variable`
+  entities keyed on mangled name + type, so a binary data export maps back to a
+  source decl. Internal-linkage namespace/file-scope `static`s and stack locals
+  are dropped (no symbol); `constexpr` variables ride the `constexpr` path;
 - **typedefs / type-aliases** — `type_hash = _hash("typedef-target",
   underlying)`, `value = underlying`;
 - **constexpr variables** — literal *and* computed initializers (a computed

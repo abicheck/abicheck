@@ -1450,14 +1450,16 @@ private:
 class FactsVisitor : public RecursiveASTVisitor<FactsVisitor> {
 public:
   FactsVisitor(ASTContext &ctx, const std::vector<std::string> &roots,
-               std::vector<Entity> &functions, std::vector<Entity> &types,
-               std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
+               std::vector<Entity> &functions, std::vector<Entity> &variables,
+               std::vector<Entity> &types, std::vector<Entity> &templates,
+               std::vector<Entity> &inlineBodies,
                std::vector<Entity> &constexprValues, std::set<std::string> &diags,
                bool inferredRoots = false)
       : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
-        Functions(functions), Types(types), Templates(templates),
-        InlineBodies(inlineBodies), ConstexprValues(constexprValues),
-        Diags(diags), InferredRoots(inferredRoots) {}
+        Functions(functions), Variables(variables), Types(types),
+        Templates(templates), InlineBodies(inlineBodies),
+        ConstexprValues(constexprValues), Diags(diags),
+        InferredRoots(inferredRoots) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1594,42 +1596,83 @@ public:
   }
 
   bool VisitVarDecl(VarDecl *vd) {
-    if (vd->isImplicit() || isa<ParmVarDecl>(vd) || !vd->isConstexpr())
+    if (vd->isImplicit() || isa<ParmVarDecl>(vd))
       return true;
-    // Block-scope `constexpr` inside a public inline/header function body IS
-    // emitted (not skipped on getParentFunctionOrMethod): the clang backend
-    // descends accessible function bodies and emits such locals as `constexpr`
-    // entities just like it emits body-local types, so the plugin matches it
-    // (Codex review). scopedName() omits the function scope, so a local `k` in
-    // `demo::f()` is named `demo::k` exactly as the backend names it. Local
-    // constexpr are syntactic (present in the AST regardless of codegen), so
-    // there is no capture-point asymmetry here.
     if (!isAccessible(vd) || vd->getNameAsString().empty())
+      return true;
+    if (vd->isConstexpr()) {
+      // Block-scope `constexpr` inside a public inline/header function body IS
+      // emitted (not skipped on getParentFunctionOrMethod): the clang backend
+      // descends accessible function bodies and emits such locals as `constexpr`
+      // entities just like it emits body-local types, so the plugin matches it
+      // (Codex review). scopedName() omits the function scope, so a local `k` in
+      // `demo::f()` is named `demo::k` exactly as the backend names it. Local
+      // constexpr are syntactic (present in the AST regardless of codegen), so
+      // there is no capture-point asymmetry here.
+      std::string file, origin, visibility;
+      if (!classify(vd, file, origin, visibility))
+        return true;
+      std::optional<Value> json = dumpDeclJson(vd);
+      if (!json || !json->getAsObject()) {
+        Diags.insert("constexpr value unavailable (JSON dump failed)");
+        return true;
+      }
+      const Object &o = *json->getAsObject();
+      const Value *init = initExprJson(o);
+      std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
+      std::string name = scopedName(vd);
+      Entity e;
+      e.id = H({"constexpr", name, value});
+      e.kind = "constexpr";
+      e.qualified_name = name;
+      e.mangled_name = mangledFromJson(o);
+      e.value = value;
+      e.loc_path = file;
+      e.loc_line = presumedLine(vd);
+      e.loc_origin = origin;
+      e.visibility = visibility;
+      stampDeclEvidence(e, vd);
+      ConstexprValues.push_back(e);
+      return true;
+    }
+    // Non-constexpr external-linkage data variables / static data members —
+    // these become exported OBJECT symbols so capturing them lets a binary data
+    // export map to a source decl (ADR-030 D4). Mirrors clang.py's
+    // `_is_variable_node`/`_emit_variable`: skip function-local vars and variable
+    // templates (the clang backend never walks into those), and drop a
+    // *namespace/file-scope* `static` (internal linkage) while keeping a static
+    // *data member* (external linkage, its lexical parent is a record).
+    if (vd->isLocalVarDecl() || vd->getDescribedVarTemplate() ||
+        isa<VarTemplateSpecializationDecl>(vd))
+      return true;
+    bool inRecord = isa<CXXRecordDecl>(vd->getLexicalDeclContext());
+    if (vd->getStorageClass() == SC_Static && !inRecord)
       return true;
     std::string file, origin, visibility;
     if (!classify(vd, file, origin, visibility))
       return true;
     std::optional<Value> json = dumpDeclJson(vd);
     if (!json || !json->getAsObject()) {
-      Diags.insert("constexpr value unavailable (JSON dump failed)");
+      Diags.insert("variable facts unavailable (JSON dump failed)");
       return true;
     }
     const Object &o = *json->getAsObject();
-    const Value *init = initExprJson(o);
-    std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
     std::string name = scopedName(vd);
+    std::string sig = qualTypeFromJson(o);
+    std::string mangled = mangledFromJson(o);
+    std::string key = mangled.empty() ? name : mangled;
     Entity e;
-    e.id = H({"constexpr", name, value});
-    e.kind = "constexpr";
+    e.id = H({"variable", key, sig});
+    e.kind = "variable";
     e.qualified_name = name;
-    e.mangled_name = mangledFromJson(o);
-    e.value = value;
+    e.mangled_name = mangled;
+    e.type_hash = H({"type", sig});
     e.loc_path = file;
     e.loc_line = presumedLine(vd);
     e.loc_origin = origin;
     e.visibility = visibility;
     stampDeclEvidence(e, vd);
-    ConstexprValues.push_back(e);
+    Variables.push_back(e);
     return true;
   }
 
@@ -1901,6 +1944,7 @@ private:
   PrintingPolicy PP;
   const std::vector<std::string> &Roots;
   std::vector<Entity> &Functions;
+  std::vector<Entity> &Variables;
   std::vector<Entity> &Types;
   std::vector<Entity> &Templates;
   std::vector<Entity> &InlineBodies;
@@ -1934,10 +1978,12 @@ public:
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
 
-    std::vector<Entity> functions, types, templates, inlineBodies, constexprValues;
+    std::vector<Entity> functions, variables, types, templates, inlineBodies,
+        constexprValues;
     std::set<std::string> diags;
-    FactsVisitor visitor(ctx, Roots, functions, types, templates, inlineBodies,
-                         constexprValues, diags, InferredRootCount > 0);
+    FactsVisitor visitor(ctx, Roots, functions, variables, types, templates,
+                         inlineBodies, constexprValues, diags,
+                         InferredRootCount > 0);
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
@@ -2037,8 +2083,8 @@ public:
     std::string tuId = "cu://" + source + "#cfg:" + cfg;
     std::string targetId = Library.empty() ? "" : "target://" + Library;
 
-    if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
-                 inlineBodies, constexprValues, macros, diags))
+    if (!writeTu(source, tuId, targetId, ctxHash, functions, variables, types,
+                 templates, inlineBodies, constexprValues, macros, diags))
       llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
                    << "\n";
   }
@@ -2108,6 +2154,7 @@ private:
   bool writeTu(const std::string &source, const std::string &tuId,
                const std::string &targetId, const std::string &ctxHash,
                const std::vector<Entity> &functions,
+               const std::vector<Entity> &variables,
                const std::vector<Entity> &types,
                const std::vector<Entity> &templates,
                const std::vector<Entity> &inlineBodies,
@@ -2138,7 +2185,7 @@ private:
         ",\"source\":" + jsonStr(source) + ",\"public_header_roots\":" +
         jsonStrArray(Roots) + ",\"declarations\":[]" +
         ",\"types\":" + arr(types) + ",\"functions\":" + arr(functions) +
-        ",\"variables\":[]" + ",\"macros\":" + arr(macros) +
+        ",\"variables\":" + arr(variables) + ",\"macros\":" + arr(macros) +
         ",\"templates\":" + arr(templates) +
         ",\"inline_bodies\":" + arr(inlineBodies) +
         ",\"constexpr_values\":" + arr(constexprValues) +
