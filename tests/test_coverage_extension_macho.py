@@ -22,12 +22,21 @@ synthetic ``MachoMetadata`` — no real binaries required.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+from macholib.mach_o import LC_DYLD_INFO  # type: ignore[import-untyped]
+
 from abicheck.checker import ChangeKind, compare
 from abicheck.macho_metadata import (
+    _LC_DYLD_EXPORTS_TRIE,
     MachoExport,
     MachoMetadata,
     MachoSymbolType,
     _cpu_slice_name,
+    _parse,
+    _parse_export_trie,
+    _read_uleb128,
     _walk_export_trie,
 )
 from abicheck.model import AbiSnapshot
@@ -153,6 +162,13 @@ class TestReexportRepoint:
         assert ChangeKind.NEEDED_REMOVED in _kinds(r)
         assert ChangeKind.MACHO_REEXPORT_CHANGED not in _kinds(r)
 
+    def test_pure_addition_stays_needed_added(self):
+        old = _macho(reexported_libs=[])
+        new = _macho(reexported_libs=["/usr/lib/libextra.dylib"])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.NEEDED_ADDED in _kinds(r)
+        assert ChangeKind.MACHO_REEXPORT_CHANGED not in _kinds(r)
+
 
 # ── Weak↔strong export flips ─────────────────────────────────────────────────
 
@@ -221,7 +237,135 @@ class TestExportTrie:
         assert sorted(_walk_export_trie(blob)) == [("_far", 0x08), ("_foo", 0x00)]
 
     def test_malformed_trie_raises(self):
-        import pytest
-
         with pytest.raises(ValueError):
             _walk_export_trie(b"\x80")  # truncated ULEB128
+
+    def test_overlong_uleb_raises(self):
+        # 10 continuation bytes push the shift past 63 bits.
+        with pytest.raises(ValueError):
+            _read_uleb128(b"\xff" * 10, 0)
+
+    def test_uleb_multibyte(self):
+        assert _read_uleb128(b"\x85\x02", 0) == (0x105, 2)
+
+    def test_walk_cycle_is_bounded(self):
+        # Root's only child points back at the root — the visited-set guard
+        # must terminate the walk instead of recursing forever.
+        blob = b"\x00\x01a\x00\x00"
+        assert _walk_export_trie(blob) == []
+
+    def test_walk_truncated_after_terminal(self):
+        # Node ends right after the (empty) terminal payload — no child count.
+        assert _walk_export_trie(b"\x00") == []
+
+    def test_walk_edge_missing_nul(self):
+        # Child edge string runs off the end of the blob without a NUL.
+        assert _walk_export_trie(b"\x00\x01abc") == []
+
+
+#: File offset the trie is written at in the fixtures (export_off=0 means
+#: "no trie" to the parser, so it must be nonzero).
+_TRIE_OFF = 8
+
+
+def _trie_header(trie: bytes, *, modern: bool = False) -> SimpleNamespace:
+    """Fake macholib header exposing an export trie via LC_DYLD_INFO or
+    LC_DYLD_EXPORTS_TRIE, mirroring the (lc, cmd, data) command tuples."""
+    if modern:
+        lc, cmd = (
+            SimpleNamespace(cmd=_LC_DYLD_EXPORTS_TRIE),
+            SimpleNamespace(dataoff=_TRIE_OFF, datasize=len(trie)),
+        )
+    else:
+        lc, cmd = (
+            SimpleNamespace(cmd=LC_DYLD_INFO),
+            SimpleNamespace(export_off=_TRIE_OFF, export_size=len(trie)),
+        )
+    return SimpleNamespace(commands=[(lc, cmd, b"")], offset=0)
+
+
+#: Trie exporting _plain (flags 0), _weakling (weak-def), _fwd (re-export),
+#: plus a bare "_" that must be dropped (empty name after underscore strip).
+#: Root (bytes 0-29): no terminal, 4 children.
+_TRIE = (
+    b"\x00\x04"
+    b"_plain\x00\x1e"      # → node at 30
+    b"_weakling\x00\x22"   # → node at 34
+    b"_fwd\x00\x26"        # → node at 38
+    b"_\x00\x2a"           # → node at 42
+    b"\x02\x00\x00\x00"    # _plain: terminal, flags=0
+    b"\x02\x04\x00\x00"    # _weakling: terminal, flags=WEAK_DEFINITION
+    b"\x02\x08\x00\x00"    # _fwd: terminal, flags=REEXPORT
+    b"\x02\x00\x00\x00"    # _: terminal — name empties after strip
+)
+
+
+class TestParseExportTrie:
+    def _run(self, tmp_path, meta: MachoMetadata, *, modern: bool = False) -> MachoMetadata:
+        f = tmp_path / "lib.dylib"
+        f.write_bytes(b"\x00" * _TRIE_OFF + _TRIE)
+        _parse_export_trie(f, _trie_header(_TRIE, modern=modern), meta)
+        return meta
+
+    def test_trie_only_exports_merged(self, tmp_path):
+        meta = self._run(tmp_path, MachoMetadata())
+        by_name = {e.name: e for e in meta.exports}
+        assert set(by_name) == {"plain", "weakling", "fwd"}
+        assert by_name["plain"].sym_type == MachoSymbolType.EXPORTED
+        assert by_name["weakling"].sym_type == MachoSymbolType.WEAK
+        assert by_name["weakling"].is_weak is True
+        assert by_name["fwd"].sym_type == MachoSymbolType.REEXPORT
+
+    def test_existing_exports_upgraded_not_duplicated(self, tmp_path):
+        meta = MachoMetadata(exports=[
+            MachoExport(name="weakling"),
+            MachoExport(name="fwd"),
+        ])
+        self._run(tmp_path, meta)
+        by_name = {e.name: e for e in meta.exports}
+        assert len(meta.exports) == 3  # only "plain" added
+        assert by_name["weakling"].is_weak is True
+        assert by_name["weakling"].sym_type == MachoSymbolType.WEAK
+        assert by_name["fwd"].sym_type == MachoSymbolType.REEXPORT
+
+    def test_modern_exports_trie_command(self, tmp_path):
+        meta = self._run(tmp_path, MachoMetadata(), modern=True)
+        assert {e.name for e in meta.exports} == {"plain", "weakling", "fwd"}
+
+    def test_no_trie_command_is_noop(self, tmp_path):
+        meta = MachoMetadata()
+        header = SimpleNamespace(commands=[], offset=0)
+        _parse_export_trie(tmp_path / "missing.dylib", header, meta)
+        assert meta.exports == []
+
+    def test_unreadable_file_is_noop(self, tmp_path):
+        meta = MachoMetadata()
+        _parse_export_trie(tmp_path / "missing.dylib", _trie_header(_TRIE), meta)
+        assert meta.exports == []
+
+    def test_malformed_trie_is_noop(self, tmp_path):
+        bad = b"\x80"  # truncated ULEB128
+        f = tmp_path / "lib.dylib"
+        f.write_bytes(b"\x00" * _TRIE_OFF + bad)
+        meta = MachoMetadata()
+        _parse_export_trie(f, _trie_header(bad), meta)
+        assert meta.exports == []
+
+
+# ── LC_RPATH collection in _parse ────────────────────────────────────────────
+
+class TestParseRpaths:
+    def test_rpaths_collected(self, tmp_path, monkeypatch):
+        from abicheck import macho_metadata as mm
+
+        hdr = SimpleNamespace(cputype=0x0100000C, cpusubtype=0, filetype=6, flags=0)
+        commands = [
+            (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"@loader_path/../lib\x00"),
+            (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"\x00"),  # empty → dropped
+        ]
+        header = SimpleNamespace(header=hdr, commands=commands, offset=0)
+        monkeypatch.setattr(
+            mm, "MachO", lambda path: SimpleNamespace(headers=[header])
+        )
+        meta = _parse(tmp_path / "lib.dylib")
+        assert meta.rpaths == ["@loader_path/../lib"]

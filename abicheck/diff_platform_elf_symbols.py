@@ -628,13 +628,18 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     A newly-imported symbol is a new obligation on the consumer's link
     environment — if no loaded dependency provides it, the dynamic linker
     fails. Weak imports are skipped in the added direction (they resolve to
-    null rather than failing). Requires ELF evidence on both sides so a
-    header-only or legacy baseline never reads as "imported nothing".
+    null rather than failing). Gated on captured ELF identity on both sides
+    (not on the lists being non-empty): a parsed ELF with zero undefined
+    symbols is real evidence of "imports nothing", so gaining a first import
+    or dropping the last one must still report; only a header-only or legacy
+    baseline (no parsed identity) is skipped.
     """
+    from .diff_platform_elf_dynamic import _both_captured_elf_identity
+
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
     old_imports = getattr(old_elf, "imports", None) or []
     new_imports = getattr(new_elf, "imports", None) or []
-    if not old_imports or not new_imports:
-        return []
 
     changes: list[Change] = []
     old_names = {i.name for i in old_imports}
@@ -674,12 +679,16 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     These symbols interpose allocation for the whole process, so their
     presence flipping is a loader-level contract change even though the
     symbol-level diff also reports the individual adds/removes. Fires once per
-    direction at the library level.
+    direction at the library level. Gated on captured ELF identity, not on the
+    symbol lists being non-empty — an export table that is empty on one side
+    is still evidence about which allocator symbols it (doesn't) export.
     """
+    from .diff_platform_elf_dynamic import _both_captured_elf_identity
+
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
     old_syms = getattr(old_elf, "symbols", None) or []
     new_syms = getattr(new_elf, "symbols", None) or []
-    if not old_syms or not new_syms:
-        return []
     old_alloc = sorted(
         s.name for s in old_syms if s.name.startswith(_ALLOCATOR_MANGLING_PREFIXES)
     )

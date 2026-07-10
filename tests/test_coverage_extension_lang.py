@@ -137,6 +137,15 @@ class TestContractAttributes:
         )
         assert ChangeKind.CALLING_CONVENTION_CHANGED in _kinds(r)
 
+    def test_identical_attributes_no_finding(self):
+        r = compare(
+            _snap([_fn(contract_attributes=["noreturn", "nonnull(1)"])]),
+            _snap([_fn(contract_attributes=["nonnull(1)", "noreturn"])]),
+        )
+        kinds = _kinds(r)
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED not in kinds
+        assert ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED not in kinds
+
 
 # ── Dynamic exception specifications ─────────────────────────────────────────
 
@@ -181,6 +190,24 @@ class TestVariableAlignment:
         )
         assert ChangeKind.VAR_ALIGNMENT_CHANGED not in _kinds(r)
 
+    def test_stable_alignment_no_finding(self):
+        r = compare(
+            _snap(variables=[_var(alignment_bits=64)]),
+            _snap(variables=[_var(alignment_bits=64)]),
+        )
+        assert ChangeKind.VAR_ALIGNMENT_CHANGED not in _kinds(r)
+
+    def test_unknown_type_side_still_checks_alignment_only(self):
+        # A stripped side reports type "?" — unknown is not a type change,
+        # but a captured alignment drift on the same pair still reports.
+        r = compare(
+            _snap(variables=[_var(type="?", alignment_bits=512)]),
+            _snap(variables=[_var(alignment_bits=64)]),
+        )
+        kinds = _kinds(r)
+        assert ChangeKind.VAR_ALIGNMENT_CHANGED in kinds
+        assert ChangeKind.VAR_TYPE_CHANGED not in kinds
+
 
 # ── vtable index moves ───────────────────────────────────────────────────────
 
@@ -200,6 +227,12 @@ class TestVtableIndexMove:
     def test_unknown_index_skipped(self):
         old = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=None)
         new = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=3)
+        r = compare(_snap([old]), _snap([new]))
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in _kinds(r)
+
+    def test_stable_index_no_finding(self):
+        old = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=2)
+        new = _fn(mangled="_ZN6Widget4drawEv", is_virtual=True, vtable_index=2)
         r = compare(_snap([old]), _snap([new]))
         assert ChangeKind.TYPE_VTABLE_CHANGED not in _kinds(r)
 
@@ -270,6 +303,25 @@ class TestCastxmlExtraction:
         assert _extract_contract_attributes("") == []
         assert _extract_contract_attributes("stdcall") == ["stdcall"]
 
+    def test_empty_throw_attribute_is_empty_spec(self):
+        # castxml spells `throw()` as throw="" — distinct from the attribute
+        # being absent (no dynamic spec at all).
+        doc = """
+        <CastXML version="1.0">
+          <Function id="_f1" name="nothrow_fn" returns="_t1"
+                    mangled="nothrow_fn" throw="">
+            <Comment/>
+          </Function>
+          <FundamentalType id="_t1" name="int"/>
+        </CastXML>
+        """
+        parser = _CastxmlParser(
+            fromstring(doc), exported_dynamic=set(), exported_static=set()
+        )
+        funcs = parser.parse_functions()
+        assert len(funcs) == 1
+        assert funcs[0].exception_spec == "throw()"
+
 
 # ── clang extraction helpers ─────────────────────────────────────────────────
 
@@ -300,3 +352,38 @@ class TestClangExtraction:
         }
         assert _clang_var_alignment_bits(node) == 512
         assert _clang_var_alignment_bits({"inner": []}) is None
+
+    def test_contract_attributes_skip_non_dict_children(self):
+        node = {"inner": ["not-a-dict", {"kind": "NoReturnAttr"}]}
+        assert _clang_contract_attributes(node) == ["noreturn"]
+
+    def test_var_alignment_integer_value(self):
+        # clang may emit the evaluated constant as an int, not a string.
+        node = {
+            "inner": [
+                {"kind": "AlignedAttr", "inner": [{"kind": "ConstantExpr", "value": 32}]}
+            ]
+        }
+        assert _clang_var_alignment_bits(node) == 256
+
+    def test_var_alignment_ignores_other_attributes(self):
+        node = {"inner": [{"kind": "NoReturnAttr"}, "junk",
+                          {"kind": "AlignedAttr", "inner": []}]}
+        assert _clang_var_alignment_bits(node) is None
+
+    def test_var_alignment_nested_and_junk_entries(self):
+        # The value can sit a level deeper (e.g. inside an IntegerLiteral);
+        # non-dict siblings and non-numeric values must be skipped.
+        node = {
+            "inner": [
+                {
+                    "kind": "AlignedAttr",
+                    "inner": [
+                        {"kind": "ConstantExpr", "value": "abc",
+                         "inner": [{"kind": "IntegerLiteral", "value": "16"}]},
+                        "junk",
+                    ],
+                }
+            ]
+        }
+        assert _clang_var_alignment_bits(node) == 128

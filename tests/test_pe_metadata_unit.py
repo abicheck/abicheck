@@ -331,8 +331,9 @@ class TestParsePeMetadata:
         imp_entry.imports = [imp_func]
         mock_pe.DIRECTORY_ENTRY_IMPORT = [imp_entry]
 
-        # No version resource
+        # No version resource, no delay-load import directory
         del mock_pe.VS_FIXEDFILEINFO
+        del mock_pe.DIRECTORY_ENTRY_DELAY_IMPORT
 
         mock_pefile = MagicMock()
         mock_pefile.PE.return_value = mock_pe
@@ -412,3 +413,55 @@ class TestParsePeMetadata:
 
         assert isinstance(meta, PeMetadata)
         assert meta.exports == []
+
+
+    def test_parse_delay_imports_and_missing_subsystem_version(self, tmp_path):
+        """Exercise DIRECTORY_ENTRY_DELAY_IMPORT parsing (named, ordinal-only,
+        and nameless non-ordinal entries) and the absent-subsystem-version
+        branch (an OPTIONAL_HEADER without Major/MinorSubsystemVersion must
+        leave the field uncaptured)."""
+        from types import SimpleNamespace
+
+        f = tmp_path / "test.dll"
+        f.write_bytes(b"MZ" + b"\x00" * 256)
+
+        mock_pe = MagicMock()
+        mock_pe.FILE_HEADER.Machine = 0x8664
+        mock_pe.FILE_HEADER.Characteristics = 0x2022
+        mock_pe.OPTIONAL_HEADER = SimpleNamespace(DllCharacteristics=0x0100)
+        del mock_pe.DIRECTORY_ENTRY_EXPORT
+        del mock_pe.DIRECTORY_ENTRY_IMPORT
+        del mock_pe.VS_FIXEDFILEINFO
+
+        named = MagicMock()
+        named.name = b"MiniDumpWriteDump"
+        by_ordinal = MagicMock()
+        by_ordinal.name = None
+        by_ordinal.import_by_ordinal = True
+        by_ordinal.ordinal = 42
+        nameless = MagicMock()
+        nameless.name = None
+        nameless.import_by_ordinal = False
+
+        entry = MagicMock()
+        entry.dll = b"DBGHELP.dll"
+        entry.imports = [named, by_ordinal, nameless]
+        mock_pe.DIRECTORY_ENTRY_DELAY_IMPORT = [entry]
+
+        mock_pefile = MagicMock()
+        mock_pefile.PE.return_value = mock_pe
+        mock_pefile.PEFormatError = Exception
+        mock_pefile.MACHINE_TYPE = {0x8664: "IMAGE_FILE_MACHINE_AMD64"}
+        mock_pefile.DIRECTORY_ENTRY = {
+            "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+            "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+            "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+        }
+
+        with patch("abicheck.pe_metadata.pefile", mock_pefile):
+            meta = parse_pe_metadata(f)
+
+        assert meta.delay_imports == {
+            "DBGHELP.dll": ["MiniDumpWriteDump", "ordinal:42"]
+        }
+        assert meta.subsystem_version == ""

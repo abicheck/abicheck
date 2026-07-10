@@ -24,8 +24,11 @@ no real binaries required.
 from __future__ import annotations
 
 import struct
+from pathlib import Path
+from types import SimpleNamespace
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.diff_platform_elf_dynamic import _kernel_version_tuple
 from abicheck.elf_metadata import (
     ElfImport,
     ElfMetadata,
@@ -34,6 +37,8 @@ from abicheck.elf_metadata import (
     SymbolType,
     _decode_abi_tag_desc,
     _decode_gnu_property_desc,
+    _parse_abi_tag,
+    _parse_dynamic,
     _value_alignment,
 )
 from abicheck.model import AbiSnapshot
@@ -215,6 +220,101 @@ class TestKernelFloor:
         # Truncated description → no floor.
         assert _decode_abi_tag_desc(b"\x00" * 8, True) == ""
 
+    def test_unparseable_floor_skipped(self):
+        # A malformed captured floor must not crash or report.
+        old = _elf(min_kernel_version="3.2.0")
+        new = _elf(min_kernel_version="not.a.version")
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED not in _kinds(r)
+
+    def test_kernel_version_tuple(self):
+        assert _kernel_version_tuple("3.2.0") == (3, 2, 0)
+        assert _kernel_version_tuple("not.a.version") is None
+
+
+class _FakeNoteElf:
+    """Minimal stand-in for pyelftools' ELFFile: one .note.ABI-tag section."""
+
+    little_endian = True
+
+    def __init__(self, notes):
+        self._notes = notes
+
+    def get_section_by_name(self, name):
+        return SimpleNamespace(iter_notes=lambda: iter(self._notes))
+
+
+class TestParseAbiTag:
+    def test_reads_floor_from_gnu_note(self):
+        desc = struct.pack("<IIII", 0, 3, 2, 0)
+        meta = ElfMetadata()
+        notes = [
+            {"n_type": 99, "n_name": "GNU"},  # wrong type → skipped
+            {"n_type": 1, "n_name": "Linux"},  # wrong owner → skipped
+            {"n_type": 1, "n_name": "GNU"},  # descriptor missing → skipped
+            {"n_type": 1, "n_name": "GNU", "n_descdata": desc},
+        ]
+        _parse_abi_tag(_FakeNoteElf(notes), meta, Path("lib.so"))
+        assert meta.min_kernel_version == "3.2.0"
+
+    def test_string_desc_is_re_encoded(self):
+        # pyelftools sometimes hands the descriptor back as a latin-1 string.
+        desc = struct.pack("<IIII", 0, 2, 6, 32).decode("latin-1")
+        meta = ElfMetadata()
+        notes = [{"n_type": "NT_GNU_ABI_TAG", "n_name": "GNU", "n_descdata": desc}]
+        _parse_abi_tag(_FakeNoteElf(notes), meta, Path("lib.so"))
+        assert meta.min_kernel_version == "2.6.32"
+
+    def test_non_linux_note_leaves_floor_unset(self):
+        desc = struct.pack("<IIII", 1, 3, 2, 0)  # os_id 1 = not Linux
+        meta = ElfMetadata()
+        notes = [{"n_type": 1, "n_name": "GNU", "n_descdata": desc}]
+        _parse_abi_tag(_FakeNoteElf(notes), meta, Path("lib.so"))
+        assert meta.min_kernel_version == ""
+
+    def test_missing_section_is_noop(self):
+        elf = SimpleNamespace(
+            little_endian=True, get_section_by_name=lambda name: None
+        )
+        meta = ElfMetadata()
+        _parse_abi_tag(elf, meta, Path("lib.so"))
+        assert meta.min_kernel_version == ""
+
+    def test_note_read_error_is_swallowed(self):
+        def _boom():
+            raise OSError("bad note segment")
+
+        elf = SimpleNamespace(
+            little_endian=True,
+            get_section_by_name=lambda name: SimpleNamespace(iter_notes=_boom),
+        )
+        meta = ElfMetadata()
+        _parse_abi_tag(elf, meta, Path("lib.so"))  # must not raise
+        assert meta.min_kernel_version == ""
+
+
+class _FakeTag:
+    def __init__(self, d_tag, d_val=0):
+        self.entry = SimpleNamespace(d_tag=d_tag, d_val=d_val)
+
+
+class TestParseDynamicFlags:
+    def test_origin_and_flags1_bits_collected(self):
+        meta = ElfMetadata()
+        tags = [
+            _FakeTag("DT_FLAGS", 0x1),  # DF_ORIGIN
+            _FakeTag("DT_FLAGS_1", 0x8 | 0x10 | 0x80),  # NODELETE | NOOPEN | ORIGIN
+        ]
+        _parse_dynamic(SimpleNamespace(iter_tags=lambda: iter(tags)), meta)
+        assert meta.dynamic_flags == frozenset({"ORIGIN", "NODELETE", "NOOPEN"})
+
+    def test_no_flag_tags_captures_empty(self):
+        meta = ElfMetadata()
+        _parse_dynamic(SimpleNamespace(iter_tags=lambda: iter([])), meta)
+        assert meta.dynamic_flags == frozenset()
+        assert meta.has_init is False
+        assert meta.has_fini is False
+
 
 # ── GNU_PROPERTY_X86_ISA_1_NEEDED baseline ───────────────────────────────────
 
@@ -313,13 +413,29 @@ class TestImportSet:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
 
-    def test_empty_side_skipped(self):
-        # A side with no captured imports (header-only / legacy) is unknown,
-        # not "imports nothing".
+    def test_first_import_gained(self):
+        # A parsed ELF with zero undefined symbols is real evidence of
+        # "imports nothing" — gaining the first import must report.
         old = _elf(imports=[])
         new = _elf(imports=[_imp("memcpy")])
         r = compare(_snap(old), _snap(new))
-        assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
+        assert ChangeKind.IMPORTED_SYMBOL_ADDED in _kinds(r)
+
+    def test_last_import_dropped(self):
+        old = _elf(imports=[_imp("memcpy")])
+        new = _elf(imports=[])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.IMPORTED_SYMBOL_REMOVED in _kinds(r)
+
+    def test_legacy_side_without_elf_identity_skipped(self):
+        # A legacy/header-only baseline (machine never captured) is unknown,
+        # not "imports nothing" — no fabricated finding.
+        old = ElfMetadata(imports=[])
+        new = _elf(imports=[_imp("memcpy")])
+        r = compare(_snap(old), _snap(new))
+        kinds = _kinds(r)
+        assert ChangeKind.IMPORTED_SYMBOL_ADDED not in kinds
+        assert ChangeKind.IMPORTED_SYMBOL_REMOVED not in kinds
 
 
 # ── Global allocator replacement ─────────────────────────────────────────────
@@ -349,5 +465,19 @@ class TestAllocatorReplacement:
         # In-class operator new mangles as _ZN...nwEm — not a global replacement.
         old = _elf(symbols=[_func("api_fn")])
         new = _elf(symbols=[_func("api_fn"), _func("_ZN3Foo3nwEm")])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in _kinds(r)
+
+    def test_empty_export_table_is_evidence(self):
+        # Zero exports on the old side is still a parsed fact; gaining a
+        # global operator new from nothing reports.
+        old = _elf(symbols=[])
+        new = _elf(symbols=[_func("_Znwm")])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED in _kinds(r)
+
+    def test_legacy_side_without_elf_identity_skipped(self):
+        old = ElfMetadata(symbols=[])
+        new = _elf(symbols=[_func("_Znwm")])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in _kinds(r)

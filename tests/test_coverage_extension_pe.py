@@ -32,6 +32,7 @@ from abicheck.pdb_parser import (
     LF_FIELDLIST,
     LF_MFUNCTION,
     LF_ONEMETHOD,
+    LF_PROCEDURE,
     CvOneMethod,
     CvStruct,
     TpiRecord,
@@ -267,3 +268,76 @@ class TestPdbCallingConventionBridge:
 
         r = compare(snap(old_adv), snap(new_adv))
         assert ChangeKind.CALLING_CONVENTION_CHANGED in _kinds(r)
+
+    def test_procedure_calling_convention_lookup(self):
+        # LF_PROCEDURE (free-function type): rvtype, calltype, funcattr,
+        # parmcount, arglist.
+        proc = TpiRecord(
+            type_index=0x1005,
+            leaf=LF_PROCEDURE,
+            data=struct.pack("<IBBHI", 0x74, 0x07, 0, 0, 0),
+        )
+        db = TypeDatabase(
+            TpiStream(type_index_begin=0x1000, type_index_end=0x2000, records=[proc])
+        )
+        db.parse_all()
+        assert db.function_calling_convention(0x1005) == 0x07
+
+    def test_truncated_onemethod_subrecord_is_dropped(self):
+        # LF_ONEMETHOD header cut short (only 2 of the 6 attr+type bytes) —
+        # the fieldlist parse must bail out, not crash.
+        rec = TpiRecord(
+            type_index=0x1003,
+            leaf=LF_FIELDLIST,
+            data=struct.pack("<HH", LF_ONEMETHOD, 0),
+        )
+        db = TypeDatabase(
+            TpiStream(type_index_begin=0x1000, type_index_end=0x2000, records=[rec])
+        )
+        db.parse_all()
+        assert db.get_fieldlist(0x1003) == []
+
+    def test_nameless_onemethod_is_dropped(self):
+        rec = _fieldlist_record(0x1003, b"", 0x1002)
+        db = TypeDatabase(
+            TpiStream(type_index_begin=0x1000, type_index_end=0x2000, records=[rec])
+        )
+        db.parse_all()
+        assert db.get_fieldlist(0x1003) == []
+
+    def test_intro_virtual_onemethod_skips_vbaseoff(self):
+        # mprop=4 (intro virtual) carries a 4-byte vbaseoff before the name.
+        attr = 4 << 2
+        payload = (
+            struct.pack("<HHI", LF_ONEMETHOD, attr, 0x1002)
+            + struct.pack("<I", 8)
+            + b"VirtualOne\x00"
+        )
+        rec = TpiRecord(type_index=0x1003, leaf=LF_FIELDLIST, data=payload)
+        db = TypeDatabase(
+            TpiStream(type_index_begin=0x1000, type_index_end=0x2000, records=[rec])
+        )
+        db.parse_all()
+        members = db.get_fieldlist(0x1003)
+        assert [m.name for m in members if isinstance(m, CvOneMethod)] == ["VirtualOne"]
+
+    def test_unresolvable_method_type_is_skipped(self):
+        # The method's type index resolves to nothing → no CC recorded.
+        rec = _fieldlist_record(0x1003, b"Mystery", 0x1FFF)
+        db = TypeDatabase(
+            TpiStream(type_index_begin=0x1000, type_index_end=0x2000, records=[rec])
+        )
+        db.parse_all()
+        cv_struct = CvStruct(
+            type_index=0x1004,
+            name="Widget",
+            field_list_ti=0x1003,
+            byte_size=8,
+            is_forward_ref=False,
+            is_packed=False,
+            is_union=False,
+            count=1,
+        )
+        adv = AdvancedDwarfMetadata(has_dwarf=True)
+        _extract_method_calling_conventions(db, cv_struct, adv)
+        assert adv.calling_conventions == {}
