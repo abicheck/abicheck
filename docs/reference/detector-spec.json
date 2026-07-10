@@ -889,7 +889,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "L1",
+      "min_evidence": "L2",
       "doc_slug": "func_virtual_removed",
       "examples": "case168_virtual_method_devirtualized"
     },

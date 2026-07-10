@@ -214,7 +214,7 @@ python scripts/benchmark_comparison.py --evidence-tiers
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
 | Just the binary (`L0`) | 52 / 169 (31%) |
-| + Debug symbols (`L1`) | 120 / 169 (71%) |
+| + Debug symbols (`L1`) | 119 / 169 (70%) |
 | + Public headers (`L2`) | 150 / 169 (89%) |
 | + Build data (`L3`) | 160 / 169 (95%) |
 | + Sources (`L4`) | 166 / 169 (98%) |

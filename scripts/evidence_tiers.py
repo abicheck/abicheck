@@ -104,14 +104,17 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # G23 Phase B2 — L1 DWARF vtable-group reconstruction.
     "secondary_vtable_group_changed": "L1",
     "virtual_base_offset_changed": "L1",
-    # Catalog batch case165–169. Virtuality (DW_AT_virtuality on functions and
-    # inheritance DIEs) and record vtables are visible from a -g build; the
-    # ADR-027 anti-pattern needs the same vtable + factory-return info. The
-    # &/&& ref-qualifier is recorded neither in DWARF nor in symbols-only
-    # snapshots (only the *renamed* symbol is), so the declaration-level
-    # match needs the header AST. overload_added groups by qualified name
-    # parsed structurally from the mangled export table alone.
-    "func_virtual_removed": "L1",
+    # Catalog batch case165–169. Virtuality of *inheritance* (DW_AT_virtuality
+    # on the base DIE) and record vtables are visible from a -g build, and the
+    # ADR-027 anti-pattern needs the same vtable + factory-return info — L1.
+    # A *member function's* virtuality flip, however, is not: the headerless
+    # dump builds symbol-only Function records (no is_virtual), so
+    # FUNC_VIRTUAL_REMOVED needs the header AST; L1 alone sees only the
+    # generic vtable-layout fallout. The &/&& ref-qualifier is likewise
+    # recorded only in the header AST (the binary just shows the renamed
+    # symbol). overload_added groups by qualified name parsed structurally
+    # from the mangled export table alone.
+    "func_virtual_removed": "L2",
     "base_class_virtual_changed": "L1",
     "polymorphic_type_non_virtual_dtor": "L1",
     "func_ref_qual_changed": "L2",

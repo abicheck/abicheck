@@ -1557,7 +1557,7 @@
       "expected_kinds": [
         "func_virtual_removed"
       ],
-      "min_evidence": "L1",
+      "min_evidence": "L2",
       "platforms": [
         "linux",
         "macos",

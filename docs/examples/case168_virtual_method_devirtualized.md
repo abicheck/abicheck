@@ -117,11 +117,12 @@ here by a single removed keyword rather than a removed class.
 ## abicheck detection
 
 The mangled name is unchanged in both versions, so abicheck matches the
-function across snapshots and sees `DW_AT_virtuality` flip: it reports
-`func_virtual_removed` (BREAKING, `min_evidence: L1`), corroborated by
-`type_vtable_changed` (header/DWARF vtable membership) and
-`vtable_slot_count_changed` from `_ZTV5Codec`'s shrunken size — the latter
-works even on a stripped binary.
+function across snapshots and sees its virtuality flip in the header AST:
+it reports `func_virtual_removed` (BREAKING, `min_evidence: L2`). Lower
+evidence tiers still catch the break through its layout fallout —
+`type_vtable_changed` (vtable membership) and `vtable_slot_count_changed`
+from `_ZTV5Codec`'s shrunken size, the latter even on a stripped binary —
+they just can't name the devirtualized method.
 
 ```bash
 abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
