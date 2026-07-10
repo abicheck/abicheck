@@ -174,7 +174,9 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
     return None
 
 
-def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | None:
+def _external_dependency_origin(
+    symbol: str, needed_libs: list[str], self_names: tuple[str, ...] = ()
+) -> str | None:
     """Name the external dependency *symbol* leaked from, or ``None`` if native.
 
     Two signals, cheapest first: the shared
@@ -187,6 +189,12 @@ def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | No
     the *owner* (not any referenced type) keeps a native symbol that merely takes a
     ``std`` argument from being mislabelled external. Conservative: only a positive
     match returns a name.
+
+    ``self_names`` are the audited library's own identity tokens (soname /
+    install-name / library name; see :func:`_library_self_names`): a vendored
+    namespace owned by the library *being scanned* (auditing libfmt itself, whose
+    ``fmt::detail`` symbols are native, not a leak) is **not** reported external so
+    the finding does not tell users to unlink their own library (Codex review).
     """
     from ..elf_metadata import _guess_symbol_origin
 
@@ -201,7 +209,28 @@ def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | No
         return "libstdc++.so.6"
     if owner == "std" or owner in _STD_OWNER_NAMESPACES:
         return _cxx_runtime_lib(symbol, needed_libs)
-    return _VENDORED_OWNER_NAMESPACES.get(owner)
+    vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
+    if vendored is not None and any(owner in name for name in self_names):
+        return None  # the audited library *is* this vendored library — native
+    return vendored
+
+
+def _library_self_names(snapshot: AbiSnapshot) -> tuple[str, ...]:
+    """The audited library's own identity tokens (lower-cased), for self-detection.
+
+    The ELF soname, the Mach-O install-name basename, and the snapshot's library
+    name — so a vendored-namespace owner that is actually the *scanned* library
+    (auditing libfmt/libboost themselves) can be recognised as native rather than a
+    leaked dependency (Codex review).
+    """
+    names: list[str] = []
+    if snapshot.library:
+        names.append(snapshot.library.rsplit("/", 1)[-1])
+    if snapshot.elf is not None and snapshot.elf.soname:
+        names.append(snapshot.elf.soname.rsplit("/", 1)[-1])
+    if snapshot.macho is not None and snapshot.macho.install_name:
+        names.append(snapshot.macho.install_name.rsplit("/", 1)[-1])
+    return tuple(n.lower() for n in names if n)
 
 
 def _linked_library_names(snapshot: AbiSnapshot) -> list[str]:

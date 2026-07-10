@@ -84,6 +84,7 @@ from .export_accounting import (
     ACCOUNT_TEMPLATE_INST,
     _account_undocumented_export,
     _external_dependency_origin,
+    _library_self_names,
     _linked_library_names,
 )
 
@@ -297,6 +298,9 @@ def _check_exported_not_public(
     # symbol names the runtime the binary actually links (e.g. the ``libc++.1.dylib``
     # dylib on macOS rather than a hard-coded ELF soname).
     needed_libs = _linked_library_names(snapshot)
+    # The audited library's own identity — a vendored namespace (fmt/boost/…) that
+    # is the library *being scanned* is native, not a leaked dependency.
+    self_names = _library_self_names(snapshot)
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
@@ -314,7 +318,7 @@ def _check_exported_not_public(
         # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
         # exempting it as a class artifact would silently undercount it (Codex
         # review). Only a *native* class's artifact is then exempted below.
-        origin_lib = _external_dependency_origin(sym, needed_libs)
+        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(

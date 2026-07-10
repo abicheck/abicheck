@@ -547,6 +547,33 @@ def test_linked_library_names_across_platforms():
     assert _linked_library_names(pe_snap) == ["msvcp140.dll"]
 
 
+def test_external_dependency_origin_ignores_audited_library_own_namespace():
+    # Auditing a vendored library itself (libfmt): its own ``fmt::detail`` symbols
+    # are native, not a leaked dependency — the vendored-namespace fallback is gated
+    # on the audited library's identity (Codex review).
+    from abicheck.buildsource.crosscheck import (
+        _external_dependency_origin,
+        _library_self_names,
+    )
+
+    sym = "_ZN3fmt6detail6secretEv"
+    # libfmt scanning itself -> native (no external finding).
+    assert _external_dependency_origin(sym, [], ("libfmt.so.9",)) is None
+    # a different library that statically linked and re-exported fmt -> leak.
+    assert (
+        _external_dependency_origin(sym, [], ("libmylib.so.1",))
+        == "{fmt} (vendored third-party)"
+    )
+    # self-names are derived from library name / soname / Mach-O install-name.
+    snap = _snap(library="libfmt", elf=ElfMetadata(symbols=[], soname="libfmt.so.9"))
+    assert set(_library_self_names(snap)) == {"libfmt", "libfmt.so.9"}
+    macho_snap = _snap(
+        library="",
+        macho=MachoMetadata(exports=[], install_name="/usr/lib/libboost.dylib"),
+    )
+    assert _library_self_names(macho_snap) == ("libboost.dylib",)
+
+
 @pytest.mark.parametrize(
     "symbol, expected",
     [
