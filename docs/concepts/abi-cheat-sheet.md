@@ -23,8 +23,8 @@ These changes preserve binary compatibility. Existing consumers continue to work
 | Tighten a C++20 concept (still satisfied) | Existing callers compile; no symbol or layout change | [case105](../examples/case105_concept_tightening.md) |
 | Graduate `experimental::` → stable (keep old alias) | New stable surface added; old symbols still resolve | [case99](../examples/case99_experimental_graduated.md) |
 | Change a **non-public**, scoped internal struct | Not part of the public surface — no consumer can observe it | [case118](../examples/case118_internal_struct_field_added_scoped.md), [case119](../examples/case119_internal_struct_field_removed_scoped.md), [case120](../examples/case120_internal_struct_reordered_scoped.md) |
-| Strengthen symbol binding (WEAK → GLOBAL) | Symbol still resolves; no consumer observes the binding tightening | [case128](../examples/case128_symbol_binding_strengthened.md) |
-| Add hardening / deployment metadata (drop exec-stack, add `DT_NEEDED`, change RUNPATH) | Loader still resolves everything; posture improves or is deployment-local | [case136](../examples/case136_executable_stack_removed.md), [case137](../examples/case137_runpath_changed.md), [case138](../examples/case138_needed_added.md) |
+| Strengthen symbol binding (WEAK → GLOBAL) | Symbol still resolves; the intended definition wins. *Context note:* if a consumer relied on **interposing** the weak symbol, tightening it removes that hook | [case128](../examples/case128_symbol_binding_strengthened.md) |
+| Add hardening / deployment metadata (drop exec-stack, add `DT_NEEDED`, change RUNPATH) | Loader still resolves the existing contract; posture improves or is deployment-local. *Context note:* a new `DT_NEEDED` / changed `RUNPATH` can select a different provider or fail on hosts missing the dependency — a deployment concern, not a symbol-contract break | [case136](../examples/case136_executable_stack_removed.md), [case137](../examples/case137_runpath_changed.md), [case138](../examples/case138_needed_added.md) |
 
 > **Scoped to the public surface.** Changes to internal/private types that never
 > reach the public header surface are reported as ✅ NO_CHANGE under public-surface
@@ -68,7 +68,7 @@ These cause crashes, wrong results, or link failures in pre-compiled consumers.
 | `[[no_unique_address]]` layout overlay | Empty-member overlap shifts subsequent field offsets | [case117](../examples/case117_no_unique_address.md) |
 | Return-by-value type became non-trivial (destructor added) | Return convention flips register→hidden-pointer (sret); caller reads a value as a pointer. Mangled name unchanged | [case129](../examples/case129_struct_return_convention.md) |
 | Empty base gains a member (EBO lost) | The empty base subobject now takes space; every derived member offset shifts and `sizeof` grows | [case140](../examples/case140_empty_base_optimization_lost.md) |
-| Insert a virtual method mid-vtable (from a **stripped** binary) | Slot indices after the insertion renumber; old callers dispatch to the wrong method — caught from `_ZTV` size alone, no DWARF | [case142](../examples/case142_vtable_slot_count_binary_only.md) |
+| Vtable slot count changed (from a **stripped** binary) | `_ZTV` size alone reveals the slot **count** changed (no DWARF) — a slot-renumbering risk: some existing slots may have moved, so old callers can dispatch to the wrong method. Pinpointing *which* slot / whether it was a mid-insert vs. append needs debug info (L1) | [case142](../examples/case142_vtable_slot_count_binary_only.md) |
 | Exported data object grew (`symbol_size_changed`) | Consumers sized their copy/relocation to the old `st_size`; a larger object overruns | [case127](../examples/case127_data_object_size_changed.md) |
 | Remove a symbol version node | Dynamic linker refuses to load; `version 'FOO_1.0' not found` | [case139](../examples/case139_symbol_version_node_removed.md) |
 | Kernel struct field added (BTF) | In-tree/out-of-tree modules baked the old layout; field offsets shift | [case121](../examples/case121_kernel_btf_struct_field_added.md) |
@@ -117,13 +117,17 @@ Binary-compatible, but may break at deployment time. Verdict: 🟡 COMPATIBLE_WI
 
 The flags the library was *built* with are an ABI input the shipped binary barely
 shows. Feed `abicheck` the build data (`-p build/` / `scan --depth build`) and it
-diffs them. On their own these are 🟡 COMPATIBLE_WITH_RISK — they *explain* and
-localize churn but never manufacture a break (the authority rule). See
+diffs them. **On their own** — when no public symbol changes — these are 🟡
+COMPATIBLE_WITH_RISK: the flag delta *explains* and localizes churn but never
+manufactures a break (the authority rule). If the same flag flip actually
+**remangles public symbols**, the L0 symbol diff proves a 🔴 BREAKING on its own
+(that is why [case104](../examples/case104_glibcxx_dual_abi_flip.md) is classified
+BREAKING, not risk). See
 [What Each Level Sees § L3](what-each-level-sees.md#level-3-build-data-the-flags-it-was-actually-built-with).
 
 | Flag drift | Why it matters | Example |
 |------------|----------------|---------|
-| `_GLIBCXX_USE_CXX11_ABI` flipped | libstdc++ string/list ABI changes; `std::string`-taking symbols re-mangle | [case104](../examples/case104_glibcxx_dual_abi_flip.md) |
+| `_GLIBCXX_USE_CXX11_ABI` flipped | libstdc++ string/list ABI changes. Risk-only when no public symbol changes; **🔴 BREAKING** if it re-mangles exported `std::string`/`std::list` signatures | [case104](../examples/case104_glibcxx_dual_abi_flip.md) |
 | `-fexceptions` mode flipped | EH tables/landing pads differ across the boundary | [case130](../examples/case130_exceptions_mode_flip.md) |
 | `-frtti` mode flipped | `typeinfo`/`dynamic_cast` support diverges | [case131](../examples/case131_rtti_mode_flip.md) |
 | Thread-safe statics (`-fthreadsafe-statics`) flipped | Function-local static init guards change | [case132](../examples/case132_threadsafe_statics_flip.md) |
@@ -159,7 +163,7 @@ comparing them.
 | Header ↔ build mismatch | Headers parsed without the build's ABI flags → wrong recorded layout | [case148](../examples/case148_xcheck_header_build_mismatch.md) |
 | ODR type variant | One type, two per-TU layouts | [case149](../examples/case149_xcheck_odr_variant.md) |
 | Export ↔ decl mismatch | Exported-not-public / public-not-exported, both directions | [case150](../examples/case150_xcheck_export_public_pair.md) |
-| Public API gained an internal dependency | Exported entry now reaches a non-public helper (L5 graph) | [case160](../examples/case160_public_api_internal_dep_added.md) |
+| Public API gained an internal dependency | A public entry newly reaches a non-public entity through the L5 graph — a *risk signal* (later changes to the internal become hidden behavioral risk), not a proven ABI dependency. It is only a hard break if it surfaces via a public header, inline body, or link-time symbol | [case160](../examples/case160_public_api_internal_dep_added.md) |
 | Exported symbol's declaring file moved | Stable symbol, but its owning header changed (L5 graph) | [case162](../examples/case162_symbol_source_owner_changed.md) |
 
 ---
