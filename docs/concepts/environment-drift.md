@@ -11,6 +11,12 @@ section in Markdown reports, and classifies most of them as
 `COMPATIBLE_WITH_RISK` — binary-compatible for existing consumers, but a
 deployment-envelope or loader-semantics change worth reviewing.
 
+> **Educational companion:** [Dependency & Runtime Floors](dependency-floors.md)
+> teaches *why* dependency floors are a compatibility contract — the OS-release
+> impact of a raised glibc/libstdc++ floor, the macOS/Windows parallels, and
+> the CPU-dispatch (oneDAL/OpenBLAS) scenario. This page carries the detector
+> and flag reference.
+
 ## The glibc side: deployment floors
 
 Linking on a host with a newer glibc rebinds imports to newer version nodes

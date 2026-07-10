@@ -98,6 +98,7 @@ nav:
   - ABI/API Handling & Recommendations:
     - Overview: concepts/abi-api-handling.md
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
+    - Dependency & Runtime Floors: concepts/dependency-floors.md
     - Learning Series:
       - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
