@@ -94,6 +94,15 @@ class EnvironmentMatrix:
     abi_version: str | None = None                    # -fabi-version value
     libstdcxx_dual_abi: str | None = None             # "cxx11" | "old"
 
+    # Declared deployment runtime floors, keyed by ELF version-node prefix
+    # (case-insensitive; normalized to upper): {"GLIBC": "2.28",
+    # "GLIBCXX": "3.4.30", "CXXABI": "1.3.13"}. When set, a new symbol-version
+    # requirement at or below the floor is COMPATIBLE (every declared target
+    # already ships it) and one above the floor is BREAKING (a declared target
+    # can no longer load the binary); unspecified prefixes keep the default
+    # RISK classification.
+    runtime_floors: dict[str, str] = field(default_factory=dict)
+
     # Heterogeneous stack constraints
     sycl: SyclConstraints = field(default_factory=SyclConstraints)
     cuda: CudaConstraints = field(default_factory=CudaConstraints)
@@ -117,7 +126,7 @@ class EnvironmentMatrix:
 
         _KNOWN_KEYS = {
             "compilers", "abi_version", "libstdcxx_dual_abi",
-            "sycl", "cuda", "target_os", "target_arch",
+            "sycl", "cuda", "target_os", "target_arch", "runtime_floors",
         }
         unknown = set(data) - _KNOWN_KEYS
         if unknown:
@@ -175,10 +184,43 @@ class EnvironmentMatrix:
             require_ptx=require_ptx,
         )
 
+        floors_raw = data.get("runtime_floors", {})
+        if not isinstance(floors_raw, dict):
+            raise ValueError(
+                f"'runtime_floors' must be a dict of version-node prefix → "
+                f"version (e.g. {{GLIBC: '2.28'}}), got {type(floors_raw).__name__}"
+            )
+        runtime_floors: dict[str, str] = {}
+        for key, value in floors_raw.items():
+            if isinstance(value, float):
+                # An unquoted YAML floor has already been lossily parsed:
+                # `GLIBC: 2.40` reaches us as the float 2.4, which would
+                # silently declare a *lower* floor than the user wrote.
+                # Reject rather than guess (Codex review #510).
+                raise ValueError(
+                    f"'runtime_floors.{key}' must be a quoted string version: "
+                    f"unquoted YAML floats lose trailing zeros "
+                    f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
+                    f"with the intended digits."
+                )
+            floor = str(value)
+            # Every dot-separated component must be purely numeric: the floor
+            # contract parses with int() per component, so a "2.28-1" or "2.x"
+            # would silently truncate to (2,) and flip verdicts. Reject
+            # malformed text here instead (Codex review #510).
+            components = floor.split(".")
+            if not components or not all(p.isdigit() for p in components):
+                raise ValueError(
+                    f"'runtime_floors.{key}' must be a dotted numeric version "
+                    f"(digits and dots only, e.g. '2.28'), got {value!r}"
+                )
+            runtime_floors[str(key).upper()] = floor
+
         return cls(
             compilers=compilers,
             abi_version=data.get("abi_version"),
             libstdcxx_dual_abi=data.get("libstdcxx_dual_abi"),
+            runtime_floors=runtime_floors,
             sycl=sycl,
             cuda=cuda,
             target_os=data.get("target_os"),
@@ -187,9 +229,17 @@ class EnvironmentMatrix:
 
     @classmethod
     def from_yaml(cls, path: Path) -> EnvironmentMatrix:
-        """Load from a YAML file."""
+        """Load from a YAML file.
+
+        Malformed YAML raises :class:`ValueError` (like the shape errors from
+        :meth:`from_dict`), so callers need not depend on the ``yaml`` package
+        for their error handling.
+        """
         import yaml
 
         with open(path) as f:
-            data = yaml.safe_load(f) or {}
+            try:
+                data = yaml.safe_load(f) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"malformed YAML: {exc}") from exc
         return cls.from_dict(data)

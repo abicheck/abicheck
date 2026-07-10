@@ -522,7 +522,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format", "--debug-info1",
         "--debug-info2", "--debug-root", "--debug-root1", "--debug-root2", "--debuginfod", "--debuginfod-url",
         "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
-        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
+        "--dwarf-only", "--env-matrix", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
         "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--include",
         "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path", "--manifest",
         "--max", "--new-ast-frontend", "--new-build-info", "--new-header", "--new-include", "--new-pdb-path",

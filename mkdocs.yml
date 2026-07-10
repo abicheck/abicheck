@@ -80,6 +80,7 @@ nav:
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
     - Class Layout ABI & API: concepts/class-layout-abi.md
+    - Environment & Toolchain Drift: concepts/environment-drift.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:

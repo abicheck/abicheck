@@ -258,6 +258,8 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_static_tls=e.get("has_static_tls", False),
         has_tls_symbols=e.get("has_tls_symbols", False),
         gnu_properties=frozenset(e.get("gnu_properties", [])),
+        has_dt_relr=e.get("has_dt_relr", False),
+        hash_styles=frozenset(e.get("hash_styles", [])),
     )
 
 

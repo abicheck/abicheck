@@ -255,6 +255,13 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PYTHON_ABI3_DROPPED,
     ChangeKind.PYTHON_GIL_ABI_CHANGED,
     ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
+    # Toolchain / runtime environment drift (tests/test_environment_drift.py)
+    ChangeKind.RUNTIME_FLOOR_RAISED,
+    ChangeKind.DT_RELR_INTRODUCED,
+    ChangeKind.DT_RELR_REMOVED,
+    ChangeKind.RPATH_TYPE_CHANGED,
+    ChangeKind.HASH_STYLE_REMOVED,
+    ChangeKind.TIME64_ABI_CHANGED,
     # G23 Phase A — Linux ELF artifact facts (tests/test_g23_elf_facts.py)
     ChangeKind.STATIC_TLS_INTRODUCED,
     ChangeKind.STATIC_TLS_REMOVED,

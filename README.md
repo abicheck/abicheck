@@ -9,7 +9,7 @@
 
 **abicheck** detects breaking changes in C/C++ shared libraries before they reach production. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
 
-It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **312 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
+It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **318 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
 
 > **Platforms:** Linux (ELF), Windows (PE/COFF), macOS (Mach-O). Binary and header AST analysis on all platforms; debug-info cross-check uses DWARF (Linux, macOS) and PDB (Windows).
 
@@ -20,7 +20,7 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 ## Key features
 
 - **Reads multiple sources of information.** abicheck doesn't rely on a single view of a library. It overlays up to **five independent, additive sources** — the compiled binary, its debug symbols, its public headers, its build-system data, and (optionally) its sources — and lets the strongest evidence win. Each source finds breaks the weaker ones are blind to, and *removes* false positives the weaker ones would raise. See [How it works](#how-it-works--multiple-sources-of-information) below.
-- **Detects most of what causes ABI/API breaks.** **312 change types** across functions, variables, structs/classes, enums, unions, typedefs, templates, and platform/linker metadata — removed or renamed symbols, changed signatures and parameter lists, struct/class layout drift, field-offset shifts, vtable reordering, enum value reassignment, qualifier/`noexcept`/access changes, calling-convention and packing changes, symbol-version and SONAME drift, dependency leaks, and more. Each is classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. See the [Change Kind Reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
+- **Detects most of what causes ABI/API breaks.** **318 change types** across functions, variables, structs/classes, enums, unions, typedefs, templates, and platform/linker metadata — removed or renamed symbols, changed signatures and parameter lists, struct/class layout drift, field-offset shifts, vtable reordering, enum value reassignment, qualifier/`noexcept`/access changes, calling-convention and packing changes, symbol-version and SONAME drift, dependency leaks, and more. Each is classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. See the [Change Kind Reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
 - **Cross-platform.** Linux (ELF), Windows (PE/COFF), and macOS (Mach-O) binaries, with debug-info cross-checks from DWARF, PDB, BTF, and CTF.
 - **Built for CI.** Deterministic [exit codes](https://abicheck.github.io/abicheck/reference/exit-codes/), SARIF/JSON/Markdown/HTML/JUnit output, snapshot-based [baselines](https://abicheck.github.io/abicheck/user-guide/baseline-management/), [policy profiles](https://abicheck.github.io/abicheck/user-guide/policies/) and [suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/), and a first-class [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/).
 - **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
@@ -181,7 +181,7 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **169 real-world ABI/API scenarios** (164 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **170 real-world ABI/API scenarios** (165 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; the L3/L4/L5 build/source-only cases (152–161) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 Current CI full-catalog default/debug validation over 169 selected cases is green: **gcc 137 PASS / 4 XFAIL / 28 SKIP** and **clang 138 PASS / 4 XFAIL / 27 SKIP**. The skips are cases that are validated outside the default single-library debug lane (audit/cross-source snapshots, L3/L4/L5 build/source fixtures, bundle cases, BTF, or host feature gaps). Runtime smoke over the same catalog produces **76 DEMONSTRATED / 54 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP**. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known backlog.
 
@@ -189,7 +189,7 @@ Current CI full-catalog default/debug validation over 169 selected cases is gree
 
 ## Validation snapshot
 
-The main validation target is the full **169-case catalog**. To scan it for the current checkout:
+The main validation target is the full **170-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all

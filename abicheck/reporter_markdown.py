@@ -660,6 +660,38 @@ def _build_severity_sections(
     return lines
 
 
+def _build_environment_drift_section(changes: list[Change]) -> list[str]:
+    """Group environment/toolchain-drift findings under one heading.
+
+    These findings share a root cause the severity sections cannot express:
+    the *build environment* moved (compiler, binutils/linker defaults,
+    glibc/sysroot), not the library's declared interface. Summarizing them
+    together answers the reviewer's first question — "was this diff caused by
+    a source change or by a rebuild?" — without duplicating the per-finding
+    details already listed in the severity sections above.
+    """
+    from .report_classifications import ENVIRONMENT_DRIFT_KINDS
+
+    drift = [c for c in changes if c.kind.value in ENVIRONMENT_DRIFT_KINDS]
+    if not drift:
+        return []
+    lines = [
+        "## 🛠️ Environment & Toolchain Drift",
+        "",
+        "> The findings below are artifacts of the **build environment** — a",
+        "> different compiler, binutils/linker default, or glibc/sysroot —",
+        "> rather than a change to the library's declared interface. They also",
+        "> appear in their severity sections above; this view groups them by",
+        "> root cause. If the source did not change, review the build",
+        "> environment first.",
+        "",
+    ]
+    for c in drift:
+        lines.append(f"- **{c.kind.value}**: {c.description}")
+    lines.append("")
+    return lines
+
+
 # Verdict -> short merge-effect phrase for the reviewer digest.
 _VERDICT_MERGE_EFFECT = {
     Verdict.NO_CHANGE: "no ABI/API change — safe to merge",
@@ -870,6 +902,8 @@ def to_markdown(
         compatible,
         severity_config=severity_config,
     )
+
+    lines += _build_environment_drift_section(changes)
 
     if not changes:
         if show_only and result.changes:

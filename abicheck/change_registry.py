@@ -1892,4 +1892,60 @@ REGISTRY = ChangeKindRegistry([
               "Adding an overload is compatible and not reported. "
               "Source-level (`API_BREAK`).",
        description_template="Python overload removed from {name}: {detail}"),
+
+    # ── Toolchain / runtime environment drift (binutils & glibc skew) ────────
+    _E("runtime_floor_raised", _R,
+       impact="The maximum symbol version this binary requires from a provider "
+              "library rose (e.g. GLIBC_2.28 → GLIBC_2.34). The binary is "
+              "interface-identical for existing consumers but no longer loads on "
+              "runtimes older than the new floor — a deployment-envelope change, "
+              "typically caused by rebuilding/relinking on a newer distro or "
+              "sysroot rather than by a source change. Check the listed symbols: "
+              "a floor pulled up only by symbols like __libc_start_main is a pure "
+              "relink artifact; a new API symbol means the code now genuinely "
+              "depends on the newer runtime.",
+       description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})"),
+    _E("dt_relr_introduced", _R,
+       impact="The linker enabled packed relative relocations (DT_RELR, "
+              "`-z pack-relative-relocs`; default on some distros since "
+              "binutils 2.38). A DT_RELR binary requires glibc ≥ 2.36 (or an "
+              "equivalent loader) — older dynamic loaders refuse to load it. "
+              "glibc marks this with a synthetic GLIBC_ABI_DT_RELR version "
+              "requirement. Rebuild with `-z nopack-relative-relocs` to keep "
+              "supporting older runtimes.",
+       description_template="Packed relative relocations introduced (DT_RELR): requires glibc >= 2.36 or equivalent loader"),
+    _E("dt_relr_removed", _C,
+       impact="Packed relative relocations (DT_RELR) were dropped; the binary "
+              "loads on older dynamic loaders again. Slightly larger relocation "
+              "tables, no compatibility cost.",
+       description_template="Packed relative relocations removed (DT_RELR): loader floor lowered"),
+    _E("rpath_type_changed", _R,
+       impact="The library-search tag type flipped between DT_RPATH and "
+              "DT_RUNPATH (ld --enable-new-dtags default drift). The two have "
+              "different lookup semantics: DT_RPATH applies to the whole "
+              "dependency subtree and takes precedence over LD_LIBRARY_PATH, "
+              "while DT_RUNPATH applies only to the object's direct dependencies "
+              "and is overridden by LD_LIBRARY_PATH. Transitive dependencies or "
+              "environment overrides that resolved before may now resolve "
+              "differently (or not at all).",
+       description_template="Library search tag type changed: {old} → {new} (lookup semantics differ)"),
+    _E("hash_style_removed", _R,
+       impact="A symbol-hash table style present in the old binary was dropped "
+              "(ld --hash-style default drift): SysV `.hash` and/or GNU "
+              "`.gnu.hash`. Dynamic loaders and tools that only support the "
+              "dropped style (very old glibc, some non-GNU loaders, MIPS "
+              "toolchains for `.hash`) can no longer resolve symbols from this "
+              "library.",
+       description_template="Symbol hash table style removed: {old} → {new}"),
+    _E("time64_abi_changed", _B,
+       impact="The time64/large-file ABI flipped: time_t/off_t-family public "
+              "typedefs changed width together (glibc `_TIME_BITS=64` / "
+              "`_FILE_OFFSET_BITS=64`, available since glibc 2.34, sometimes "
+              "flipped by a toolchain or distro default on 32-bit targets). "
+              "Every public function or struct carrying one of these typedefs "
+              "changed layout — old binaries pass 32-bit values where the new "
+              "library reads 64-bit ones (or vice versa). The per-symbol breaking "
+              "findings share this single root cause; align _TIME_BITS/"
+              "_FILE_OFFSET_BITS across the library and its consumers.",
+       description_template="time64/LFS ABI flip detected: {detail}"),
 ])

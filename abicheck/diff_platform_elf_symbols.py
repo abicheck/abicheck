@@ -29,6 +29,10 @@ from typing import Any
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
+from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
+    _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
+    _parse_abi_version_tag as _parse_abi_version_tag,
+)
 from .elf_metadata import SymbolBinding, SymbolType
 from .model import AbiSnapshot
 
@@ -74,28 +78,9 @@ def _is_internal_data_symbol(name: str) -> bool:
     return name.startswith("_")
 
 
-_UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
-"""Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
-like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
-non-numeric requirement is always treated as potentially BREAKING — never
-silently COMPAT."""
-
-
-def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
-    """Parse a versioned symbol tag like ``GLIBC_2.34`` or ``GLIBCXX_3.4.19``
-    into a comparable integer tuple.
-
-    Only the numeric suffix after the last ``_`` is used:
-    ``GLIBC_2.34`` → ``(2, 34)``, ``GLIBCXX_3.4.19`` → ``(3, 4, 19)``.
-
-    Returns :data:`_UNPARSEABLE_VERSION` for non-numeric tags such as
-    ``GLIBC_PRIVATE`` — a very large sentinel that always compares as newer
-    than any real version, so such tags are conservatively treated as BREAKING.
-    """
-    parts = ver.rsplit("_", 1)
-    numeric = parts[-1] if len(parts) > 1 else ver
-    result = tuple(int(x) for x in numeric.split(".") if x.isdigit())
-    return result if result else _UNPARSEABLE_VERSION
+# Canonical version-tag parsing lives in diff_versioning (imported at the top
+# of this module); the private names stay re-exported here for existing
+# callers/tests.
 
 
 def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
@@ -147,6 +132,13 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
             return max(matching, default=(0,))
 
         for ver in sorted(new_vers - old_vers):
+            if ver == "GLIBC_ABI_DT_RELR" and _dt_relr_introduced(old_elf, new_elf):
+                # glibc's synthetic marker for packed relative relocations.
+                # The dedicated DT_RELR_INTRODUCED finding names the root cause
+                # (linker `-z pack-relative-relocs`) and the actual floor
+                # (glibc ≥ 2.36); surfacing the marker here as an unparseable
+                # version requirement would just re-report it cryptically.
+                continue
             ver_tuple = _parse_abi_version_tag(ver)
             prefix = ver.rsplit("_", 1)[0] if "_" in ver else ver
             old_max = _old_max_for_prefix(prefix)
@@ -183,6 +175,102 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                     old_value=f"{lib}:{ver}",
                 )
             )
+        if not lib_is_new:
+            changes.extend(
+                _runtime_floor_changes(lib, old_vers, new_vers, new_elf)
+            )
+    return changes
+
+
+def _dt_relr_introduced(old_elf: Any, new_elf: Any) -> bool:
+    """Deferred import wrapper — see diff_platform_elf_dynamic for semantics."""
+    from .diff_platform_elf_dynamic import dt_relr_introduced
+
+    return dt_relr_introduced(old_elf, new_elf)
+
+
+def _max_parseable_tag(vers: set[str], prefix: str) -> tuple[tuple[int, ...], str]:
+    """Return ``(max_version_tuple, its_tag)`` among parseable *prefix* tags.
+
+    Non-numeric tags (``GLIBC_PRIVATE``, ``GLIBC_ABI_DT_RELR``) are excluded —
+    they are markers, not deployment floors. ``((0,), "")`` when none parse.
+    """
+    best: tuple[int, ...] = (0,)
+    best_tag = ""
+    for v in vers:
+        if not v.startswith(prefix + "_"):
+            continue
+        t = _parse_abi_version_tag(v)
+        if t == _UNPARSEABLE_VERSION:
+            continue
+        if t > best:
+            best, best_tag = t, v
+    return best, best_tag
+
+
+def _floor_evidence_symbols(
+    new_elf: Any, lib: str, prefix: str, old_max: tuple[int, ...]
+) -> list[str]:
+    """Imported symbols whose required *prefix* version exceeds *old_max*.
+
+    These are the imports that pulled the deployment floor up — the actionable
+    part of the finding (``__libc_start_main`` alone means a pure relink
+    artifact; a real API symbol means new runtime functionality is used).
+    """
+    names: set[str] = set()
+    for imp in getattr(new_elf, "imports", []) or []:
+        ver = getattr(imp, "version", "") or ""
+        if not ver.startswith(prefix + "_"):
+            continue
+        soname = getattr(imp, "version_soname", "") or ""
+        if soname and soname != lib:
+            continue
+        t = _parse_abi_version_tag(ver)
+        if t == _UNPARSEABLE_VERSION or t <= old_max:
+            continue
+        names.add(f"{getattr(imp, 'name', '')}@{ver}")
+    return sorted(names)
+
+
+def _runtime_floor_changes(
+    lib: str, old_vers: set[str], new_vers: set[str], new_elf: Any
+) -> list[Change]:
+    """Synthesize per-prefix RUNTIME_FLOOR_RAISED headline findings.
+
+    The per-symbol ``SYMBOL_VERSION_REQUIRED_ADDED`` findings enumerate every
+    new version node; this rolls them up to the root cause a maintainer acts
+    on: "the minimum runtime this binary loads against rose from X to Y" —
+    one finding per (provider lib, version-tag prefix), carrying the imported
+    symbols that raised the floor as evidence. Emitted alongside (not instead
+    of) the per-node findings, mirroring the dual-ABI-flip collapse pattern.
+    """
+    changes: list[Change] = []
+    prefixes = {
+        v.rsplit("_", 1)[0] for v in (old_vers | new_vers) if "_" in v
+    }
+    for prefix in sorted(prefixes):
+        old_max, old_tag = _max_parseable_tag(old_vers, prefix)
+        new_max, new_tag = _max_parseable_tag(new_vers, prefix)
+        # Only a *raise* of an existing floor reports. A prefix appearing from
+        # nothing is already covered by the per-node findings, and a lowered
+        # floor broadens compatibility.
+        if old_max == (0,) or new_max <= old_max:
+            continue
+        evidence = _floor_evidence_symbols(new_elf, lib, prefix, old_max)
+        sample = ", ".join(evidence[:5])
+        if len(evidence) > 5:
+            sample += f" (+{len(evidence) - 5} more)"
+        changes.append(
+            make_change(
+                ChangeKind.RUNTIME_FLOOR_RAISED,
+                symbol=f"{lib}:{prefix}",
+                name=sample or "(no import evidence captured)",
+                detail=lib,
+                old=old_tag,
+                new=new_tag,
+                affected_symbols=evidence or None,
+            )
+        )
     return changes
 
 
