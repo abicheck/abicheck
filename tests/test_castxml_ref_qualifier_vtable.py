@@ -245,9 +245,17 @@ def test_method_literally_named_d4_is_not_a_destructor_clone() -> None:
         ("_ZN3FooIiED1Ev", True),  # template class
         ("_ZN3FooILi5EED2Ev", True),  # integer template arg (L…E literal)
         ("_ZNSt6vectorIiSaIiEED1Ev", True),  # std:: substitutions
+        ("_ZN3FooIN2ns3BarEED1Ev", True),  # class-type template arg (N…E)
+        ("_ZN3FooIFvvEED1Ev", True),  # function-type template arg (F…E)
+        ("_ZN1CB1XD1Ev", True),  # [[gnu::abi_tag("X")]] class destructor
+        ("_ZN1CB1X4drawEv", False),  # abi-tagged ordinary method
         ("_ZN1C2D4Ev", False),  # method literally named D4
         ("_ZN2D45resetEv", False),  # class literally named D4
         ("_ZN8Renderer4drawEi", False),  # ordinary virtual method
+        ("_ZNK3Buf3getEv", False),  # const-qualified accessor
+        ("_ZNS0_D1Ev", True),  # substituted (S0_) prefix + dtor
+        ("_ZN3FooIS0_ED1Ev", True),  # seq-id substitution inside args
+        ("_ZN1C", False),  # truncated mangling — walk exhausts
         ("_Z4freev", False),  # non-member function
         ("stat", False),  # C symbol
     ],
@@ -256,3 +264,16 @@ def test_is_itanium_dtor_symbol_structural(entry: str, is_dtor: bool) -> None:
     from abicheck.idioms import _is_itanium_dtor_symbol
 
     assert _is_itanium_dtor_symbol(entry) is is_dtor
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "??1Renderer@@UEAA@XZ",  # MSVC destructor
+        "Renderer::`vector deleting destructor'(unsigned int)",
+        "~Renderer",  # castxml fallback entry
+    ],
+)
+def test_has_virtual_destructor_non_itanium_entries(entry: str) -> None:
+    rec = RecordType(name="Renderer", kind="class", vtable=[entry])
+    assert _has_virtual_destructor(rec)

@@ -205,7 +205,7 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from `examples/ground_truth.json` minimum-evidence labels. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
+The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of all 169 catalog cases. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers
@@ -213,12 +213,12 @@ python scripts/benchmark_comparison.py --evidence-tiers
 
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 50 / 153 (33%) |
-| + Debug symbols (`L1`) | 115 / 153 (75%) |
-| + Public headers (`L2`) | 138 / 153 (90%) |
-| + Build data (`L3`) | 146 / 153 (95%) |
-| + Sources (`L4`) | 150 / 153 (98%) |
-| + Source graph (`L5`) | 153 / 153 (100%) |
+| Just the binary (`L0`) | 52 / 169 (31%) |
+| + Debug symbols (`L1`) | 120 / 169 (71%) |
+| + Public headers (`L2`) | 150 / 169 (89%) |
+| + Build data (`L3`) | 160 / 169 (95%) |
+| + Sources (`L4`) | 166 / 169 (98%) |
+| + Source graph (`L5`) | 169 / 169 (100%) |
 
 More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 

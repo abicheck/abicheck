@@ -467,6 +467,12 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
         if ch in "rVKRO":  # CV / ref qualifiers of the nested-name
             i += 1
             continue
+        if ch == "B":
+            # ABI tag: B <source-name>, may repeat (_ZN1CB1XD1Ev). Step over
+            # the marker; the following length-prefixed tag name is skipped
+            # by the digit branch on the next iteration.
+            i += 1
+            continue
         if ch == "S":  # substitution: 2-char std abbrev or S<seq-id>_
             nxt = entry[i + 1] if i + 1 < n else ""
             if nxt in "abdiost":
@@ -478,9 +484,11 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
             i = j + 1
             continue
         if ch == "I":
-            # Template args: skip the balanced I…E group. Inside it, skip
-            # length-prefixed names, substitutions, and L…E literals whole
-            # so their bytes can't be misread as structural I/E tokens.
+            # Template args: skip the balanced group. I (args), N (nested
+            # names), and F (function types) all nest and close with E;
+            # length-prefixed names, substitutions, and L…E literals are
+            # skipped whole so their bytes can't be misread as structural
+            # I/N/F/E tokens.
             depth = 1
             j = i + 1
             while j < n and depth:
@@ -502,7 +510,7 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
                     while j < n and entry[j] != "E":
                         j += 1
                     j += 1
-                elif cj == "I":
+                elif cj in "INF":
                     depth += 1
                     j += 1
                 elif cj == "E":
