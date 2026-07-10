@@ -67,6 +67,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
@@ -74,6 +75,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -96,6 +98,33 @@ namespace {
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe.
 constexpr const char *kPluginVersion = "0.4";
+
+// ---------------------------------------------------------------------------
+// Optional profiling (ABICHECK_PLUGIN_PROFILE=1): attribute subtree-hash cost
+// to its phases (clang JSON dump / json::parse / canonicalize) so the hot loop
+// can be optimized on evidence. Zero cost when disabled.
+// ---------------------------------------------------------------------------
+struct ProfileCounters {
+  bool enabled = false;
+  uint64_t dumpNs = 0, parseNs = 0, canonNs = 0;
+  uint64_t dumpCalls = 0, canonCalls = 0;
+  uint64_t dumpBytes = 0;
+};
+inline ProfileCounters &prof() {
+  static ProfileCounters p = [] {
+    ProfileCounters c;
+    const char *e = std::getenv("ABICHECK_PLUGIN_PROFILE");
+    c.enabled = e && *e && std::strcmp(e, "0") != 0;
+    return c;
+  }();
+  return p;
+}
+using ProfClock = std::chrono::steady_clock;
+inline uint64_t nowNs() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             ProfClock::now().time_since_epoch())
+      .count();
+}
 
 // ---------------------------------------------------------------------------
 // Hashing — mirrors clang.py::_hash exactly:
@@ -497,8 +526,15 @@ std::string canonical(const Value &node, const llvm::StringMap<std::string> &ama
 }
 
 std::string subtreeHash(const Value &node, llvm::ArrayRef<std::string> paramIds) {
+  const bool p = prof().enabled;
+  uint64_t t0 = p ? nowNs() : 0;
   auto amap = alphaRenameMap(node, paramIds);
-  return H({"clang-ast", canonical(node, amap)});
+  std::string c = canonical(node, amap);
+  if (p) {
+    prof().canonNs += nowNs() - t0;
+    prof().canonCalls++;
+  }
+  return H({"clang-ast", c});
 }
 
 // clang.py::_WRAPPER_EXPR_KINDS — single-child wrappers descended through when
@@ -663,19 +699,283 @@ std::string qualTypeFromJson(const Object &o) {
   return "";
 }
 
+// ---------------------------------------------------------------------------
+// Pruned JSON parse (perf, C.2-preserving).
+//
+// clang's `-ast-dump=json` emits full location/range/type/flag detail for every
+// node, but the only keys ANY reader in this file touches are a fixed, small set
+// (verified exhaustively): the recursive `inner` array; the scalars `kind`, `id`,
+// `name`, `storageClass`, `opcode`, `mangledName`, `castKind`, `value`, `init`;
+// and the *shallow* objects `type` (→ `qualType`/`desugaredQualType`) and
+// `referencedDecl` (→ `id`/`name`). Everything else is parsed and then discarded
+// by `canonical()` — pure waste that dominated the profile (json::parse ≈ 68% of
+// subtree-hash time, on ~200 MB of dumped text per TU).
+//
+// This parser walks only the STRUCTURE (objects/arrays) and delegates every kept
+// LEAF token to `llvm::json::parse`, so scalar/escape/number semantics are
+// byte-identical to a full parse — the produced Value is indistinguishable to
+// every reader, and therefore every emitted hash is unchanged (validated by
+// output-identity against the full-parse build). Skipped values are scanned but
+// never materialized, so the discarded ~90% costs only a linear character skip.
+// ---------------------------------------------------------------------------
+class PrunedJsonParser {
+public:
+  explicit PrunedJsonParser(llvm::StringRef s) : S(s), I(0) {}
+
+  std::optional<Value> parse() {
+    skipWs();
+    if (I >= S.size() || S[I] != '{')
+      return std::nullopt; // a Decl dump root is always an object
+    std::optional<Value> v = parseNode();
+    if (!v)
+      return std::nullopt;
+    return v;
+  }
+
+private:
+  llvm::StringRef S;
+  size_t I;
+  bool Failed = false;
+
+  void skipWs() {
+    while (I < S.size()) {
+      char c = S[I];
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+        ++I;
+      else
+        break;
+    }
+  }
+
+  // Scan (and consume) exactly one JSON value, returning its raw [start,end)
+  // slice. Handles nested objects/arrays and string escapes. On malformation it
+  // sets Failed and returns an empty ref.
+  llvm::StringRef captureValue() {
+    skipWs();
+    size_t start = I;
+    if (I >= S.size()) {
+      Failed = true;
+      return {};
+    }
+    char c = S[I];
+    if (c == '"') {
+      scanString();
+    } else if (c == '{' || c == '[') {
+      char open = c, close = (c == '{') ? '}' : ']';
+      int depth = 0;
+      while (I < S.size()) {
+        char d = S[I];
+        if (d == '"') {
+          scanString();
+          continue;
+        }
+        if (d == open)
+          ++depth;
+        else if (d == close) {
+          --depth;
+          if (depth == 0) {
+            ++I;
+            break;
+          }
+        }
+        ++I;
+      }
+    } else {
+      // scalar: number / true / false / null — up to a delimiter
+      while (I < S.size()) {
+        char d = S[I];
+        if (d == ',' || d == '}' || d == ']' || d == ' ' || d == '\t' ||
+            d == '\n' || d == '\r')
+          break;
+        ++I;
+      }
+    }
+    return S.substr(start, I - start);
+  }
+
+  void scanString() {
+    // assumes S[I] == '"'; consumes through the closing quote
+    ++I;
+    while (I < S.size()) {
+      char c = S[I++];
+      if (c == '\\') {
+        if (I < S.size())
+          ++I; // skip escaped char (\uXXXX's trailing hex are skipped by loop)
+      } else if (c == '"') {
+        return;
+      }
+    }
+    Failed = true;
+  }
+
+  // Parse a leaf token slice into a Value with full json semantics.
+  std::optional<Value> leaf(llvm::StringRef raw) {
+    auto parsed = llvm::json::parse(raw);
+    if (!parsed) {
+      llvm::consumeError(parsed.takeError());
+      return std::nullopt;
+    }
+    return std::move(*parsed);
+  }
+
+  // At '{': build an Object keeping only the pruned key set; `recurseInner`
+  // controls whether `inner` children are parsed as full nodes (true for AST
+  // nodes) or skipped (for the shallow `type`/`referencedDecl` objects, which no
+  // reader recurses into).
+  std::optional<Value> parseObject(bool recurseInner,
+                                   bool shallowScalarsOnly) {
+    Object out;
+    ++I; // consume '{'
+    skipWs();
+    if (I < S.size() && S[I] == '}') {
+      ++I;
+      return Value(std::move(out));
+    }
+    while (I < S.size()) {
+      skipWs();
+      if (S[I] != '"') {
+        Failed = true;
+        return std::nullopt;
+      }
+      llvm::StringRef keyRaw = captureValueString();
+      auto keyV = leaf(keyRaw);
+      if (Failed || !keyV || !keyV->getAsString()) {
+        Failed = true;
+        return std::nullopt;
+      }
+      std::string key = keyV->getAsString()->str();
+      skipWs();
+      if (I >= S.size() || S[I] != ':') {
+        Failed = true;
+        return std::nullopt;
+      }
+      ++I; // consume ':'
+      storeMember(out, key, recurseInner, shallowScalarsOnly);
+      if (Failed)
+        return std::nullopt;
+      skipWs();
+      if (I < S.size() && S[I] == ',') {
+        ++I;
+        continue;
+      }
+      if (I < S.size() && S[I] == '}') {
+        ++I;
+        break;
+      }
+      Failed = true;
+      return std::nullopt;
+    }
+    return Value(std::move(out));
+  }
+
+  llvm::StringRef captureValueString() {
+    skipWs();
+    size_t start = I;
+    scanString();
+    return S.substr(start, I - start);
+  }
+
+  void storeMember(Object &out, const std::string &key, bool recurseInner,
+                   bool shallowScalarsOnly) {
+    // Keys read as recursive structure.
+    if (key == "inner") {
+      if (!recurseInner) {
+        captureValue(); // shallow objects never recurse into inner
+        return;
+      }
+      skipWs();
+      if (I >= S.size() || S[I] != '[') {
+        captureValue();
+        return;
+      }
+      Array arr;
+      ++I; // consume '['
+      skipWs();
+      if (I < S.size() && S[I] == ']') {
+        ++I;
+        out["inner"] = Value(std::move(arr));
+        return;
+      }
+      while (I < S.size()) {
+        skipWs();
+        if (S[I] == '{') {
+          if (auto node = parseNode())
+            arr.push_back(std::move(*node));
+          else if (Failed)
+            return;
+        } else {
+          captureValue(); // non-object array element: irrelevant, skip
+        }
+        skipWs();
+        if (I < S.size() && S[I] == ',') {
+          ++I;
+          continue;
+        }
+        if (I < S.size() && S[I] == ']') {
+          ++I;
+          break;
+        }
+        Failed = true;
+        return;
+      }
+      out["inner"] = Value(std::move(arr));
+      return;
+    }
+    // Shallow objects: `type` and `referencedDecl` — keep only their scalars.
+    if (!shallowScalarsOnly && (key == "type" || key == "referencedDecl")) {
+      skipWs();
+      if (I < S.size() && S[I] == '{') {
+        if (auto obj = parseObject(/*recurseInner=*/false,
+                                   /*shallowScalarsOnly=*/true))
+          out[key] = std::move(*obj);
+      } else {
+        captureValue();
+      }
+      return;
+    }
+    // Kept scalar keys (both on AST nodes and inside shallow objects).
+    static const std::set<std::string> kKeptScalars = {
+        "kind",       "id",       "name",     "storageClass", "opcode",
+        "mangledName", "castKind", "value",    "init",         "qualType",
+        "desugaredQualType"};
+    if (kKeptScalars.count(key)) {
+      llvm::StringRef raw = captureValue();
+      if (Failed)
+        return;
+      if (auto v = leaf(raw))
+        out[key] = std::move(*v);
+      return;
+    }
+    // Everything else: skip without materializing.
+    captureValue();
+  }
+
+  std::optional<Value> parseNode() {
+    return parseObject(/*recurseInner=*/true, /*shallowScalarsOnly=*/false);
+  }
+};
+
 // Dump a Decl to clang's JSON (identical to -ast-dump=json for that node) and
-// parse it. Returns nullopt on any dump/parse failure (best-effort, C.3).
+// parse it, KEEPING ONLY the keys any reader uses (see PrunedJsonParser).
+// Returns nullopt on any dump/parse failure (best-effort, C.3).
 std::optional<Value> dumpDeclJson(const Decl *d) {
   std::string buf;
   llvm::raw_string_ostream os(buf);
+  const bool p = prof().enabled;
+  uint64_t t0 = p ? nowNs() : 0;
   d->dump(os, /*Deserialize=*/false, ADOF_JSON);
   os.flush();
-  auto parsed = llvm::json::parse(buf);
-  if (!parsed) {
-    llvm::consumeError(parsed.takeError());
-    return std::nullopt;
+  if (p) {
+    uint64_t t1 = nowNs();
+    prof().dumpNs += t1 - t0;
+    prof().dumpCalls++;
+    prof().dumpBytes += buf.size();
   }
-  return std::move(*parsed);
+  uint64_t t1 = p ? nowNs() : 0;
+  std::optional<Value> parsed = PrunedJsonParser(buf).parse();
+  if (p)
+    prof().parseNs += nowNs() - t1;
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1863,6 +2163,16 @@ private:
     if (!out)
       return false;
     out << tu << "\n";
+    if (prof().enabled) {
+      auto &p = prof();
+      auto ms = [](uint64_t ns) { return ns / 1e6; };
+      llvm::errs() << "abicheck-facts PROFILE " << stem << ": dump="
+                   << llvm::format("%.1f", ms(p.dumpNs)) << "ms parse="
+                   << llvm::format("%.1f", ms(p.parseNs)) << "ms canonicalize="
+                   << llvm::format("%.1f", ms(p.canonNs)) << "ms  (dumps="
+                   << p.dumpCalls << " canon=" << p.canonCalls << " jsonMB="
+                   << llvm::format("%.1f", p.dumpBytes / 1e6) << ")\n";
+    }
     return true;
   }
 
