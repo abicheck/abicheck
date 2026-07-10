@@ -54,13 +54,13 @@ with `abicheck dump --show-data-sources`; the build/source layers (`L3`/`L4`)
 are not reported there — they surface in the pack-aware `compare`
 `layer_coverage` table once you supply a build/source pack:
 
-| # | Source you provide | Layer | abicheck input | What it newly reveals |
-|---|--------------------|:-----:|----------------|------------------------|
-| 1 | **Just the binary** | **L0** | a stripped `.so`/`.dll`/`.dylib` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies |
-| 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment |
-| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--ast-frontend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
-| 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps |
-| 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates |
+| # | Source you provide | Layer | abicheck input | What it newly reveals | Authority |
+|---|--------------------|:-----:|----------------|------------------------|-----------|
+| 1 | **Just the binary** | **L0** | a stripped `.so`/`.dll`/`.dylib` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies | **Authoritative** |
+| 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment | **Authoritative** (matched to binary) |
+| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--ast-frontend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** | **Authoritative** for header-visible API |
+| 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps | Corroborating |
+| 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates | Corroborating (→ `API_BREAK`/risk) |
 
 Read this as a staircase: **each step up the table can both *find* breaks the
 step below is blind to and *prevent false positives* the step below would

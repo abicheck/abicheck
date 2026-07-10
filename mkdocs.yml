@@ -198,6 +198,13 @@ exclude_docs: |
 
 plugins:
   - search
+  # Old URLs of pages merged/moved by the docs-structure consolidation keep
+  # working via client-side redirect stubs (external bookmarks, search hits).
+  - redirects:
+      redirect_maps:
+        concepts/scan-and-evidence-levels.md: concepts/evidence-and-detectability.md
+        concepts/verdicts-and-exit-codes.md: concepts/verdicts.md
+        concepts/api-surface-intelligence.md: user-guide/api-surface-intelligence.md
 
 markdown_extensions:
   - admonition

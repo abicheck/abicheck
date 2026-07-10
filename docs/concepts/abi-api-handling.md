@@ -15,10 +15,11 @@ struct-field insertion corrupts memory also tells you what abicheck will report
 when it sees one.
 
 !!! tip "New to the topic? Don't start here — start with the on-ramp."
-    This hub is dense (it doubles as a deep reference, and points to a full
-    evidence-model walk-through on its own page —
-    [What Each Level Sees](what-each-level-sees.md)). If binary compatibility is
-    new to you, read the five-minute on-ramp first and follow the series in order:
+    This hub is a navigator: it maps the series, the deep-dive pages, and the
+    break families, and points each to its own page (e.g. the evidence-model
+    walk-through, [What Each Level Sees](what-each-level-sees.md)). If binary
+    compatibility is new to you, read the five-minute on-ramp first and follow
+    the series in order:
 
     1. [**ABI in Five Minutes**](abi-series/abi-in-5-minutes.md) — the gentlest introduction.
     2. [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) — the framing.
