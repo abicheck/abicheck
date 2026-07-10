@@ -89,6 +89,16 @@ def _func(name: str, alignment: int = 0) -> ElfSymbol:
     )
 
 
+def _common(name: str, alignment: int = 0) -> ElfSymbol:
+    return ElfSymbol(
+        name=name,
+        binding=SymbolBinding.GLOBAL,
+        sym_type=SymbolType.COMMON,
+        size=8,
+        value_alignment=alignment,
+    )
+
+
 def _imp(name: str, binding: SymbolBinding = SymbolBinding.GLOBAL, version: str = "") -> ElfImport:
     return ElfImport(name=name, binding=binding, version=version)
 
@@ -380,6 +390,14 @@ class TestObjectAlignmentReduced:
         new = _elf(symbols=[_func("do_work", alignment=8)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    def test_common_tentative_definition_reduced(self):
+        # STT_COMMON exports are copy-relocation data, like OBJECT/TLS — an
+        # alignment drop on a retained COMMON variable is still a hazard.
+        old = _elf(symbols=[_common("g_pool", alignment=64)])
+        new = _elf(symbols=[_common("g_pool", alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
     def test_value_alignment_helper(self):
         assert _value_alignment(0) == 0

@@ -575,10 +575,13 @@ def _check_object_alignment_reduced(
     Alignment is derived from st_value (power-of-two factor, page-capped) at
     parse time; 0 means unknown (legacy snapshot), so both sides must carry a
     positive value. Only data objects matter (copy relocations / aligned data
-    access); function alignment is a codegen artifact. Only the reduction
-    direction is a hazard — a stricter alignment satisfies every old consumer.
+    access); function alignment is a codegen artifact. COMMON (tentative
+    definition) exports are copy-relocation data too — the size detector
+    already treats them as data objects, so they are included here. Only the
+    reduction direction is a hazard — a stricter alignment satisfies every old
+    consumer.
     """
-    if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.TLS):
+    if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
         return []
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)
