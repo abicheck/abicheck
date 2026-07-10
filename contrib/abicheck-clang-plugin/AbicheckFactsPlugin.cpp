@@ -691,6 +691,43 @@ std::string mangledFromJson(const Object &o) {
   return "";
 }
 
+// Port of clang.py::_mangled_has_internal_linkage: true when an Itanium mangled
+// name marks internal linkage (its own <source-name> is prefixed with the
+// GCC/clang seniority marker `L`, e.g. `_ZN2nsL7g_constE`, `_ZL1xE`). Parses by
+// length prefixes so an `L` inside a source name is never miscounted, and bails
+// to false (external, keep) on any exotic production. Must stay byte-identical to
+// the Python port so both producers drop the same set (C.6 gate).
+bool mangledHasInternalLinkage(const std::string &m) {
+  if (m.rfind("_Z", 0) != 0)
+    return false;
+  size_t i = 2, n = m.size();
+  if (i < n && m[i] == 'N') {
+    ++i;
+    while (i < n && (m[i] == 'r' || m[i] == 'V' || m[i] == 'K' || m[i] == 'O'))
+      ++i;
+  }
+  while (i < n) {
+    char c = m[i];
+    if (c == 'E')
+      break;
+    if (c == 'L')
+      return i + 1 < n && m[i + 1] >= '0' && m[i + 1] <= '9';
+    if (c >= '0' && c <= '9') {
+      size_t j = i, length = 0;
+      while (j < n && m[j] >= '0' && m[j] <= '9') {
+        length = length * 10 + static_cast<size_t>(m[j] - '0');
+        ++j;
+        if (length > n - j)
+          return false;
+      }
+      i = j + length;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
 // clang.py::_signature over JSON: the node's type.qualType.
 std::string qualTypeFromJson(const Object &o) {
   if (const Object *t = o.getObject("type"))
@@ -1639,14 +1676,11 @@ public:
     // these become exported OBJECT symbols so capturing them lets a binary data
     // export map to a source decl (ADR-030 D4). Mirrors clang.py's
     // `_is_variable_node`/`_emit_variable`: skip function-local vars and variable
-    // templates (the clang backend never walks into those), and drop a
-    // *namespace/file-scope* `static` (internal linkage) while keeping a static
-    // *data member* (external linkage, its lexical parent is a record).
+    // templates (the clang backend never walks into those); internal-linkage
+    // variables (a namespace/file-scope `static` OR a namespace-scope `const`
+    // without `extern`) are dropped below by their mangled-name marker.
     if (vd->isLocalVarDecl() || vd->getDescribedVarTemplate() ||
         isa<VarTemplateSpecializationDecl>(vd))
-      return true;
-    bool inRecord = isa<CXXRecordDecl>(vd->getLexicalDeclContext());
-    if (vd->getStorageClass() == SC_Static && !inRecord)
       return true;
     std::string file, origin, visibility;
     if (!classify(vd, file, origin, visibility))
@@ -1660,6 +1694,11 @@ public:
     std::string name = scopedName(vd);
     std::string sig = qualTypeFromJson(o);
     std::string mangled = mangledFromJson(o);
+    // Drop internal-linkage variables (clang's own linkage verdict, encoded as
+    // the Itanium `L` seniority marker) so a header `const`/file-`static` never
+    // shows up as a decl expected to map to an export (Codex review).
+    if (mangledHasInternalLinkage(mangled))
+      return true;
     std::string key = mangled.empty() ? name : mangled;
     Entity e;
     e.id = H({"variable", key, sig});

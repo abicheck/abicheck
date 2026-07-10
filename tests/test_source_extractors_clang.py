@@ -758,6 +758,18 @@ def _var_ast() -> dict:
                         "mangledName": "_ZN2nsL5gPrivE",
                         "type": {"qualType": "int"},
                     },
+                    # namespace-scope `const` without `extern` -> internal linkage
+                    # in C++ (clang marks it with the mangled `L`) -> dropped, so a
+                    # header constant does not populate decls_without_symbol
+                    # (Codex review). Note: no storageClass here — only the mangled
+                    # marker distinguishes it, which is why the marker is the signal.
+                    {
+                        "kind": "VarDecl",
+                        "name": "gConst",
+                        "loc": {"line": 4},
+                        "mangledName": "_ZN2nsL6gConstE",
+                        "type": {"qualType": "const int"},
+                    },
                     # constexpr -> constexpr_values, not variables
                     {
                         "kind": "VarDecl",
@@ -829,12 +841,33 @@ def test_ast_mapping_emits_external_linkage_variables_only() -> None:
     assert got["ns::C::sMember"].mangled_name == "_ZN2ns1C7sMemberE"
     assert got["ns::gCount"].kind == "variable"
     assert got["ns::gCount"].type_hash.startswith("sha256:")
-    # internal-linkage namespace static, constexpr, and the stack local are NOT variables
+    # internal-linkage namespace static, a namespace `const` (Codex review),
+    # constexpr, and the stack local are NOT variables
     assert "ns::gPriv" not in got
+    assert "ns::gConst" not in got
     assert "ns::kN" not in got
     assert all("local" not in n for n in got)
     # constexpr still routes to constexpr_values
     assert {e.qualified_name for e in tu.constexpr_values} == {"ns::kN"}
+
+
+def test_mangled_internal_linkage_marker() -> None:
+    from abicheck.buildsource.source_extractors.clang import (
+        _mangled_has_internal_linkage as internal,
+    )
+
+    # External: namespace global, extern, static data member (no `L` marker).
+    assert not internal("_ZN2ns8g_globalE")
+    assert not internal("_ZN2ns1C8s_memberE")  # static data member is external
+    assert not internal("_Z3fooi")  # free function
+    assert not internal("")  # no mangling (extern "C") -> treat as external
+    # Internal: namespace static / namespace const, and a top-level static.
+    assert internal("_ZN2nsL8g_staticE")
+    assert internal("_ZN2nsL7g_constE")
+    assert internal("_ZL1xE")
+    # Length-prefix parsing: an `L` that is the last char of a *source name*
+    # (namespace `detailL`) must NOT be read as the linkage marker.
+    assert not internal("_ZN7detailL8g_globalE")
 
 
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:

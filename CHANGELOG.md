@@ -11,17 +11,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`abicheck dump <binary> --inputs ./abicheck_inputs/`** folds a build-emitted
+  Flow-2 pack (from the `abicheck-cc` wrapper or the Clang facts plugin) straight
+  into the artifact snapshot and links the source surface against the binary's
+  exports — the same result as a follow-up `abicheck merge`, in **one command**.
+  Removes the separate `merge` step for the common single-artifact plugin/wrapper
+  flow (`merge` remains for multi-input folds). No compiler frontend is re-run.
 - **External-linkage variables in the clang source backend + Clang plugin.**
   The clang backend and `contrib/abicheck-clang-plugin` previously emitted an
   empty `variables` list, so exported data symbols (namespace globals, static
   data members such as `llvm::raw_ostream::RED`) could never map to a source
   declaration. Both now emit `variable` entities keyed identically
-  (`id=_hash("variable", mangled|name, type)`), gated to external linkage
-  (namespace/record/linkage-spec scope; block-scope locals and namespace-scope
-  `static` are dropped, `constexpr` keeps its own path). The C.6
-  differential-conformance fixture gains a global + static member so the gate
-  covers variables. Measured on LLVM 18.1.3 `LLVMSupport`: +24 exported symbols
-  now map.
+  (`id=_hash("variable", mangled|name, type)`), gated to external linkage:
+  block-scope locals and internal-linkage variables (a namespace/file-scope
+  `static` **or** a namespace-scope `const` without `extern`) are dropped by
+  their Itanium mangled `L` marker — clang's own linkage verdict — so a header
+  constant never inflates `decls_without_symbol` or triggers a spurious
+  `source_binary_provenance_mismatch`; `constexpr` keeps its own path. The C.6
+  differential-conformance fixture gains globals, a static member, and an
+  internal `const` so the gate covers variables. Measured on LLVM 18.1.3
+  `LLVMSupport`: +24 exported symbols now map.
 - **Template-instantiation RTTI attribution.** `source_link` now attributes an
   exported vtable/typeinfo emitted for a template instantiation
   (`_ZTVN…format_object<char>…E`) to the captured class-*template* pattern when

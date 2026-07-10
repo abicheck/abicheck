@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Helper functions for the ``dump`` CLI command (split from cli.py)."""
+
 from __future__ import annotations
 
 import shlex
@@ -68,6 +69,7 @@ class _WriteSnapshotOutput(Protocol):
         build_query: str | None = ...,
         build_compile_db: str | None = ...,
         extractor: str = ...,
+        inputs_pack: Path | None = ...,
     ) -> None: ...
 
 
@@ -235,6 +237,7 @@ def perform_elf_dump(
     header_backend: str = "auto",
     user_gcc_options: str | None = None,
     compile_db_filter: str | None = None,
+    inputs_pack: Path | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -338,11 +341,21 @@ def perform_elf_dump(
         snap.python_api = detect_python_api(snap)
 
     if follow_deps:
-        populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
+        populate_dependency_info(
+            snap, so_path, list(search_paths), sysroot, ld_library_path
+        )
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query,
-        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        snap,
+        output,
+        build_info,
+        sources,
+        build_config,
+        allow_build_query,
+        collect_mode,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
         extractor=header_backend,
+        inputs_pack=inputs_pack,
     )

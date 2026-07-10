@@ -58,7 +58,8 @@ inline int nestedTemplateSink() {
 // dropped by both; a static data member IS external and is kept.
 int gCounter;                          // namespace global -> variable
 extern int gShared;                    // extern global -> variable
-static int gInternal = 0;              // internal linkage -> dropped by both
+static int gInternal = 0;              // static: internal linkage -> dropped by both
+const int gConstInternal = 3;          // namespace const w/o extern: internal -> dropped
 
 int add(int a, int b = 1);             // default arg (literal int)
 bool toggle(bool on = true);           // default arg (literal bool)

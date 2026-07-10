@@ -966,6 +966,50 @@ _VARIABLE_SCOPE_KINDS = frozenset(
 )
 
 
+def _mangled_has_internal_linkage(mangled: str) -> bool:
+    """Return ``True`` when an Itanium *mangled* name marks internal linkage.
+
+    clang has already done the linkage analysis and encoded it: an
+    internal-linkage entity's own ``<unqualified-name>`` is prefixed with the
+    GCC/clang seniority marker ``L`` (a namespace/file-scope ``static`` *or* a
+    namespace-scope ``const`` without ``extern`` — e.g. ``_ZN2nsL7g_constE``,
+    ``_ZL1xE``). Such an entity never appears in the dynamic symbol table, so
+    emitting it as a ``variable`` would populate ``decls_without_symbol`` and risk
+    a spurious ``source_binary_provenance_mismatch`` against the correct binary
+    (Codex review). This parses by Itanium length prefixes — so an ``L`` *inside*
+    a source name (a namespace literally ending in ``L``) is never miscounted —
+    and bails to ``False`` (external, keep) on any exotic production, so a real
+    export is never dropped.
+    """
+    m = mangled
+    if not m.startswith("_Z"):
+        return False
+    i = 2
+    n = len(m)
+    if i < n and m[i] == "N":  # nested-name: N [CV/ref] <prefix> <name> E
+        i += 1
+        while i < n and m[i] in "rVKO":  # cv-qualifiers / ref-qualifiers
+            i += 1
+    while i < n:
+        c = m[i]
+        if c == "E":
+            break
+        if c == "L":  # seniority marker before a <source-name> ⇒ internal linkage
+            return i + 1 < n and m[i + 1].isdigit()
+        if c.isdigit():  # <source-name> ::= <length> <identifier> — skip wholesale
+            j = i
+            length = 0
+            while j < n and m[j].isdigit():
+                length = length * 10 + (ord(m[j]) - 48)
+                j += 1
+                if length > n - j:  # malformed length ⇒ bail safe
+                    return False
+            i = j + length
+            continue
+        return False  # template/substitution/other production ⇒ treat as external
+    return False
+
+
 def _is_variable_node(
     kind: str | None,
     name: str,
@@ -982,11 +1026,11 @@ def _is_variable_node(
 
     A block-scope local (enclosing kind is a statement, not a decl container) has
     no linkage and is dropped. Internal-linkage variables never appear in the
-    dynamic symbol table, so a *namespace/file-scope* ``static`` is dropped; a
-    ``static`` **data member** (enclosing ``CXXRecordDecl``) has external linkage
-    and is kept. Namespace-scope ``const`` without ``extern`` is internal in C++
-    but harmless to over-emit (it simply matches no export); the rule errs toward
-    emitting so a real export is never dropped.
+    dynamic symbol table, so they are dropped by their mangled-name marker: a
+    *namespace/file-scope* ``static`` **and** a namespace-scope ``const`` without
+    ``extern`` both carry it, while a ``static`` data member (external) does not.
+    The mangled name is clang's own linkage verdict, so this stays authoritative
+    without re-deriving C++ linkage rules.
     """
     if kind != "VarDecl" or not name or not accessible:
         return False
@@ -994,8 +1038,7 @@ def _is_variable_node(
         return False
     if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
         return False
-    in_record = enclosing_kind == "CXXRecordDecl"
-    if node.get("storageClass") == "static" and not in_record:
+    if _mangled_has_internal_linkage(_mangled(node)):
         return False
     return True
 
