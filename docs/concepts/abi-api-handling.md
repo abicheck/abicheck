@@ -363,7 +363,7 @@ abicheck can read the build's compile database (**L3**) and replay the sources
 driver is `abicheck scan`. It has one evidence dial — `--depth`
 (`binary|headers|build|source|full`) — that selects how far down the `L0`–`L5`
 *evidence layers* (what it sees + authority) to collect; fully explained in
-[Evidence Layers & Scan Depth](scan-and-evidence-levels.md). The governing
+[Evidence & Detectability](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). The governing
 **authority rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes,
 or raises its own source-/API-level findings, but **never deletes an
 artifact-proven break**.

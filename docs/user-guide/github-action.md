@@ -350,7 +350,7 @@ silence the warning); the raw CLI resolves `auto` only when nothing is passed:
     warning. `scan-mode` currently defaults to `pr`, so leaving both new inputs
     unset still emits that warning — set `depth` (or `audit: 'true'`) to pin the
     modern dial. The mapping is in the
-    [Deprecated axes appendix](../concepts/scan-and-evidence-levels.md#appendix-deprecated-scan-axes-s0s6-and-mode).
+    [Deprecated axes appendix](../concepts/evidence-and-detectability.md#appendix-deprecated-scan-axes-s0s6-and-mode).
 
 ### Single-release audit (no baseline)
 

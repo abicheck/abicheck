@@ -59,7 +59,7 @@ inputs you give it — its five additive evidence layers, **L0–L4**. More
 evidence catches more breaks. Start at the layer your artifacts allow, and add
 more when you need more confidence. (The `scan` docs also use a sixth code,
 **`L5`** — the source graph abicheck *derives* from L3/L4; you never provide it.
-See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md).) For a
+See [Evidence & Detectability](../concepts/evidence-and-detectability.md).) For a
 concrete, side-by-side look at *what each layer actually sees* on one example —
 and where each one goes blind — see the
 [level-by-level walk-through](../concepts/what-each-level-sees.md).

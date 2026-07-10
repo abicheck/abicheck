@@ -8,6 +8,14 @@
 > *bodies*, uninstantiated templates) are invisible to *any* artifact
 > comparison.
 
+!!! info "This topic in three pages — you are on **Model**"
+    **Model** — this page: the `L0`–`L5` evidence layers, what each can and
+    cannot see, and the `--depth` dial that collects them.
+    **Worked example** — [What Each Level Sees](what-each-level-sees.md): one
+    tiny library walked up every level, with the actual data.
+    **Flags** — [Source-Scan Depth](../user-guide/scan-levels.md): the `scan`
+    command reference with recipes.
+
 This page is the conceptual companion to the practical
 [Limitations](limitations.md) and [Tool Comparison](../reference/tool-comparison.md)
 pages; for the teaching-track version — which break families need which evidence,
@@ -149,10 +157,9 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > layers* — *what* abicheck sees and how much that evidence is trusted. The
 > `abicheck scan` command has one knob, `--depth`
 > (`binary|headers|build|source|full`), that selects **how far down** these
-> layers to collect. (Earlier releases exposed a separate `s0`–`s6` "method"
-> axis; it is now a deprecated alias of `--depth`.)
-> [Evidence Layers & Scan Depth](scan-and-evidence-levels.md) explains the model
-> and the `s0…s6` → `--depth` mapping.
+> layers to collect. The [`--depth` dial section
+> below](#the-depth-dial-how-much-evidence-to-collect) explains the mapping
+> (and the deprecated `s0`–`s6`/`--mode` axes it replaced).
 
 ### How they combine
 
@@ -219,6 +226,91 @@ So "evidence" + the authority rule is the mental model that lets abicheck keep
 *adding* sources for more accuracy without ever letting a weaker source override
 a proven break.
 
+---
+
+## The `--depth` dial: how much evidence to collect
+
+The layers above describe *what* abicheck can see. `abicheck scan` has **one**
+knob that decides how much of it to gather — `--depth`, each rung **named by
+the evidence you get** (ADR-037 D5) and additive over the one below it:
+
+| `--depth` | Reaches | Needs |
+|-----------|---------|-------|
+| `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* (no deep DWARF type walk, no L2 AST) + the always-on pattern scan | just the artifact(s) |
+| `headers` | + **L2** header AST (the public/internal boundary) | a public-header directory + a C/C++ frontend |
+| `build` | + **L3** build context (flag/toolchain drift) | a compile DB / build dir |
+| `source` | + **L4** source-ABI replay of changed TUs + the **L5** graph | sources **and** `clang` (+ a diff seed for scoping) |
+| `full` | **L4** over the whole library | sources **and** `clang` |
+
+**Omit `--depth` for `auto`** — the default. `auto` is risk-driven when a
+`--since`/`--changed-path` diff seed is present (it reads the numeric risk of the
+changed paths and picks a rung), and falls back to a sensible preset otherwise.
+`auto` **never** fires for a pinned depth — a rung you pin always produces the
+same scan for the same inputs, which is what CI wants. `--audit` is
+**orthogonal** to `--depth`: a single-build, no-baseline hygiene lint you can
+combine with any depth.
+
+!!! warning "A pinned deep depth is a contract (fail-loud)"
+    Pinning `--depth build|source|full` with **no source input**
+    (`--sources`/`--build-info`) is an error, not a silent shallow scan: there
+    is nothing to collect L3/L4/L5 from. Pass the evidence, or use the default
+    `auto` for a best-effort binary scan.
+
+`scan` is a front-end over `dump`/`compare`: the resolved depth selects an
+internal collection mode, which decides which L-layers get collected and at
+what replay scope:
+
+```mermaid
+flowchart LR
+    subgraph D["--depth · the dial (how deep)"]
+      d0["binary"]:::cheap
+      d1["headers"]:::cheap
+      d2["build"]:::cheap
+      d3["source"]:::exp
+      d4["full"]:::exp
+    end
+    subgraph L["L-axis · evidence (what)"]
+      L01["L0/L1 artifact (authoritative)"]
+      L2e["L2 header AST"]
+      L3e["L3 build context"]
+      L45["L4 replay + L5 graph"]
+    end
+    d0 --> L01
+    d1 --> L2e
+    d2 --> L3e
+    d3 --> L45
+    d4 --> L45
+    classDef cheap fill:#e6f4ea,stroke:#34a853;
+    classDef exp fill:#fce8e6,stroke:#ea4335;
+```
+
+Three properties of the dial worth internalizing:
+
+- **There is no `graph` rung.** The L5 reachability graph is an internal
+  consequence of `--depth source`/`full`, never its own user-facing rung
+  (ADR-037 D6) — you do not select the graph directly.
+- **Cost has exactly one cliff, at L4.** `binary`/`headers`/`build` are one
+  cheap price; `source`/`full` pay for clang per-TU AST replay, and the cliff
+  height tracks C++ template/STL instantiation depth, not TU count. `source`
+  only beats `full` with a `--since`/`--changed-path` seed. Flag-level detail:
+  [Source-Scan Depth](../user-guide/scan-levels.md); measured numbers:
+  [Performance § scan-level cost model](../development/performance.md#scan-level-cost-model-one-cliff-at-l4).
+- **Coverage is honest.** A scan can request a deep level and only reach a
+  shallow one (clang missing, no sources); abicheck never reports that as
+  "scan failed" — every scan states the L-depth it *actually reached* and, for
+  each disabled check, the precise input or tool to add (the capability report
+  in [Build Info & Sources § Evidence coverage](build-source-data.md#evidence-coverage);
+  worked illustration: [case147](../examples/case147_scan_depth_ladder.md)).
+
+Combining two layers can also resolve a finding that is invisible or ambiguous
+to either alone: [case148](../examples/case148_xcheck_header_build_mismatch.md)
+crosschecks L2 header macros against L3 build flags;
+[case149](../examples/case149_xcheck_odr_variant.md) crosschecks two L4 per-TU
+layouts; [case150](../examples/case150_xcheck_export_public_pair.md) crosschecks
+the L0 export table against L2 declarations in both directions.
+
+Migrating an old command line? The deprecated `s0…s6`/`--mode` axes map onto
+`--depth` in the [appendix at the end of this page](#appendix-deprecated-scan-axes-s0s6-and-mode).
 
 ---
 
@@ -451,6 +543,38 @@ The takeaway is the same one [Part 0](abi-series/00-product-contract.md) opens
 with: **a stable ABI is necessary but not sufficient for a compatible release.**
 ABI tools prove the binary contract held; behavioral compatibility still needs
 your tests and your specification.
+
+---
+
+## Appendix — deprecated scan axes (`s0…s6` and `--mode`)
+
+Earlier releases had you pick evidence in two other ways. Both still parse but
+are **deprecated (ADR-037 D5)** — they print a warning and map onto `--depth`.
+Prefer `--depth`; this table is here only for anyone migrating an old command
+line.
+
+**`--source-method s0…s6`** (the old "how it gathers evidence" axis):
+
+| Deprecated | Was | Use instead |
+|------------|-----|-------------|
+| `s0` / `s3` | diff classifier / lexical pattern scan (compiler-free) | `--depth binary` (or `headers` for +L2) |
+| `s1` | compile-DB / build-flag scan (L3) | `--depth build` |
+| `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
+| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung** (D6): the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
+| `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
+| `s6` | full AST replay of all TUs (L4) | `--depth full` |
+
+**`--mode`** presets:
+
+| Deprecated | Was | Use instead |
+|------------|-----|-------------|
+| `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
+| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only (D6). `--depth source` gives the change-scoped edges; keep `--mode pr-deep` if you need the full graph |
+| `baseline` | whole-library replay of a release | `--depth full` |
+| `audit` | intra-version hygiene lint, no baseline | the `--audit` switch |
+
+`--source-method auto` (risk-driven escalation) is now simply the default when
+you **omit** `--depth`.
 
 ---
 
