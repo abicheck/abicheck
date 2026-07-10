@@ -679,6 +679,27 @@ class TestTime64AbiFlip:
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
+    def test_unrelated_same_basename_private_record_not_leaked(self) -> None:
+        # A public unqualified `Event` must not pull an unrelated private
+        # `ns::Event` (which carries the time_t) into the surface via the
+        # shared basename (Codex review #510, round 7).
+        from abicheck.model import Function, RecordType, TypeField, Visibility
+
+        old = _snap32({"time_t": "long int"}, referenced=False)
+        new = _snap32({"time_t": "long long int"}, referenced=False)
+        for snap in (old, new):
+            snap.types = [
+                RecordType(name="Event", kind="struct",
+                           fields=[TypeField(name="id", type="int")]),
+                RecordType(name="ns::Event", kind="struct",
+                           fields=[TypeField(name="stamp", type="time_t")]),
+            ]
+            snap.functions = [Function(
+                name="get_event", mangled="get_event",
+                return_type="Event", visibility=Visibility.PUBLIC,
+            )]
+        assert _diff_time64_abi(old, new) == []
+
     def test_base_class_fields_reachable(self) -> None:
         # Inherited layout is public layout: an exported Derived whose Base
         # carries the resized time_t must still roll up

@@ -92,7 +92,12 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
 #: ABI as header-proven ones (Codex review #510).
 _ABI_VISIBLE = (Visibility.PUBLIC, Visibility.ELF_ONLY)
 
-_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Qualified identifiers are captured whole ("ns::Event" is one token, not
+# {ns, Event}) so a namespaced record/alias key matches its public spelling
+# exactly, without a basename fallback that would also match an *unrelated*
+# private type of the same basename in another scope (Codex review #510,
+# rounds 6-7).
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
@@ -133,12 +138,14 @@ def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
     # is keyed "stat") — without resolving the alias the record's fields would
     # never be visited (Codex review #510, round 5).
     def _reachable(name: str) -> bool:
-        # The tokenizer splits qualified spellings (`ns::Event` -> ns, Event),
-        # while records/aliases may be keyed by the qualified name — match on
-        # the terminal component as well so a namespaced public type still
-        # folds in (Codex review #510, round 6). Over-inclusion (an unrelated
-        # same-named type) errs toward reporting, the safe direction here.
-        return name in tokens or name.rsplit("::", 1)[-1] in tokens
+        # Exact-name matching only: the tokenizer keeps qualified spellings
+        # whole, so `ns::Event` in a public signature reaches the record keyed
+        # `ns::Event` — and an unrelated private `other::Event` does NOT ride
+        # along on the shared basename (Codex review #510, round 7). The
+        # accepted limitation: a dumper that spells a type unqualified while
+        # keying the record qualified will miss the roll-up, but the ordinary
+        # per-typedef/per-field findings still report that change.
+        return name in tokens
 
     remaining_aliases = dict(snap.typedefs)
     remaining_records = {rec.name: rec for rec in snap.types if rec.name}
