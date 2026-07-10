@@ -286,6 +286,121 @@ def test_exported_not_public_clean_when_everything_declared():
 
 
 # --------------------------------------------------------------------------- #
+# exported_not_public — precise export accounting (ADR-035 D4)
+# --------------------------------------------------------------------------- #
+
+
+def _public_fn() -> Function:
+    """A documented public function so provenance is resolvable (``_Z3fooi``)."""
+    return Function(
+        name="foo",
+        mangled="_Z3fooi",
+        return_type="void",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+
+
+def test_exported_not_public_marks_external_dependency_leak():
+    # A leaked libstdc++ symbol (``_ZNSt…``) is not this library's API: it must be
+    # accounted as an external dependency, name the originating library, and say so
+    # in the message — a maintainer fixes a leak differently from an API mistake.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZNSt6vectorIiSaIiEE9push_backEOi"))
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert [c.symbol for c in hits] == ["_ZNSt6vectorIiSaIiEE9push_backEOi"]
+    assert hits[0].old_value == "libstdc++.so.6"
+    assert "external dependency" in hits[0].description
+    assert "libstdc++.so.6" in hits[0].description
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 1
+    assert counters["documented_public_api"] == 1
+
+
+def test_exported_not_public_marks_vendored_third_party():
+    # A statically-linked, re-exported {fmt} symbol is a vendored third-party leak.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3fmt3v106detail11format_errorEPKc"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    assert hits[0].old_value == "{fmt} (vendored third-party)"
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 1
+
+
+def test_exported_not_public_marks_internal_namespace():
+    # An export in the library's own ``::impl`` namespace is a visibility leak,
+    # distinct from an external dependency: no origin lib, internal_namespace bucket.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib4impl6secretEv"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    assert hits[0].old_value is None
+    assert "internal namespace" in hits[0].description
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["internal_namespace"] == 1
+
+
+def test_exported_not_public_marks_template_instantiation():
+    # An exported template instantiation (Itanium ``I…E`` args) with no matching
+    # public decl is its own accounted reason, not a bare undeclared export.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib9transformIdEEvT_"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["template_instantiation"] == 1
+
+
+def test_exported_not_public_accounting_sums_to_all_exports():
+    # The accounting partitions the whole export table — documented API +
+    # compiler artifact + every undocumented reason == number of exports, so the
+    # report can honestly state "100 % accounted".
+    snap = _snap(
+        elf=_elf(
+            "_Z3fooi",  # documented
+            "_ZTV6Widget",  # cxx artifact
+            "_ZNSt6vectorIiSaIiEE9push_backEOi",  # external dependency
+            "_ZN3lib4impl6secretEv",  # internal namespace
+            "_ZN3lib9transformIdEEvT_",  # template instantiation
+            "raw_entry",  # undeclared
+        )
+    )
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert sum(counters.values()) == 6
+    assert counters == {
+        "documented_public_api": 1,
+        "cxx_abi_artifact": 1,
+        "external_dependency": 1,
+        "internal_namespace": 1,
+        "template_instantiation": 1,
+        "undeclared_export": 1,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # public_not_exported
 # --------------------------------------------------------------------------- #
 
@@ -446,9 +561,7 @@ def test_reconciliation_underscore_strip_is_macho_only():
 
     # Mach-O: the export table strips one underscore, so a raw `__ZN…`/`_foo`
     # mapping value still reconciles against the stripped export set.
-    macho_snap = _snap(
-        macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")])
-    )
+    macho_snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")]))
     surf2 = SourceAbiSurface(library="l")
     surf2.mappings["source_decl_to_binary_symbol"] = {"__ZN1A3fooEv": "__ZN1A3fooEv"}
     macho_snap.build_source = BuildSourcePack(root="", source_abi=surf2)
@@ -1559,7 +1672,9 @@ def test_public_to_internal_dependency_elevates_via_callgraph_def_file():
         [
             _decl("decl://pub", "pubFn", "public_header"),
             GraphNode(
-                id="decl://impl", kind="source_decl", label="implHelper",
+                id="decl://impl",
+                kind="source_decl",
+                label="implHelper",
                 attrs={"defined_in_project": True, "def_file": "/work/src/impl.cc"},
             ),
         ],
