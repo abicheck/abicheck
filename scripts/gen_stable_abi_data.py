@@ -140,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.url:
-        with urllib.request.urlopen(args.url) as resp:  # noqa: S310 (trusted URL)
+        if not args.url.startswith("https://"):
+            parser.error("--url must be an https:// URL")
+        with urllib.request.urlopen(args.url) as resp:  # noqa: S310  # nosec B310 - https enforced above
             toml_bytes = resp.read()
     elif args.toml:
         toml_bytes = Path(args.toml).read_bytes()

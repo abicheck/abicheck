@@ -26,10 +26,26 @@ Linking is cheap relative to parsing, so it is recomputed rather than cached
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
+
+
+def _try_demangle(
+    demangler: Callable[[str], str | None], symbol: str
+) -> str | None:
+    """*demangler*(*symbol*), with any demangler failure collapsed to ``None``.
+
+    The attribution loops iterate exported symbols and simply skip any the
+    demangler rejects; folding the failure into the return value keeps that
+    skip a plain conditional at the call site instead of a
+    try/except/``continue`` (bandit B112).
+    """
+    try:
+        return demangler(symbol)
+    except Exception:  # noqa: BLE001 - a demangler failure means "skip this symbol"
+        return None
 
 #: C++ Itanium ctor/dtor "ABI clone" tags. The compiler emits *several* object
 #: symbols for one source ctor/dtor — ``C1`` (complete), ``C2`` (base), ``C3``
@@ -638,10 +654,7 @@ def _attribute_synthesized_exports(
 
     attributed: dict[str, tuple[str, str]] = {}
     for sym in candidates:
-        try:
-            demangled = _demangle(sym)
-        except Exception:  # noqa: BLE001
-            continue
+        demangled = _try_demangle(_demangle, sym)
         if not demangled:
             continue
         parsed = _synthesized_target(demangled)
@@ -812,17 +825,21 @@ def _template_instantiation_attribution(
 
     attributed: dict[str, str] = {}
     for sym in candidates:
-        try:
-            demangled = _demangle(_norm_itanium(sym))
-        except Exception:  # noqa: BLE001
+        # An empty/None demangling can never match: unique_decl only holds
+        # truthy pattern keys and special-member owner keys always contain
+        # "<", so skipping early is behavior-identical and cheaper. The
+        # normalization runs inside the guard — a raising _norm_itanium
+        # also just skips the symbol.
+        demangled = _try_demangle(lambda s: _demangle(_norm_itanium(s)), sym)
+        if not demangled:
             continue
-        key = _template_pattern_key(_strip_call_signature(demangled or ""))
+        key = _template_pattern_key(_strip_call_signature(demangled))
         owner = unique_decl.get(key)
         if owner is not None:
             attributed[sym] = owner.qualified_name
             continue
         special_owner = source_owners.get(
-            _template_special_member_owner_key(demangled or "")
+            _template_special_member_owner_key(demangled)
         )
         if special_owner is not None:
             attributed[sym] = special_owner

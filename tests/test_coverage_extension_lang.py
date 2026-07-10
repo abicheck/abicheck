@@ -22,7 +22,9 @@ function/typedef bridge, and the castxml/clang extraction helpers.
 """
 from __future__ import annotations
 
-from xml.etree.ElementTree import fromstring
+# Parse with defusedxml like production does (dumper_castxml feeds the parser
+# defusedxml-parsed trees; stdlib fromstring would trip bandit B314 here).
+from defusedxml.ElementTree import fromstring
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper_castxml import _CastxmlParser, _extract_contract_attributes

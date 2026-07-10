@@ -5,12 +5,36 @@ No conda needed. Uses anaconda.org API + direct CDN download. Handles .conda
 (zip of zstd tarballs; requires external zstd for GNU tar) and legacy .tar.bz2.
 """
 from __future__ import annotations
-import json, os, sys, time, zipfile, tarfile, subprocess, urllib.request, shutil
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.request
+import zipfile
 
 API = "https://api.anaconda.org/package/conda-forge/{}"
 CDN = "https://conda.anaconda.org/conda-forge/linux-64/{}"
-CACHE = os.environ.get("ABICHECK_EVAL_CACHE", "/tmp/abicheck-eval/pkgs")
+CACHE = os.environ.get(
+    "ABICHECK_EVAL_CACHE", os.path.join(tempfile.gettempdir(), "abicheck-eval", "pkgs")
+)
 os.makedirs(CACHE, exist_ok=True)  # urlretrieve won't create parents
+
+
+def _retrieve(url, dest):
+    """Download *url* to *dest*, refusing anything but HTTPS.
+
+    Every URL here is built from the HTTPS API/CDN constants, but pinning the
+    scheme keeps a crafted package/version string from smuggling in a
+    ``file://``/``ftp://`` fetch (bandit B310).
+    """
+    if not url.startswith("https://"):
+        raise ValueError(f"refusing non-HTTPS download: {url}")
+    urllib.request.urlretrieve(url, dest)  # noqa: S310  # nosec B310 - scheme pinned above
 
 def _ensure_within(root, path):
     root = os.path.realpath(root)
@@ -42,13 +66,13 @@ def _require_zstd():
 
 def _get(url, dest):
     t0 = time.time()
-    urllib.request.urlretrieve(url, dest)
+    _retrieve(url, dest)
     return time.time() - t0, os.path.getsize(dest)
 
 def list_files(pkg, subdir="linux-64"):
     p = f"{CACHE}/{pkg}.api.json"
     if not os.path.exists(p):
-        urllib.request.urlretrieve(API.format(pkg), p)
+        _retrieve(API.format(pkg), p)
     d = json.load(open(p))
     fs = [f for f in d["files"] if f["attrs"].get("subdir") == subdir]
     # newest build per (version): sort by version then build_number
@@ -68,7 +92,8 @@ def download(pkg, version, subdir="linux-64"):
     f = pick(pkg, version, subdir)
     base = os.path.basename(f["basename"])
     dest = f"{CACHE}/{base}"
-    dl_t = 0.0; size = os.path.getsize(dest) if os.path.exists(dest) else 0
+    dl_t = 0.0
+    size = os.path.getsize(dest) if os.path.exists(dest) else 0
     if not os.path.exists(dest):
         dl_t, size = _get(CDN.format(base), dest)
     return dest, dl_t, size
@@ -126,7 +151,7 @@ if __name__ == "__main__":
     elif cmd == "fetch":
         pkg, ver = sys.argv[2], sys.argv[3]
         arch, dl_t, size = download(pkg, ver)
-        out = f"/tmp/scan/pkgs/ex_{pkg}_{ver}"
+        out = os.path.join(CACHE, f"ex_{pkg}_{ver}")
         ex_t = extract(arch, out)
         sos = find_sos(out)
         print(json.dumps({"archive": os.path.basename(arch), "dl_s": round(dl_t,2),
