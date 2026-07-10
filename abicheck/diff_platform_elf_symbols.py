@@ -624,6 +624,16 @@ def _diff_elf_symbol_pair(
 #: start with these tokens.
 _ALLOCATOR_MANGLING_PREFIXES = ("_Znw", "_Zna", "_Zdl", "_Zda")
 
+#: Placement new/delete forms, which are NOT replaceable global allocation
+#: functions — they only serve explicit placement call sites, so their
+#: presence flipping is not an allocator-contract change. Placement new is
+#: ``operator new(size_t, void*)`` → ``_Zn[wa][jmy]Pv``; placement delete is
+#: ``operator delete(void*, void*)`` → ``_Zd[la]Pv{S_|Pv}`` (the second void*
+#: is spelled ``S_`` by Itanium substitution, or ``Pv`` unsubstituted). Sized
+#: (``_ZdlPvm``), aligned (``…St11align_val_t``) and nothrow delete keep a
+#: non-pointer second parameter and are correctly left in the replaceable set.
+_PLACEMENT_OPERATOR_RE = re.compile(r"^_Zn[wa][jmy]Pv|^_Zd[la]Pv(?:S_|Pv)")
+
 
 def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     """Diff the undefined-symbol (import) surface of the two binaries.
@@ -677,6 +687,28 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
                 old_value=f"{name}{detail}",
             )
         )
+    # A persisting import that goes weak → strong becomes a new hard obligation:
+    # the weak form resolved to null when unsatisfied, the strong form makes the
+    # loader fail. The name-only add/remove loops miss it (same name both sides),
+    # so surface it as an added import.
+    for name in sorted(old_names & new_names):
+        old_imp = old_by_name.get(name)
+        new_imp = new_by_name.get(name)
+        if (
+            getattr(old_imp, "binding", None) == SymbolBinding.WEAK
+            and getattr(new_imp, "binding", None) != SymbolBinding.WEAK
+        ):
+            version = getattr(new_imp, "version", "")
+            ver = f"@{version}" if version else ""
+            changes.append(
+                make_change(
+                    ChangeKind.IMPORTED_SYMBOL_ADDED,
+                    symbol=name,
+                    name=name,
+                    detail=f"{ver} (weak→strong)",
+                    new_value=f"{name}{ver}",
+                )
+            )
     return changes
 
 
@@ -696,12 +728,13 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
         return []
     old_syms = getattr(old_elf, "symbols", None) or []
     new_syms = getattr(new_elf, "symbols", None) or []
-    old_alloc = sorted(
-        s.name for s in old_syms if s.name.startswith(_ALLOCATOR_MANGLING_PREFIXES)
-    )
-    new_alloc = sorted(
-        s.name for s in new_syms if s.name.startswith(_ALLOCATOR_MANGLING_PREFIXES)
-    )
+    def _is_global_allocator(name: str) -> bool:
+        return name.startswith(_ALLOCATOR_MANGLING_PREFIXES) and not (
+            _PLACEMENT_OPERATOR_RE.match(name)
+        )
+
+    old_alloc = sorted(s.name for s in old_syms if _is_global_allocator(s.name))
+    new_alloc = sorted(s.name for s in new_syms if _is_global_allocator(s.name))
     if bool(old_alloc) == bool(new_alloc):
         return []
     if new_alloc:

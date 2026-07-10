@@ -438,6 +438,27 @@ class TestClangExtraction:
         node = {"inner": [{"kind": "NoReturnAttr", "inner": []}]}
         assert _clang_contract_attributes(node) == ["noreturn"]
 
+    def test_contract_attribute_arg_walk_skips_noise(self):
+        # Exercises the arg walk's three fall-through paths: a non-dict child is
+        # skipped, a bool value is not an ABI arg, and a value-less wrapper is
+        # descended into to reach the real ConstantExpr operand.
+        node = {
+            "inner": [
+                {
+                    "kind": "AllocSizeAttr",
+                    "inner": [
+                        "not-a-dict",
+                        {"kind": "CXXBoolLiteralExpr", "value": True, "inner": []},
+                        {
+                            "kind": "ImplicitCastExpr",
+                            "inner": [{"kind": "ConstantExpr", "value": 3}],
+                        },
+                    ],
+                }
+            ]
+        }
+        assert _clang_contract_attributes(node) == ["alloc_size(3)"]
+
     def test_var_alignment_integer_value(self):
         # clang may emit the evaluated constant as an int, not a string.
         node = {

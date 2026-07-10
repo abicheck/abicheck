@@ -763,14 +763,20 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
                 )
             )
 
-    # x86-64 ISA-needed baseline (GNU_PROPERTY_X86_ISA_1_NEEDED). Only when the
-    # property is present on BOTH sides — many toolchains never emit it, so an
-    # absent old side means "unrecorded", not "no requirement" — and only the
-    # raising direction (a lowered floor widens the supported CPU set).
+    # x86-64 ISA-needed baseline (GNU_PROPERTY_X86_ISA_1_NEEDED). Fires when the
+    # NEW side declares a level: both ELFs are captured (gated above), so an
+    # absent old note is not "unrecorded" but "no declared micro-architecture
+    # floor" = plain x86-64 (baseline). A common baseline → v3 rebuild must
+    # therefore report. Only the raising direction is a finding (a lowered floor
+    # widens the supported CPU set).
     old_isa = {t for t in old_props if t in _X86_ISA_LEVEL_RANK}
     new_isa = {t for t in new_props if t in _X86_ISA_LEVEL_RANK}
-    if old_isa and new_isa:
-        old_max = max(old_isa, key=_X86_ISA_LEVEL_RANK.__getitem__)
+    if new_isa:
+        old_max = (
+            max(old_isa, key=_X86_ISA_LEVEL_RANK.__getitem__)
+            if old_isa
+            else "x86-64-baseline"
+        )
         new_max = max(new_isa, key=_X86_ISA_LEVEL_RANK.__getitem__)
         if _X86_ISA_LEVEL_RANK[new_max] > _X86_ISA_LEVEL_RANK[old_max]:
             changes.append(

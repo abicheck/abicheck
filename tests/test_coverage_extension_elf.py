@@ -341,9 +341,25 @@ class TestX86IsaBaseline:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.X86_ISA_BASELINE_RAISED not in _kinds(r)
 
-    def test_absent_old_property_skipped(self):
-        # Most toolchains never emit the property; absence means unrecorded.
+    def test_absent_old_property_is_baseline(self):
+        # Both sides are captured ELF: an absent old ISA note is not
+        # "unrecorded" but "no declared micro-arch floor" = baseline x86-64, so
+        # the common baseline → v3 rebuild reports.
         old = _elf(gnu_properties=frozenset())
+        new = _elf(gnu_properties=frozenset({"x86-64-v3"}))
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.X86_ISA_BASELINE_RAISED in _kinds(r)
+
+    def test_new_baseline_only_is_not_a_raise(self):
+        # An added note that only declares plain x86-64 is not a raise.
+        old = _elf(gnu_properties=frozenset())
+        new = _elf(gnu_properties=frozenset({"x86-64-baseline"}))
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.X86_ISA_BASELINE_RAISED not in _kinds(r)
+
+    def test_legacy_side_without_elf_identity_skipped(self):
+        # No captured identity → the note's absence is unknown, not baseline.
+        old = ElfMetadata(gnu_properties=frozenset())
         new = _elf(gnu_properties=frozenset({"x86-64-v3"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.X86_ISA_BASELINE_RAISED not in _kinds(r)
@@ -431,6 +447,23 @@ class TestImportSet:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
 
+    def test_weak_to_strong_import_is_added_obligation(self):
+        # A persisting import going weak → strong becomes a hard requirement the
+        # loader must satisfy (the weak form resolved to null); report it.
+        old = _elf(imports=[_imp("optional_fn", binding=SymbolBinding.WEAK)])
+        new = _elf(imports=[_imp("optional_fn", binding=SymbolBinding.GLOBAL)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.IMPORTED_SYMBOL_ADDED in _kinds(r)
+        change = next(c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED)
+        assert "weak" in change.description
+
+    def test_strong_to_weak_import_not_flagged(self):
+        # The relaxing direction (strong → weak) is not a new obligation.
+        old = _elf(imports=[_imp("optional_fn", binding=SymbolBinding.GLOBAL)])
+        new = _elf(imports=[_imp("optional_fn", binding=SymbolBinding.WEAK)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
+
     def test_first_import_gained(self):
         # A parsed ELF with zero undefined symbols is real evidence of
         # "imports nothing" — gaining the first import must report.
@@ -491,6 +524,24 @@ class TestAllocatorReplacement:
         # global operator new from nothing reports.
         old = _elf(symbols=[])
         new = _elf(symbols=[_func("_Znwm")])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED in _kinds(r)
+
+    def test_placement_operators_not_matched(self):
+        # Placement new/delete (operator new(size,void*) / delete(void*,void*))
+        # do not replace the global allocator — adding them is not a finding.
+        old = _elf(symbols=[_func("api_fn")])
+        new = _elf(
+            symbols=[_func("api_fn"), _func("_ZnwmPv"), _func("_ZdlPvS_")]
+        )
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in _kinds(r)
+
+    def test_sized_and_aligned_delete_still_matched(self):
+        # Sized delete(void*, size_t) and aligned new/delete ARE replaceable
+        # global forms and must not be excluded by the placement filter.
+        old = _elf(symbols=[_func("api_fn")])
+        new = _elf(symbols=[_func("api_fn"), _func("_ZdlPvm")])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED in _kinds(r)
 
