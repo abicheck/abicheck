@@ -14,7 +14,7 @@ One row per `ChangeKind` (312 total). Columns fuse the verdict partition (`check
 | `atomic_qualifier_changed` | breaking | `BREAKING` | `error` | L1 | `atomic_qualifier_changed` | [case116](../examples/case116_atomic_qualifier_changed.md) |
 | `base_class_offset_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_offset_changed` | [case140](../examples/case140_empty_base_optimization_lost.md) |
 | `base_class_position_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_position_changed` | — |
-| `base_class_virtual_changed` | breaking | `BREAKING` | `error` | unspecified | `base_class_virtual_changed` | — |
+| `base_class_virtual_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_virtual_changed` | [case167](../examples/case167_base_became_virtual.md) |
 | `behavioural_default_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `behavioural_default_changed` | — |
 | `bit_int_width_changed` | breaking | `BREAKING` | `error` | L1 | `bit_int_width_changed` | [case115](../examples/case115_bit_int_width_changed.md) |
 | `branch_protection_improved` | quality | `COMPATIBLE` | `warning` | L0 | `branch_protection_improved` | — |
@@ -97,14 +97,14 @@ One row per `ChangeKind` (312 total). Columns fuse the verdict partition (`check
 | `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `func_noexcept_removed` | — |
 | `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` | [case02](../examples/case02_param_type_change.md), [case102](../examples/case102_frozen_runtime_signature_changed.md) |
 | `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | [case23](../examples/case23_pure_virtual_added.md) |
-| `func_ref_qual_changed` | breaking | `BREAKING` | `error` | unspecified | `func_ref_qual_changed` | — |
+| `func_ref_qual_changed` | breaking | `BREAKING` | `error` | L2 | `func_ref_qual_changed` | [case166](../examples/case166_ref_qualifier_added.md) |
 | `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](../examples/case01_symbol_removal.md), [case100](../examples/case100_experimental_removed_without_replacement.md), [case104](../examples/case104_glibcxx_dual_abi_flip.md), [case107](../examples/case107_task_scheduler_init_removed.md), +8 |
 | `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case97](../examples/case97_api_depends_on_consumer_env.md) |
 | `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](../examples/case102_frozen_runtime_signature_changed.md), [case10](../examples/case10_return_type.md), [case70](../examples/case70_flexible_array_member_changed.md), [case72](../examples/case72_covariant_return_changed.md) |
 | `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` | [case21](../examples/case21_method_became_static.md) |
 | `func_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_virtual_added` | [case68](../examples/case68_virtual_method_added.md) |
 | `func_virtual_became_pure` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_became_pure` | — |
-| `func_virtual_removed` | breaking | `BREAKING` | `error` | unspecified | `func_virtual_removed` | — |
+| `func_virtual_removed` | breaking | `BREAKING` | `error` | L1 | `func_virtual_removed` | [case168](../examples/case168_virtual_method_devirtualized.md) |
 | `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` | [case06](../examples/case06_visibility.md) |
 | `func_visibility_protected_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `func_visibility_protected_changed` | — |
 | `generated_file_dependency_unstable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_file_dependency_unstable` | — |
@@ -147,7 +147,7 @@ One row per `ChangeKind` (312 total). Columns fuse the verdict partition (`check
 | `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` | — |
 | `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | — |
 | `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` | — |
-| `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_added` | — |
+| `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `overload_added` | [case169](../examples/case169_overload_added.md) |
 | `overload_set_rerouted` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_set_rerouted` | — |
 | `param_became_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_became_va_list` | — |
 | `param_default_value_changed` | quality | `COMPATIBLE` | `warning` | L2 | `param_default_value_changed` | [case32](../examples/case32_param_defaults.md) |
@@ -159,7 +159,7 @@ One row per `ChangeKind` (312 total). Columns fuse the verdict partition (`check
 | `pe_forwarder_changed` | breaking | `BREAKING` | `error` | L0 | `pe_forwarder_changed` | — |
 | `pe_machine_changed` | breaking | `BREAKING` | `error` | L0 | `pe_machine_changed` | — |
 | `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` | — |
-| `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `polymorphic_type_non_virtual_dtor` | — |
+| `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `polymorphic_type_non_virtual_dtor` | [case165](../examples/case165_polymorphic_nonvirtual_dtor.md) |
 | `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | — |
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |

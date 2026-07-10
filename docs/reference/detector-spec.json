@@ -79,9 +79,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "base_class_virtual_changed",
-      "examples": ""
+      "examples": "case167_base_became_virtual"
     },
     {
       "kind": "behavioural_default_changed",
@@ -826,9 +826,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L2",
       "doc_slug": "func_ref_qual_changed",
-      "examples": ""
+      "examples": "case166_ref_qualifier_added"
     },
     {
       "kind": "func_removed",
@@ -889,9 +889,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "func_virtual_removed",
-      "examples": ""
+      "examples": "case168_virtual_method_devirtualized"
     },
     {
       "kind": "func_visibility_changed",
@@ -1276,9 +1276,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "overload_added",
-      "examples": ""
+      "examples": "case169_overload_added"
     },
     {
       "kind": "overload_set_rerouted",
@@ -1384,9 +1384,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "polymorphic_type_non_virtual_dtor",
-      "examples": ""
+      "examples": "case165_polymorphic_nonvirtual_dtor"
     },
     {
       "kind": "private_header_leak",

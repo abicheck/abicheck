@@ -540,6 +540,7 @@ def _build_compare_cmd(
     scope_public_headers: bool,
     old_build_source: Path | None,
     new_build_source: Path | None,
+    pattern_verdicts: bool = False,
 ) -> list[str]:
     """Build an ``abicheck compare`` command from two snapshots.
 
@@ -557,6 +558,11 @@ def _build_compare_cmd(
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
     cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
+    # ADR-027 pattern-aware verdicts are an opt-in analysis mode; cases whose
+    # expected verdict depends on it (e.g. anti-pattern RISK findings) set
+    # "pattern_verdicts": true in ground_truth.json.
+    if pattern_verdicts:
+        cmd.append("--pattern-verdicts")
     return cmd
 
 
@@ -586,6 +592,7 @@ def _dump_and_compare(
     old_build_info: Path | None = None,
     new_build_info: Path | None = None,
     sources: bool = False,
+    pattern_verdicts: bool = False,
 ) -> tuple[str | None, str | None]:
     """Run abicheck dump+compare. Returns (verdict, error_msg).
 
@@ -625,6 +632,7 @@ def _dump_and_compare(
         scope_public_headers=scope_public_headers,
         old_build_source=old_build_source,
         new_build_source=new_build_source,
+        pattern_verdicts=pattern_verdicts,
     )
     return _run_compare_and_parse(compare_cmd)
 
@@ -1116,6 +1124,7 @@ def run_case(
         old_build_info=old_build_info,
         new_build_info=new_build_info,
         sources=bool(entry.get("sources", False)),
+        pattern_verdicts=bool(entry.get("pattern_verdicts", False)),
     )
     if dc_err is not None:
         return CaseResult(name, "ERROR", expected_raw, None, dc_err, variant)

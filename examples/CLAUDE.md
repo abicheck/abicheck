@@ -1,9 +1,11 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 152 cases numbered contiguously (`01–151` +
-`26b`), including 5 multi-library bundle cases and the 9 G20 audit /
+The ABI-scenario catalog: 169 cases (`01–158`, `160–169` + `26b`),
+including 5 multi-library bundle cases and the 9 G20 audit /
 cross-source cases (`143–151`). Each case is a minimal, compilable C/C++
-example demonstrating a specific ABI/API pitfall.
+example demonstrating a specific ABI/API pitfall. The authoritative
+count is the number of entries in `ground_truth.json` — trust that over
+this sentence.
 
 Read `README.md` in this directory first — it indexes every case and
 explains the verdict taxonomy.

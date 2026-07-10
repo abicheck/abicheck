@@ -1451,6 +1451,132 @@
         "linux"
       ]
     },
+    "case163_python_kwarg_renamed": {
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "category": "api_break",
+      "description": "CPython extension whose .pyi renames a keyword-only argument (encoding -> codec) and drops its default; the compiled .so is byte-identical, so the C-ABI/abi3 check alone scores it compatible while the Python-level API breaks every keyword caller.",
+      "expected": "API_BREAK",
+      "expected_kinds": [
+        "python_api_parameter_renamed"
+      ],
+      "min_evidence": "L2",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "stub_pair": true
+    },
+    "case164_preproc_conditional_field": {
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "category": "no_change",
+      "description": "A public struct field gains a #ifdef guard while both releases still ship with that macro defined, so the ABI is unchanged. A context-free header parse prunes the guarded field and raises a type_field_removed FALSE POSITIVE (the record size is artifact-accurate, so no size change fires); the binary depth is blind (identical builds) and correct. Only build context (the active -D define set, via --reconcile-build-context / ADR-039) proves the field is effectively present in both builds and clears the phantom. Ships committed guard-annotated snapshot fixtures (no compiler).",
+      "expected": "NO_CHANGE",
+      "expected_absent_kinds": [
+        "type_field_removed"
+      ],
+      "expected_kinds": [],
+      "fixtures": [
+        "v1.abi.json",
+        "v2.abi.json"
+      ],
+      "min_evidence": "L3",
+      "mode": "reconcile",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "scope_public_headers": true
+    },
+    "case165_polymorphic_nonvirtual_dtor": {
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "category": "risk",
+      "description": "v2 adds a NEW polymorphic type (Exporter has a vtable via virtual write()) whose destructor is not virtual, plus a public factory returning Exporter* that callers delete. Deleting any future subclass through the base skips the derived destructor (UB). Existing binaries keep working — the finding is the ADR-027 anti-pattern POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR, emitted as RISK only for newly introduced instances under --pattern-verdicts.",
+      "expected": "COMPATIBLE_WITH_RISK",
+      "expected_kinds": [
+        "polymorphic_type_non_virtual_dtor"
+      ],
+      "min_evidence": "L1",
+      "pattern_verdicts": true,
+      "platforms": [
+        "linux",
+        "macos"
+      ]
+    },
+    "case166_ref_qualifier_added": {
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "category": "breaking",
+      "description": "str() gains an lvalue ref-qualifier (&) so that MessageBuilder().str() — a pointer into a dying temporary — no longer compiles. Sound API hardening, but the ref-qualifier is part of the Itanium mangling: _ZN14MessageBuilder3strEv becomes _ZNR14MessageBuilder3strEv, so every existing binary fails at load with an undefined symbol (FUNC_REF_QUAL_CHANGED).",
+      "expected": "BREAKING",
+      "expected_kinds": [
+        "func_ref_qual_changed"
+      ],
+      "min_evidence": "L2",
+      "platforms": [
+        "linux",
+        "macos"
+      ]
+    },
+    "case167_base_became_virtual": {
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "category": "breaking",
+      "description": "Stream's base Device became a VIRTUAL base (classic diamond preparation, iostream-style). The object model is rewritten: the Device subobject moves to the end, derived fields shift, sizeof grows, and Stream gains a VTT and vbase machinery. Old binaries read fields at dead offsets (BASE_CLASS_VIRTUAL_CHANGED).",
+      "expected": "BREAKING",
+      "expected_kinds": [
+        "base_class_virtual_changed"
+      ],
+      "min_evidence": "L1",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
+    "case168_virtual_method_devirtualized": {
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "category": "breaking",
+      "description": "flush() was devirtualized: the exported symbol _ZN5Codec5flushEv survives with an identical signature (link and load succeed), but flush() left the vtable so every later slot shifts up one. Old binaries virtual-dispatch through the stale slot index and silently call reset() instead (FUNC_VIRTUAL_REMOVED); consumer overrides of flush() also silently stop being called.",
+      "expected": "BREAKING",
+      "expected_kinds": [
+        "func_virtual_removed"
+      ],
+      "min_evidence": "L1",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
+    "case169_overload_added": {
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "category": "risk",
+      "description": "units::to_celsius(double) — previously the unique declaration under its name — gains a float overload. Binary-compatible (the double symbol is untouched, old binaries keep working), but per the KDE BC policy this is a change to avoid: on the next recompile, float call sites silently re-route to the new overload (precision drift) and &units::to_celsius becomes ambiguous (OVERLOAD_ADDED).",
+      "expected": "COMPATIBLE_WITH_RISK",
+      "expected_kinds": [
+        "overload_added"
+      ],
+      "min_evidence": "L0",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
     "case16_inline_to_non_inline": {
       "abi_break": false,
       "api_break": false,
@@ -2972,48 +3098,6 @@
         "macos",
         "windows"
       ]
-    },
-    "case163_python_kwarg_renamed": {
-      "abi_break": false,
-      "api_break": true,
-      "bad_practice": false,
-      "category": "api_break",
-      "description": "CPython extension whose .pyi renames a keyword-only argument (encoding -> codec) and drops its default; the compiled .so is byte-identical, so the C-ABI/abi3 check alone scores it compatible while the Python-level API breaks every keyword caller.",
-      "expected": "API_BREAK",
-      "expected_kinds": [
-        "python_api_parameter_renamed"
-      ],
-      "min_evidence": "L2",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
-      "stub_pair": true
-    },
-    "case164_preproc_conditional_field": {
-      "abi_break": false,
-      "api_break": false,
-      "bad_practice": false,
-      "category": "no_change",
-      "description": "A public struct field gains a #ifdef guard while both releases still ship with that macro defined, so the ABI is unchanged. A context-free header parse prunes the guarded field and raises a type_field_removed FALSE POSITIVE (the record size is artifact-accurate, so no size change fires); the binary depth is blind (identical builds) and correct. Only build context (the active -D define set, via --reconcile-build-context / ADR-039) proves the field is effectively present in both builds and clears the phantom. Ships committed guard-annotated snapshot fixtures (no compiler).",
-      "expected": "NO_CHANGE",
-      "expected_absent_kinds": [
-        "type_field_removed"
-      ],
-      "expected_kinds": [],
-      "fixtures": [
-        "v1.abi.json",
-        "v2.abi.json"
-      ],
-      "mode": "reconcile",
-      "min_evidence": "L3",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
-      "scope_public_headers": true
     }
   },
   "version": "4"

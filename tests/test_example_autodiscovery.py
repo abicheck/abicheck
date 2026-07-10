@@ -144,6 +144,13 @@ SCOPE_PUBLIC_HEADERS: dict[str, bool] = {
     k: bool(v.get("scope_public_headers", False))
     for k, v in _gt_data["verdicts"].items()
 }
+# pattern_verdicts: case_name → bool. When true the case is compared with
+# ADR-027 pattern-aware verdicts enabled (opt-in analysis mode); the case's
+# expected verdict depends on an idiom/anti-pattern finding.
+PATTERN_VERDICTS: dict[str, bool] = {
+    k: bool(v.get("pattern_verdicts", False))
+    for k, v in _gt_data["verdicts"].items()
+}
 # build_info: cases that ship per-side compile_commands.json and assert an L3
 # build-evidence finding (a runtime-model flip). This pipeline validates via the
 # Python compare() API, which does NOT run the build-evidence diff — only the CLI
@@ -525,6 +532,7 @@ def _dump_and_compare(
     headers_v1: list[Path],
     headers_v2: list[Path],
     scope_to_public_surface: bool = False,
+    pattern_verdicts: bool = False,
 ) -> tuple[str, list]:
     """Run abicheck dump+compare and return (verdict, changes)."""
     from abicheck.checker import compare
@@ -536,7 +544,12 @@ def _dump_and_compare(
     except Exception as exc:
         pytest.fail(f"{case_name}: dump failed: {exc}")
 
-    result = compare(snap1, snap2, scope_to_public_surface=scope_to_public_surface)
+    result = compare(
+        snap1,
+        snap2,
+        scope_to_public_surface=scope_to_public_surface,
+        pattern_verdicts=pattern_verdicts,
+    )
     return result.verdict.value.upper(), result.changes
 
 
@@ -657,6 +670,7 @@ def test_example_pipeline(
     got, changes = _dump_and_compare(
         case_name, v1_lib, v2_lib, headers_v1, headers_v2,
         scope_to_public_surface=SCOPE_PUBLIC_HEADERS.get(case_name, False),
+        pattern_verdicts=PATTERN_VERDICTS.get(case_name, False),
     )
 
     _assert_verdict(case_name, expected_verdict, got, changes,

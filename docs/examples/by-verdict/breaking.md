@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_92 case(s)._ [← back to all examples](../index.md)
+_95 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -99,3 +99,6 @@ _92 case(s)._ [← back to all examples](../index.md)
 | [case140_empty_base_optimization_lost](../case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
 | [case141_versioned_symbol_scheme](../case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
 | [case142_vtable_slot_count_binary_only](../case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
+| [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
+| [case167_base_became_virtual](../case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
+| [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
