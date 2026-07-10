@@ -423,9 +423,30 @@ def find_sources(case_dir: Path) -> _SourceResult:
     return _NO_SOURCES
 
 
-# ── abicheck compare (dump + compare pipeline) ────────────────────────────────
+# ── abicheck compare (full evidence dump + compare pipeline) ─────────────────
+def _version_source_root(case_dir: Path | None, src: Path | None) -> Path | None:
+    """Return the source root to pass to ``abicheck dump --sources``.
+
+    Most catalog cases use ``old/`` and ``new/`` source roots.  Older v1/v2
+    cases keep both versions side-by-side, so the case directory itself is the
+    narrowest available source root.  The benchmark should exercise abicheck's
+    deepest evidence path, not just binary/header snapshots.
+    """
+    if case_dir is None or src is None:
+        return None
+    try:
+        rel = src.relative_to(case_dir)
+    except ValueError:
+        return src.parent if src.exists() else None
+    if rel.parts and rel.parts[0] in {"old", "new", "v1", "v2"}:
+        return case_dir / rel.parts[0]
+    return case_dir
+
+
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                 case: str, rdir: Path) -> ToolResult:
+                 case: str, rdir: Path, *, case_dir: Path | None = None,
+                 v1_src: Path | None = None, v2_src: Path | None = None,
+                 build_dir: Path | None = None) -> ToolResult:
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
 
@@ -434,20 +455,31 @@ def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
     snap2 = bdir / "snap_v2.json"
     _t_start = time.monotonic()
 
-    def dump(so: Path, h: Path | None, snap: Path, ver: str) -> tuple[bool, str]:
+    src1 = _version_source_root(case_dir, v1_src)
+    src2 = _version_source_root(case_dir, v2_src)
+
+    def dump(so: Path, h: Path | None, snap: Path, ver: str,
+             src_root: Path | None) -> tuple[bool, str]:
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap), "--version", ver]
         if h and h.exists():
             cmd += ["-H", str(h)]
+        cmd += ["--depth", "full"]
+        if build_dir is not None:
+            cmd += ["--build-info", str(build_dir)]
+            if h and h.exists():
+                cmd += ["-p", str(build_dir)]
+        if src_root is not None and src_root.exists():
+            cmd += ["--sources", str(src_root)]
         run = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV)
         ok = run.returncode == 0 and snap.exists()
         return ok, (run.stderr or run.stdout)
 
     try:
-        ok, err = dump(v1_so, v1_h, snap1, "v1")
+        ok, err = dump(v1_so, v1_h, snap1, "v1", src1)
         if not ok:
             return ToolResult(verdict="ERROR", raw_output=f"dump v1 failed: {err}",
                               elapsed_ms=(time.monotonic() - _t_start) * 1000)
-        ok, err = dump(v2_so, v2_h, snap2, "v2")
+        ok, err = dump(v2_so, v2_h, snap2, "v2", src2)
         if not ok:
             return ToolResult(verdict="ERROR", raw_output=f"dump v2 failed: {err}",
                               elapsed_ms=(time.monotonic() - _t_start) * 1000)
@@ -1316,11 +1348,21 @@ def _run_tools_for_case(
     name: str,
     rdir: Path,
     abicc_timeout: int,
+    case_dir: Path | None = None,
+    v1_src: Path | None = None,
+    v2_src: Path | None = None,
+    build_dir: Path | None = None,
 ) -> dict[str, ToolResult]:
     """Run all active tools for a case and return their results keyed by tool name."""
     tool_results: dict[str, ToolResult] = {}
     for t in active_tools:
-        if t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
+        if t.name == "abicheck":
+            tool_results[t.name] = t.run_fn(
+                v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir,
+                case_dir=case_dir, v1_src=v1_src, v2_src=v2_src,
+                build_dir=build_dir,
+            )
+        elif t.name in ("abicheck_compat", "abicheck_strict"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
         elif t.name in ("abicc_dumper", "abicc_xml"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
@@ -1395,9 +1437,13 @@ def _process_case(
         br.used_make_artifacts, br.used_cmake_artifacts,
     )
 
+    compile_db = _find_compile_db(bdir)
+    build_info = compile_db if compile_db is not None else None
+
     tool_results = _run_tools_for_case(
         active_tools, v1_so, v2_so, v1_h, v2_h, v1_h_abicheck, v2_h_abicheck,
         name, rdir, args.abicc_timeout,
+        case_dir=case_dir, v1_src=v1_src, v2_src=v2_src, build_dir=build_info,
     )
 
     row_parts = [f"  {name:<33}", f"{expected:<12}"]
