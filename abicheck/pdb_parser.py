@@ -616,6 +616,20 @@ class CvEnumerator:
 
 
 @dataclass
+class CvOneMethod:
+    """Parsed LF_ONEMETHOD (non-overloaded member function).
+
+    Carries the method's function-type index so the calling convention of the
+    referenced LF_MFUNCTION/LF_PROCEDURE can be resolved by name — the piece
+    the PDB path needs to feed ``AdvancedDwarfMetadata.calling_conventions``
+    (a PDB has no DWARF-style per-symbol linkage, but methods are named right
+    in their class's fieldlist).
+    """
+    name: str
+    type_ti: int
+
+
+@dataclass
 class CvProcedure:
     """Parsed LF_PROCEDURE."""
     type_index: int
@@ -863,7 +877,22 @@ class TypeDatabase:
                     cont_members = self._fieldlists.get(cont_ti, [])
                     members.extend(cont_members)
 
-            elif sub_leaf in (LF_STMEMBER, LF_NESTTYPE, LF_ONEMETHOD,
+            elif sub_leaf == LF_ONEMETHOD:
+                # attr(2) + type_ti(4) [+ vbaseoff(4) if intro virtual] + name.
+                # Parsed (not skipped) so the method's calling convention can
+                # be resolved by name via its LF_MFUNCTION type.
+                if pos + 6 > len(d):
+                    break
+                (attr, m_type_ti) = struct.unpack_from("<HI", d, pos)
+                pos += 6
+                mprop = (attr >> 2) & 0x07
+                if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
+                    pos += 4
+                m_name, pos = _read_cstring(d, pos)
+                if m_name:
+                    members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
+
+            elif sub_leaf in (LF_STMEMBER, LF_NESTTYPE,
                               LF_VFUNCTAB, LF_BCLASS, LF_VBCLASS,
                               LF_IVBCLASS, LF_METHOD):
                 # Skip known sub-records we don't need
@@ -1202,6 +1231,20 @@ class TypeDatabase:
     def calling_convention_name(self, cc: int) -> str:
         """Map a CV_call_e value to a human-readable name."""
         return _CC_NAMES.get(cc, f"cc_{cc:#x}")
+
+    def function_calling_convention(self, ti: int) -> int | None:
+        """Return the CV_call_e value of a function type index, if known.
+
+        Resolves both member-function (LF_MFUNCTION) and free-function
+        (LF_PROCEDURE) type records; ``None`` for anything else.
+        """
+        mf = self._mfunctions.get(ti)
+        if mf is not None:
+            return mf.calling_convention
+        proc = self._procedures.get(ti)
+        if proc is not None:
+            return proc.calling_convention
+        return None
 
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,40 @@ from .model import (
 )
 from .provenance import build_public_set, classify_origin, header_from_location
 
+#: Base names of semantic contract / calling-convention attributes worth
+#: diffing. castxml passes GNU attributes through its compound ``attributes``
+#: string, optionally prefixed (``gnu:nonnull(1)``); arguments are kept as
+#: part of the normalized token so ``nonnull(1)`` → ``nonnull(2)`` is a change.
+_CONTRACT_ATTRIBUTE_BASES = frozenset({
+    "noreturn", "nonnull", "returns_nonnull", "malloc", "format",
+    "format_arg", "alloc_size", "alloc_align", "warn_unused_result",
+    "sentinel",
+    # calling-convention selections — a flip is an ABI change on the
+    # affected targets, reported via the contract-attribute kinds.
+    "cdecl", "stdcall", "fastcall", "thiscall", "regparm", "ms_abi",
+    "sysv_abi", "vectorcall",
+})
+
+
+def _extract_contract_attributes(attributes: str) -> list[str]:
+    """Filter a castxml ``attributes`` string down to contract attributes.
+
+    Returns normalized, sorted tokens with any ``gnu:``/``gnu::`` namespace
+    prefix stripped and argument lists preserved (``nonnull(1)``). Tokens not
+    in the known contract set (``noexcept``, ``final``, …) are ignored.
+    """
+    tokens: set[str] = set()
+    for raw in attributes.split():
+        token = raw
+        for prefix in ("gnu::", "gnu:", "__"):
+            if token.startswith(prefix):
+                token = token[len(prefix):]
+        token = token.strip("_")
+        base = token.split("(", 1)[0]
+        if base in _CONTRACT_ATTRIBUTE_BASES:
+            tokens.add(token)
+    return sorted(tokens)
+
 
 def _parse_vtable_index(vi_str: str | None) -> int | None:
     """Parse vtable_index attribute, returning None for missing/invalid values."""
@@ -325,6 +359,7 @@ class _CastxmlParser:
             ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
 
             params = []
+            is_variadic = False
             for arg in el:
                 if arg.tag == "Argument":
                     p_name = arg.get("name", "")
@@ -344,6 +379,9 @@ class _CastxmlParser:
                             default=arg.get("default"),
                         )
                     )
+                elif arg.tag == "Ellipsis":
+                    # Trailing C ellipsis (...) — the function is variadic.
+                    is_variadic = True
 
             if raw_mangled:
                 mangled = raw_mangled
@@ -431,6 +469,27 @@ class _CastxmlParser:
             # the referenced ids upfront and check membership here.
             is_hidden_friend = el.get("id", "") in hidden_friend_ids
 
+            # Semantic contract / calling-convention attributes, filtered from
+            # the compound ``attributes`` string (same channel as noexcept).
+            contract_attributes = _extract_contract_attributes(
+                el.get("attributes", "")
+            )
+
+            # Dynamic exception specification: castxml emits throw="" for
+            # `throw()` and a space-separated type-id list for `throw(T...)`.
+            # Absent attribute = no dynamic spec (captured as ""), keeping the
+            # tri-state None for dumpers that cannot know.
+            throw_attr = el.get("throw")
+            if throw_attr is None:
+                exception_spec = ""
+            elif not throw_attr.strip():
+                exception_spec = "throw()"
+            else:
+                thrown = ", ".join(
+                    self._type_name(tid) for tid in throw_attr.split()
+                )
+                exception_spec = f"throw({thrown})"
+
             funcs.append(
                 Function(
                     name=name,
@@ -454,6 +513,9 @@ class _CastxmlParser:
                     ref_qualifier=ref_qualifier,
                     is_explicit=is_explicit,
                     is_hidden_friend=is_hidden_friend,
+                    is_variadic=is_variadic,
+                    contract_attributes=contract_attributes,
+                    exception_spec=exception_spec,
                 )
             )
         return funcs
@@ -489,6 +551,9 @@ class _CastxmlParser:
                     visibility=vis,
                     is_const=is_const,
                     source_location=self._source_location(el),
+                    # Explicit alignas/aligned attribute when castxml emits an
+                    # ``align`` attribute on the Variable; None = unknown.
+                    alignment_bits=self._optional_int_attr(el, "align"),
                 )
             )
         return variables
