@@ -467,12 +467,39 @@ def test_external_dependency_origin_owner_based(symbol, expected):
 
 
 @pytest.mark.parametrize(
+    "symbol, needed, expected",
+    [
+        # libc++ std uses the std::__1 inline namespace: a leaked std guard var the
+        # prefix table misses must name libc++, not libstdc++ (Codex review).
+        ("_ZGVZNSt3__116generic_categoryEvE3loc", ["libc++.so.1"], "libc++.so.1"),
+        # No __1 marker but the binary links libc++ -> prefer libc++.
+        ("_ZN10__cxxabiv117__class_type_infoE", ["libc++.so.1"], "libc++.so.1"),
+        # __gnu_cxx is libstdc++-only, even alongside a libc++ DT_NEEDED.
+        ("_ZN9__gnu_cxx17__normal_iteratorEv", ["libc++.so.1"], "libstdc++.so.6"),
+        # covariant thunk with h/v-tagged call-offsets still resolves its owner.
+        ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
+    ],
+)
+def test_external_dependency_origin_runtime_and_covariant_thunk(
+    symbol, needed, expected
+):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, needed) == expected
+
+
+@pytest.mark.parametrize(
     "symbol, expected",
     [
         ("_ZN3lib4impl6secretEv", "internal_namespace"),
         ("_ZN3lib8internal6secretEv", "internal_namespace"),
         ("_ZN12_GLOBAL__N_13fooEv", "internal_namespace"),
         ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
+        ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
+        # an ``I`` *inside* an identifier is not a template — must not be
+        # misclassified (Codex review).
+        ("_ZN3lib10InitEngineEv", "undeclared_export"),
+        ("_ZN3lib9InterfaceEv", "undeclared_export"),
         ("_Z3fooi", "undeclared_export"),
         ("raw_c_entry", "undeclared_export"),
     ],

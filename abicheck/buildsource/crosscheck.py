@@ -1363,12 +1363,14 @@ _ARTIFACT_OPERAND_PREFIXES = (
 )
 
 #: A non-virtual/virtual/covariant thunk prefix (``_ZTh``/``_ZTv``/``_ZTc``)
-#: followed by its call-offset run (``n?<num>_`` one or more times). Peeling the
-#: whole run — not just the ``_ZTh`` letters — leaves the nested-name operand, so a
-#: leaked dependency thunk (``_ZThn16_N3fmt…``, ``_ZTv0_n24_N5boost…``) attributes
-#: to its dependency instead of falling through to the artifact exemption (Codex
-#: review).
-_THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:n?\d+_)+")
+#: followed by its call-offset run. Each offset chunk is ``n?<num>_`` and, for a
+#: covariant (``_ZTc``) thunk, may carry an ``h``/``v`` tag (``h<n>_`` /
+#: ``v<n>_<n>_``), so the run token is ``[hv]?n?\d+_``. Peeling the whole run —
+#: not just the ``_ZTh`` letters — leaves the nested-name operand, so a leaked
+#: dependency thunk (``_ZThn16_N3fmt…``, ``_ZTv0_n24_N5boost…``, covariant
+#: ``_ZTchn16_h16_N3fmt…``) attributes to its dependency instead of falling through
+#: to the artifact exemption (Codex review).
+_THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:[hv]?n?\d+_)+")
 
 
 def _mangled_owner_namespace(symbol: str) -> str | None:
@@ -1428,9 +1430,32 @@ def _external_dependency_origin(symbol: str, needed_libs: list[str]) -> str | No
     owner = _mangled_owner_namespace(symbol)
     if owner is None:
         return None
-    if owner == "std" or owner in _STD_OWNER_NAMESPACES:
+    if owner == "__gnu_cxx":
+        # libstdc++-only extension namespace — never libc++.
         return "libstdc++.so.6"
+    if owner == "std" or owner in _STD_OWNER_NAMESPACES:
+        return _cxx_runtime_lib(symbol, needed_libs)
     return _VENDORED_OWNER_NAMESPACES.get(owner)
+
+
+def _cxx_runtime_lib(symbol: str, needed_libs: list[str]) -> str:
+    """Which C++ runtime a leaked ``std`` symbol belongs to (libc++ vs libstdc++).
+
+    libc++ mangles ``std`` through its ``std::__1`` inline namespace (``…St3__1…``);
+    libstdc++ does not. When the marker is absent, prefer whichever runtime the
+    binary actually links (``DT_NEEDED``) so a libc++ build is not mislabelled as
+    libstdc++ (Codex review), defaulting to libstdc++ only when neither is linked.
+    """
+    if "St3__1" in symbol:
+        return "libc++.so.1"
+    needed_bases = [lib.rsplit("/", 1)[-1] for lib in needed_libs]
+    for base in needed_bases:
+        if base.startswith("libc++"):
+            return base
+    for base in needed_bases:
+        if base.startswith("libstdc++"):
+            return base
+    return "libstdc++.so.6"
 
 
 def _account_undocumented_export(symbol: str) -> str:
@@ -1450,12 +1475,40 @@ def _account_undocumented_export(symbol: str) -> str:
             "_GLOBAL__N_" in symbol
         ):
             return ACCOUNT_INTERNAL_NS
-    # Itanium template-argument encoding (``I…E``) on a mangled name that carries
-    # no finer reason: an instantiation the public headers declare only as a
-    # template. ``_ZN…I…EE`` / ``_Z<name>I…E``.
-    if symbol.startswith("_Z") and re.search(r"I[A-Za-z0-9_].*E", symbol):
+    # An exported template instantiation the public headers declare only as a
+    # template. Detected *structurally* (a ``<len><name>`` component immediately
+    # followed by ``I``) — a raw ``I…E`` substring search would misread the ``I``
+    # inside an ordinary identifier like ``InitEngine`` as template args (Codex
+    # review).
+    if _has_template_args(symbol):
         return ACCOUNT_TEMPLATE_INST
     return ACCOUNT_UNDECLARED
+
+
+def _has_template_args(symbol: str) -> bool:
+    """Whether an Itanium *symbol* carries a template-argument list (``…I…E``).
+
+    Walks the length-prefixed ``<len><name>`` source-name components and reports a
+    template-id only when a completed name component is immediately followed by an
+    ``I`` (the template-args opener). This ignores an ``I`` that merely appears
+    *inside* a name (``_ZN3lib10InitEngineEv`` is not a template), which a raw
+    substring scan would misclassify.
+    """
+    i, n = 0, len(symbol)
+    while i < n:
+        if not symbol[i].isdigit():
+            i += 1
+            continue
+        j = i
+        while j < n and symbol[j].isdigit():
+            j += 1
+        length = int(symbol[i:j])
+        end = j + length  # the source name occupies symbol[j:end]
+        if end < n and symbol[end] == "I":
+            return True
+        # Advance past this component; guard against a bogus/overlong length.
+        i = end if end > i else i + 1
+    return False
 
 
 def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
