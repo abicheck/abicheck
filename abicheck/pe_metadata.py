@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 from pathlib import Path
+from typing import Any
 
 import pefile  # type: ignore[import-untyped]
 
@@ -132,7 +133,103 @@ def parse_pe_metadata(dll_path: Path) -> PeMetadata:
         return PeMetadata()
 
 
+def _parse_pe_header_fields(pe: Any, meta: PeMetadata) -> None:
+    """Populate machine type, characteristics, and subsystem version from PE headers."""
+    # Machine type
+    meta.machine = pefile.MACHINE_TYPE.get(
+        pe.FILE_HEADER.Machine, f"0x{pe.FILE_HEADER.Machine:04x}"
+    )
+    meta.characteristics = pe.FILE_HEADER.Characteristics
+    if hasattr(pe, "OPTIONAL_HEADER"):
+        meta.dll_characteristics = getattr(pe.OPTIONAL_HEADER, "DllCharacteristics", 0)
+        major = getattr(pe.OPTIONAL_HEADER, "MajorSubsystemVersion", None)
+        minor = getattr(pe.OPTIONAL_HEADER, "MinorSubsystemVersion", None)
+        if major is not None and minor is not None:
+            meta.subsystem_version = f"{major}.{minor}"
+
+
+def _parse_pe_exports(pe: Any, meta: PeMetadata) -> None:
+    """Populate *meta.exports* from the PE export directory."""
+    if not hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
+        return
+    for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+        name = exp.name.decode("utf-8", errors="replace") if exp.name else ""
+        forwarder = ""
+        sym_type = PeSymbolType.EXPORTED
+
+        if exp.forwarder:
+            forwarder = exp.forwarder.decode("utf-8", errors="replace")
+            sym_type = PeSymbolType.FORWARDED
+
+        meta.exports.append(
+            PeExport(
+                name=name,
+                ordinal=exp.ordinal,
+                sym_type=sym_type,
+                forwarder=forwarder,
+            )
+        )
+
+
+def _import_entry_funcs(entry: Any) -> list[str]:
+    """Decode the imported function names of one import-directory entry."""
+    funcs: list[str] = []
+    for imp in entry.imports:
+        if imp.name:
+            funcs.append(imp.name.decode("utf-8", errors="replace"))
+        elif getattr(imp, "import_by_ordinal", False):
+            # Ordinal-only import (name=None, import_by_ordinal=True)
+            funcs.append(f"ordinal:{imp.ordinal}")
+    return funcs
+
+
+def _parse_pe_imports(pe: Any, meta: PeMetadata) -> None:
+    """Populate *meta.imports* from the PE import directory."""
+    if not hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
+        return
+    for entry in pe.DIRECTORY_ENTRY_IMPORT:
+        dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
+        meta.imports[dll_name] = _import_entry_funcs(entry)
+
+
+def _parse_pe_delay_imports(pe: Any, meta: PeMetadata) -> None:
+    """Populate *meta.delay_imports* from the PE delay-load import directory."""
+    # Delay-load imports (resolved lazily at first call, not at load time)
+    if not hasattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT"):
+        return
+    delay_imports: dict[str, list[str]] = {}
+    for entry in pe.DIRECTORY_ENTRY_DELAY_IMPORT:
+        dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
+        delay_imports[dll_name] = _import_entry_funcs(entry)
+    meta.delay_imports = delay_imports
+
+
+def _parse_pe_version_resource(pe: Any, meta: PeMetadata) -> None:
+    """Populate file/product version strings from the VS_FIXEDFILEINFO resource."""
+    if not hasattr(pe, "VS_FIXEDFILEINFO"):
+        return
+    for finfo in pe.VS_FIXEDFILEINFO:
+        ms_ver = finfo.FileVersionMS
+        ls_ver = finfo.FileVersionLS
+        meta.file_version = (
+            f"{(ms_ver >> 16) & 0xFFFF}."
+            f"{ms_ver & 0xFFFF}."
+            f"{(ls_ver >> 16) & 0xFFFF}."
+            f"{ls_ver & 0xFFFF}"
+        )
+        ms_prod = finfo.ProductVersionMS
+        ls_prod = finfo.ProductVersionLS
+        meta.product_version = (
+            f"{(ms_prod >> 16) & 0xFFFF}."
+            f"{ms_prod & 0xFFFF}."
+            f"{(ls_prod >> 16) & 0xFFFF}."
+            f"{ls_prod & 0xFFFF}"
+        )
+        break  # only first entry
+
+
 def _parse(dll_path: Path) -> PeMetadata:
+    """Parse PE metadata from *dll_path* using pefile."""
     pe = pefile.PE(str(dll_path), fast_load=True)
     try:
         pe.parse_data_directories(
@@ -154,83 +251,11 @@ def _parse(dll_path: Path) -> PeMetadata:
         # for legacy snapshots where it was never looked at.
         meta.delay_imports = {}
 
-        # Machine type
-        meta.machine = pefile.MACHINE_TYPE.get(
-            pe.FILE_HEADER.Machine, f"0x{pe.FILE_HEADER.Machine:04x}"
-        )
-        meta.characteristics = pe.FILE_HEADER.Characteristics
-        if hasattr(pe, "OPTIONAL_HEADER"):
-            meta.dll_characteristics = getattr(pe.OPTIONAL_HEADER, "DllCharacteristics", 0)
-            major = getattr(pe.OPTIONAL_HEADER, "MajorSubsystemVersion", None)
-            minor = getattr(pe.OPTIONAL_HEADER, "MinorSubsystemVersion", None)
-            if major is not None and minor is not None:
-                meta.subsystem_version = f"{major}.{minor}"
-
-        # Exports
-        if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
-            for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
-                name = exp.name.decode("utf-8", errors="replace") if exp.name else ""
-                forwarder = ""
-                sym_type = PeSymbolType.EXPORTED
-
-                if exp.forwarder:
-                    forwarder = exp.forwarder.decode("utf-8", errors="replace")
-                    sym_type = PeSymbolType.FORWARDED
-
-                meta.exports.append(PeExport(
-                    name=name,
-                    ordinal=exp.ordinal,
-                    sym_type=sym_type,
-                    forwarder=forwarder,
-                ))
-
-        # Imports
-        if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
-            for entry in pe.DIRECTORY_ENTRY_IMPORT:
-                dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
-                funcs: list[str] = []
-                for imp in entry.imports:
-                    if imp.name:
-                        funcs.append(imp.name.decode("utf-8", errors="replace"))
-                    elif getattr(imp, "import_by_ordinal", False):
-                        # Ordinal-only import (name=None, import_by_ordinal=True)
-                        funcs.append(f"ordinal:{imp.ordinal}")
-                meta.imports[dll_name] = funcs
-
-        # Delay-load imports (resolved lazily at first call, not at load time)
-        if hasattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT"):
-            delay_imports: dict[str, list[str]] = {}
-            for entry in pe.DIRECTORY_ENTRY_DELAY_IMPORT:
-                dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
-                funcs = []
-                for imp in entry.imports:
-                    if imp.name:
-                        funcs.append(imp.name.decode("utf-8", errors="replace"))
-                    elif getattr(imp, "import_by_ordinal", False):
-                        funcs.append(f"ordinal:{imp.ordinal}")
-                delay_imports[dll_name] = funcs
-            meta.delay_imports = delay_imports
-
-        # Version resource
-        if hasattr(pe, "VS_FIXEDFILEINFO"):
-            for finfo in pe.VS_FIXEDFILEINFO:
-                ms_ver = finfo.FileVersionMS
-                ls_ver = finfo.FileVersionLS
-                meta.file_version = (
-                    f"{(ms_ver >> 16) & 0xFFFF}."
-                    f"{ms_ver & 0xFFFF}."
-                    f"{(ls_ver >> 16) & 0xFFFF}."
-                    f"{ls_ver & 0xFFFF}"
-                )
-                ms_prod = finfo.ProductVersionMS
-                ls_prod = finfo.ProductVersionLS
-                meta.product_version = (
-                    f"{(ms_prod >> 16) & 0xFFFF}."
-                    f"{ms_prod & 0xFFFF}."
-                    f"{(ls_prod >> 16) & 0xFFFF}."
-                    f"{ls_prod & 0xFFFF}"
-                )
-                break  # only first entry
+        _parse_pe_header_fields(pe, meta)
+        _parse_pe_exports(pe, meta)
+        _parse_pe_imports(pe, meta)
+        _parse_pe_delay_imports(pe, meta)
+        _parse_pe_version_resource(pe, meta)
 
         return meta
     finally:

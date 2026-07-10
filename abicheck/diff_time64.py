@@ -35,7 +35,7 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot, RecordType, Visibility
 
 #: Typedefs resized by glibc's ``_TIME_BITS=64`` (time64) option.
 _TIME64_TYPEDEFS = frozenset({"time_t", "suseconds_t"})
@@ -100,6 +100,70 @@ _ABI_VISIBLE = (Visibility.PUBLIC, Visibility.ELF_ONLY)
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*")
 
 
+def _add_tokens(tokens: set[str], spelling: object) -> None:
+    """Fold *spelling*'s identifier tokens into *tokens* (non-strings are skipped)."""
+    if isinstance(spelling, str) and spelling:
+        tokens.update(_IDENTIFIER_RE.findall(spelling))
+
+
+def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
+    """Identifier tokens spelled directly by ABI-visible signatures and variables."""
+    tokens: set[str] = set()
+    for fn in snap.functions:
+        if fn.visibility not in _ABI_VISIBLE:
+            continue
+        _add_tokens(tokens, fn.return_type)
+        for p in fn.params:
+            _add_tokens(tokens, getattr(p, "type", ""))
+    for var in snap.variables:
+        if getattr(var, "visibility", Visibility.PUBLIC) not in _ABI_VISIBLE:
+            continue
+        _add_tokens(tokens, var.type)
+    return tokens
+
+
+def _fold_record_tokens(tokens: set[str], rec: RecordType) -> None:
+    """Fold a reachable record's field and base-class type spellings into *tokens*."""
+    for fld in rec.fields:
+        _add_tokens(tokens, getattr(fld, "type", ""))
+    # Inherited layout is public layout: fold base-class names in
+    # so a base carrying time_t/off_t is visited too (Codex
+    # review #510, round 6).
+    for base in list(rec.bases) + list(rec.virtual_bases):
+        _add_tokens(tokens, base)
+
+
+def _expand_reachable_types(snap: AbiSnapshot, tokens: set[str]) -> None:
+    """Grow *tokens* to a fixpoint through name-reachable typedefs and records."""
+    # Expand through name-reachable typedef aliases AND records to a fixpoint;
+    # each is folded in at most once. Typedefs participate because a public
+    # signature often reaches a record only through an alias (`typedef struct
+    # stat Stat;` + `f(Stat *)` puts "Stat" in the tokens while the record map
+    # is keyed "stat") — without resolving the alias the record's fields would
+    # never be visited (Codex review #510, round 5).
+    #
+    # Reachability is exact-name matching only: the tokenizer keeps qualified
+    # spellings whole, so `ns::Event` in a public signature reaches the record
+    # keyed `ns::Event` — and an unrelated private `other::Event` does NOT
+    # ride along on the shared basename (Codex review #510, round 7). The
+    # accepted limitation: a dumper that spells a type unqualified while
+    # keying the record qualified will miss the roll-up, but the ordinary
+    # per-typedef/per-field findings still report that change.
+    remaining_aliases = dict(snap.typedefs)
+    remaining_records = {rec.name: rec for rec in snap.types if rec.name}
+    changed = True
+    while changed and (remaining_aliases or remaining_records):
+        changed = False
+        for alias in list(remaining_aliases):
+            if alias in tokens:
+                _add_tokens(tokens, remaining_aliases.pop(alias))
+                changed = True
+        for name in list(remaining_records):
+            if name in tokens:
+                _fold_record_tokens(tokens, remaining_records.pop(name))
+                changed = True
+
+
 def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
     """Identifier tokens of the snapshot's *reachable* public surface.
 
@@ -114,59 +178,8 @@ def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:
     the number of spellings — this runs inside every ``compare`` and must not
     regress the scaling benchmarks.
     """
-    tokens: set[str] = set()
-
-    def _add(spelling: object) -> None:
-        if isinstance(spelling, str) and spelling:
-            tokens.update(_IDENTIFIER_RE.findall(spelling))
-
-    for fn in snap.functions:
-        if fn.visibility not in _ABI_VISIBLE:
-            continue
-        _add(fn.return_type)
-        for p in fn.params:
-            _add(getattr(p, "type", ""))
-    for var in snap.variables:
-        if getattr(var, "visibility", Visibility.PUBLIC) not in _ABI_VISIBLE:
-            continue
-        _add(var.type)
-
-    # Expand through name-reachable typedef aliases AND records to a fixpoint;
-    # each is folded in at most once. Typedefs participate because a public
-    # signature often reaches a record only through an alias (`typedef struct
-    # stat Stat;` + `f(Stat *)` puts "Stat" in the tokens while the record map
-    # is keyed "stat") — without resolving the alias the record's fields would
-    # never be visited (Codex review #510, round 5).
-    def _reachable(name: str) -> bool:
-        # Exact-name matching only: the tokenizer keeps qualified spellings
-        # whole, so `ns::Event` in a public signature reaches the record keyed
-        # `ns::Event` — and an unrelated private `other::Event` does NOT ride
-        # along on the shared basename (Codex review #510, round 7). The
-        # accepted limitation: a dumper that spells a type unqualified while
-        # keying the record qualified will miss the roll-up, but the ordinary
-        # per-typedef/per-field findings still report that change.
-        return name in tokens
-
-    remaining_aliases = dict(snap.typedefs)
-    remaining_records = {rec.name: rec for rec in snap.types if rec.name}
-    changed = True
-    while changed and (remaining_aliases or remaining_records):
-        changed = False
-        for alias in list(remaining_aliases):
-            if _reachable(alias):
-                _add(remaining_aliases.pop(alias))
-                changed = True
-        for name in list(remaining_records):
-            if _reachable(name):
-                rec = remaining_records.pop(name)
-                for fld in rec.fields:
-                    _add(getattr(fld, "type", ""))
-                # Inherited layout is public layout: fold base-class names in
-                # so a base carrying time_t/off_t is visited too (Codex
-                # review #510, round 6).
-                for base in list(rec.bases) + list(rec.virtual_bases):
-                    _add(base)
-                changed = True
+    tokens = _seed_surface_tokens(snap)
+    _expand_reachable_types(snap, tokens)
     return tokens
 
 
