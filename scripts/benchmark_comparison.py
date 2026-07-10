@@ -125,6 +125,21 @@ EXPECTED_ABICC: dict[str, str] = {
     k: ("COMPATIBLE" if EXPECTED[k] == "NO_CHANGE" else EXPECTED[k])
     for k, v in _gt_data["verdicts"].items()
 }
+# Cases whose expected verdict depends on the opt-in ADR-027 pattern analysis
+# ("pattern_verdicts": true in ground_truth.json). Both abicheck compare paths
+# below must pass --pattern-verdicts for them, mirroring validate_examples.py —
+# otherwise the case scores as wrong/missed in the suite and tier benchmarks.
+PATTERN_VERDICT_CASES: set[str] = {
+    k for k, v in _gt_data["verdicts"].items() if v.get("pattern_verdicts")
+}
+
+
+def _compare_cmd(snap1: Path, snap2: Path, case: str) -> list[str]:
+    """abicheck compare command for *case*, honoring its pattern_verdicts opt-in."""
+    cmd = [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"]
+    if case in PATTERN_VERDICT_CASES:
+        cmd.append("--pattern-verdicts")
+    return cmd
 
 
 @dataclass
@@ -442,7 +457,7 @@ def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
 
     try:
         r = subprocess.run(
-            [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"],
+            _compare_cmd(snap1, snap2, case),
             capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
@@ -1452,7 +1467,7 @@ def _abicheck_tier_result(
         return "ERROR", []
     try:
         r = subprocess.run(
-            [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"],
+            _compare_cmd(snap1, snap2, case),
             capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
