@@ -510,6 +510,13 @@ def test_external_dependency_origin_owner_based(symbol, expected):
         ),
         # a libc++ marker with no dependency list falls back to the canonical soname.
         ("_ZGVZNSt3__116generic_categoryEvE3loc", [], "libc++.so.1"),
+        # libc++abi is a *different* runtime — a std::__1 symbol must resolve to
+        # libc++ even when libc++abi precedes it in the dependency list (Codex).
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++.so.1",
+        ),
         # covariant thunk with h/v-tagged call-offsets still resolves its owner.
         ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
     ],
@@ -546,6 +553,9 @@ def test_linked_library_names_across_platforms():
         ("_ZN3lib4impl6secretEv", "internal_namespace"),
         ("_ZN3lib8internal6secretEv", "internal_namespace"),
         ("_ZN12_GLOBAL__N_13fooEv", "internal_namespace"),
+        # a parameter type referencing an internal namespace does NOT make the
+        # exported entity internal — only the entity's own name counts (Codex).
+        ("_ZN3lib3fooEPN3lib6detail4TypeE", "undeclared_export"),
         ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
         ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
         ("_Z9transformIdEv", "template_instantiation"),  # un-nested template fn
