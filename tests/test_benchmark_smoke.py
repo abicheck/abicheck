@@ -187,6 +187,66 @@ def test_run_abicheck_skip_when_missing(tmp_path):
     assert result.verdict == "SKIP"
 
 
+def test_abicheck_baseline_and_full_build_distinct_commands(tmp_path):
+    """Baseline is binary+headers only; full adds source/build evidence."""
+    mod = _load_benchmark()
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "api.h"
+    src = tmp_path / "old" / "lib.c"
+    compile_db = tmp_path / "build" / "compile_commands.json"
+    snapshot_dir = tmp_path / "snapshots"
+    for path in (so, hdr, src, compile_db):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    snapshot_dir.mkdir()
+
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = '{"verdict":"NO_CHANGE","changes":[]}'
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(x) for x in cmd])
+        if "dump" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+        return Result()
+
+    with (
+        patch.object(mod, "_HAS_ABICHECK", True),
+        patch.object(mod, "BUILD_DIR", snapshot_dir),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+    ):
+        mod.run_abicheck(so, so, hdr, hdr, "smoke_baseline", tmp_path)
+        baseline = commands[:]
+        commands.clear()
+        mod.run_abicheck_full(
+            so, so, hdr, hdr, "smoke_full", tmp_path,
+            case_dir=tmp_path, v1_src=src, v2_src=src, build_dir=compile_db,
+        )
+        full = commands[:]
+
+    assert len(baseline) == len(full) == 3
+    for dump in baseline[:2]:
+        assert "-H" in dump
+        for option in ("--depth", "--sources", "--build-info", "-p"):
+            assert option not in dump
+
+    for dump in full[:2]:
+        assert dump[dump.index("--depth") + 1] == "full"
+        assert dump[dump.index("--sources") + 1] == str(src.parent)
+        assert dump[dump.index("--build-info") + 1] == str(compile_db)
+        assert dump[dump.index("-p") + 1] == str(compile_db)
+
+
+def test_default_tools_include_both_abicheck_lanes():
+    mod = _load_benchmark()
+    with patch("sys.argv", ["benchmark_comparison.py"]):
+        selected = mod._resolve_selected_tools(mod.parse_args())
+    assert {"abicheck", "abicheck_full"} <= selected
+
+
 def test_run_abidiff_skip_when_missing(tmp_path):
     """run_abidiff returns SKIP if abidiff is not installed."""
     mod = _load_benchmark()
