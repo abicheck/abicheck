@@ -423,7 +423,7 @@ def find_sources(case_dir: Path) -> _SourceResult:
     return _NO_SOURCES
 
 
-# ── abicheck compare (full evidence dump + compare pipeline) ─────────────────
+# ── abicheck compare (dump + compare pipeline) ────────────────────────────────
 def _version_source_root(case_dir: Path | None, src: Path | None) -> Path | None:
     """Return the source root to pass to ``abicheck dump --sources``.
 
@@ -444,27 +444,66 @@ def _version_source_root(case_dir: Path | None, src: Path | None) -> Path | None
 
 
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                 case: str, rdir: Path, *, case_dir: Path | None = None,
-                 v1_src: Path | None = None, v2_src: Path | None = None,
-                 build_dir: Path | None = None) -> ToolResult:
+                 case: str, rdir: Path) -> ToolResult:
+    """Run the normal binary+headers abicheck benchmark lane.
+
+    Keep this lane comparable with libabigail's binary/header modes.  The
+    deeper source/build evidence path is exposed separately as
+    ``abicheck_full``.
+    """
+    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir)
+
+
+def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
+                      case: str, rdir: Path, *, case_dir: Path | None = None,
+                      v1_src: Path | None = None, v2_src: Path | None = None,
+                      build_dir: Path | None = None) -> ToolResult:
+    """Run abicheck with the deepest available evidence: binary + headers + sources.
+
+    This lane is intentionally separate from ``abicheck`` so benchmark reports
+    can show both the competitor-comparable baseline and abicheck's full scan.
+    """
+    return _run_abicheck_dump_compare(
+        v1_so, v2_so, v1_h, v2_h, case, rdir, suffix="_full",
+        case_dir=case_dir, v1_src=v1_src, v2_src=v2_src, build_dir=build_dir,
+        full_evidence=True,
+    )
+
+
+def _run_abicheck_dump_compare(
+    v1_so: Path,
+    v2_so: Path,
+    v1_h: Path | None,
+    v2_h: Path | None,
+    case: str,
+    rdir: Path,
+    *,
+    suffix: str = "",
+    case_dir: Path | None = None,
+    v1_src: Path | None = None,
+    v2_src: Path | None = None,
+    build_dir: Path | None = None,
+    full_evidence: bool = False,
+) -> ToolResult:
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
 
     bdir = BUILD_DIR / case
-    snap1 = bdir / "snap_v1.json"
-    snap2 = bdir / "snap_v2.json"
+    snap1 = bdir / f"snap{suffix}_v1.json"
+    snap2 = bdir / f"snap{suffix}_v2.json"
     _t_start = time.monotonic()
 
-    src1 = _version_source_root(case_dir, v1_src)
-    src2 = _version_source_root(case_dir, v2_src)
+    src1 = _version_source_root(case_dir, v1_src) if full_evidence else None
+    src2 = _version_source_root(case_dir, v2_src) if full_evidence else None
 
     def dump(so: Path, h: Path | None, snap: Path, ver: str,
              src_root: Path | None) -> tuple[bool, str]:
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap), "--version", ver]
         if h and h.exists():
             cmd += ["-H", str(h)]
-        cmd += ["--depth", "full"]
-        if build_dir is not None:
+        if full_evidence:
+            cmd += ["--depth", "full"]
+        if full_evidence and build_dir is not None:
             cmd += ["--build-info", str(build_dir)]
             if h and h.exists():
                 cmd += ["-p", str(build_dir)]
@@ -498,7 +537,7 @@ def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
     elapsed_ms = (time.monotonic() - _t_start) * 1000
 
     out = r.stdout + r.stderr
-    (rdir / f"{case}_abicheck.txt").write_text(out)
+    (rdir / f"{case}_abicheck{suffix}.txt").write_text(out)
 
     verdict = _abicheck_verdict_from_compare(r.stdout, r.returncode)
 
@@ -842,6 +881,7 @@ def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 
 TOOL_REGISTRY: list[Tool] = [
     Tool("abicheck", run_abicheck, "abicheck", 12, "expected"),
+    Tool("abicheck_full", run_abicheck_full, "ac-full", 12, "expected"),
     Tool("abicheck_compat", run_abicheck_compat, "ac-compat", 12, "expected_compat"),
     Tool("abicheck_strict", run_abicheck_strict, "ac-strict", 14, "expected"),
     Tool("abidiff", run_abidiff, "abidiff", 12, "expected"),
@@ -892,7 +932,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--suite", choices=["all", "pinned74"], default="all",
                    help="Case suite to run: all catalog cases, or the historical 74-case release-pinned subset")
     p.add_argument("--tools", nargs="+", metavar="TOOL",
-                   choices=["abicheck", "abicheck_compat", "abicheck_strict",
+                   choices=["abicheck", "abicheck_full", "abicheck_compat", "abicheck_strict",
                             "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml"],
                    help="Run only selected tools")
     p.add_argument("--case64-toolchain", choices=["auto", "gcc", "clang"], default="auto",
@@ -924,6 +964,7 @@ def _error_entry(case_name: str, expected: str) -> dict[str, Any]:
         "expected": expected,
         "expected_compat": EXPECTED_COMPAT.get(case_name, expected),
         "abicheck": "ERROR",
+        "abicheck_full": "ERROR",
         "abicheck_compat": "ERROR",
         "abicheck_strict": "ERROR",
         "abidiff": "ERROR",
@@ -1294,6 +1335,7 @@ def _skip_row_entry(name: str, expected: str) -> dict[str, Any]:
         "case": name,
         "expected": expected,
         "abicheck": "SKIP",
+        "abicheck_full": "SKIP",
         "abicheck_compat": "SKIP",
         "abicheck_strict": "SKIP",
         "abidiff": "SKIP",
@@ -1356,13 +1398,13 @@ def _run_tools_for_case(
     """Run all active tools for a case and return their results keyed by tool name."""
     tool_results: dict[str, ToolResult] = {}
     for t in active_tools:
-        if t.name == "abicheck":
+        if t.name == "abicheck_full":
             tool_results[t.name] = t.run_fn(
                 v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir,
                 case_dir=case_dir, v1_src=v1_src, v2_src=v2_src,
                 build_dir=build_dir,
             )
-        elif t.name in ("abicheck_compat", "abicheck_strict"):
+        elif t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
         elif t.name in ("abicc_dumper", "abicc_xml"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
