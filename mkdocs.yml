@@ -75,6 +75,7 @@ nav:
     - Verdicts: concepts/verdicts.md
     - Verdicts and Exit Codes: concepts/verdicts-and-exit-codes.md
     - Evidence & Detectability: concepts/evidence-and-detectability.md
+    - What Each Level Sees: concepts/what-each-level-sees.md
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Evidence Layers & Scan Depth: concepts/scan-and-evidence-levels.md
