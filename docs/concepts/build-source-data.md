@@ -102,7 +102,7 @@ flatter `BuildOption` record per canonical option key, which the adapters
 
 ```json
 {
-  "key": "glibcxx_use_cxx11_abi",
+  "key": "define:_GLIBCXX_USE_CXX11_ABI",
   "value": "1",
   "abi_relevant": true,
   "scope": "global"
@@ -158,12 +158,21 @@ the record `graph explain` walks to answer "what does this declaration reach":
 ```json
 {
   "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
-  "src": "decl://cart::Cart::total",
+  "src": "decl://_ZNK4cart4Cart5totalEb",
   "dst": "binary_symbol://_ZNK4cart4Cart5totalEb",
   "provenance": "source_abi_link",
   "confidence": "high"
 }
 ```
+
+A `decl://` node id is `SourceEntity.identity()` — the **mangled** name when
+one exists, not the qualified source name — precisely so overloads
+(`total(bool)` vs. a hypothetical `total()`) get distinct source-decl nodes
+instead of colliding on one `Cart::total`. For a C++ method this makes the
+`decl://` and `binary_symbol://` ids look identical modulo prefix; that's
+expected — the edge still records *two separate nodes* (a source declaration
+and an exported binary symbol) so a rename on one side without the other shows
+up as the edge moving to a different `dst`.
 
 `diff_source_graph_findings()` compares the *edge set*, not individual nodes:
 if this exact `(src, dst, kind)` triple disappears and a *different* `dst`
