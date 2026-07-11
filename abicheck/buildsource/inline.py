@@ -676,8 +676,21 @@ def derive_l2_include_dirs(
         if build_info is not None and is_pack_dir(build_info):
             base_build = BuildSourcePack.load(build_info).build_evidence
             raw_build_info = None
+        raw_sources = sources
+        if sources is not None and is_pack_dir(sources):
+            # A --sources pack carries its own L3 build_evidence, and
+            # embed_build_source/_combine_packs use it for L3 when no --build-info
+            # pack supplies one (build-info precedence). Mirror that here so the
+            # source pack's compile-unit include dirs seed L2 too — otherwise a
+            # `scan`/`dump -H include --sources path/to/pack` with no -I derives no
+            # include dirs and fails on dependency headers the pack already knows
+            # (Codex review). --build-info still wins L3: only fill base_build from
+            # the source pack when a build-info pack didn't already supply it.
+            if base_build is None:
+                base_build = BuildSourcePack.load(sources).build_evidence
+            raw_sources = None
         pack = collect_inline_pack(
-            sources=None if is_pack_dir(sources) else sources,
+            sources=raw_sources,
             build_info=raw_build_info,
             build_config=cfg,
             build_config_trusted_for_query=cfg_trusted_for_query,

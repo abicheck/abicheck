@@ -204,6 +204,93 @@ def test_derive_l2_include_dirs_from_pack(tmp_path):
     assert str(inc) in dirs
 
 
+def test_derive_l2_include_dirs_from_sources_pack(tmp_path):
+    # A collected BuildSourcePack passed as --sources also carries its own L3
+    # build_evidence, which embed_build_source/_combine_packs use for L3 when no
+    # --build-info pack supplies one. The L2 seeding must mirror that: surface the
+    # source pack's compile-unit include dirs so `scan/dump -H include --sources
+    # path/to/pack` with no -I can parse dependency headers the pack already knows
+    # (Codex review). Previously the sources pack was dropped to None and its
+    # include dirs were silently ignored.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    inc = tmp_path / "srcpkginc"
+    inc.mkdir()
+    pack_dir = tmp_path / "srcpack"
+    pack = BuildSourcePack.empty(pack_dir)
+    pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
+    )
+    pack.write()
+
+    dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=pack_dir)
+    for fn in cleanups:
+        fn()
+    assert str(inc) in dirs
+
+
+def test_derive_l2_include_dirs_build_info_pack_wins_over_sources_pack(tmp_path):
+    # When BOTH --build-info and --sources are packs, --build-info wins L3 (mirrors
+    # _combine_packs, whose L3 supplier order is bi_pack, src_pack, embedded). The
+    # seeding must therefore use the build-info pack's include dirs and NOT fold in
+    # the sources pack's — the source pack only backfills when build-info supplies
+    # no L3.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    bi_inc = tmp_path / "biinc"
+    bi_inc.mkdir()
+    src_inc = tmp_path / "srcinc"
+    src_inc.mkdir()
+
+    bi_dir = tmp_path / "bipack"
+    bi_pack = BuildSourcePack.empty(bi_dir)
+    bi_pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://bi", include_paths=[str(bi_inc)])]
+    )
+    bi_pack.write()
+
+    src_dir = tmp_path / "srcpack"
+    src_pack = BuildSourcePack.empty(src_dir)
+    src_pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://src", include_paths=[str(src_inc)])]
+    )
+    src_pack.write()
+
+    dirs, cleanups = derive_l2_include_dirs(build_info=bi_dir, sources=src_dir)
+    for fn in cleanups:
+        fn()
+    assert str(bi_inc) in dirs  # build-info pack wins L3
+    assert str(src_inc) not in dirs  # source pack does not override it
+
+
+def test_seed_l2_includes_from_sources_pack(tmp_path):
+    # End-to-end through the shared wrapper: -H headers, no -I, --sources pointing
+    # at a pack → the pack's include dirs are seeded into the effective includes.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import seed_l2_includes
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    inc = tmp_path / "seedpkginc"
+    inc.mkdir()
+    pack_dir = tmp_path / "seedpack"
+    pack = BuildSourcePack.empty(pack_dir)
+    pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
+    )
+    pack.write()
+
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=pack_dir,
+        build_info=None, build_config=None, defer_cleanup=None,
+    )
+    assert str(inc) in [str(p) for p in incs]
+    assert isinstance(pending, list)
+
+
 def test_derive_l2_include_dirs_build_compile_db_override(tmp_path):
     # A --build-compile-db override points at a non-default DB location; the L2
     # seeding must resolve *that* DB (mirroring embed_build_source), not only an
