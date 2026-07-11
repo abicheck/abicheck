@@ -32,6 +32,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `old-header`/`new-header`/`old-include`/`new-include` inputs are unchanged —
   they now map to the side-aware flags internally.
 
+- **Breaking — side-aware `--pdb-path`/`--debug-root`/`--probe-matrix`/
+  `--debug-info`/`--devel-pkg`/`--version` (ADR-040 Lever 1, Phase C).**
+  Continuing the collapse, the remaining per-side pairs fold into single
+  repeatable flags with the same `old=`/`new=` value prefix: `--old-pdb-path`/
+  `--new-pdb-path` → `--pdb-path`, `--debug-root1`/`--debug-root2` →
+  `--debug-root`, `--probe-matrix-old`/`--probe-matrix-new` → `--probe-matrix`,
+  `--debug-info1`/`--debug-info2` → `--debug-info`, `--devel-pkg1`/`--devel-pkg2`
+  → `--devel-pkg`, and `--old-version`/`--new-version` → `--version` (a string
+  flag whose per-side defaults stay `old`/`new`). Lowers `compare`'s visible
+  flag count by a further 5. The `--ast-frontend` triple is intentionally kept
+  (its base flag is shared with `dump`/`scan`). The GitHub Action's per-side
+  inputs are unchanged — they map to the side-aware flags internally.
+
 - **`compare` flag budget is now derived from a documented ledger.** The
   `COMPARE_FLAG_BUDGET` ceiling is computed as `BASE + len(COMPARE_FLAG_BUDGET_RAISES)`,
   so a new visible flag cannot be added without a rationale entry — closing the

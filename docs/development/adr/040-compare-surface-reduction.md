@@ -1,7 +1,8 @@
 # ADR-040: `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles
 
 **Status:** Accepted — phased implementation (Phase A run profiles + Phase B
-evidence-family collapse landed; Phases C–D staged, see "Rollout"). Targets
+evidence-family collapse landed; Phase C Lever-1 remainder landed except the
+`ast-frontend` carve-out; Phase D staged, see "Rollout"). Targets
 **0.5.0** (hard break, no alias window — consistent with how ADR-037 removed
 `--header-backend`).
 
@@ -159,8 +160,14 @@ half-migrated with red tests.
   `build-info` side-aware (the primary flow). Highest-traffic concepts.
   *(landed — `COMPARE_FLAG_BUDGET_BASE` 76→70; the unregistered release engine
   keeps its per-side surface via `release_input_options`.)*
-* **Phase C — Lever 1 remainder.** `ast-frontend`, `pdb-path`, `version`,
-  `debug-info`, `devel-pkg`, `debug-root`, `probe-matrix`.
+* **Phase C — Lever 1 remainder.** `pdb-path`, `debug-root`, `probe-matrix`
+  *(slice 1, landed — `BASE` 70→65)*; `debug-info`, `devel-pkg` *(slice 2,
+  landed — `BASE` 65→63)*; `version` *(slice 3, landed — `BASE` 63→62; a
+  side-aware `--version` string flag with per-side defaults `old`/`new`)*.
+  The `ast-frontend` triple is deliberately **not** collapsed: its base
+  `--ast-frontend` is shared with `dump`/`scan` through
+  `@compile_context_options`, so a side-aware collapse would fork that shared
+  family for one command only — the two per-side overrides stay as-is.
 * **Phase D — Lever 2 config demotion.** Remove hidden toolchain /
   debug-resolution / scope flags whose config home is wired.
 

@@ -35,6 +35,7 @@ from .cli_params import (
     SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
+    SIDED_STR_PARAM,
 )
 
 if TYPE_CHECKING:
@@ -113,10 +114,30 @@ def _split_sided_base(
     return both, old, new
 
 
+def _split_sided_version(
+    pairs: Sequence[tuple[str, str]],
+) -> tuple[str, str]:
+    """Resolve ``(side, label)`` pairs to ``(old_version, new_version)`` labels.
+
+    Same fan-out as :func:`_split_sided_single` (a bare/``both=`` value applies
+    to both sides, ``old=``/``new=`` override that side, last wins) but with the
+    historical per-side *defaults* ``"old"`` / ``"new"`` when a side is unset —
+    version labels are always populated, unlike the optional path families.
+    """
+    old = "old"
+    new = "new"
+    for side, label in pairs:
+        if side in ("both", "old"):
+            old = label
+        if side in ("both", "new"):
+            new = label
+    return old, new
+
+
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
     """Translate the sided ``header``/``include``/``sources``/``build_info``/
-    ``debug_root``/``pdb``/``probe_matrix`` dests into the per-side kwargs the
-    command bodies consume, in place (ADR-040 L1).
+    ``debug_root``/``pdb``/``probe_matrix``/``version`` dests into the per-side
+    kwargs the command bodies consume, in place (ADR-040 L1).
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
@@ -161,6 +182,10 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["pdb_path"] = base_p
         kwargs["old_pdb_path"] = old_pp
         kwargs["new_pdb_path"] = new_pp
+    if "version" in kwargs:
+        old_v, new_v = _split_sided_version(kwargs.pop("version"))  # type: ignore[arg-type]
+        kwargs["old_version"] = old_v
+        kwargs["new_version"] = new_v
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -186,18 +211,14 @@ def two_sided_input_options(func: F) -> F:
     inline.)
     """
     func = click.option(
-        "--new-version",
-        "new_version",
-        default="new",
-        show_default=True,
-        help="Version label for new side (used when input is a .so file).",
-    )(func)
-    func = click.option(
-        "--old-version",
-        "old_version",
-        default="old",
-        show_default=True,
-        help="Version label for old side (used when input is a .so file).",
+        "--version",
+        "version",
+        multiple=True,
+        type=SIDED_STR_PARAM,
+        help="Version label used when an input is a bare .so file. Scope to one "
+        "side with an 'old='/'new=' prefix, repeating the flag per side (e.g. "
+        "--version old=1.0 --version new=2.0); a bare value applies to both. "
+        "Defaults: old side 'old', new side 'new' (ADR-040).",
     )(func)
     func = click.option(
         "-I",
@@ -1170,8 +1191,7 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--header",
             "--include",
-            "--old-version",
-            "--new-version",
+            "--version",
         }
     ),
     "policy": frozenset({"--policy", "--policy-file", "--suppress"}),
@@ -1286,7 +1306,11 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: Lowered 65→63 by Phase C (slice 2): ``--debug-info1/2`` and ``--devel-pkg1/2``
 #: folded into side-aware ``--debug-info`` / ``--devel-pkg`` (−1 each). The
 #: unregistered release engine keeps its per-side ``--debug-info1/2`` etc.
-COMPARE_FLAG_BUDGET_BASE = 63
+#: Lowered 63→62 by Phase C (slice 3): ``--old-version``/``--new-version``
+#: folded into one side-aware ``--version`` (``old=``/``new=`` prefix; per-side
+#: defaults ``old``/``new``). The unregistered release engine keeps its per-side
+#: ``--old-version``/``--new-version``.
+COMPARE_FLAG_BUDGET_BASE = 62
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

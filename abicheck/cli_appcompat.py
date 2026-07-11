@@ -36,6 +36,7 @@ from .cli import (
     main,
 )
 from .cli_options import (
+    _split_sided_version,
     lang_option,
     output_options,
     policy_options,
@@ -179,8 +180,7 @@ def appcompat_cmd(
     header: tuple[tuple[str, Path], ...],
     include: tuple[tuple[str, Path], ...],
     lang: str,
-    old_version: str,
-    new_version: str,
+    version: tuple[tuple[str, str], ...],
     fmt: str,
     output: Path | None,
     show_irrelevant: bool,
@@ -236,6 +236,7 @@ def appcompat_cmd(
     # both-sides + per-side inputs the appcompat resolver consumes.
     headers, old_headers_only, new_headers_only = split_sided_paths(header)
     includes, old_includes_only, new_includes_only = split_sided_paths(include)
+    old_version, new_version = _split_sided_version(version)
 
     from .appcompat import (
         _get_lib_soname,

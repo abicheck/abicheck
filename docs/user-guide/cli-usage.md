@@ -35,7 +35,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 abicheck compare libfoo.so.1 libfoo.so.2 \
   --header old=include/v1/foo.h --header old=include/v1/bar.h \
   --header new=include/v2/foo.h --header new=include/v2/bar.h \
-  -I include/ --old-version 1.0 --new-version 2.0
+  -I include/ --version old=1.0 --version new=2.0
 
 # Shorthand: -H applies the same header to both sides
 # (only when the header itself didn't change between versions)
@@ -560,11 +560,11 @@ does include redundancy annotations (`<redundant_changes>`, `<caused_by>`,
 ```bash
 # CI baseline snapshot vs current build
 abicheck compare baseline-1.0.json ./build/libfoo.so \
-  --header new=include/foo.h --new-version 2.0-dev
+  --header new=include/foo.h --version new=2.0-dev
 
 # Live old build vs stored new snapshot
 abicheck compare ./build-old/libfoo.so new-release.json \
-  --header old=include/foo.h --old-version 1.0-rc1
+  --header old=include/foo.h --version old=1.0-rc1
 ```
 
 ### 4) ABICC-compatible invocation (for migration)

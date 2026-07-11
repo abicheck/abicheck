@@ -12,10 +12,11 @@ from pathlib import Path
 from abicheck.cli_options import (
     _split_sided_base,
     _split_sided_single,
+    _split_sided_version,
     normalize_sided_options,
     split_sided_paths,
 )
-from abicheck.cli_params import SIDED_PATH_PARAM
+from abicheck.cli_params import SIDED_PATH_PARAM, SIDED_STR_PARAM
 
 
 class TestSidedPathParam:
@@ -121,6 +122,49 @@ class TestNormalizeSidedOptions:
         kw: dict[str, object] = {"other": 1}
         normalize_sided_options(kw)
         assert kw == {"other": 1}
+
+
+class TestSidedStrParam:
+    def test_bare_value_is_both(self) -> None:
+        assert SIDED_STR_PARAM.convert("1.0", None, None) == ("both", "1.0")
+
+    def test_old_and_new_prefixes(self) -> None:
+        assert SIDED_STR_PARAM.convert("old=1.0", None, None) == ("old", "1.0")
+        assert SIDED_STR_PARAM.convert("new=2.0", None, None) == ("new", "2.0")
+
+    def test_both_prefix_is_escape_hatch(self) -> None:
+        # a label that literally starts 'old=' is expressed with both=
+        assert SIDED_STR_PARAM.convert("both=old=weird", None, None) == ("both", "old=weird")
+
+    def test_metavar(self) -> None:
+        assert SIDED_STR_PARAM.get_metavar(None) == "[old=|new=]LABEL"
+
+
+class TestSplitSidedVersion:
+    def test_defaults_when_empty(self) -> None:
+        # no --version given → the historical per-side defaults
+        assert _split_sided_version(()) == ("old", "new")
+
+    def test_both_fans_out_to_each_side(self) -> None:
+        assert _split_sided_version([("both", "1.5")]) == ("1.5", "1.5")
+
+    def test_per_side_overrides_keep_other_default(self) -> None:
+        assert _split_sided_version([("old", "1.0")]) == ("1.0", "new")
+        assert _split_sided_version([("new", "2.0")]) == ("old", "2.0")
+
+    def test_both_then_side_override(self) -> None:
+        assert _split_sided_version([("both", "s"), ("new", "2.0")]) == ("s", "2.0")
+
+    def test_normalize_version(self) -> None:
+        kw: dict[str, object] = {"version": (("old", "1.0"), ("new", "2.0"))}
+        normalize_sided_options(kw)
+        assert kw["old_version"] == "1.0" and kw["new_version"] == "2.0"
+        assert "version" not in kw
+
+    def test_normalize_version_empty_uses_defaults(self) -> None:
+        kw: dict[str, object] = {"version": ()}
+        normalize_sided_options(kw)
+        assert kw["old_version"] == "old" and kw["new_version"] == "new"
 
 
 class TestSplitSidedBase:

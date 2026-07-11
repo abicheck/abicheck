@@ -88,7 +88,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-version", "--new-version", "--pdb-path",
+                "--version", "--pdb-path",
             ],
         },
         {
@@ -236,7 +236,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-version", "--new-version",
+                "--version",
             ],
         },
         {

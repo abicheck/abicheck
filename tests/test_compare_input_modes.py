@@ -412,7 +412,7 @@ class TestCompareSoSo:
         assert "symbols-only mode" in out or "weaker" in out
 
     def test_so_vs_so_with_version_labels(self, tmp_path, monkeypatch):
-        """--old-version / --new-version are passed through to dump."""
+        """--version old=/new= are passed through to dump."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         hdr = tmp_path / "foo.h"
@@ -430,7 +430,7 @@ class TestCompareSoSo:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf), "-H", str(hdr),
-            "--old-version", "1.0", "--new-version", "2.0",
+            "--version", "old=1.0", "--version", "new=2.0",
         ])
         assert result.exit_code == 0, result.output
         assert recorded_versions == ["1.0", "2.0"]
@@ -626,7 +626,7 @@ class TestCompareHelp:
         result = runner.invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
         for flag in ["-H", "--header", "--include", "--sources", "--build-info",
-                     "--old-version", "--new-version", "--lang"]:
+                     "--version", "--lang"]:
             assert flag in result.output, f"{flag} not in help output"
 
     def test_help_shows_examples(self):

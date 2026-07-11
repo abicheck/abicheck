@@ -1399,7 +1399,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       # With version labels and SARIF output
       abicheck compare libfoo.so.1 libfoo.so.2 \\
         --header old=v1/foo.h --header new=v2/foo.h \\
-        --old-version 1.0 --new-version 2.0 --format sarif -o abi.sarif
+        --version old=1.0 --version new=2.0 --format sarif -o abi.sarif
     \b
       # Compare saved snapshot vs current build (mixed mode)
       abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h

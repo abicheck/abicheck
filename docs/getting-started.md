@@ -234,7 +234,7 @@ abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
 ```bash
 # Compare saved baseline against current build
 abicheck compare baseline.json ./build/libfoo.so \
-  --header new=include/foo.h --new-version 2.0-dev
+  --header new=include/foo.h --version new=2.0-dev
 ```
 
 ```bash

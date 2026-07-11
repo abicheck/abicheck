@@ -165,6 +165,32 @@ SIDED_BUILD_INFO_PARAM = SidedPathParam(exists=True)
 SIDED_EXISTING_PATH_PARAM = SidedPathParam(exists=True)
 
 
+class SidedStrParam(click.ParamType):
+    """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--version``.
+
+    Same ``old=`` / ``new=`` / ``both=`` prefix convention as
+    :class:`SidedPathParam`, but the value stays a bare ``str`` (a version label,
+    not a path). A bare value means both sides.
+    """
+
+    name = "sided-str"
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, str]:
+        s = str(value)
+        for side in _SIDES:
+            prefix = f"{side}="
+            if s.startswith(prefix):
+                return (side, s[len(prefix):])
+        return ("both", s)
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[old=|new=]LABEL"
+
+
+#: Shared instance for sided string options (``--version``).
+SIDED_STR_PARAM = SidedStrParam()
+
+
 def _load_suppression_and_policy(
     suppress: Path | None, policy: str, policy_file_path: Path | None,
     *,
