@@ -366,13 +366,23 @@ def _build_new_snapshot(
     # -I, seed the build's include dirs so the aggregate public-header parse can
     # resolve dependency headers (e.g. pvxs headers include EPICS Base's
     # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    #
+    # Keep the seed's temp-build-dir cleanups LOCAL (defer_cleanup=None), not on the
+    # outer scan list: the seed may run the inferred-CMake query, whose build dir is
+    # held under an exclusive flock until its cleanup runs. embed_build_source()
+    # below runs its *own* inferred query in the same function, so if we deferred the
+    # release to the outer drain (which happens after embed) that second query would
+    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s) before
+    # falling back to a fresh dir. The finally below drains _l2_local_cleanups right
+    # after resolve_input() has consumed the seeded dirs, releasing the lock before
+    # L3/L4 collection replays the query (Codex review).
     includes, _l2_local_cleanups = seed_l2_includes(
         headers=headers,
         includes=includes,
         sources=sources,
         build_info=build_info,
         build_config=build_config,
-        defer_cleanup=defer_cleanup,
+        defer_cleanup=None,
         # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
         # CompileContext) are explicit too — pass them so the seed stays a no-op
         # and the user's include search precedence is preserved (Codex review).
@@ -399,8 +409,9 @@ def _build_new_snapshot(
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
     finally:
         # The L2 parse has now consumed the build-derived include dirs (whether it
-        # succeeded or raised), so any inferred-CMake temp build dir we could not
-        # hand to defer_cleanup is safe to release here.
+        # succeeded or raised), so release any inferred-CMake temp build dir now —
+        # before embed_build_source() below replays its own inferred query — so its
+        # exclusive flock does not block that replay for 600s (see the seed call).
         if _l2_local_cleanups:
             from .buildsource.inline import _run_cleanups
 
