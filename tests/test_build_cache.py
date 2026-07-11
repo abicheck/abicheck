@@ -81,6 +81,66 @@ def test_corrupt_entry_is_a_miss(tmp_path):
     assert cache.misses == 1
 
 
+def test_put_with_no_key_is_noop(tmp_path):
+    # An uncacheable key (None or "") must never touch disk: it is not a failure,
+    # just a skip. The cache dir stays absent / empty.
+    cache = BuildEvidenceCache(tmp_path / "c")
+    cache.put(None, BuildEvidence())
+    cache.put("", BuildEvidence())
+    assert not (tmp_path / "c").exists() or not list((tmp_path / "c").glob("build-*.json"))
+
+
+def test_non_dict_json_entry_is_a_miss(tmp_path):
+    # A well-formed-JSON-but-wrong-shape entry (a list, not an object) must miss,
+    # never crash — corrupt entries prefer false misses over false hits.
+    cache = BuildEvidenceCache(tmp_path / "c")
+    cache.cache_dir.mkdir(parents=True)
+    (cache.cache_dir / "build-k.json").write_text("[1, 2, 3]")
+    assert cache.get("k") is None
+    assert cache.misses == 1
+
+
+def test_schema_incompatible_entry_is_a_miss(tmp_path):
+    # A dict that BuildEvidence.from_dict rejects (schema_version not coercible to
+    # int) is a corrupt/partial entry → miss, not a raised exception.
+    cache = BuildEvidenceCache(tmp_path / "c")
+    cache.cache_dir.mkdir(parents=True)
+    (cache.cache_dir / "build-k.json").write_text(
+        json.dumps({"schema_version": "not-an-int"})
+    )
+    assert cache.get("k") is None
+    assert cache.misses == 1
+
+
+def test_key_survives_unresolvable_location(tmp_path, monkeypatch):
+    # If Path.resolve() cannot resolve the compile DB (e.g. a transient FS error),
+    # the key still folds the un-resolved path string rather than returning None —
+    # a readable DB must always produce a key.
+    db = _cdb(tmp_path / "a")
+
+    def boom(self, *args, **kwargs):
+        raise OSError("cannot resolve")
+
+    monkeypatch.setattr(Path, "resolve", boom)
+    key = compute_build_cache_key(db, "generic")
+    assert key is not None and len(key) == 64  # sha256 hex digest
+
+
+def test_put_write_failure_is_swallowed(tmp_path, monkeypatch):
+    # A cache-write failure must never break collection: put() swallows the
+    # OSError and leaves no entry behind.
+    cache = BuildEvidenceCache(tmp_path / "c")
+
+    def boom(self, *args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", boom)
+    cache.put("k", BuildEvidence())  # must not raise
+
+    monkeypatch.undo()
+    assert cache.get("k") is None  # nothing was persisted
+
+
 def test_inline_collection_uses_cache(tmp_path):
     tree = tmp_path / "src"
     _cdb(tree)

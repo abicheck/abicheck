@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import click
 import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence
@@ -24,7 +25,7 @@ from abicheck.buildsource.model import (
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface
 from abicheck.buildsource.source_graph import SourceGraphSummary
-from abicheck.cli_datasources import _combine_diagnostic_packs
+from abicheck.cli_datasources import _combine_diagnostic_packs, print_data_sources
 
 
 def _build_info_pack() -> BuildSourcePack:
@@ -130,3 +131,82 @@ def test_source_abi_falls_back_to_build_info_when_sources_lacks_it() -> None:
     combined = _combine_diagnostic_packs(bi, src)
     assert combined is not None
     assert combined.source_abi is bi.source_abi
+
+
+def _valid_pack_dir(root: Path) -> Path:
+    """Write a minimal but well-formed BuildSourcePack directory to *root*."""
+    BuildSourcePack.empty(root).write()
+    return root
+
+
+def test_print_data_sources_previews_non_binary_input(tmp_path, capsys) -> None:
+    # A non-ELF/PE/Mach-O input still produces a diagnostic preview: the binary
+    # format is unknown (elf parsing is skipped) but the preview + the
+    # "preview-only" note are always emitted on stderr/stdout.
+    not_a_binary = tmp_path / "notalib.so"
+    not_a_binary.write_text("this is plainly not a binary\n")
+
+    print_data_sources(not_a_binary, has_headers=False)
+
+    captured = capsys.readouterr()
+    # The unmissable preview-only contract note goes to stderr.
+    assert "preview-only" in captured.err
+    assert "no snapshot was written" in captured.err
+
+
+def test_print_data_sources_warns_on_uncollected_pack_input(tmp_path, capsys) -> None:
+    # Passing a --build-info / --sources path that is NOT a collected pack must
+    # produce a clear "not collected" diagnostic (per side), not silently ignore
+    # the input.
+    not_a_binary = tmp_path / "lib.so"
+    not_a_binary.write_text("nope\n")
+    bare_dir = tmp_path / "just-a-tree"
+    bare_dir.mkdir()
+
+    print_data_sources(
+        not_a_binary,
+        has_headers=True,
+        build_source_path=bare_dir,
+        sources_path=bare_dir,
+    )
+
+    err = capsys.readouterr().err
+    assert "Build-info input:" in err
+    assert "Sources input:" in err
+    assert "not collected in --show-data-sources" in err
+
+
+def test_print_data_sources_loads_collected_packs(tmp_path, capsys) -> None:
+    # When the inputs ARE real packs, they load and feed the diagnostic view
+    # without any "not collected" warning.
+    not_a_binary = tmp_path / "lib.so"
+    not_a_binary.write_text("nope\n")
+    pack_dir = _valid_pack_dir(tmp_path / "pack")
+
+    print_data_sources(
+        not_a_binary,
+        has_headers=False,
+        build_source_path=pack_dir,
+    )
+
+    err = capsys.readouterr().err
+    assert "not collected" not in err
+    assert "preview-only" in err
+
+
+def test_print_data_sources_rejects_corrupt_pack(tmp_path) -> None:
+    # A directory that looks like a pack (valid manifest) but whose evidence
+    # payload is corrupt must raise a ClickException, not crash with a traceback.
+    not_a_binary = tmp_path / "lib.so"
+    not_a_binary.write_text("nope\n")
+    pack_dir = _valid_pack_dir(tmp_path / "pack")
+    # Corrupt an evidence payload load() reads (manifest still validates, so
+    # is_pack_dir accepts the dir, but BuildSourcePack.load will choke).
+    (pack_dir / "build" / "build_evidence.json").write_text("{ not valid json")
+
+    with pytest.raises(click.ClickException, match="Invalid Build-info build-source pack"):
+        print_data_sources(
+            not_a_binary,
+            has_headers=False,
+            build_source_path=pack_dir,
+        )

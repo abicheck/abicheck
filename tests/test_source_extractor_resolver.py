@@ -90,3 +90,55 @@ class TestProfilesContract:
     def test_no_probe_assumes_available(self):
         c = resolve_source_extractor("clang")
         assert c.selected == "clang"
+
+
+class TestGapNote:
+    def test_full_capability_backend_reports_no_gap(self):
+        c = resolve_source_extractor("clang", available=_avail("clang"))
+        note = c.gap_note()
+        assert "full source-ABI capability" in note
+        assert c.selected == "clang"
+
+    def test_partial_backend_lists_its_blind_spots(self):
+        c = resolve_source_extractor("castxml", available=_avail("castxml"))
+        note = c.gap_note()
+        assert "cannot observe" in note
+        # castxml's documented blind spots must appear in the note verbatim.
+        assert "inline_bodies" in note
+        assert "concepts" in note
+
+    def test_no_backend_note_says_disabled(self):
+        c = resolve_source_extractor("auto", available=_avail())
+        assert "disabled" in c.gap_note()
+
+
+class TestAvailabilityProbe:
+    def test_probe_that_raises_is_treated_as_available(self):
+        # A flaky/raising availability probe must not disable a backend; the
+        # resolver defaults to "assumed available" and lets extract() degrade.
+        def boom(_name):
+            raise RuntimeError("probe blew up")
+
+        c = resolve_source_extractor("clang", available=boom)
+        assert c.selected == "clang"
+
+
+class TestUnavailableAndUnknown:
+    def test_android_requested_but_unavailable_yields_none(self):
+        c = resolve_source_extractor("android", available=_avail())
+        assert c.selected is None
+        assert any(n == "android" for n, _ in c.skipped)
+        assert "android" in c.reason
+
+    def test_unknown_backend_name_degrades_to_auto(self):
+        # An unrecognised backend name is treated as auto (best available), and
+        # the request label is recorded in the no-usable-backend reason.
+        c = resolve_source_extractor("nonsense", available=_avail("castxml"))
+        assert c.selected == "castxml"
+
+    def test_unknown_backend_name_with_nothing_available(self):
+        # Unknown names route through the auto chain, so with nothing available
+        # the result is None and the reason reflects the (auto) lead.
+        c = resolve_source_extractor("nonsense", available=_avail())
+        assert c.selected is None
+        assert "no usable source-ABI backend" in c.reason
