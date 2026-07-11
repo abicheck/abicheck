@@ -453,6 +453,10 @@ def perform_elf_dump(
         defer_cleanup=None,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        # Include dirs supplied via --gcc-options/--gcc-option are as explicit as
+        # -I and must suppress the seed so the user's search precedence is kept.
+        gcc_options=effective_gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
     )
     try:
         snap = dump(

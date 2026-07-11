@@ -47,7 +47,7 @@ import shlex
 import subprocess
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -680,13 +680,17 @@ def derive_l2_include_dirs(
         if sources is not None and is_pack_dir(sources):
             # A --sources pack carries its own L3 build_evidence, and
             # embed_build_source/_combine_packs use it for L3 when no --build-info
-            # pack supplies one (build-info precedence). Mirror that here so the
-            # source pack's compile-unit include dirs seed L2 too — otherwise a
-            # `scan`/`dump -H include --sources path/to/pack` with no -I derives no
-            # include dirs and fails on dependency headers the pack already knows
-            # (Codex review). --build-info still wins L3: only fill base_build from
-            # the source pack when a build-info pack didn't already supply it.
-            if base_build is None:
+            # supplies one. Mirror that here so the source pack's compile-unit
+            # include dirs seed L2 too — otherwise a `scan`/`dump -H include
+            # --sources path/to/pack` with no -I derives no include dirs and fails
+            # on dependency headers the pack already knows (Codex review). Any
+            # explicit --build-info wins L3, though: seed from the source pack only
+            # when *no* --build-info was given — not merely when no build-info pack
+            # was loaded. A raw --build-info (compile DB / build dir / Bazel file)
+            # must still be resolved by collect_inline_pack below; folding the
+            # source pack into base_build here would make it skip that input and
+            # parse -H headers against stale source-pack dirs (Codex review).
+            if build_info is None:
                 base_build = BuildSourcePack.load(sources).build_evidence
             raw_sources = None
         pack = collect_inline_pack(
@@ -740,6 +744,8 @@ def seed_l2_includes(
     defer_cleanup: list[Callable[[], None]] | None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: Sequence[str] = (),
 ) -> tuple[list[Path], list[Callable[[], None]]]:
     """Augment *includes* with build-derived L2 include dirs (shared by scan+dump).
 
@@ -749,6 +755,16 @@ def seed_l2_includes(
     them from :func:`derive_l2_include_dirs` so ``scan``/``dump --sources`` parse
     those headers without a manual ``-I``.
 
+    ``gcc_options``/``gcc_option_tokens`` are the pass-through compile flags
+    (``--gcc-options``/``--gcc-option``). A user can supply include search dirs
+    through them (e.g. ``--gcc-options '-I /sdk/include'``) rather than via ``-I``;
+    those are just as explicit, so the fallback must treat them the same and stay
+    a no-op. Seeding compile-DB dirs as ``extra_includes`` on top of them would put
+    the build-DB dirs *ahead* of the user's SDK in search order (the dumper emits
+    ``extra_includes`` before the pass-through flags), letting the header AST
+    resolve dependency headers from the build DB instead of the user's choice
+    (Codex review).
+
     Returns ``(includes, pending_cleanups)``. Temp-build-dir cleanups (an inferred
     CMake dir may hold generated headers the seeded dirs point into) are pushed
     onto *defer_cleanup* when the caller provides one (drained at command end);
@@ -756,8 +772,20 @@ def seed_l2_includes(
     **after** the L2 parse has consumed the dirs. A no-op (returns *includes*
     unchanged, no cleanups) when the seeding conditions do not hold.
     """
+    from ..header_utils import _context_tokens, _has_include_build_context
+
     incs = list(includes)
-    if not (headers and not incs and (sources is not None or build_info is not None)):
+    # An explicit -I list OR include dirs supplied through --gcc-options/--gcc-option
+    # both count as "the user gave includes" — either suppresses the fallback so the
+    # user's search precedence is preserved.
+    user_gave_includes = bool(incs) or _has_include_build_context(
+        _context_tokens(gcc_options, gcc_option_tokens)
+    )
+    if not (
+        headers
+        and not user_gave_includes
+        and (sources is not None or build_info is not None)
+    ):
         return incs, []
     derived, cleanups = derive_l2_include_dirs(
         build_info, sources, build_config,

@@ -267,6 +267,92 @@ def test_derive_l2_include_dirs_build_info_pack_wins_over_sources_pack(tmp_path)
     assert str(src_inc) not in dirs  # source pack does not override it
 
 
+def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
+    # A raw --build-info (compile DB / build dir), NOT a pack, combined with a
+    # --sources pack: the explicit raw build-info must win L3, so its include dirs
+    # are what seed L2 — not the reused source pack's. Folding the source pack into
+    # base_build would make collect_inline_pack skip the raw build DB and parse -H
+    # headers against stale source-pack dirs (Codex review). Guard is
+    # `build_info is None`, not `base_build is None`.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    # Raw build-info: a build dir holding a fresh compile_commands.json with bi_inc.
+    bi_inc = tmp_path / "freshinc"
+    bi_inc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    bidir = tmp_path / "bd"
+    bidir.mkdir()
+    (bidir / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "arguments": ["cc", f"-I{bi_inc}", "-c", str(src)]}]),
+        encoding="utf-8",
+    )
+
+    # Sources pack carrying a *different* (stale) include dir in its L3 evidence.
+    stale_inc = tmp_path / "staleinc"
+    stale_inc.mkdir()
+    src_dir = tmp_path / "srcpack"
+    src_pack = BuildSourcePack.empty(src_dir)
+    src_pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://stale", include_paths=[str(stale_inc)])]
+    )
+    src_pack.write()
+
+    dirs, cleanups = derive_l2_include_dirs(build_info=bidir, sources=src_dir)
+    for fn in cleanups:
+        fn()
+    assert str(bi_inc) in dirs        # raw --build-info wins L3
+    assert str(stale_inc) not in dirs  # reused source pack does not override it
+
+
+def test_seed_l2_includes_noop_when_gcc_options_supply_includes(tmp_path):
+    # Include dirs supplied via --gcc-options '-I ...' are as explicit as -I, so the
+    # fallback must stay a no-op — seeding compile-DB dirs as extra_includes would
+    # front-run the user's SDK in the dumper's search order (Codex review).
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    _compile_db_tree(tmp_path)
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+        gcc_options=f"-I {tmp_path / 'sdk'}",
+    )
+    assert incs == []       # no-op: user's -I via --gcc-options wins
+    assert pending == []
+
+
+def test_seed_l2_includes_noop_when_gcc_option_tokens_supply_includes(tmp_path):
+    # Same for the repeatable --gcc-option token form (`-I`, `<dir>`).
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    _compile_db_tree(tmp_path)
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+        gcc_option_tokens=("-isystem", str(tmp_path / "sdk")),
+    )
+    assert incs == []
+    assert pending == []
+
+
+def test_seed_l2_includes_seeds_when_gcc_options_have_no_includes(tmp_path):
+    # A --gcc-options string with NO include flags (e.g. just a -D) must not
+    # suppress the fallback — the seed still fires so dependency headers resolve.
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    inc = _compile_db_tree(tmp_path)
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+        gcc_options="-DNDEBUG -O2",
+    )
+    assert str(inc) in [str(p) for p in incs]
+    assert isinstance(pending, list)
+
+
 def test_seed_l2_includes_from_sources_pack(tmp_path):
     # End-to-end through the shared wrapper: -H headers, no -I, --sources pointing
     # at a pack → the pack's include dirs are seeded into the effective includes.

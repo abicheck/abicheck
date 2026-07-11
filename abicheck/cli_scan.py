@@ -373,6 +373,13 @@ def _build_new_snapshot(
         build_info=build_info,
         build_config=build_config,
         defer_cleanup=defer_cleanup,
+        # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
+        # CompileContext) are explicit too — pass them so the seed stays a no-op
+        # and the user's include search precedence is preserved (Codex review).
+        gcc_options=compile_context.gcc_options if compile_context else None,
+        gcc_option_tokens=(
+            compile_context.gcc_option_tokens if compile_context else ()
+        ),
     )
 
     try:
