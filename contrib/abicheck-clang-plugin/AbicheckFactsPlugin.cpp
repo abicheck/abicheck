@@ -765,6 +765,28 @@ std::string mangledFromJson(const Object &o) {
   return "";
 }
 
+// Skip Itanium CV-qualifier / ref-qualifier prefixes (`r`/`V`/`K`/`O`) that may
+// follow a nested-name `N`, returning the index of the first non-qualifier char.
+size_t skipItaniumCvQualifiers(const std::string &m, size_t i, size_t n) {
+  while (i < n && (m[i] == 'r' || m[i] == 'V' || m[i] == 'K' || m[i] == 'O'))
+    ++i;
+  return i;
+}
+
+// Advance past a `<length><source-name>` component whose first digit is at `i`,
+// returning the index just past the name, or `std::string::npos` when the length
+// prefix overruns the remaining string (an exotic/truncated production → bail).
+size_t advancePastLengthComponent(const std::string &m, size_t i, size_t n) {
+  size_t j = i, length = 0;
+  while (j < n && m[j] >= '0' && m[j] <= '9') {
+    length = length * 10 + static_cast<size_t>(m[j] - '0');
+    ++j;
+    if (length > n - j)
+      return std::string::npos;
+  }
+  return j + length;
+}
+
 // Port of clang.py::_mangled_has_internal_linkage: true when an Itanium mangled
 // name marks internal linkage (its own <source-name> is prefixed with the
 // GCC/clang seniority marker `L`, e.g. `_ZN2nsL7g_constE`, `_ZL1xE`). Parses by
@@ -782,8 +804,7 @@ bool mangledHasInternalLinkage(const std::string &m) {
   size_t i = 2, n = m.size();
   if (i < n && m[i] == 'N') {
     ++i;
-    while (i < n && (m[i] == 'r' || m[i] == 'V' || m[i] == 'K' || m[i] == 'O'))
-      ++i;
+    i = skipItaniumCvQualifiers(m, i, n);
   }
   while (i < n) {
     char c = m[i];
@@ -792,14 +813,10 @@ bool mangledHasInternalLinkage(const std::string &m) {
     if (c == 'L')
       return i + 1 < n && m[i + 1] >= '0' && m[i + 1] <= '9';
     if (c >= '0' && c <= '9') {
-      size_t j = i, length = 0;
-      while (j < n && m[j] >= '0' && m[j] <= '9') {
-        length = length * 10 + static_cast<size_t>(m[j] - '0');
-        ++j;
-        if (length > n - j)
-          return false;
-      }
-      i = j + length;
+      size_t next = advancePastLengthComponent(m, i, n);
+      if (next == std::string::npos)
+        return false;
+      i = next;
       continue;
     }
     return false;
@@ -919,36 +936,46 @@ private:
     if (c == '"') {
       scanString();
     } else if (c == '{' || c == '[') {
-      char open = c, close = (c == '{') ? '}' : ']';
-      int depth = 0;
-      while (I < S.size()) {
-        char d = S[I];
-        if (d == '"') {
-          scanString();
-          continue;
-        }
-        if (d == open)
-          ++depth;
-        else if (d == close) {
-          --depth;
-          if (depth == 0) {
-            ++I;
-            break;
-          }
-        }
-        ++I;
-      }
+      scanBalanced();
     } else {
-      // scalar: number / true / false / null — up to a delimiter
-      while (I < S.size()) {
-        char d = S[I];
-        if (d == ',' || d == '}' || d == ']' || d == ' ' || d == '\t' ||
-            d == '\n' || d == '\r')
-          break;
-        ++I;
-      }
+      scanScalar();
     }
     return S.substr(start, I - start);
+  }
+
+  // At '{' or '[': consume through the matching close, honoring string escapes so
+  // a brace/bracket inside a string never shifts the nesting depth.
+  void scanBalanced() {
+    char open = S[I], close = (open == '{') ? '}' : ']';
+    int depth = 0;
+    while (I < S.size()) {
+      char d = S[I];
+      if (d == '"') {
+        scanString();
+        continue;
+      }
+      if (d == open)
+        ++depth;
+      else if (d == close) {
+        --depth;
+        if (depth == 0) {
+          ++I;
+          break;
+        }
+      }
+      ++I;
+    }
+  }
+
+  // Scalar: number / true / false / null — consumed up to a delimiter.
+  void scanScalar() {
+    while (I < S.size()) {
+      char d = S[I];
+      if (d == ',' || d == '}' || d == ']' || d == ' ' || d == '\t' ||
+          d == '\n' || d == '\r')
+        break;
+      ++I;
+    }
   }
 
   void scanString() {
@@ -1033,50 +1060,57 @@ private:
     return S.substr(start, I - start);
   }
 
+  // The `inner` child array of an AST node: parse each object element as a full
+  // node (keeping the pruned key set), skipping non-object elements. `recurseInner`
+  // false (shallow `type`/`referencedDecl` objects) skips the whole value.
+  void storeInnerMember(Object &out, bool recurseInner) {
+    if (!recurseInner) {
+      captureValue(); // shallow objects never recurse into inner
+      return;
+    }
+    skipWs();
+    if (I >= S.size() || S[I] != '[') {
+      captureValue();
+      return;
+    }
+    Array arr;
+    ++I; // consume '['
+    skipWs();
+    if (I < S.size() && S[I] == ']') {
+      ++I;
+      out["inner"] = Value(std::move(arr));
+      return;
+    }
+    while (I < S.size()) {
+      skipWs();
+      if (S[I] == '{') {
+        if (auto node = parseNode())
+          arr.push_back(std::move(*node));
+        else if (Failed)
+          return;
+      } else {
+        captureValue(); // non-object array element: irrelevant, skip
+      }
+      skipWs();
+      if (I < S.size() && S[I] == ',') {
+        ++I;
+        continue;
+      }
+      if (I < S.size() && S[I] == ']') {
+        ++I;
+        break;
+      }
+      Failed = true;
+      return;
+    }
+    out["inner"] = Value(std::move(arr));
+  }
+
   void storeMember(Object &out, const std::string &key, bool recurseInner,
                    bool shallowScalarsOnly) {
     // Keys read as recursive structure.
     if (key == "inner") {
-      if (!recurseInner) {
-        captureValue(); // shallow objects never recurse into inner
-        return;
-      }
-      skipWs();
-      if (I >= S.size() || S[I] != '[') {
-        captureValue();
-        return;
-      }
-      Array arr;
-      ++I; // consume '['
-      skipWs();
-      if (I < S.size() && S[I] == ']') {
-        ++I;
-        out["inner"] = Value(std::move(arr));
-        return;
-      }
-      while (I < S.size()) {
-        skipWs();
-        if (S[I] == '{') {
-          if (auto node = parseNode())
-            arr.push_back(std::move(*node));
-          else if (Failed)
-            return;
-        } else {
-          captureValue(); // non-object array element: irrelevant, skip
-        }
-        skipWs();
-        if (I < S.size() && S[I] == ',') {
-          ++I;
-          continue;
-        }
-        if (I < S.size() && S[I] == ']') {
-          ++I;
-          break;
-        }
-        Failed = true;
-        return;
-      }
-      out["inner"] = Value(std::move(arr));
+      storeInnerMember(out, recurseInner);
       return;
     }
     // Shallow objects: `type` and `referencedDecl` — keep only their scalars.
@@ -1767,53 +1801,77 @@ public:
     return true;
   }
 
-  bool VisitVarDecl(VarDecl *vd) {
-    if (vd->isImplicit() || isa<ParmVarDecl>(vd))
+  // A block-scope `constexpr` inside a public inline/header function body IS
+  // emitted (not skipped on getParentFunctionOrMethod): the clang backend descends
+  // accessible function bodies and emits such locals as `constexpr` entities just
+  // like it emits body-local types, so the plugin matches it (Codex review).
+  // scopedName() omits the function scope, so a local `k` in `demo::f()` is named
+  // `demo::k` exactly as the backend names it. Local constexpr are syntactic
+  // (present in the AST regardless of codegen), so there is no capture-point
+  // asymmetry here. Returns the VisitVarDecl continue-traversal verdict (true).
+  bool emitConstexprVar(VarDecl *vd) {
+    std::string file, origin, visibility;
+    if (!classify(vd, file, origin, visibility))
       return true;
-    if (!isAccessible(vd) || vd->getNameAsString().empty())
-      return true;
-    if (vd->isConstexpr()) {
-      // Block-scope `constexpr` inside a public inline/header function body IS
-      // emitted (not skipped on getParentFunctionOrMethod): the clang backend
-      // descends accessible function bodies and emits such locals as `constexpr`
-      // entities just like it emits body-local types, so the plugin matches it
-      // (Codex review). scopedName() omits the function scope, so a local `k` in
-      // `demo::f()` is named `demo::k` exactly as the backend names it. Local
-      // constexpr are syntactic (present in the AST regardless of codegen), so
-      // there is no capture-point asymmetry here.
-      std::string file, origin, visibility;
-      if (!classify(vd, file, origin, visibility))
-        return true;
-      std::optional<Value> json = dumpDeclJson(vd);
-      if (!json || !json->getAsObject()) {
-        Diags.insert("constexpr value unavailable (JSON dump failed)");
-        return true;
-      }
-      const Object &o = *json->getAsObject();
-      const Value *init = initExprJson(o);
-      std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
-      std::string name = scopedName(vd);
-      Entity e;
-      e.id = H({"constexpr", name, value});
-      e.kind = "constexpr";
-      e.qualified_name = name;
-      e.mangled_name = mangledFromJson(o);
-      e.value = value;
-      e.loc_path = file;
-      e.loc_line = presumedLine(vd);
-      e.loc_origin = origin;
-      e.visibility = visibility;
-      stampDeclEvidence(e, vd);
-      ConstexprValues.push_back(e);
+    std::optional<Value> json = dumpDeclJson(vd);
+    if (!json || !json->getAsObject()) {
+      Diags.insert("constexpr value unavailable (JSON dump failed)");
       return true;
     }
-    // Non-constexpr external-linkage data variables / static data members —
-    // these become exported OBJECT symbols so capturing them lets a binary data
-    // export map to a source decl (ADR-030 D4). Mirrors clang.py's
-    // `_is_variable_node`/`_emit_variable`: skip function-local vars and variable
-    // templates (the clang backend never walks into those); internal-linkage
-    // variables (a namespace/file-scope `static` OR a namespace-scope `const`
-    // without `extern`) are dropped below by their mangled-name marker.
+    const Object &o = *json->getAsObject();
+    const Value *init = initExprJson(o);
+    std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
+    std::string name = scopedName(vd);
+    Entity e;
+    e.id = H({"constexpr", name, value});
+    e.kind = "constexpr";
+    e.qualified_name = name;
+    e.mangled_name = mangledFromJson(o);
+    e.value = value;
+    e.loc_path = file;
+    e.loc_line = presumedLine(vd);
+    e.loc_origin = origin;
+    e.visibility = visibility;
+    stampDeclEvidence(e, vd);
+    ConstexprValues.push_back(e);
+    return true;
+  }
+
+  // Internal-linkage data variables that must NOT be emitted as exportable decls:
+  //  - clang's own linkage verdict, encoded as the Itanium `L` seniority marker /
+  //    `_GLOBAL__N_` component (header `const`/file-`static`/anon-namespace var);
+  //  - a C / extern "C" file-scope static, which carries no mangled name for the
+  //    marker, so filter on storageClass (a static data member — lexical parent a
+  //    record — is external, so kept);
+  //  - MSVC / clang-cl mangling (`?name@...`) has no Itanium marker, so a
+  //    namespace-scope top-level `const` without `extern` (internal in C++) is
+  //    caught by the type-based `_is_top_level_const` rule (Codex review). A
+  //    C++17 `inline const` at namespace scope is externally linked (the
+  //    `inline` keyword overrides const's internal linkage), so it is exempt from
+  //    the top-level-const drop and kept (Codex review).
+  bool isDroppedInternalVariable(VarDecl *vd, const std::string &mangled,
+                                 const std::string &sig, const Object &o) {
+    if (mangledHasInternalLinkage(mangled))
+      return true;
+    if (vd->getStorageClass() == SC_Static &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()))
+      return true;
+    if (mangled.rfind("?", 0) == 0 && vd->getStorageClass() != SC_Extern &&
+        !vd->isInline() &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()) &&
+        (isTopLevelConst(sig) ||
+         isTopLevelConst(desugaredQualTypeFromJson(o))))
+      return true;
+    return false;
+  }
+
+  // Non-constexpr external-linkage data variables / static data members — these
+  // become exported OBJECT symbols so capturing them lets a binary data export map
+  // to a source decl (ADR-030 D4). Mirrors clang.py's `_is_variable_node`/
+  // `_emit_variable`: skip function-local vars and variable templates (the clang
+  // backend never walks into those); internal-linkage variables are dropped by
+  // isDroppedInternalVariable. Returns the continue-traversal verdict (true).
+  bool emitDataVariable(VarDecl *vd) {
     if (vd->isLocalVarDecl() || vd->getDescribedVarTemplate() ||
         isa<VarTemplateSpecializationDecl>(vd))
       return true;
@@ -1829,30 +1887,7 @@ public:
     std::string name = scopedName(vd);
     std::string sig = qualTypeFromJson(o);
     std::string mangled = mangledFromJson(o);
-    // Drop internal-linkage variables (clang's own linkage verdict, encoded as
-    // the Itanium `L` seniority marker / `_GLOBAL__N_` component) so a header
-    // `const`/file-`static`/anon-namespace var never shows up as a decl expected
-    // to map to an export (Codex review).
-    if (mangledHasInternalLinkage(mangled))
-      return true;
-    // C / extern "C" file-scope static: clang gives no mangled name to carry the
-    // marker, so filter on storageClass directly. A static data member is
-    // external (its lexical parent is a record), so keep it.
-    if (vd->getStorageClass() == SC_Static &&
-        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()))
-      return true;
-    // MSVC / clang-cl mangling (`?name@...`) carries no Itanium internal-linkage
-    // marker, so a namespace-scope top-level `const` without `extern` (internal
-    // in C++) would slip through. Fall back to the type-based language rule
-    // (Codex review); mirrors clang.py's `_is_top_level_const` branch.
-    // A C++17 `inline const` at namespace scope is externally linked (the
-    // `inline` keyword overrides const's internal linkage), so it must be kept —
-    // exempt it from the top-level-const drop (Codex review).
-    if (mangled.rfind("?", 0) == 0 && vd->getStorageClass() != SC_Extern &&
-        !vd->isInline() &&
-        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()) &&
-        (isTopLevelConst(sig) ||
-         isTopLevelConst(desugaredQualTypeFromJson(o))))
+    if (isDroppedInternalVariable(vd, mangled, sig, o))
       return true;
     std::string key = mangled.empty() ? name : mangled;
     Entity e;
@@ -1868,6 +1903,16 @@ public:
     stampDeclEvidence(e, vd);
     Variables.push_back(e);
     return true;
+  }
+
+  bool VisitVarDecl(VarDecl *vd) {
+    if (vd->isImplicit() || isa<ParmVarDecl>(vd))
+      return true;
+    if (!isAccessible(vd) || vd->getNameAsString().empty())
+      return true;
+    if (vd->isConstexpr())
+      return emitConstexprVar(vd);
+    return emitDataVariable(vd);
   }
 
   // Emit the template entity and STOP descending — matching clang.py, which
