@@ -161,7 +161,6 @@ $ gcc -g -shared -fPIC math.c -o libmath.debug.so   # (1) debug build, unstrippe
 $ cp libmath.debug.so libmath.release.so
 $ strip -s libmath.release.so                       # (2) fully stripped release
 $ objcopy --only-keep-debug libmath.debug.so libmath.release.so.debug   # (3) split debug file
-$ strip -g libmath.release.so.debug -o /dev/null 2>/dev/null; true      # (debug file keeps DWARF)
 $ objcopy --add-gnu-debuglink=libmath.release.so.debug libmath.release.so
 ```
 
@@ -236,12 +235,15 @@ resolvable at runtime via a `debuginfod` server; macOS ships the equivalent as a
     `.dynsym` alone is enough for **L0** — symbol add/remove/rename, SONAME,
     versioning — so abicheck can always do at least a symbol-level compare on a
     binary you download off a mirror, stripped or not. **L1** (struct layout,
-    calling convention, vtables) needs DWARF/PDB: either the binary is
-    unstripped, or you point abicheck at the split debug file with
-    `--debug-root` (build-id tree / path mirror) or `--debuginfod` (query a
-    debuginfod server by build-id). Full walk-through, `nm`/`readelf` output
-    included, in [Stripped Production Binaries](../limitations.md#stripped-production-binaries)
-    and the level-by-level [L0 section](../what-each-level-sees.md#level-0-the-shipped-binary-symbols-only)
+    calling convention, vtables) needs DWARF/PDB, which today means the binary
+    itself is unstripped, or you feed a package-level split-debug pair to
+    `compare-release` (`--debug-info1`/`--debug-info2`, resolved by build-id).
+    `dump`/`compare`'s `--debug-root`/`--debuginfod` currently locate a split
+    debug file and print where they found it, but do not yet feed it into the
+    DWARF parse — see [Stripped Production
+    Binaries](../limitations.md#stripped-production-binaries) for the current
+    status. Full walk-through, `nm`/`readelf` output included, in the
+    level-by-level [L0 section](../what-each-level-sees.md#level-0-the-shipped-binary-symbols-only)
     of the worked example.
 
 ---
