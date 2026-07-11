@@ -353,6 +353,9 @@ class TestMainArgValidation:
         monkeypatch.setattr(
             sys, "argv", ["abicheck-mcp", "--log-format", "json", "--timeout", "5"]
         )
+        # main() mutates these module globals via `global` (not monkeypatch), so
+        # capture and restore them ourselves to keep later tests isolated.
+        saved_timeout = ms.MCP_TIMEOUT
         try:
             main()
             assert calls == ["stdio"]
@@ -361,3 +364,4 @@ class TestMainArgValidation:
         finally:
             # Restore module-level globals mutated by main().
             ms._structured_logging = False
+            ms.MCP_TIMEOUT = saved_timeout

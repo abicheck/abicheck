@@ -320,8 +320,11 @@ def test_kill_process_tree_kills_own_group_via_terminate(
 ) -> None:
     # When the child never detached (its pgid still equals the parent's group),
     # killpg would nuke the parent — so terminate() the single process instead.
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 777)
-    monkeypatch.setattr(os, "getpgrp", lambda: 777)
+    # raising=False so the POSIX-only os.getpgid/os.getpgrp can be injected on
+    # Windows too (production catches their AttributeError there); monkeypatch
+    # removes the injected attrs on teardown.
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 777, raising=False)
+    monkeypatch.setattr(os, "getpgrp", lambda: 777, raising=False)
     proc = _FakeProc()
     _kill_process_tree(proc)
     assert proc.terminated == 1
@@ -334,9 +337,9 @@ def test_kill_process_tree_kills_detached_group(
     # A detached child (own process group) is killed group-wide: SIGTERM, and —
     # because our fake stays alive — an escalation SIGKILL.
     signals: list[tuple[int, int]] = []
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
-    monkeypatch.setattr(os, "getpgrp", lambda: 111)
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 999, raising=False)
+    monkeypatch.setattr(os, "getpgrp", lambda: 111, raising=False)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)), raising=False)
     proc = _FakeProc()  # stays alive → triggers the SIGKILL escalation
     _kill_process_tree(proc)
     import signal
@@ -353,7 +356,7 @@ def test_kill_process_tree_falls_back_on_oserror(
     def _boom(_pid: int) -> int:
         raise ProcessLookupError("gone")
 
-    monkeypatch.setattr(os, "getpgid", _boom)
+    monkeypatch.setattr(os, "getpgid", _boom, raising=False)
     proc = _FakeProc()
     _kill_process_tree(proc)
     assert proc.terminated == 1
@@ -367,7 +370,7 @@ def test_kill_process_tree_swallows_terminate_failure(
     # and terminate() *also* raises. The inner guard swallows it, and the trailing
     # reap join still runs, so the helper never propagates.
     monkeypatch.setattr(
-        os, "getpgid", lambda _pid: (_ for _ in ()).throw(OSError("gone"))
+        os, "getpgid", lambda _pid: (_ for _ in ()).throw(OSError("gone")), raising=False
     )
 
     class _StubbornProc(_FakeProc):

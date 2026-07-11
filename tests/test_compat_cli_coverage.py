@@ -7,16 +7,14 @@ post-compare transform helper, per-phase log-handler lifecycle in
 failure in ``compat check``, and the API_BREAK console-summary exit.
 
 Everything is driven either through Click (``CliRunner``) or by calling the
-internal helpers/command callbacks directly with crafted inputs. Only a tiny
-ELF ``.so`` (built with gcc) is used for the ELF-only dump path; no castxml /
-abidiff / abi-compliance-checker is required.
+internal helpers/command callbacks directly with crafted inputs. The dump path
+stubs ``compat.cli.dump`` with a canned snapshot, so no gcc / castxml / abidiff
+is required and the tests stay in the fast (default) lane.
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,23 +33,17 @@ from abicheck.model import AbiSnapshot
 
 # ── helpers / fixtures ──────────────────────────────────────────────────────────
 
-_HAVE_GCC = shutil.which("gcc") is not None
+
+def _fake_elf(path: Path) -> Path:
+    """Write a file that only needs to *exist* — the dump call is stubbed out."""
+    path.write_bytes(b"\x7fELF\x02\x01\x01")
+    return path
 
 
-@pytest.fixture
-def tiny_so(tmp_path: Path) -> Path:
-    """Build a minimal real ELF shared object with one exported function."""
-    if not _HAVE_GCC:
-        pytest.skip("gcc not available")
-    src = tmp_path / "f.c"
-    src.write_text("int add(int a, int b){return a+b;}\n", encoding="utf-8")
-    so = tmp_path / "libfoo.so"
-    subprocess.run(
-        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
-        check=True,
-        capture_output=True,
-    )
-    return so
+def _stub_dump(monkeypatch: pytest.MonkeyPatch, snapshot: AbiSnapshot | None = None) -> None:
+    """Replace ``compat.cli.dump`` so the dump path runs without a real binary."""
+    snap = snapshot if snapshot is not None else AbiSnapshot(library="orig-name", version="1.0")
+    monkeypatch.setattr("abicheck.compat.cli.dump", lambda *a, **k: snap)
 
 
 def _descriptor(
@@ -110,26 +102,29 @@ def _diff_result() -> DiffResult:
 # ════════════════════════════════════════════════════════════════════════════════
 
 
-def test_dump_success_writes_default_json(tiny_so: Path, tmp_path: Path, monkeypatch):
-    """ELF-only dump (no headers) writes JSON to the default abi_dumps path."""
-    desc = _descriptor(tmp_path / "desc.xml", libs=[tiny_so])
+def test_dump_success_writes_default_json(tmp_path: Path, monkeypatch):
+    """ELF-only dump writes JSON to the default abi_dumps path + overrides -lib name."""
+    lib = _fake_elf(tmp_path / "libfoo.so")
+    desc = _descriptor(tmp_path / "desc.xml", libs=[lib])
+    _stub_dump(monkeypatch)
     monkeypatch.chdir(tmp_path)
     _dump_callback(desc_path=desc)
     out = tmp_path / "abi_dumps" / "libfoo" / "1.0" / "dump.json"
     assert out.exists()
-    # Library name is overridden to the -lib flag value (line 329).
+    # Library name is overridden to the -lib flag value (line 329), not the
+    # stub snapshot's own "orig-name".
     from abicheck.serialization import load_snapshot
 
     snap = load_snapshot(out)
     assert snap.library == "libfoo"
 
 
-def test_dump_multiple_libs_emits_warning(
-    tiny_so: Path, tmp_path: Path, monkeypatch, capsys
-):
+def test_dump_multiple_libs_emits_warning(tmp_path: Path, monkeypatch, capsys):
     """A descriptor with >1 <libs> entries warns and uses the first (line 302)."""
+    lib = _fake_elf(tmp_path / "libfoo.so")
     other = tmp_path / "missing_other.so"
-    desc = _descriptor(tmp_path / "desc2.xml", libs=[tiny_so, other])
+    desc = _descriptor(tmp_path / "desc2.xml", libs=[lib, other])
+    _stub_dump(monkeypatch)
     monkeypatch.chdir(tmp_path)
     _dump_callback(desc_path=desc)
     # _do_echo writes to stderr by default.
@@ -137,15 +132,24 @@ def test_dump_multiple_libs_emits_warning(
     assert (tmp_path / "abi_dumps" / "libfoo" / "1.0" / "dump.json").exists()
 
 
-def test_dump_failure_during_dump_exits(tiny_so: Path, tmp_path: Path, monkeypatch):
-    """Headers in the descriptor force a castxml dump that fails -> _compat_fail."""
-    hdr = tmp_path / "foo.h"
-    hdr.write_text("int add(int a, int b);\n", encoding="utf-8")
-    desc = _descriptor(tmp_path / "desch.xml", libs=[tiny_so], headers=[hdr])
+def test_dump_failure_during_dump_exits(tmp_path: Path, monkeypatch):
+    """A dump exception routes through _compat_fail; a missing-tool error -> exit 3.
+
+    Rather than depend on castxml being absent (fragile — fails where castxml is
+    installed), we stub ``dump`` to raise the exact FileNotFoundError shape a
+    missing external tool produces (bare command in ``.filename``), which the
+    "during dump" context classifies as tool-missing (exit code 3).
+    """
+    lib = _fake_elf(tmp_path / "libfoo.so")
+    desc = _descriptor(tmp_path / "desch.xml", libs=[lib])
+
+    def _boom(*_a, **_k):
+        raise FileNotFoundError(2, "No such file or directory", "castxml")
+
+    monkeypatch.setattr("abicheck.compat.cli.dump", _boom)
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as ei:
         _dump_callback(desc_path=desc)
-    # castxml missing classifies as tool-missing exit code 3.
     assert ei.value.code == 3
 
 
