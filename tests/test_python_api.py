@@ -26,6 +26,7 @@ scores the pair compatible.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -39,6 +40,7 @@ from abicheck.elf_metadata import (
 from abicheck.model import AbiSnapshot
 from abicheck.python_api import (
     KEYWORD_ONLY,
+    MAX_STUB_BYTES,
     POSITIONAL_ONLY,
     POSITIONAL_OR_KEYWORD,
     VAR_KEYWORD,
@@ -166,13 +168,15 @@ def test_clean_empty_stub_is_parse_ok() -> None:
     assert surface.is_empty and surface.parse_ok is True
 
 
-def test_detect_skips_malformed_stub(tmp_path) -> None:
-    # A recognised extension whose stub has a syntax error → unrecoverable →
-    # None (so the diff does not read every old name as removed).
+def test_detect_retains_malformed_stub_as_invalid_surface(tmp_path) -> None:
+    # A recognised extension whose stub has a syntax error stays distinguishable
+    # from no stub, so compare can fail closed instead of disabling coverage.
     (tmp_path / "foo.pyi").write_text("def f(:\n", encoding="utf-8")
     so = tmp_path / "foo.abi3.so"
     so.write_bytes(b"\x7fELF")
-    assert detect_python_api(_ext_snapshot(so)) is None
+    surface = detect_python_api(_ext_snapshot(so))
+    assert surface is not None
+    assert surface.is_empty and surface.parse_ok is False
 
 
 def test_overload_widened_with_optional_param_is_compatible() -> None:
@@ -892,6 +896,34 @@ def test_detector_skipped_when_new_has_no_surface() -> None:
     new = AbiSnapshot(library="foo.abi3.so", version="2")  # no python_api
     result = compare(old, new)
     assert not (_kinds(result) & {ChangeKind.PYTHON_API_FUNCTION_REMOVED})
+
+
+def test_malformed_new_stub_is_api_break_not_coverage_gap(tmp_path) -> None:
+    old = _snap("1", "def f(a): ...\n")
+    new = AbiSnapshot(library="foo.abi3.so", version="2")
+    new.python_api = surface_from_stub_source(
+        "def f(:\n", module_name="foo", source_path=str(tmp_path / "foo.pyi")
+    )
+    result = compare(old, new)
+    assert _kinds(result) == {ChangeKind.PYTHON_API_STUB_INVALID}
+    assert result.verdict == Verdict.API_BREAK
+
+
+def test_oversized_stub_is_invalid_without_full_parse(tmp_path) -> None:
+    p = tmp_path / "foo.pyi"
+    p.write_bytes(b"#" * (MAX_STUB_BYTES + 1))
+    surface = surface_from_stub_file(p, module_name="foo")
+    assert surface.is_empty and surface.parse_ok is False
+
+
+def test_stub_read_failure_after_stat_is_invalid(tmp_path, caplog) -> None:
+    caplog.set_level("DEBUG", logger="abicheck.python_api")
+    p = tmp_path / "foo.pyi"
+    p.write_text("def f(): ...\n", encoding="utf-8")
+    with patch.object(type(p), "read_text", side_effect=OSError("race")):
+        surface = surface_from_stub_file(p, module_name="foo")
+    assert surface.is_empty and surface.parse_ok is False
+    assert "could not read stub" in caplog.text
 
 
 def test_missing_old_surface_treated_as_empty_baseline() -> None:

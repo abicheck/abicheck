@@ -265,6 +265,7 @@ appear here — only the real Python-level break drives the verdict.
 | `python_api_parameter_kind_changed` | `API_BREAK` | a parameter's **binding** changed with its name unchanged — positional↔keyword-only, keyword→positional-only, or the positional order/position shifted (a reorder, or an optional parameter inserted mid-list) — so existing positional or keyword callers bind arguments differently |
 | `python_api_callable_kind_changed` | `API_BREAK` | a callable's **protocol** changed with an unchanged parameter list — `def`↔`async def` (callers must/mustn't `await`), or a class member changed between instance method, `@staticmethod`, `@classmethod`, and `@property` (call vs attribute access, different bind) |
 | `python_api_overload_removed` | `API_BREAK` | an `@overload` signature variant was dropped from an overloaded function/method — typed callers relying on that call shape lose it |
+| `python_api_stub_invalid` | `API_BREAK` | a shipped stub was unreadable, oversized, or syntactically invalid, so Python API coverage cannot be trusted |
 | `python_api_parameter_type_changed` | `RISK` | a parameter's type annotation changed |
 | `python_api_return_type_changed` | `RISK` | a function/method's return annotation changed |
 | `python_api_function_added` / `python_api_class_added` / `python_api_method_added` | `COMPATIBLE` | new public surface — existing callers unaffected |

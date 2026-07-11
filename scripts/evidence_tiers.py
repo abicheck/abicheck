@@ -172,6 +172,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "python_api_parameter_kind_changed": "L2",
     "python_api_callable_kind_changed": "L2",
     "python_api_overload_removed": "L2",
+    "python_api_stub_invalid": "L2",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",
