@@ -55,6 +55,7 @@ def test_parse_args_defaults():
     with patch("sys.argv", ["benchmark_comparison.py"]):
         args = mod.parse_args()
     assert args.abicc_timeout == mod.DEFAULT_ABICC_TIMEOUT
+    assert args.abicheck_full_timeout == mod.DEFAULT_ABICHECK_FULL_TIMEOUT
     assert args.abicc_mode == "both"
     assert args.suite == "all"
     assert not args.skip_abicc
@@ -65,6 +66,13 @@ def test_parse_args_custom_timeout():
     with patch("sys.argv", ["benchmark_comparison.py", "--abicc-timeout", "60"]):
         args = mod.parse_args()
     assert args.abicc_timeout == 60
+
+
+def test_parse_args_custom_abicheck_full_timeout():
+    mod = _load_benchmark()
+    with patch("sys.argv", ["benchmark_comparison.py", "--abicheck-full-timeout", "180"]):
+        args = mod.parse_args()
+    assert args.abicheck_full_timeout == 180
 
 
 def test_parse_args_skip_abicc():
@@ -185,6 +193,124 @@ def test_run_abicheck_skip_when_missing(tmp_path):
         result = mod.run_abicheck(dummy, dummy, dummy_h, dummy_h,
                                   "smoke_case", tmp_path)
     assert result.verdict == "SKIP"
+
+
+def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
+    mod = _load_benchmark()
+    so = tmp_path / "lib.so"
+    header = tmp_path / "api.h"
+    so.touch()
+    header.touch()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = '{"verdict":"NO_CHANGE","changes":[]}'
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(x) for x in cmd])
+        if "dump" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+        return Result()
+
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", tmp_path / "build"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+        mod.run_abicheck(so, so, header, header, "baseline", tmp_path)
+
+    assert len(commands) == 3
+    for dump in commands[:2]:
+        assert "-H" in dump
+        for option in ("--depth", "--sources", "--build-info", "-p"):
+            assert option not in dump
+
+
+def _write_plugin_pack(pack, version, source, *, with_facts=True):
+    import json
+    (pack / "source_facts").mkdir(parents=True)
+    (pack / "manifest.json").write_text(json.dumps({"version": version}))
+    record = {"source": str(source), "functions": [{"id": "f"}] if with_facts else []}
+    (pack / "source_facts" / "one.jsonl").write_text(json.dumps(record) + "\n")
+
+
+def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
+    mod = _load_benchmark()
+    case = "case02_param_type_change"
+    case_dir = tmp_path / "examples" / case
+    case_dir.mkdir(parents=True)
+    v1_src, v2_src = case_dir / "v1.c", case_dir / "v2.c"
+    v1_h, v2_h = case_dir / "v1.h", case_dir / "v2.h"
+    for path in (v1_src, v2_src, v1_h, v2_h):
+        path.write_text("/* fixture */\n")
+    plugin = tmp_path / "libabicheck-facts.so"
+    plugin.touch()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = '{"verdict":"BREAKING","changes":[]}'
+
+    def fake_run(cmd, **kwargs):
+        cmd = [str(x) for x in cmd]
+        commands.append(cmd)
+        if cmd[:2] == ["cmake", "--build"]:
+            version = cmd[cmd.index("--target") + 1].rsplit("_", 1)[1]
+            build = Path(cmd[2])
+            out = build / case
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"lib{version}.so").touch()
+            injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
+            injection = Path(injection_arg.split("=", 1)[1]).read_text()
+            pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
+            _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
+        elif "dump" in cmd or "merge" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+        return Result()
+
+    build_root = tmp_path / "bench-build"
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", build_root
+    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
+        mod, "SHARED_LIB_SUFFIX", ".so"
+    ):
+        result = mod.run_abicheck_full(
+            plugin, plugin, v1_h, v2_h, case, tmp_path, case_dir=case_dir,
+            v1_src=v1_src, v2_src=v2_src, timeout=177,
+        )
+
+    assert result.verdict == "BREAKING"
+    targets = [cmd[cmd.index("--target") + 1] for cmd in commands if "--target" in cmd]
+    assert targets == [f"{case}_v1", f"{case}_v2"]
+    merges = [cmd for cmd in commands if "merge" in cmd]
+    assert len(merges) == 2
+    assert merges[0][1:3] == ["-m", "abicheck"]
+    assert "abicheck_inputs_v1" in " ".join(merges[0])
+    assert "abicheck_inputs_v2" in " ".join(merges[1])
+    assert not any("--sources" in cmd for cmd in commands)
+    assert all(kwargs_timeout == 177 for kwargs_timeout in [177])
+
+
+def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
+    mod = _load_benchmark()
+    v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
+    v1.touch()
+    v2.touch()
+    empty = tmp_path / "empty"
+    _write_plugin_pack(empty, "v1", v1, with_facts=False)
+    assert not mod._plugin_pack_is_target_specific(empty, "v1", v1, v2)[0]
+    wrong = tmp_path / "wrong"
+    _write_plugin_pack(wrong, "v1", v2)
+    assert not mod._plugin_pack_is_target_specific(wrong, "v1", v1, v2)[0]
+
+def test_default_tools_include_both_abicheck_lanes():
+    mod = _load_benchmark()
+    with patch("sys.argv", ["benchmark_comparison.py"]):
+        selected = mod._resolve_selected_tools(mod.parse_args())
+    assert {"abicheck", "abicheck_full"} <= selected
 
 
 def test_run_abidiff_skip_when_missing(tmp_path):

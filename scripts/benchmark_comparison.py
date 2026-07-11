@@ -85,6 +85,7 @@ _HAS_ABICHECK: bool = _abicheck_available()
 
 
 DEFAULT_ABICC_TIMEOUT = 120  # seconds
+DEFAULT_ABICHECK_FULL_TIMEOUT = 120  # seconds per dump/compare call
 
 # Historical release-pinned cross-tool benchmark:
 # cases 01-73 plus the 26b compatible-union edge case.  The full catalog can
@@ -125,21 +126,6 @@ EXPECTED_ABICC: dict[str, str] = {
     k: ("COMPATIBLE" if EXPECTED[k] == "NO_CHANGE" else EXPECTED[k])
     for k, v in _gt_data["verdicts"].items()
 }
-# Cases whose expected verdict depends on the opt-in ADR-027 pattern analysis
-# ("pattern_verdicts": true in ground_truth.json). Both abicheck compare paths
-# below must pass --pattern-verdicts for them, mirroring validate_examples.py —
-# otherwise the case scores as wrong/missed in the suite and tier benchmarks.
-PATTERN_VERDICT_CASES: set[str] = {
-    k for k, v in _gt_data["verdicts"].items() if v.get("pattern_verdicts")
-}
-
-
-def _compare_cmd(snap1: Path, snap2: Path, case: str) -> list[str]:
-    """abicheck compare command for *case*, honoring its pattern_verdicts opt-in."""
-    cmd = [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"]
-    if case in PATTERN_VERDICT_CASES:
-        cmd.append("--pattern-verdicts")
-    return cmd
 
 
 @dataclass
@@ -424,57 +410,274 @@ def find_sources(case_dir: Path) -> _SourceResult:
 
 
 # ── abicheck compare (dump + compare pipeline) ────────────────────────────────
+def _find_or_build_abicheck_plugin(timeout: int) -> tuple[Path | None, str]:
+    """Return the build-integrated Clang fact plugin, building it once if needed."""
+    override = os.environ.get("ABICHECK_CLANG_PLUGIN")
+    if override:
+        plugin = Path(override)
+        return (plugin, "") if plugin.is_file() else (None, f"plugin not found: {plugin}")
+
+    plugin_build = BUILD_DIR / "_abicheck_clang_plugin"
+    names = ("libabicheck-facts.so", "libabicheck-facts.dylib", "abicheck-facts.dll")
+    for name in names:
+        candidate = plugin_build / name
+        if candidate.is_file():
+            return candidate, ""
+
+    source = REPO_DIR / "contrib" / "abicheck-clang-plugin"
+    llvm_config = _first_available_tool("llvm-config-18", "llvm-config")
+    clang = _first_available_tool("clang-18", "clang")
+    clangxx = _first_available_tool("clang++-18", "clang++")
+    if not (source.is_dir() and llvm_config and clang and clangxx and shutil.which("cmake")):
+        return None, "Clang plugin prerequisites unavailable"
+    try:
+        cmakedir = subprocess.run(
+            [llvm_config, "--cmakedir"], capture_output=True, text=True,
+            timeout=15, check=True,
+        ).stdout.strip()
+        env = {**os.environ, "CC": clang, "CXX": clangxx}
+        configure = subprocess.run(
+            ["cmake", "-S", str(source), "-B", str(plugin_build),
+             f"-DCMAKE_PREFIX_PATH={Path(cmakedir).parent}"],
+            capture_output=True, text=True, timeout=timeout, env=env,
+        )
+        if configure.returncode != 0:
+            return None, configure.stderr or configure.stdout
+        build = subprocess.run(
+            ["cmake", "--build", str(plugin_build), "--config", "Release"],
+            capture_output=True, text=True, timeout=timeout, env=env,
+        )
+        if build.returncode != 0:
+            return None, build.stderr or build.stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+    for name in names:
+        matches = list(plugin_build.rglob(name))
+        if matches:
+            return matches[0], ""
+    return None, "plugin build succeeded but library was not produced"
+
+
+def _plugin_pack_is_target_specific(
+    pack: Path, version: str, src: Path, opposite_src: Path,
+) -> tuple[bool, str]:
+    """Reject empty, wrong-version, or cross-release plugin evidence packs."""
+    try:
+        manifest = json.loads((pack / "manifest.json").read_text())
+        fact_files = sorted((pack / "source_facts").glob("*.jsonl"))
+        records = [json.loads(line) for path in fact_files for line in path.read_text().splitlines() if line]
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"invalid plugin pack: {exc}"
+    if manifest.get("version") != version or not fact_files or not records:
+        return False, f"missing {version} target-specific source facts"
+    sources = {Path(str(record.get("source", ""))).resolve() for record in records}
+    if src.resolve() not in sources or opposite_src.resolve() in sources:
+        return False, f"{version} pack contains wrong release translation units"
+    evidence_keys = {
+        "declarations", "types", "functions", "variables", "macros", "templates",
+        "inline_bodies", "constexpr_values", "source_edges",
+    }
+    if not any(record.get(key) for record in records for key in evidence_keys):
+        return False, f"{version} plugin pack contains no L3/L4/L5 facts"
+    return True, ""
+
+
+def _build_plugin_side(
+    case_dir: Path, case: str, version: str, src: Path, opposite_src: Path,
+    header: Path | None, plugin: Path, root: Path, timeout: int,
+) -> tuple[Path | None, Path | None, str]:
+    """Configure and build exactly one versioned library target with the plugin."""
+    case_dir = case_dir.resolve()
+    src = src.resolve()
+    opposite_src = opposite_src.resolve()
+    plugin = plugin.resolve()
+    root = root.resolve()
+    header = header.resolve() if header and header.exists() else header
+    side_build = root / f"plugin_build_{version}"
+    pack = root / f"abicheck_inputs_{version}"
+    for path in (side_build, pack):
+        if path.exists():
+            shutil.rmtree(path)
+
+    clang = _first_available_tool("clang-18", "clang")
+    clangxx = _first_available_tool("clang++-18", "clang++")
+    if not clang or not clangxx:
+        return None, None, "Clang compiler unavailable"
+    public_root = header.parent if header and header.exists() else src.parent
+    flags = [
+        f"-fplugin={plugin}",
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"out={pack}",
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"public-roots={public_root}",
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"library={case}",
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"version={version}",
+    ]
+    # Compact fixtures often define the API without including their public
+    # header. Force it into the real target compile so the pack sees that API.
+    if header and header.exists():
+        flags += ["-include", str(header)]
+    flag_string = shlex.join(flags)
+    # Inject only after CMake has validated the compilers. Putting the plugin in
+    # CMAKE_{C,CXX}_FLAGS would instrument CMake's compiler probes and contaminate
+    # the target pack with CMakeCCompilerId/CMakeCXXCompilerABI translation units.
+    injection = root / f"plugin_flags_{version}.cmake"
+    cmake_flags = flag_string.replace("\\", "\\\\").replace('"', '\\"')
+    injection.write_text(
+        f'set(CMAKE_C_FLAGS "${{CMAKE_C_FLAGS}} {cmake_flags}")\n'
+        f'set(CMAKE_CXX_FLAGS "${{CMAKE_CXX_FLAGS}} {cmake_flags}")\n'
+    )
+    env = {**os.environ, "CC": clang, "CXX": clangxx}
+    try:
+        configure = subprocess.run(
+            ["cmake", "-S", str(case_dir.parent), "-B", str(side_build),
+             "-DCMAKE_BUILD_TYPE=Debug", f"-DCMAKE_PROJECT_INCLUDE={injection}"],
+            capture_output=True, text=True, timeout=timeout, env=env,
+        )
+        if configure.returncode != 0:
+            return None, None, configure.stderr or configure.stdout
+        build = subprocess.run(
+            ["cmake", "--build", str(side_build), "--target", f"{case}_{version}",
+             "--config", "Debug"],
+            capture_output=True, text=True, timeout=timeout, env=env,
+        )
+        if build.returncode != 0:
+            return None, None, build.stderr or build.stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, str(exc)
+    library = _find_cmake_lib(side_build / case, version)
+    valid, error = _plugin_pack_is_target_specific(pack, version, src, opposite_src)
+    if library is None:
+        return None, None, f"target {case}_{version} produced no shared library"
+    if not valid:
+        return None, None, error
+    return library, pack, ""
+
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
                  case: str, rdir: Path) -> ToolResult:
-    if not _HAS_ABICHECK:
+    """Run the normal binary+headers abicheck benchmark lane.
+
+    Keep this lane comparable with libabigail's binary/header modes.  The
+    deeper source/build evidence path is exposed separately as
+    ``abicheck_full``.
+    """
+    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir)
+
+
+def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
+                      case: str, rdir: Path, *, case_dir: Path | None = None,
+                      v1_src: Path | None = None, v2_src: Path | None = None,
+                      build_dir: Path | None = None,
+                      timeout: int = DEFAULT_ABICHECK_FULL_TIMEOUT) -> ToolResult:
+    """Build each release target with the Clang plugin, merge its pack, compare."""
+    del v1_so, v2_so, build_dir  # full lane uses plugin-instrumented target artifacts
+    started = time.monotonic()
+    if not _HAS_ABICHECK or case_dir is None or v1_src is None or v2_src is None:
         return ToolResult(verdict="SKIP")
-
-    bdir = BUILD_DIR / case
-    snap1 = bdir / "snap_v1.json"
-    snap2 = bdir / "snap_v2.json"
-    _t_start = time.monotonic()
-
-    def dump(so: Path, h: Path | None, snap: Path, ver: str) -> tuple[bool, str]:
-        cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap), "--version", ver]
-        if h and h.exists():
-            cmd += ["-H", str(h)]
-        run = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV)
-        ok = run.returncode == 0 and snap.exists()
-        return ok, (run.stderr or run.stdout)
-
+    root = BUILD_DIR / case / "full_plugin"
+    root.mkdir(parents=True, exist_ok=True)
+    plugin, error = _find_or_build_abicheck_plugin(timeout)
+    if plugin is None:
+        return ToolResult(verdict="ERROR", raw_output=error,
+                          elapsed_ms=(time.monotonic() - started) * 1000)
     try:
-        ok, err = dump(v1_so, v1_h, snap1, "v1")
-        if not ok:
-            return ToolResult(verdict="ERROR", raw_output=f"dump v1 failed: {err}",
-                              elapsed_ms=(time.monotonic() - _t_start) * 1000)
-        ok, err = dump(v2_so, v2_h, snap2, "v2")
-        if not ok:
-            return ToolResult(verdict="ERROR", raw_output=f"dump v2 failed: {err}",
-                              elapsed_ms=(time.monotonic() - _t_start) * 1000)
+        sides = [
+            ("v1", v1_src, v2_src, v1_h),
+            ("v2", v2_src, v1_src, v2_h),
+        ]
+        merged: list[Path] = []
+        logs: list[str] = []
+        for version, src, opposite, header in sides:
+            library, pack, error = _build_plugin_side(
+                case_dir, case, version, src, opposite, header, plugin, root, timeout,
+            )
+            if library is None or pack is None:
+                return ToolResult(verdict="ERROR", raw_output=error,
+                                  elapsed_ms=(time.monotonic() - started) * 1000)
+            base = root / f"{version}.binary_headers.json"
+            final = root / f"{version}.merged.json"
+            dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
+                    "-o", str(base), "--version", version]
+            if header and header.exists():
+                dump += ["-H", str(header)]
+            dr = subprocess.run(dump, capture_output=True, text=True,
+                                timeout=timeout, env=_ABICHECK_ENV)
+            if dr.returncode != 0 or not base.exists():
+                return ToolResult(verdict="ERROR", raw_output=dr.stderr or dr.stdout,
+                                  elapsed_ms=(time.monotonic() - started) * 1000)
+            mr = subprocess.run(
+                # ``abicheck.cli`` invokes Click before late subcommand modules
+                # register ``merge``; the package entry point imports the full
+                # module first and therefore exposes build-source commands.
+                [_PYTHON, "-m", "abicheck", "merge", str(base), str(pack),
+                 "-o", str(final), "--on-conflict", "error"],
+                capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
+            )
+            if mr.returncode != 0 or not final.exists():
+                return ToolResult(verdict="ERROR", raw_output=mr.stderr or mr.stdout,
+                                  elapsed_ms=(time.monotonic() - started) * 1000)
+            merged.append(final)
+            logs.extend([dr.stdout, dr.stderr, mr.stdout, mr.stderr])
+        compare = subprocess.run(
+            [_PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
+             "--format", "json"], capture_output=True, text=True,
+            timeout=timeout, env=_ABICHECK_ENV,
+        )
     except subprocess.TimeoutExpired as exc:
         return ToolResult(verdict="TIMEOUT", raw_output=str(exc),
-                          elapsed_ms=(time.monotonic() - _t_start) * 1000)
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    out = compare.stdout + compare.stderr
+    (rdir / f"{case}_abicheck_full.txt").write_text(out)
+    return ToolResult(
+        verdict=_abicheck_verdict_from_compare(compare.stdout, compare.returncode),
+        raw_output="".join(logs) + out,
+        elapsed_ms=(time.monotonic() - started) * 1000,
+    )
+
+
+def _run_abicheck_dump_compare(
+    v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
+    case: str, rdir: Path, *, suffix: str = "", timeout: int = 60,
+) -> ToolResult:
+    """Run the baseline binary plus public-header dump/compare lane."""
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    bdir = BUILD_DIR / case
+    bdir.mkdir(parents=True, exist_ok=True)
+    snap1 = bdir / f"snap{suffix}_v1.json"
+    snap2 = bdir / f"snap{suffix}_v2.json"
+    started = time.monotonic()
+
+    def dump(so: Path, header: Path | None, snap: Path, version: str) -> tuple[bool, str]:
+        cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap),
+               "--version", version]
+        if header and header.exists():
+            cmd += ["-H", str(header)]
+        run = subprocess.run(cmd, capture_output=True, text=True,
+                             timeout=timeout, env=_ABICHECK_ENV)
+        return run.returncode == 0 and snap.exists(), run.stderr or run.stdout
 
     try:
-        r = subprocess.run(
-            _compare_cmd(snap1, snap2, case),
-            capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
+        ok, error = dump(v1_so, v1_h, snap1, "v1")
+        if not ok:
+            return ToolResult(verdict="ERROR", raw_output=f"dump v1 failed: {error}",
+                              elapsed_ms=(time.monotonic() - started) * 1000)
+        ok, error = dump(v2_so, v2_h, snap2, "v2")
+        if not ok:
+            return ToolResult(verdict="ERROR", raw_output=f"dump v2 failed: {error}",
+                              elapsed_ms=(time.monotonic() - started) * 1000)
+        result = subprocess.run(
+            [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2),
+             "--format", "json"], capture_output=True, text=True,
+            timeout=timeout, env=_ABICHECK_ENV,
         )
-    except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT",
-                          elapsed_ms=(time.monotonic() - _t_start) * 1000)
-    elapsed_ms = (time.monotonic() - _t_start) * 1000
-
-    out = r.stdout + r.stderr
-    (rdir / f"{case}_abicheck.txt").write_text(out)
-
-    verdict = _abicheck_verdict_from_compare(r.stdout, r.returncode)
-
-    changes = [ln.strip() for ln in out.splitlines()
-               if any(k in ln for k in ("removed", "added", "changed")) and ln.strip()]
-    return ToolResult(verdict=verdict, changes=changes[:8], raw_output=out,
-                      elapsed_ms=elapsed_ms)
-
+    except subprocess.TimeoutExpired as exc:
+        return ToolResult(verdict="TIMEOUT", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    out = result.stdout + result.stderr
+    (rdir / f"{case}_abicheck{suffix}.txt").write_text(out)
+    return ToolResult(
+        verdict=_abicheck_verdict_from_compare(result.stdout, result.returncode),
+        raw_output=out, elapsed_ms=(time.monotonic() - started) * 1000,
+    )
 
 def _abicheck_verdict_from_compare(stdout: str, returncode: int) -> str:
     """Derive normalized verdict from abicheck compare output or exit code."""
@@ -810,6 +1013,7 @@ def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 
 TOOL_REGISTRY: list[Tool] = [
     Tool("abicheck", run_abicheck, "abicheck", 12, "expected"),
+    Tool("abicheck_full", run_abicheck_full, "ac-full", 12, "expected"),
     Tool("abicheck_compat", run_abicheck_compat, "ac-compat", 12, "expected_compat"),
     Tool("abicheck_strict", run_abicheck_strict, "ac-strict", 14, "expected"),
     Tool("abidiff", run_abidiff, "abidiff", 12, "expected"),
@@ -849,6 +1053,10 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark abicheck vs abidiff vs ABICC")
     p.add_argument("--abicc-timeout", type=int, default=DEFAULT_ABICC_TIMEOUT,
                    help=f"Timeout per ABICC call (default: {DEFAULT_ABICC_TIMEOUT}s)")
+    p.add_argument("--abicheck-full-timeout", type=int,
+                   default=DEFAULT_ABICHECK_FULL_TIMEOUT,
+                   help="Timeout per abicheck full-lane call "
+                        f"(default: {DEFAULT_ABICHECK_FULL_TIMEOUT}s)")
     p.add_argument("--abicc-mode", choices=["xml", "dumper", "both"], default="both",
                    help="ABICC mode: xml (legacy XML descriptor), dumper (abi-dumper workflow), or both (default: both)")
     p.add_argument("--skip-abicc", action="store_true",
@@ -860,7 +1068,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--suite", choices=["all", "pinned74"], default="all",
                    help="Case suite to run: all catalog cases, or the historical 74-case release-pinned subset")
     p.add_argument("--tools", nargs="+", metavar="TOOL",
-                   choices=["abicheck", "abicheck_compat", "abicheck_strict",
+                   choices=["abicheck", "abicheck_full", "abicheck_compat", "abicheck_strict",
                             "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml"],
                    help="Run only selected tools")
     p.add_argument("--case64-toolchain", choices=["auto", "gcc", "clang"], default="auto",
@@ -892,6 +1100,7 @@ def _error_entry(case_name: str, expected: str) -> dict[str, Any]:
         "expected": expected,
         "expected_compat": EXPECTED_COMPAT.get(case_name, expected),
         "abicheck": "ERROR",
+        "abicheck_full": "ERROR",
         "abicheck_compat": "ERROR",
         "abicheck_strict": "ERROR",
         "abidiff": "ERROR",
@@ -1232,7 +1441,7 @@ def _resolve_selected_tools(args: Any) -> set[str]:
     use_compat = not args.skip_compat
 
     selected: set[str] = set(args.tools or [
-        "abicheck", "abicheck_compat", "abicheck_strict",
+        "abicheck", "abicheck_full", "abicheck_compat", "abicheck_strict",
         "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml",
     ])
 
@@ -1262,6 +1471,7 @@ def _skip_row_entry(name: str, expected: str) -> dict[str, Any]:
         "case": name,
         "expected": expected,
         "abicheck": "SKIP",
+        "abicheck_full": "SKIP",
         "abicheck_compat": "SKIP",
         "abicheck_strict": "SKIP",
         "abidiff": "SKIP",
@@ -1316,11 +1526,22 @@ def _run_tools_for_case(
     name: str,
     rdir: Path,
     abicc_timeout: int,
+    abicheck_full_timeout: int = DEFAULT_ABICHECK_FULL_TIMEOUT,
+    case_dir: Path | None = None,
+    v1_src: Path | None = None,
+    v2_src: Path | None = None,
+    build_dir: Path | None = None,
 ) -> dict[str, ToolResult]:
     """Run all active tools for a case and return their results keyed by tool name."""
     tool_results: dict[str, ToolResult] = {}
     for t in active_tools:
-        if t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
+        if t.name == "abicheck_full":
+            tool_results[t.name] = t.run_fn(
+                v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir,
+                case_dir=case_dir, v1_src=v1_src, v2_src=v2_src,
+                build_dir=build_dir, timeout=abicheck_full_timeout,
+            )
+        elif t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
         elif t.name in ("abicc_dumper", "abicc_xml"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
@@ -1395,9 +1616,13 @@ def _process_case(
         br.used_make_artifacts, br.used_cmake_artifacts,
     )
 
+    compile_db = _find_compile_db(bdir)
+    build_info = compile_db if compile_db is not None else None
+
     tool_results = _run_tools_for_case(
         active_tools, v1_so, v2_so, v1_h, v2_h, v1_h_abicheck, v2_h_abicheck,
-        name, rdir, args.abicc_timeout,
+        name, rdir, args.abicc_timeout, args.abicheck_full_timeout,
+        case_dir=case_dir, v1_src=v1_src, v2_src=v2_src, build_dir=build_info,
     )
 
     row_parts = [f"  {name:<33}", f"{expected:<12}"]
@@ -1467,7 +1692,7 @@ def _abicheck_tier_result(
         return "ERROR", []
     try:
         r = subprocess.run(
-            _compare_cmd(snap1, snap2, case),
+            [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"],
             capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
