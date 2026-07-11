@@ -15,9 +15,37 @@ from pathlib import Path
 import click
 import pytest
 
-from abicheck import cli_scan_baseline as csb
+from abicheck import cli_scan_baseline as csb, cli_scan_helpers as csh
 from abicheck.buildsource.risk import RiskRules
 from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+
+
+class TestPackCoverage:
+    """`_pack_coverage` reads embedded L3/L4/L5 rows defensively (CodeRabbit)."""
+
+    def test_no_pack_returns_not_collected_rows(self) -> None:
+        rows = csh._pack_coverage(types.SimpleNamespace(build_source=None))
+        assert [r["layer"] for r in rows] == ["L3_build", "L4_source_abi", "L5_source_graph"]
+        assert all(r["status"] == "not_collected" for r in rows)
+
+    def test_mixed_to_dict_and_plain_dict_entries(self) -> None:
+        # _l3_collected tolerates plain-dict rows; _pack_coverage must match it —
+        # a row lacking to_dict() is passed through unchanged, not AttributeError'd.
+        class _Row:
+            def to_dict(self) -> dict[str, str]:
+                return {"layer": "L3_build", "status": "collected"}
+
+        plain = {"layer": "L4_source_abi", "status": "partial"}
+        snap = types.SimpleNamespace(
+            build_source=types.SimpleNamespace(
+                manifest=types.SimpleNamespace(coverage=[_Row(), plain])
+            )
+        )
+        rows = csh._pack_coverage(snap)
+        assert rows == [
+            {"layer": "L3_build", "status": "collected"},
+            {"layer": "L4_source_abi", "status": "partial"},
+        ]
 
 
 class TestPublicProvenanceSet:

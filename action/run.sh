@@ -257,6 +257,8 @@ elif [[ "$MODE" == "compare-release" ]]; then
   add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
   add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
+  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
   add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
   add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"

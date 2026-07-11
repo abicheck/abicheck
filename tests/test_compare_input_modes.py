@@ -318,7 +318,7 @@ class TestCompareJsonJson:
         assert "ignored" in result.output.lower()
 
     def test_per_side_headers_ignored_warning(self, tmp_path):
-        """When both inputs are JSON, --old-header/--new-header should warn."""
+        """When both inputs are JSON, --header old=/--header new= should warn."""
         old_p, new_p = _write_snapshots(tmp_path)
         hdr = tmp_path / "dummy.h"
         hdr.write_text("// dummy", encoding="utf-8")
@@ -366,7 +366,7 @@ class TestCompareSoSo:
         assert call_count[0] == 2  # dump called for both sides
 
     def test_so_vs_so_with_per_side_headers(self, tmp_path, monkeypatch):
-        """Compare two .so files with --old-header / --new-header."""
+        """Compare two .so files with --header old= / --header new=."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         old_hdr = tmp_path / "v1.h"
@@ -532,7 +532,7 @@ class TestCompareMixed:
         assert result.exit_code == 4  # BREAKING
 
     def test_mixed_with_per_side_headers(self, tmp_path, monkeypatch):
-        """--new-header only applies to the .so side, JSON side ignores headers."""
+        """--header new= only applies to the .so side, JSON side ignores headers."""
         old_p = _write_snapshot(tmp_path / "baseline.json", _make_snapshot("1.0"))
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         new_hdr = tmp_path / "v2.h"
@@ -690,7 +690,7 @@ class TestHeaderDirectoryInput:
         assert captured[1] == expected
 
     def test_old_new_header_directories(self, tmp_path, monkeypatch):
-        """--old-header/--new-header accept directories and expand recursively."""
+        """--header old=/--header new= accept directories and expand recursively."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
 

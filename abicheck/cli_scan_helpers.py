@@ -96,7 +96,10 @@ def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
             }
             for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
         ]
-    return [c.to_dict() for c in pack.manifest.coverage]
+    return [
+        c.to_dict() if hasattr(c, "to_dict") else c
+        for c in pack.manifest.coverage
+    ]
 
 
 def _l3_collected(snap: Any) -> bool:

@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.core import ParameterSource
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -48,9 +49,7 @@ class _FakeCtx:
     def __init__(self, explicit: set[str]) -> None:
         self._explicit = set(explicit)
 
-    def get_parameter_source(self, name: str):  # noqa: ANN201 - test double
-        from click.core import ParameterSource
-
+    def get_parameter_source(self, name: str) -> ParameterSource:
         return (
             ParameterSource.COMMANDLINE
             if name in self._explicit
@@ -77,7 +76,7 @@ class TestApplyProfileUnit:
         # but an unset field still takes the profile default
         assert kwargs["depth"] == "headers"
 
-    def test_set_input_operands_reject_profile(self, tmp_path) -> None:
+    def test_set_input_operands_reject_profile(self, tmp_path: Path) -> None:
         """Regression (Codex P2 ×3): profiles are single-pair-only.
 
         A profile bundles single-pair-only knobs (``--depth``,
@@ -100,7 +99,7 @@ class TestApplyProfileUnit:
         with pytest.raises(click.UsageError, match="single-pair"):
             apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
 
-    def test_set_input_reject_is_usage_error_end_to_end(self, tmp_path) -> None:
+    def test_set_input_reject_is_usage_error_end_to_end(self, tmp_path: Path) -> None:
         """`compare dir dir --profile release` exits as a usage error (64)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -142,7 +141,7 @@ class TestApplyProfileUnit:
 
 
 class TestProfileEndToEnd:
-    def test_quick_profile_emits_stat_summary(self, tmp_path) -> None:
+    def test_quick_profile_emits_stat_summary(self, tmp_path: Path) -> None:
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
@@ -153,7 +152,7 @@ class TestProfileEndToEnd:
         assert "total)" in result.output
         assert result.output.strip().count("\n") == 0
 
-    def test_explicit_format_overrides_profile_e2e(self, tmp_path) -> None:
+    def test_explicit_format_overrides_profile_e2e(self, tmp_path: Path) -> None:
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -163,7 +162,7 @@ class TestProfileEndToEnd:
         # ci-gate would pick 'review'; explicit --format json wins → JSON object
         assert result.output.lstrip().startswith("{")
 
-    def test_profile_with_explicit_max_does_not_conflict(self, tmp_path) -> None:
+    def test_profile_with_explicit_max_does_not_conflict(self, tmp_path: Path) -> None:
         """`compare … --profile quick --max` must not exit 64 (depth conflict)."""
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(
@@ -172,7 +171,7 @@ class TestProfileEndToEnd:
         assert result.exit_code == 0, result.output
         assert "is not one of" not in result.output  # no depth-conflict rejection
 
-    def test_unknown_profile_is_a_usage_error(self, tmp_path) -> None:
+    def test_unknown_profile_is_a_usage_error(self, tmp_path: Path) -> None:
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "--profile", "bogus"]

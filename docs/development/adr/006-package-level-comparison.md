@@ -57,14 +57,14 @@ abicheck compare-release libfoo_1.0.deb libfoo_1.1.deb
 abicheck compare-release sdk-2.0.tar.gz sdk-2.1.tar.gz
 
 # With debug info packages
-abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm \
-    --debug-info old=libfoo-debuginfo-1.0.rpm \
-    --debug-info new=libfoo-debuginfo-1.1.rpm
+abicheck compare-release libfoo-1.0.rpm libfoo-1.1.rpm \
+    --debug-info1 libfoo-debuginfo-1.0.rpm \
+    --debug-info2 libfoo-debuginfo-1.1.rpm
 
 # With development packages (for header-based analysis)
-abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm \
-    --devel-pkg old=libfoo-devel-1.0.rpm \
-    --devel-pkg new=libfoo-devel-1.1.rpm
+abicheck compare-release libfoo-1.0.rpm libfoo-1.1.rpm \
+    --devel-pkg1 libfoo-devel-1.0.rpm \
+    --devel-pkg2 libfoo-devel-1.1.rpm
 ```
 
 The CLI auto-detects format by extension and magic bytes. No separate `pkg-compare`
