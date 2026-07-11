@@ -735,7 +735,7 @@ def _check_odr_type_variant(
         return _CheckOutput(
             [],
             "skipped",
-            "no L4 source-ABI surface on the snapshot (run --source-method s5)",
+            "no L4 source-ABI surface on the snapshot (run --depth source)",
             providers,
         )
     # An empty surface is attached when L4 replay ran but parsed zero TUs (e.g.
@@ -1024,7 +1024,7 @@ def _check_public_to_internal_dependency(
         return _CheckOutput(
             [],
             "skipped",
-            "no L5 source graph on the snapshot (run --source-method s5/--depth graph)",
+            "no L5 source graph on the snapshot (run --depth source)",
             providers,
         )
     if not any(e.kind in _DEPENDENCY_EDGE_KINDS for e in graph.edges):
@@ -1032,9 +1032,9 @@ def _check_public_to_internal_dependency(
             [],
             "skipped",
             "L5 source graph has no decl-dependency edges — run a semantic source "
-            "mode with clang++ available (`--source-method s5` / `--mode pr-deep`) "
-            "or fold a call graph (`collect --call-graph`, Kythe/CodeQL); the "
-            "structural-only `--depth graph` (s4) mode emits no call edges",
+            "mode with clang++ available (`--depth source`) or fold a call graph "
+            "(`collect --call-graph`, Kythe/CodeQL); a structural-only graph emits "
+            "no call edges",
             providers,
         )
 
