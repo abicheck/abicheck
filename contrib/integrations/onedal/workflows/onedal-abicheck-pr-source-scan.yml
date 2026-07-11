@@ -80,8 +80,8 @@ jobs:
           # analysis), NOT a full binary/symbol diff. The authoritative
           # removed/changed-export + layout diff is the nightly compare, which
           # builds the new side. A genuine per-PR API diff needs the baseline to
-          # carry L4 source facts (see the plugin-collect workflow) or a quick
-          # DAAL-classic build in this job.
+          # carry L4 source facts (see onedal-abicheck-build-with-plugin.yml +
+          # onedal-abicheck-analysis.yml) or a quick DAAL-classic build in this job.
           baseline: ${{ matrix.iface.baseline }}
           # NOTE: no `config:`/`suppress:` inputs here on purpose.
           #  * scan AUTO-DISCOVERS `.abicheck.yml` at the --sources root, so the

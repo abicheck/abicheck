@@ -127,71 +127,99 @@ abicheck dump <lib>.so --sources . --build-info compile_commands.json --depth bu
 ```
 
 Validated on the fixture: `bear -- make` → `compile_commands.json` (1 entry) →
-`abicheck dump` reports **L3 present** ("1 compile units"). This is wired into
-`onedal-abicheck-libabigail.yml` (bear wraps the real build) and documented in
-the config's `build:` block.
+`abicheck dump` reports **L3 present** ("1 compile units").
+
+Two ways to wire it, both config-driven (your point — for Make you declare the
+build command, abicheck doesn't guess):
+
+- **Config `build.query`** — put the exact command in `.abicheck.yml` (see the
+  `build:` block); abicheck runs it (from an explicit `--config`) to produce the
+  DB. Example: `query: bear --output compile_commands.json -- .ci/scripts/build.sh …`.
+- **Pre-generate + `build.compile_db`** — run `bear …` in the build job, commit or
+  upload the resulting `compile_commands.json`, and point `compile_db` at it.
 
 **abicheck recommendation:** when the detected build system is `make` **and**
 `bear` is on PATH, offer to run `bear -- <make target>` (an explicit,
 operator-trusted opt-in) instead of the low-confidence `make -n` scrape — or at
-least name `bear` in the "no compile DB found" message (the message already
-mentions it generically; make it the headline for make projects).
+least name `bear` in the "no compile DB found" message.
 
-## D. Plugin data collection — where to inject it in oneDAL CI
+## Naming — the three ways to produce source facts
 
-Goal: persist abicheck's source-analysis data (`abicheck_inputs/` packs, or a
-compile DB) as a **CI artifact** the GitHub Action reuses, so the expensive
-source-fact extraction happens once, inside the build that already runs.
+We dropped the internal "Flow A/B/C" labels. The three producers, by what they
+*are* (all emit the same `abicheck_inputs/` protocol, so the analysis step is
+identical):
 
-oneDAL's real build happens in:
-- `.github/workflows/nightly-build.yml` and the Azure pipeline (`.ci/pipeline/`),
-  which build via `.ci/scripts/build.sh` and **already upload the `__release_*`
-  tree as an artifact** for downstream jobs.
+| Name | What it does | When |
+|------|--------------|------|
+| **compiler plugin** | emits facts from the AST **during the normal compile** — zero extra parse | you own the build image; fastest |
+| **compiler wrapper** (`abicheck-cc`) | wraps any compiler, runs the extractor as a companion | portable; any toolchain |
+| **compile-database replay** | `dump --sources` re-parses TUs from a `compile_commands.json` | you already have/produce a compile DB |
 
-Two injection points, cheapest first:
+## D. Where to inject plugin data collection in oneDAL CI (the build-integrated design)
 
-1. **Portable (Flow B / bear) — recommended default.** In the existing build job,
-   wrap the build with `bear` (or the `abicheck-cc` wrapper) and, after it,
-   `abicheck collect --compile-db compile_commands.json --headers cpp/daal/include
-   -o abicheck_inputs`. Upload `abicheck_inputs/` next to the release tree. The
-   Action's `dump --inputs abicheck_inputs/` (or `merge`) then folds the source
-   facts in with **no compiler re-run**. This is what
-   `onedal-abicheck-libabigail.yml` demonstrates.
-2. **Fast (Flow C / Clang plugin).** For the icx/clang build, load the abicheck
-   facts plugin during compilation (`-fplugin=…facts.so … out=abicheck_inputs
-   public-roots=cpp/daal/include`) so facts are emitted from the AST the compiler
-   already built — zero extra parse. Caveat (ADR-038 C.5): the plugin is
-   ABI-locked to its clang major and **must be built against icx's LLVM**; verify
-   load compatibility before relying on it. `onedal-abicheck-plugin-collect.yml`
-   builds/loads it against stock clang as a template.
+Goal, per your steer: **add the plugin to the build that CI already runs, save
+its output as an artifact next to the build, and reuse it in analysis** — instead
+of a throwaway build or calling the CLI inside oneDAL's scripts.
 
-Either way the artifact is the same `abicheck_inputs/` protocol, so the
-downstream Action step is identical.
+Which build? oneDAL's `.github/workflows/nightly-build.yml` builds daal +
+oneapi_c (icx/avx2), uploads `__release_lnx` as an artifact, and triggers on
+**both `schedule` and `pull_request`** (path-filtered). So there **is** a build
+on PRs — but the ABI *check* (`abi_check.sh` → abidiff) lives in the nightly
+**test** side, so today PRs are built but not ABI-scanned. The fix is to collect
+facts in that build and analyze on PRs:
 
-## E. Integrating with the existing libabigail (abidiff) job
+1. **Build + collect** (`onedal-abicheck-build-with-plugin.yml`): mirrors
+   nightly-build, but loads the **compiler plugin** via a PATH-shim `icx`/`icpx`
+   (forwards to the real compiler + appends the plugin's cc1 args), so facts are
+   emitted during the normal compile with **no makefile change**. Uploads
+   `__release_lnx` **and** `abicheck_inputs/` as two artifacts. In your fork you
+   merge this into nightly-build (add the shim + the two uploads), so collection
+   rides the build you already run.
+2. **Analyze via the Action** (`onedal-abicheck-analysis.yml`): `workflow_run`
+   after the build downloads both artifacts and runs the **GitHub Action** —
+   `dump` the built lib → `merge` in `abicheck_inputs/` → `compare` vs the
+   2026.0.0 baseline (SARIF + PR comment). No CLI in oneDAL scripts; the facts
+   collected once in the build are reused here.
+
+The plugin is ABI-locked to icx's LLVM major, so the build job builds it against
+icx's own LLVM tree (`icpx -print-resource-dir`). If it can't load into your icx,
+swap the shim for the **compiler wrapper** or `bear` + **compile-database
+replay** — the uploaded `abicheck_inputs/` is identical, so the analysis job is
+unchanged.
+
+## E. Coexisting with the existing libabigail (abidiff) job
 
 oneDAL already gates ABI with `.ci/scripts/abi_check.sh <baseline_dir>
-<new_dir>` → `abidiff --suppr .github/.abignore` per library. **Don't replace it —
-overlay abicheck in the same job** (no second build):
+<new_dir>` → `abidiff --suppr .github/.abignore` per library. **Keep it** — run
+abicheck as an overlay, not a replacement:
 
-- The job already has the two release dirs (baseline + freshly built) and the
-  `.github/.abignore` suppressions. Add an `abicheck compare "$bso" "$nso"` step
-  over the same pairs, emitting **SARIF** (code scanning) + a **Markdown summary**
-  + source-level (L2/L3/L4) findings abidiff doesn't model.
-- Keep abidiff as the hard gate initially; run abicheck **advisory**
-  (`continue-on-error`) until its signal is triaged, then promote.
-- Reuse suppressions: abidiff keeps `.github/.abignore`; abicheck uses
-  `onedal.suppress.yml`. (A nice future abicheck feature: **read `.abignore`
-  directly**, since abicheck already targets ABICC-format suppressions — that
-  would let both tools share one file.)
-
-This is exactly what `onedal-abicheck-libabigail.yml` implements: abidiff and
-abicheck run back-to-back over the identical inputs, and a bear-produced
-`abicheck_inputs/` pack is uploaded for the Action to reuse (§D).
+- Both consume the same two release dirs. Keep abidiff as the hard gate; run the
+  abicheck **analysis workflow** (above) **advisory** until its signal is triaged,
+  then promote. abicheck adds SARIF (code scanning), a per-symbol PR comment,
+  policy profiles, and source-level (L2/L3/L4) findings abidiff doesn't model.
+- Suppressions stay separate for now: abidiff keeps `.github/.abignore`, abicheck
+  uses `onedal.suppress.yml`.
 
 **abicheck recommendation:** add native `.abignore` (libabigail suppression)
-ingestion so a project that already maintains one for abidiff gets abicheck
-suppressions for free.
+ingestion so a project already maintaining one for abidiff gets abicheck
+suppressions for free — one file, both tools.
+
+## F. Why weren't these bugs caught earlier?
+
+Each fixed bug had a matching **test blind spot**; the fixes ship with
+**generalized** guards (not one-off assertions), so the whole class is covered:
+
+| Bug | Why it slipped | Generalized guard added |
+|-----|----------------|--------------------------|
+| Action `scan --build-config` (exit 64) | **No action test ran scan with a config input** — the config path was never exercised, in any mode. | `tests/test_action_run_contract.py` parses `run.sh` and asserts **every** flag it passes, **per subcommand**, is a real option of that subcommand's `--help`. Catches this and any future action↔CLI drift for *all* modes. Verified it fails when `--build-config` is reintroduced. |
+| Misleading "not collected" warning | The existing test **mocked** `_missing_requested_evidence_layers` to return a list and only checked the string "not collected" — the message was never asserted against a real pack, so a present-but-empty layer's wording was untested. | `TestClassifyMissingLayers` runs the real split on a real `BuildSourcePack` (PARTIAL L4 row) and asserts the ran-but-empty branch says "collected but linked no facts", not "install clang/castxml". |
+
+The deeper behavioural gaps (B1 unseeded `--depth source` selects 0 TUs; B2
+`0/N symbols matched`) are **not** yet fixed — they're documented as
+recommendations, so no test claims coverage of behaviour we haven't corrected.
+They need an integration-marked fixture (a real compiled lib + compile DB) to pin
+the seed requirement and the public-roots matching rule; that's the right next
+step before changing the L4 scope defaults.
 
 ---
 

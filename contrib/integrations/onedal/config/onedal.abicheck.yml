@@ -13,12 +13,32 @@ version: 1
 # emitted by that build, so L3/L4/L5 source evidence needs one of:
 #   * bazel:  `bazel aquery ... > aquery.json` → `abicheck collect --from bazel-aquery=aquery.json`
 #   * bear:   `bear -- make -f makefile daal PLAT=lnx32e`  (wraps the make build)
-#   * plugin: the abicheck clang facts plugin (see workflows/onedal-abicheck-plugin-collect.yml)
+#   * plugin: the abicheck compiler plugin (see workflows/onedal-abicheck-build-with-plugin.yml)
 # Point `compile_db` at whichever you generate; leave it unset for symbol+header
 # (L0/L1/L2) analysis, which needs no compile DB.
+#
+# oneDAL is a Make project and Make emits no compile_commands.json on its own, so
+# you tell abicheck exactly how to produce one. Two config-driven options:
+#
+#   (a) point `compile_db` at a DB you already generated, or
+#   (b) give `query` the exact build command (run from the repo root) that
+#       produces a DB — abicheck runs it for you when the config is passed with an
+#       explicit `--config` (trusted). `bear` wraps the real build and writes the
+#       DB with no change to oneDAL's makefile.
+#
+# `query` is only executed from an EXPLICIT `--config` (operator-trusted); an
+# auto-discovered .abicheck.yml never runs it. Uncomment when you want L3/L4/L5.
 build:
   system: make
-  # compile_db: build/compile_commands.json
+  # (a) pre-generated DB (e.g. committed by the build-with-plugin workflow):
+  # compile_db: compile_commands.json
+  #
+  # (b) let abicheck produce the DB from the real build (run at the repo root):
+  # query: >-
+  #   bear --output compile_commands.json --
+  #   .ci/scripts/build.sh --compiler icx --optimizations avx2
+  #   --target daal --debug symbols
+  # compile_db: compile_commands.json
 
 # ── Public-header surface (L2 header AST + provenance scoping) ────────────────
 # Two public interfaces ship from one tree:

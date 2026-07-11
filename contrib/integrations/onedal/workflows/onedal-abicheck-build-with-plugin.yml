@@ -1,0 +1,138 @@
+# oneDAL build + abicheck compiler-plugin fact collection
+#
+# THE build-integrated collection step. Mirrors oneDAL's own build
+# (.github/workflows/nightly-build.yml: icx + avx2, builds daal/oneapi_c, uploads
+# __release_lnx), and adds ONE thing: the abicheck **compiler plugin** is loaded
+# during the normal compile, so it emits source facts (abicheck_inputs/) from the
+# AST the compiler already builds — no extra parse, no second build. It then
+# uploads BOTH the release tree AND the facts as artifacts, so the analysis step
+# (onedal-abicheck-analysis.yml, which runs the GitHub Action) reuses them.
+#
+# This is the answer to "add the plugin to the build we analyze, and save its
+# output with the build": collection happens inside the build that already runs
+# in CI (on PRs, path-filtered, exactly like nightly-build), not in a separate
+# throwaway build.
+#
+# Naming (no more "Flow A/B/C"):
+#   * compiler plugin        — this file: emits facts during the compile.
+#   * compiler wrapper       — abicheck-cc, wraps any compiler (portable fallback).
+#   * compile-database replay — dump --sources over a compile_commands.json.
+#
+# ⚠ The plugin is ABI-locked to the loading compiler's LLVM major, so it must be
+# built against **icx's** LLVM. Verify it loads into your icx (`icpx -### -fplugin=…`)
+# before relying on it; if it can't, use the compiler wrapper or bear +
+# compile-database replay instead (same abicheck_inputs/ output either way).
+name: oneDAL ABI — build with abicheck plugin (collect facts)
+
+on:
+  workflow_dispatch:
+  # In oneDAL, add these paths to (or merge this job into) nightly-build.yml so
+  # facts are collected on the SAME PR builds you analyze:
+  pull_request:
+    paths:
+      - "cpp/daal/include/**"
+      - "cpp/oneapi/dal/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-collect:
+    name: build oneDAL + collect source facts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+
+      - name: Install oneDAL toolchain + LLVM dev (to build the plugin for icx)
+        run: |
+          set -euxo pipefail
+          .ci/env/apt.sh dpcpp     # Intel icx/icpx (LLVM-based)
+          .ci/env/apt.sh mkl
+          .ci/env/apt.sh miniforge
+          # Plugin build needs the clang/LLVM dev headers matching icx's LLVM
+          # major. Discover it and install the matching -dev packages.
+          source /opt/intel/oneapi/setvars.sh
+          llvm_major="$(icpx --version | grep -oiE 'clang version [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+          echo "icx LLVM major: ${llvm_major:-unknown}"
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build \
+            "llvm-${llvm_major}-dev" "libclang-${llvm_major}-dev" || \
+            echo "::warning::LLVM ${llvm_major}-dev not on apt; build the plugin against icx's own LLVM tree instead (CMAKE_PREFIX_PATH=\$(dirname \$(icpx -print-resource-dir))/../..)."
+
+      - name: Checkout abicheck (plugin sources)
+        uses: actions/checkout@v4
+        with:
+          repository: abicheck/abicheck
+          ref: v0.4.0
+          path: .abicheck-src
+          persist-credentials: false
+
+      - name: Build the compiler plugin (against icx's LLVM)
+        run: |
+          set -euxo pipefail
+          source /opt/intel/oneapi/setvars.sh
+          # Point CMake at icx's own LLVM/Clang cmake packages so the plugin's ABI
+          # matches the compiler that will load it.
+          res="$(icpx -print-resource-dir)"; llvm_root="$(cd "$res/../.." && pwd)"
+          cmake -S .abicheck-src/contrib/abicheck-clang-plugin -B build/plugin -G Ninja \
+            -DCMAKE_PREFIX_PATH="$llvm_root" \
+            -DCMAKE_CXX_COMPILER=icpx || \
+          cmake -S .abicheck-src/contrib/abicheck-clang-plugin -B build/plugin -G Ninja
+          cmake --build build/plugin
+          test -f build/plugin/libabicheck-facts.so
+
+      # ── Inject the plugin into oneDAL's compile via a PATH-shim compiler ────
+      # oneDAL's build.sh resolves `--compiler icx` to icx/icpx on PATH. A shim
+      # earlier on PATH forwards to the real compiler and appends the plugin
+      # cc1 args — so facts are emitted with NO change to oneDAL's makefile.
+      - name: Install compiler shims that load the plugin
+        run: |
+          set -euxo pipefail
+          shim=/opt/abicheck-shim; sudo mkdir -p "$shim"
+          plugin="$PWD/build/plugin/libabicheck-facts.so"
+          out="$PWD/abicheck_inputs"
+          for cc in icx icpx; do
+            real="$(source /opt/intel/oneapi/setvars.sh >/dev/null; command -v $cc)"
+            sudo tee "$shim/$cc" >/dev/null <<EOF
+          #!/usr/bin/env bash
+          exec "$real" \\
+            -fplugin=$plugin \\
+            -Xclang -plugin-arg-abicheck-facts -Xclang out=$out \\
+            -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=cpp/daal/include \\
+            -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=cpp/oneapi \\
+            "\$@"
+          EOF
+            sudo chmod +x "$shim/$cc"
+          done
+          echo "$shim" >> "$GITHUB_PATH"
+
+      - name: Build oneDAL (plugin emits facts during the compile)
+        run: |
+          set -euxo pipefail
+          source /opt/intel/oneapi/setvars.sh
+          .ci/scripts/build.sh --compiler icx --optimizations avx2 --target daal     --debug symbols --jobs "$(nproc)"
+          .ci/scripts/build.sh --compiler icx --optimizations avx2 --target oneapi_c --debug symbols --jobs "$(nproc)"
+          echo "collected facts:"; find abicheck_inputs -maxdepth 2 -type f 2>/dev/null | head
+
+      - name: Package the release tree
+        run: |
+          set -euo pipefail
+          rel="$(find . -path '*/daal/latest' -type d | head -1)"
+          echo "RELEASE_DIR=$rel" >> "$GITHUB_ENV"
+
+      # ── Upload BOTH the build and the facts, side by side ───────────────────
+      - name: Upload oneDAL release tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: onedal-release-lnx
+          path: ${{ env.RELEASE_DIR }}
+          if-no-files-found: warn
+
+      - name: Upload abicheck source facts (consumed by the analysis workflow)
+        uses: actions/upload-artifact@v4
+        with:
+          name: onedal-abicheck-inputs
+          path: abicheck_inputs/
+          if-no-files-found: warn

@@ -12,8 +12,9 @@ and a full validation write-up in its `README.md`).
 | Layer | What it does | Build cost | When |
 |-------|--------------|-----------|------|
 | **PR source scan** | `mode: scan` over the PR's changed public headers, projected against the committed 2026.0.0 snapshot | **none** (buildless) | every PR, advisory |
+| **Build + collect facts** | Builds oneDAL with the [compiler plugin](build-evidence-setup.md) loaded during the compile; uploads `__release` + `abicheck_inputs/` | oneDAL build | PR + dispatch |
+| **Analysis (via Action)** | Downloads the build + facts and runs the Action: `dump` → `merge` facts → `compare` vs baseline; SARIF + PR comment | none (reuses artifacts) | after the build |
 | **Nightly binary compare** | Builds current oneDAL (icx+MKL, `--debug symbols`) and `compare`s each `.so` vs its baseline snapshot; SARIF | full build | nightly, advisory |
-| **Plugin data collection** | Builds the [Clang facts plugin](build-evidence-setup.md) and merges source facts into the snapshot | plugin build | on demand |
 
 The baseline is a set of per-library **`.abi.json` snapshots** built once from tag
 `2026.0.0` (symbol + DWARF, because oneDAL builds with `--debug symbols`) and

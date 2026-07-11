@@ -62,7 +62,9 @@ def _flags_by_subcommand() -> dict[str, set[str]]:
     assert RUN_SH.is_file(), f"missing {RUN_SH}"
     current_sub: str | None = None
     by_sub: dict[str, set[str]] = {}
-    for line in RUN_SH.read_text().splitlines():
+    # run.sh carries UTF-8 box-drawing chars; force UTF-8 so the default Windows
+    # cp1252 codec doesn't raise UnicodeDecodeError.
+    for line in RUN_SH.read_text(encoding="utf-8").splitlines():
         m_sub = _CMD_SUBCMD_RE.search(line)
         if m_sub and m_sub.group(1) in _KNOWN_SUBCOMMANDS:
             current_sub = m_sub.group(1)
@@ -81,6 +83,7 @@ def _valid_flags(subcommand: str) -> set[str]:
     out = subprocess.run(
         [sys.executable, "-m", "abicheck", *parts, "--help"],
         capture_output=True, text=True, check=True,
+        encoding="utf-8", errors="replace",  # rich help has box chars; avoid cp1252
     ).stdout
     # rich-click wraps help lines, so a flag can be split across the box; join
     # first, then scoop every "--flag" token.

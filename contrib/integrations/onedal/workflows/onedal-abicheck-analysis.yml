@@ -1,0 +1,108 @@
+# oneDAL ABI analysis — consumes the build + plugin facts via the GitHub Action
+#
+# The analysis half of the split. It does NOT build oneDAL and does NOT call the
+# abicheck CLI directly — it downloads the artifacts produced by
+# onedal-abicheck-build-with-plugin.yml (the release tree + abicheck_inputs/
+# source facts) and runs the **abicheck GitHub Action**:
+#
+#   1. dump   the freshly built library   → new.json
+#   2. merge  new.json + abicheck_inputs/ → new.enriched.json   (folds plugin facts)
+#   3. compare baseline.abi.json vs new.enriched.json → SARIF + PR comment
+#
+# So the expensive fact collection happens once, inside the build that already
+# runs in CI, and the analysis reuses it. Runs after the build completes
+# (workflow_run) so it also covers PRs — not just nightly.
+name: oneDAL ABI — analysis (action)
+
+on:
+  workflow_run:
+    workflows: ["oneDAL ABI — build with abicheck plugin (collect facts)"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload
+  pull-requests: write      # PR comment (compare mode supports it)
+
+jobs:
+  analyze:
+    name: analyze ${{ matrix.iface.name }}
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        iface:
+          - { name: daal-core, lib: libonedal_core, baseline: .abicheck/baseline-2026.0.0/libonedal_core.abi.json, headers: cpp/daal/include }
+          - { name: oneapi-dal, lib: libonedal,      baseline: .abicheck/baseline-2026.0.0/libonedal.abi.json,      headers: cpp/oneapi/dal }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+
+      # Pull the build + facts the build-with-plugin workflow uploaded.
+      - name: Download release tree
+        uses: actions/download-artifact@v4
+        with:
+          name: onedal-release-lnx
+          path: onedal-release
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Download abicheck source facts
+        uses: actions/download-artifact@v4
+        with:
+          name: onedal-abicheck-inputs
+          path: abicheck_inputs
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve the built library
+        id: lib
+        run: |
+          set -euo pipefail
+          so="$(find onedal-release -path "*/lib/intel64/${{ matrix.iface.lib }}.so.*" ! -type l | head -1)"
+          [[ -n "$so" ]] || { echo "::error::${{ matrix.iface.lib }} not in the release artifact"; exit 1; }
+          echo "so=$so" >> "$GITHUB_OUTPUT"
+
+      # 1. dump the built library (Action).
+      - name: Dump new library
+        uses: abicheck/abicheck@v0.4.0
+        with:
+          mode: dump
+          new-library: ${{ steps.lib.outputs.so }}
+          new-header: ${{ matrix.iface.headers }}
+          output-file: new-${{ matrix.iface.name }}.json
+
+      # 2. fold the plugin's source facts into that dump (Action, merge mode).
+      - name: Merge plugin facts into the new snapshot
+        uses: abicheck/abicheck@v0.4.0
+        with:
+          mode: merge
+          merge-inputs: "new-${{ matrix.iface.name }}.json abicheck_inputs/"
+          output-file: new-${{ matrix.iface.name }}.enriched.json
+
+      # 3. compare against the committed 2026.0.0 baseline (Action, compare mode).
+      - name: Compare vs 2026.0.0 baseline
+        uses: abicheck/abicheck@v0.4.0
+        with:
+          mode: compare
+          old-library: ${{ matrix.iface.baseline }}
+          new-library: new-${{ matrix.iface.name }}.enriched.json
+          suppress: onedal.suppress.yml
+          policy: sdk_vendor
+          format: sarif
+          output-file: onedal-${{ matrix.iface.name }}.sarif
+          upload-sarif: true
+          pr-comment: true
+          fail-on-breaking: false     # advisory while validating
+          fail-on-api-break: false
+
+      - name: Upload analysis artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onedal-abicheck-analysis-${{ matrix.iface.name }}
+          path: |
+            new-${{ matrix.iface.name }}.enriched.json
+            onedal-${{ matrix.iface.name }}.sarif
+          if-no-files-found: ignore

@@ -7,9 +7,17 @@ against the **2026.0.0** release. It gives you three layers of ABI/API safety:
 | Layer | Workflow | Trigger | Build cost | Gating |
 |-------|----------|---------|-----------|--------|
 | **Source scan** (primary) | `onedal-abicheck-pr-source-scan.yml` | every PR | **none** (buildless) | advisory (job summary) |
-| **Binary compare** (authoritative) | `onedal-abicheck-nightly-compare.yml` | nightly + dispatch | full icx+MKL build | advisory (SARIF) |
-| **Plugin data collection** | `onedal-abicheck-plugin-collect.yml` | dispatch | plugin build | non-blocking (enrichment) |
+| **Build + collect facts** | `onedal-abicheck-build-with-plugin.yml` | PR + dispatch | oneDAL build (plugin loaded) | uploads release + facts |
+| **Analysis (via Action)** | `onedal-abicheck-analysis.yml` | after the build | none (reuses artifacts) | advisory (SARIF + PR comment) |
+| **Nightly binary compare** | `onedal-abicheck-nightly-compare.yml` | nightly + dispatch | full icx+MKL build | advisory (SARIF) |
 | **Baseline builder** | `onedal-abicheck-baseline.yml` | dispatch (once) | full icx+MKL build | opens a PR with snapshots |
+
+> **Build-integrated collection:** `build-with-plugin` mirrors oneDAL's
+> `nightly-build.yml` and loads the **compiler plugin** during the normal compile
+> so it emits source facts (`abicheck_inputs/`) with no extra parse, then uploads
+> them next to `__release_lnx`. `analysis` runs the **GitHub Action** on those
+> artifacts (`dump` → `merge` facts → `compare`) — the collection happens once,
+> inside the build CI already runs, and the analysis reuses it. See ANALYSIS.md §D.
 
 > **Posture:** everything ships **advisory** (report, don't block). This is a
 > validation deployment — see the signal, tune the config/suppressions, then flip
@@ -30,8 +38,8 @@ contrib/integrations/onedal/
 │   ├── onedal-abicheck-baseline.yml
 │   ├── onedal-abicheck-pr-source-scan.yml
 │   ├── onedal-abicheck-nightly-compare.yml
-│   ├── onedal-abicheck-libabigail.yml    → abicheck alongside the existing abidiff gate
-│   └── onedal-abicheck-plugin-collect.yml
+│   ├── onedal-abicheck-build-with-plugin.yml → build oneDAL + collect facts (plugin)
+│   └── onedal-abicheck-analysis.yml       → analyze the build + facts via the Action
 ├── scripts/
 │   └── onedal-make-baseline.sh → reproduce baselines locally
 └── ANALYSIS.md                 → UX findings + abicheck backlog (read this)
@@ -77,8 +85,8 @@ contrib/integrations/onedal/
 5. **Open a test PR** touching `cpp/daal/include/**`. The *PR source scan* runs
    (buildless, ~1 min) and writes an ABI report to the job summary.
 
-That's the loop. The nightly compare and plugin-collect workflows are opt-in from
-the Actions tab.
+That's the loop. The build-with-plugin, analysis, and nightly-compare workflows
+are opt-in from the Actions tab.
 
 ---
 
@@ -103,14 +111,18 @@ at the **binary + DWARF** level — the ground truth for removed/changed exporte
 symbols and layout breaks. Emits SARIF (code scanning) + a job summary. Kept off
 the PR path because a full oneDAL build is far too slow for per-PR feedback.
 
-### 3. Plugin data collection (source-fact enrichment)
+### 3. Build + collect facts, then analyze via the Action (the plugin path)
 
-Builds the **abicheck Clang facts plugin** and, during a clang compile of the
-public-header surface, emits normalized `abicheck_inputs/` source facts, which
-`abicheck merge` folds into the binary snapshot — linking each exported symbol
-back to its source declaration (L4/L5 evidence). See the caveats: the plugin is
-ABI-locked to its clang major, so the production (icx) build should prefer the
-portable `abicheck-cc` wrapper or a `compile_commands.json`.
+`build-with-plugin` builds oneDAL with the **compiler plugin** loaded during the
+normal compile (via a PATH-shim `icx`/`icpx`), so it emits `abicheck_inputs/`
+source facts with no extra parse, and uploads them next to `__release_lnx`.
+`analysis` then runs the **GitHub Action** on those artifacts: `dump` the built
+library → `merge` in the facts → `compare` vs the baseline (SARIF + PR comment).
+Collection rides the build CI already runs; the analysis reuses it — no second
+build, no CLI in oneDAL's scripts. The three fact producers (compiler plugin /
+compiler wrapper / compile-database replay) all emit the same `abicheck_inputs/`,
+so the analysis is identical whichever you use. Details + the icx ABI-lock
+caveat: ANALYSIS.md §D.
 
 ---
 
@@ -226,12 +238,12 @@ job-summary channel is the pragmatic per-PR choice.
 
 ### F8 — 🟢 Plugin is ABI-locked to its clang major (icx caveat)
 
-The Clang facts plugin must be loaded by the *same* clang major it was built
-against (ADR-038 C.5). A plugin built against upstream LLVM 18 is **not guaranteed
-to load into Intel icx**. The demo builds + loads with one stock clang (always
-green). For fact collection during the *real* icx build, prefer the portable
-`abicheck-cc` wrapper (Flow B), which wraps any compiler, or generate a
-`compile_commands.json` and use `dump --sources`.
+The compiler plugin must be loaded by the *same* compiler major it was built
+against (ADR-038 C.5). `build-with-plugin.yml` builds it against **icx's own
+LLVM** (`icpx -print-resource-dir`) so it matches. If it still can't load into
+your icx, swap the PATH-shim for the **compiler wrapper** (`abicheck-cc`) or
+`bear` + **compile-database replay** — the uploaded `abicheck_inputs/` is
+identical, so the analysis workflow is unchanged.
 
 ---
 
