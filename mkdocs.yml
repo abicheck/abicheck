@@ -65,6 +65,7 @@ nav:
       - Security Hardening: user-guide/security-hardening.md
       - Probe Harness: user-guide/probe-harness.md
     - Integrations & Migration:
+      - Integrating with oneDAL: user-guide/onedal-integration.md
       - Tool Modes: user-guide/tool-modes.md
       - Python API: user-guide/python-api.md
       - MCP Integration: user-guide/mcp-integration.md

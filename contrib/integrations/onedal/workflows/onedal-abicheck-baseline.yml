@@ -1,0 +1,121 @@
+# abicheck — build the oneDAL 2026.0.0 ABI baseline snapshots
+#
+# Builds oneDAL at tag 2026.0.0 with oneDAL's own toolchain (icx + MKL, matching
+# .github/workflows/ci.yml), then dumps one abicheck snapshot per shared library.
+# The snapshots are the anchor every later PR scan / nightly compare measures
+# against. Because the build uses `--debug symbols`, each snapshot carries L0
+# symbols + L1 DWARF types — a rich, robust baseline that needs no header parsing.
+#
+# Run this once (workflow_dispatch); it uploads the snapshots as an artifact and
+# opens a PR committing them under .abicheck/baseline-2026.0.0/. Re-run to rebase
+# the baseline onto a newer release tag (bump `ref` / the input).
+name: oneDAL ABI — build 2026.0.0 baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: "oneDAL release tag to baseline from"
+        required: true
+        default: "2026.0.0"
+      open-pr:
+        description: "Open a PR committing the snapshots"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write        # push the baseline branch
+  pull-requests: write   # open the baseline PR
+
+jobs:
+  build-baseline:
+    name: build + dump ${{ inputs.release-tag }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout oneDAL @ ${{ inputs.release-tag }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release-tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # ── oneDAL toolchain (identical to oneDAL's Linux CI) ──────────────────
+      - name: Install DPC++ / MKL / miniforge
+        run: |
+          .ci/env/apt.sh dpcpp
+          .ci/env/apt.sh mkl
+          .ci/env/apt.sh miniforge
+
+      # ── Build the release libraries (with debug symbols → DWARF for L1) ────
+      - name: Build oneDAL release libraries
+        run: |
+          set -euxo pipefail
+          source /opt/intel/oneapi/setvars.sh
+          .ci/scripts/build.sh --compiler icx --optimizations avx2 --target daal      --debug symbols --jobs "$(nproc)"
+          .ci/scripts/build.sh --compiler icx --optimizations avx2 --target oneapi_c  --debug symbols --jobs "$(nproc)"
+          # oneapi_dpc (SYCL) is optional — uncomment to baseline the DPC++ libs too:
+          # .ci/scripts/build.sh --compiler icx --optimizations avx2 --target oneapi_dpc --debug symbols --jobs "$(nproc)"
+
+      - name: Locate the release lib dir
+        id: rel
+        run: |
+          set -euo pipefail
+          libdir="$(find . -path '*/daal/latest/lib/intel64' -type d | head -1)"
+          if [[ -z "$libdir" ]]; then
+            echo "::error::Release lib dir (*/daal/latest/lib/intel64) not found — did the build succeed?"
+            exit 1
+          fi
+          echo "libdir=$libdir" >> "$GITHUB_OUTPUT"
+          echo "Found release lib dir: $libdir"; ls -la "$libdir"
+
+      # ── abicheck ───────────────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install abicheck
+        run: pip install "abicheck==0.4.0"   # pin to a published release
+
+      - name: Dump per-library baseline snapshots
+        run: |
+          set -euxo pipefail
+          libdir="${{ steps.rel.outputs.libdir }}"
+          out=".abicheck/baseline-${{ inputs.release-tag }}"
+          mkdir -p "$out"
+          # One snapshot per real (unversioned-basename) shared library. Symbol +
+          # DWARF (L0/L1) — no header parse, so this is toolchain-robust.
+          for so in "$libdir"/libonedal*.so.*; do
+            [[ -f "$so" && ! -L "$so" ]] || continue
+            base="$(basename "$so")"; stem="${base%%.so.*}"       # libonedal_core.so.4 → libonedal_core
+            echo "dumping $base → $out/$stem.abi.json"
+            abicheck dump "$so" \
+              --version "${{ inputs.release-tag }}" \
+              --git-tag "${{ inputs.release-tag }}" \
+              --build-id "${{ github.run_id }}" \
+              -o "$out/$stem.abi.json"
+          done
+          echo "Baseline snapshots:"; ls -la "$out"
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onedal-abicheck-baseline-${{ inputs.release-tag }}
+          path: .abicheck/baseline-${{ inputs.release-tag }}/
+
+      - name: Open baseline PR
+        if: ${{ inputs.open-pr }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="abicheck/baseline-${{ inputs.release-tag }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -f ".abicheck/baseline-${{ inputs.release-tag }}/"
+          git commit -m "chore(abicheck): add oneDAL ${{ inputs.release-tag }} ABI baseline snapshots"
+          git push -u origin "$branch" --force-with-lease
+          gh pr create --fill \
+            --title "abicheck: oneDAL ${{ inputs.release-tag }} ABI baseline" \
+            --body "Generated by the *build 2026.0.0 baseline* workflow (run ${{ github.run_id }}). These per-library symbol+DWARF snapshots anchor the PR source scans and nightly compare." \
+            || echo "PR may already exist; skipping."

@@ -1,0 +1,58 @@
+# onedal.suppress.yml — accepted/known ABI changes for oneDAL
+#
+# Passed to compare/scan via `suppress:` in the workflows. Suppressed changes are
+# removed BEFORE the verdict and severity counts are computed (classify →
+# suppress → severity → exit code). Detection stays on; this only silences.
+#
+# Format: https://abicheck.github.io/abicheck/user-guide/suppressions/
+# Keep every rule justified (the config sets suppression.require_justification).
+#
+# NOTE: `change_kind` (when used) must be a REAL abicheck change kind — an unknown
+# value makes compare/scan hard-fail (exit 64), not warn. Removed exported
+# functions are `func_removed`/`func_deleted`, not "symbol_removed". These rules
+# intentionally match by symbol/location only (no change_kind), so they suppress
+# ALL changes on internal symbols regardless of kind — the safe choice for
+# implementation-detail namespaces.
+version: 1
+suppressions:
+  # ── Internal implementation namespaces (not part of the public ABI) ─────────
+  # Belt-and-suspenders: scope.public + sources.exclude already drop most of
+  # these, but symbol-level (L0) diffing sees mangled internal symbols that leak
+  # as exported when the library is built without a version script.
+  - symbol_pattern: "_ZN4daal8internal.*"
+    reason: "daal::internal is an implementation namespace, not public ABI."
+    label: onedal-internal
+  - symbol_pattern: "_ZN6oneapi3dal6detail.*"
+    reason: "oneapi::dal::detail is an implementation namespace, not public ABI."
+    label: onedal-internal
+  - symbol_pattern: "_ZN6oneapi3dal7backend.*"
+    reason: "oneapi::dal::backend is an implementation namespace, not public ABI."
+    label: onedal-internal
+  - source_location: "*/detail/*"
+    reason: "detail/ headers are internal; do not gate on them."
+    label: onedal-internal
+  - source_location: "*/backend/*"
+    reason: "backend/ headers are internal; do not gate on them."
+    label: onedal-internal
+
+  # ── Versioned interface namespaces (DAAL ABI-generation churn) ──────────────
+  # DAAL wraps each ABI generation in interface1/interface2/... . Symbol churn
+  # between *internal* interface generations is expected; the public umbrella
+  # (daal::algorithms::...) is what must stay stable. Dated so you revisit it;
+  # narrow to the generations your release actually exports once you see a real
+  # diff. (No change_kind: suppresses all churn on these internal symbols.)
+  - symbol_pattern: "_ZN4daal.*10interface[0-9]+.*"
+    expires: 2026-12-31
+    reason: "Internal DAAL interfaceN generation churn; public umbrella is stable."
+    label: onedal-daal-interface
+
+  # ── Template instantiation noise (example — enable after reviewing a baseline)
+  # oneDAL exports many weak template instantiations whose exact set varies with
+  # compiler/opt level; that set is not a stability contract. Uncomment and scope
+  # to real symbols once a baseline-vs-build diff shows the churn.
+  # - symbol_pattern: "_ZN6oneapi3dal.*IiEE.*"
+  #   reason: "Weak template instantiation drift, not an API contract."
+  #   label: onedal-template-instantiation
+
+  # Add project-specific, justified waivers below as the pipeline surfaces
+  # intentional changes during the pre-release validation runs.

@@ -346,7 +346,9 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-}"
   add_single_flag "--compile-db" "${INPUT_COMPILE_DB:-}"
-  add_single_flag "--build-config" "${INPUT_BUILD_CONFIG:-}"
+  # scan's config flag is --config (not --build-config, which does not exist on
+  # scan and hard-fails with exit 64). dump uses --config for the same input.
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   add_single_flag "--baseline" "${INPUT_BASELINE:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 

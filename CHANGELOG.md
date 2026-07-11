@@ -11,6 +11,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **oneDAL integration package** (`contrib/integrations/onedal/`) — a drop-in
+  set of GitHub Actions workflows, an `.abicheck.yml`, and a suppression file for
+  wiring abicheck into [uxlfoundation/oneDAL](https://github.com/uxlfoundation/oneDAL)
+  CI, baselined against the 2026.0.0 release: a buildless per-PR source scan
+  (`mode: scan` against a committed `.abi.json` snapshot), a nightly binary
+  compare (icx+MKL build → SARIF), a one-shot baseline builder, and a Clang
+  facts-plugin data-collection demo. Ships with a validated findings write-up
+  (`README.md`) and a user-guide page (`docs/user-guide/onedal-integration.md`).
+
+### Fixed
+
+- **GitHub Action `scan` mode passed the wrong config flag.** `action/run.sh`
+  forwarded the `build-config` input as `--build-config` in `scan` mode, but
+  `abicheck scan` only accepts `--config` (as `dump` already used) — so setting
+  `build-config` on a `scan` step hard-failed with exit 64
+  (`No such option '--build-config'`). Now passes `--config`.
+
 - **`abicheck dump <binary> --inputs ./abicheck_inputs/`** folds a build-emitted
   Flow-2 pack (from the `abicheck-cc` wrapper or the Clang facts plugin) straight
   into the artifact snapshot and links the source surface against the binary's
