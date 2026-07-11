@@ -141,8 +141,44 @@ def test_derive_l2_include_dirs_surfaces_argv_only_include_flags(tmp_path):
     dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=tmp_path)
     for fn in cleanups:
         fn()
-    assert str(qdir) in dirs  # -iquote dir surfaced from argv
-    assert str(ddir) in dirs  # -idirafter dir surfaced from argv
+    # Compare resolved (real) paths — the seed canonicalizes and, on Windows, the
+    # adapter redacts the home-relative temp dir to ``~`` which the seed un-redacts.
+    resolved = {str(Path(d).resolve()) for d in dirs}
+    assert str(qdir.resolve()) in resolved  # -iquote dir surfaced from argv
+    assert str(ddir.resolve()) in resolved  # -idirafter dir surfaced from argv
+
+
+def test_derive_l2_include_dirs_argv_dir_relative_to_compile_unit(tmp_path):
+    # An argv-only include dir that is *relative to the compile command's directory*
+    # (e.g. `directory: build` + `-iquote ../deps/include`) must resolve against that
+    # directory — the cwd the build ran in — not the abicheck process cwd, or the
+    # L2 seed drops it while L4 replay (cwd=directory) finds it (Codex review).
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    builddir = tmp_path / "build"
+    builddir.mkdir()
+    deps = tmp_path / "deps" / "include"
+    deps.mkdir(parents=True)
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    (builddir / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(builddir),
+            "file": str(src),
+            # `../deps/include` is relative to `directory`, argv-only.
+            "arguments": ["cc", "-iquote", "../deps/include", "-c", str(src)],
+        }]),
+        encoding="utf-8",
+    )
+
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path,
+        build_compile_db="build/compile_commands.json",
+    )
+    for fn in cleanups:
+        fn()
+    resolved = {str(Path(d).resolve()) for d in dirs}
+    assert str(deps.resolve()) in resolved
 
 
 def test_derive_l2_include_dirs_no_inputs_is_empty():

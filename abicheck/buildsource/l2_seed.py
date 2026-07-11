@@ -154,8 +154,17 @@ def derive_l2_include_dirs(
             # in argv. The L4 replay honours those argv forms (dropping them changes
             # the parsed TU), so L2 must see the same dirs or a build that resolves
             # dependency headers via e.g. `-iquote deps/include` still fails its
-            # header parse with no manual -I (Codex review). Union both, deduped.
-            argv_dirs = _build_context_include_dirs(list(cu.argv)) if cu.argv else set()
+            # header parse with no manual -I (Codex review). Resolve them against the
+            # unit's `directory` (the cwd the compile command ran in — a relative
+            # `-iquote ../deps` must resolve there, not against the abicheck cwd) and
+            # un-redact the home-relative `~` the adapter stored. Union, deduped.
+            argv_dirs = (
+                _build_context_include_dirs(
+                    list(cu.argv), base_dir=cu.directory or None, expand_user=True
+                )
+                if cu.argv
+                else set()
+            )
             for inc in (*cu.include_paths, *cu.system_include_paths, *sorted(argv_dirs)):
                 if not inc:
                     continue
