@@ -84,8 +84,9 @@ def _abicheck_available() -> bool:
 _HAS_ABICHECK: bool = _abicheck_available()
 
 
-DEFAULT_ABICC_TIMEOUT = 120  # seconds
-DEFAULT_ABICHECK_FULL_TIMEOUT = 120  # seconds per dump/compare call
+DEFAULT_ABICC_TIMEOUT = 90  # seconds; ABICC is the slowest tool and can hang
+DEFAULT_ABICHECK_FULL_TIMEOUT = 90  # seconds per dump/compare call
+DEFAULT_TIMEOUT = 90  # seconds; shared per-tool-call budget for one example run
 
 # Historical release-pinned cross-tool benchmark:
 # cases 01-73 plus the 26b compatible-union edge case.  The full catalog can
@@ -552,14 +553,14 @@ def _build_plugin_side(
     return library, pack, ""
 
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                 case: str, rdir: Path) -> ToolResult:
+                 case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run the normal binary+headers abicheck benchmark lane.
 
     Keep this lane comparable with libabigail's binary/header modes.  The
     deeper source/build evidence path is exposed separately as
     ``abicheck_full``.
     """
-    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir)
+    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir, timeout=timeout)
 
 
 def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
@@ -635,7 +636,7 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
 
 def _run_abicheck_dump_compare(
     v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-    case: str, rdir: Path, *, suffix: str = "", timeout: int = 60,
+    case: str, rdir: Path, *, suffix: str = "", timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     """Run the baseline binary plus public-header dump/compare lane."""
     if not _HAS_ABICHECK:
@@ -725,7 +726,7 @@ def _write_compat_descriptor(so: Path, h: Path | None, ver: str, out: Path) -> N
 
 # ── abicheck compat (ABICC XML drop-in) ──────────────────────────────────────
 def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run abicheck compat with ABICC-format XML descriptors."""
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
@@ -740,10 +741,10 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
         r = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compat", "check", "-lib", case,
              "-old", str(v1_xml), "-new", str(v2_xml)],
-            capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
+            capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=60_000.0)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -775,7 +776,7 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 
 # ── abicheck compat strict mode ───────────────────────────────────────────────
 def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path, timeout: int = 60) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run abicheck compat in strict mode (-s flag promotes API_BREAK→BREAKING)."""
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
@@ -831,7 +832,7 @@ def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 def run_abidiff(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
                 case: str, rdir: Path,
                 headers_dir: str | None = None,
-                suffix: str = "", **_kw: Any) -> ToolResult:
+                suffix: str = "", timeout: int = DEFAULT_TIMEOUT, **_kw: Any) -> ToolResult:
     if not shutil.which("abidiff"):
         return ToolResult(verdict="SKIP")
 
@@ -845,9 +846,9 @@ def run_abidiff(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
 
     _t0 = time.monotonic()
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=60_000.0)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
     out = r.stdout + r.stderr
     (rdir / f"{case}_abidiff{suffix}.txt").write_text(out)
@@ -998,7 +999,8 @@ def run_abicc_dumper(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | N
 
 
 def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path, **kw: Any) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT,
+                        **kw: Any) -> ToolResult:
     """Wrapper: run abidiff with headers_dir resolved from v1_h/v2_h."""
     if v1_h and v1_h.exists() and v2_h and v2_h.exists() and v1_h.parent != v2_h.parent:
         headers_dir: str | tuple | None = (str(v1_h.parent), str(v2_h.parent))
@@ -1008,7 +1010,8 @@ def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
         headers_dir = str(v2_h.parent)
     else:
         headers_dir = None
-    return run_abidiff(v1_so, v2_so, v1_h, v2_h, case, rdir, headers_dir=headers_dir, suffix="_headers")
+    return run_abidiff(v1_so, v2_so, v1_h, v2_h, case, rdir, headers_dir=headers_dir,
+                       suffix="_headers", timeout=timeout)
 
 
 TOOL_REGISTRY: list[Tool] = [
@@ -1051,8 +1054,12 @@ def _correct(verdict: str, expected: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark abicheck vs abidiff vs ABICC")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help="Timeout per tool call for abicheck/abicheck_compat/"
+                        f"abicheck_strict/abidiff(+headers) (default: {DEFAULT_TIMEOUT}s)")
     p.add_argument("--abicc-timeout", type=int, default=DEFAULT_ABICC_TIMEOUT,
-                   help=f"Timeout per ABICC call (default: {DEFAULT_ABICC_TIMEOUT}s)")
+                   help="Timeout per ABICC call — ABICC is the slowest tool and can "
+                        f"hang, so keep this bounded (default: {DEFAULT_ABICC_TIMEOUT}s)")
     p.add_argument("--abicheck-full-timeout", type=int,
                    default=DEFAULT_ABICHECK_FULL_TIMEOUT,
                    help="Timeout per abicheck full-lane call "
@@ -1527,6 +1534,7 @@ def _run_tools_for_case(
     rdir: Path,
     abicc_timeout: int,
     abicheck_full_timeout: int = DEFAULT_ABICHECK_FULL_TIMEOUT,
+    timeout: int = DEFAULT_TIMEOUT,
     case_dir: Path | None = None,
     v1_src: Path | None = None,
     v2_src: Path | None = None,
@@ -1542,12 +1550,13 @@ def _run_tools_for_case(
                 build_dir=build_dir, timeout=abicheck_full_timeout,
             )
         elif t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
-            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir,
+                                            timeout=timeout)
         elif t.name in ("abicc_dumper", "abicc_xml"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
         else:
             # abidiff and abidiff_headers share the common signature
-            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir)
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=timeout)
     return tool_results
 
 
@@ -1621,7 +1630,7 @@ def _process_case(
 
     tool_results = _run_tools_for_case(
         active_tools, v1_so, v2_so, v1_h, v2_h, v1_h_abicheck, v2_h_abicheck,
-        name, rdir, args.abicc_timeout, args.abicheck_full_timeout,
+        name, rdir, args.abicc_timeout, args.abicheck_full_timeout, args.timeout,
         case_dir=case_dir, v1_src=v1_src, v2_src=v2_src, build_dir=build_info,
     )
 
