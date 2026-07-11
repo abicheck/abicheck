@@ -170,6 +170,111 @@ def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
         assert not any(d.startswith("~") for d in dirs)
 
 
+def test_derive_l2_include_dirs_empty_when_no_build(tmp_path):
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    # A source tree with no compile DB and no build-system marker resolves no
+    # compile units → the fallback yields nothing and drains cleanly (never raises).
+    (tmp_path / "notes.txt").write_text("hi\n", encoding="utf-8")
+    dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    assert dirs == []
+    assert cleanups == []
+
+
+def test_derive_l2_include_dirs_from_pack(tmp_path):
+    # A collected BuildSourcePack passed as --build-info supplies compile units
+    # directly (via base_build), so its include dirs must be surfaced too — the
+    # non-compile-DB build-info form the earlier hand-rolled resolver missed.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    inc = tmp_path / "pkginc"
+    inc.mkdir()
+    pack_dir = tmp_path / "pack"
+    pack = BuildSourcePack.empty(pack_dir)
+    pack.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
+    )
+    pack.write()
+
+    dirs, cleanups = derive_l2_include_dirs(build_info=pack_dir, sources=None)
+    for fn in cleanups:
+        fn()
+    assert str(inc) in dirs
+
+
+def _compile_db_tree(tmp_path):
+    """A source tree with a compile DB whose one TU has a real -I dir."""
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        encoding="utf-8",
+    )
+    return inc
+
+
+def test_seed_l2_includes_noop_when_includes_given(tmp_path):
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    _compile_db_tree(tmp_path)
+    existing = [tmp_path / "myinc"]
+    # User already passed -I → the fallback is a strict no-op (explicit -I wins).
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=existing, sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+    )
+    assert incs == existing
+    assert pending == []
+
+
+def test_seed_l2_includes_noop_when_no_headers(tmp_path):
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    _compile_db_tree(tmp_path)
+    # No -H headers → nothing to scope, so no seeding.
+    incs, pending = seed_l2_includes(
+        headers=[], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+    )
+    assert incs == []
+    assert pending == []
+
+
+def test_seed_l2_includes_seeds_and_defers_cleanup(tmp_path):
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    inc = _compile_db_tree(tmp_path)
+    defer: list = []
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=defer,
+    )
+    from pathlib import Path as _P
+    assert _P(str(inc)) in incs
+    # With a defer_cleanup channel, cleanups go there (none for a plain compile DB)
+    # and none come back as pending.
+    assert pending == []
+
+
+def test_seed_l2_includes_returns_pending_without_defer(tmp_path):
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    inc = _compile_db_tree(tmp_path)
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+    )
+    assert str(inc) in [str(p) for p in incs]
+    # A plain compile DB spawns no temp build dir, so pending is empty; the call
+    # must still return the (list, list) shape and never raise.
+    assert isinstance(pending, list)
+
+
 def test_graph_build_collect_mode_skips_l4(tmp_path):
     # P18: graph-build collects L3 + the L5 graph from build facts alone, with NO
     # L4 source replay — so the structural graph + build options are available even

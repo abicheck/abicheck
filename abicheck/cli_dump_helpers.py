@@ -437,11 +437,26 @@ def perform_elf_dump(
     # Deferred roots ride in gcc_option_tokens (as -isystem), not extra_includes,
     # so their contents must be hashed into the AST cache key explicitly (Codex).
     deferred_dirs = tuple(deferred_token_dirs(deferred))
+    # L2 include fallback (parity with `scan`): when -H headers are given but no
+    # explicit -I, seed the build's include dirs so `dump --sources` parses public
+    # headers that reach into a dependency SDK (the pvxs/EPICS case). dump has no
+    # defer_cleanup channel, so any inferred temp-build-dir cleanups come back as
+    # pending and are run below, after the header parse has consumed the dirs.
+    from .buildsource.inline import _run_cleanups, seed_l2_includes
+
+    eff_includes, _l2_pending_cleanups = seed_l2_includes(
+        headers=headers,
+        includes=includes,
+        sources=sources,
+        build_info=build_info,
+        build_config=build_config,
+        defer_cleanup=None,
+    )
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=list(includes) + inc_extra,
+            extra_includes=eff_includes + inc_extra,
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,
@@ -460,6 +475,11 @@ def perform_elf_dump(
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    finally:
+        # The header parse has consumed the build-seeded include dirs (success or
+        # failure), so release any inferred-CMake temp build dir now.
+        if _l2_pending_cleanups:
+            _run_cleanups(_l2_pending_cleanups)
 
     # Record that the header AST was parsed with the real build context (ADR-029)
     if effective_compile_db and resolved_headers:

@@ -47,7 +47,6 @@ side-effect at the bottom of :mod:`abicheck.cli` so ``@main.command`` runs.
 from __future__ import annotations
 
 import json
-import logging
 import subprocess
 import sys
 import time
@@ -108,8 +107,6 @@ from .cli_scan_helpers import (
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
-
-logger = logging.getLogger(__name__)
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -361,35 +358,22 @@ def _build_new_snapshot(
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
     """
+    from .buildsource.inline import seed_l2_includes
     from .errors import AbicheckError
     from .service import resolve_input
 
     # L2 include fallback: when headers are given but the user passed no explicit
-    # -I, the aggregate public-header parse cannot see the include dirs the build
-    # already knows (e.g. pvxs public headers include EPICS Base's <epicsTime.h>).
-    # Reuse the build's compile DB — the same one the L4 replay uses, honoring a
-    # trusted --config — to seed those dirs so `scan/dump --sources` parses headers
-    # without a manual -I. An inferred CMake build dir may hold generated headers
-    # the derived dirs point into, so its cleanup thunks must outlive this L2 parse:
-    # push them onto defer_cleanup (drained at scan end) when available, else run
-    # them only after resolve_input has consumed the dirs.
-    _l2_local_cleanups: list[Callable[[], None]] = []
-    if headers and not includes and (sources is not None or build_info is not None):
-        from .buildsource.inline import derive_l2_include_dirs
-
-        derived, derived_cleanups = derive_l2_include_dirs(
-            build_info, sources, build_config
-        )
-        if derived:
-            includes = [Path(d) for d in derived]
-            logger.info(
-                "L2 header parse: seeded %d include dir(s) from the build's "
-                "compile database (no -I given).", len(derived),
-            )
-            if defer_cleanup is not None:
-                defer_cleanup.extend(derived_cleanups)
-            else:
-                _l2_local_cleanups = derived_cleanups
+    # -I, seed the build's include dirs so the aggregate public-header parse can
+    # resolve dependency headers (e.g. pvxs headers include EPICS Base's
+    # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    includes, _l2_local_cleanups = seed_l2_includes(
+        headers=headers,
+        includes=includes,
+        sources=sources,
+        build_info=build_info,
+        build_config=build_config,
+        defer_cleanup=defer_cleanup,
+    )
 
     try:
         snap = resolve_input(

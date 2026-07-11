@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -68,6 +69,8 @@ if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
 
 #: Default places to look for a compile DB inside a source checkout, in order.
+logger = logging.getLogger(__name__)
+
 _COMPILE_DB_NAME = "compile_commands.json"
 #: ``builddir`` is the name the Meson docs/tutorials use for `meson setup builddir`
 #: (P12); ``build``/``_build``/``out`` cover CMake/Ninja conventions.
@@ -639,20 +642,37 @@ def derive_l2_include_dirs(
     # .abicheck.yml is loaded for its non-executable settings but never run).
     cfg_path = build_config or discover_build_config(sources)
     cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
-    merged = BuildEvidence()
-    extractors: list[ExtractorRecord] = []
     cleanups: list[Callable[[], None]] = []
     try:
-        compile_db = _resolve_compile_db(
-            build_info, sources, cfg,
+        # Reuse the same L3-collection path embed_build_source drives, restricted
+        # to build context only (no L4/L5), so every supported build-info form —
+        # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
+        # config-located compile DB, or the inferred build-system query — yields
+        # the same CompileUnit include dirs the L4 replay would use. Re-deriving
+        # this by hand kept missing input forms (packs, bazel); collect_inline_pack
+        # owns them, plus the temp-build-dir cleanup lifecycle via defer_cleanup.
+        base_build = None
+        raw_build_info = build_info
+        if build_info is not None and is_pack_dir(build_info):
+            base_build = BuildSourcePack.load(build_info).build_evidence
+            raw_build_info = None
+        pack = collect_inline_pack(
+            sources=None if is_pack_dir(sources) else sources,
+            build_info=raw_build_info,
+            build_config=cfg,
             build_config_trusted_for_query=build_config is not None,
-            merged=merged, extractors=extractors, cleanup=cleanups,
+            base_build=base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
         )
-        if compile_db is not None:
-            _run_compile_db(compile_db, cfg.system, merged, extractors, None)
+        units = (
+            pack.build_evidence.compile_units
+            if pack is not None and pack.build_evidence is not None
+            else []
+        )
         seen: set[str] = set()
         out: list[str] = []
-        for cu in merged.compile_units:
+        for cu in units:
             for inc in (*cu.include_paths, *cu.system_include_paths):
                 if not inc:
                     continue
@@ -674,6 +694,47 @@ def derive_l2_include_dirs(
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         _run_cleanups(cleanups)
         return [], []
+
+
+def seed_l2_includes(
+    *,
+    headers: list[Path] | tuple[Path, ...],
+    includes: list[Path] | tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    build_config: Path | None,
+    defer_cleanup: list[Callable[[], None]] | None,
+) -> tuple[list[Path], list[Callable[[], None]]]:
+    """Augment *includes* with build-derived L2 include dirs (shared by scan+dump).
+
+    When ``-H`` headers are given but the user passed no explicit ``-I``, the L2
+    aggregate public-header parse cannot see the include dirs the build already
+    knows (pvxs public headers include EPICS Base's ``<epicsTime.h>``). This seeds
+    them from :func:`derive_l2_include_dirs` so ``scan``/``dump --sources`` parse
+    those headers without a manual ``-I``.
+
+    Returns ``(includes, pending_cleanups)``. Temp-build-dir cleanups (an inferred
+    CMake dir may hold generated headers the seeded dirs point into) are pushed
+    onto *defer_cleanup* when the caller provides one (drained at command end);
+    otherwise they are returned as *pending_cleanups* for the caller to run only
+    **after** the L2 parse has consumed the dirs. A no-op (returns *includes*
+    unchanged, no cleanups) when the seeding conditions do not hold.
+    """
+    incs = list(includes)
+    if not (headers and not incs and (sources is not None or build_info is not None)):
+        return incs, []
+    derived, cleanups = derive_l2_include_dirs(build_info, sources, build_config)
+    if not derived:
+        return incs, []
+    logger.info(
+        "L2 header parse: seeded %d include dir(s) from the build's compile "
+        "database (no -I given).", len(derived),
+    )
+    seeded = [Path(d) for d in derived]
+    if defer_cleanup is not None:
+        defer_cleanup.extend(cleanups)
+        return seeded, []
+    return seeded, cleanups
 
 
 def _run_cleanups(cleanups: list[Callable[[], None]]) -> None:
