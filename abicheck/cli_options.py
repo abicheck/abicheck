@@ -1257,33 +1257,11 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
     },
 }
 
-#: Profile keys the directory/package (release fan-out) path does not accept —
-#: the ``compare`` set-input dispatch rejects these loudly (some by parameter
-#: source, e.g. ``--depth``; some by value, e.g. ``--exit-code-scheme``). A
-#: profile default must never *become* one of those rejections, so on a set-input
-#: compare these keys are skipped and the fan-out's own resolution (config /
-#: legacy scheme) applies. The remaining keys (``fmt``/``recommend``/``stat``)
-#: are honoured on both paths.
-_PROFILE_SET_INPUT_INCOMPATIBLE: frozenset[str] = frozenset(
-    {
-        "depth",
-        "max_depth",
-        "old_sources",
-        "new_sources",
-        "old_build_info",
-        "new_build_info",
-        "exit_code_scheme",
-        "reconcile_build_context",
-        "env_matrix_path",
-    }
-)
-
-
 def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
     """True when the ``compare`` operands are a directory/package (set) input.
 
     Mirrors the ADR-037 D7 dispatch (:func:`cli_resolve.classify_compare_operand`)
-    so profile application matches how ``run_compare`` will actually route the
+    so profile handling matches how ``run_compare`` will actually route the
     comparison, without duplicating the classification rules.
     """
     from pathlib import Path
@@ -1316,10 +1294,10 @@ def profile_option(func: F) -> F:
         type=click.Choice(list(COMPARE_PROFILES), case_sensitive=True),
         default=None,
         help="Run-profile preset bundling workflow defaults (ADR-040): "
-        "'ci-gate' (headers depth, public-surface scope, review digest, "
-        "severity exit codes), 'release' (full depth, recommendation, Markdown), "
-        "'quick' (symbols-only, one-line summary). Explicit flags override the "
-        "profile.",
+        "'ci-gate' (headers depth, review digest, severity exit codes), "
+        "'release' (full depth, recommendation, Markdown), 'quick' "
+        "(symbols-only, one-line summary). Explicit flags override the profile; "
+        "single-pair compares only (configure release defaults in .abicheck.yml).",
     )(func)
     return func
 
@@ -1328,29 +1306,43 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     """Fold the selected ``--profile`` defaults into *kwargs*, in place.
 
     Pops ``profile`` from *kwargs* (it is a CLI-layer concept the downstream
-    ``run_compare`` signature does not take) and, for each setting the profile
-    declares, fills it **only** when the user left that option at its default —
-    an explicitly-passed flag always wins. Uses Click's parameter-source
-    tracking (``ctx.get_parameter_source``) to tell the two apart, so a profile
-    never clobbers an intentional override.
+    ``run_compare`` signature does not take) and fills each setting the profile
+    declares **only** when the user left that option at its default.
 
-    **Precedence: explicit flag > project config > profile > default.** A profile
-    is a *default layer*, not a synthetic ``--flag``: it fills values the user
-    left unset, but it is deliberately **not** stamped as a command-line source.
-    Two reasons: (1) a project's ``.abicheck.yml`` is an explicit decision that
-    should win over a generic profile default; (2) stamping the source
-    ``COMMANDLINE`` would make a profile default *look* like a typed flag to the
-    directory/package (release fan-out) path, which rejects the single-pair-only
-    flags (``--depth``/``--exit-code-scheme``/…) — so a profile default would
-    abort a valid release compare with exit 64. Instead, on a set-input compare
-    the single-pair-only keys are skipped entirely
-    (:data:`_PROFILE_SET_INPUT_INCOMPATIBLE`), and value-only injection keeps the
-    profile from ever masquerading as an explicit flag.
+    **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
+    (``--depth``, ``--exit-code-scheme``) and single-pair report formats
+    (``review``) that the directory/package *release fan-out* deliberately does
+    not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
+    than silently drop half a profile (the codebase rejects such flags loudly on
+    set inputs, e.g. :func:`cli_resolve._reject_evidence_flags_for_set_inputs`),
+    a ``--profile`` on directory/package operands is rejected with a message that
+    points at the config home for release defaults. This keeps the feature
+    consistent with the existing set-input contract and free of the per-key /
+    per-value special cases the fan-out would otherwise force.
+
+    **Precedence (single-pair): explicit flag > profile > project config >
+    default.** A ``--profile`` is a per-run choice the user typed on the command
+    line, so — like any typed flag — it overrides project ``.abicheck.yml``
+    defaults, while a genuinely typed flag still overrides the profile. Injection
+    is value-only and gated on ``ctx.get_parameter_source`` so an explicit flag
+    is never clobbered; the profile is **not** stamped as a command-line source
+    (nothing downstream needs the source, and not stamping keeps the mechanism
+    simple).
     """
     name = kwargs.pop("profile", None)
     if not name:
         return
+    import click
     from click.core import ParameterSource
+
+    if _profile_targets_set_input(kwargs):
+        raise click.UsageError(
+            f"--profile {name} is not supported for directory/package (release) "
+            "comparisons: profiles bundle single-pair-only knobs (--depth, "
+            "--exit-code-scheme, the 'review' format). Configure release defaults "
+            "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
+            "or compare the libraries individually to use a profile."
+        )
 
     profile = COMPARE_PROFILES[str(name)]
     get_source = getattr(ctx, "get_parameter_source", None)
@@ -1358,13 +1350,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         ParameterSource.COMMANDLINE,
         ParameterSource.ENVIRONMENT,
     }
-    set_input = _profile_targets_set_input(kwargs)
     for dest, value in profile.items():
-        # On a directory/package compare, skip the keys the fan-out rejects —
-        # the profile still sets the format/recommend, just not the
-        # single-pair-only evidence/exit knobs.
-        if set_input and dest in _PROFILE_SET_INPUT_INCOMPATIBLE:
-            continue
         src = get_source(dest) if get_source is not None else None
         # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
         # / unknown). An explicit --flag or a mapped env var stays untouched.

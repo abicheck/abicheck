@@ -98,13 +98,17 @@ that keeps casual invocations short without adding one flag per knob.
 --profile quick       # depth=binary, stat
 ```
 
-* Precedence is **explicit flag > project config > profile > default**: a
-  profile fills unset values but is *not* stamped as a command-line source, so a
-  project's `.abicheck.yml` decision still wins and — critically — a profile
-  default never masquerades as a typed flag to the directory/package fan-out
-  path (which rejects single-pair-only flags like `--depth`/`--exit-code-scheme`
-  by source/value). On a set-input compare those keys are skipped, not errored.
-  Public-surface scoping is the default, so profiles don't restate it.
+* Precedence is **explicit flag > profile > project config > default**: a
+  `--profile` is a per-run typed choice, so it overrides `.abicheck.yml`
+  defaults, while a genuinely typed flag still overrides the profile. Injection
+  is value-only (no command-line source stamping).
+* Profiles are **single-pair-only**: they bundle single-pair knobs (`--depth`,
+  `--exit-code-scheme`, the `review` format) the directory/package release
+  fan-out rejects. `--profile` on set inputs is a usage error pointing at
+  `.abicheck.yml` (the fan-out's config home) — consistent with the existing
+  set-input flag rejections, and avoiding the per-key/per-value special cases a
+  "apply the safe subset" rule would need. Public-surface scoping is the
+  default, so profiles don't restate it.
 * Profiles are data (`COMPARE_PROFILES` table), so a project can ship its own
   in `.abicheck.yml` under `profiles:` — but the built-ins cover the three
   documented workflows out of the box.

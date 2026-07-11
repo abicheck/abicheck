@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -76,36 +77,31 @@ class TestApplyProfileUnit:
         # but an unset field still takes the profile default
         assert kwargs["depth"] == "headers"
 
-    def test_set_input_skips_single_pair_only_keys(self, tmp_path) -> None:
-        """Regression (Codex P2): a release/fan-out compare must not exit 64.
+    def test_set_input_operands_reject_profile(self, tmp_path) -> None:
+        """Regression (Codex P2 ×3): profiles are single-pair-only.
 
-        On directory/package operands the fan-out rejects the single-pair-only
-        flags (``--depth`` by source, ``--exit-code-scheme`` by value). A profile
-        default must be *skipped* for those keys — not injected — so it never
-        becomes one of those rejections. Format/recommend still apply.
+        A profile bundles single-pair-only knobs (``--depth``,
+        ``--exit-code-scheme``) and single-pair formats (``review``) the
+        directory/package release fan-out rejects. Rather than silently apply a
+        partial profile, ``--profile`` on set-input operands is a usage error
+        pointing at ``.abicheck.yml`` — consistent with the fan-out's existing
+        set-input flag rejections and free of per-key/per-value special cases.
         """
+        import click
+
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         kwargs: dict[str, object] = {
             "profile": "ci-gate", "old_input": old_dir, "new_input": new_dir,
-            "depth": None, "fmt": "markdown", "exit_code_scheme": None,
+            "depth": None,
         }
-        apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
-        # single-pair-only keys are NOT injected on a set input
-        assert kwargs["depth"] is None
-        assert kwargs["exit_code_scheme"] is None
-        # but the fan-out-compatible key still takes the profile default
-        assert kwargs["fmt"] == "review"
+        with pytest.raises(click.UsageError, match="single-pair"):
+            apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
 
-    def test_release_profile_on_directories_does_not_error(self, tmp_path) -> None:
-        """End-to-end: `compare dir dir --profile release` reaches the fan-out.
-
-        Before the fix, the profile stamped --depth as command-line and the
-        release path rejected it with exit 64 (usage error). Now it must get past
-        option handling into the fan-out (which then reports no libraries).
-        """
+    def test_set_input_reject_is_usage_error_end_to_end(self, tmp_path) -> None:
+        """`compare dir dir --profile release` exits as a usage error (64)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -113,9 +109,8 @@ class TestApplyProfileUnit:
         result = CliRunner().invoke(
             main, ["compare", str(old_dir), str(new_dir), "--profile", "release"]
         )
-        # must NOT be the usage error (64) the depth/exit rejection raised
-        assert result.exit_code != 64, result.output
-        assert "not supported for directory/package" not in result.output
+        assert result.exit_code == 64, result.output
+        assert "single-pair" in result.output
 
     def test_no_profile_is_a_noop(self) -> None:
         kwargs: dict[str, object] = {"profile": None, "depth": None}
