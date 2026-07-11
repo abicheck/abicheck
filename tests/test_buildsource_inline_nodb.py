@@ -87,17 +87,53 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
         encoding="utf-8",
     )
 
-    dirs = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=tmp_path)
     assert str(inc) in dirs
     assert str(sysinc) in dirs
     assert str(missing) not in dirs  # non-existent dirs filtered out
+    for fn in cleanups:  # a plain compile DB has none, but drain defensively
+        fn()
 
 
 def test_derive_l2_include_dirs_no_inputs_is_empty():
     from abicheck.buildsource.inline import derive_l2_include_dirs
 
     # No sources and no build-info → nothing to derive, and never raises.
-    assert derive_l2_include_dirs(build_info=None, sources=None) == []
+    assert derive_l2_include_dirs(build_info=None, sources=None) == ([], [])
+
+
+def test_derive_l2_include_dirs_honors_config_compile_db(tmp_path):
+    # When the compile DB is located only via a trusted --config `build.compile_db`
+    # (not auto-discoverable at the tree root), the derivation must still find it —
+    # otherwise the L2 fallback silently ignores the same config embed_build_source
+    # uses later. Passing build_config=None (the old bug) would return no dirs here.
+    import yaml
+
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    dbdir = tmp_path / "out"
+    dbdir.mkdir()
+    (dbdir / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        encoding="utf-8",
+    )
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        yaml.safe_dump({"build": {"compile_db": "out/compile_commands.json"}}),
+        encoding="utf-8",
+    )
+
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path, build_config=cfg
+    )
+    for fn in cleanups:
+        fn()
+    assert str(inc) in dirs
 
 
 def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
@@ -127,7 +163,7 @@ def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
             }]),
             encoding="utf-8",
         )
-        dirs = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+        dirs, _ = derive_l2_include_dirs(build_info=None, sources=tmp_path)
         # The returned path must be the real, expanded dir (usable by castxml/clang),
         # not the ~-prefixed redacted form.
         assert str(inc) in dirs

@@ -607,9 +607,9 @@ def effective_graph_scope(graph_detail: str, scope: str) -> str:
 def derive_l2_include_dirs(
     build_info: Path | None,
     sources: Path | None,
-    build_config: BuildConfig | None = None,
-) -> list[str]:
-    """Best-effort union of ``-I``/``-isystem`` dirs from the build's compile DB.
+    build_config: Path | None = None,
+) -> tuple[list[str], list[Callable[[], None]]]:
+    """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
 
     The L2 public-header parse (castxml/clang over ``-H`` headers) only searches
     the user's ``-I`` inputs and the inferred public-header roots — it does *not*
@@ -617,15 +617,28 @@ def derive_l2_include_dirs(
     public headers ``#include`` a dependency's headers (e.g. EPICS pvxs headers
     including ``<epicsTime.h>``), a ``scan``/``dump`` with just ``--sources`` (no
     explicit ``-I``) then fails to parse them. This resolves the same compile DB
-    the L4 replay uses (explicit ``--build-info`` / auto-discovered
-    ``compile_commands.json`` / the inferred build-system query) and returns the
-    de-duplicated, existing include dirs so the caller can feed them to L2 as a
-    **fallback** (only when the user gave no ``-I``). Purely best-effort: any
-    failure returns ``[]`` so a scan that works today never regresses.
+    the L4 replay uses (explicit ``--build-info`` / a trusted ``--config``
+    ``build.compile_db``/``build.query`` / auto-discovered ``compile_commands.json``
+    / the inferred build-system query) and returns the de-duplicated, existing
+    include dirs so the caller can feed them to L2 as a **fallback** (only when the
+    user gave no ``-I``).
+
+    Returns ``(include_dirs, cleanups)``. The *cleanups* are the temp-build-dir
+    thunks an inferred CMake query appends — an inferred CMake build dir can hold
+    generated headers that the returned include dirs point into, so the caller
+    **must** run these only *after* the L2 parse has consumed the dirs (thread them
+    onto the scan's ``defer_cleanup``); this function never runs them on the success
+    path. Purely best-effort: any failure drains the cleanups and returns
+    ``([], [])`` so a scan that works today never regresses.
     """
     if sources is None and build_info is None:
-        return []
-    cfg = build_config or BuildConfig()
+        return [], []
+    # Mirror embed_build_source's config handling so a trusted --config
+    # build.compile_db / build.query is honored here too (and only an explicit
+    # --config file is trusted for query execution; an auto-discovered
+    # .abicheck.yml is loaded for its non-executable settings but never run).
+    cfg_path = build_config or discover_build_config(sources)
+    cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
     cleanups: list[Callable[[], None]] = []
@@ -653,15 +666,22 @@ def derive_l2_include_dirs(
                 if real not in seen and Path(real).is_dir():
                     seen.add(real)
                     out.append(real)
-        return out
+        if not out:
+            # Nothing to preserve — release any temp build dir now.
+            _run_cleanups(cleanups)
+            return [], []
+        return out, cleanups
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
-        return []
-    finally:
-        for fn in cleanups:
-            try:
-                fn()
-            except Exception:  # noqa: BLE001
-                pass
+        _run_cleanups(cleanups)
+        return [], []
+
+
+def _run_cleanups(cleanups: list[Callable[[], None]]) -> None:
+    for fn in cleanups:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def collect_inline_pack(

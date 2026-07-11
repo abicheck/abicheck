@@ -367,18 +367,29 @@ def _build_new_snapshot(
     # L2 include fallback: when headers are given but the user passed no explicit
     # -I, the aggregate public-header parse cannot see the include dirs the build
     # already knows (e.g. pvxs public headers include EPICS Base's <epicsTime.h>).
-    # Reuse the build's compile DB — the same one the L4 replay uses — to seed
-    # those dirs so `scan/dump --sources` parses headers without a manual -I.
+    # Reuse the build's compile DB — the same one the L4 replay uses, honoring a
+    # trusted --config — to seed those dirs so `scan/dump --sources` parses headers
+    # without a manual -I. An inferred CMake build dir may hold generated headers
+    # the derived dirs point into, so its cleanup thunks must outlive this L2 parse:
+    # push them onto defer_cleanup (drained at scan end) when available, else run
+    # them only after resolve_input has consumed the dirs.
+    _l2_local_cleanups: list[Callable[[], None]] = []
     if headers and not includes and (sources is not None or build_info is not None):
         from .buildsource.inline import derive_l2_include_dirs
 
-        derived = derive_l2_include_dirs(build_info, sources, None)
+        derived, derived_cleanups = derive_l2_include_dirs(
+            build_info, sources, build_config
+        )
         if derived:
             includes = [Path(d) for d in derived]
             logger.info(
                 "L2 header parse: seeded %d include dir(s) from the build's "
                 "compile database (no -I given).", len(derived),
             )
+            if defer_cleanup is not None:
+                defer_cleanup.extend(derived_cleanups)
+            else:
+                _l2_local_cleanups = derived_cleanups
 
     try:
         snap = resolve_input(
@@ -395,6 +406,14 @@ def _build_new_snapshot(
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
+    finally:
+        # The L2 parse has now consumed the build-derived include dirs (whether it
+        # succeeded or raised), so any inferred-CMake temp build dir we could not
+        # hand to defer_cleanup is safe to release here.
+        if _l2_local_cleanups:
+            from .buildsource.inline import _run_cleanups
+
+            _run_cleanups(_l2_local_cleanups)
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":
