@@ -529,7 +529,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--new-sources", "--new-version", "--no-bundle-analysis", "--no-demangle", "--no-fail-on-removed-library", "--no-nostdinc",
         "--no-pattern-verdicts", "--no-scope-public-headers", "--nostdinc", "--old-ast-frontend", "--old-build-info", "--old-header",
         "--old-include", "--old-pdb-path", "--old-sources", "--old-version", "--output", "--output-dir",
-        "--pattern-verdicts", "--pdb-path", "--policy", "--policy-file", "--post-manifest", "--probe-matrix-new", "--probe-matrix-old",
+        "--pattern-verdicts", "--pdb-path", "--policy", "--policy-file", "--post-manifest", "--probe-matrix-new", "--probe-matrix-old", "--profile",
         "--public-symbol", "--public-symbols-list", "--recommend", "--reconcile-build-context", "--report-mode", "--require-justification", "--scope-public-headers",
         "--search-path", "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
         "--show-filtered", "--show-impact", "--show-only", "--show-redundant", "--stat", "--strict-suppressions",

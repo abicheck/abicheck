@@ -63,6 +63,7 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 )
 from .cli_options import (
     adr027_compare_options,
+    apply_compare_profile,
     build_source_dump_options,
     compile_context_options,
     debug_resolution_options,
@@ -71,6 +72,7 @@ from .cli_options import (
     lang_option,
     output_options,
     policy_options,
+    profile_option,
     release_options,
     scope_options,
     set_input_options,
@@ -1350,6 +1352,7 @@ def _embed_inline_source_side(
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
+@profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
 @click.option("--reconcile-build-context", is_flag=True, default=False,
               help="Clear context-free header-parse false positives using the build's "
                    "active preprocessor defines (ADR-039): a conditional field's phantom "
@@ -1417,6 +1420,11 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from .cli_compare_helpers import run_compare
+
+    # ADR-040 Lever 3: fold the selected --profile's workflow defaults into the
+    # forwarded options (explicit flags always win) and drop the CLI-only
+    # ``profile`` key before delegating to the typed run_compare signature.
+    apply_compare_profile(ctx, kwargs)
 
     run_compare(ctx, **kwargs)
 

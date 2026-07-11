@@ -43,3 +43,4 @@
 | [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Accepted — implemented (G22) |
 | [038](038-build-integrated-fact-collection-variants.md) | Working With Sources — Full-Scan and Two Build-Injection Flows | Accepted — implemented |
 | [039](039-build-context-reconciliation.md) | Build-Context Reconciliation of Context-Free Header-Parse Artifacts | Accepted — implemented |
+| [040](040-compare-surface-reduction.md) | `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles | Accepted — phased (Phase A landed) |

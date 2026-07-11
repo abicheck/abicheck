@@ -1202,6 +1202,12 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "verdicts. The matrix varies per deployment target checked, so it is a "
         "per-run input, not a stable project setting."
     ),
+    "--profile": (
+        "ADR-040 Lever 3: a single per-run bundle of workflow defaults "
+        "(ci-gate/release/quick) that explicit flags always override. One visible "
+        "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
+        "1-2 lower BASE to bring the net well below today."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
@@ -1217,6 +1223,91 @@ def count_visible_options(cmd: object) -> int:
         ):
             n += 1
     return n
+
+
+#: ADR-040 Lever 3 — named run profiles for ``compare``. Each maps a profile
+#: name to a bundle of ``{option-dest: value}`` defaults for the documented
+#: workflows. A profile is a *default layer*: an explicitly-passed flag always
+#: wins (see :func:`apply_compare_profile`), mirroring the config < CLI rule and
+#: the way ``--severity-preset`` collapses four severity flags into one token.
+#: Values are in each option's *resolved* form (``depth`` uses the canonical
+#: ``USER_DEPTHS`` rungs, ``fmt``/``exit_code_scheme`` the ``Choice`` strings,
+#: booleans as ``bool``) so they can be injected without re-running conversion.
+COMPARE_PROFILES: dict[str, dict[str, object]] = {
+    # CI gate: fast header-depth check, public-surface scoped, compact review
+    # digest, severity-aware exit codes — the "block the PR" workflow.
+    "ci-gate": {
+        "depth": "headers",
+        "scope_public_headers": True,
+        "fmt": "review",
+        "exit_code_scheme": "severity",
+    },
+    # Release cut: deepest evidence, public-surface scoped, full Markdown report
+    # with a semver/SONAME recommendation appended — the "should I bump?" flow.
+    "release": {
+        "depth": "full",
+        "scope_public_headers": True,
+        "fmt": "markdown",
+        "recommend": True,
+    },
+    # Quick look: symbols-only, one-line summary — the "just tell me" flow.
+    "quick": {
+        "depth": "binary",
+        "stat": True,
+    },
+}
+
+
+def profile_option(func: F) -> F:
+    """The ``--profile`` option (ADR-040 Lever 3): one token for a workflow.
+
+    Kept here so ``cli.py`` stays under its size cap and any future front-end
+    shares one spelling/help. The value is validated against
+    :data:`COMPARE_PROFILES`; application (default-layering under explicit flags)
+    happens in :func:`apply_compare_profile`.
+    """
+    func = click.option(
+        "--profile",
+        "profile",
+        type=click.Choice(list(COMPARE_PROFILES), case_sensitive=True),
+        default=None,
+        help="Run-profile preset bundling workflow defaults (ADR-040): "
+        "'ci-gate' (headers depth, public-surface scope, review digest, "
+        "severity exit codes), 'release' (full depth, recommendation, Markdown), "
+        "'quick' (symbols-only, one-line summary). Explicit flags override the "
+        "profile.",
+    )(func)
+    return func
+
+
+def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
+    """Fold the selected ``--profile`` defaults into *kwargs*, in place.
+
+    Pops ``profile`` from *kwargs* (it is a CLI-layer concept the downstream
+    ``run_compare`` signature does not take) and, for each setting the profile
+    declares, fills it **only** when the user left that option at its default —
+    an explicitly-passed flag always wins. Uses Click's parameter-source
+    tracking (``ctx.get_parameter_source``) to tell the two apart, so a profile
+    never clobbers an intentional override.
+    """
+    name = kwargs.pop("profile", None)
+    if not name:
+        return
+    from click.core import ParameterSource
+
+    profile = COMPARE_PROFILES[str(name)]
+    get_source = getattr(ctx, "get_parameter_source", None)
+    explicit = {
+        ParameterSource.COMMANDLINE,
+        ParameterSource.ENVIRONMENT,
+    }
+    for dest, value in profile.items():
+        src = get_source(dest) if get_source is not None else None
+        # Only override a value the user did not set explicitly (DEFAULT /
+        # DEFAULT_MAP / unknown). An explicit --flag on the command line or a
+        # mapped env var stays untouched.
+        if src not in explicit:
+            kwargs[dest] = value
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``
