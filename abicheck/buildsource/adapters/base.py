@@ -443,6 +443,126 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     return out
 
 
+def _add_build_option(
+    out: list[BuildOption],
+    seen: set[tuple[str, str]],
+    key: str,
+    value: str,
+    *,
+    raw: str,
+) -> None:
+    """Append a BuildOption to *out* unless its (key, value) was already recorded."""
+    sig = (key, value)
+    if sig in seen:
+        return
+    seen.add(sig)
+    out.append(BuildOption(key=key, value=value, abi_relevant=True, raw=raw))
+
+
+def _structured_unit_options(cu: CompileUnit) -> list[tuple[str, str, str]]:
+    """(key, value, raw) options from a unit's structured standard/target/sysroot fields."""
+    opts: list[tuple[str, str, str]] = []
+    if cu.standard:
+        # Per-language key so a mixed C/C++ project keeps std:C and std:CXX
+        # distinct (otherwise one masks the other in the diff).
+        std_key = f"std:{cu.language}" if cu.language else "std"
+        opts.append((std_key, cu.standard, f"-std={cu.standard}"))
+    if cu.target_triple:
+        opts.append(("target", cu.target_triple, cu.target_triple))
+    if cu.sysroot:
+        opts.append(("sysroot", cu.sysroot, cu.sysroot))
+    return opts
+
+
+def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
+    """Classify *flag* as a last-one-wins runtime-mode option: (key, value), or None."""
+    if flag in _RUNTIME_MODE_FLAGS:
+        base_key, value = _RUNTIME_MODE_FLAGS[flag]
+        # exceptions/rtti/threadsafe-statics have language-dependent
+        # compiler defaults (on for C++, off / N-A for C), so qualify the
+        # key per language (mirrors the ``std:<lang>`` option) — the
+        # build-evidence diff then infers the right default for an
+        # omitted flag. TLS keys are language-agnostic and stay bare.
+        key = (
+            f"{base_key}:{cu.language}"
+            if base_key in _LANG_QUALIFIED_MODE_KEYS and cu.language
+            else base_key
+        )
+        return key, value
+    if flag.startswith("-ftls-model"):
+        # -ftls-model=<model>: canonical key so a model switch diffs as a
+        # single option regardless of which model string is on each side.
+        return "tls_model", flag.split("=", 1)[1] if "=" in flag else ""
+    if flag.startswith("/Zp"):
+        # MSVC struct-packing width (/Zp[N]). Its default is
+        # target-dependent (/Zp8 on x86/ARM, /Zp16 on x64), so it is keyed
+        # separately from the GNU flag and diffed only when both sides are
+        # explicit (build_diff), avoiding a false flip when a VS project
+        # merely records its platform default against an omitted side.
+        return "struct_packing_msvc", flag[len("/Zp"):] or "1"
+    if flag.startswith("-fpack-struct"):
+        # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
+        # is known (disabled → natural packing), so a one-sided add/remove
+        # is a real, reportable layout change. Bare flag packs to 1.
+        return "struct_packing", flag.split("=", 1)[1] if "=" in flag else "1"
+    if flag.startswith("-flto="):
+        # -flto=<thin|auto|N>: an *enabling* spelling (bare -flto is caught
+        # by the _RUNTIME_MODE_FLAGS map above; -fno-lto too). Match only
+        # "-flto=" so LTO *tuning* flags that do not enable LTO
+        # (-flto-partition=, -flto-jobs=) fall through to the generic
+        # option path instead of falsely reporting lto off->on (Codex).
+        return "lto", "on"
+    if flag.startswith("-fsanitize="):
+        # -fsanitize=<list>: sanitizers change object layout (asan
+        # redzones), instrumentation and the runtime contract. Canonical
+        # key so a flip diffs as one option; default is "none" (known).
+        return "sanitizer", flag.split("=", 1)[1]
+    if flag.startswith("-fno-sanitize="):
+        # -fno-sanitize=<list> disables sanitizers. On its own it just
+        # spells the default (no sanitizer), so normalize to "none" rather
+        # than let it fall through to the generic ABI-flag finding — with
+        # last-one-wins it also correctly cancels an earlier -fsanitize=
+        # for the same set (Codex review).
+        return "sanitizer", "none"
+    if flag.startswith("-mfloat-abi="):
+        # -mfloat-abi=<soft|softfp|hard>: the float calling convention on
+        # ARM. Its default is target-dependent, so build_diff requires
+        # both sides explicit before reporting a flip.
+        return "float_abi", flag.split("=", 1)[1]
+    return None
+
+
+def _add_generic_flag_option(
+    flag: str,
+    cu: CompileUnit,
+    out: list[BuildOption],
+    seen: set[tuple[str, str]],
+) -> None:
+    """Record a non-mode ABI-relevant flag (define/std/generic) as a BuildOption."""
+    if flag.startswith(("-D", "/D")):
+        key, _, value = flag[2:].partition("=")
+        _add_build_option(out, seen, f"define:{key}", value, raw=flag)
+    elif flag.startswith(_STD_FLAG_PREFIXES):
+        # Language standard. GCC ``-std=`` is already captured via
+        # cu.standard above; MSVC ``/std:`` is not parsed into
+        # cu.standard, so normalize it into the same std:<lang> option
+        # here (only when the structured field didn't already set it).
+        if not cu.standard:
+            sep = "=" if "=" in flag else ":"
+            std_val = flag.split(sep, 1)[1] if sep in flag else flag
+            _add_build_option(
+                out, seen, f"std:{cu.language}" if cu.language else "std", std_val, raw=flag
+            )
+    elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
+        # sysroot/target are already emitted from the normalized
+        # structured fields above. Re-adding the raw flag would
+        # double-count and make split (``--sysroot /sdk``) vs combined
+        # (``--sysroot=/sdk``) spelling look like a change.
+        return
+    else:
+        _add_build_option(out, seen, flag.split("=", 1)[0], flag, raw=flag)
+
+
 def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
     """Project each compile unit's ABI-relevant flags into global BuildOptions.
 
@@ -455,23 +575,9 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
     out: list[BuildOption] = []
     seen: set[tuple[str, str]] = set()
 
-    def add(key: str, value: str, *, raw: str) -> None:
-        sig = (key, value)
-        if sig in seen:
-            return
-        seen.add(sig)
-        out.append(BuildOption(key=key, value=value, abi_relevant=True, raw=raw))
-
     for cu in compile_units:
-        if cu.standard:
-            # Per-language key so a mixed C/C++ project keeps std:C and std:CXX
-            # distinct (otherwise one masks the other in the diff).
-            std_key = f"std:{cu.language}" if cu.language else "std"
-            add(std_key, cu.standard, raw=f"-std={cu.standard}")
-        if cu.target_triple:
-            add("target", cu.target_triple, raw=cu.target_triple)
-        if cu.sysroot:
-            add("sysroot", cu.sysroot, raw=cu.sysroot)
+        for key, value, raw in _structured_unit_options(cu):
+            _add_build_option(out, seen, key, value, raw=raw)
         # Runtime-mode flags are resolved per TU with last-one-wins semantics
         # (GCC: "if conflicting, the last such option is effective"), so a TU
         # that carries e.g. ``-fno-exceptions -fexceptions`` records only the
@@ -479,83 +585,13 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
         # after the flag loop so a later flag can override an earlier one.
         mode_values: dict[str, tuple[str, str]] = {}  # key -> (value, raw)
         for flag in cu.abi_relevant_flags:
-            if flag in _RUNTIME_MODE_FLAGS:
-                base_key, value = _RUNTIME_MODE_FLAGS[flag]
-                # exceptions/rtti/threadsafe-statics have language-dependent
-                # compiler defaults (on for C++, off / N-A for C), so qualify the
-                # key per language (mirrors the ``std:<lang>`` option) — the
-                # build-evidence diff then infers the right default for an
-                # omitted flag. TLS keys are language-agnostic and stay bare.
-                key = (
-                    f"{base_key}:{cu.language}"
-                    if base_key in _LANG_QUALIFIED_MODE_KEYS and cu.language
-                    else base_key
-                )
-                mode_values[key] = (value, flag)
-            elif flag.startswith("-ftls-model"):
-                # -ftls-model=<model>: canonical key so a model switch diffs as a
-                # single option regardless of which model string is on each side.
-                model = flag.split("=", 1)[1] if "=" in flag else ""
-                mode_values["tls_model"] = (model, flag)
-            elif flag.startswith("/Zp"):
-                # MSVC struct-packing width (/Zp[N]). Its default is
-                # target-dependent (/Zp8 on x86/ARM, /Zp16 on x64), so it is keyed
-                # separately from the GNU flag and diffed only when both sides are
-                # explicit (build_diff), avoiding a false flip when a VS project
-                # merely records its platform default against an omitted side.
-                mode_values["struct_packing_msvc"] = (flag[len("/Zp"):] or "1", flag)
-            elif flag.startswith("-fpack-struct"):
-                # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
-                # is known (disabled → natural packing), so a one-sided add/remove
-                # is a real, reportable layout change. Bare flag packs to 1.
-                packing = flag.split("=", 1)[1] if "=" in flag else "1"
-                mode_values["struct_packing"] = (packing, flag)
-            elif flag.startswith("-flto="):
-                # -flto=<thin|auto|N>: an *enabling* spelling (bare -flto is caught
-                # by the _RUNTIME_MODE_FLAGS map above; -fno-lto too). Match only
-                # "-flto=" so LTO *tuning* flags that do not enable LTO
-                # (-flto-partition=, -flto-jobs=) fall through to the generic
-                # option path instead of falsely reporting lto off->on (Codex).
-                mode_values["lto"] = ("on", flag)
-            elif flag.startswith("-fsanitize="):
-                # -fsanitize=<list>: sanitizers change object layout (asan
-                # redzones), instrumentation and the runtime contract. Canonical
-                # key so a flip diffs as one option; default is "none" (known).
-                mode_values["sanitizer"] = (flag.split("=", 1)[1], flag)
-            elif flag.startswith("-fno-sanitize="):
-                # -fno-sanitize=<list> disables sanitizers. On its own it just
-                # spells the default (no sanitizer), so normalize to "none" rather
-                # than let it fall through to the generic ABI-flag finding — with
-                # last-one-wins it also correctly cancels an earlier -fsanitize=
-                # for the same set (Codex review).
-                mode_values["sanitizer"] = ("none", flag)
-            elif flag.startswith("-mfloat-abi="):
-                # -mfloat-abi=<soft|softfp|hard>: the float calling convention on
-                # ARM. Its default is target-dependent, so build_diff requires
-                # both sides explicit before reporting a flip.
-                mode_values["float_abi"] = (flag.split("=", 1)[1], flag)
-            elif flag.startswith(("-D", "/D")):
-                key, _, value = flag[2:].partition("=")
-                add(f"define:{key}", value, raw=flag)
-            elif flag.startswith(_STD_FLAG_PREFIXES):
-                # Language standard. GCC ``-std=`` is already captured via
-                # cu.standard above; MSVC ``/std:`` is not parsed into
-                # cu.standard, so normalize it into the same std:<lang> option
-                # here (only when the structured field didn't already set it).
-                if not cu.standard:
-                    sep = "=" if "=" in flag else ":"
-                    std_val = flag.split(sep, 1)[1] if sep in flag else flag
-                    add(f"std:{cu.language}" if cu.language else "std", std_val, raw=flag)
-            elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
-                # sysroot/target are already emitted from the normalized
-                # structured fields above. Re-adding the raw flag would
-                # double-count and make split (``--sysroot /sdk``) vs combined
-                # (``--sysroot=/sdk``) spelling look like a change.
-                continue
+            mode = _mode_flag_option(flag, cu)
+            if mode is not None:
+                mode_values[mode[0]] = (mode[1], flag)
             else:
-                add(flag.split("=", 1)[0], flag, raw=flag)
+                _add_generic_flag_option(flag, cu, out, seen)
         for key, (value, raw) in mode_values.items():
-            add(key, value, raw=raw)
+            _add_build_option(out, seen, key, value, raw=raw)
 
     return out
 

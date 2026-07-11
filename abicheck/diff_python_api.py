@@ -102,127 +102,144 @@ def _positional_names(fn: PyFunction) -> list[str]:
     return [p.name for p in fn.parameters if p.is_positional]
 
 
-def _diff_signature(
-    old_fn: PyFunction, new_fn: PyFunction, symbol: str, qualified: str
-) -> list[Change]:
-    """Diff two function/method signatures with the same qualified name.
-
-    Emits parameter-level findings (removed / added-required / renamed /
-    default-removed / type-changed / binding-changed) plus a return-annotation
-    change. The binding checks compare the *ordered* parameter list and each
-    parameter's kind — not just the set of names — so a call-shape break with
-    unchanged names (positional→keyword-only, a reorder, or an optional
-    parameter inserted mid-list) is not missed.
-    """
-    changes: list[Change] = []
-    old_params = _named_param_map(old_fn)
-    new_params = _named_param_map(new_fn)
-
-    common = [n for n in old_params if n in new_params]
-    removed = [n for n in old_params if n not in new_params]
-    added = [n for n in new_params if n not in old_params]
-
+def _detect_same_slot_rename(
+    old_params: dict[str, PyParameter],
+    new_params: dict[str, PyParameter],
+    removed: list[str],
+    added: list[str],
+) -> tuple[str, str] | None:
+    """The ``(old_name, new_name)`` of a single same-position rename, else ``None``."""
     # Exactly one dropped + one gained named parameter *at the same ordinal
     # position* reads as a rename of that slot (the fixture case: `encoding` →
     # `codec`, both the 2nd named parameter). Requiring positional alignment
     # distinguishes a rename from an unrelated shuffle — `f(a, b)` → `f(b, c)`
     # drops `a` and adds `c` at different positions, so it is reported as a
-    # removal + addition (and a reorder), not a phantom `a`→`c` rename. The
-    # rename is folded into the positional-binding comparison below (via
-    # ``rename_map``) so a same-position rename is not double-reported as a
-    # reorder. A rename is only a *break* when the old parameter could be passed
-    # **by keyword**: renaming a positional-only parameter (`def f(a, /)` →
-    # `def f(b, /)`) is invisible to callers (they pass by position, and the name
-    # was never a valid keyword), so it is recorded in ``rename_map`` (to
-    # suppress a false positional-order finding) but emits nothing.
+    # removal + addition (and a reorder), not a phantom `a`→`c` rename.
     old_named = list(old_params)
     new_named = list(new_params)
-    rename_map: dict[str, str] = {}
     if (
         len(removed) == 1
         and len(added) == 1
         and old_named.index(removed[0]) == new_named.index(added[0])
     ):
-        old_name, new_name = removed[0], added[0]
-        op, np = old_params[old_name], new_params[new_name]
-        rename_map[old_name] = new_name
-        if _is_keyword_capable(op):
-            changes.append(
-                make_change(
-                    ChangeKind.PYTHON_API_PARAMETER_RENAMED,
-                    symbol=symbol,
-                    name=qualified,
-                    old=old_name,
-                    new=new_name,
-                    detail=qualified,
-                )
+        return removed[0], added[0]
+    return None
+
+
+def _diff_renamed_slot(
+    old_name: str,
+    new_name: str,
+    op: PyParameter,
+    np: PyParameter,
+    symbol: str,
+    qualified: str,
+) -> list[Change]:
+    """Findings for the single parameter slot renamed *old_name* → *new_name*."""
+    changes: list[Change] = []
+    # A rename is only a *break* when the old parameter could be passed
+    # **by keyword**: renaming a positional-only parameter (`def f(a, /)` →
+    # `def f(b, /)`) is invisible to callers (they pass by position, and the name
+    # was never a valid keyword), so it is recorded in ``rename_map`` (to
+    # suppress a false positional-order finding) but emits nothing.
+    if _is_keyword_capable(op):
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_API_PARAMETER_RENAMED,
+                symbol=symbol,
+                name=qualified,
+                old=old_name,
+                new=new_name,
+                detail=qualified,
             )
-        # The renamed slot is position-bound: still compare its default and
-        # annotation, so a positional-only rename that ALSO drops a default
-        # (`def f(a=1, /)` → `def f(b, /)`, breaking no-arg callers) or changes
-        # a type is not silently lost.
-        if op.has_default and not np.has_default:
-            changes.append(
-                make_change(
-                    ChangeKind.PYTHON_API_DEFAULT_REMOVED,
-                    symbol=symbol,
-                    name=qualified,
-                    detail=new_name,
-                )
+        )
+    # The renamed slot is position-bound: still compare its default and
+    # annotation, so a positional-only rename that ALSO drops a default
+    # (`def f(a=1, /)` → `def f(b, /)`, breaking no-arg callers) or changes
+    # a type is not silently lost.
+    if op.has_default and not np.has_default:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_API_DEFAULT_REMOVED,
+                symbol=symbol,
+                name=qualified,
+                detail=new_name,
             )
-        if op.annotation and np.annotation and op.annotation != np.annotation:
-            changes.append(
-                make_change(
-                    ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED,
-                    symbol=symbol,
-                    name=qualified,
-                    old=op.annotation,
-                    new=np.annotation,
-                    detail=new_name,
-                )
+        )
+    if op.annotation and np.annotation and op.annotation != np.annotation:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_API_PARAMETER_TYPE_CHANGED,
+                symbol=symbol,
+                name=qualified,
+                old=op.annotation,
+                new=np.annotation,
+                detail=new_name,
             )
-        # The renamed slot may also change *binding kind* — a positional-only
-        # slot replaced by a keyword-only one (`def f(a, /)` → `def f(*, b)`)
-        # breaks positional callers (`f(1)` now raises TypeError) even though no
-        # keyword-renamed name existed. Because this branch bypasses the
-        # removed/added and positional-prefix checks below, the narrowing would
-        # otherwise be swallowed, so compare the kinds here directly.
-        kind_detail = _kind_narrowing_detail(new_name, op, np)
-        if kind_detail is not None:
-            changes.append(
-                make_change(
-                    ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED,
-                    symbol=symbol,
-                    name=qualified,
-                    detail=kind_detail,
-                )
+        )
+    # The renamed slot may also change *binding kind* — a positional-only
+    # slot replaced by a keyword-only one (`def f(a, /)` → `def f(*, b)`)
+    # breaks positional callers (`f(1)` now raises TypeError) even though no
+    # keyword-renamed name existed. Because the rename branch bypasses the
+    # removed/added and positional-prefix checks, the narrowing would
+    # otherwise be swallowed, so compare the kinds here directly.
+    kind_detail = _kind_narrowing_detail(new_name, op, np)
+    if kind_detail is not None:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_API_PARAMETER_KIND_CHANGED,
+                symbol=symbol,
+                name=qualified,
+                detail=kind_detail,
             )
-    else:
-        for n in removed:
+        )
+    return changes
+
+
+def _diff_removed_and_added_params(
+    removed: list[str],
+    added: list[str],
+    new_params: dict[str, PyParameter],
+    symbol: str,
+    qualified: str,
+) -> list[Change]:
+    """Findings for dropped named parameters and newly *required* ones."""
+    changes: list[Change] = []
+    for n in removed:
+        changes.append(
+            make_change(
+                ChangeKind.PYTHON_API_PARAMETER_REMOVED,
+                symbol=symbol,
+                name=qualified,
+                detail=n,
+            )
+        )
+    for n in added:
+        p = new_params[n]
+        # A newly *required* parameter (no default) breaks every existing
+        # caller. A new optional parameter is backward compatible on its
+        # own; if it is inserted *before* an existing positional parameter
+        # it shifts bindings — that is caught by the positional-binding check.
+        if not p.has_default:
             changes.append(
                 make_change(
-                    ChangeKind.PYTHON_API_PARAMETER_REMOVED,
+                    ChangeKind.PYTHON_API_PARAMETER_ADDED,
                     symbol=symbol,
                     name=qualified,
                     detail=n,
                 )
             )
-        for n in added:
-            p = new_params[n]
-            # A newly *required* parameter (no default) breaks every existing
-            # caller. A new optional parameter is backward compatible on its
-            # own; if it is inserted *before* an existing positional parameter
-            # it shifts bindings — that is caught by the positional check below.
-            if not p.has_default:
-                changes.append(
-                    make_change(
-                        ChangeKind.PYTHON_API_PARAMETER_ADDED,
-                        symbol=symbol,
-                        name=qualified,
-                        detail=n,
-                    )
-                )
+    return changes
 
+
+def _diff_common_params(
+    common: list[str],
+    old_params: dict[str, PyParameter],
+    new_params: dict[str, PyParameter],
+    symbol: str,
+    qualified: str,
+) -> list[Change]:
+    """Findings for parameters present (by name) on both sides."""
+    changes: list[Change] = []
     for n in common:
         op, np = old_params[n], new_params[n]
         # Dropping a default makes a previously optional argument mandatory —
@@ -265,7 +282,17 @@ def _diff_signature(
                     detail=detail,
                 )
             )
+    return changes
 
+
+def _diff_positional_binding(
+    old_fn: PyFunction,
+    new_fn: PyFunction,
+    rename_map: dict[str, str],
+    symbol: str,
+    qualified: str,
+) -> list[Change]:
+    """Finding for a rebound positional argument (reorder / mid-list insert)."""
     # Positional-binding compatibility: an existing positional caller passing
     # k arguments requires that the new positional sequence keep the old one
     # (modulo an at-most-one rename) as an order-preserving prefix — you may
@@ -274,6 +301,7 @@ def _diff_signature(
     # an existing one). Trailing positional removals are already reported as
     # PARAMETER_REMOVED, so comparing only the shared prefix length avoids
     # double-reporting them here.
+    changes: list[Change] = []
     old_pos = [rename_map.get(n, n) for n in _positional_names(old_fn)]
     new_pos = _positional_names(new_fn)
     limit = min(len(old_pos), len(new_pos))
@@ -290,12 +318,19 @@ def _diff_signature(
                 ),
             )
         )
+    return changes
 
-    # ``*args`` / ``**kwargs`` collectors. Dropping one breaks callers that
-    # passed extra positional / keyword arguments (they now raise ``TypeError``);
-    # adding one is more permissive and compatible. When the collector survives
-    # but its *annotation* changed, that is the same type-contract RISK the named
+
+def _diff_variadic_collectors(
+    old_fn: PyFunction, new_fn: PyFunction, symbol: str, qualified: str
+) -> list[Change]:
+    """Findings for the ``*args`` / ``**kwargs`` collectors."""
+    # Dropping a collector breaks callers that passed extra positional /
+    # keyword arguments (they now raise ``TypeError``); adding one is more
+    # permissive and compatible. When the collector survives but its
+    # *annotation* changed, that is the same type-contract RISK the named
     # parameters get (only flagged when both sides declare a type and differ).
+    changes: list[Change] = []
     for var_kind, label in ((VAR_POSITIONAL, "*args"), (VAR_KEYWORD, "**kwargs")):
         ov, nv = _param_of_kind(old_fn, var_kind), _param_of_kind(new_fn, var_kind)
         if ov is not None and nv is None:
@@ -324,7 +359,14 @@ def _diff_signature(
                     detail=label,
                 )
             )
+    return changes
 
+
+def _diff_return_annotation(
+    old_fn: PyFunction, new_fn: PyFunction, symbol: str, qualified: str
+) -> list[Change]:
+    """Finding for a changed return annotation (declared on both sides)."""
+    changes: list[Change] = []
     if (
         old_fn.return_annotation
         and new_fn.return_annotation
@@ -340,7 +382,61 @@ def _diff_signature(
                 detail=qualified,
             )
         )
+    return changes
 
+
+def _diff_signature(
+    old_fn: PyFunction, new_fn: PyFunction, symbol: str, qualified: str
+) -> list[Change]:
+    """Diff two function/method signatures with the same qualified name.
+
+    Emits parameter-level findings (removed / added-required / renamed /
+    default-removed / type-changed / binding-changed) plus a return-annotation
+    change. The binding checks compare the *ordered* parameter list and each
+    parameter's kind — not just the set of names — so a call-shape break with
+    unchanged names (positional→keyword-only, a reorder, or an optional
+    parameter inserted mid-list) is not missed.
+    """
+    changes: list[Change] = []
+    old_params = _named_param_map(old_fn)
+    new_params = _named_param_map(new_fn)
+
+    common = [n for n in old_params if n in new_params]
+    removed = [n for n in old_params if n not in new_params]
+    added = [n for n in new_params if n not in old_params]
+
+    # A same-position rename is folded into the positional-binding comparison
+    # below (via ``rename_map``) so it is not double-reported as a reorder.
+    rename_map: dict[str, str] = {}
+    rename = _detect_same_slot_rename(old_params, new_params, removed, added)
+    if rename is not None:
+        old_name, new_name = rename
+        rename_map[old_name] = new_name
+        changes.extend(
+            _diff_renamed_slot(
+                old_name,
+                new_name,
+                old_params[old_name],
+                new_params[new_name],
+                symbol,
+                qualified,
+            )
+        )
+    else:
+        changes.extend(
+            _diff_removed_and_added_params(
+                removed, added, new_params, symbol, qualified
+            )
+        )
+
+    changes.extend(
+        _diff_common_params(common, old_params, new_params, symbol, qualified)
+    )
+    changes.extend(
+        _diff_positional_binding(old_fn, new_fn, rename_map, symbol, qualified)
+    )
+    changes.extend(_diff_variadic_collectors(old_fn, new_fn, symbol, qualified))
+    changes.extend(_diff_return_annotation(old_fn, new_fn, symbol, qualified))
     return changes
 
 

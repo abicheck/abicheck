@@ -70,6 +70,7 @@ from ..model import (
     ScopeOrigin,
     Variable,
 )
+from .source_graph import GraphNode, SourceGraphSummary
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -751,6 +752,118 @@ def _path_matches(candidate: str, changed: frozenset[str]) -> bool:
     return False
 
 
+def _decl_declaring_files(
+    graph: SourceGraphSummary, node_by_id: dict[str, GraphNode]
+) -> dict[str, str]:
+    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges."""
+    # Reverse the SOURCE_DECLARES edge (header → decl/type) to learn each
+    # entity's declaring file, so changed-path elevation can fire.
+    decl_to_file: dict[str, str] = {}
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        header = node_by_id.get(e.src)
+        if header is not None and header.label:
+            decl_to_file.setdefault(e.dst, header.label)
+    return decl_to_file
+
+
+def _is_public_decl(
+    node_id: str, node_by_id: dict[str, GraphNode], exported_decls: set[str]
+) -> bool:
+    """Whether the decl is public: exported-symbol-mapped or public-header visible."""
+    # A decl is definitively public when it maps to an exported binary symbol.
+    if node_id in exported_decls:
+        return True
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in _DECL_NODE_KINDS:
+        return False
+    return str(node.attrs.get("visibility", "")) in _PUBLIC_VISIBILITIES
+
+
+def _is_internal_decl(
+    node_id: str,
+    node_by_id: dict[str, GraphNode],
+    exported_decls: set[str],
+    decl_to_file: dict[str, str],
+) -> bool:
+    """Whether the decl is an internal entity consumers cannot see."""
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in _DECL_NODE_KINDS:
+        return False
+    if node_id in exported_decls:
+        return False
+    vis = str(node.attrs.get("visibility", ""))
+    if vis in _INTERNAL_VISIBILITIES:
+        return True
+    # An unannotated (call-graph-only) decl is internal only with explicit
+    # *project provenance*: either a SOURCE_DECLARES edge from one of the
+    # project's own files (``decl_to_file``), or the call-graph extractor's
+    # ``defined_in_project`` marker (the decl's body lives in a project
+    # compile-unit source — sound source-location provenance, not mere
+    # caller-presence). This catches a public→impl-helper dependency the
+    # built-in call graph produced without L4 SOURCE_DECLARES evidence, while
+    # a third-party header-inline or extern/system call target (no project
+    # source-file body) still has neither marker and is not flagged (Codex
+    # review).
+    if vis in _UNANNOTATED_VISIBILITIES:
+        has_provenance = node_id in decl_to_file or bool(
+            node.attrs.get("defined_in_project")
+        )
+        if not has_provenance:
+            return False
+        return not _looks_system(node.label or "")
+    return False
+
+
+def _decl_label(node_id: str, node_by_id: dict[str, GraphNode]) -> str:
+    """The node's human-readable label, falling back to its id."""
+    node = node_by_id.get(node_id)
+    return node.label if node and node.label else node_id
+
+
+def _internal_decl_file(
+    node_id: str, node_by_id: dict[str, GraphNode], decl_to_file: dict[str, str]
+) -> str:
+    """Declaring file of the internal decl, for changed-path elevation."""
+    # Declaring file from SOURCE_DECLARES (L4), else the call-graph node's
+    # source-location ``def_file`` — so changed-file elevation also works for
+    # a call-graph-only internal helper (Codex review).
+    changed_file = decl_to_file.get(node_id, "")
+    if not changed_file:
+        node = node_by_id.get(node_id)
+        if node is not None:
+            changed_file = str(node.attrs.get("def_file", ""))
+    return changed_file
+
+
+def _public_to_internal_change(
+    pub: str, internal: str, changed_file: str, is_changed: bool
+) -> Change:
+    """Build the PUBLIC_TO_INTERNAL_DEPENDENCY finding for one public→internal edge."""
+    note = (
+        f" — {internal!r} is declared in changed file {changed_file!r}, so the "
+        "API's behavior may have shifted this revision"
+        if is_changed
+        else ""
+    )
+    return _change(
+        ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
+        pub,
+        f"Public API {pub!r} depends on internal entity {internal!r} "
+        "(declared in a private header / source file, not the public "
+        f"surface){note}. Consumers cannot see it, so a change to it is an "
+        "undeclared behavioral risk. Make the dependency public or sever it.",
+        new_value=internal,
+        confidence=Confidence.HIGH if is_changed else Confidence.MEDIUM,
+        # Only stamp source_location when the internal entity was actually
+        # changed this revision — otherwise the finding is about the public
+        # API (``symbol``), and pointing the location at the unchanged
+        # private file would mislead SARIF/suppression matching (review).
+        source_location=changed_file if is_changed else None,
+    )
+
+
 def _check_public_to_internal_dependency(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -794,106 +907,30 @@ def _check_public_to_internal_dependency(
         )
 
     node_by_id = {n.id: n for n in graph.nodes}
-    # A decl is definitively public when it maps to an exported binary symbol.
     exported_decls = {
         e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
     }
-    # Reverse the SOURCE_DECLARES edge (header → decl/type) to learn each
-    # entity's declaring file, so changed-path elevation can fire.
-    decl_to_file: dict[str, str] = {}
-    for e in graph.edges:
-        if e.kind != "SOURCE_DECLARES":
-            continue
-        header = node_by_id.get(e.src)
-        if header is not None and header.label:
-            decl_to_file.setdefault(e.dst, header.label)
-
-    def _visibility(node_id: str) -> str:
-        node = node_by_id.get(node_id)
-        if node is None or node.kind not in _DECL_NODE_KINDS:
-            return ""
-        return str(node.attrs.get("visibility", ""))
-
-    def _is_public(node_id: str) -> bool:
-        if node_id in exported_decls:
-            return True
-        return _visibility(node_id) in _PUBLIC_VISIBILITIES
-
-    def _is_internal(node_id: str) -> bool:
-        node = node_by_id.get(node_id)
-        if node is None or node.kind not in _DECL_NODE_KINDS:
-            return False
-        if node_id in exported_decls:
-            return False
-        vis = str(node.attrs.get("visibility", ""))
-        if vis in _INTERNAL_VISIBILITIES:
-            return True
-        # An unannotated (call-graph-only) decl is internal only with explicit
-        # *project provenance*: either a SOURCE_DECLARES edge from one of the
-        # project's own files (``decl_to_file``), or the call-graph extractor's
-        # ``defined_in_project`` marker (the decl's body lives in a project
-        # compile-unit source — sound source-location provenance, not mere
-        # caller-presence). This catches a public→impl-helper dependency the
-        # built-in call graph produced without L4 SOURCE_DECLARES evidence, while
-        # a third-party header-inline or extern/system call target (no project
-        # source-file body) still has neither marker and is not flagged (Codex
-        # review).
-        if vis in _UNANNOTATED_VISIBILITIES:
-            has_provenance = node_id in decl_to_file or bool(
-                node.attrs.get("defined_in_project")
-            )
-            if not has_provenance:
-                return False
-            return not _looks_system(node.label or "")
-        return False
-
-    def _label(node_id: str) -> str:
-        node = node_by_id.get(node_id)
-        return node.label if node and node.label else node_id
+    decl_to_file = _decl_declaring_files(graph, node_by_id)
 
     findings: list[Change] = []
     seen: set[tuple[str, str]] = set()
     for e in graph.edges:
         if e.kind not in _DEPENDENCY_EDGE_KINDS:
             continue
-        if not _is_public(e.src) or not _is_internal(e.dst):
+        if not _is_public_decl(e.src, node_by_id, exported_decls):
             continue
-        pub, internal = _label(e.src), _label(e.dst)
+        if not _is_internal_decl(e.dst, node_by_id, exported_decls, decl_to_file):
+            continue
+        pub = _decl_label(e.src, node_by_id)
+        internal = _decl_label(e.dst, node_by_id)
         key = (pub, internal)
         if key in seen:
             continue
         seen.add(key)
-        # Declaring file from SOURCE_DECLARES (L4), else the call-graph node's
-        # source-location ``def_file`` — so changed-file elevation also works for
-        # a call-graph-only internal helper (Codex review).
-        changed_file = decl_to_file.get(e.dst, "")
-        if not changed_file:
-            dst_node = node_by_id.get(e.dst)
-            if dst_node is not None:
-                changed_file = str(dst_node.attrs.get("def_file", ""))
+        changed_file = _internal_decl_file(e.dst, node_by_id, decl_to_file)
         is_changed = _path_matches(changed_file, cfg.changed_paths)
-        note = (
-            f" — {internal!r} is declared in changed file {changed_file!r}, so the "
-            "API's behavior may have shifted this revision"
-            if is_changed
-            else ""
-        )
         findings.append(
-            _change(
-                ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
-                pub,
-                f"Public API {pub!r} depends on internal entity {internal!r} "
-                "(declared in a private header / source file, not the public "
-                f"surface){note}. Consumers cannot see it, so a change to it is an "
-                "undeclared behavioral risk. Make the dependency public or sever it.",
-                new_value=internal,
-                confidence=Confidence.HIGH if is_changed else Confidence.MEDIUM,
-                # Only stamp source_location when the internal entity was actually
-                # changed this revision — otherwise the finding is about the public
-                # API (``symbol``), and pointing the location at the unchanged
-                # private file would mislead SARIF/suppression matching (review).
-                source_location=changed_file if is_changed else None,
-            )
+            _public_to_internal_change(pub, internal, changed_file, is_changed)
         )
     findings.sort(key=lambda c: (c.symbol, c.new_value or ""))
     detail = (

@@ -26,10 +26,26 @@ Linking is cheap relative to parsing, so it is recomputed rather than cached
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
+
+
+def _try_demangle(
+    demangler: Callable[[str], str | None], symbol: str
+) -> str | None:
+    """*demangler*(*symbol*), with any demangler failure collapsed to ``None``.
+
+    The attribution loops iterate exported symbols and simply skip any the
+    demangler rejects; folding the failure into the return value keeps that
+    skip a plain conditional at the call site instead of a
+    try/except/``continue`` (bandit B112).
+    """
+    try:
+        return demangler(symbol)
+    except Exception:  # noqa: BLE001 - a demangler failure means "skip this symbol"
+        return None
 
 #: C++ Itanium ctor/dtor "ABI clone" tags. The compiler emits *several* object
 #: symbols for one source ctor/dtor — ``C1`` (complete), ``C2`` (base), ``C3``
@@ -175,6 +191,55 @@ def _ctor_dtor_demangle_fallback(symbol: str) -> str:
     return symbol
 
 
+def _skip_substitution(symbol: str, i: int) -> int:
+    """Return the index just past the Itanium ``<substitution>`` starting at *i*."""
+    # <substitution> := S_ | S<id>_ | S[abisod]
+    n = len(symbol)
+    if i + 1 < n and symbol[i + 1] in "atbsiod":
+        return i + 2
+    i += 1
+    while i < n and symbol[i] != "_":
+        i += 1
+    return i + 1  # consume the trailing '_'
+
+
+def _fold_nested_ctor_dtor(symbol: str) -> str | None:
+    """Fold a genuine ctor/dtor tag in a normalized ``_ZN…`` name, or ``None``."""
+    i, n = 3, len(symbol)
+    # Leading CV-/ref-qualifiers on the implicit object parameter.
+    while i < n and symbol[i] in "rVKRO":
+        i += 1
+    # ``boundary`` = we are at a clean prefix-component boundary (the previous
+    # token was a fully-consumed source-name / substitution / template-arg list),
+    # so a leading ``C``/``D`` here can only be a ctor/dtor special name — never
+    # the middle of an identifier.
+    boundary = False
+    while i < n:
+        c = symbol[i]
+        if c == "E":  # end of the nested-name
+            break
+        if "0" <= c <= "9":  # <source-name> := <len> <identifier> — consume wholesale
+            i = _consume_source_name(symbol, i)
+            boundary = True
+            continue
+        if c == "I":  # <template-args> := I … E (skip the balanced, nested run)
+            i = _skip_e_terminated(symbol, i)
+            boundary = True
+            continue
+        if c == "S":
+            i = _skip_substitution(symbol, i)
+            boundary = True
+            continue
+        if boundary and c in "CD" and symbol[i : i + 2] in _CTOR_DTOR_TAGS:
+            # Normalized (prefix-stripped) canonical key — unifies `__ZN`/`_ZN`.
+            return symbol[:i] + c + "@" + symbol[i + 2 :]
+        # Unknown production: advance without claiming a boundary, so a later
+        # C1/D0 reached only by char-skip is never mistaken for a special name.
+        boundary = False
+        i += 1
+    return None
+
+
 def _ctor_dtor_structural(symbol: str) -> str:
     """Fold a genuine Itanium ``<ctor-dtor-name>`` by structural parse (no deps).
 
@@ -188,7 +253,8 @@ def _ctor_dtor_structural(symbol: str) -> str:
     function literally named ``AC1`` mangles as ``_ZN1N3AC1Ev``) must NOT fold,
     or two unrelated symbols (``AC1``/``AC2``) would collide and one would be
     dropped from ``symbols_without_decl`` (Codex review). To tell them apart the
-    nested name is parsed component-by-component: length-prefixed identifiers are
+    nested name is parsed component-by-component (:func:`_fold_nested_ctor_dtor`):
+    length-prefixed identifiers are
     consumed *wholesale* (by their declared length), so their interior characters
     — including any ``C1``/``D0`` — never reach the tag test. A no-op for any name
     without a genuine tag, so non-ctor/dtor symbols keep exact-match semantics.
@@ -211,45 +277,9 @@ def _ctor_dtor_structural(symbol: str) -> str:
     # (plain ``_Z…``, vtables/typeinfo ``_ZTV``/``_ZTI``, data) have none.
     if not body.startswith("_ZN"):
         return original
-    symbol = body
-    i, n = 3, len(symbol)
-    # Leading CV-/ref-qualifiers on the implicit object parameter.
-    while i < n and symbol[i] in "rVKRO":
-        i += 1
-    # ``boundary`` = we are at a clean prefix-component boundary (the previous
-    # token was a fully-consumed source-name / substitution / template-arg list),
-    # so a leading ``C``/``D`` here can only be a ctor/dtor special name — never
-    # the middle of an identifier.
-    boundary = False
-    while i < n:
-        c = symbol[i]
-        if c == "E":  # end of the nested-name
-            break
-        if "0" <= c <= "9":  # <source-name> := <len> <identifier> — consume wholesale
-            i = _consume_source_name(symbol, i)
-            boundary = True
-            continue
-        if c == "I":  # <template-args> := I … E (skip the balanced, nested run)
-            i = _skip_e_terminated(symbol, i)
-            boundary = True
-            continue
-        if c == "S":  # <substitution> := S_ | S<id>_ | S[abisod]
-            if i + 1 < n and symbol[i + 1] in "atbsiod":
-                i += 2
-            else:
-                i += 1
-                while i < n and symbol[i] != "_":
-                    i += 1
-                i += 1  # consume the trailing '_'
-            boundary = True
-            continue
-        if boundary and c in "CD" and symbol[i : i + 2] in _CTOR_DTOR_TAGS:
-            # Normalized (prefix-stripped) canonical key — unifies `__ZN`/`_ZN`.
-            return symbol[:i] + c + "@" + symbol[i + 2 :]
-        # Unknown production: advance without claiming a boundary, so a later
-        # C1/D0 reached only by char-skip is never mistaken for a special name.
-        boundary = False
-        i += 1
+    folded = _fold_nested_ctor_dtor(body)
+    if folded is not None:
+        return folded
     # No fold: return the ORIGINAL symbol (with its prefix) so non-ctor names keep
     # exact-match semantics against the export set.
     return original
@@ -422,6 +452,36 @@ def _strip_call_signature(name: str) -> str:
     return name.strip()
 
 
+def _read_itanium_number(s: str, j: int) -> int | None:
+    """Return the index just past an Itanium ``<number>`` (``[n]<digits>``) at *j*, or ``None``."""
+    n = len(s)
+    if j < n and s[j] == "n":
+        j += 1
+    k = j
+    while k < n and s[k].isdigit():
+        k += 1
+    return k if k > j else None
+
+
+def _read_call_offset(s: str, j: int) -> int | None:
+    """Return the index just past an Itanium ``<call-offset>`` at *j*, or ``None``."""
+    # h <number> _   |   v <number> _ <number> _
+    n = len(s)
+    if j >= n or s[j] not in "hv":
+        return None
+    virtual = s[j] == "v"
+    j2 = _read_itanium_number(s, j + 1)
+    if j2 is None or j2 >= n or s[j2] != "_":
+        return None
+    j2 += 1
+    if virtual:
+        j3 = _read_itanium_number(s, j2)
+        if j3 is None or j3 >= n or s[j3] != "_":
+            return None
+        j2 = j3 + 1
+    return j2
+
+
 def _thunk_target_mangled(symbol: str) -> str | None:
     """Extract the underlying target symbol a thunk adjusts to, or ``None``.
 
@@ -446,37 +506,12 @@ def _thunk_target_mangled(symbol: str) -> str | None:
     if i >= n or s[i] not in "hvc":
         return None
     kind = s[i]
-
-    def read_number(j: int) -> int | None:
-        if j < n and s[j] == "n":
-            j += 1
-        k = j
-        while k < n and s[k].isdigit():
-            k += 1
-        return k if k > j else None
-
-    def read_call_offset(j: int) -> int | None:
-        # h <number> _   |   v <number> _ <number> _
-        if j >= n or s[j] not in "hv":
-            return None
-        virtual = s[j] == "v"
-        j2 = read_number(j + 1)
-        if j2 is None or j2 >= n or s[j2] != "_":
-            return None
-        j2 += 1
-        if virtual:
-            j3 = read_number(j2)
-            if j3 is None or j3 >= n or s[j3] != "_":
-                return None
-            j2 = j3 + 1
-        return j2
-
     if kind == "c":  # covariant: two call-offsets
-        j = read_call_offset(i + 1)
+        j = _read_call_offset(s, i + 1)
         if j is not None:
-            j = read_call_offset(j)
+            j = _read_call_offset(s, j)
     else:  # h / v begin their own call-offset at i
-        j = read_call_offset(i)
+        j = _read_call_offset(s, i)
     if j is None or j >= n:
         return None
     return "_Z" + s[j:]
@@ -638,10 +673,7 @@ def _attribute_synthesized_exports(
 
     attributed: dict[str, tuple[str, str]] = {}
     for sym in candidates:
-        try:
-            demangled = _demangle(sym)
-        except Exception:  # noqa: BLE001
-            continue
+        demangled = _try_demangle(_demangle, sym)
         if not demangled:
             continue
         parsed = _synthesized_target(demangled)
@@ -812,17 +844,21 @@ def _template_instantiation_attribution(
 
     attributed: dict[str, str] = {}
     for sym in candidates:
-        try:
-            demangled = _demangle(_norm_itanium(sym))
-        except Exception:  # noqa: BLE001
+        # An empty/None demangling can never match: unique_decl only holds
+        # truthy pattern keys and special-member owner keys always contain
+        # "<", so skipping early is behavior-identical and cheaper. The
+        # normalization runs inside the guard — a raising _norm_itanium
+        # also just skips the symbol.
+        demangled = _try_demangle(lambda s: _demangle(_norm_itanium(s)), sym)
+        if not demangled:
             continue
-        key = _template_pattern_key(_strip_call_signature(demangled or ""))
+        key = _template_pattern_key(_strip_call_signature(demangled))
         owner = unique_decl.get(key)
         if owner is not None:
             attributed[sym] = owner.qualified_name
             continue
         special_owner = source_owners.get(
-            _template_special_member_owner_key(demangled or "")
+            _template_special_member_owner_key(demangled)
         )
         if special_owner is not None:
             attributed[sym] = special_owner

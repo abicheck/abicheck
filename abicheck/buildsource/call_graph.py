@@ -194,6 +194,104 @@ def _classify_call(
     return callee, CALL_KIND_DIRECT, RESOLUTION_EXACT
 
 
+def _node_file(node: dict[str, Any]) -> str:
+    """The source file a node names, if any (clang emits ``file`` only when it *changes* — sticky — so the caller tracks the last-seen value)."""
+    loc = node.get("loc")
+    if isinstance(loc, dict) and loc.get("file"):
+        return str(loc["file"])
+    rng = node.get("range")
+    if isinstance(rng, dict):
+        beg = rng.get("begin")
+        if isinstance(beg, dict) and beg.get("file"):
+            return str(beg["file"])
+    return ""
+
+
+def _has_function_body(node: dict[str, Any]) -> bool:
+    """Whether a function-decl node carries a definition body (a ``CompoundStmt`` child)."""
+    return any(
+        isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
+        for ch in node.get("inner", []) or []
+    )
+
+
+def _enter_function_scope(
+    node: dict[str, Any],
+    caller: str,
+    caller_file: str,
+    cur_file: str,
+    decl_files: dict[str, str],
+) -> tuple[str, str]:
+    """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
+    ident = _identity(node) or caller
+    if ident != caller:
+        # Entering a new enclosing function: its body lives in cur_file.
+        caller, caller_file = ident, cur_file
+    # Record the definition file so a callee-only leaf helper resolves it.
+    if ident and _has_function_body(node):
+        decl_files[ident] = cur_file
+    return caller, caller_file
+
+
+def _append_call_edge(
+    node: dict[str, Any], caller: str, caller_file: str, edges: list[CallEdge]
+) -> None:
+    """Resolve one call expression's callee and append the edge (unresolved/self calls dropped)."""
+    ref = _find_referenced_decl(node)
+    callee, call_kind, resolution = _classify_call(node, ref)
+    if callee and callee != caller:
+        edges.append(CallEdge(caller, callee, call_kind, resolution, caller_file))
+
+
+def _walk_calls(
+    node: Any,
+    caller: str,
+    caller_file: str,
+    cur_file: str,
+    edges: list[CallEdge],
+    decl_files: dict[str, str],
+) -> None:
+    """Recursive AST walk tracking the nearest enclosing function as the *caller*."""
+    if not isinstance(node, dict):
+        return
+    f = _node_file(node)
+    if f:
+        cur_file = f
+    kind = str(node.get("kind", ""))
+    if kind in _FUNCTION_DECL_KINDS:
+        caller, caller_file = _enter_function_scope(
+            node, caller, caller_file, cur_file, decl_files
+        )
+    if kind in _CALL_EXPR_KINDS and caller:
+        _append_call_edge(node, caller, caller_file, edges)
+    for child in node.get("inner", []) or []:
+        _walk_calls(child, caller, caller_file, cur_file, edges, decl_files)
+
+
+def _fill_callee_files(
+    edges: list[CallEdge], decl_files: dict[str, str]
+) -> list[CallEdge]:
+    """Fill ``callee_file`` from the definition-file map (the callee's own FunctionDecl)."""
+    if not decl_files:
+        return edges
+    return [
+        replace(e, callee_file=decl_files[e.callee]) if e.callee in decl_files else e
+        for e in edges
+    ]
+
+
+def _dedupe_edges(edges: list[CallEdge]) -> list[CallEdge]:
+    """De-duplicate edges by ``(caller, callee, call_kind)``, keeping first-seen order."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[CallEdge] = []
+    for e in edges:
+        key = (e.caller, e.callee, e.call_kind)
+        if key not in seen:
+            seen.add(key)
+            out.append(e)
+    return out
+
+
 def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     """Extract static call edges from a ``clang -ast-dump=json`` tree (pure).
 
@@ -209,72 +307,8 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
     # this map after the walk, not from the reference node (Codex review).
     decl_files: dict[str, str] = {}
-
-    def _file_of(node: dict[str, Any]) -> str:
-        """The source file a node names, if any. clang emits ``file`` only when it
-        *changes* (sticky), so the caller tracks the last-seen value."""
-        loc = node.get("loc")
-        if isinstance(loc, dict) and loc.get("file"):
-            return str(loc["file"])
-        rng = node.get("range")
-        if isinstance(rng, dict):
-            beg = rng.get("begin")
-            if isinstance(beg, dict) and beg.get("file"):
-                return str(beg["file"])
-        return ""
-
-    def _has_body(node: dict[str, Any]) -> bool:
-        return any(
-            isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
-            for ch in node.get("inner", []) or []
-        )
-
-    def visit(node: Any, caller: str, caller_file: str, cur_file: str) -> None:
-        if not isinstance(node, dict):
-            return
-        f = _file_of(node)
-        if f:
-            cur_file = f
-        kind = str(node.get("kind", ""))
-        if kind in _FUNCTION_DECL_KINDS:
-            ident = _identity(node) or caller
-            if ident != caller:
-                # Entering a new enclosing function: its body lives in cur_file.
-                caller, caller_file = ident, cur_file
-            # Record the definition file so a callee-only leaf helper resolves it.
-            if ident and _has_body(node):
-                decl_files[ident] = cur_file
-        if kind in _CALL_EXPR_KINDS and caller:
-            ref = _find_referenced_decl(node)
-            callee, call_kind, resolution = _classify_call(node, ref)
-            if callee and callee != caller:
-                edges.append(
-                    CallEdge(caller, callee, call_kind, resolution, caller_file)
-                )
-        for child in node.get("inner", []) or []:
-            visit(child, caller, caller_file, cur_file)
-
-    visit(ast, "", "", "")
-
-    # Fill callee_file from the definition-file map (the callee's own FunctionDecl).
-    if decl_files:
-        edges = [
-            (
-                replace(e, callee_file=decl_files[e.callee])
-                if e.callee in decl_files
-                else e
-            )
-            for e in edges
-        ]
-
-    seen: set[tuple[str, str, str]] = set()
-    out: list[CallEdge] = []
-    for e in edges:
-        key = (e.caller, e.callee, e.call_kind)
-        if key not in seen:
-            seen.add(key)
-            out.append(e)
-    return out
+    _walk_calls(ast, "", "", "", edges, decl_files)
+    return _dedupe_edges(_fill_callee_files(edges, decl_files))
 
 
 def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:

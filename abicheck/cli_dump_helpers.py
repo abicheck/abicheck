@@ -27,6 +27,7 @@ from .errors import AbicheckError
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
 
 
 class _ExpandHeaderInputs(Protocol):
@@ -195,6 +196,107 @@ def resolve_dump_compile_db(
             "Without headers, CastXML has nothing to parse."
         )
     return effective_compile_db
+
+
+def resolve_dump_collect_context(
+    depth: str | None,
+    max_depth: bool,
+    resolved_collect_mode: str | None,
+    sources: Path | None,
+    build_info: Path | None,
+    headers: tuple[Path, ...],
+    compile_db_path: Path | None,
+    compile_db_path_alt: Path | None,
+) -> tuple[str, tuple[Path, ...], Path | None, Path | None]:
+    """Resolve the --depth/--max preset into the internal collect mode for a dump.
+
+    Returns the ``(collect_mode, headers, compile_db_path, compile_db_path_alt)``
+    tuple the caller should proceed with — ``--depth binary`` suppresses the L2
+    header AST and its compile DB, and an explicitly-requested deep depth without
+    a source tree / build context warns loudly (G21.7-style fail-loud).
+    """
+    # Resolve the --depth/--max preset into the internal collect mode before any
+    # dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the
+    # same evidence depth (G21.1). With no preset, dump embeds at "source-target".
+    # ``compare``'s inline source-tree embed already resolved the mode (possibly
+    # from a config source.method, where --depth is None) and hands it over via
+    # the private _resolved_collect_mode hook so we don't re-derive a different
+    # default here (Codex review).
+    if resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
+        collect_mode = resolved_collect_mode
+    else:
+        collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
+    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
+    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
+    # only feeds the header parse, so discard it with the headers — otherwise
+    # resolve_dump_compile_db would reject the now-headerless invocation even though
+    # the user did supply headers, blocking the switch to the fast binary rung
+    # (Codex review).
+    if depth == "binary":
+        headers = ()
+        compile_db_path = None
+        compile_db_path_alt = None
+
+    # An *explicitly* requested deep evidence depth (--depth/--max) collects
+    # nothing without a source tree / build context: _write_snapshot_output only
+    # embeds when --sources/--build-info is given. Warn loudly rather than
+    # silently writing an L0-L2 snapshot for an explicitly-requested deep depth
+    # (Codex review). The bare default (collect_mode "source-target" with no
+    # flag) stays silent — embedding is a no-op there by design. G21.7-style
+    # fail-loud (a warning, not an error).
+    depth_requested = depth is not None or max_depth
+    if (
+        depth_requested
+        and collect_mode != "off"
+        and sources is None and build_info is None
+    ):
+        click.echo(
+            f"Warning: evidence depth '{collect_mode}' was requested but no "
+            "--sources/--build-info was given; the snapshot will carry only "
+            "L0-L2 data (no build/source/graph facts). Pass --sources or "
+            "--build-info, or use --depth headers for an L2-only dump.",
+            err=True,
+        )
+    return collect_mode, headers, compile_db_path, compile_db_path_alt
+
+
+def resolve_dump_compile_context(
+    resolved_compile_context: CompileContext | None,
+    *,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    header_backend: str,
+    includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """Resolve the L2 compile context for a dump, folding the config compile: block.
+
+    Returns ``(compile_context, includes)``. When the caller (compare's inline
+    source-tree embed) already resolved the context it is used verbatim; do NOT
+    re-discover/re-merge the tree's .abicheck.yml here.
+    """
+    if resolved_compile_context is not None:
+        # Caller (compare's inline source-tree embed) already resolved the compile
+        # context with CLI-over-config explicitness honored; use it verbatim and do
+        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
+        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
+        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
+        # auto on the source-tree path only (Codex review).
+        return resolved_compile_context, includes
+    from .cli_options import resolve_compile_context
+
+    return resolve_compile_context(
+        click.get_current_context(),
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes,
+        build_config=build_config, sources=sources,
+    )
 
 
 def perform_elf_dump(

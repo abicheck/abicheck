@@ -843,70 +843,95 @@ class TypeDatabase:
             pos += 2
 
             if sub_leaf == LF_MEMBER:
-                if pos + 6 > len(d):
-                    break
-                (attr, type_ti) = struct.unpack_from("<HI", d, pos)
-                pos += 6
-                offset_val, pos = _read_numeric_leaf(d, pos)
-                name, pos = _read_cstring(d, pos)
-                members.append(CvMember(
-                    name=name, type_ti=type_ti,
-                    offset=offset_val, access=attr & 0x03,
-                ))
-
+                new_pos = self._parse_lf_member(d, pos, members)
             elif sub_leaf == LF_ENUMERATE:
-                if pos + 2 > len(d):
-                    break
-                (attr,) = struct.unpack_from("<H", d, pos)
-                pos += 2
-                val, pos = _read_numeric_leaf(d, pos)
-                name, pos = _read_cstring(d, pos)
-                members.append(CvEnumerator(name=name, value=val))
-
+                new_pos = self._parse_lf_enumerate(d, pos, members)
             elif sub_leaf == LF_INDEX:
-                # LF_INDEX — continuation to another LF_FIELDLIST.
-                # Structure: 2-byte sub_leaf (already consumed) + 2-byte padding + 4-byte TI = 6 bytes total.
-                if pos + 6 > len(d):
-                    break
-                (cont_ti,) = struct.unpack_from("<I", d, pos + 2)
-                pos += 6
-                # Resolve continuation
-                cont_rec = self._tpi.get(cont_ti)
-                if cont_rec and cont_rec.leaf == LF_FIELDLIST:
-                    self._parse_fieldlist(cont_ti, cont_rec.data, _visited)
-                    cont_members = self._fieldlists.get(cont_ti, [])
-                    members.extend(cont_members)
-
+                new_pos = self._parse_lf_index(d, pos, members, _visited)
             elif sub_leaf == LF_ONEMETHOD:
-                # attr(2) + type_ti(4) [+ vbaseoff(4) if intro virtual] + name.
-                # Parsed (not skipped) so the method's calling convention can
-                # be resolved by name via its LF_MFUNCTION type.
-                if pos + 6 > len(d):
-                    break
-                (attr, m_type_ti) = struct.unpack_from("<HI", d, pos)
-                pos += 6
-                mprop = (attr >> 2) & 0x07
-                if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
-                    pos += 4
-                m_name, pos = _read_cstring(d, pos)
-                if m_name:
-                    members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
-
+                new_pos = self._parse_lf_onemethod(d, pos, members)
             elif sub_leaf in (LF_STMEMBER, LF_NESTTYPE,
                               LF_VFUNCTAB, LF_BCLASS, LF_VBCLASS,
                               LF_IVBCLASS, LF_METHOD):
                 # Skip known sub-records we don't need
-                pos = self._skip_subrecord(sub_leaf, d, pos)
-
+                new_pos = self._skip_subrecord(sub_leaf, d, pos)
             else:
                 # Unknown sub-record — can't safely continue
                 log.debug("Unknown fieldlist sub-leaf 0x%04x at pos %d", sub_leaf, pos)
                 break
 
+            if new_pos is None:  # truncated sub-record
+                break
             # 4-byte alignment within fieldlist
-            pos = (pos + 3) & ~3
+            pos = (new_pos + 3) & ~3
 
         self._fieldlists[ti] = members
+
+    def _parse_lf_member(
+        self, d: bytes, pos: int, members: list[Any],
+    ) -> int | None:
+        """Parse an LF_MEMBER sub-record; return the new position, or None if truncated."""
+        if pos + 6 > len(d):
+            return None
+        (attr, type_ti) = struct.unpack_from("<HI", d, pos)
+        pos += 6
+        offset_val, pos = _read_numeric_leaf(d, pos)
+        name, pos = _read_cstring(d, pos)
+        members.append(CvMember(
+            name=name, type_ti=type_ti,
+            offset=offset_val, access=attr & 0x03,
+        ))
+        return pos
+
+    def _parse_lf_enumerate(
+        self, d: bytes, pos: int, members: list[Any],
+    ) -> int | None:
+        """Parse an LF_ENUMERATE sub-record; return the new position, or None if truncated."""
+        if pos + 2 > len(d):
+            return None
+        (_attr,) = struct.unpack_from("<H", d, pos)
+        pos += 2
+        val, pos = _read_numeric_leaf(d, pos)
+        name, pos = _read_cstring(d, pos)
+        members.append(CvEnumerator(name=name, value=val))
+        return pos
+
+    def _parse_lf_index(
+        self, d: bytes, pos: int, members: list[Any], _visited: set[int],
+    ) -> int | None:
+        """Parse an LF_INDEX continuation sub-record; return the new position, or None if truncated."""
+        # LF_INDEX — continuation to another LF_FIELDLIST.
+        # Structure: 2-byte sub_leaf (already consumed) + 2-byte padding + 4-byte TI = 6 bytes total.
+        if pos + 6 > len(d):
+            return None
+        (cont_ti,) = struct.unpack_from("<I", d, pos + 2)
+        pos += 6
+        # Resolve continuation
+        cont_rec = self._tpi.get(cont_ti)
+        if cont_rec and cont_rec.leaf == LF_FIELDLIST:
+            self._parse_fieldlist(cont_ti, cont_rec.data, _visited)
+            cont_members = self._fieldlists.get(cont_ti, [])
+            members.extend(cont_members)
+        return pos
+
+    def _parse_lf_onemethod(
+        self, d: bytes, pos: int, members: list[Any],
+    ) -> int | None:
+        """Parse an LF_ONEMETHOD sub-record; return the new position, or None if truncated."""
+        # attr(2) + type_ti(4) [+ vbaseoff(4) if intro virtual] + name.
+        # Parsed (not skipped) so the method's calling convention can
+        # be resolved by name via its LF_MFUNCTION type.
+        if pos + 6 > len(d):
+            return None
+        (attr, m_type_ti) = struct.unpack_from("<HI", d, pos)
+        pos += 6
+        mprop = (attr >> 2) & 0x07
+        if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
+            pos += 4
+        m_name, pos = _read_cstring(d, pos)
+        if m_name:
+            members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
+        return pos
 
     def _skip_subrecord(self, sub_leaf: int, d: bytes, pos: int) -> int:
         """Skip known sub-record types we don't parse.
@@ -929,17 +954,8 @@ class TypeDatabase:
             _, pos = _read_cstring(d, pos)
             return pos
 
-        if sub_leaf == LF_ONEMETHOD:
-            # attr(2) + type_ti(4) [+ vbaseoff(4) if virtual] + name(variable)
-            if pos + 6 > len(d):
-                return len(d)
-            (attr,) = struct.unpack_from("<H", d, pos)
-            pos += 6
-            mprop = (attr >> 2) & 0x07
-            if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
-                pos += 4
-            _, pos = _read_cstring(d, pos)
-            return pos
+        # LF_ONEMETHOD is dispatched to _parse_lf_onemethod by _parse_fieldlist
+        # before it reaches this fallback, so it is intentionally absent here.
 
         if sub_leaf == LF_METHOD:
             # count(2) + mlist_ti(4) + name(variable)

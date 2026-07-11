@@ -408,7 +408,7 @@ def _cxx_tag(cxx: str) -> str:
     never collide on the same cached tree.
     """
     base = re.sub(r"[^A-Za-z0-9]+", "", Path(cxx).name) or "cxx"
-    return f"{base}-{hashlib.sha1(cxx.encode()).hexdigest()[:8]}"
+    return f"{base}-{hashlib.sha1(cxx.encode(), usedforsecurity=False).hexdigest()[:8]}"
 
 
 def run_sweep(

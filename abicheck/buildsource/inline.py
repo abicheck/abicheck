@@ -374,14 +374,8 @@ class BuildConfig:
             version=version,
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
-
-        Only non-default blocks/keys are emitted so a dumped config stays minimal
-        and a reload reproduces the same :class:`BuildConfig` (ADR-037 D4
-        round-trip contract, ``test_config_roundtrip``).
-        """
-        out: dict[str, Any] = {}
+    def _build_block(self) -> dict[str, Any]:
+        """Non-default ``build:`` keys (empty when the block is all-defaults)."""
         build: dict[str, Any] = {}
         if self.system and self.system != "auto":
             build["system"] = self.system
@@ -389,9 +383,10 @@ class BuildConfig:
             build["query"] = self.query
         if self.compile_db:
             build["compile_db"] = self.compile_db
-        if build:
-            out["build"] = build
+        return build
 
+    def _sources_block(self) -> dict[str, Any]:
+        """Non-default ``sources:`` keys (headers/excludes/graph detail)."""
         sources: dict[str, Any] = {}
         if self.public_headers:
             sources["public_headers"] = list(self.public_headers)
@@ -399,9 +394,10 @@ class BuildConfig:
             sources["exclude"] = list(self.exclude)
         if self.graph_detail and self.graph_detail != "summary":
             sources["graph"] = self.graph_detail
-        if sources:
-            out["sources"] = sources
+        return sources
 
+    def _severity_block(self) -> dict[str, Any]:
+        """Non-default ``severity:`` keys (preset + per-category levels)."""
         severity: dict[str, Any] = {}
         if self.severity_preset is not None:
             severity["preset"] = self.severity_preset
@@ -409,9 +405,10 @@ class BuildConfig:
             val = getattr(self, f"severity_{key}")
             if val is not None:
                 severity[key] = val
-        if severity:
-            out["severity"] = severity
+        return severity
 
+    def _scope_block(self) -> dict[str, Any]:
+        """Non-default ``scope:`` keys (public-surface FP tuning)."""
         scope: dict[str, Any] = {}
         if self.scope_public is not None:
             scope["public"] = self.scope_public
@@ -419,9 +416,10 @@ class BuildConfig:
             scope["collapse_versioned_symbols"] = self.collapse_versioned_symbols
         if self.public_symbols:
             scope["public_symbols"] = list(self.public_symbols)
-        if scope:
-            out["scope"] = scope
+        return scope
 
+    def _suppression_block(self) -> dict[str, Any]:
+        """Non-default ``suppression:`` keys (hygiene policy)."""
         suppression: dict[str, Any] = {}
         if self.suppression_strict is not None:
             suppression["strict"] = self.suppression_strict
@@ -429,12 +427,16 @@ class BuildConfig:
             suppression["require_justification"] = (
                 self.suppression_require_justification
             )
-        if suppression:
-            out["suppression"] = suppression
+        return suppression
 
+    def _source_block(self) -> dict[str, Any]:
+        """``source:`` block (``method`` only; empty when unset)."""
         if self.source_method is not None:
-            out["source"] = {"method": self.source_method}
+            return {"method": self.source_method}
+        return {}
 
+    def _compile_block(self) -> dict[str, Any]:
+        """Non-default ``compile:`` keys (stable L2 header compile context)."""
         compile_blk: dict[str, Any] = {}
         if self.compile_frontend is not None:
             compile_blk["frontend"] = self.compile_frontend
@@ -448,8 +450,29 @@ class BuildConfig:
             compile_blk["sysroot"] = self.compile_sysroot
         if self.compile_nostdinc is not None:
             compile_blk["nostdinc"] = self.compile_nostdinc
-        if compile_blk:
-            out["compile"] = compile_blk
+        return compile_blk
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
+
+        Only non-default blocks/keys are emitted so a dumped config stays minimal
+        and a reload reproduces the same :class:`BuildConfig` (ADR-037 D4
+        round-trip contract, ``test_config_roundtrip``).
+        """
+        out: dict[str, Any] = {}
+        # Insertion order is the stable dump order: block by block, then the
+        # top-level scalars — keep it in sync with the dataclass field order.
+        for key, block in (
+            ("build", self._build_block()),
+            ("sources", self._sources_block()),
+            ("severity", self._severity_block()),
+            ("scope", self._scope_block()),
+            ("suppression", self._suppression_block()),
+            ("source", self._source_block()),
+            ("compile", self._compile_block()),
+        ):
+            if block:
+                out[key] = block
 
         if self.exit_code_scheme and self.exit_code_scheme != "auto":
             out["exit_code_scheme"] = self.exit_code_scheme

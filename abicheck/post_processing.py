@@ -1092,80 +1092,108 @@ class EscalateFrozenNamespaceViolations:
 
     name = "escalate_frozen_namespace_violations"
 
+    @staticmethod
+    def _candidate_forms(
+        name: str,
+        c: Change,
+        old_qualified: dict[str, str],
+        new_qualified: dict[str, str],
+    ) -> list[str]:
+        """Collect every plausible C++-qualified form of *name*."""
+        # Imported lazily so this module stays free of import cycles.
+        from .demangle import demangle
+        from .diff_filtering import _qualified_name_for_change
+
+        # The plausible forms are:
+        # 1. the raw value (mangled, demangled, or already qualified);
+        # 2. the demangled form when the raw value looks Itanium-mangled;
+        # 3. the snapshot-recorded qualified name (Function.name), which
+        #    is the only form that recovers the namespace of an
+        #    ``extern "C"`` symbol whose export name is unqualified.
+        forms: list[str] = [name]
+        if name.startswith("_Z"):
+            dm = demangle(name)
+            if dm:
+                forms.append(dm)
+        if name == c.symbol:
+            qual = _qualified_name_for_change(c, old_qualified, new_qualified)
+            if qual:
+                forms.append(qual)
+        return forms
+
+    @classmethod
+    def _match(
+        cls,
+        name: str | None,
+        c: Change,
+        patterns: list[str],
+        old_qualified: dict[str, str],
+        new_qualified: dict[str, str],
+    ) -> str | None:
+        """Return the first frozen-namespace pattern matching *name*, or None."""
+        # Imported lazily so this module stays free of import cycles.
+        import fnmatch
+
+        from .internal_leak import _strip_template_args
+
+        if not name:
+            return None
+        for form in cls._candidate_forms(name, c, old_qualified, new_qualified):
+            # Walk every ancestor prefix so ``**::detail::r1`` matches
+            # both ``ns::detail::r1::foo`` and the deeper
+            # ``ns::detail::r1::sub::foo``.
+            candidate = _strip_template_args(form)
+            while True:
+                for pat in patterns:
+                    if fnmatch.fnmatchcase(candidate, pat):
+                        return pat
+                if "::" not in candidate:
+                    break
+                candidate = candidate.rsplit("::", 1)[0]
+        return None
+
+    @classmethod
+    def _tag(
+        cls,
+        c: Change,
+        patterns: list[str],
+        old_qualified: dict[str, str],
+        new_qualified: dict[str, str],
+    ) -> None:
+        """Tag *c* with the matching frozen-namespace pattern, if any."""
+        if c.frozen_namespace_violation is not None:
+            # Already tagged by an earlier step (e.g. internal-leak
+            # overlay that synthesised a finding with the field set).
+            return
+        pat = (
+            cls._match(c.symbol, c, patterns, old_qualified, new_qualified)
+            or cls._match(c.caused_by_type, c, patterns, old_qualified, new_qualified)
+            or cls._match(c.qualified_name, c, patterns, old_qualified, new_qualified)
+        )
+        if pat is None:
+            return
+        c.frozen_namespace_violation = pat
+        if not c.description.startswith("[frozen-namespace violation"):
+            c.description = f"[frozen-namespace violation: {pat}] " + c.description
+
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.frozen_namespaces:
             return changes
         # Imported lazily so this module stays free of import cycles.
-        import fnmatch
-
-        from .demangle import demangle
-        from .diff_filtering import (
-            _qualified_functions_by_mangled,
-            _qualified_name_for_change,
-        )
-        from .internal_leak import _strip_template_args
+        from .diff_filtering import _qualified_functions_by_mangled
 
         patterns = list(ctx.frozen_namespaces)
         old_qualified = _qualified_functions_by_mangled(ctx.old)
         new_qualified = _qualified_functions_by_mangled(ctx.new)
 
-        def _match(name: str | None, c: Change) -> str | None:
-            if not name:
-                return None
-            # Collect every plausible C++-qualified form of *name*:
-            # 1. the raw value (mangled, demangled, or already qualified);
-            # 2. the demangled form when the raw value looks Itanium-mangled;
-            # 3. the snapshot-recorded qualified name (Function.name), which
-            #    is the only form that recovers the namespace of an
-            #    ``extern "C"`` symbol whose export name is unqualified.
-            forms: list[str] = [name]
-            if name.startswith("_Z"):
-                dm = demangle(name)
-                if dm:
-                    forms.append(dm)
-            if name == c.symbol:
-                qual = _qualified_name_for_change(c, old_qualified, new_qualified)
-                if qual:
-                    forms.append(qual)
-
-            for form in forms:
-                # Walk every ancestor prefix so ``**::detail::r1`` matches
-                # both ``ns::detail::r1::foo`` and the deeper
-                # ``ns::detail::r1::sub::foo``.
-                candidate = _strip_template_args(form)
-                while True:
-                    for pat in patterns:
-                        if fnmatch.fnmatchcase(candidate, pat):
-                            return pat
-                    if "::" not in candidate:
-                        break
-                    candidate = candidate.rsplit("::", 1)[0]
-            return None
-
-        def _tag(c: Change) -> None:
-            if c.frozen_namespace_violation is not None:
-                # Already tagged by an earlier step (e.g. internal-leak
-                # overlay that synthesised a finding with the field set).
-                return
-            pat = (
-                _match(c.symbol, c)
-                or _match(c.caused_by_type, c)
-                or _match(c.qualified_name, c)
-            )
-            if pat is None:
-                return
-            c.frozen_namespace_violation = pat
-            if not c.description.startswith("[frozen-namespace violation"):
-                c.description = f"[frozen-namespace violation: {pat}] " + c.description
-
         for c in changes:
-            _tag(c)
+            self._tag(c, patterns, old_qualified, new_qualified)
         # ``compare()`` computes the verdict on kept + redundant, so
         # findings moved into ctx.redundant by FilterRedundant must also
         # be tagged — otherwise a downgrade override could silently
         # apply to a redundant-but-frozen finding.
         for c in ctx.redundant:
-            _tag(c)
+            self._tag(c, patterns, old_qualified, new_qualified)
         return changes
 
 

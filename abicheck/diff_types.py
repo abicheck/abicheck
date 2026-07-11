@@ -387,81 +387,88 @@ def _try_match_reserved_field(
     return None
 
 
-def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
-    changes: list[Change] = []
-    old_fields = {f.name: f for f in t_old.fields}
-    new_fields = {f.name: f for f in t_new.fields}
-
+def _index_added_fields(
+    old_fields: dict[str, TypeField],
+    new_fields: dict[str, TypeField],
+) -> tuple[dict[int, TypeField], dict[str, list[TypeField]]]:
+    """Index fields present only in new_fields by offset and by type for reserved-field matching."""
     # Build index of added fields by offset for reserved-field matching.
-    added_names = {fname for fname in new_fields if fname not in old_fields}
     added_by_offset: dict[int, TypeField] = {}
     # Also build an ordered list of added non-reserved fields for fallback
-    # when offset_bits is unavailable (e.g. DWARF-only mode).
+    # when offset_bits is unavailable (e.g. DWARF-only mode). Iterate
+    # new_fields (insertion == declaration order) rather than a set of names, so
+    # the per-type fallback lists are deterministic across runs.
     added_by_type: dict[str, list[TypeField]] = {}
-    for fname in added_names:
-        f = new_fields[fname]
+    for fname, f in new_fields.items():
+        if fname in old_fields:
+            continue
         if f.offset_bits is not None:
             added_by_offset[f.offset_bits] = f
         if not _RESERVED_FIELD_RE.match(fname):
             added_by_type.setdefault(f.type, []).append(f)
-    # Track which added fields were matched as reserved-field activations
-    # so we skip emitting TYPE_FIELD_ADDED for them.
-    reserved_matched_added: set[str] = set()
-    renamed_type_changed_added: set[str] = set()
+    return added_by_offset, added_by_type
 
-    # Identify trailing FAM fields so we can skip them from generic checks
-    # and let _diff_flexible_array_member handle them exclusively.
-    old_trailing_fam = (
-        t_old.fields[-1].name if t_old.fields and _is_flexible_array_member(t_old.fields[-1]) else None
-    )
-    new_trailing_fam = (
-        t_new.fields[-1].name if t_new.fields and _is_flexible_array_member(t_new.fields[-1]) else None
-    )
 
-    for fname, f_old in old_fields.items():
-        f_new = new_fields.get(fname)
-        if f_new is None:
-            # Skip trailing FAM removals — handled by _diff_flexible_array_member
-            if fname == old_trailing_fam:
-                continue
-            # Check if this is a reserved field put into use
-            matched = _try_match_reserved_field(
-                fname, f_old, name, added_by_offset, added_by_type, reserved_matched_added,
-            )
-            if matched is not None:
-                changes.append(matched)
-                continue
-            if f_old.offset_bits is not None:
-                f_new = added_by_offset.get(f_old.offset_bits)
-                if (
-                    f_new is not None
-                    and f_new.name not in reserved_matched_added
-                    and not _RESERVED_FIELD_RE.match(fname)
-                    and not _RESERVED_FIELD_RE.match(f_new.name)
-                    and canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
-                    and not cv_qualifiers_only_differ(f_old.type, f_new.type)
-                ):
-                    renamed_type_changed_added.add(f_new.name)
-                    changes.append(make_change(
-                        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-                        symbol=name,
-                        name=name,
-                        detail=f"{fname} -> {f_new.name}",
-                        old=f_old.type,
-                        new=f_new.type,
-                    ))
-                    continue
-            changes.append(make_change(
-                ChangeKind.TYPE_FIELD_REMOVED,
+def _trailing_fam_name(fields: list[TypeField]) -> str | None:
+    """Return the name of the trailing flexible array member, or None if absent."""
+    if fields and _is_flexible_array_member(fields[-1]):
+        return fields[-1].name
+    return None
+
+
+def _diff_removed_field(
+    name: str,
+    fname: str,
+    f_old: TypeField,
+    added_by_offset: dict[int, TypeField],
+    added_by_type: dict[str, list[TypeField]],
+    reserved_matched_added: set[str],
+    renamed_type_changed_added: set[str],
+) -> Change:
+    """Classify a field missing from the new type as reserved-use, rename+retype, or removal."""
+    # Check if this is a reserved field put into use
+    matched = _try_match_reserved_field(
+        fname, f_old, name, added_by_offset, added_by_type, reserved_matched_added,
+    )
+    if matched is not None:
+        return matched
+    if f_old.offset_bits is not None:
+        f_new = added_by_offset.get(f_old.offset_bits)
+        if (
+            f_new is not None
+            and f_new.name not in reserved_matched_added
+            and not _RESERVED_FIELD_RE.match(fname)
+            and not _RESERVED_FIELD_RE.match(f_new.name)
+            and canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
+            and not cv_qualifiers_only_differ(f_old.type, f_new.type)
+        ):
+            renamed_type_changed_added.add(f_new.name)
+            return make_change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
                 symbol=name,
-                name=name, detail=fname,
-            ))
-            continue
-        # Skip trailing FAM type changes — handled by _diff_flexible_array_member
-        if fname == old_trailing_fam and fname == new_trailing_fam:
-            continue
-        changes.extend(_diff_type_field_pair(name, fname, f_old, f_new))
+                name=name,
+                detail=f"{fname} -> {f_new.name}",
+                old=f_old.type,
+                new=f_new.type,
+            )
+    return make_change(
+        ChangeKind.TYPE_FIELD_REMOVED,
+        symbol=name,
+        name=name, detail=fname,
+    )
 
+
+def _added_field_changes(
+    name: str,
+    t_new: RecordType,
+    old_fields: dict[str, TypeField],
+    new_fields: dict[str, TypeField],
+    reserved_matched_added: set[str],
+    renamed_type_changed_added: set[str],
+    new_trailing_fam: str | None,
+) -> list[Change]:
+    """Emit added-field changes for new fields not consumed by reserved/rename matching."""
+    changes: list[Change] = []
     for fname in new_fields:
         if (
             fname not in old_fields
@@ -476,6 +483,46 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
                 symbol=name,
                 name=name, detail=fname,
             ))
+    return changes
+
+
+def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+    """Diff the field lists of two record types, emitting field-level changes."""
+    changes: list[Change] = []
+    old_fields = {f.name: f for f in t_old.fields}
+    new_fields = {f.name: f for f in t_new.fields}
+
+    added_by_offset, added_by_type = _index_added_fields(old_fields, new_fields)
+    # Track which added fields were matched as reserved-field activations
+    # so we skip emitting TYPE_FIELD_ADDED for them.
+    reserved_matched_added: set[str] = set()
+    renamed_type_changed_added: set[str] = set()
+
+    # Identify trailing FAM fields so we can skip them from generic checks
+    # and let _diff_flexible_array_member handle them exclusively.
+    old_trailing_fam = _trailing_fam_name(t_old.fields)
+    new_trailing_fam = _trailing_fam_name(t_new.fields)
+
+    for fname, f_old in old_fields.items():
+        f_new = new_fields.get(fname)
+        if f_new is None:
+            # Skip trailing FAM removals — handled by _diff_flexible_array_member
+            if fname == old_trailing_fam:
+                continue
+            changes.append(_diff_removed_field(
+                name, fname, f_old, added_by_offset, added_by_type,
+                reserved_matched_added, renamed_type_changed_added,
+            ))
+            continue
+        # Skip trailing FAM type changes — handled by _diff_flexible_array_member
+        if fname == old_trailing_fam and fname == new_trailing_fam:
+            continue
+        changes.extend(_diff_type_field_pair(name, fname, f_old, f_new))
+
+    changes.extend(_added_field_changes(
+        name, t_new, old_fields, new_fields,
+        reserved_matched_added, renamed_type_changed_added, new_trailing_fam,
+    ))
 
     # FLEXIBLE_ARRAY_MEMBER_CHANGED: detect changes to trailing flexible array members.
     # A FAM is the last field with type matching "T []" or "T [0]" — zero static size.

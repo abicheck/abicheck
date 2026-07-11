@@ -310,7 +310,9 @@ def test_extract_worker_partial_is_picklable() -> None:
     # ProcessPoolExecutor pickles the worker + its bound args; this is the
     # invariant that lets the process executor exist at all.
     worker = partial(sr._extract_one, _FakeExtractor(), ["/inc"], "tgt")
-    restored = pickle.loads(pickle.dumps(worker))
+    # nosec B301 - round-tripping our own in-process object IS the test: it
+    # proves ProcessPoolExecutor can ship the worker to a child process.
+    restored = pickle.loads(pickle.dumps(worker))  # noqa: S301  # nosec B301
     tu, err = restored(_cu("u3"))
     assert err is None and isinstance(tu, SourceAbiTu)
 

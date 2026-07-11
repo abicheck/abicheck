@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import IO
 
 from elftools.common.exceptions import ELFError
-from elftools.elf.dynamic import DynamicSection
+from elftools.elf.dynamic import DynamicSection, DynamicTag
 from elftools.elf.elffile import ELFFile
 from elftools.elf.gnuversions import (
     GNUVerDefSection,
@@ -795,29 +795,75 @@ _DF_1_PIE = 0x08000000    # DT_FLAGS_1
 _INIT_TAGS = frozenset({"DT_INIT", "DT_PREINIT_ARRAY"})
 _FINI_TAGS = frozenset({"DT_FINI"})
 
+# All init/fini-related dynamic tags, deferred to _apply_init_fini_tags.
+_INIT_FINI_TAGS = frozenset(
+    _INIT_TAGS
+    | _FINI_TAGS
+    | {"DT_INIT_ARRAY", "DT_FINI_ARRAY", "DT_INIT_ARRAYSZ", "DT_FINI_ARRAYSZ"}
+)
 
-def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
-    # A dynamic section exists — the loader-contract fields below are now
-    # *captured* (tri-state None → concrete), so detectors may compare them.
-    dyn_flags: set[str] = set(meta.dynamic_flags or ())
-    meta.has_init = bool(meta.has_init)
-    meta.has_fini = bool(meta.has_fini)
+
+def _apply_simple_dynamic_tag(
+    d_tag: object, tag: DynamicTag, meta: ElfMetadata
+) -> bool:
+    """Handle a self-contained dynamic tag; return True if the tag was consumed."""
+    if d_tag == "DT_SONAME":
+        meta.soname = tag.soname
+    elif d_tag == "DT_NEEDED":
+        meta.needed.append(tag.needed)
+    elif d_tag == "DT_RPATH":
+        meta.rpath = tag.rpath
+    elif d_tag == "DT_RUNPATH":
+        meta.runpath = tag.runpath
+    elif d_tag == "DT_BIND_NOW":
+        meta.bind_now = True
+    elif d_tag in ("DT_RELR", _DT_RELR):
+        # Packed relative relocations. pyelftools spells known tags as
+        # strings; an older release may pass the raw numeric through.
+        meta.has_dt_relr = True
+    else:
+        return False
+    return True
+
+
+def _apply_dt_flags(d_val: int, meta: ElfMetadata, dyn_flags: set[str]) -> None:
+    """Apply DT_FLAGS bits (DF_*) to the metadata and the collected flag set."""
+    if d_val & _DF_BIND_NOW:
+        meta.bind_now = True
+    if d_val & _DF_STATIC_TLS:
+        meta.has_static_tls = True
+    if d_val & _DF_ORIGIN:
+        dyn_flags.add("ORIGIN")
+
+
+def _apply_dt_flags_1(d_val: int, meta: ElfMetadata, dyn_flags: set[str]) -> None:
+    """Apply DT_FLAGS_1 bits (DF_1_*) to the metadata and the collected flag set."""
+    if d_val & _DF_1_NOW:
+        meta.bind_now = True
+    if d_val & _DF_1_PIE:
+        # Tentative; gated on ET_DYN by the caller.
+        meta.is_pie = True
+    if d_val & _DF_1_NODELETE:
+        dyn_flags.add("NODELETE")
+    if d_val & _DF_1_NOOPEN:
+        dyn_flags.add("NOOPEN")
+    if d_val & _DF_1_ORIGIN:
+        dyn_flags.add("ORIGIN")
+
+
+def _array_tag_is_populated(present: bool, size: int | None) -> bool:
+    """True when a DT_*_ARRAY tag exists and its *SZ tag is absent or non-zero."""
+    return present and (size is None or size > 0)
+
+
+def _apply_init_fini_tags(tags: list[DynamicTag], meta: ElfMetadata) -> None:
+    """Set meta.has_init/has_fini from the collected DT_INIT*/DT_FINI* tags."""
     init_array_sz: int | None = None  # None = no DT_INIT_ARRAYSZ tag seen
     fini_array_sz: int | None = None
     has_init_array = has_fini_array = False
-    for tag in section.iter_tags():
+    for tag in tags:
         d_tag = tag.entry.d_tag
-        if d_tag == "DT_SONAME":
-            meta.soname = tag.soname
-        elif d_tag == "DT_NEEDED":
-            meta.needed.append(tag.needed)
-        elif d_tag == "DT_RPATH":
-            meta.rpath = tag.rpath
-        elif d_tag == "DT_RUNPATH":
-            meta.runpath = tag.runpath
-        elif d_tag == "DT_BIND_NOW":
-            meta.bind_now = True
-        elif d_tag in _INIT_TAGS:
+        if d_tag in _INIT_TAGS:
             meta.has_init = True
         elif d_tag in _FINI_TAGS:
             meta.has_fini = True
@@ -829,33 +875,30 @@ def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
             init_array_sz = int(tag.entry.d_val)
         elif d_tag == "DT_FINI_ARRAYSZ":
             fini_array_sz = int(tag.entry.d_val)
-        elif d_tag == "DT_FLAGS":
-            if tag.entry.d_val & _DF_BIND_NOW:
-                meta.bind_now = True
-            if tag.entry.d_val & _DF_STATIC_TLS:
-                meta.has_static_tls = True
-            if tag.entry.d_val & _DF_ORIGIN:
-                dyn_flags.add("ORIGIN")
-        elif d_tag == "DT_FLAGS_1":
-            if tag.entry.d_val & _DF_1_NOW:
-                meta.bind_now = True
-            if tag.entry.d_val & _DF_1_PIE:
-                # Tentative; gated on ET_DYN by the caller.
-                meta.is_pie = True
-            if tag.entry.d_val & _DF_1_NODELETE:
-                dyn_flags.add("NODELETE")
-            if tag.entry.d_val & _DF_1_NOOPEN:
-                dyn_flags.add("NOOPEN")
-            if tag.entry.d_val & _DF_1_ORIGIN:
-                dyn_flags.add("ORIGIN")
-        elif d_tag in ("DT_RELR", _DT_RELR):
-            # Packed relative relocations. pyelftools spells known tags as
-            # strings; an older release may pass the raw numeric through.
-            meta.has_dt_relr = True
-    if has_init_array and (init_array_sz is None or init_array_sz > 0):
+    if _array_tag_is_populated(has_init_array, init_array_sz):
         meta.has_init = True
-    if has_fini_array and (fini_array_sz is None or fini_array_sz > 0):
+    if _array_tag_is_populated(has_fini_array, fini_array_sz):
         meta.has_fini = True
+
+
+def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
+    # A dynamic section exists — the loader-contract fields below are now
+    # *captured* (tri-state None → concrete), so detectors may compare them.
+    dyn_flags: set[str] = set(meta.dynamic_flags or ())
+    meta.has_init = bool(meta.has_init)
+    meta.has_fini = bool(meta.has_fini)
+    init_fini_tags: list[DynamicTag] = []
+    for tag in section.iter_tags():
+        d_tag = tag.entry.d_tag
+        if _apply_simple_dynamic_tag(d_tag, tag, meta):
+            continue
+        if d_tag in _INIT_FINI_TAGS:
+            init_fini_tags.append(tag)
+        elif d_tag == "DT_FLAGS":
+            _apply_dt_flags(tag.entry.d_val, meta, dyn_flags)
+        elif d_tag == "DT_FLAGS_1":
+            _apply_dt_flags_1(tag.entry.d_val, meta, dyn_flags)
+    _apply_init_fini_tags(init_fini_tags, meta)
     meta.dynamic_flags = frozenset(dyn_flags)
 
 

@@ -222,6 +222,77 @@ def _mirror_dir_candidate(
     return _dir_spelling(_include_spelling_base(raw_inc, inc) / prefix)
 
 
+def _public_root_samples(
+    public_header_roots: list[str],
+) -> dict[str, tuple[bool, list[Path], list[Path]]]:
+    """Sampled headers per public root: root -> (is_file_root, root suffixes, samples)."""
+    samples_by_root: dict[str, tuple[bool, list[Path], list[Path]]] = {}
+    for root in public_header_roots:
+        is_file_root, samples = _header_samples(root)
+        if samples:
+            root_path = Path(unredact_home(root)).expanduser()
+            samples_by_root[root] = (
+                is_file_root,
+                []
+                if is_file_root
+                else _path_suffixes(root_path, _PUBLIC_FILE_ROOT_SUFFIX_LIMIT),
+                samples,
+            )
+    return samples_by_root
+
+
+def _prefixed_or_stripped_match(
+    raw_inc: str,
+    inc: Path,
+    samples: list[Path],
+    root_prefixes: list[Path],
+    matched: list[Path],
+) -> tuple[list[Path], Path | None]:
+    """Retry sample matching under a root-suffix prefix, then with the leading sample dir stripped."""
+    for candidate_prefix in root_prefixes:
+        prefixed = [candidate_prefix / rel for rel in samples]
+        prefixed_matched = [rel for rel in prefixed if (inc / rel).is_file()]
+        if _can_promote_whole_root(
+            raw_inc, prefixed_matched
+        ) or _is_full_single_header_mirror(samples, prefixed_matched):
+            return prefixed_matched, candidate_prefix
+    if not _can_promote_whole_root(raw_inc, matched):
+        stripped = _strip_leading_sample_dir(samples)
+        stripped_matched = [rel for rel in stripped if (inc / rel).is_file()]
+        if _can_promote_whole_root(
+            raw_inc, stripped_matched
+        ) or _is_full_single_header_mirror(samples, stripped_matched):
+            return stripped_matched, None
+    return matched, None
+
+
+def _mirror_candidates(
+    raw_inc: str,
+    inc: Path,
+    samples: list[Path],
+    matched: list[Path],
+    prefix: Path | None,
+    *,
+    is_file_root: bool,
+    for_cache: bool,
+) -> list[str]:
+    """Equivalent-root spellings to record for one include dir mirroring one public root."""
+    if for_cache:
+        return [str(inc / rel) for rel in matched]
+    if is_file_root or (
+        _is_dot_include_root(raw_inc)
+        and len(matched) >= _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES
+    ):
+        return [_root_spelling(raw_inc, inc, rel) for rel in matched]
+    if _is_full_single_header_mirror(samples, matched):
+        return [_root_spelling(raw_inc, inc, matched[0])]
+    if not _can_promote_whole_root(raw_inc, matched):
+        return []
+    if matched:
+        return [_mirror_dir_candidate(raw_inc, inc, prefix, for_cache=for_cache)]
+    return []
+
+
 def _equivalent_public_roots_for_unit(
     public_header_roots: list[str],
     compile_unit: CompileUnit,
@@ -240,18 +311,7 @@ def _equivalent_public_roots_for_unit(
     """
     roots = list(public_header_roots)
     seen = {unredact_home(r) for r in roots}
-    samples_by_root: dict[str, tuple[bool, list[Path], list[Path]]] = {}
-    for root in public_header_roots:
-        is_file_root, samples = _header_samples(root)
-        if samples:
-            root_path = Path(unredact_home(root)).expanduser()
-            samples_by_root[root] = (
-                is_file_root,
-                []
-                if is_file_root
-                else _path_suffixes(root_path, _PUBLIC_FILE_ROOT_SUFFIX_LIMIT),
-                samples,
-            )
+    samples_by_root = _public_root_samples(public_header_roots)
     if not samples_by_root:
         return roots
 
@@ -264,61 +324,19 @@ def _equivalent_public_roots_for_unit(
             if is_file_root and matched:
                 matched = matched[:1]
             prefix: Path | None = None
-            prefixed_match_found = False
             if not is_file_root and root_prefixes:
-                for candidate_prefix in root_prefixes:
-                    prefixed = [candidate_prefix / rel for rel in samples]
-                    prefixed_matched = [
-                        rel for rel in prefixed if (inc / rel).is_file()
-                    ]
-                    if _can_promote_whole_root(
-                        raw_inc, prefixed_matched
-                    ) or _is_full_single_header_mirror(samples, prefixed_matched):
-                        matched = prefixed_matched
-                        prefix = candidate_prefix
-                        prefixed_match_found = True
-                        break
-                if not prefixed_match_found and not _can_promote_whole_root(
-                    raw_inc, matched
-                ):
-                    stripped = _strip_leading_sample_dir(samples)
-                    stripped_matched = [
-                        rel for rel in stripped if (inc / rel).is_file()
-                    ]
-                    if _can_promote_whole_root(
-                        raw_inc, stripped_matched
-                    ) or _is_full_single_header_mirror(samples, stripped_matched):
-                        matched = stripped_matched
-                        prefix = None
-            if for_cache:
-                for rel in matched:
-                    candidate = str(inc / rel)
-                    if candidate not in seen:
-                        roots.append(candidate)
-                        seen.add(candidate)
-                continue
-            if is_file_root or (
-                _is_dot_include_root(raw_inc)
-                and len(matched) >= _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES
-            ):
-                for rel in matched:
-                    candidate = _root_spelling(raw_inc, inc, rel)
-                    if candidate not in seen:
-                        roots.append(candidate)
-                        seen.add(candidate)
-                continue
-            if _is_full_single_header_mirror(samples, matched):
-                candidate = _root_spelling(raw_inc, inc, matched[0])
-                if candidate not in seen:
-                    roots.append(candidate)
-                    seen.add(candidate)
-                continue
-            if not _can_promote_whole_root(raw_inc, matched):
-                continue
-            if matched:
-                candidate = _mirror_dir_candidate(
-                    raw_inc, inc, prefix, for_cache=for_cache
+                matched, prefix = _prefixed_or_stripped_match(
+                    raw_inc, inc, samples, root_prefixes, matched
                 )
+            for candidate in _mirror_candidates(
+                raw_inc,
+                inc,
+                samples,
+                matched,
+                prefix,
+                is_file_root=is_file_root,
+                for_cache=for_cache,
+            ):
                 if candidate not in seen:
                     roots.append(candidate)
                     seen.add(candidate)

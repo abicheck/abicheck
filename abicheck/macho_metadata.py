@@ -387,16 +387,8 @@ def _select_header(macho: MachO) -> Any:
     return macho.headers[0]
 
 
-def _parse(dylib_path: Path) -> MachoMetadata:
-    """Parse Mach-O metadata using macholib."""
-    macho = MachO(str(dylib_path))
-    header = _select_header(macho)
-    if header is None:
-        return MachoMetadata()
-
-    meta = MachoMetadata()
-    hdr = header.header
-
+def _parse_macho_header_fields(macho: MachO, hdr: Any, meta: MachoMetadata) -> None:
+    """Populate CPU/filetype/flags header fields from the selected Mach-O slice."""
     # Basic header info. Slice names are arm64e-aware: arm64 vs arm64e are
     # distinct, non-interchangeable ABIs (pointer authentication), so they
     # must not collapse into the same "ARM64" label.
@@ -413,6 +405,9 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     meta.filetype = _FILETYPE_NAMES.get(filetype, f"0x{filetype:x}")
     meta.flags = int(hdr.flags)
 
+
+def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
+    """Populate install name, versions, dependencies, and rpaths from load commands."""
     # Parse load commands. A successful parse captures the LC_RPATH surface
     # even when no such command exists ([] = "verified none"), keeping None
     # reserved for legacy snapshots where it was never looked at.
@@ -447,6 +442,9 @@ def _parse(dylib_path: Path) -> MachoMetadata:
                 rpaths.append(path)
     meta.rpaths = rpaths
 
+
+def _build_section_segment_map(header: Any) -> dict[int, str]:
+    """Build the 1-based section ordinal → segment name mapping from segment commands."""
     # Build section ordinal → segment name mapping so we can distinguish
     # __TEXT (function) from __DATA (variable) symbols via nlist n_sect.
     _section_segment: dict[int, str] = {}  # 1-based ordinal → segment name
@@ -459,9 +457,24 @@ def _parse(dylib_path: Path) -> MachoMetadata:
             for _sect in data:
                 _section_segment[_sect_ordinal] = seg_name
                 _sect_ordinal += 1
+    return _section_segment
+
+
+def _parse(dylib_path: Path) -> MachoMetadata:
+    """Parse Mach-O metadata using macholib."""
+    macho = MachO(str(dylib_path))
+    header = _select_header(macho)
+    if header is None:
+        return MachoMetadata()
+
+    meta = MachoMetadata()
+    _parse_macho_header_fields(macho, header.header, meta)
+    _parse_macho_load_commands(header, meta)
 
     # Parse exported symbols via SymbolTable
-    _parse_macho_symbols(macho, header, _section_segment, meta, dylib_path)
+    _parse_macho_symbols(
+        macho, header, _build_section_segment_map(header), meta, dylib_path
+    )
 
     # Merge dyld export-trie facts (trie-only exports, weak/re-export flags).
     _parse_export_trie(dylib_path, header, meta)

@@ -518,83 +518,99 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
     i, n = 0, len(text)
     state = "code"  # code | line_comment | block_comment | string | char
     while i < n:
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
         if state == "code":
-            if ch == "/" and nxt == "/":
-                out.append("  ")
-                i += 2
-                state = "line_comment"
-            elif ch == "/" and nxt == "*":
-                out.append("  ")
-                i += 2
-                state = "block_comment"
-            elif ch == '"':
-                raw_end = _raw_string_end(text, i)
-                if raw_end >= 0:
-                    raw = text[i : raw_end + 1]
-                    # Raw-string bodies are never code, even on the
-                    # string-preserving path used by `_Pragma`/`extern "C"`.
-                    out.append("".join("\n" if c == "\n" else " " for c in raw))
-                    i = raw_end + 1
-                else:
-                    out.append('"')
-                    i += 1
-                    state = "string"
-            elif ch == "'":
-                # Distinguish a C++14 digit separator (`1'000`, `0xFF'FF`) from a
-                # char-literal opener — misreading a literal as a separator (or
-                # vice-versa) would blank the rest of the file.
-                out.append("'")
-                if not _is_digit_separator(text, i):
-                    state = "char"
-                i += 1
-            else:
-                out.append(ch)
-                i += 1
+            i, state = _blank_scan_code(text, i, out)
         elif state == "line_comment":
-            if ch == "\n":
-                # A backslash immediately before the newline (optionally across
-                # a CRLF `\r`) splices the next physical line into the `//`
-                # comment via C/C++ line continuation, so stay in the comment.
-                prev = text[i - 1] if i > 0 else ""
-                prev2 = text[i - 2] if i > 1 else ""
-                spliced = prev == "\\" or (prev == "\r" and prev2 == "\\")
-                out.append("\n")
-                if not spliced:
-                    state = "code"
-            else:
-                out.append(" ")
-            i += 1
+            i, state = _blank_scan_line_comment(text, i, out)
         elif state == "block_comment":
-            if ch == "*" and nxt == "/":
-                out.append("  ")
-                i += 2
-                state = "code"
-            else:
-                out.append("\n" if ch == "\n" else " ")
-                i += 1
-        elif state in ("string", "char"):
-            quote = '"' if state == "string" else "'"
-            if ch == "\\":
-                # Keep the escape + escaped char verbatim when preserving strings,
-                # else blank both (newlines always survive for line accounting).
-                if not blank_strings:
-                    out.append(ch + (nxt if nxt else ""))
-                else:
-                    out.append("  " if nxt != "\n" else " \n")
-                i += 2
-            elif ch == quote:
-                out.append(quote)
-                i += 1
-                state = "code"
-            else:
-                if not blank_strings:
-                    out.append(ch)
-                else:
-                    out.append("\n" if ch == "\n" else " ")
-                i += 1
+            i, state = _blank_scan_block_comment(text, i, out)
+        else:  # string | char
+            i, state = _blank_scan_literal(text, i, out, state, blank_strings)
     return "".join(out)
+
+
+def _blank_scan_code(text: str, i: int, out: list[str]) -> tuple[int, str]:
+    """One scanner step in the ``code`` state; returns ``(next_offset, next_state)``."""
+    ch = text[i]
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    if ch == "/" and nxt == "/":
+        out.append("  ")
+        return i + 2, "line_comment"
+    if ch == "/" and nxt == "*":
+        out.append("  ")
+        return i + 2, "block_comment"
+    if ch == '"':
+        raw_end = _raw_string_end(text, i)
+        if raw_end >= 0:
+            raw = text[i : raw_end + 1]
+            # Raw-string bodies are never code, even on the
+            # string-preserving path used by `_Pragma`/`extern "C"`.
+            out.append("".join("\n" if c == "\n" else " " for c in raw))
+            return raw_end + 1, "code"
+        out.append('"')
+        return i + 1, "string"
+    if ch == "'":
+        # Distinguish a C++14 digit separator (`1'000`, `0xFF'FF`) from a
+        # char-literal opener — misreading a literal as a separator (or
+        # vice-versa) would blank the rest of the file.
+        out.append("'")
+        if not _is_digit_separator(text, i):
+            return i + 1, "char"
+        return i + 1, "code"
+    out.append(ch)
+    return i + 1, "code"
+
+
+def _blank_scan_line_comment(text: str, i: int, out: list[str]) -> tuple[int, str]:
+    """One scanner step inside a ``//`` comment; returns ``(next_offset, next_state)``."""
+    ch = text[i]
+    if ch == "\n":
+        # A backslash immediately before the newline (optionally across
+        # a CRLF `\r`) splices the next physical line into the `//`
+        # comment via C/C++ line continuation, so stay in the comment.
+        prev = text[i - 1] if i > 0 else ""
+        prev2 = text[i - 2] if i > 1 else ""
+        spliced = prev == "\\" or (prev == "\r" and prev2 == "\\")
+        out.append("\n")
+        return i + 1, ("line_comment" if spliced else "code")
+    out.append(" ")
+    return i + 1, "line_comment"
+
+
+def _blank_scan_block_comment(text: str, i: int, out: list[str]) -> tuple[int, str]:
+    """One scanner step inside a ``/* */`` comment; returns ``(next_offset, next_state)``."""
+    ch = text[i]
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    if ch == "*" and nxt == "/":
+        out.append("  ")
+        return i + 2, "code"
+    out.append("\n" if ch == "\n" else " ")
+    return i + 1, "block_comment"
+
+
+def _blank_scan_literal(
+    text: str, i: int, out: list[str], state: str, blank_strings: bool
+) -> tuple[int, str]:
+    """One scanner step inside a string/char literal; returns ``(next_offset, next_state)``."""
+    ch = text[i]
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    quote = '"' if state == "string" else "'"
+    if ch == "\\":
+        # Keep the escape + escaped char verbatim when preserving strings,
+        # else blank both (newlines always survive for line accounting).
+        if not blank_strings:
+            out.append(ch + (nxt if nxt else ""))
+        else:
+            out.append("  " if nxt != "\n" else " \n")
+        return i + 2, state
+    if ch == quote:
+        out.append(quote)
+        return i + 1, "code"
+    if not blank_strings:
+        out.append(ch)
+    else:
+        out.append("\n" if ch == "\n" else " ")
+    return i + 1, state
 
 
 def _line_of(text: str, offset: int) -> int:
