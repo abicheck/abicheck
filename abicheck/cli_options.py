@@ -1289,6 +1289,17 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     an explicitly-passed flag always wins. Uses Click's parameter-source
     tracking (``ctx.get_parameter_source``) to tell the two apart, so a profile
     never clobbers an intentional override.
+
+    **Precedence: explicit flag > profile > project config > default.** A profile
+    default is documented to "expand to ``--flag``", so it must behave like a
+    typed flag against ``.abicheck.yml`` — otherwise a config that turns a
+    setting off (e.g. ``scope.public_headers: false``) would silently defeat the
+    profile, because the config-resolution layer decides "did the user set this?"
+    from Click's *parameter source*, not from the kwargs value
+    (:func:`cli_compare_helpers._cli_flag`). So for each value we inject we also
+    stamp its parameter source to ``COMMANDLINE`` via ``ctx.set_parameter_source``,
+    lifting it above config while still sitting below a genuinely typed flag
+    (those are ``COMMANDLINE`` already and are skipped here).
     """
     name = kwargs.pop("profile", None)
     if not name:
@@ -1297,6 +1308,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
 
     profile = COMPARE_PROFILES[str(name)]
     get_source = getattr(ctx, "get_parameter_source", None)
+    set_source = getattr(ctx, "set_parameter_source", None)
     explicit = {
         ParameterSource.COMMANDLINE,
         ParameterSource.ENVIRONMENT,
@@ -1308,6 +1320,10 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         # mapped env var stays untouched.
         if src not in explicit:
             kwargs[dest] = value
+            # Stamp the source so downstream config resolution treats the
+            # profile default as CLI-provided (profile beats config).
+            if set_source is not None:
+                set_source(dest, ParameterSource.COMMANDLINE)
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

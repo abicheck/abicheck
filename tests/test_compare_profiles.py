@@ -36,19 +36,30 @@ def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 
 class _FakeCtx:
-    """Minimal stand-in for a Click context's parameter-source lookup."""
+    """Stand-in for a Click context's parameter-source get/set.
+
+    Records ``set_parameter_source`` calls so tests can assert that an injected
+    profile default is stamped ``COMMANDLINE`` (so it outranks project config),
+    while an explicitly-typed flag is left untouched.
+    """
 
     def __init__(self, explicit: set[str]) -> None:
-        self._explicit = explicit
+        self._explicit = set(explicit)
+        self.stamped: dict[str, object] = {}
 
     def get_parameter_source(self, name: str):  # noqa: ANN201 - test double
         from click.core import ParameterSource
 
+        if name in self.stamped:
+            return self.stamped[name]
         return (
             ParameterSource.COMMANDLINE
             if name in self._explicit
             else ParameterSource.DEFAULT
         )
+
+    def set_parameter_source(self, name: str, source: object) -> None:
+        self.stamped[name] = source
 
 
 class TestApplyProfileUnit:
@@ -69,6 +80,28 @@ class TestApplyProfileUnit:
         assert kwargs["fmt"] == "json"
         # but an unset field still takes the profile default
         assert kwargs["depth"] == "headers"
+
+    def test_injected_default_is_stamped_commandline(self) -> None:
+        """Regression (Codex P2): a profile default must outrank .abicheck.yml.
+
+        Config resolution decides "did the user set this?" from Click's parameter
+        *source*, not the kwargs value, so an injected profile value must have its
+        source stamped COMMANDLINE — else a config with `scope.public_headers:
+        false` would silently defeat `--profile ci-gate`'s scoping default.
+        """
+        from click.core import ParameterSource
+
+        ctx = _FakeCtx(explicit={"fmt"})  # user typed --format explicitly
+        kwargs: dict[str, object] = {
+            "profile": "ci-gate", "scope_public_headers": True,
+            "depth": None, "fmt": "json",
+        }
+        apply_compare_profile(ctx, kwargs)
+        # injected defaults are stamped so downstream config cannot override them
+        assert ctx.stamped["scope_public_headers"] == ParameterSource.COMMANDLINE
+        assert ctx.stamped["depth"] == ParameterSource.COMMANDLINE
+        # the explicitly-typed flag is never re-stamped by the profile
+        assert "fmt" not in ctx.stamped
 
     def test_no_profile_is_a_noop(self) -> None:
         kwargs: dict[str, object] = {"profile": None, "depth": None}

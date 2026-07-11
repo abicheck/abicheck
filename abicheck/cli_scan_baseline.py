@@ -42,7 +42,6 @@ import click
 
 from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
-from .cli import _safe_write_output
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -116,6 +115,10 @@ def _emit_estimate(
     and prints the projected per-layer cost — scanning nothing, running no
     compiler. Always exits 0 (it is a probe, not a gate).
     """
+    # Imported lazily (not at module top) so importing cli_scan_baseline never
+    # forces cli's module-load tail — which imports cli_scan, which imports back
+    # from here — to run before this module finishes (partial-init cycle).
+    from .cli import _safe_write_output
     from .service import Budget, ScanRequest, estimate_scan
 
     req = ScanRequest(
