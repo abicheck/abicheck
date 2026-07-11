@@ -279,10 +279,10 @@ elif [[ "$MODE" == "compare-release" ]]; then
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
 
   # Package-specific options
-  add_single_flag "--debug-info1" "${INPUT_DEBUG_INFO1:-}"
-  add_single_flag "--debug-info2" "${INPUT_DEBUG_INFO2:-}"
-  add_single_flag "--devel-pkg1" "${INPUT_DEVEL_PKG1:-}"
-  add_single_flag "--devel-pkg2" "${INPUT_DEVEL_PKG2:-}"
+  add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
+  add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
+  add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
+  add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
 
   if [[ "${INPUT_DSO_ONLY:-false}" == "true" ]]; then
     CMD+=(--dso-only)

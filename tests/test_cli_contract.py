@@ -519,9 +519,9 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
         "--annotate", "--annotate-additions", "--ast-frontend", "--btf", "--bundle-cohort", "--bundle-system-providers",
-        "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format", "--debug-info1",
-        "--debug-info2", "--debug-root", "--debuginfod", "--debuginfod-url",
-        "--build-info", "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
+        "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format",
+        "--debug-root", "--debuginfod", "--debuginfod-url",
+        "--build-info", "--debug-info", "--demangle", "--depth", "--devel-pkg", "--dso-only", "--dwarf",
         "--dwarf-only", "--env-matrix", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
         "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--include",
         "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path", "--manifest",

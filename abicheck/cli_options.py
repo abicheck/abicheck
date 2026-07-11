@@ -32,6 +32,7 @@ from .cli_params import (
     DEPTH_PARAM,
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
+    SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
 )
@@ -147,6 +148,14 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         old_p, new_p = _split_sided_single(kwargs.pop("probe_matrix"))  # type: ignore[arg-type]
         kwargs["probe_matrix_old"] = old_p
         kwargs["probe_matrix_new"] = new_p
+    if "debug_info" in kwargs:
+        old_di, new_di = _split_sided_single(kwargs.pop("debug_info"))  # type: ignore[arg-type]
+        kwargs["debug_info1"] = old_di
+        kwargs["debug_info2"] = new_di
+    if "devel_pkg" in kwargs:
+        old_dp, new_dp = _split_sided_single(kwargs.pop("devel_pkg"))  # type: ignore[arg-type]
+        kwargs["devel_pkg1"] = old_dp
+        kwargs["devel_pkg2"] = new_dp
     if "pdb" in kwargs:
         base_p, old_pp, new_pp = _split_sided_base(kwargs.pop("pdb"))  # type: ignore[arg-type]
         kwargs["pdb_path"] = base_p
@@ -840,36 +849,22 @@ def release_options(func: F) -> F:
         "paths. (directory/package inputs only)",
     )(func)
     func = click.option(
-        "--devel-pkg2",
-        "devel_pkg2",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Development package with headers for the new side. "
-        "(directory/package inputs only)",
+        "--devel-pkg",
+        "devel_pkg",
+        multiple=True,
+        type=SIDED_EXISTING_PATH_PARAM,
+        help="Development package with headers, scoped per side with an "
+        "'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg "
+        "new=b-dev.rpm). Directory/package inputs only (ADR-040).",
     )(func)
     func = click.option(
-        "--devel-pkg1",
-        "devel_pkg1",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Development package with headers for the old side. "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--debug-info2",
-        "debug_info2",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Debug info package for the new side (RPM/Deb/tar). "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--debug-info1",
-        "debug_info1",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Debug info package for the old side (RPM/Deb/tar). "
-        "(directory/package inputs only)",
+        "--debug-info",
+        "debug_info",
+        multiple=True,
+        type=SIDED_EXISTING_PATH_PARAM,
+        help="Debug info package (RPM/Deb/tar), scoped per side with an "
+        "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
+        "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
     )(func)
     func = click.option(
         "--fail-on-removed-library/--no-fail-on-removed-library",
@@ -1288,7 +1283,10 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: Lowered 70→65 by ADR-040 Lever 1 Phase C (slice 1): ``--pdb-path`` and
 #: ``--debug-root`` collapsed their per-side triples (−2 each) and
 #: ``--probe-matrix-old/new`` folded into one side-aware ``--probe-matrix`` (−1).
-COMPARE_FLAG_BUDGET_BASE = 65
+#: Lowered 65→63 by Phase C (slice 2): ``--debug-info1/2`` and ``--devel-pkg1/2``
+#: folded into side-aware ``--debug-info`` / ``--devel-pkg`` (−1 each). The
+#: unregistered release engine keeps its per-side ``--debug-info1/2`` etc.
+COMPARE_FLAG_BUDGET_BASE = 63
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

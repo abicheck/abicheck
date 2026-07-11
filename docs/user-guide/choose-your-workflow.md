@@ -33,7 +33,7 @@ command** when you need more confidence or a CI gate.
 | Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow B `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
 | Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
-| RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
+| RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info old=/new=` (debuginfo packages) and `--devel-pkg old=/new=` (header/devel packages) where available |
 | An application + a library upgrade | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against new.so` when no old library exists (symbol-availability only) |
 | A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
 | Will this binary load in this sysroot / rootfs? | `abicheck deps ./app --sysroot /rootfs` | `abicheck deps ./app` alone checks the dependency tree resolves |

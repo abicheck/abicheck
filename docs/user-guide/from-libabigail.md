@@ -119,7 +119,7 @@ abipkgdiff --d1 foo-debuginfo-1.rpm --d2 foo-debuginfo-2.rpm foo-1.rpm foo-2.rpm
 
 # After (abicheck — directory, archive, or package inputs):
 abicheck compare foo-1.rpm foo-2.rpm \
-  --debug-info1 foo-debuginfo-1.rpm --debug-info2 foo-debuginfo-2.rpm
+  --debug-info old=foo-debuginfo-1.rpm --debug-info new=foo-debuginfo-2.rpm
 ```
 
 Multi-library inputs are compared as a co-versioned bundle, with per-library

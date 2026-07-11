@@ -102,7 +102,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Release (directory/package inputs)",
             "options": [
                 "--jobs", "--dso-only", "--output-dir", "--fail-on-removed-library",
-                "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2",
+                "--debug-info", "--devel-pkg",
                 "--include-private-dso", "--keep-extracted", "--manifest",
                 "--bundle-system-providers", "--bundle-cohort", "--no-bundle-analysis",
             ],

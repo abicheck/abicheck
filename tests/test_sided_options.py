@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck.cli_options import (
+    _split_sided_base,
     _split_sided_single,
     normalize_sided_options,
     split_sided_paths,
@@ -90,7 +91,44 @@ class TestNormalizeSidedOptions:
         assert kw["old_build_info"] == Path("b1") and kw["new_build_info"] == Path("b2")
         assert "sources" not in kw and "build_info" not in kw
 
+    def test_debug_root_pdb_probe_matrix(self) -> None:
+        kw: dict[str, object] = {
+            "debug_root": (("both", Path("d")), ("old", Path("od"))),
+            "pdb": (("both", Path("p")), ("new", Path("np"))),
+            "probe_matrix": (("old", Path("mo")), ("new", Path("mn"))),
+        }
+        normalize_sided_options(kw)
+        # debug_root: multi base+per-side
+        assert kw["debug_roots"] == (Path("d"),)
+        assert kw["debug_roots_old"] == (Path("od"),)
+        # pdb: base+per-side single (base kept, not fanned)
+        assert kw["pdb_path"] == Path("p")
+        assert kw["old_pdb_path"] is None and kw["new_pdb_path"] == Path("np")
+        # probe_matrix: per-side single
+        assert kw["probe_matrix_old"] == Path("mo") and kw["probe_matrix_new"] == Path("mn")
+
+    def test_debug_info_and_devel_pkg(self) -> None:
+        kw: dict[str, object] = {
+            "debug_info": (("both", Path("di")),),
+            "devel_pkg": (("old", Path("d1")), ("new", Path("d2"))),
+        }
+        normalize_sided_options(kw)
+        # debug_info: both fans out to each side
+        assert kw["debug_info1"] == Path("di") and kw["debug_info2"] == Path("di")
+        assert kw["devel_pkg1"] == Path("d1") and kw["devel_pkg2"] == Path("d2")
+
     def test_absent_keys_are_untouched(self) -> None:
         kw: dict[str, object] = {"other": 1}
         normalize_sided_options(kw)
         assert kw == {"other": 1}
+
+
+class TestSplitSidedBase:
+    def test_both_kept_as_base_not_fanned(self) -> None:
+        # base+per-side single: 'both' is its own base value, not copied to sides
+        assert _split_sided_base([("both", Path("b"))]) == (Path("b"), None, None)
+
+    def test_per_side_and_last_wins(self) -> None:
+        assert _split_sided_base([("old", Path("o1")), ("old", Path("o2")), ("new", Path("n"))]) == (
+            None, Path("o2"), Path("n"),
+        )
