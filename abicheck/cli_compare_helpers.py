@@ -79,6 +79,34 @@ def _cli_flag(name: str, value: bool) -> bool | None:
     return value if src == click.core.ParameterSource.COMMANDLINE else None
 
 
+def _param_from_cli(name: str) -> bool:
+    """True when parameter *name*'s value came from the command line (not default)."""
+    src = click.get_current_context().get_parameter_source(name)
+    return bool(src == click.core.ParameterSource.COMMANDLINE)
+
+
+def _merge_cli_debug_format(
+    debug_format_opt: str | None,
+    legacy_debug_format: str | None,
+    *,
+    legacy_from_cli: bool,
+) -> str | None:
+    """Effective *command-line* debug format across all CLI spellings (ADR-040 L2).
+
+    ``--debug-format`` (``debug_format_opt``) is the primary selector; the hidden
+    compatibility flags ``--btf``/``--ctf``/``--dwarf`` write the ``debug_format``
+    dest. Either, when typed, must beat a ``.abicheck.yml`` ``debug.format`` — so
+    fold a *command-line-sourced* legacy flag in here (the flag's own default is
+    ``None``, so ``legacy_from_cli`` distinguishes "typed" from "unset"). Returns
+    ``None`` when no format was given on the command line, letting config win.
+    """
+    if debug_format_opt is not None:
+        return debug_format_opt
+    if legacy_from_cli:
+        return legacy_debug_format
+    return None
+
+
 def _resolve_compare_config(
     *,
     config: Path | None,
@@ -94,6 +122,7 @@ def _resolve_compare_config(
     require_justification: bool,
     exit_code_scheme: str | None,
     debug_format_opt: str | None,
+    debug_format: str | None,
     dwarf_only: bool,
     debuginfod: bool,
     debuginfod_url: str | None,
@@ -134,8 +163,12 @@ def _resolve_compare_config(
         # ADR-040 Lever 2: debug-resolution + show-redundant demoted to config.
         # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
         # config wins); the is_flags need the COMMANDLINE-source gate so their
-        # default ``False`` doesn't mask a configured ``True``.
-        cli_debug_format=debug_format_opt,
+        # default ``False`` doesn't mask a configured ``True``. A typed legacy
+        # --btf/--ctf/--dwarf must also beat config, so fold it into the CLI value.
+        cli_debug_format=_merge_cli_debug_format(
+            debug_format_opt, debug_format,
+            legacy_from_cli=_param_from_cli("debug_format"),
+        ),
         cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
         cli_debuginfod=_cli_flag("debuginfod", debuginfod),
         cli_debuginfod_url=debuginfod_url,
@@ -442,6 +475,7 @@ def run_compare(
         require_justification=require_justification,
         exit_code_scheme=exit_code_scheme,
         debug_format_opt=debug_format_opt,
+        debug_format=debug_format,
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
