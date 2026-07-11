@@ -199,7 +199,8 @@ def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
     mod = _load_benchmark()
     so = tmp_path / "lib.so"
     header = tmp_path / "api.h"
-    so.touch(); header.touch()
+    so.touch()
+    header.touch()
     commands = []
 
     class Result:
@@ -242,7 +243,8 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     v1_h, v2_h = case_dir / "v1.h", case_dir / "v2.h"
     for path in (v1_src, v2_src, v1_h, v2_h):
         path.write_text("/* fixture */\n")
-    plugin = tmp_path / "libabicheck-facts.so"; plugin.touch()
+    plugin = tmp_path / "libabicheck-facts.so"
+    plugin.touch()
     commands = []
 
     class Result:
@@ -251,10 +253,12 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
         stdout = '{"verdict":"BREAKING","changes":[]}'
 
     def fake_run(cmd, **kwargs):
-        cmd = [str(x) for x in cmd]; commands.append(cmd)
+        cmd = [str(x) for x in cmd]
+        commands.append(cmd)
         if cmd[:2] == ["cmake", "--build"]:
             version = cmd[cmd.index("--target") + 1].rsplit("_", 1)[1]
-            build = Path(cmd[2]); out = build / case
+            build = Path(cmd[2])
+            out = build / case
             out.mkdir(parents=True, exist_ok=True)
             (out / f"lib{version}.so").touch()
             injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
@@ -293,7 +297,8 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
 def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
     mod = _load_benchmark()
     v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
-    v1.touch(); v2.touch()
+    v1.touch()
+    v2.touch()
     empty = tmp_path / "empty"
     _write_plugin_pack(empty, "v1", v1, with_facts=False)
     assert not mod._plugin_pack_is_target_specific(empty, "v1", v1, v2)[0]
