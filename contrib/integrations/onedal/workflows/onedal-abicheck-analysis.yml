@@ -19,6 +19,13 @@ on:
     workflows: ["oneDAL ABI — build with abicheck plugin (collect facts)"]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      build-run-id:
+        description: >
+          Run ID of the build-with-plugin workflow whose artifacts to analyze.
+          REQUIRED for manual runs (a workflow_dispatch has no source build, so
+          the current run holds no artifacts to download).
+        required: true
 
 permissions:
   contents: read
@@ -51,14 +58,14 @@ jobs:
         with:
           name: onedal-release-lnx
           path: onedal-release
-          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          run-id: ${{ github.event.workflow_run.id || inputs.build-run-id }}
           github-token: ${{ github.token }}
       - name: Download abicheck source facts
         uses: actions/download-artifact@v4
         with:
           name: onedal-abicheck-inputs
           path: abicheck_inputs
-          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          run-id: ${{ github.event.workflow_run.id || inputs.build-run-id }}
           github-token: ${{ github.token }}
 
       - name: Resolve the built library
@@ -76,6 +83,13 @@ jobs:
           mode: dump
           new-library: ${{ steps.lib.outputs.so }}
           new-header: ${{ matrix.iface.headers }}
+          # Pass the project config so the header parse uses the intended context
+          # (compile.frontend: clang, C++17). `dump` only auto-discovers a config
+          # from a --sources root, which this step has no need for — so set it
+          # explicitly, else `ast-frontend: auto` could pick castxml (unreliable
+          # for these headers).
+          build-config: .abicheck.yml
+          ast-frontend: clang
           output-file: new-${{ matrix.iface.name }}.json
 
       # 2. fold the plugin's source facts into that dump (Action, merge mode).
