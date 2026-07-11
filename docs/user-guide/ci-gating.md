@@ -45,6 +45,14 @@ above):
 `--report-mode`, and `--format` change what the report *renders*, never the
 verdict or the exit code.
 
+!!! tip "Shortcut: `--profile ci-gate`"
+    A single `--profile ci-gate` bundles the common gating knobs
+    (`--depth headers --format review --exit-code-scheme severity`) so you
+    don't retype them — an explicit flag still overrides the profile. It is a
+    single-pair convenience; for a directory/package (release) gate, configure
+    the same defaults in `.abicheck.yml`. See the `--profile` section of the
+    [CLI usage guide](cli-usage.md).
+
 ## The two exit-code schemes
 
 `compare` has two exit-code regimes, and **any active severity setting — a
