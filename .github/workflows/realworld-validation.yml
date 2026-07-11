@@ -67,8 +67,8 @@ jobs:
           abicheck compare \
             "inputs/debs/${runtime_deb}" \
             "inputs/debs/${runtime_deb}" \
-            --devel-pkg1 "inputs/debs/${devel_deb}" \
-            --devel-pkg2 "inputs/debs/${devel_deb}" \
+            --devel-pkg "old=inputs/debs/${devel_deb}" \
+            --devel-pkg "new=inputs/debs/${devel_deb}" \
             --no-bundle-analysis \
             --format json \
             -o reports/realworld/zlib-deb-self.json
