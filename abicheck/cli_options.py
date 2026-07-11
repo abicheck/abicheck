@@ -1234,19 +1234,19 @@ def count_visible_options(cmd: object) -> int:
 #: ``USER_DEPTHS`` rungs, ``fmt``/``exit_code_scheme`` the ``Choice`` strings,
 #: booleans as ``bool``) so they can be injected without re-running conversion.
 COMPARE_PROFILES: dict[str, dict[str, object]] = {
-    # CI gate: fast header-depth check, public-surface scoped, compact review
-    # digest, severity-aware exit codes — the "block the PR" workflow.
+    # CI gate: fast header-depth check, compact review digest, severity-aware
+    # exit codes — the "block the PR" workflow. (Public-surface scoping is the
+    # default, so the profile does not restate it — a project's .abicheck.yml
+    # scope choice stays authoritative.)
     "ci-gate": {
         "depth": "headers",
-        "scope_public_headers": True,
         "fmt": "review",
         "exit_code_scheme": "severity",
     },
-    # Release cut: deepest evidence, public-surface scoped, full Markdown report
-    # with a semver/SONAME recommendation appended — the "should I bump?" flow.
+    # Release cut: deepest evidence, full Markdown report with a semver/SONAME
+    # recommendation appended — the "should I bump?" flow.
     "release": {
         "depth": "full",
-        "scope_public_headers": True,
         "fmt": "markdown",
         "recommend": True,
     },
@@ -1256,6 +1256,50 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
         "stat": True,
     },
 }
+
+#: Profile keys the directory/package (release fan-out) path does not accept —
+#: the ``compare`` set-input dispatch rejects these loudly (some by parameter
+#: source, e.g. ``--depth``; some by value, e.g. ``--exit-code-scheme``). A
+#: profile default must never *become* one of those rejections, so on a set-input
+#: compare these keys are skipped and the fan-out's own resolution (config /
+#: legacy scheme) applies. The remaining keys (``fmt``/``recommend``/``stat``)
+#: are honoured on both paths.
+_PROFILE_SET_INPUT_INCOMPATIBLE: frozenset[str] = frozenset(
+    {
+        "depth",
+        "max_depth",
+        "old_sources",
+        "new_sources",
+        "old_build_info",
+        "new_build_info",
+        "exit_code_scheme",
+        "reconcile_build_context",
+        "env_matrix_path",
+    }
+)
+
+
+def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
+    """True when the ``compare`` operands are a directory/package (set) input.
+
+    Mirrors the ADR-037 D7 dispatch (:func:`cli_resolve.classify_compare_operand`)
+    so profile application matches how ``run_compare`` will actually route the
+    comparison, without duplicating the classification rules.
+    """
+    from pathlib import Path
+
+    from .cli_resolve import classify_compare_operand
+
+    kinds: set[str] = set()
+    for key in ("old_input", "new_input"):
+        operand = kwargs.get(key)
+        if operand is None:
+            continue
+        try:
+            kinds.add(classify_compare_operand(Path(str(operand))))
+        except Exception:  # noqa: BLE001 - classification is best-effort here
+            continue
+    return bool(kinds & {"directory", "package"})
 
 
 def profile_option(func: F) -> F:
@@ -1290,16 +1334,18 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     tracking (``ctx.get_parameter_source``) to tell the two apart, so a profile
     never clobbers an intentional override.
 
-    **Precedence: explicit flag > profile > project config > default.** A profile
-    default is documented to "expand to ``--flag``", so it must behave like a
-    typed flag against ``.abicheck.yml`` — otherwise a config that turns a
-    setting off (e.g. ``scope.public_headers: false``) would silently defeat the
-    profile, because the config-resolution layer decides "did the user set this?"
-    from Click's *parameter source*, not from the kwargs value
-    (:func:`cli_compare_helpers._cli_flag`). So for each value we inject we also
-    stamp its parameter source to ``COMMANDLINE`` via ``ctx.set_parameter_source``,
-    lifting it above config while still sitting below a genuinely typed flag
-    (those are ``COMMANDLINE`` already and are skipped here).
+    **Precedence: explicit flag > project config > profile > default.** A profile
+    is a *default layer*, not a synthetic ``--flag``: it fills values the user
+    left unset, but it is deliberately **not** stamped as a command-line source.
+    Two reasons: (1) a project's ``.abicheck.yml`` is an explicit decision that
+    should win over a generic profile default; (2) stamping the source
+    ``COMMANDLINE`` would make a profile default *look* like a typed flag to the
+    directory/package (release fan-out) path, which rejects the single-pair-only
+    flags (``--depth``/``--exit-code-scheme``/…) — so a profile default would
+    abort a valid release compare with exit 64. Instead, on a set-input compare
+    the single-pair-only keys are skipped entirely
+    (:data:`_PROFILE_SET_INPUT_INCOMPATIBLE`), and value-only injection keeps the
+    profile from ever masquerading as an explicit flag.
     """
     name = kwargs.pop("profile", None)
     if not name:
@@ -1308,22 +1354,22 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
 
     profile = COMPARE_PROFILES[str(name)]
     get_source = getattr(ctx, "get_parameter_source", None)
-    set_source = getattr(ctx, "set_parameter_source", None)
     explicit = {
         ParameterSource.COMMANDLINE,
         ParameterSource.ENVIRONMENT,
     }
+    set_input = _profile_targets_set_input(kwargs)
     for dest, value in profile.items():
+        # On a directory/package compare, skip the keys the fan-out rejects —
+        # the profile still sets the format/recommend, just not the
+        # single-pair-only evidence/exit knobs.
+        if set_input and dest in _PROFILE_SET_INPUT_INCOMPATIBLE:
+            continue
         src = get_source(dest) if get_source is not None else None
-        # Only override a value the user did not set explicitly (DEFAULT /
-        # DEFAULT_MAP / unknown). An explicit --flag on the command line or a
-        # mapped env var stays untouched.
+        # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
+        # / unknown). An explicit --flag or a mapped env var stays untouched.
         if src not in explicit:
             kwargs[dest] = value
-            # Stamp the source so downstream config resolution treats the
-            # profile default as CLI-provided (profile beats config).
-            if set_source is not None:
-                set_source(dest, ParameterSource.COMMANDLINE)
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

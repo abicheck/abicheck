@@ -38,28 +38,23 @@ def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 class _FakeCtx:
     """Stand-in for a Click context's parameter-source get/set.
 
-    Records ``set_parameter_source`` calls so tests can assert that an injected
-    profile default is stamped ``COMMANDLINE`` (so it outranks project config),
-    while an explicitly-typed flag is left untouched.
+    A profile is a value-only default layer (it must NOT stamp a command-line
+    source — see the module docstring / ADR-040), so this double only needs
+    ``get_parameter_source`` to distinguish an explicitly-typed flag from a
+    default.
     """
 
     def __init__(self, explicit: set[str]) -> None:
         self._explicit = set(explicit)
-        self.stamped: dict[str, object] = {}
 
     def get_parameter_source(self, name: str):  # noqa: ANN201 - test double
         from click.core import ParameterSource
 
-        if name in self.stamped:
-            return self.stamped[name]
         return (
             ParameterSource.COMMANDLINE
             if name in self._explicit
             else ParameterSource.DEFAULT
         )
-
-    def set_parameter_source(self, name: str, source: object) -> None:
-        self.stamped[name] = source
 
 
 class TestApplyProfileUnit:
@@ -81,27 +76,46 @@ class TestApplyProfileUnit:
         # but an unset field still takes the profile default
         assert kwargs["depth"] == "headers"
 
-    def test_injected_default_is_stamped_commandline(self) -> None:
-        """Regression (Codex P2): a profile default must outrank .abicheck.yml.
+    def test_set_input_skips_single_pair_only_keys(self, tmp_path) -> None:
+        """Regression (Codex P2): a release/fan-out compare must not exit 64.
 
-        Config resolution decides "did the user set this?" from Click's parameter
-        *source*, not the kwargs value, so an injected profile value must have its
-        source stamped COMMANDLINE — else a config with `scope.public_headers:
-        false` would silently defeat `--profile ci-gate`'s scoping default.
+        On directory/package operands the fan-out rejects the single-pair-only
+        flags (``--depth`` by source, ``--exit-code-scheme`` by value). A profile
+        default must be *skipped* for those keys — not injected — so it never
+        becomes one of those rejections. Format/recommend still apply.
         """
-        from click.core import ParameterSource
-
-        ctx = _FakeCtx(explicit={"fmt"})  # user typed --format explicitly
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
         kwargs: dict[str, object] = {
-            "profile": "ci-gate", "scope_public_headers": True,
-            "depth": None, "fmt": "json",
+            "profile": "ci-gate", "old_input": old_dir, "new_input": new_dir,
+            "depth": None, "fmt": "markdown", "exit_code_scheme": None,
         }
-        apply_compare_profile(ctx, kwargs)
-        # injected defaults are stamped so downstream config cannot override them
-        assert ctx.stamped["scope_public_headers"] == ParameterSource.COMMANDLINE
-        assert ctx.stamped["depth"] == ParameterSource.COMMANDLINE
-        # the explicitly-typed flag is never re-stamped by the profile
-        assert "fmt" not in ctx.stamped
+        apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
+        # single-pair-only keys are NOT injected on a set input
+        assert kwargs["depth"] is None
+        assert kwargs["exit_code_scheme"] is None
+        # but the fan-out-compatible key still takes the profile default
+        assert kwargs["fmt"] == "review"
+
+    def test_release_profile_on_directories_does_not_error(self, tmp_path) -> None:
+        """End-to-end: `compare dir dir --profile release` reaches the fan-out.
+
+        Before the fix, the profile stamped --depth as command-line and the
+        release path rejected it with exit 64 (usage error). Now it must get past
+        option handling into the fan-out (which then reports no libraries).
+        """
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--profile", "release"]
+        )
+        # must NOT be the usage error (64) the depth/exit rejection raised
+        assert result.exit_code != 64, result.output
+        assert "not supported for directory/package" not in result.output
 
     def test_no_profile_is_a_noop(self) -> None:
         kwargs: dict[str, object] = {"profile": None, "depth": None}

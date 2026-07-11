@@ -495,16 +495,29 @@ not a straitjacket.
 
 | Profile | Expands to | Use when |
 |---------|-----------|----------|
-| `ci-gate` | `--depth headers --scope-public-headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
-| `release` | `--depth full --scope-public-headers --format markdown --recommend` | Deciding a version bump at release time |
+| `ci-gate` | `--depth headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
+| `release` | `--depth full --format markdown --recommend` | Deciding a version bump at release time |
 | `quick` | `--depth binary --stat` | A fast "just tell me" look |
 
+Precedence is **explicit flag > project config > profile > default**: a profile
+fills values you didn't set, but an explicit `.abicheck.yml` decision (and any
+flag you type) still wins. Public-surface scoping is on by default, so the
+profiles don't restate it — your config's `scope` choice stays authoritative.
+
+On a directory/package (release fan-out) compare, the single-pair-only keys
+(`--depth`, `--exit-code-scheme`) are skipped — the fan-out resolves those from
+`.abicheck.yml` — while `--format`/`--recommend` still apply.
+
 ```bash
-# CI gate — equivalent to the four flags in the table
+# CI gate — equivalent to the three flags in the table
 abicheck compare old.json new.json --profile ci-gate
 
 # Start from the release profile but force JSON output (explicit flag wins)
 abicheck compare old.json new.json --profile release --format json
+
+# Release profile on a whole directory of libraries (fan-out): --format and
+# --recommend apply; the single-pair-only --depth is skipped, not an error
+abicheck compare ./old-libs ./new-libs --profile release
 ```
 
 #### `--stat`: one-line CI summary

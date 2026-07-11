@@ -93,13 +93,18 @@ flags into one. Profiles are the "one token for a whole workflow" ergonomic
 that keeps casual invocations short without adding one flag per knob.
 
 ```text
---profile ci-gate     # depth=headers, scope-public-headers, format=review, exit=severity
---profile release     # depth=full, recommend, scope-public-headers, format=markdown
---profile quick       # depth=symbols, format=stat
+--profile ci-gate     # depth=headers, format=review, exit=severity
+--profile release     # depth=full, recommend, format=markdown
+--profile quick       # depth=binary, stat
 ```
 
-* Explicit flags **always win** over a profile (a profile is a default
-  layer, not an override) — same precedence rule as config < CLI.
+* Precedence is **explicit flag > project config > profile > default**: a
+  profile fills unset values but is *not* stamped as a command-line source, so a
+  project's `.abicheck.yml` decision still wins and — critically — a profile
+  default never masquerades as a typed flag to the directory/package fan-out
+  path (which rejects single-pair-only flags like `--depth`/`--exit-code-scheme`
+  by source/value). On a set-input compare those keys are skipped, not errored.
+  Public-surface scoping is the default, so profiles don't restate it.
 * Profiles are data (`COMPARE_PROFILES` table), so a project can ship its own
   in `.abicheck.yml` under `profiles:` — but the built-ins cover the three
   documented workflows out of the box.
