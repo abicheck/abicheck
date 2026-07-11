@@ -500,7 +500,7 @@ class TestLoadProbeMatrixChanges:
     def test_one_side_only_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "m.json"
         f.write_text("{}")
-        with pytest.raises(click.UsageError, match="must be given together"):
+        with pytest.raises(click.UsageError, match="needs both sides"):
             _load_probe_matrix_changes(f, None)
 
 
@@ -750,11 +750,11 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--probe-matrix-old",
-            str(m),
+            "--probe-matrix",
+            "old=" + str(m),
         )
         assert result.exit_code != 0
-        assert "must be given together" in result.output
+        assert "needs both sides" in result.output
 
 
 # ── compare-release: format helpers and exit-code logic ───────────────────────

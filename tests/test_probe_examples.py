@@ -10,8 +10,8 @@
 The repository ships self-contained probe manifests under
 ``examples/probes/`` that, unlike ``onedpl.yaml``, need no external
 toolchain — stock ``cc`` / ``c++`` is enough. These tests drive them
-through the *mainline* ``compare`` command via ``--probe-matrix-old`` /
-``--probe-matrix-new`` so the build-config matrix findings are proven to
+through the *mainline* ``compare`` command via the side-aware ``--probe-matrix`` (
+) so the build-config matrix findings are proven to
 reach the verdict and the JSON/SARIF output, not only the standalone
 ``probe compare`` path.
 """
@@ -115,8 +115,8 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     json_res = runner.invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix-old", str(old_matrix),
-         "--probe-matrix-new", str(new_matrix),
+         "--probe-matrix", "old=" + str(old_matrix),
+         "--probe-matrix", "new=" + str(new_matrix),
          "--format", "json"],
     )
     assert json_res.exit_code in (2, 4), json_res.output
@@ -127,8 +127,8 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     sarif_res = runner.invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix-old", str(old_matrix),
-         "--probe-matrix-new", str(new_matrix),
+         "--probe-matrix", "old=" + str(old_matrix),
+         "--probe-matrix", "new=" + str(new_matrix),
          "--format", "sarif"],
     )
     assert "cxx_standard_floor_raised" in sarif_res.stdout
@@ -175,8 +175,8 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     res = runner.invoke(
         main,
         ["compare", str(old_dir), str(new_dir),
-         "--probe-matrix-old", str(old_matrix),
-         "--probe-matrix-new", str(new_matrix),
+         "--probe-matrix", "old=" + str(old_matrix),
+         "--probe-matrix", "new=" + str(new_matrix),
          "--format", "json"],
     )
     # Floor-raised is a source-level break → API_BREAK → release exit 2.
@@ -230,7 +230,7 @@ def test_feature_macro_api_depends_fires_end_to_end(tmp_path: Path) -> None:
 
 def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> None:
     """The matrix finding reaches the mainline ``compare`` JSON via
-    ``--probe-matrix-old/--probe-matrix-new`` (not only ``probe compare``)."""
+    ``--probe-matrix old=/new=`` (not only ``probe compare``)."""
     if shutil.which("cc") is None:
         pytest.skip("cc unavailable; cannot compile probe matrix")
     from click.testing import CliRunner
@@ -257,8 +257,8 @@ def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> N
     res = CliRunner().invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix-old", str(old_matrix),
-         "--probe-matrix-new", str(new_matrix),
+         "--probe-matrix", "old=" + str(old_matrix),
+         "--probe-matrix", "new=" + str(new_matrix),
          "--format", "json"],
     )
     data = json.loads(res.stdout)

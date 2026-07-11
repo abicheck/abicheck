@@ -76,7 +76,7 @@ scenarios:
       (Companion to SC-PROBE-MATRIX-GATE, which validates the probe-matrix
       *workflow*; this scenario validates the *toolchain* use case it surfaces.)
     flow:
-      - abicheck compare old.json new.json --probe-matrix-old old.matrix.json --probe-matrix-new new.matrix.json
+      - abicheck compare old.json new.json --probe-matrix old=old.matrix.json --probe-matrix new=new.matrix.json
     expected:
       exit_code: 2
       verdict: API_BREAK

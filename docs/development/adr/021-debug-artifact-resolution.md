@@ -327,15 +327,15 @@ abicheck compare old.so new.so -H include/
 
 # New: specify debug root directories
 abicheck compare old.so new.so -H include/ \
-    --debug-root1 /usr/lib/debug \
-    --debug-root2 /path/to/new/debuginfo
+    --debug-root old=/usr/lib/debug \
+    --debug-root new=/path/to/new/debuginfo
 
 # New: enable debuginfod
 abicheck compare old.so new.so --debuginfod
 
 # New: macOS dSYM
 abicheck compare old.dylib new.dylib \
-    --debug-root1 /path/to/old.dSYM/..
+    --debug-root old=/path/to/old.dSYM/..
 ```
 
 ### 8. Diagnostic output

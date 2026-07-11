@@ -331,7 +331,7 @@ def _resolve_debug_roots(
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
 ) -> tuple[list[Path], list[Path]]:
-    """Per-side debug roots: --debug-root1/2 override --debug-root for that side."""
+    """Per-side debug roots: --debug-root old=/new= override the both-sides value."""
     resolved_old = list(debug_roots_old) if debug_roots_old else list(debug_roots)
     resolved_new = list(debug_roots_new) if debug_roots_new else list(debug_roots)
     return resolved_old, resolved_new

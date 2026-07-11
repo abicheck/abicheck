@@ -271,8 +271,8 @@ automatically searches for debug artifacts across multiple locations:
 | Flag | Description |
 |------|-------------|
 | `--debug-root <dir>` | Directory containing separate debug files. Can be repeated. |
-| `--debug-root1 <dir>` | Debug root for old side only (`compare` command). |
-| `--debug-root2 <dir>` | Debug root for new side only (`compare` command). |
+| `--debug-root old=<dir>` | Debug root for old side only (`compare` command). |
+| `--debug-root new=<dir>` | Debug root for new side only (`compare` command). |
 | `--debuginfod` | Enable debuginfod network resolution (opt-in). |
 | `--debuginfod-url <url>` | Override debuginfod server URL. |
 
@@ -280,8 +280,8 @@ automatically searches for debug artifacts across multiple locations:
 # Stripped distro packages with separate debuginfo
 abicheck compare \
     old/usr/lib64/libfoo.so.1 new/usr/lib64/libfoo.so.1 \
-    --debug-root1 old-debug/usr/lib/debug \
-    --debug-root2 new-debug/usr/lib/debug
+    --debug-root old=old-debug/usr/lib/debug \
+    --debug-root new=new-debug/usr/lib/debug
 
 # Fedora/RHEL: debug info fetched automatically by build-id
 export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"

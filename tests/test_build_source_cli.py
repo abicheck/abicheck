@@ -460,7 +460,7 @@ def test_evidence_metrics_excludes_probe_matrix_from_artifact_backed(tmp_path):
 
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap), "--build-info", "new=" + str(ev_new),
-        "--probe-matrix-old", str(pm_old), "--probe-matrix-new", str(pm_new),
+        "--probe-matrix", "old=" + str(pm_old), "--probe-matrix", "new=" + str(pm_new),
         "--format", "json",
     ])
     assert result.exit_code in (0, 1, 2, 4), result.output

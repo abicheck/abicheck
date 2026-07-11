@@ -161,6 +161,8 @@ SIDED_PATH_PARAM = SidedPathParam()
 SIDED_SOURCES_PARAM = SidedPathParam(exists=True, file_okay=False)
 #: Sided path for ``--build-info`` — an existing file (compile DB) or directory.
 SIDED_BUILD_INFO_PARAM = SidedPathParam(exists=True)
+#: Sided path requiring an existing file/dir (e.g. ``--probe-matrix`` snapshots).
+SIDED_EXISTING_PATH_PARAM = SidedPathParam(exists=True)
 
 
 def _load_suppression_and_policy(

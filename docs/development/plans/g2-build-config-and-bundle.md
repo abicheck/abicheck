@@ -11,7 +11,7 @@ but were not reachable from the mainline gate:
 1. **Build-config matrix** — `abicheck/probe_harness.py` + `diff_build_config.py`
    detect `API_DEPENDS_ON_CONSUMER_ENV`, `CXX_STANDARD_FLOOR_RAISED`, and
    `BEHAVIOURAL_DEFAULT_CHANGED`, but only via the separate `abicheck probe`
-   command. They now feed `compare`/`compare-release` via `--probe-matrix-old/new`.
+   command. They now feed `compare`/`compare-release` via `--probe-matrix old=/new=`.
 2. **Bundle analysis** — `abicheck/bundle.py` detects cross-DSO breakage, but
    `compare-release` wiring is now complete for explicit cohorts, including case84.
 
@@ -19,7 +19,7 @@ but were not reachable from the mainline gate:
 
 - [x] `compare`/`compare-release` merge matrix findings into the verdict
       (worst-of), with the matrix ChangeKinds appearing in the report.
-      **Shipped as `--probe-matrix-old` / `--probe-matrix-new`** (pre-built
+      **Shipped as `--probe-matrix old=` / `--probe-matrix new=`** (pre-built
       matrix snapshots from `abicheck probe run`) rather than an inline
       `--probe-spec`: running a matrix needs compilers, so it stays a separate
       `probe run` step that feeds the comparison, keeping the compare commands

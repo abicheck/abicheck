@@ -187,7 +187,7 @@ Detectability](concepts/evidence-and-detectability.md) and the per-layer
 reference; build data (L3) and source build/source packs (L4) are documented under
 [CLI Usage → Evidence packs](user-guide/cli-usage.md#evidence-packs-build-source-context-l3-l4).
 For stripped production builds, point abicheck at separate debug files
-(`--debug-root1/2`) or fetch them with `--debuginfod` — see
+(`--debug-root old=/new=`) or fetch them with `--debuginfod` — see
 [CLI Usage](user-guide/cli-usage.md#debug-artifact-resolution).
 
 ---

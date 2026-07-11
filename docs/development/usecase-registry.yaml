@@ -495,7 +495,7 @@ use_cases:
     status: complete
     note: >
       G2 closed. Matrix findings fold into `compare`/`compare-release` via
-      --probe-matrix-old/--probe-matrix-new. Both build-config kinds are now
+      --probe-matrix old=/new=. Both build-config kinds are now
       proven end-to-end through the mainline command:
       CXX_STANDARD_FLOOR_RAISED and — after the relocatable-object symbol-surface
       fix — API_DEPENDS_ON_CONSUMER_ENV. parse_elf_metadata now falls back to
@@ -624,7 +624,7 @@ use_cases:
     status: complete
     note: >
       Surfaced through the mainline `compare`/`compare-release` command via
-      --probe-matrix-old/--probe-matrix-new; the finding reaches the verdict and
+      --probe-matrix old=/new=; the finding reaches the verdict and
       the JSON/SARIF output (proven in tests/test_probe_examples.py).
     evidence:
       examples: [examples/case98_cxx_standard_floor_raised, examples/probes/cxx_standard.yaml]

@@ -132,11 +132,11 @@ scenarios:
       A library's binary surface is unchanged, but a build raises the minimum
       C++ standard floor (17 → 20) — a source-level break that a per-binary diff
       cannot see. By passing the probe build-config matrices to compare
-      (--probe-matrix-old/--probe-matrix-new), the CXX_STANDARD_FLOOR_RAISED
+      (--probe-matrix old=/new=), the CXX_STANDARD_FLOOR_RAISED
       finding is folded into the same verdict and report, turning a NO_CHANGE
       binary diff into an API_BREAK gate (exit 2).
     flow:
-      - abicheck compare old.json new.json --probe-matrix-old old.matrix.json --probe-matrix-new new.matrix.json
+      - abicheck compare old.json new.json --probe-matrix old=old.matrix.json --probe-matrix new=new.matrix.json
     expected:
       exit_code: 2
       verdict: API_BREAK

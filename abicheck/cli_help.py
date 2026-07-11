@@ -71,8 +71,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Debug info",
             "options": [
-                "--dwarf-only", "--debug-format", "--debug-root", "--debug-root1",
-                "--debug-root2", "--debuginfod", "--debuginfod-url",
+                "--dwarf-only", "--debug-format", "--debug-root",
+                "--debuginfod", "--debuginfod-url",
             ],
         },
         {
@@ -88,14 +88,13 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-version", "--new-version", "--pdb-path", "--old-pdb-path",
-                "--new-pdb-path",
+                "--old-version", "--new-version", "--pdb-path",
             ],
         },
         {
             "name": "Build-config matrix & idioms",
             "options": [
-                "--probe-matrix-old", "--probe-matrix-new", "--pattern-verdicts",
+                "--probe-matrix", "--pattern-verdicts",
                 "--explain-patterns", "--surface-metrics",
             ],
         },

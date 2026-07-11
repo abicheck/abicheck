@@ -88,9 +88,34 @@ def _split_sided_single(
     return old, new
 
 
+def _split_sided_base(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Resolve ``(side, path)`` pairs to ``(both, old, new)`` single values.
+
+    The "base + per-side" single-valued model (e.g. ``--pdb-path``): a bare/
+    ``both=`` value is the shared base (applied to both sides unless overridden),
+    while ``old=``/``new=`` set a per-side override. Last value wins per bucket.
+    Unlike :func:`_split_sided_single`, ``both`` is kept as its own base value
+    rather than fanned out — the downstream resolver applies the base per side.
+    """
+    both: Path | None = None
+    old: Path | None = None
+    new: Path | None = None
+    for side, path in pairs:
+        if side == "both":
+            both = path
+        elif side == "old":
+            old = path
+        else:
+            new = path
+    return both, old, new
+
+
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
-    """Translate the sided ``header``/``include``/``sources``/``build_info`` dests
-    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
+    """Translate the sided ``header``/``include``/``sources``/``build_info``/
+    ``debug_root``/``pdb``/``probe_matrix`` dests into the per-side kwargs the
+    command bodies consume, in place (ADR-040 L1).
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
@@ -105,6 +130,11 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["includes"] = both
         kwargs["old_includes_only"] = old
         kwargs["new_includes_only"] = new
+    if "debug_root" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("debug_root"))  # type: ignore[arg-type]
+        kwargs["debug_roots"] = both
+        kwargs["debug_roots_old"] = old
+        kwargs["debug_roots_new"] = new
     if "sources" in kwargs:
         old_s, new_s = _split_sided_single(kwargs.pop("sources"))  # type: ignore[arg-type]
         kwargs["old_sources"] = old_s
@@ -113,6 +143,15 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         old_b, new_b = _split_sided_single(kwargs.pop("build_info"))  # type: ignore[arg-type]
         kwargs["old_build_info"] = old_b
         kwargs["new_build_info"] = new_b
+    if "probe_matrix" in kwargs:
+        old_p, new_p = _split_sided_single(kwargs.pop("probe_matrix"))  # type: ignore[arg-type]
+        kwargs["probe_matrix_old"] = old_p
+        kwargs["probe_matrix_new"] = new_p
+    if "pdb" in kwargs:
+        base_p, old_pp, new_pp = _split_sided_base(kwargs.pop("pdb"))  # type: ignore[arg-type]
+        kwargs["pdb_path"] = base_p
+        kwargs["old_pdb_path"] = old_pp
+        kwargs["new_pdb_path"] = new_pp
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -894,26 +933,14 @@ def debug_resolution_options(func: F) -> F:
         help="Enable debuginfod network resolution for debug info (opt-in).",
     )(func)
     func = click.option(
-        "--debug-root2",
-        "debug_roots_new",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Debug root for new side only (overrides --debug-root for new).",
-    )(func)
-    func = click.option(
-        "--debug-root1",
-        "debug_roots_old",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Debug root for old side only (overrides --debug-root for old).",
-    )(func)
-    func = click.option(
         "--debug-root",
-        "debug_roots",
+        "debug_root",
         multiple=True,
-        type=click.Path(path_type=Path),
+        type=SIDED_PATH_PARAM,
         help="Directory containing separate debug files (build-id trees, "
-        "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.",
+        "path-mirror, dSYM bundles). Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
     )(func)
     func = click.option(
         "--dwarf-only",
@@ -1182,8 +1209,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--dwarf-only",
             "--debug-root",
-            "--debug-root1",
-            "--debug-root2",
             "--debuginfod",
             "--debuginfod-url",
             "--debug-format",
@@ -1260,7 +1285,10 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: ``--old/new-include``, ``--old/new-sources`` and ``--old/new-build-info``
 #: triples collapsed into the four side-aware flags ``--header`` / ``--include``
 #: / ``--sources`` / ``--build-info`` (``old=``/``new=`` value prefix), a net −6.
-COMPARE_FLAG_BUDGET_BASE = 70
+#: Lowered 70→65 by ADR-040 Lever 1 Phase C (slice 1): ``--pdb-path`` and
+#: ``--debug-root`` collapsed their per-side triples (−2 each) and
+#: ``--probe-matrix-old/new`` folded into one side-aware ``--probe-matrix`` (−1).
+COMPARE_FLAG_BUDGET_BASE = 65
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

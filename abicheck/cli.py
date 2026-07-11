@@ -82,6 +82,8 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import (
+    SIDED_EXISTING_PATH_PARAM,
+    SIDED_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 from .cli_resolve import (
@@ -760,7 +762,7 @@ def _load_probe_matrix_changes(
         return None
     if probe_matrix_old is None or probe_matrix_new is None:
         raise click.UsageError(
-            "--probe-matrix-old and --probe-matrix-new must be given together."
+            "--probe-matrix needs both sides: --probe-matrix old=… --probe-matrix new=…"
         )
     from .diff_build_config import diff_matrix
     from .probe_harness import load_matrix_snapshot
@@ -1242,13 +1244,11 @@ def _embed_inline_source_side(
               help="Require every suppression rule to have a non-empty 'reason' "
                    "field (config: suppression.require_justification). Demoted to "
                    "config (ADR-037 D4).")
-@click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
-              help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
-                   "Overrides automatic PDB discovery.")
-@click.option("--old-pdb-path", "old_pdb_path", type=click.Path(path_type=Path), default=None,
-              help="PDB file path for old side only (overrides --pdb-path for old).")
-@click.option("--new-pdb-path", "new_pdb_path", type=click.Path(path_type=Path), default=None,
-              help="PDB file path for new side only (overrides --pdb-path for new).")
+@click.option("--pdb-path", "pdb", multiple=True, type=SIDED_PATH_PARAM,
+              help="Explicit PDB file path for Windows PE debug info. Applies to both "
+                   "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
+                   "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
+                   "automatic PDB discovery (ADR-040).")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
@@ -1307,16 +1307,13 @@ def _embed_inline_source_side(
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --show-filtered).")
-@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
-              default=None,
-              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
-                   "When given with --probe-matrix-new, build-config findings "
-                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+@click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
+              help="Build-configuration matrix snapshot (from 'abicheck probe run'), "
+                   "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
+                   "old=m1 --probe-matrix new=m2). With both sides given, build-config "
+                   "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
                    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
-                   "verdict and report (G2: probe -> compare).")
-@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
-              default=None,
-              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
+                   "verdict and report (G2: probe -> compare; ADR-040).")
 @click.option("--show-only", "show_only", default=None,
               callback=_validate_show_only, expose_value=True, is_eager=False,
               help="Comma-separated filter tokens to limit displayed changes. "
