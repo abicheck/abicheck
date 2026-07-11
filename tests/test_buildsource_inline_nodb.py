@@ -95,6 +95,23 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
         fn()
 
 
+def test_derive_l2_include_dirs_swallows_collection_errors(tmp_path, monkeypatch):
+    # The seed is best-effort: if the underlying collection raises, derivation must
+    # drain cleanups and return ([], []) rather than propagate — a scan that works
+    # today never regresses because of a flaky build-DB resolution.
+    from abicheck.buildsource import l2_seed
+
+    (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise RuntimeError("collection blew up")
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", boom)
+    dirs, cleanups = l2_seed.derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    assert dirs == []
+    assert cleanups == []
+
+
 def test_derive_l2_include_dirs_no_inputs_is_empty():
     from abicheck.buildsource.inline import derive_l2_include_dirs
 

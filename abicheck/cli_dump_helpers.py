@@ -242,9 +242,32 @@ def handle_non_elf_dump(
     """
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
+    # L2 include fallback (parity with the ELF dump path): when -H headers are given
+    # with --sources/--build-info but no explicit -I, seed the build's include dirs so
+    # a PE/Mach-O header scope can resolve dependency headers instead of failing or
+    # falling back to export-table mode (Codex review). collect_mode "off"
+    # (--depth headers/binary) gates the executing inferred build query. dump has no
+    # defer_cleanup channel, so temp-build-dir cleanups come back pending and run in
+    # the finally, after the header parse has consumed the dirs.
+    from .buildsource.inline import _run_cleanups
+    from .buildsource.l2_seed import seed_l2_includes
+
+    eff_includes, _l2_pending_cleanups = seed_l2_includes(
+        headers=headers,
+        includes=includes,
+        sources=sources,
+        build_info=build_info,
+        build_config=build_config,
+        defer_cleanup=None,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        gcc_options=getattr(compile_context, "gcc_options", None),
+        gcc_option_tokens=getattr(compile_context, "gcc_option_tokens", ()),
+        allow_inferred_build_query=collect_mode != "off",
+    )
     try:
         snap = dump_native_binary(
-            so_path, binary_fmt, list(headers), list(includes), version, lang,
+            so_path, binary_fmt, list(headers), list(eff_includes), version, lang,
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
@@ -255,6 +278,9 @@ def handle_non_elf_dump(
         raise
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    finally:
+        if _l2_pending_cleanups:
+            _run_cleanups(_l2_pending_cleanups)
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
