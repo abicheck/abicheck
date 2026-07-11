@@ -18,6 +18,7 @@ from abicheck.dumper import (
     _castxml_available,
     _castxml_dump,
     _CastxmlParser,
+    _is_kernel_binary,
     _parse_vtable_index,
     _pyelftools_exported_symbols,
     _resolve_debug_metadata,
@@ -242,6 +243,148 @@ class TestResolveDebugMetadata:
     def test_invalid_debug_format_raises_value_error(self, tmp_path):
         with pytest.raises(ValueError, match="Invalid debug_format"):
             _resolve_debug_metadata(tmp_path / "lib.so", "invalid")
+
+    def test_forced_btf_missing_section_still_returns(self, tmp_path, monkeypatch):
+        """Forced BTF with no .BTF section logs a warning and returns empty."""
+        from abicheck.btf_metadata import BtfMetadata
+
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.parse_btf_metadata",
+            lambda _p: BtfMetadata(has_btf=False),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", "btf")
+        assert not dwarf_meta.has_dwarf
+
+    def test_forced_ctf_missing_section_still_returns(self, tmp_path, monkeypatch):
+        """Forced CTF with no .ctf section logs a warning and returns empty."""
+        from abicheck.ctf_metadata import CtfMetadata
+
+        monkeypatch.setattr(
+            "abicheck.ctf_metadata.parse_ctf_metadata",
+            lambda _p: CtfMetadata(has_ctf=False),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", "ctf")
+        assert not dwarf_meta.has_dwarf
+
+    def test_auto_kernel_prefers_btf(self, tmp_path, monkeypatch):
+        """Auto-detect on a kernel binary with a .BTF section prefers BTF."""
+        from abicheck.btf_metadata import BtfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: True)
+        monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.parse_btf_metadata",
+            lambda _p: BtfMetadata(has_btf=True),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "vmlinux", None)
+        assert dwarf_meta.has_dwarf  # BTF converted to DwarfMetadata
+
+    def test_auto_falls_back_to_btf_when_no_dwarf(self, tmp_path, monkeypatch):
+        """Userspace binary with no DWARF but a .BTF section falls back to BTF."""
+        from abicheck.btf_metadata import BtfMetadata
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),
+        )
+        monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.parse_btf_metadata",
+            lambda _p: BtfMetadata(has_btf=True),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", None)
+        assert dwarf_meta.has_dwarf
+
+    def test_auto_falls_back_to_ctf_when_no_dwarf_or_btf(self, tmp_path, monkeypatch):
+        """No DWARF and no BTF but a .ctf section falls back to CTF."""
+        from abicheck.ctf_metadata import CtfMetadata
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),
+        )
+        monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: False)
+        monkeypatch.setattr("abicheck.ctf_metadata.has_ctf_section", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.ctf_metadata.parse_ctf_metadata",
+            lambda _p: CtfMetadata(has_ctf=True),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", None)
+        assert dwarf_meta.has_dwarf
+
+    @pytest.mark.parametrize("btf_section_present", [False, True])
+    def test_auto_kernel_btf_absent_falls_through_to_dwarf(
+        self, tmp_path, monkeypatch, btf_section_present
+    ):
+        """Kernel binary with no usable BTF falls through to DWARF — covers both
+        the section-absent and the section-present-but-empty fall-through edges."""
+        from abicheck.btf_metadata import BtfMetadata
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.has_btf_section", lambda _p: btf_section_present
+        )
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.parse_btf_metadata",
+            lambda _p: BtfMetadata(has_btf=False),
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata()),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "vmlinux", None)
+        assert dwarf_meta.has_dwarf  # came from DWARF, not BTF
+
+    def test_auto_returns_empty_when_no_debug_info(self, tmp_path, monkeypatch):
+        """No usable DWARF/BTF/CTF → empty DwarfMetadata (has_dwarf False).
+
+        BTF and CTF sections are *present but empty* so the ``has_btf``/``has_ctf``
+        fall-through edges are exercised, not just the section-absent ones."""
+        from abicheck.btf_metadata import BtfMetadata
+        from abicheck.ctf_metadata import CtfMetadata
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),
+        )
+        monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.btf_metadata.parse_btf_metadata",
+            lambda _p: BtfMetadata(has_btf=False),
+        )
+        monkeypatch.setattr("abicheck.ctf_metadata.has_ctf_section", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.ctf_metadata.parse_ctf_metadata",
+            lambda _p: CtfMetadata(has_ctf=False),
+        )
+        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", None)
+        assert not dwarf_meta.has_dwarf
+
+
+class TestIsKernelBinary:
+    def test_vmlinux_name(self, tmp_path):
+        assert _is_kernel_binary(tmp_path / "vmlinux") is True
+
+    @pytest.mark.parametrize("name", ["mod.ko", "mod.ko.xz", "mod.ko.zst", "mod.ko.gz"])
+    def test_ko_suffixes(self, tmp_path, name):
+        assert _is_kernel_binary(tmp_path / name) is True
+
+    def test_plain_so_is_not_kernel(self, tmp_path):
+        """A regular .so with no .modinfo section is not a kernel binary."""
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"not an elf")
+        assert _is_kernel_binary(so) is False
 
 
 # ── _pyelftools_exported_symbols ────────────────────────────────────────

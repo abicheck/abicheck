@@ -9,6 +9,8 @@ compilers produce Mach-O/PE, and DWARF parsing requires ELF.
 """
 from __future__ import annotations
 
+import os
+import struct
 import subprocess
 import sys
 import textwrap
@@ -342,6 +344,55 @@ class TestDwarfSession:
         bad.write_bytes(b"not an ELF file")
         assert open_dwarf_session(bad) is None
 
+    def test_open_session_never_raises_and_no_leak_on_unexpected_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """pyelftools can raise beyond (ELFError, OSError, ValueError) on corrupt
+        DWARF; open_dwarf_session must still return None and release the handle
+        (the "never raises" / no-descriptor-leak contract, F-D-leak review)."""
+        from abicheck import dwarf_unified as du
+
+        so = tmp_path / "corrupt.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 128)
+
+        def boom(*_a: object, **_k: object) -> object:
+            raise struct.error("truncated header")  # not in the narrow tuple
+
+        monkeypatch.setattr(du, "ELFFile", boom)
+
+        def nfds() -> int:
+            try:
+                return len(os.listdir("/proc/self/fd"))
+            except OSError:
+                return -1
+
+        base = nfds()
+        for _ in range(30):
+            assert du.open_dwarf_session(so) is None  # must not raise
+        assert nfds() - base <= 1, "open_dwarf_session leaked a file descriptor"
+
+    def test_parse_dwarf_survives_cu_iteration_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """iter_CUs() can raise on malformed CU headers before the per-CU guard
+        runs. parse_dwarf must swallow it, close the session (not hand it back),
+        and return empty metadata so the dumper degrades to symbol-only."""
+        _require_tool("g++")
+        from abicheck import dwarf_unified as du
+
+        so = _compile_so(tmp_path, "libcuerr", _SESSION_SRC, lang="cpp")
+
+        def boom(_session: object) -> object:
+            raise ValueError("iter_CUs blew up")
+
+        monkeypatch.setattr(du, "parse_dwarf_from_session", boom)
+
+        out: list = []
+        meta, adv = du.parse_dwarf(so, _session_out=out)  # must not raise
+        assert not meta.has_dwarf
+        assert not adv.has_dwarf
+        assert out == [], "failed parse must close the session, not append it"
+
     def test_close_is_safe_to_call(self, tmp_path: Path) -> None:
         _require_tool("g++")
         so = _compile_so(tmp_path, "libsessdbl", _SESSION_SRC, lang="cpp")
@@ -350,6 +401,18 @@ class TestDwarfSession:
         sess.close()
         # Double close must not raise.
         sess.close()
+
+    def test_close_swallows_file_error(self) -> None:
+        """close() must not propagate an OSError from the underlying handle."""
+
+        class _BadFile:
+            def close(self) -> None:
+                raise OSError("handle already gone")
+
+        sess = DwarfSession(
+            path=Path("x"), _file=_BadFile(), elf=None, dwarf=None, arch="x86_64"  # type: ignore[arg-type]
+        )
+        sess.close()  # must not raise
 
     def test_snapshot_reuses_session_without_reopening(self, tmp_path: Path) -> None:
         """When a session is supplied, the snapshot build must NOT open the ELF

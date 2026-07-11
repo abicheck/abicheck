@@ -1599,30 +1599,32 @@ def _dump_elf(
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
     # A DWARF metadata parse that finds real debug info leaves its open
-    # DwarfSession here so the snapshot build below can reuse the same
-    # DWARFInfo (and its warm DIE cache) rather than re-parsing every DIE
-    # from a second open (F5b). The session is closed in the finally below on
-    # every exit path; the built snapshot holds extracted model objects, not
-    # live DIE references, so closing after it is returned is safe.
+    # DwarfSession in ``_dwarf_session_out`` so the snapshot build below can
+    # reuse the same DWARFInfo (and its warm DIE cache) rather than re-parsing
+    # every DIE from a second open (F5b). Metadata resolution and the snapshot
+    # attempt run inside the try; the finally closes any opened session on every
+    # exit path (including an exception during resolution), so no descriptor
+    # leaks. The built snapshot holds extracted model objects, not live DIE
+    # references, so closing after it is returned is safe.
     _dwarf_session_out: list[DwarfSession] = []
-    if symbols_only or debug_presence_only:
-        from .dwarf_presence import cheap_debug_presence_metadata
-        dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
-            so_path,
-            debug_format=debug_format,
-        )
-    else:
-        dwarf_meta, dwarf_adv = _resolve_debug_metadata(
-            so_path, debug_format, _session_out=_dwarf_session_out,
-        )
-    dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
-    profile_hint = _lang_to_profile(lang)
-    # ADR-003: Updated fallback chain
-    # --dwarf-only → force DWARF mode regardless of headers
-    # no headers + DWARF available -> DWARF-only mode with type-aware checks
-    # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
     try:
+        if symbols_only or debug_presence_only:
+            from .dwarf_presence import cheap_debug_presence_metadata
+            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+                so_path,
+                debug_format=debug_format,
+            )
+        else:
+            dwarf_meta, dwarf_adv = _resolve_debug_metadata(
+                so_path, debug_format, _session_out=_dwarf_session_out,
+            )
+        dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
+        profile_hint = _lang_to_profile(lang)
+        # ADR-003: Updated fallback chain
+        # --dwarf-only → force DWARF mode regardless of headers
+        # no headers + DWARF available -> DWARF-only mode with type-aware checks
+        # no headers + no DWARF -> symbols-only mode
         if not (symbols_only or debug_presence_only) and (
             dwarf_only or (not headers and dwarf_meta.has_dwarf)
         ):
@@ -1640,8 +1642,8 @@ def _dump_elf(
                 dwarf_only_types, profile_hint,
             )
     finally:
-        if dwarf_session is not None:
-            dwarf_session.close()
+        for _sess in _dwarf_session_out:
+            _sess.close()
 
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,

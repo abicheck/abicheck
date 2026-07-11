@@ -138,7 +138,11 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
             dwarf=dwarf,
             arch=_normalize_arch(elf),
         )
-    except (ELFError, OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - never raise; always release the handle
+        # pyelftools can raise beyond (ELFError, OSError, ValueError) on corrupt
+        # DWARF (struct.error, KeyError, …). The legacy parse_dwarf used a
+        # ``with open()`` block that closed on *any* exception; match that here
+        # so the "never raises" contract holds and no descriptor leaks.
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
         f.close()
         return None
@@ -202,7 +206,16 @@ def parse_dwarf(
     if session is None:
         return DwarfMetadata(), AdvancedDwarfMetadata()
 
-    meta, adv = parse_dwarf_from_session(session)
+    try:
+        meta, adv = parse_dwarf_from_session(session)
+    except Exception as exc:  # noqa: BLE001 - never raise; mirror the legacy top-level guard
+        # parse_dwarf_from_session guards each CU, but iter_CUs() itself can
+        # raise on malformed/truncated CU headers before the per-CU try runs.
+        # Close the session and fall back to empty metadata (the caller then
+        # degrades to symbol-only) rather than leaking the handle / aborting.
+        log.warning("parse_dwarf: failed to parse CUs in %s: %s", so_path, exc)
+        session.close()
+        return DwarfMetadata(), AdvancedDwarfMetadata()
 
     if _session_out is not None:
         _session_out.append(session)
