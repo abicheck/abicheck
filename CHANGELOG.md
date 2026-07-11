@@ -20,7 +20,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   instead of re-parsing. Output is byte-for-byte identical (validated A/B on real
   compiled binaries); the redundant snapshot DIE walk drops from a full cold
   parse to near-free on the measured fixtures. Internal only — no CLI or API
-  surface change.
+  surface change. `tests/test_perf_dwarf_session_scaling.py` (new,
+  `integration`) guards the win going forward: a same-binary A/B timing
+  comparison (session reuse must stay reliably faster than independent opens)
+  and a CU-count scaling exponent gate on the production `dwarf_only` dump
+  path, compiling multi-CU C++ binaries that reproduce the pvxs
+  repeated-type-across-CUs pattern.
 
 ### Added
 

@@ -405,14 +405,18 @@ class TestDwarfSession:
     def test_close_swallows_file_error(self) -> None:
         """close() must not propagate an OSError from the underlying handle."""
 
+        calls: list[bool] = []
+
         class _BadFile:
             def close(self) -> None:
+                calls.append(True)
                 raise OSError("handle already gone")
 
         sess = DwarfSession(
             path=Path("x"), _file=_BadFile(), elf=None, dwarf=None, arch="x86_64"  # type: ignore[arg-type]
         )
         sess.close()  # must not raise
+        assert calls == [True], "close() should still attempt to close the handle"
 
     def test_snapshot_reuses_session_without_reopening(self, tmp_path: Path) -> None:
         """When a session is supplied, the snapshot build must NOT open the ELF
