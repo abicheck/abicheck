@@ -74,11 +74,15 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
     sysinc.mkdir()
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    missing = tmp_path / "nope"  # a dir that does not exist
+    # Use the `arguments` array form (not `command`) so paths are never shell-split
+    # — a Windows `C:\...` path in a `command` string would be mangled by shlex.
     (tmp_path / "compile_commands.json").write_text(
         json.dumps([{
             "directory": str(tmp_path),
             "file": str(src),
-            "command": f"cc -I{inc} -isystem {sysinc} -I/nonexistent/xyz -c {src}",
+            "arguments": ["cc", f"-I{inc}", "-isystem", str(sysinc),
+                          f"-I{missing}", "-c", str(src)],
         }]),
         encoding="utf-8",
     )
@@ -86,7 +90,7 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
     dirs = derive_l2_include_dirs(build_info=None, sources=tmp_path)
     assert str(inc) in dirs
     assert str(sysinc) in dirs
-    assert "/nonexistent/xyz" not in dirs  # non-existent dirs filtered out
+    assert str(missing) not in dirs  # non-existent dirs filtered out
 
 
 def test_derive_l2_include_dirs_no_inputs_is_empty():
@@ -113,11 +117,13 @@ def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
         inc.mkdir()
         src = tmp_path / "foo.c"
         src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+        # `arguments` array (not `command`) so a Windows `C:\...` home path is not
+        # shell-split; the absolute home path is what the adapter redacts to ~/...
         (tmp_path / "compile_commands.json").write_text(
             json.dumps([{
                 "directory": str(tmp_path),
                 "file": str(src),
-                "command": f"cc -I{inc} -c {src}",  # absolute home path -> redacted to ~/...
+                "arguments": ["cc", f"-I{inc}", "-c", str(src)],
             }]),
             encoding="utf-8",
         )
