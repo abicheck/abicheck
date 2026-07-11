@@ -28,12 +28,91 @@ from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
-from .cli_params import DEPTH_PARAM, POLICY_FILE_PARAM
+from .cli_params import (
+    DEPTH_PARAM,
+    POLICY_FILE_PARAM,
+    SIDED_BUILD_INFO_PARAM,
+    SIDED_PATH_PARAM,
+    SIDED_SOURCES_PARAM,
+)
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
+
+
+# ── ADR-040 Lever 1: side-aware option collapse ──────────────────────────────
+#
+# ``--old-X`` / ``--new-X`` / ``--X`` triples collapse to one repeatable ``--X``
+# whose value carries an optional ``old=`` / ``new=`` prefix (:class:`SidedPathParam`
+# returns ``(side, Path)`` pairs). The command bodies stay on their existing
+# internal kwargs (``headers`` / ``old_headers_only`` / …) — the two helpers below
+# translate the sided tuples back into those kwargs at the boundary, so the engine,
+# the Tier-2 service, and the ABICC compat layer are untouched.
+
+
+def split_sided_paths(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
+    """Split ``(side, path)`` pairs into ``(both, old_only, new_only)`` tuples.
+
+    Used by ``header`` / ``include`` (the "both-sides + per-side extra" model,
+    where the both bucket is applied to each side and ``old=``/``new=`` add
+    per-side overrides).
+    """
+    both: list[Path] = []
+    old_only: list[Path] = []
+    new_only: list[Path] = []
+    for side, path in pairs:
+        {"both": both, "old": old_only, "new": new_only}[side].append(path)
+    return tuple(both), tuple(old_only), tuple(new_only)
+
+
+def _split_sided_single(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[Path | None, Path | None]:
+    """Resolve ``(side, path)`` pairs to a single ``(old, new)`` per-side value.
+
+    Used by ``sources`` / ``build-info`` (one pack per side): a bare/``both=``
+    value applies to *both* sides, while ``old=``/``new=`` override that side.
+    Last value wins if a side is given twice.
+    """
+    old: Path | None = None
+    new: Path | None = None
+    for side, path in pairs:
+        if side in ("both", "old"):
+            old = path
+        if side in ("both", "new"):
+            new = path
+    return old, new
+
+
+def normalize_sided_options(kwargs: dict[str, object]) -> None:
+    """Translate the sided ``header``/``include``/``sources``/``build_info`` dests
+    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
+
+    Absent keys are left untouched, so this is safe to call on any command that
+    composes only a subset of the sided families.
+    """
+    if "header" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("header"))  # type: ignore[arg-type]
+        kwargs["headers"] = both
+        kwargs["old_headers_only"] = old
+        kwargs["new_headers_only"] = new
+    if "include" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("include"))  # type: ignore[arg-type]
+        kwargs["includes"] = both
+        kwargs["old_includes_only"] = old
+        kwargs["new_includes_only"] = new
+    if "sources" in kwargs:
+        old_s, new_s = _split_sided_single(kwargs.pop("sources"))  # type: ignore[arg-type]
+        kwargs["old_sources"] = old_s
+        kwargs["new_sources"] = new_s
+    if "build_info" in kwargs:
+        old_b, new_b = _split_sided_single(kwargs.pop("build_info"))  # type: ignore[arg-type]
+        kwargs["old_build_info"] = old_b
+        kwargs["new_build_info"] = new_b
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -73,54 +152,81 @@ def two_sided_input_options(func: F) -> F:
         help="Version label for old side (used when input is a .so file).",
     )(func)
     func = click.option(
-        "--new-include",
-        "new_includes_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Include dir for new side only (overrides -I for new).",
-    )(func)
-    func = click.option(
-        "--old-include",
-        "old_includes_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Include dir for old side only (overrides -I for old).",
-    )(func)
-    func = click.option(
-        "--new-header",
-        "new_headers_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header for new side only (overrides -H for new). "
-        "Validated for native binaries; ignored for snapshots.",
-    )(func)
-    func = click.option(
-        "--old-header",
-        "old_headers_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header for old side only (overrides -H for old). "
-        "Validated for native binaries; ignored for snapshots.",
-    )(func)
-    func = click.option(
         "-I",
         "--include",
-        "includes",
+        "include",
         multiple=True,
-        type=click.Path(path_type=Path),
-        help="Extra include directory for castxml (applied to both sides).",
+        type=SIDED_PATH_PARAM,
+        help="Extra include directory for castxml. Applies to both sides; scope "
+        "to one side with an 'old='/'new=' prefix (e.g. --include old=inc1 "
+        "new=inc2). Repeat for multiple (ADR-040).",
     )(func)
     func = click.option(
         "-H",
         "--header",
-        "headers",
+        "header",
         multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header file or directory applied to both sides (repeat for multiple). "
+        type=SIDED_PATH_PARAM,
+        help="Public header file or directory. Applies to both sides; scope to "
+        "one side with an 'old='/'new=' prefix (e.g. --header old=v1/foo.h "
+        "new=v2/foo.h). Repeat for multiple (ADR-040). "
         "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
+    )(func)
+    return func
+
+
+def release_input_options(func: F) -> F:
+    """Per-side header/include/version for the *internal* release engine.
+
+    ``compare_release_cmd`` is unregistered (ADR-037 D7): it is never parsed from
+    the CLI, only ``ctx.invoke``-d from ``compare``'s directory/package dispatch
+    with the already-normalised per-side kwargs (``headers`` / ``old_headers_only``
+    / …). So it keeps the pre-ADR-040 per-side param surface — the side-aware
+    ``--header``/``--include`` collapse (Lever 1) applies to the *user-facing*
+    ``compare`` / ``appcompat`` commands, which normalise before dispatching here.
+    These option spellings are inert (the command is not registered) and do not
+    count against any flag budget or option-set snapshot.
+    """
+    func = click.option(
+        "--new-version", "new_version", default="new", show_default=True,
+        help="Version label for new side (used when input is a .so file).",
+    )(func)
+    func = click.option(
+        "--old-version", "old_version", default="old", show_default=True,
+        help="Version label for old side (used when input is a .so file).",
+    )(func)
+    func = click.option(
+        "--new-include", "new_includes_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Include dir for new side only.",
+    )(func)
+    func = click.option(
+        "--old-include", "old_includes_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Include dir for old side only.",
+    )(func)
+    func = click.option(
+        "--new-header", "new_headers_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header for new side only.",
+    )(func)
+    func = click.option(
+        "--old-header", "old_headers_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header for old side only.",
+    )(func)
+    func = click.option(
+        "-I", "--include", "includes", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Extra include directory (both sides).",
+    )(func)
+    func = click.option(
+        "-H", "--header", "headers", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header file or directory (both sides).",
     )(func)
     return func
 
@@ -974,22 +1080,14 @@ def evidence_options(func: F) -> F:
     that take source depth compose it).
 
     By default ``compare old.json new.json`` reads build-info + source facts
-    **embedded** in each snapshot (single-artifact UX). The optional
-    ``--old-build-info`` / ``--new-build-info`` and ``--old-sources`` /
-    ``--new-sources`` point at out-of-band pack directories to supply or
-    override those facts per side; ``--depth`` selects how deep the inline
+    **embedded** in each snapshot (single-artifact UX). The optional side-aware
+    ``--build-info`` and ``--sources`` (ADR-040) point at out-of-band pack
+    directories to supply or override those facts — for both sides, or per side
+    with an ``old=``/``new=`` prefix; ``--depth`` selects how deep the inline
     collection runs (ADR-037 D5). All folded into the verdict as ordinary
     findings, never overriding artifact-backed ABI verdicts (ADR-028 D3).
     Applied bottom-up, so listed in reverse of displayed order.
     """
-    from pathlib import Path
-
-    pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
-    # --build-info also accepts a file (a raw compile_commands.json), not just a
-    # build dir / pack dir — the per-side replacement for the removed
-    # deep-compare, whose build-info option took dirs *or* a compile DB file
-    # (Codex review). The later pack/raw validation still distinguishes them.
-    build_info_path = click.Path(exists=True, path_type=Path)
     func = click.option(
         "--max",
         "max_depth",
@@ -1005,41 +1103,26 @@ def evidence_options(func: F) -> F:
         help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
         "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
         "full=deepest. --max == --depth full. Deeper-than-headers needs "
-        "--old/new-sources or --old/new-build-info.",
+        "--sources or --build-info.",
     )(func)
     func = click.option(
-        "--new-sources",
-        "new_sources",
-        type=pack_dir,
-        default=None,
-        help="New-side L4/L5 source: a raw source checkout (collected inline at "
-        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
-        "pack. Overrides embedded.",
+        "--sources",
+        "sources",
+        multiple=True,
+        type=SIDED_SOURCES_PARAM,
+        help="L4/L5 source: a raw source checkout (collected inline at --depth, "
+        "embedding build/source/graph facts) or a pre-built `collect` pack, "
+        "overriding embedded. Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix (e.g. --sources old=src_v1 new=src_v2) (ADR-040).",
     )(func)
     func = click.option(
-        "--old-sources",
-        "old_sources",
-        type=pack_dir,
-        default=None,
-        help="Old-side L4/L5 source: a raw source checkout (collected inline at "
-        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
-        "pack. Overrides embedded.",
-    )(func)
-    func = click.option(
-        "--new-build-info",
-        "new_build_info",
-        type=build_info_path,
-        default=None,
-        help="Out-of-band L3 build-info for the new side: a build dir, a "
-        "compile_commands.json, or a pack (overrides embedded).",
-    )(func)
-    func = click.option(
-        "--old-build-info",
-        "old_build_info",
-        type=build_info_path,
-        default=None,
-        help="Out-of-band L3 build-info for the old side: a build dir, a "
-        "compile_commands.json, or a pack (overrides embedded).",
+        "--build-info",
+        "build_info",
+        multiple=True,
+        type=SIDED_BUILD_INFO_PARAM,
+        help="Out-of-band L3 build-info: a build dir, a compile_commands.json, or "
+        "a pack, overriding embedded. Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix (e.g. --build-info old=b1 new=b2) (ADR-040).",
     )(func)
     return func
 
@@ -1063,10 +1146,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--header",
             "--include",
-            "--old-header",
-            "--new-header",
-            "--old-include",
-            "--new-include",
             "--old-version",
             "--new-version",
         }
@@ -1090,10 +1169,8 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--depth",
             "--max",
-            "--old-sources",
-            "--new-sources",
-            "--old-build-info",
-            "--new-build-info",
+            "--sources",
+            "--build-info",
         }
     ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
@@ -1177,7 +1254,11 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: release-only knobs (package extraction, DSO selection, removed-library gate,
 #: ADR-023 bundle/manifest) folded onto ``compare``'s directory/package path
 #: (ADR-037 D7) — genuine release surface, inert on single files.
-COMPARE_FLAG_BUDGET_BASE = 76
+#: Lowered 76→70 by ADR-040 Lever 1 Phase B: the per-side ``--old/new-header``,
+#: ``--old/new-include``, ``--old/new-sources`` and ``--old/new-build-info``
+#: triples collapsed into the four side-aware flags ``--header`` / ``--include``
+#: / ``--sources`` / ``--build-info`` (``old=``/``new=`` value prefix), a net −6.
+COMPARE_FLAG_BUDGET_BASE = 70
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable
@@ -1372,8 +1453,10 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     # input operands
     "old_input": "--old (positional OLD)",
     "new_input": "--new (positional NEW)",
-    "old_headers": "--old-header",
-    "new_headers": "--new-header",
+    # ADR-040 L1: the per-side header params now map to the single side-aware
+    # ``--header`` flag (scoped via an ``old=``/``new=`` value prefix).
+    "old_headers": "--header",
+    "new_headers": "--header",
     "headers": "--header",
     "include_dirs": "--include",
     "language": "--lang",

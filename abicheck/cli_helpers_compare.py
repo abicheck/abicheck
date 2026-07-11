@@ -145,11 +145,11 @@ def _warn_ignored_flags(
         return
     flag_pairs: list[tuple[tuple[Path, ...], str]] = [
         (headers, "-H/--header"),
-        (old_headers_only, "--old-header"),
-        (new_headers_only, "--new-header"),
+        (old_headers_only, "--header old="),
+        (new_headers_only, "--header new="),
         (includes, "-I/--include"),
-        (old_includes_only, "--old-include"),
-        (new_includes_only, "--new-include"),
+        (old_includes_only, "--include old="),
+        (new_includes_only, "--include new="),
     ]
     ignored_flags = [label for value, label in flag_pairs if value]
     if ignored_flags:

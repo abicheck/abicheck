@@ -551,13 +551,15 @@ _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
 #: Build/source evidence flags (param dest → flag). ``max_depth``/``depth`` are
 #: the evidence-depth dial; the four per-side --sources/--build-info are the
 #: inline evidence inputs.
+#: ADR-040 L1: keyed on the *side-aware* CLI param dests (``sources`` /
+#: ``build_info``) — the rejection runs on the raw Click params (before the
+#: sided values are normalised into per-side kwargs), so it must check the
+#: dest the user actually typed to.
 _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
     "max_depth": "--max",
     "depth": "--depth",
-    "old_sources": "--old-sources",
-    "new_sources": "--new-sources",
-    "old_build_info": "--old-build-info",
-    "new_build_info": "--new-build-info",
+    "sources": "--sources",
+    "build_info": "--build-info",
 }
 
 

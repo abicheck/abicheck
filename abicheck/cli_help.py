@@ -78,8 +78,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--old-build-info", "--new-build-info", "--old-sources",
-                "--new-sources", "--depth", "--max",
+                "--build-info", "--sources", "--depth", "--max",
             ],
         },
         {
@@ -89,7 +88,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-header", "--new-header", "--old-include", "--new-include",
                 "--old-version", "--new-version", "--pdb-path", "--old-pdb-path",
                 "--new-pdb-path",
             ],
@@ -239,7 +237,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-header", "--new-header", "--old-include", "--new-include",
                 "--old-version", "--new-version",
             ],
         },

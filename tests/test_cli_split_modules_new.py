@@ -187,10 +187,10 @@ class TestValidateAppcompatArgs:
             self._call(new_lib=None)
 
     @pytest.mark.parametrize("kwarg,flag", [
-        ("old_headers_only", "--old-header"),
-        ("new_headers_only", "--new-header"),
-        ("old_includes_only", "--old-include"),
-        ("new_includes_only", "--new-include"),
+        ("old_headers_only", "--header old="),
+        ("new_headers_only", "--header new="),
+        ("old_includes_only", "--include old="),
+        ("new_includes_only", "--include new="),
     ])
     def test_weak_mode_rejects_per_side_flags(self, kwarg: str, flag: str) -> None:
         with pytest.raises(click.UsageError, match=flag):

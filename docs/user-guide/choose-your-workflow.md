@@ -24,11 +24,11 @@ command** when you need more confidence or a CI gate.
 
 | Your situation | Minimum command | Stronger / production command |
 |---|---|---|
-| One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --old-header include/v1/ --new-header include/v2/` — the primary flow |
+| One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --header old=include/v1/ --header new=include/v2/` — the primary flow |
 | Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
 | No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root1/2` |
 | Stripped production binaries | `abicheck compare old.so new.so --debug-root1 old-debug --debug-root2 new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
-| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --new-header include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
+| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck scan --binary build/libfoo.so -H include/ --sources . --baseline baseline.json --since origin/main` | One orchestrator over dump/compare: always-on pattern + cross-source checks plus the pinned L3/L4/L5 level — see [Source & Build Data](../concepts/build-source-data.md) and the [GitHub Action: Source Scans](github-action-source-scans.md) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow B `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
@@ -130,13 +130,13 @@ verdict or exit code.
 # Report everything, fail ONLY on binary ABI breaks
 # (i.e. source/API breaks are allowed through)
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-preset info-only \
   --severity-abi-breaking error
 
 # Fail on binary ABI breaks AND new public API additions
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-addition error
 ```
 
@@ -145,7 +145,7 @@ abicheck compare old.json new.so \
 ```bash
 # Show only additions in a review report — verdict and exit code unchanged
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --show-only compatible,added
 ```
 

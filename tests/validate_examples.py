@@ -552,9 +552,9 @@ def _build_compare_cmd(
         sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json",
     ]
     if old_build_source is not None:
-        cmd += ["--old-build-info", str(old_build_source), "--old-sources", str(old_build_source)]
+        cmd += ["--build-info", "old=" + str(old_build_source), "--sources", "old=" + str(old_build_source)]
     if new_build_source is not None:
-        cmd += ["--new-build-info", str(new_build_source), "--new-sources", str(new_build_source)]
+        cmd += ["--build-info", "new=" + str(new_build_source), "--sources", "new=" + str(new_build_source)]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
     cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")

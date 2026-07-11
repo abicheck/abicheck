@@ -241,7 +241,7 @@ def test_compare_with_source_graph_packs_runs_graph_diff(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--format", "json",
     ])
     assert result.exit_code in (0, 1, 2, 4), result.output
@@ -264,7 +264,7 @@ def test_compare_with_evidence_emits_coverage_and_findings(tmp_path):
 
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--format", "markdown",
     ])
     assert result.exit_code in (0, 2, 4), result.output
@@ -288,7 +288,7 @@ def test_compare_json_carries_layer_coverage_block(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
 
     result = runner.invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "compare", str(old_snap), str(new_snap), "--build-info", "new=" + str(ev_new),
         "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
@@ -311,7 +311,7 @@ def test_compare_asymmetric_old_only_reports_target_not_collected(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
 
     result = runner.invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--old-build-info", str(ev_old),
+        "compare", str(old_snap), str(new_snap), "--build-info", "old=" + str(ev_old),
         "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
@@ -349,7 +349,7 @@ def test_compare_json_carries_evidence_metrics_block(tmp_path):
 
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
@@ -386,7 +386,7 @@ def test_evidence_metrics_bucket_counts_are_post_suppression(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--suppress", str(supp), "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
@@ -459,7 +459,7 @@ def test_evidence_metrics_excludes_probe_matrix_from_artifact_backed(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
 
     result = runner.invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "compare", str(old_snap), str(new_snap), "--build-info", "new=" + str(ev_new),
         "--probe-matrix-old", str(pm_old), "--probe-matrix-new", str(pm_new),
         "--format", "json",
     ])
@@ -497,7 +497,7 @@ def test_evidence_policy_build_drift_fail_on_abi_relevant_escalates(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--policy-file", str(pol), "--format", "json",
     ])
     assert result.exit_code == 2, result.output  # API_BREAK
@@ -513,7 +513,7 @@ def test_evidence_policy_build_drift_default_is_risk(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
     ])
     assert result.exit_code == 0, result.output
 
@@ -548,7 +548,7 @@ def test_require_evidence_fails_when_layer_only_on_target_side(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "compare", str(old_snap), str(new_snap), "--build-info", "new=" + str(ev_new),
         "--policy-file", str(pol), "--format", "json",
     ])
     assert result.exit_code == 2, result.output
@@ -573,7 +573,7 @@ def test_require_evidence_satisfied_when_layer_comparable(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--policy-file", str(pol), "--format", "json",
     ])
     assert result.exit_code == 0, result.output
@@ -797,7 +797,7 @@ def test_compare_source_abi_findings_and_capabilities(tmp_path):
 
     result = CliRunner().invoke(main, [
         "compare", str(old_snap), str(new_snap),
-        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--build-info", "old=" + str(ev_old), "--build-info", "new=" + str(ev_new),
         "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output

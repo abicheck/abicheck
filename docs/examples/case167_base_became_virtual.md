@@ -119,7 +119,7 @@ findings: `type_size_changed`, `type_field_offset_changed`,
 `_ZTV`/`_ZTI` layer, so even a stripped binary shows the break.
 
 ```bash
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: BREAKING (base_class_virtual_changed: Stream — became virtual: ['Device'])
 ```
 

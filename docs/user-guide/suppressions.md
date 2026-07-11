@@ -82,8 +82,8 @@ So `source_location` does **not** bypass symbol/type selectors.
 
 ```bash
 abicheck compare old.so new.so \
-  --old-header include/v1/ \
-  --new-header include/v2/ \
+  --header old=include/v1/ \
+  --header new=include/v2/ \
   --suppress suppressions.yaml
 ```
 

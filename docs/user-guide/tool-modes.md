@@ -63,7 +63,7 @@ See [Architecture](../concepts/architecture.md) for the full per-layer breakdown
 | Requirement | Mandatory? | Notes |
 |-------------|-----------|-------|
 | Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
-| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--*-header`. The default selector is **`--ast-frontend auto`**: it prefers **castxml** when present (GCC, Clang, or MSVC — castxml emulates whichever you point it at) and automatically falls back to **clang** (`clang -ast-dump=json`) on a clang-only host where castxml is absent — so you normally need not choose. Pin a frontend with `--ast-frontend castxml`/`clang` (or `ABICHECK_AST_FRONTEND=…`) to override, or pin **one side only** with `--old-ast-frontend`/`--new-ast-frontend` — useful when the old release parses on castxml but the new one needs clang (the frontend mirror of `--old-header`/`--new-header`). The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). |
+| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--header old=`/`--header new=`. The default selector is **`--ast-frontend auto`**: it prefers **castxml** when present (GCC, Clang, or MSVC — castxml emulates whichever you point it at) and automatically falls back to **clang** (`clang -ast-dump=json`) on a clang-only host where castxml is absent — so you normally need not choose. Pin a frontend with `--ast-frontend castxml`/`clang` (or `ABICHECK_AST_FRONTEND=…`) to override, or pin **one side only** with `--old-ast-frontend`/`--new-ast-frontend` — useful when the old release parses on castxml but the new one needs clang (the frontend mirror of `--header old=`/`--header new=`). The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). |
 | Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
 | Headers | strongly recommended | Without them abicheck runs **symbols-only mode** and warns; type/signature breaks may be missed |
 
@@ -84,7 +84,7 @@ single external tools miss:
 
 ```bash
 # Header-aware (recommended; needs castxml)
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 
 # Binary-only fallback (no castxml required)
 abicheck compare libv1.so libv2.so

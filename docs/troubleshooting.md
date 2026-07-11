@@ -10,7 +10,7 @@ surprising (false positive, false negative, or unexpected verdict).
 ### "castxml not found in PATH"
 
 Header AST analysis requires `castxml`. `pip install abicheck` does **not** install it,
-so any command that passes headers (`--old-header` / `--new-header` / `-H`) fails with
+so any command that passes headers (`--header` / `-H`) fails with
 this error until `castxml` is on your `PATH`.
 
 ```bash

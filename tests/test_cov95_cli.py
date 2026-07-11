@@ -1115,8 +1115,8 @@ class TestAppcompatValidation:
             str(app),
             "--check-against",
             str(lib),
-            "--old-header",
-            str(tmp_path / "h.h"),
+            "--header",
+            "old=" + str(tmp_path / "h.h"),
         )
         assert result.exit_code != 0
         assert "cannot be used with" in result.output

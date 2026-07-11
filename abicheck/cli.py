@@ -70,6 +70,7 @@ from .cli_options import (
     env_matrix_option,
     evidence_options,
     lang_option,
+    normalize_sided_options,
     output_options,
     policy_options,
     profile_option,
@@ -1421,6 +1422,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from .cli_compare_helpers import run_compare
 
+    # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
+    # --build-info tuples back into the per-side kwargs run_compare consumes.
+    normalize_sided_options(kwargs)
     # ADR-040 Lever 3: fold the selected --profile's workflow defaults into the
     # forwarded options (explicit flags always win) and drop the CLI-only
     # ``profile`` key before delegating to the typed run_compare signature.

@@ -70,9 +70,9 @@ from .cli_options import (
     lang_option,
     output_options,
     policy_options,
+    release_input_options,
     scope_options,
     severity_options,
-    two_sided_input_options,
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
@@ -767,8 +767,9 @@ def _strip_diff_results_and_adjust_verdict(
 @click.command("compare-release")
 @click.argument("old_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
-# Two-sided header/include/version family (ADR-037 D3); --lang stays inline.
-@two_sided_input_options
+# Per-side header/include/version for the internal (unregistered) release engine;
+# the user-facing --header/--include collapse (ADR-040 L1) lives on `compare`.
+@release_input_options
 @lang_option
 @output_options(
     ["json", "markdown", "junit"],

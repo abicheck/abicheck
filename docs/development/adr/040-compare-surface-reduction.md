@@ -1,8 +1,9 @@
 # ADR-040: `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles
 
-**Status:** Accepted — phased implementation (Phase A: run profiles landed;
-Phases B–D staged, see "Rollout"). Targets **0.5.0** (hard break, no alias
-window — consistent with how ADR-037 removed `--header-backend`).
+**Status:** Accepted — phased implementation (Phase A run profiles + Phase B
+evidence-family collapse landed; Phases C–D staged, see "Rollout"). Targets
+**0.5.0** (hard break, no alias window — consistent with how ADR-037 removed
+`--header-backend`).
 
 ## Context
 
@@ -131,7 +132,7 @@ single flags and `--profile`.
 ## Consequences
 
 * **Breaking (0.5.0, no alias window).** Existing invocations using
-  `--old-header X --new-header Y` become `--header old=X new=Y`; toolchain and
+  `--header old=X --header new=Y` become `--header old=X new=Y`; toolchain and
   debug-resolution flags move to `.abicheck.yml`. A migration table ships in
   `docs/user-guide/migration-0.5.md` and the CHANGELOG. This matches the
   ADR-037 precedent (hard removal of `--header-backend`).
@@ -156,6 +157,8 @@ half-migrated with red tests.
 * **Phase A — Lever 3 (profiles).** Additive; no removals. *(landed)*
 * **Phase B — Lever 1 evidence family.** `header`, `include`, `sources`,
   `build-info` side-aware (the primary flow). Highest-traffic concepts.
+  *(landed — `COMPARE_FLAG_BUDGET_BASE` 76→70; the unregistered release engine
+  keeps its per-side surface via `release_input_options`.)*
 * **Phase C — Lever 1 remainder.** `ast-frontend`, `pdb-path`, `version`,
   `debug-info`, `devel-pkg`, `debug-root`, `probe-matrix`.
 * **Phase D — Lever 2 config demotion.** Remove hidden toolchain /

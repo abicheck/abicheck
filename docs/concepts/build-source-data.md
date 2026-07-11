@@ -96,7 +96,7 @@ flowchart TD
     end
 
     SNAP --> CMP{{"compare"}}
-    PACK -. "pass explicitly:<br/>--old/--new-build-info" .-> CMP
+    PACK -. "pass explicitly:<br/>--build-info" .-> CMP
     CMP --> DIFFA["diff artifact layers<br/>L0/L1/L2 → can prove BREAKING"]
     CMP --> DIFFE["diff evidence layers<br/>L3/L4/L5 → API_BREAK / risk only"]
     DIFFA --> REC["reconcile (worst-wins +<br/>authority rule: L3/L4/L5 never<br/>deletes an artifact-proven break)"]
@@ -111,7 +111,7 @@ Three consequences fall out of this shape, all by design:
   later `compare old.json new.json` carries them with **no out-of-band
   directories** (single-artifact UX). The pack directory that `collect`
   produces stays available as an explicit per-side override
-  (`--old-build-info`/`--new-build-info`, `--old-sources`/`--new-sources`), and
+  (`--build-info`, `--sources`), and
   raw provenance is never embedded — only the normalized facts that feed the
   comparison.
 - Collection is **post-build and read-only**: it reads existing build outputs and
@@ -345,7 +345,7 @@ policy profiles decide whether a source-only finding blocks a release.
 ## Source graph findings (L5)
 
 When both packs carry an L5 source graph summary, comparing them (via `compare`
-with `--old/--new-build-info`, or directly with `graph compare`) produces
+with `--build-info`, or directly with `graph compare`) produces
 graph-derived **risk** findings (ADR-031 D6):
 
 | ChangeKind | verdict | meaning |

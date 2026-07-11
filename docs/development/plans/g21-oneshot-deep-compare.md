@@ -88,7 +88,7 @@ registry entry flips to `complete` with real `evidence` once G21.1/2/9 land.
 - **Presets are a thin front, not a new engine.** `--collect-mode` already maps
   modes → layers via `collection_for_ci_mode()`
   (`buildsource/source_replay.py`); `compare` already accepts
-  `--old-sources`/`--new-sources` and inline collection (ADR-033). `--depth`
+  `--sources` and inline collection (ADR-033). `--depth`
   expands to those.
 - **Keep the primitives.** `dump`/`collect`/`merge` stay as the explicit,
   cacheable stages for CI power-users (run `collect` at build time where the

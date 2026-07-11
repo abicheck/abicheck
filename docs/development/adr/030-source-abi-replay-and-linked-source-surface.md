@@ -411,7 +411,7 @@ All seven phases are implemented, in `abicheck/buildsource/`:
 
 The pipeline is wired into the CLI: `collect --source-abi
 [--source-abi-extractor clang|castxml|android] [--source-abi-scope ...]` writes
-`source/source_abi.json`, and `compare --old/--new-build-info` diffs the two
+`source/source_abi.json`, and `compare --build-info` diffs the two
 surfaces (`diff_source_abi`) and folds the findings into the verdict pipeline.
 The compare output prints an explicit **capability report** — which check
 categories are enabled and, for each disabled one, why (no binary / no debug
@@ -466,7 +466,7 @@ they are coverage/precision gaps, not correctness holes.
    depfiles, so the map must be produced live (`clang -MM`) or from pre-captured
    depfiles; persisting it in the pack is ADR-031 graph-layer scope.
 5. **Inline auto-collection during `compare --collect-mode` is still a stub.**
-   `compare` consumes pre-built packs via `--old/--new-build-info`; it does not yet
+   `compare` consumes pre-built packs via `--build-info`; it does not yet
    run `collect` inline for a requested evidence mode (the source-tree redesign
    moved inline collection to `dump --sources`). That inline
    collection is **ADR-033 D2** scope, tracked there, not in this ADR.

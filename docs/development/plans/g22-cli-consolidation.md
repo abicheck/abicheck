@@ -128,7 +128,7 @@ coarse `--severity-preset` and is the sole `INTENTIONAL_SUBSET` entry. The
 per-command option-set snapshot and the gate↔`cli_options` table-mirror test.
 
 The seventh decorator, **`@evidence_options` (`--depth`/`--max`/per-side
-`--old/new-sources`/`--old/new-build-info`, plus the hidden `--collect-mode`
+`--sources`/`--build-info`, plus the hidden `--collect-mode`
 alias), now exists as the canonical two-sided evidence family** (the pre-rename
 `build_source_compare_options` is kept as a back-compat alias). It is registered
 in the contract tables as a *non-required* family (`FAMILY_FLAGS["evidence"]` /
@@ -174,7 +174,7 @@ graph-at-source, symbols-only, config knob). `--source-method`/`--mode` on `scan
 are unchanged — their move to config is Phase 5 (D4), not D5.
 
 **Work.** `--depth {symbols,headers,build,source,full}` + `--max` on
-`@evidence_options` (incl. per-side `--old/new-sources`, `--old/new-build-info`).
+`@evidence_options` (incl. per-side `--sources`, `--build-info`).
 Map deprecated `--collect-mode`/`--mode`/standalone `--source-method` **and the
 G21 `--depth graph` value** into `DEPRECATED_FLAGS` (`graph` → `source`). Make
 the L5 graph an internal consequence of `--depth source`; delete the `graph-*`

@@ -59,14 +59,14 @@ further — it's the floor for results you can trust.)
 
 ```bash
 abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
-  --old-header old/include --new-header new/include \
-  --old-include old/include --new-include new/include
+  --header old=old/include --header new=new/include \
+  --include old=old/include --include new=new/include
 ```
 
 - `-H/--header` accepts a header **directory** (best — a lone file can't
-  establish a public/internal boundary) or a file; use `--old-header`/`--new-header`
+  establish a public/internal boundary) or a file; use `--header old=`/`--header new=`
   when the versions differ.
-- `--old-include`/`--new-include` (`-I` for both) are the include roots.
+- `--include old=`/`--include new=` (`-I` for both) are the include roots.
 - Add `--ast-frontend clang` on a clang-only host (`castxml` is the default);
   abicheck auto-detects the host libstdc++.
 - Need a specific `-std`/`-D` to parse the headers? Pass `--gcc-options

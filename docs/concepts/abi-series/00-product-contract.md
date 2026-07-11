@@ -70,7 +70,7 @@ public surface is the union of:
 
 | Surface element | What it pins | Where abicheck sees it |
 |-----------------|--------------|------------------------|
-| **Public headers** | The source-level API: function signatures, types, macros, default arguments | Header AST (CastXML), if you pass `--old-header`/`--new-header` |
+| **Public headers** | The source-level API: function signatures, types, macros, default arguments | Header AST (CastXML), if you pass `--header old=`/`--header new=` |
 | **Exported symbols** | The link/load-level ABI: which names a consumer can bind to | ELF `.dynsym` / PE export table / Mach-O export trie |
 | **Struct/class layout exposed in headers** | Field offsets, sizes, alignment that consumers bake in | DWARF/PDB debug info |
 | **Plugin / `dlopen` entry points** | The dynamic-loading contract between host and plugin | [Plugin manifest](../../user-guide/plugin-systems.md) |

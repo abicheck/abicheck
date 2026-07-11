@@ -25,8 +25,8 @@ abicheck compare old/libfoo.so old/libbar.so \
            -H include/
 
 # Per-pair per-side headers (run separately)
-abicheck compare old/libfoo.so new/libfoo.so --old-header v1/foo.h --new-header v2/foo.h
-abicheck compare old/libbar.so new/libbar.so --old-header v1/bar.h --new-header v2/bar.h
+abicheck compare old/libfoo.so new/libfoo.so --header old=v1/foo.h --header new=v2/foo.h
+abicheck compare old/libbar.so new/libbar.so --header old=v1/bar.h --header new=v2/bar.h
 ```
 
 **Problem:** CLI gets ambiguous for 3+ binaries.
@@ -39,7 +39,7 @@ abicheck compare-release release-1.0/ release-2.0/ -H include/
 
 # Per-side header directories
 abicheck compare-release release-1.0/ release-2.0/ \
-    --old-header include/v1/ --new-header include/v2/
+    --header old=include/v1/ --header new=include/v2/
 
 # With mapping file (when binary names differ between versions)
 abicheck compare-release release-1.0/ release-2.0/ \

@@ -325,11 +325,11 @@ class TestCompareJsonJson:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p),
-            "--old-header", str(hdr), "--new-header", str(hdr),
+            "--header", "old=" + str(hdr), "--header", "new=" + str(hdr),
         ])
         assert result.exit_code == 0
-        assert "--old-header" in result.output
-        assert "--new-header" in result.output
+        assert "--header old=" in result.output
+        assert "--header new=" in result.output
         assert "ignored" in result.output.lower()
 
 
@@ -386,8 +386,8 @@ class TestCompareSoSo:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),
-            "--old-header", str(old_hdr),
-            "--new-header", str(new_hdr),
+            "--header", "old=" + str(old_hdr),
+            "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
         assert len(recorded_headers) == 2
@@ -550,7 +550,7 @@ class TestCompareMixed:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_elf),
-            "--new-header", str(new_hdr),
+            "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
         # dump should only be called for the .so side (new)
@@ -625,9 +625,8 @@ class TestCompareHelp:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
-        for flag in ["-H", "--header", "--old-header", "--new-header",
-                     "--old-version", "--new-version", "--old-include",
-                     "--new-include", "--lang"]:
+        for flag in ["-H", "--header", "--include", "--sources", "--build-info",
+                     "--old-version", "--new-version", "--lang"]:
             assert flag in result.output, f"{flag} not in help output"
 
     def test_help_shows_examples(self):
@@ -714,8 +713,8 @@ class TestHeaderDirectoryInput:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),
-            "--old-header", str(old_dir),
-            "--new-header", str(new_dir),
+            "--header", "old=" + str(old_dir),
+            "--header", "new=" + str(new_dir),
         ])
         assert result.exit_code == 0, result.output
         assert len(captured) == 2

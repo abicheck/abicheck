@@ -29,12 +29,12 @@ The simplest way — pass `.so` files and their public headers directly to
 ```bash
 # Each version has its own header
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header include/v1/foo.h --new-header include/v2/foo.h
+  --header old=include/v1/foo.h --header new=include/v2/foo.h
 
 # Multiple headers per version, with include dirs and version labels
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header include/v1/foo.h --old-header include/v1/bar.h \
-  --new-header include/v2/foo.h --new-header include/v2/bar.h \
+  --header old=include/v1/foo.h --header old=include/v1/bar.h \
+  --header new=include/v2/foo.h --header new=include/v2/bar.h \
   -I include/ --old-version 1.0 --new-version 2.0
 
 # Shorthand: -H applies the same header to both sides
@@ -46,9 +46,9 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 
 # Output formats
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header v1/foo.h --new-header v2/foo.h --format sarif -o abi.sarif
+  --header old=v1/foo.h --header new=v2/foo.h --format sarif -o abi.sarif
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header v1/foo.h --new-header v2/foo.h --format junit -o results.xml
+  --header old=v1/foo.h --header new=v2/foo.h --format junit -o results.xml
 ```
 
 #### Public headers vs. include roots
@@ -57,8 +57,8 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 
 | Flag | Question | Role |
 |------|----------|------|
-| `-H` / `--header` (`--old-header`/`--new-header`) | **What** to analyse | The **public headers** — the files a consumer `#include`s. These *are* the API surface abicheck parses to decide what's public and to read types. Pass a directory to establish a public/internal boundary. |
-| `-I` / `--include` (`--old-include`/`--new-include`) | **How** to parse it | The **include roots** — directories added to the parser's search path so the public headers' *own* `#include "…"`/`<…>` lines resolve. They are **not** analysed; they only make the parse succeed. |
+| `-H` / `--header` (`--header old=`/`--header new=`) | **What** to analyse | The **public headers** — the files a consumer `#include`s. These *are* the API surface abicheck parses to decide what's public and to read types. Pass a directory to establish a public/internal boundary. |
+| `-I` / `--include` (`--include old=`/`--include new=`) | **How** to parse it | The **include roots** — directories added to the parser's search path so the public headers' *own* `#include "…"`/`<…>` lines resolve. They are **not** analysed; they only make the parse succeed. |
 
 Often a single `include/` is both the public header dir and the include root. But
 they diverge when a public header pulls in a dependency from elsewhere — e.g.
@@ -223,7 +223,7 @@ abicheck compare old.abi.json new.abi.json
     `dump --build-info`/`--sources` **embed** the normalized build + source
     facts in the `.abi.json`, so `compare old.json new.json` carries them with
     no out-of-band directories (single-artifact UX). For advanced use, the
-    `--old-build-info`/`--new-build-info` and `--old-sources`/`--new-sources`
+    `--build-info` and `--sources`
     flags supply or override those facts per side from a pack directory; raw
     provenance is never embedded — only the normalized facts that feed the
     comparison.
@@ -232,9 +232,9 @@ abicheck compare old.abi.json new.abi.json
 |------|---------|-------------|
 | `--build-info <dir>` | `dump` | Embed a pack's L3 build-info facts inline in the snapshot |
 | `--sources <dir>` | `dump` | Embed a pack's L4/L5 source facts (source ABI replay + graph) inline in the snapshot |
-| `--old-build-info <dir>` / `--new-build-info <dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
-| `--old-sources <dir>` / `--new-sources <dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
-| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial (`binary`/`headers`/`build`/`source`/`full`; `--max` == `--depth full`). On `compare`, depths past `headers` collect from an `--old/new-sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only — run `abicheck collect` separately instead. |
+| `--build-info old=<dir>` / `--build-info new=<dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
+| `--sources old=<dir>` / `--sources new=<dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
+| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial (`binary`/`headers`/`build`/`source`/`full`; `--max` == `--depth full`). On `compare`, depths past `headers` collect from an `--sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only — run `abicheck collect` separately instead. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
 default-argument values, uninstantiated templates), add `--source-abi` to
@@ -560,11 +560,11 @@ does include redundancy annotations (`<redundant_changes>`, `<caused_by>`,
 ```bash
 # CI baseline snapshot vs current build
 abicheck compare baseline-1.0.json ./build/libfoo.so \
-  --new-header include/foo.h --new-version 2.0-dev
+  --header new=include/foo.h --new-version 2.0-dev
 
 # Live old build vs stored new snapshot
 abicheck compare ./build-old/libfoo.so new-release.json \
-  --old-header include/foo.h --old-version 1.0-rc1
+  --header old=include/foo.h --old-version 1.0-rc1
 ```
 
 ### 4) ABICC-compatible invocation (for migration)

@@ -21,6 +21,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Breaking — side-aware `--header`/`--include`/`--sources`/`--build-info`
+  (ADR-040 Lever 1, Phase B).** The per-side `--old-header`/`--new-header`,
+  `--old-include`/`--new-include`, `--old-sources`/`--new-sources` and
+  `--old-build-info`/`--new-build-info` flags are removed; each concept is now a
+  single repeatable flag that takes an optional `old=`/`new=` value prefix:
+  `compare a.so b.so --header old=v1/foo.h --header new=v2/foo.h`. A bare value
+  (or `-H`/`-I`) still applies to both sides. This collapses `compare`'s visible
+  flag count by 6 (and `appcompat`'s by 4). The GitHub Action's per-side
+  `old-header`/`new-header`/`old-include`/`new-include` inputs are unchanged —
+  they now map to the side-aware flags internally.
+
 - **`compare` flag budget is now derived from a documented ledger.** The
   `COMPARE_FLAG_BUDGET` ceiling is computed as `BASE + len(COMPARE_FLAG_BUDGET_RAISES)`,
   so a new visible flag cannot be added without a rationale entry — closing the
