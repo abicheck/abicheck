@@ -9,6 +9,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Performance
+
+- **DWARF-only dumps reuse one open `DWARFInfo` across all extraction passes.**
+  The basic-metadata, advanced-metadata, and snapshot-builder passes previously
+  opened the ELF and built a `DWARFInfo` independently, so a large C++ library's
+  DIEs were parsed multiple times from cold caches (the F5b finding from the pvxs
+  validation). A shared `DwarfSession` now threads one open handle through all
+  three passes; the snapshot walk hits the DIE cache the metadata passes warmed
+  instead of re-parsing. Output is byte-for-byte identical (validated A/B on real
+  compiled binaries); the redundant snapshot DIE walk drops from a full cold
+  parse to near-free on the measured fixtures. Internal only — no CLI or API
+  surface change. `tests/test_perf_dwarf_session_scaling.py` (new,
+  `integration`) guards the win going forward: a same-binary A/B timing
+  comparison (session reuse must stay reliably faster than independent opens)
+  and a CU-count scaling exponent gate on the production `dwarf_only` dump
+  path, compiling multi-CU C++ binaries that reproduce the pvxs
+  repeated-type-across-CUs pattern.
+
 ### Added
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`

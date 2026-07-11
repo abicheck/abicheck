@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
+    from .dwarf_unified import DwarfSession
     from .elf_metadata import ElfMetadata
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ def build_snapshot_from_dwarf(
     *,
     version: str = "unknown",
     language_profile: str | None = None,
+    session: DwarfSession | None = None,
 ) -> AbiSnapshot:
     """Build a complete AbiSnapshot from DWARF, no headers required.
 
@@ -94,13 +96,19 @@ def build_snapshot_from_dwarf(
         dwarf_adv: Pre-parsed DWARF advanced metadata.
         version: Version label for the snapshot.
         language_profile: "c" | "cpp" | None.
+        session: Optional pre-opened :class:`~abicheck.dwarf_unified.DwarfSession`
+            (as produced while parsing ``dwarf_meta``/``dwarf_adv``). When given,
+            the DIE walk reuses that open ``DWARFInfo`` — hitting the cache the
+            metadata passes warmed — instead of opening ``elf_path`` a second
+            time. Output is byte-for-byte identical either way; the caller owns
+            the session's lifetime.
 
     Returns:
         AbiSnapshot with functions, variables, types, enums, and typedefs
         populated from DWARF. elf_only_mode=False (full type info available).
     """
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
-    builder.extract()
+    builder.extract(session=session)
 
     snapshot = AbiSnapshot(
         library=elf_path.name,
@@ -345,29 +353,23 @@ class _DwarfSnapshotBuilder:
         self._logged_type_dups: set[str] = set()
         self._logged_enum_dups: set[str] = set()
 
-    def extract(self) -> None:
-        """Open the ELF, walk DWARF, and populate result lists."""
+    def extract(self, session: DwarfSession | None = None) -> None:
+        """Walk DWARF and populate result lists.
+
+        When *session* is provided, its already-open ``DWARFInfo`` is reused
+        (the metadata passes warmed the DIE cache); otherwise the ELF is opened
+        here. Both paths produce identical results.
+        """
+        if session is not None:
+            self._walk_dwarf(session.dwarf)
+            return
+
         try:
             with open(self._elf_path, "rb") as f:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
                 if not has_real_dwarf_info(elf):
                     return
-                dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
-
-                # First pass: extract all functions, variables, types, enums, typedefs
-                for CU in dwarf.iter_CUs():
-                    try:
-                        self._process_cu(CU)
-                    except Exception as exc:  # noqa: BLE001
-                        log.warning(
-                            "dwarf_snapshot: skipping CU in %s: %s",
-                            self._elf_path,
-                            exc,
-                        )
-
-                # Second pass: filter types to only those reachable from
-                # exported symbols (transitive closure)
-                self._filter_types_by_reachability()
+                self._walk_dwarf(elf.get_dwarf_info())  # type: ignore[no-untyped-call]
 
         except (ELFError, OSError, ValueError) as exc:
             log.warning(
@@ -375,6 +377,26 @@ class _DwarfSnapshotBuilder:
                 self._elf_path,
                 exc,
             )
+
+    def _walk_dwarf(self, dwarf: Any) -> None:
+        """Walk every CU of *dwarf*, then filter to exported reachability.
+
+        Shared by the open-here and reuse-session paths of :meth:`extract`.
+        """
+        # First pass: extract all functions, variables, types, enums, typedefs
+        for CU in dwarf.iter_CUs():
+            try:
+                self._process_cu(CU)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "dwarf_snapshot: skipping CU in %s: %s",
+                    self._elf_path,
+                    exc,
+                )
+
+        # Second pass: filter types to only those reachable from
+        # exported symbols (transitive closure)
+        self._filter_types_by_reachability()
 
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
