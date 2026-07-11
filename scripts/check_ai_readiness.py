@@ -673,6 +673,14 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # `service`/`service_scan`/`cli_buildsource`/`cli_resolve` collectors
         # (function-local) and are imported back by `cli`, so they join the same SCC
         # — the package still imports cleanly (no init deadlock).
+        #
+        # `cli_scan_baseline` is the extracted `scan --baseline`/`--estimate`
+        # sub-flow (size-split per CLAUDE.md): `cli_scan` imports it at module load
+        # and it reaches `_safe_write_output` in `cli` plus the
+        # `service`/`service_scan`/`cli_buildsource` collectors function-locally,
+        # exactly as `cli_scan` did before the split — so it joins the same SCC and
+        # introduces no new *runtime* edge (`service_scan` re-imports
+        # `_public_provenance_set` from it function-locally).
         frozenset(
             {
                 "appcompat",
@@ -692,6 +700,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_probe",
                 "cli_resolve",
                 "cli_scan",
+                "cli_scan_baseline",
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",

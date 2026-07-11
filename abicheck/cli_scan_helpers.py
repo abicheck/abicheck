@@ -37,7 +37,92 @@ if TYPE_CHECKING:
     from .buildsource.scan_levels import SourceMethod
 
 
+# --- coverage-row helpers (snapshot → report rows) ---------------------------
+
+
+def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
+    """Compute the intrinsic L0/L1/L2 coverage rows from a snapshot."""
+    rows: list[dict[str, Any]] = []
+    has_binary = bool(snap.elf or snap.pe or snap.macho)
+    rows.append(
+        {
+            "layer": "L0_binary",
+            "status": "present" if has_binary else "not_collected",
+            "detail": f"{len(snap.functions)} function(s), "
+            f"{len(snap.variables)} variable(s)"
+            if has_binary
+            else "no binary export table (snapshot-only input)",
+        }
+    )
+    dwarf = getattr(snap, "dwarf", None)
+    has_debug = bool(getattr(dwarf, "has_dwarf", False)) if dwarf is not None else False
+    rows.append(
+        {
+            "layer": "L1_debug",
+            "status": "present" if has_debug else "not_collected",
+            "detail": "DWARF/PDB debug info present" if has_debug else "no debug info",
+        }
+    )
+    rows.append(
+        {
+            "layer": "L2_header",
+            "status": "present" if snap.from_headers else "skipped",
+            "detail": f"{len(snap.types)} type(s) from public headers"
+            if snap.from_headers
+            else "no public-header AST (pass --headers; needs castxml or clang)",
+        }
+    )
+    return rows
+
+
+def _source_abi_coverage(snap: Any) -> dict[str, Any]:
+    """Return the embedded L4 coverage dict, if present."""
+    pack = getattr(snap, "build_source", None)
+    surface = getattr(pack, "source_abi", None) if pack is not None else None
+    cov = getattr(surface, "coverage", None) if surface is not None else None
+    return dict(cov or {})
+
+
+def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
+    """Read the L3/L4/L5 coverage rows from a snapshot's embedded pack, if any."""
+    pack = getattr(snap, "build_source", None)
+    if pack is None:
+        return [
+            {
+                "layer": layer,
+                "status": "not_collected",
+                "detail": "no build/source evidence collected "
+                "(pass --sources, or a deeper --source-method)",
+            }
+            for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
+        ]
+    return [c.to_dict() for c in pack.manifest.coverage]
+
+
+def _l3_collected(snap: Any) -> bool:
+    """True when the snapshot carries a non-empty L3 build-evidence layer.
+
+    Used to decide whether a deep ``--source-method`` actually reached L3: a
+    ``not_collected`` (or absent pack) L3 means the requested L3/L4/L5 layers were
+    skipped for want of a compile database, which warrants a pointed advisory.
+    ``partial`` counts as collected — it ran and produced something.
+    """
+    pack = getattr(snap, "build_source", None)
+    if pack is None:
+        return False
+    for cov in pack.manifest.coverage:
+        row = cov.to_dict() if hasattr(cov, "to_dict") else cov
+        if row.get("layer") == "L3_build":
+            return bool(row.get("status") != "not_collected")
+    return False
+
+
 # --- run_scan_core helpers ---------------------------------------------------
+
+
+def _uses_debug_presence_only(depth: EvidenceDepth) -> bool:
+    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap."""
+    return depth in {EvidenceDepth.HEADERS, EvidenceDepth.BUILD}
 
 
 def scan_pattern_roots(
