@@ -200,12 +200,22 @@ stripped" `.so`.
 
 **(3) The split-debug pair** is how distros ship both: the release `.so` above,
 *plus* a separate `.debug` file holding the DWARF that was stripped out of it,
-linked back together by a `.gnu_debuglink` section (matched by a build-id, not
-by filename):
+linked back together by a `.gnu_debuglink` section — a **filename + CRC32**
+pointer to the debug file, resolved by looking next to the binary (or under a
+configured debug directory):
 
 ```bash
-$ readelf -S libmath.release.so.debug | grep debug_info
-  [27] .debug_info       PROGBITS
+$ readelf --debug-dump=links libmath.release.so
+  Separate debug info file: libmath.release.so.debug
+  CRC value: 0x7a1e93c0
+```
+
+The **build-id** (`.note.gnu.build-id`, an independent content hash embedded
+in the binary) is a *second*, separate lookup path — the one a `/usr/lib/debug/
+.build-id/<ab>/<cdef…>.debug` tree or a `debuginfod` server key off, instead of
+filename:
+
+```bash
 $ readelf -n libmath.release.so | grep 'Build ID'
     Build ID: 3fae1c9e2b7a4d0f...
 ```
