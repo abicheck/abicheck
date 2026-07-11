@@ -112,6 +112,39 @@ def test_derive_l2_include_dirs_swallows_collection_errors(tmp_path, monkeypatch
     assert cleanups == []
 
 
+def test_derive_l2_include_dirs_surfaces_argv_only_include_flags(tmp_path):
+    # The compile-DB adapter folds only -I/-isystem into the structured
+    # include_paths; -iquote/-idirafter (and MSVC /I) stay in argv. The L4 replay
+    # honours those, so the L2 seed must surface them too — otherwise a build that
+    # resolves dependency headers via `-iquote deps/include` fails its L2 parse
+    # with no manual -I (Codex review).
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    qdir = tmp_path / "quoteinc"
+    qdir.mkdir()
+    ddir = tmp_path / "afterinc"
+    ddir.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            # -iquote / -idirafter are NOT captured into include_paths by the
+            # adapter; they live only in argv.
+            "arguments": ["cc", "-iquote", str(qdir), "-idirafter", str(ddir),
+                          "-c", str(src)],
+        }]),
+        encoding="utf-8",
+    )
+
+    dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    for fn in cleanups:
+        fn()
+    assert str(qdir) in dirs  # -iquote dir surfaced from argv
+    assert str(ddir) in dirs  # -idirafter dir surfaced from argv
+
+
 def test_derive_l2_include_dirs_no_inputs_is_empty():
     from abicheck.buildsource.inline import derive_l2_include_dirs
 
