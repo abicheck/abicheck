@@ -20,8 +20,10 @@ case "$OS" in
     else
       sudo apt-get update -qq
       # clang enables L4 source-ABI replay + L5 graphs for `scan --sources`;
-      # castxml/gcc remain the L2 header path and the L4 declaration fallback.
-      sudo apt-get install -y -qq castxml gcc g++ clang > /dev/null
+      # castxml/gcc remain the L2 header path and the L4 declaration fallback;
+      # bear generates a compile_commands.json for Make/Autotools projects that
+      # do not emit one (`bear -- make …`), which is what unlocks L3/L4/L5 there.
+      sudo apt-get install -y -qq castxml gcc g++ clang bear > /dev/null
     fi
     ;;
   Darwin)
@@ -52,6 +54,15 @@ if command -v castxml &> /dev/null; then
 else
   echo "::warning::castxml not found. Header analysis will not be available."
   echo "Binary-only mode (exports/imports) will still work."
+fi
+
+# Verify bear is available (generates compile_commands.json for Make projects)
+if command -v bear &> /dev/null; then
+  echo "bear version: $(bear --version 2>&1 | head -1)"
+else
+  echo "::notice::bear not found. Make/Autotools projects that do not emit a"
+  echo "compile_commands.json will fall back to reduced-confidence 'make -n'"
+  echo "scraping for L3; wrap the build with 'bear -- make …' for authoritative L3/L4."
 fi
 
 # Verify clang is available (used by source scans: L4 replay, S2, L5 graphs)

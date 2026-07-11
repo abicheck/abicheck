@@ -30,10 +30,17 @@ contrib/integrations/onedal/
 │   ├── onedal-abicheck-baseline.yml
 │   ├── onedal-abicheck-pr-source-scan.yml
 │   ├── onedal-abicheck-nightly-compare.yml
+│   ├── onedal-abicheck-libabigail.yml    → abicheck alongside the existing abidiff gate
 │   └── onedal-abicheck-plugin-collect.yml
-└── scripts/
-    └── onedal-make-baseline.sh → reproduce baselines locally
+├── scripts/
+│   └── onedal-make-baseline.sh → reproduce baselines locally
+└── ANALYSIS.md                 → UX findings + abicheck backlog (read this)
 ```
+
+> **`ANALYSIS.md`** is the experiment write-up: the bugs found & fixed, the
+> confirmed UX gaps with recommendations for abicheck, the `bear` fix for
+> make-based compile DBs, where to inject plugin data collection in oneDAL CI,
+> and how to overlay abicheck on oneDAL's existing libabigail (`abidiff`) job.
 
 ## oneDAL facts this integration is built on (verified @ 2026.0.0)
 

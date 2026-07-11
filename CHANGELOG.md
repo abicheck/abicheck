@@ -22,6 +22,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Misleading "evidence layer not collected" warning.** `dump` warned
+  *"supply --build-info/--compile-db or install clang/castxml"* even when the
+  layer's extractor had run — e.g. an L4 replay that parsed TUs but linked 0
+  symbols, or an unseeded `--depth source` that selected 0 TUs. The warning now
+  distinguishes a genuinely **absent** layer (→ supply a compile DB / install the
+  frontend) from one that **ran but linked nothing** (→ points at the coverage
+  rows: public-header-roots mismatch, use `--max`/`--changed-path`/`--since`, or a
+  snapshot/source mismatch). No more "install the tools you already have."
+
+- **Action installs `bear`.** `action/install-deps.sh` now installs `bear` (and
+  notes `bear -- make`) so Make/Autotools projects that don't emit a
+  `compile_commands.json` get authoritative L3/L4 instead of reduced-confidence
+  `make -n` scraping.
+
 - **GitHub Action `scan` mode passed the wrong config flag.** `action/run.sh`
   forwarded the `build-config` input as `--build-config` in `scan` mode, but
   `abicheck scan` only accepts `--config` (as `dump` already used) — so setting

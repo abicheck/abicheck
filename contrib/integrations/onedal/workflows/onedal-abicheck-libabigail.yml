@@ -1,0 +1,131 @@
+# abicheck alongside oneDAL's existing libabigail (abidiff) ABI check
+#
+# oneDAL already ships an ABI gate: `.ci/scripts/abi_check.sh <baseline_dir>
+# <new_dir>` runs `abidiff --suppr .github/.abignore <baseline>.so <new>.so` for
+# every library and sums the non-4 return codes. This workflow shows how to
+# ADD abicheck to that same job WITHOUT a second build: it consumes the exact
+# same two release directories (baseline + freshly built), runs abidiff and
+# `abicheck compare` side by side, and additionally persists abicheck source
+# facts (via bear, portable) as an artifact the GitHub Action can reuse.
+#
+# Why run both:
+#   * abidiff  — battle-tested binary/DWARF ABI diff; keep it as the gate.
+#   * abicheck — adds SARIF for code scanning, a per-symbol Markdown/PR report,
+#                policy profiles, and source-level (L2/L3/L4) findings abidiff
+#                does not model — as an advisory overlay first, a gate later.
+#
+# Drop-in points into oneDAL's real CI are in ANALYSIS.md §"Integrating with the
+# existing libabigail job".
+name: oneDAL ABI — abicheck + libabigail (abidiff)
+
+on:
+  workflow_dispatch:
+  # In oneDAL you would instead add the abicheck step INTO the existing job that
+  # already builds the release and calls .ci/scripts/abi_check.sh — see ANALYSIS.md.
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload
+
+jobs:
+  abi-both:
+    name: abidiff + abicheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BASELINE_TAG: "2026.0.0"
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+
+      - name: Install toolchains (oneDAL + libabigail + abicheck)
+        run: |
+          set -euxo pipefail
+          .ci/env/apt.sh dpcpp
+          .ci/env/apt.sh mkl
+          .ci/env/apt.sh miniforge
+          # libabigail (abidiff) + bear (compile DB for abicheck L3/L4).
+          sudo apt-get update -qq
+          sudo apt-get install -y abigail-tools bear
+
+      # ── Build BOTH sides once (baseline tag + current), capturing a compile DB
+      #    for the current build via bear so abicheck can embed L3/L4 source facts.
+      - name: Build current (with bear) and baseline release trees
+        run: |
+          set -euxo pipefail
+          source /opt/intel/oneapi/setvars.sh
+          # current build — bear wraps the make-based build.sh to emit a
+          # compile_commands.json (the make build emits none on its own).
+          bear --output compile_commands.json -- \
+            .ci/scripts/build.sh --compiler icx --optimizations avx2 --target daal     --debug symbols --jobs "$(nproc)"
+          bear --append --output compile_commands.json -- \
+            .ci/scripts/build.sh --compiler icx --optimizations avx2 --target oneapi_c --debug symbols --jobs "$(nproc)"
+          cur="$(find . -path '*/daal/latest/lib/intel64' -type d | head -1)"
+          echo "CUR_LIBDIR=$cur" >> "$GITHUB_ENV"
+          mv "$(dirname "$(dirname "$cur")")" ./__cur_release
+          # baseline build (separate worktree at the tag)
+          git worktree add ../onedal-baseline "$BASELINE_TAG"
+          ( cd ../onedal-baseline && source /opt/intel/oneapi/setvars.sh && \
+            .ci/scripts/build.sh --compiler icx --optimizations avx2 --target daal     --debug symbols --jobs "$(nproc)" && \
+            .ci/scripts/build.sh --compiler icx --optimizations avx2 --target oneapi_c --debug symbols --jobs "$(nproc)" )
+          bl="$(find ../onedal-baseline -path '*/daal/latest/lib/intel64' -type d | head -1)"
+          echo "BL_LIBDIR=$bl" >> "$GITHUB_ENV"
+
+      # ── 1. oneDAL's existing libabigail gate (unchanged) ────────────────────
+      - name: abidiff (oneDAL abi_check.sh)
+        continue-on-error: true      # advisory while validating
+        run: |
+          set -uxo pipefail
+          # Reuses the repo's own script + .github/.abignore suppressions.
+          bash .ci/scripts/abi_check.sh "$BL_LIBDIR" "$CUR_LIBDIR" | tee abidiff.txt
+          echo "abidiff exit=${PIPESTATUS[0]}"
+
+      # ── 2. abicheck compare over the SAME two dirs (added overlay) ──────────
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install "abicheck==0.4.0"
+
+      - name: abicheck compare (SARIF + summary + source facts)
+        continue-on-error: true
+        run: |
+          set -uxo pipefail
+          mkdir -p reports
+          for bso in "$BL_LIBDIR"/libonedal*.so.*; do
+            [[ -f "$bso" && ! -L "$bso" ]] || continue
+            base="$(basename "$bso")"; stem="${base%%.so.*}"
+            nso="$(find "$CUR_LIBDIR" -maxdepth 1 -name "$stem.so.*" ! -type l | head -1)"
+            [[ -n "$nso" ]] || { echo "::warning::$stem missing in current build"; continue; }
+            # --sources + the bear compile DB fold L3/L4 source facts into the diff.
+            abicheck compare "$bso" "$nso" \
+              --new-sources . --new-build-info compile_commands.json \
+              --config .abicheck.yml --suppress onedal.suppress.yml --policy sdk_vendor \
+              --format sarif -o "reports/$stem.sarif" || true
+            abicheck compare "$bso" "$nso" \
+              --config .abicheck.yml --suppress onedal.suppress.yml --policy sdk_vendor \
+              --format markdown >> "$GITHUB_STEP_SUMMARY" || true
+          done
+
+      - name: Persist abicheck source-fact inputs (for the GitHub Action)
+        run: |
+          set -uxo pipefail
+          # `collect` packages the build/source evidence (from the bear compile DB)
+          # into a portable abicheck_inputs/ pack the Action can `merge` later.
+          abicheck collect --compile-db compile_commands.json --headers cpp/daal/include \
+            -o abicheck_inputs || echo "::warning::collect produced no pack (see log)"
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: reports, category: abicheck }
+        continue-on-error: true
+
+      - name: Upload reports + source facts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onedal-abi-abidiff-plus-abicheck
+          path: |
+            abidiff.txt
+            reports/
+            abicheck_inputs/
+          if-no-files-found: ignore

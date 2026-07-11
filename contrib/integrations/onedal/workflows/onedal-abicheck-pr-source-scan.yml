@@ -72,6 +72,17 @@ jobs:
           new-library: ${{ matrix.iface.baseline }}
           new-header: ${{ matrix.iface.headers }}
           sources: .
+          # Wire the baseline so scan runs its baseline-comparison arm (the
+          # source-ABI replay of changed TUs is diffed against the baseline's
+          # embedded source surface). NOTE — see ANALYSIS.md §"What a buildless PR
+          # scan can and cannot see": with no new *build*, this is source-level
+          # ADVISORY intelligence (pattern + cross-source + changed-file source
+          # analysis), NOT a full binary/symbol diff. The authoritative
+          # removed/changed-export + layout diff is the nightly compare, which
+          # builds the new side. A genuine per-PR API diff needs the baseline to
+          # carry L4 source facts (see the plugin-collect workflow) or a quick
+          # DAAL-classic build in this job.
+          baseline: ${{ matrix.iface.baseline }}
           # NOTE: no `config:`/`suppress:` inputs here on purpose.
           #  * scan AUTO-DISCOVERS `.abicheck.yml` at the --sources root, so the
           #    project config (scope/severity/exclude) applies without an input —

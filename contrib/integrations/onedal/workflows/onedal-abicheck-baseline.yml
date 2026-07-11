@@ -118,10 +118,12 @@ jobs:
           # freshly-built snapshots outside the worktree, switch to the default
           # branch, and restore only the snapshots onto it.
           tmp="$(mktemp -d)"
-          cp -r "$out" "$tmp/snapshots"
+          mv "$out" "$tmp/snapshots"          # move (not copy) out of the worktree,
+          # so these untracked files can't block `git checkout -B` when the target
+          # branch already tracks a baseline at this path (re-run case, Codex P2).
           git fetch origin "$DEFAULT_BRANCH"
           git checkout -B "$branch" "origin/$DEFAULT_BRANCH"
-          rm -rf "$out"; mkdir -p "$(dirname "$out")"; cp -r "$tmp/snapshots" "$out"
+          mkdir -p "$(dirname "$out")"; cp -r "$tmp/snapshots" "$out"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
