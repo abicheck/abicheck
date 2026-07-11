@@ -22,8 +22,8 @@ on:
 
 permissions:
   contents: read
+  actions: read            # download artifacts from the build run (cross-run)
   security-events: write   # SARIF upload
-  pull-requests: write      # PR comment (compare mode supports it)
 
 jobs:
   analyze:
@@ -37,8 +37,13 @@ jobs:
           - { name: daal-core, lib: libonedal_core, baseline: .abicheck/baseline-2026.0.0/libonedal_core.abi.json, headers: cpp/daal/include }
           - { name: oneapi-dal, lib: libonedal,      baseline: .abicheck/baseline-2026.0.0/libonedal.abi.json,      headers: cpp/oneapi/dal }
     steps:
+      # Check out the SAME commit the build ran on (workflow_run defaults to the
+      # default branch, but the artifacts came from the PR head — so new-header
+      # must be parsed from that head, not main).
       - uses: actions/checkout@v4
-        with: { persist-credentials: false }
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
       # Pull the build + facts the build-with-plugin workflow uploaded.
       - name: Download release tree
@@ -93,7 +98,12 @@ jobs:
           format: sarif
           output-file: onedal-${{ matrix.iface.name }}.sarif
           upload-sarif: true
-          pr-comment: true
+          # No pr-comment here: this job runs on `workflow_run` (not a
+          # pull_request event), and the action's sticky comment only fires for
+          # pull_request/-target. The channel is SARIF (code scanning) + the
+          # uploaded artifact. To get an inline PR comment, run the compare step
+          # from a pull_request-triggered workflow instead.
+          pr-comment: false
           fail-on-breaking: false     # advisory while validating
           fail-on-api-break: false
 
