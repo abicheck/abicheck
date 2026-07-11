@@ -78,6 +78,37 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     assert events.index("cleanup") < events.index("embed")
 
 
+def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
+    # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
+    # compare can header-parse the old native library with the same build-derived
+    # dependency include dirs (Codex review).
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    def fake_seed(**kwargs):
+        return [seeded], []  # seed adds a build-derived dir, no cleanup
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+    )
+
+    snap, eff_includes = _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="build",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+    assert seeded in eff_includes  # effective includes carry the seed for the baseline
+
+
 def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_path):
     # The flock must be released on the error path too (finally), so a failed L2
     # parse still can't wedge a later inferred query.

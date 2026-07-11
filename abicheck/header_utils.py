@@ -166,7 +166,11 @@ def _has_include_build_context(toks: list[str]) -> bool:
 
 
 def _build_context_include_dirs(
-    toks: list[str], *, base_dir: str | None = None, expand_user: bool = False
+    toks: list[str],
+    *,
+    base_dir: str | None = None,
+    expand_user: bool = False,
+    prefixes: tuple[str, ...] | None = None,
 ) -> set[str]:
     """Resolved include directories the compile-flag *tokens* already search.
 
@@ -183,9 +187,14 @@ def _build_context_include_dirs(
     with ``cwd=directory``) resolves the way the build does, not against the
     abicheck process cwd (Codex review). ``expand_user`` un-redacts a leading ``~``
     (compile-DB paths are stored home-relative via ``DEFAULT_REDACTION``) before
-    resolving. Both default off so existing callers keep the cwd-relative,
-    literal-``~`` behaviour.
+    resolving. ``prefixes`` restricts which include-flag prefixes are parsed (default
+    all of :data:`_INCLUDE_FLAG_PREFIXES`) — a caller that will re-emit the dirs as
+    plain ``-I`` should pass only the *normal-priority* buckets (``-I``/``-iquote``/
+    ``/I``) so it does not promote an *after-system* dir (``-idirafter``) or a
+    system dir (``-isystem``/``-imsvc``) to ``-I`` and shadow a system header (Codex
+    review). All keyword-only and defaulted so existing callers are unchanged.
     """
+    flag_prefixes = prefixes if prefixes is not None else _INCLUDE_FLAG_PREFIXES
     base = os.path.expanduser(base_dir) if (base_dir and expand_user) else base_dir
 
     def _resolve(operand: str) -> str:
@@ -199,7 +208,7 @@ def _build_context_include_dirs(
     i = 0
     while i < len(toks):
         t = toks[i]
-        prefix = next((p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None)
+        prefix = next((p for p in flag_prefixes if t.startswith(p)), None)
         if prefix is None:
             i += 1
             continue

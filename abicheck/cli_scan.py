@@ -344,8 +344,11 @@ def _build_new_snapshot(
     defer_cleanup: list[Callable[[], None]] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
-) -> Any:
+) -> tuple[Any, list[Path]]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
+
+    Returns ``(snapshot, effective_includes)`` — the effective includes carry any
+    build-derived L2 seed so a ``--baseline`` compare can reuse the same context.
 
     The resolved ``changed_paths`` (from ``--changed-path``/``--since``) are
     threaded into the inline source replay so a ``source-changed`` collection
@@ -442,7 +445,11 @@ def _build_new_snapshot(
             public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
             defer_cleanup=defer_cleanup,
         )
-    return snap
+    # Return the *effective* includes (the seed above may have added build-derived
+    # dirs) so a --baseline compare header-parses the old native library with the
+    # same include context — else the baseline side fails on dependency headers the
+    # candidate resolved via the seed (Codex review).
+    return snap, includes
 
 
 def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
@@ -1380,7 +1387,7 @@ def run_scan_core(
         advisories.append(_query_advisory)
 
     _stage = time.monotonic()
-    new_snap = _build_new_snapshot(
+    new_snap, eff_includes = _build_new_snapshot(
         binary,
         list(headers),
         list(includes),
@@ -1461,7 +1468,9 @@ def run_scan_core(
             lang,
             collect_mode,
             list(headers),
-            list(includes),
+            # Effective (seeded) includes so the baseline native parse gets the same
+            # build-derived dependency include dirs as the candidate (Codex review).
+            list(eff_includes),
             list(public_headers),
             list(public_header_dirs),
             compile_context=compile_context,

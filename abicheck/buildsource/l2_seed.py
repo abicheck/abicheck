@@ -150,17 +150,23 @@ def derive_l2_include_dirs(
         out: list[str] = []
         for cu in units:
             # The compile-DB adapter folds only -I/-isystem into the structured
-            # include_paths/system_include_paths; -iquote/-idirafter and MSVC /I stay
-            # in argv. The L4 replay honours those argv forms (dropping them changes
-            # the parsed TU), so L2 must see the same dirs or a build that resolves
-            # dependency headers via e.g. `-iquote deps/include` still fails its
-            # header parse with no manual -I (Codex review). Resolve them against the
-            # unit's `directory` (the cwd the compile command ran in — a relative
-            # `-iquote ../deps` must resolve there, not against the abicheck cwd) and
-            # un-redact the home-relative `~` the adapter stored. Union, deduped.
+            # include_paths/system_include_paths; normal-priority include dirs given
+            # via -iquote (GNU) or /I (MSVC) stay only in argv. The L4 replay honours
+            # those, so L2 must see them too or a build resolving dependency headers
+            # via `-iquote deps/include` fails its header parse with no manual -I
+            # (Codex review). Restrict to normal-priority buckets: the callers re-emit
+            # every seeded dir as plain -I, so promoting an *after-system* dir
+            # (-idirafter) or a system dir (-isystem/-imsvc) would shadow a system
+            # header the build would actually use (Codex review) — -isystem dirs are
+            # already carried structurally anyway. Resolve relative operands against
+            # the unit's `directory` (the compile command's cwd) and un-redact the
+            # home-relative `~` the adapter stored. Union, deduped.
             argv_dirs = (
                 _build_context_include_dirs(
-                    list(cu.argv), base_dir=cu.directory or None, expand_user=True
+                    list(cu.argv),
+                    base_dir=cu.directory or None,
+                    expand_user=True,
+                    prefixes=("-I", "-iquote", "/I"),
                 )
                 if cu.argv
                 else set()

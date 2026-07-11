@@ -141,10 +141,12 @@ def test_derive_l2_include_dirs_swallows_collection_errors(tmp_path, monkeypatch
 
 def test_derive_l2_include_dirs_surfaces_argv_only_include_flags(tmp_path):
     # The compile-DB adapter folds only -I/-isystem into the structured
-    # include_paths; -iquote/-idirafter (and MSVC /I) stay in argv. The L4 replay
-    # honours those, so the L2 seed must surface them too — otherwise a build that
-    # resolves dependency headers via `-iquote deps/include` fails its L2 parse
-    # with no manual -I (Codex review).
+    # include_paths; a normal-priority include dir given via -iquote stays only in
+    # argv. The L4 replay honours it, so the L2 seed must surface it too — otherwise
+    # a build resolving dependency headers via `-iquote deps/include` fails its L2
+    # parse with no manual -I (Codex review). An *after-system* -idirafter dir is
+    # deliberately NOT surfaced: the callers re-emit seeded dirs as plain -I, so
+    # promoting an after-system dir would shadow a system header (Codex review).
     from abicheck.buildsource.inline import derive_l2_include_dirs
 
     qdir = tmp_path / "quoteinc"
@@ -171,8 +173,8 @@ def test_derive_l2_include_dirs_surfaces_argv_only_include_flags(tmp_path):
     # Compare resolved (real) paths — the seed canonicalizes and, on Windows, the
     # adapter redacts the home-relative temp dir to ``~`` which the seed un-redacts.
     resolved = {str(Path(d).resolve()) for d in dirs}
-    assert str(qdir.resolve()) in resolved  # -iquote dir surfaced from argv
-    assert str(ddir.resolve()) in resolved  # -idirafter dir surfaced from argv
+    assert str(qdir.resolve()) in resolved  # -iquote (normal priority) surfaced
+    assert str(ddir.resolve()) not in resolved  # -idirafter (after-system) not promoted
 
 
 def test_derive_l2_include_dirs_argv_dir_relative_to_compile_unit(tmp_path):
