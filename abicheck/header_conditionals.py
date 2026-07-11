@@ -590,13 +590,13 @@ def _capture_guarded_field(state: _ScanState, rec: _Scope, line: str) -> None:
     parsed = _parse_field(fm.group("decl")) if fm else None
     # Count **every** member-looking declaration in source order — not just
     # the ones ``_parse_field`` can decode. Array members (``int t[4];``),
-    # default-initialised members (``int x = 0;``), and methods all advance
-    # the position, so a guarded field *before* them is never wrongly marked
-    # terminal (Codex review #498, P1). A line starting with ``}`` (the
-    # record's own close) is excluded so a genuinely-last field keeps
-    # ``is_last``. Over-counting a non-layout member only *suppresses* a
-    # reconciliation (safe); under-counting could hide a real reorder.
-    is_memberish = bool(line) and (line[0].isalpha() or line[0] == "_") and line.endswith(";")
+    # default-initialised members (``int x = 0;``), methods, attributed members,
+    # nested declarations, and multiline declarations whose final line is only
+    # ``;`` all advance the conservative proof position. Access labels have
+    # already been consumed by the caller. A line starting with ``}`` is a scope
+    # close, not a following member. False positives only suppress reconciliation;
+    # false negatives could incorrectly claim that the guarded field is terminal.
+    is_memberish = bool(line) and not line.startswith("}") and line.endswith(";")
     if parsed is None and not is_memberish:
         return
     pos = rec.field_index

@@ -27,6 +27,7 @@ from __future__ import annotations
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_reconcile import RECONCILE_REASON, reconcile_build_context
+from abicheck.header_conditionals import scan_conditional_fields
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -255,6 +256,30 @@ def test_reorder_hidden_by_pruned_field_is_kept():
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
     )
+    assert result.verdict == Verdict.BREAKING
+    assert result.reconciled_count == 0
+
+
+def test_attributed_member_after_guarded_field_keeps_reorder_break():
+    """A valid C++ attributed member after a guarded field counts as a later
+    member, so the scanner must not stamp the guarded field terminal and the
+    reconciler must keep the possible reorder break."""
+    old = _snap("1", [_tf("version"), _tf("legacy"), _tf("tail")])
+    new_source = """struct S {
+ int version;
+#ifdef CONFIG_KEEP_LEGACY
+ int legacy;
+#endif
+ [[maybe_unused]] int tail;
+};"""
+    registry = scan_conditional_fields(new_source)
+    assert registry["S"]["legacy"]["is_last"] is False
+    new = _snap("2", [_tf("version"), _tf("tail")], conditional=registry)
+
+    result = compare(
+        old, new, scope_to_public_surface=True, reconcile_build_context=True
+    )
+
     assert result.verdict == Verdict.BREAKING
     assert result.reconciled_count == 0
 
