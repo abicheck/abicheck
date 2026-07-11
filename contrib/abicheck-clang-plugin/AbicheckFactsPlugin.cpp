@@ -1845,7 +1845,11 @@ public:
     // marker, so a namespace-scope top-level `const` without `extern` (internal
     // in C++) would slip through. Fall back to the type-based language rule
     // (Codex review); mirrors clang.py's `_is_top_level_const` branch.
+    // A C++17 `inline const` at namespace scope is externally linked (the
+    // `inline` keyword overrides const's internal linkage), so it must be kept —
+    // exempt it from the top-level-const drop (Codex review).
     if (mangled.rfind("?", 0) == 0 && vd->getStorageClass() != SC_Extern &&
+        !vd->isInline() &&
         !isa<CXXRecordDecl>(vd->getLexicalDeclContext()) &&
         (isTopLevelConst(sig) ||
          isTopLevelConst(desugaredQualTypeFromJson(o))))

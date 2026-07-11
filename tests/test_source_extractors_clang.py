@@ -986,6 +986,37 @@ def test_msvc_const_alias_variable_is_dropped_via_desugared_type() -> None:
     assert got == set(), got  # the internal const-alias `c` is dropped
 
 
+def test_msvc_inline_const_variable_is_kept() -> None:
+    # A C++17 `inline const int c = 1;` at namespace scope is EXTERNALLY linked
+    # (the `inline` keyword overrides const's internal linkage) and under clang-cl
+    # carries `inline: true`, no storageClass, and an MSVC mangled name. It becomes
+    # an exported OBJECT symbol, so the top-level-const drop must exempt it — else
+    # it later shows up as symbols_without_decl (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "inline": True,
+                        "mangledName": "?c@ns@@3HB",
+                        "type": {"qualType": "const int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == {"ns::c"}, got  # the external inline const is kept
+
+
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:
     # A1 acceptance (gap G4): the eval reported `reachable_declarations: 0` /
     # `reachable_types: 0` on real C++ libs because the source surface came back

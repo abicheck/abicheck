@@ -1111,6 +1111,7 @@ def _is_variable_node(
         mangled.startswith("?")
         and enclosing_kind != "CXXRecordDecl"
         and node.get("storageClass") != "extern"
+        and not node.get("inline")
         and (
             _is_top_level_const(_signature(node))
             or _is_top_level_const(_signature_desugared(node))
