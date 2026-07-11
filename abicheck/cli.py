@@ -1309,7 +1309,7 @@ def _embed_inline_source_side(
                    "build_context_defines + per-field guards.")
 @verbose_option
 @click.pass_context
-def compare_cmd(ctx: click.Context, **kwargs: Any) -> None:
+def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     """Compare two ABI surfaces and report changes.
 
     Each input (OLD, NEW) can be a .so shared library, a JSON snapshot from
