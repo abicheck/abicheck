@@ -203,16 +203,34 @@ automatically searches for debug artifacts across multiple locations:
 | `--debuginfod-url <url>` | Override debuginfod server URL. |
 
 ```bash
-# Stripped distro packages with separate debuginfo
+# Locate + report separate debuginfo for stripped .so files
 abicheck compare \
     old/usr/lib64/libfoo.so.1 new/usr/lib64/libfoo.so.1 \
     --debug-root old=old-debug/usr/lib/debug \
     --debug-root new=new-debug/usr/lib/debug
 
-# Fedora/RHEL: debug info fetched automatically by build-id
+# Fedora/RHEL: debug info located automatically by build-id
 export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"
 abicheck compare old-libfoo.so new-libfoo.so --debuginfod
 ```
+
+!!! warning "`--debug-root`/`--debuginfod` currently resolve and report — they do not yet feed the parse"
+    On `dump` and `compare`, these flags locate the matching debug artifact
+    through the resolver chain above and print where they found it
+    (`Debug info: <source>`), but that resolved path is **not** currently
+    passed into the DWARF parse — the two commands above still analyze
+    `old/usr/lib64/libfoo.so.1`/`new/usr/lib64/libfoo.so.1` as given, so a
+    stripped input stays **symbols-only** (L0) even though a matching
+    `.debug`/build-id file was found. For a debug-info split that *does* get
+    parsed today, package the debug info as its own artifact (RPM/Deb/tar) and
+    pass it on directory/package inputs with the side-aware `--debug-info`
+    flag, which *is* wired into the dump:
+
+    ```bash
+    abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm \
+        --debug-info old=libfoo-debuginfo-1.0.rpm \
+        --debug-info new=libfoo-debuginfo-1.1.rpm
+    ```
 
 > **What these binary shapes actually look like** (`nm`/`readelf` output for a
 > debug build vs. a fully stripped release vs. a split `.debug` file) is shown
