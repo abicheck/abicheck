@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gen_stable_abi_data.py"
 _SPEC = importlib.util.spec_from_file_location("gen_stable_abi_data", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
