@@ -199,7 +199,8 @@ def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
     mod = _load_benchmark()
     so = tmp_path / "lib.so"
     header = tmp_path / "api.h"
-    so.touch(); header.touch()
+    so.touch()
+    header.touch()
     commands = []
 
     class Result:
@@ -225,12 +226,15 @@ def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
             assert option not in dump
 
 
-def _write_plugin_pack(pack, version, source, *, with_facts=True):
+def _write_plugin_pack(pack, version, source, *, with_facts=True, with_record=True):
     import json
     (pack / "source_facts").mkdir(parents=True)
     (pack / "manifest.json").write_text(json.dumps({"version": version}))
-    record = {"source": str(source), "functions": [{"id": "f"}] if with_facts else []}
-    (pack / "source_facts" / "one.jsonl").write_text(json.dumps(record) + "\n")
+    payload = ""
+    if with_record:
+        record = {"source": str(source), "functions": [{"id": "f"}] if with_facts else []}
+        payload = json.dumps(record) + "\n"
+    (pack / "source_facts" / "one.jsonl").write_text(payload)
 
 
 def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
@@ -238,11 +242,13 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     case = "case02_param_type_change"
     case_dir = tmp_path / "examples" / case
     case_dir.mkdir(parents=True)
+    (case_dir / "CMakeLists.txt").touch()
     v1_src, v2_src = case_dir / "v1.c", case_dir / "v2.c"
     v1_h, v2_h = case_dir / "v1.h", case_dir / "v2.h"
     for path in (v1_src, v2_src, v1_h, v2_h):
         path.write_text("/* fixture */\n")
-    plugin = tmp_path / "libabicheck-facts.so"; plugin.touch()
+    plugin = tmp_path / "libabicheck-facts.so"
+    plugin.touch()
     commands = []
 
     class Result:
@@ -251,10 +257,23 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
         stdout = '{"verdict":"BREAKING","changes":[]}'
 
     def fake_run(cmd, **kwargs):
-        cmd = [str(x) for x in cmd]; commands.append(cmd)
+        import json
+        cmd = [str(x) for x in cmd]
+        commands.append(cmd)
+        if cmd[:2] == ["cmake", "-S"]:
+            build = Path(cmd[cmd.index("-B") + 1])
+            build.mkdir(parents=True, exist_ok=True)
+            version = build.name.rsplit("_", 1)[1]
+            target = f"{case}_{version}"
+            source = v1_src if version == "v1" else v2_src
+            (build / "compile_commands.json").write_text(json.dumps([{
+                "file": str(source),
+                "command": f"clang -o CMakeFiles/{target}.dir/{source.name}.o {source}",
+            }]))
         if cmd[:2] == ["cmake", "--build"]:
             version = cmd[cmd.index("--target") + 1].rsplit("_", 1)[1]
-            build = Path(cmd[2]); out = build / case
+            build = Path(cmd[2])
+            out = build / case
             out.mkdir(parents=True, exist_ok=True)
             (out / f"lib{version}.so").touch()
             injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
@@ -293,13 +312,263 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
 def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
     mod = _load_benchmark()
     v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
-    v1.touch(); v2.touch()
+    v1.write_text("int v1(void);\n")
+    v2.write_text("int v2(void);\n")
     empty = tmp_path / "empty"
-    _write_plugin_pack(empty, "v1", v1, with_facts=False)
+    _write_plugin_pack(empty, "v1", v1, with_record=False)
     assert not mod._plugin_pack_is_target_specific(empty, "v1", v1, v2)[0]
     wrong = tmp_path / "wrong"
     _write_plugin_pack(wrong, "v1", v2)
     assert not mod._plugin_pack_is_target_specific(wrong, "v1", v1, v2)[0]
+
+
+def test_compare_verdict_parses_json_from_stderr_with_trailing_diagnostics():
+    mod = _load_benchmark()
+    output = (
+        'warning: report written to stderr\n'
+        '{"verdict":"COMPATIBLE_WITH_RISK","changes":[]}\n'
+        'Evidence metrics: findings=1\n'
+    )
+
+    assert mod._abicheck_verdict_from_compare(output, 2) == "COMPATIBLE_WITH_RISK"
+
+
+def test_compare_verdict_falls_back_to_explicit_risk_text():
+    mod = _load_benchmark()
+
+    assert (
+        mod._abicheck_verdict_from_compare("Verdict: COMPATIBLE_WITH_RISK", 2)
+        == "COMPATIBLE_WITH_RISK"
+    )
+
+
+def test_plugin_pack_accepts_target_record_without_function_or_type_facts(tmp_path):
+    mod = _load_benchmark()
+    v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
+    v1.write_text("int global = 1;\n")
+    v2.write_text("long global = 1;\n")
+    pack = tmp_path / "global-only"
+    _write_plugin_pack(pack, "v1", v1, with_facts=False)
+
+    assert mod._plugin_pack_is_target_specific(pack, "v1", v1, v2) == (True, "")
+
+
+def test_plugin_pack_accepts_cmake_target_reusing_other_release_source(tmp_path):
+    mod = _load_benchmark()
+    v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
+    v1.write_text("int stable(void) { return 1; }\n")
+    v2.write_text(v1.read_text())
+    pack = tmp_path / "v2-pack"
+    # CMake intentionally uses v1.c for both targets. Trust the concrete
+    # target's compile database, not source byte equality or path naming.
+    _write_plugin_pack(pack, "v2", v1)
+
+    assert mod._plugin_pack_is_target_specific(
+        pack, "v2", v2, v1, target_sources={v1},
+    ) == (True, "")
+
+
+def test_plugin_pack_does_not_accept_identical_opposite_source_without_target_proof(tmp_path):
+    mod = _load_benchmark()
+    v1, v2 = tmp_path / "v1.c", tmp_path / "v2.c"
+    v1.write_text("int stable(void) { return 1; }\n")
+    v2.write_text(v1.read_text())
+    pack = tmp_path / "unproven-v2-pack"
+    _write_plugin_pack(pack, "v2", v1)
+
+    assert not mod._plugin_pack_is_target_specific(pack, "v2", v2, v1)[0]
+
+
+def test_abicheck_full_retries_binary_only_when_header_parser_rejects_c23(tmp_path):
+    mod = _load_benchmark()
+    case = "case115_bit_int_width_changed"
+    case_dir = tmp_path / case
+    case_dir.mkdir()
+    v1, v2 = case_dir / "v1.c", case_dir / "v2.c"
+    h1, h2 = case_dir / "v1.h", case_dir / "v2.h"
+    for path in (v1, v2, h1, h2):
+        path.touch()
+    plugin = tmp_path / "plugin.so"
+    plugin.touch()
+    commands = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def fake_side(case_dir_arg, case_arg, version, src, opposite, header, plugin_arg, root, timeout):
+        library = root / f"lib{version}.so"
+        library.touch()
+        pack = root / f"pack-{version}"
+        _write_plugin_pack(pack, version, src)
+        return library, pack, ""
+
+    def fake_run(cmd, **kwargs):
+        cmd = [str(arg) for arg in cmd]
+        commands.append(cmd)
+        if "dump" in cmd:
+            if "-H" in cmd:
+                return Result(1, stderr="_BitInt was used without a declaration")
+            Path(cmd[cmd.index("-o") + 1]).touch()
+            return Result()
+        if "merge" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+            return Result()
+        return Result(stdout='{"verdict":"BREAKING","changes":[]}')
+
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", tmp_path / "build"
+    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
+        mod, "_build_plugin_side", side_effect=fake_side
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+        result = mod.run_abicheck_full(
+            plugin, plugin, h1, h2, case, tmp_path, case_dir=case_dir,
+            v1_src=v1, v2_src=v2,
+        )
+
+    dumps = [cmd for cmd in commands if "dump" in cmd]
+    assert result.verdict == "BREAKING"
+    assert ["-H" in cmd for cmd in dumps] == [True, False, True, False]
+    assert result.raw_output.count("_BitInt was used without a declaration") == 2
+
+
+def test_plugin_build_does_not_force_include_public_header(tmp_path):
+    mod = _load_benchmark()
+    case = "case_includes_own_header"
+    case_dir = tmp_path / case
+    case_dir.mkdir()
+    (case_dir / "CMakeLists.txt").touch()
+    src = case_dir / "v1.c"
+    other = case_dir / "v2.c"
+    header = case_dir / "v1.h"
+    for path in (src, other, header):
+        path.touch()
+    plugin = tmp_path / "plugin.so"
+    plugin.touch()
+    commands = []
+
+    class Result:
+        returncode = 1
+        stderr = "stop after configure"
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(arg) for arg in cmd])
+        return Result()
+
+    with patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+        mod._build_plugin_side(
+            case_dir, case, "v1", src, other, header, plugin, tmp_path / "root", 30,
+        )
+
+    injection_arg = next(arg for arg in commands[0] if arg.startswith("-DCMAKE_PROJECT_INCLUDE="))
+    injection = Path(injection_arg.split("=", 1)[1]).read_text()
+    assert "-include" not in injection
+
+
+def test_plugin_build_directly_compiles_source_fixture_without_cmake(tmp_path):
+    mod = _load_benchmark()
+    case_dir = tmp_path / "source_only"
+    case_dir.mkdir()
+    src, other = case_dir / "v1.c", case_dir / "v2.c"
+    src.write_text("int api(void) { return 1; }\n")
+    other.write_text("int api(void) { return 2; }\n")
+    plugin = tmp_path / "plugin.so"
+    plugin.touch()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        cmd = [str(arg) for arg in cmd]
+        commands.append(cmd)
+        Path(cmd[cmd.index("-o") + 1]).touch()
+        out_arg = next(arg for arg in cmd if arg.startswith("out="))
+        _write_plugin_pack(Path(out_arg.split("=", 1)[1]), "v1", src)
+        return Result()
+
+    with patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
+        mod, "SHARED_LIB_SUFFIX", ".so"
+    ):
+        library, pack, error = mod._build_plugin_side(
+            case_dir, "source_only", "v1", src, other, None,
+            plugin, tmp_path / "root", 30,
+        )
+
+    assert error == ""
+    assert library and library.name == "libv1.so"
+    assert pack and pack.name == "abicheck_inputs_v1"
+    assert len(commands) == 1
+    assert str(src.resolve()) in commands[0]
+    assert str(other.resolve()) not in commands[0]
+
+
+def test_case115_baseline_build_prefers_clang(tmp_path):
+    mod = _load_benchmark()
+    case_dir = tmp_path / "case115_bit_int_width_changed"
+    case_dir.mkdir()
+    (case_dir / "CMakeLists.txt").touch()
+    src = case_dir / "v1.c"
+    src.touch()
+    captured = {}
+
+    class Args:
+        case64_toolchain = "auto"
+
+    def fake_build(case_dir_arg, build_dir, name, env):
+        captured.update(env)
+        return type("Result", (), {"returncode": 1, "stderr": "expected", "stdout": ""})()
+
+    with patch.object(mod, "_try_reuse_prebuilt", return_value=(None, None, False, False)), patch(
+        "shutil.which", return_value="/usr/bin/cmake"
+    ), patch.object(mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"), patch.object(
+        mod, "_run_cmake_configure_and_build", side_effect=fake_build
+    ):
+        mod._build_case_artifacts(
+            case_dir.name, "BREAKING", case_dir, tmp_path / "build", src, src,
+            None, None, Args(), [],
+        )
+
+    assert captured["CC"].endswith("clang-18")
+    assert captured["CXX"].endswith("clang++-18")
+
+
+def test_source_only_fixture_uses_isolated_direct_baseline_build(tmp_path):
+    mod = _load_benchmark()
+    case_dir = tmp_path / "case118_source_only"
+    case_dir.mkdir()
+    v1, v2 = case_dir / "v1.c", case_dir / "v2.c"
+    v1.touch()
+    v2.touch()
+    (tmp_path / "build").mkdir()
+    calls = []
+
+    class Args:
+        case64_toolchain = "auto"
+
+    def fake_compile(src, output, **kwargs):
+        calls.append((src, output, kwargs))
+        output.touch()
+        return True
+
+    with patch.object(mod, "_try_reuse_prebuilt", return_value=(None, None, False, False)), patch.object(
+        mod, "compile_so", side_effect=fake_compile
+    ):
+        result = mod._build_case_artifacts(
+            case_dir.name, "NO_CHANGE", case_dir, tmp_path / "build", v1, v2,
+            None, None, Args(), [],
+        )
+
+    assert result.ok
+    assert [call[0] for call in calls] == [v1, v2]
+    assert all(call[1].parent == tmp_path / "build" for call in calls)
 
 def test_default_tools_include_both_abicheck_lanes():
     mod = _load_benchmark()

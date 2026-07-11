@@ -906,6 +906,38 @@ def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
     return out
 
 
+def _source_owner_identity(graph: SourceGraphSummary, owner: str) -> tuple[str, ...]:
+    """Return a cross-version identity for a symbol's declaring file.
+
+    Header paths are API provenance and remain path-sensitive: moving a public
+    declaration between headers can change consumers' include requirements.
+    A translation-unit filename, however, is build provenance rather than API
+    identity.  Old/new source packs are commonly produced from side-specific
+    filenames or checkout layouts, so comparing the raw file-node id reports a
+    move even when the TU owns exactly the same declaration set.  Identify a
+    source TU by its stable declaration ids instead.  This still detects a real
+    redistribution between TUs because their declaration sets differ.
+
+    ``build_source_graph`` represents source locations as ``header`` nodes too,
+    distinguishing them with the ``origin`` attribute, hence both node kind and
+    origin are checked here.
+    """
+    nodes = {n.id: n for n in graph.nodes}
+    node = nodes.get(owner)
+    if node is None:
+        return ("file", owner)
+    origin = str(node.attrs.get("origin", ""))
+    if node.kind != "source" and origin != "source":
+        return ("file", owner)
+    declarations = sorted(
+        e.dst for e in graph.edges
+        if e.kind == "SOURCE_DECLARES" and e.src == owner
+    )
+    # An empty declaration set cannot provide a semantic identity; preserve the
+    # raw owner rather than making all evidence-poor TUs look equivalent.
+    return ("source-tu", *declarations) if declarations else ("file", owner)
+
+
 def diff_source_graph_findings(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> list[Change]:
@@ -1146,7 +1178,9 @@ def diff_source_graph_findings(
     #    so its def_file attr is dropped (Codex review).
     old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
     for symbol in sorted(set(old_owner) & set(new_owner)):
-        if old_owner[symbol] != new_owner[symbol]:
+        old_identity = _source_owner_identity(old, old_owner[symbol])
+        new_identity = _source_owner_identity(new, new_owner[symbol])
+        if old_identity != new_identity:
             label = new_labels.get(symbol, symbol)
             findings.append(Change(
                 kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,

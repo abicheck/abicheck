@@ -460,6 +460,7 @@ def _find_or_build_abicheck_plugin(timeout: int) -> tuple[Path | None, str]:
 
 def _plugin_pack_is_target_specific(
     pack: Path, version: str, src: Path, opposite_src: Path,
+    *, target_sources: set[Path] | None = None,
 ) -> tuple[bool, str]:
     """Reject empty, wrong-version, or cross-release plugin evidence packs."""
     try:
@@ -471,15 +472,30 @@ def _plugin_pack_is_target_specific(
     if manifest.get("version") != version or not fact_files or not records:
         return False, f"missing {version} target-specific source facts"
     sources = {Path(str(record.get("source", ""))).resolve() for record in records}
-    if src.resolve() not in sources or opposite_src.resolve() in sources:
+    expected_sources = (
+        {path.resolve() for path in target_sources} if target_sources else {src.resolve()}
+    )
+    if sources != expected_sources:
         return False, f"{version} pack contains wrong release translation units"
-    evidence_keys = {
-        "declarations", "types", "functions", "variables", "macros", "templates",
-        "inline_bodies", "constexpr_values", "source_edges",
-    }
-    if not any(record.get(key) for record in records for key in evidence_keys):
-        return False, f"{version} plugin pack contains no L3/L4/L5 facts"
+    # A record for the expected translation unit is sufficient proof that the
+    # plugin instrumented this target.  Do not require function/type payloads:
+    # a library may legitimately expose only a global variable (case11).
     return True, ""
+
+
+def _cmake_target_sources(build_dir: Path, target: str) -> set[Path]:
+    """Read the translation units CMake assigned to one concrete target."""
+    try:
+        entries = json.loads((build_dir / "compile_commands.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    marker = f"CMakeFiles/{target}.dir/"
+    result = set()
+    for entry in entries:
+        command = str(entry.get("command", "")) + " " + str(entry.get("output", ""))
+        if marker in command and entry.get("file"):
+            result.add(Path(entry["file"]).resolve())
+    return result
 
 
 def _build_plugin_side(
@@ -492,6 +508,7 @@ def _build_plugin_side(
     opposite_src = opposite_src.resolve()
     plugin = plugin.resolve()
     root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
     header = header.resolve() if header and header.exists() else header
     side_build = root / f"plugin_build_{version}"
     pack = root / f"abicheck_inputs_{version}"
@@ -511,10 +528,6 @@ def _build_plugin_side(
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"library={case}",
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"version={version}",
     ]
-    # Compact fixtures often define the API without including their public
-    # header. Force it into the real target compile so the pack sees that API.
-    if header and header.exists():
-        flags += ["-include", str(header)]
     flag_string = shlex.join(flags)
     # Inject only after CMake has validated the compilers. Putting the plugin in
     # CMAKE_{C,CXX}_FLAGS would instrument CMake's compiler probes and contaminate
@@ -527,9 +540,30 @@ def _build_plugin_side(
     )
     env = {**os.environ, "CC": clang, "CXX": clangxx}
     try:
+        if not (case_dir / "CMakeLists.txt").exists():
+            # Source-backed catalog fixtures without a CMake target still have
+            # a valid full-evidence path.  Compile exactly this release's
+            # translation unit; do not replay or scan the containing tree.
+            side_build.mkdir(parents=True)
+            compiler = clangxx if src.suffix == ".cpp" else clang
+            library = side_build / f"lib{version}{SHARED_LIB_SUFFIX}"
+            link_mode = "-dynamiclib" if sys.platform == "darwin" else "-shared"
+            build = subprocess.run(
+                [compiler, link_mode, "-fPIC", "-g", "-o", str(library), str(src), *flags],
+                capture_output=True, text=True, timeout=timeout, env=env,
+            )
+            if build.returncode != 0:
+                return None, None, build.stderr or build.stdout
+            valid, error = _plugin_pack_is_target_specific(pack, version, src, opposite_src)
+            if not library.exists():
+                return None, None, f"direct {version} compile produced no shared library"
+            if not valid:
+                return None, None, error
+            return library, pack, ""
         configure = subprocess.run(
             ["cmake", "-S", str(case_dir.parent), "-B", str(side_build),
-             "-DCMAKE_BUILD_TYPE=Debug", f"-DCMAKE_PROJECT_INCLUDE={injection}"],
+             "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+             f"-DCMAKE_PROJECT_INCLUDE={injection}"],
             capture_output=True, text=True, timeout=timeout, env=env,
         )
         if configure.returncode != 0:
@@ -544,7 +578,12 @@ def _build_plugin_side(
     except (OSError, subprocess.SubprocessError) as exc:
         return None, None, str(exc)
     library = _find_cmake_lib(side_build / case, version)
-    valid, error = _plugin_pack_is_target_specific(pack, version, src, opposite_src)
+    target_sources = _cmake_target_sources(side_build, f"{case}_{version}")
+    if not target_sources:
+        return None, None, f"cannot determine sources for target {case}_{version}"
+    valid, error = _plugin_pack_is_target_specific(
+        pack, version, src, opposite_src, target_sources=target_sources,
+    )
     if library is None:
         return None, None, f"target {case}_{version} produced no shared library"
     if not valid:
@@ -596,10 +635,28 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             final = root / f"{version}.merged.json"
             dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
                     "-o", str(base), "--version", version]
-            if header and header.exists():
+            used_header = bool(header and header.exists())
+            if used_header:
                 dump += ["-H", str(header)]
+                if src.suffix == ".c":
+                    # Header parsing defaults to C++.  Force Clang's C23 mode
+                    # for C targets so declarations such as _BitInt(N) retain
+                    # their widths in the header snapshot.
+                    dump += ["--lang", "c", "--ast-frontend", "clang",
+                             "--gcc-option=-std=gnu23"]
             dr = subprocess.run(dump, capture_output=True, text=True,
                                 timeout=timeout, env=_ABICHECK_ENV)
+            if (dr.returncode != 0 or not base.exists()) and used_header:
+                # The source pack is authoritative L3 evidence and can retain
+                # language features unsupported by abicheck's generic header
+                # parser (notably C23 _BitInt). Retry binary-only, then merge
+                # the target's Clang facts; retain the failed diagnostic.
+                header_error = dr.stderr or dr.stdout
+                base.unlink(missing_ok=True)
+                binary_only = dump[:dump.index("-H")]
+                dr = subprocess.run(binary_only, capture_output=True, text=True,
+                                    timeout=timeout, env=_ABICHECK_ENV)
+                logs.append(f"header dump fallback ({version}): {header_error}\n")
             if dr.returncode != 0 or not base.exists():
                 return ToolResult(verdict="ERROR", raw_output=dr.stderr or dr.stdout,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
@@ -627,7 +684,7 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
     out = compare.stdout + compare.stderr
     (rdir / f"{case}_abicheck_full.txt").write_text(out)
     return ToolResult(
-        verdict=_abicheck_verdict_from_compare(compare.stdout, compare.returncode),
+        verdict=_abicheck_verdict_from_compare(out, compare.returncode),
         raw_output="".join(logs) + out,
         elapsed_ms=(time.monotonic() - started) * 1000,
     )
@@ -675,18 +732,30 @@ def _run_abicheck_dump_compare(
     out = result.stdout + result.stderr
     (rdir / f"{case}_abicheck{suffix}.txt").write_text(out)
     return ToolResult(
-        verdict=_abicheck_verdict_from_compare(result.stdout, result.returncode),
+        verdict=_abicheck_verdict_from_compare(out, result.returncode),
         raw_output=out, elapsed_ms=(time.monotonic() - started) * 1000,
     )
 
-def _abicheck_verdict_from_compare(stdout: str, returncode: int) -> str:
-    """Derive normalized verdict from abicheck compare output or exit code."""
-    try:
-        data = json.loads(stdout)
-    except (json.JSONDecodeError, AttributeError):
+def _abicheck_verdict_from_compare(output: str, returncode: int) -> str:
+    """Derive normalized verdict from compare output or exit code.
+
+    Click and logging configuration can put the JSON report on stderr and can
+    append human-readable evidence diagnostics after it.  Decode the first
+    JSON object from the combined output instead of requiring stdout to be a
+    JSON-only document.
+    """
+    data: object = None
+    text = str(output)
+    start = text.find("{")
+    if start >= 0:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text[start:])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not isinstance(data, dict):
         # Non-JSON fallback: preserve explicit textual verdicts when available.
-        text = str(stdout).upper()
-        if "COMPATIBLE_WITH_RISK" in text:
+        upper = text.upper()
+        if "COMPATIBLE_WITH_RISK" in upper:
             return "COMPATIBLE_WITH_RISK"
         return _abicheck_verdict_from_exit_code(returncode)
     return {
@@ -1343,6 +1412,12 @@ def _build_case_artifacts(
     cmake_file = case_dir / "CMakeLists.txt"
 
     preferred_family, force_case64_compile = _case64_toolchain_policy(name, args.case64_toolchain)
+    if name == "case115_bit_int_width_changed":
+        # GCC versions commonly used by the benchmark runner cannot compile
+        # C23 _BitInt, while the full-evidence plugin already requires Clang.
+        # Keep the baseline artifacts buildable with the applicable compiler.
+        preferred_family = "clang"
+        force_case64_compile = True
     pb_v1, pb_v2, used_prebuilt_artifacts, pb_cmake = _try_reuse_prebuilt(
         force_case64_compile=force_case64_compile, case_name=name,
     )
@@ -1351,10 +1426,37 @@ def _build_case_artifacts(
         used_cmake_artifacts = pb_cmake
 
     if not used_prebuilt_artifacts:
-        if not (cmake_file.exists() and shutil.which("cmake")):
+        if not cmake_file.exists():
+            # A few catalog fixtures are self-contained source/header pairs but
+            # predate per-case CMake wiring.  Build only their selected v1/v2
+            # translation units rather than excluding otherwise applicable
+            # benchmark cases or scanning/replaying the surrounding tree.
+            v1_ok = compile_so(
+                v1_src, v1_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v1_src),
+            )
+            v2_ok = compile_so(
+                v2_src, v2_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v2_src),
+            )
+            if v1_ok and v2_ok:
+                return _BuildResult(
+                    v1_so, v2_so, used_make_artifacts, used_cmake_artifacts,
+                    v1_h_hint, v2_h_hint, ok=True,
+                )
+            print(f"  {name:<35} DIRECT_BUILD_ERR")
+            results.append(_error_entry(name, expected))
+            return _BuildResult(
+                v1_so, v2_so, used_make_artifacts, used_cmake_artifacts,
+                v1_h_hint, v2_h_hint, ok=False,
+            )
+        if not shutil.which("cmake"):
             print(f"  {name:<35} BUILD_PATH_UNAVAILABLE(prebuilt|cmake)")
             results.append(_error_entry(name, expected))
-            return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
+            return _BuildResult(
+                v1_so, v2_so, used_make_artifacts, used_cmake_artifacts,
+                v1_h_hint, v2_h_hint, ok=False,
+            )
 
         cmake_build = bdir / "cmake_build"
         if cmake_build.exists():

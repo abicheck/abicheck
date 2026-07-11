@@ -23,6 +23,7 @@ from abicheck.model import (
     Param,
     RecordType,
     ScopeOrigin,
+    TypeField,
     Visibility,
 )
 from abicheck.reporter import to_json
@@ -161,7 +162,9 @@ class TestExportOnlyAntiHiding:
             types=[_rec("Widget", size=128, origin=ScopeOrigin.PUBLIC_HEADER)],
         )
         s_old, s_new = compute_public_surface(old), compute_public_surface(new)
-        assert s_old.has_typed_roots is False
+        # The recovered public-header declaration is now itself a typed root,
+        # even though the export-table function carries no signature types.
+        assert s_old.has_typed_roots is True
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Widget", description="")
         # Kept in surface — NOT demoted as non-public-type.
         assert classify_change_surface(c, s_old, s_new) == (True, None)
@@ -198,6 +201,59 @@ class TestExportOnlyAntiHiding:
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Unreached", description="")
         in_surf, _ = classify_change_surface(c, s, s)
         assert in_surf is False
+
+    def test_public_header_type_is_a_root_without_signature_reference(self):
+        # Public headers are source API roots in their own right: consumers can
+        # instantiate these records even when no exported signature names them.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                RecordType(
+                    name="HeaderApi",
+                    kind="struct",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    fields=[TypeField(name="value", type="Dependency")],
+                ),
+                _rec("Dependency", origin=ScopeOrigin.UNKNOWN),
+                _rec("PrivateOrphan", origin=ScopeOrigin.UNKNOWN),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert s.has_typed_roots is True
+        assert {"HeaderApi", "Dependency"} <= s.public_types
+        assert "PrivateOrphan" not in s.public_types
+        orphan_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="PrivateOrphan",
+            description="private orphan changed",
+        )
+        assert classify_change_surface(orphan_change, s, s) == (
+            False,
+            REASON_NO_PROVENANCE,
+        )
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.FIELD_RENAMED,
+            ChangeKind.ANON_FIELD_CHANGED,
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+        ],
+    )
+    def test_specialized_member_finding_uses_private_owner(self, kind):
+        # These detectors also encode findings as Owner::member and must use
+        # the same owner reachability path as ordinary field findings.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Public *")],
+            types=[_rec("Public"), _rec("Private")],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=kind, symbol="Private::member", description="member change")
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
     def test_field_level_private_type_uses_owner_for_surface(self):
         # Real-world regression: p11-kit DWARF reports

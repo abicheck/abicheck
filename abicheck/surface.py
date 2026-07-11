@@ -139,6 +139,16 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
         "standard_layout_lost",
         "tail_padding_reuse_changed",
         "layout_unverifiable",
+        # Source/layout detectors emitted outside diff_types.  Their symbols
+        # identify an owner record (or an owner-qualified member), not an
+        # exported function.  Omitting these makes a reachable public type
+        # fall through the symbol path and, more importantly, makes a private
+        # owner look like an unknown symbol that is conservatively retained.
+        "base_class_position_changed",
+        "base_class_virtual_changed",
+        "field_renamed",
+        "anon_field_changed",
+        "atomic_qualifier_changed",
     }
 )
 
@@ -163,6 +173,9 @@ _MEMBER_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
         "enum_member_added",
         "enum_member_value_changed",
         "enum_last_member_value_changed",
+        "field_renamed",
+        "anon_field_changed",
+        "atomic_qualifier_changed",
     }
 )
 
@@ -281,11 +294,11 @@ class PublicSurface:
     # Lets the classifier distinguish a confident reachability demotion from one
     # made without provenance to confirm it (ADR-024 §D5.1 ``no-provenance``).
     has_provenance: bool = False
-    # True when at least one public root carried real signature type info
-    # (a parameter or a return/variable type other than the export-only
-    # sentinel ``"?"``). When False the snapshot is export-table-only (e.g. a
-    # PE binary whose header scoping fell back), so the type-reachability
-    # closure has no roots and **cannot** be trusted to demote a type as
+    # True when at least one trustworthy typed root exists: a public symbol
+    # carrying real signature type info, or a record/enum declaration positively
+    # identified as coming from a selected public header. When False the snapshot
+    # may be export-table-only (e.g. a PE binary whose header scoping fell back),
+    # so the type-reachability closure cannot be trusted to demote a type as
     # "unreachable" — doing so would hide a real break (ADR-024 §D5.2). Only
     # confident provenance (private/system header) may demote in that case.
     has_typed_roots: bool = False
@@ -487,6 +500,38 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 
     # Transitive closure over the record/typedef graph.
     _walk_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
+
+    # A declaration originating in a selected public header is itself part of
+    # the public source contract, even if no exported function happens to name
+    # it.  Header consumers can instantiate it, derive from it, and access its
+    # fields directly; requiring export-signature reachability incorrectly
+    # hides exactly those source/layout breaks.  Seed these declarations only
+    # when provenance positively identifies PUBLIC_HEADER (UNKNOWN keeps the
+    # existing conservative reachability policy), then close over fields and
+    # bases because their layout dependencies are public as well.
+    public_header_seeds = {
+        rec.name
+        for rec in snap.types
+        if getattr(rec, "origin", ScopeOrigin.UNKNOWN) == ScopeOrigin.PUBLIC_HEADER
+    } | {
+        en.name
+        for en in snap.enums
+        if getattr(en, "origin", ScopeOrigin.UNKNOWN) == ScopeOrigin.PUBLIC_HEADER
+    }
+    if public_header_seeds:
+        # These declarations are real typed roots even when the only exported
+        # symbols have ``?``/void signatures. Without this flag, the closure is
+        # populated correctly but _demote_by_reachability() still treats it as
+        # an export-table-only snapshot and conservatively keeps every unrelated
+        # UNKNOWN-origin type, defeating public-header-root scoping.
+        surface.has_typed_roots = True
+        _walk_type_closure(
+            snap,
+            surface,
+            record_by_name,
+            enum_by_name,
+            public_header_seeds,
+        )
     return surface
 
 
@@ -810,6 +855,13 @@ def _demote_by_reachability(
     # a genuine public ABI break, including a change to a PUBLIC_HEADER type
     # recovered from a PDB. Keep the finding in that case (ADR-024 §D5.2).
     if not (surf_old.has_typed_roots and surf_new.has_typed_roots):
+        return True, None
+    # Reachability alone is not enough to prove that a known-but-unreachable
+    # type is private when declaration provenance is absent. Build/source packs
+    # can contribute complete layout facts without preserving header ownership;
+    # demoting in that state hides public-header ABI breaks. Keep conservatively
+    # unless both snapshots carry provenance that can support the scoping call.
+    if not (surf_old.has_provenance and surf_new.has_provenance):
         return True, None
     # Reachability demotion. If provenance was available for the snapshot but
     # none of the implicated types carried it, disclose the reduced confidence

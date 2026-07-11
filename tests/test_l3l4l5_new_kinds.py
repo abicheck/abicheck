@@ -352,6 +352,7 @@ def test_l5_target_dependency_added() -> None:
 def test_l5_exported_symbol_source_owner_changed() -> None:
     nodes = [
         _N("d", "source_decl", "d()"),
+        _N("other", "source_decl", "other()"),
         _N("s", "binary_symbol", "d"),
         _N("src:a", "source", "a.cpp"),
         _N("src:b", "source", "b.cpp"),
@@ -362,11 +363,33 @@ def test_l5_exported_symbol_source_owner_changed() -> None:
     )
     new = SourceGraphSummary(
         nodes=nodes,
-        edges=[_E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("src:b", "d", "SOURCE_DECLARES")],
+        edges=[
+            _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("src:b", "d", "SOURCE_DECLARES"),
+            _E("src:b", "other", "SOURCE_DECLARES"),
+        ],
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value in kinds
     assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED in RISK_KINDS
+
+
+def test_l5_source_owner_path_noise_is_ignored() -> None:
+    nodes = [
+        _N("d", "source_decl", "d()"),
+        _N("s", "binary_symbol", "d"),
+        _N("src:old", "source", "old-side.cpp"),
+        _N("src:new", "source", "new-side.cpp"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[_E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("src:old", "d", "SOURCE_DECLARES")],
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[_E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("src:new", "d", "SOURCE_DECLARES")],
+    )
+    assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value not in _graph_kinds(old, new)
 
 
 def test_l5_identical_graph_emits_nothing() -> None:
