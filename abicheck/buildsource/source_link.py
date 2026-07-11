@@ -672,6 +672,22 @@ def _attribute_synthesized_exports(
     func_names = {
         d.qualified_name for d in surface.reachable_declarations if d.qualified_name
     }
+    # Template-erased owner index (``ns::Box<>`` -> source owner label). A binary
+    # exports vtable/typeinfo *per concrete instantiation* (`format_object<char>`,
+    # `format_object<double>`, …) while the source captures only the class-template
+    # pattern, so the exact/base type check above never matches an instantiation.
+    # The pattern legitimately owns all its instantiations' RTTI, so when it is on
+    # the public surface the instantiation's synthesized symbol is attributed to it.
+    template_owners = _template_source_owner_index(surface)
+    # Only a genuine *template declaration* (not another concrete specialization)
+    # authorizes attributing an unseen instantiation's RTTI: with only `A<int>` on
+    # the surface, `A<char>`'s vtable must stay an orphan (it may be an exported,
+    # unchecked specialization) — mirrors `_owner_present`'s base-match guard.
+    template_pattern_keys = {
+        _template_pattern_key(t.qualified_name) or f"{t.qualified_name}<>"
+        for t in surface.reachable_templates
+        if t.qualified_name
+    }
     # Overload-specific index: a decl's real mangled name → its qualified name, so a
     # thunk is attributed to the EXACT overload it forwards to (Codex review). Keyed
     # Mach-O-normalized to line up with `_thunk_target_mangled`'s `_Z…` output.
@@ -704,6 +720,13 @@ def _attribute_synthesized_exports(
         if owner == "type":
             if _owner_present(target, type_names):
                 attributed[sym] = (kind, target)
+            else:
+                # Template instantiation whose concrete type is absent but whose
+                # class-template pattern is on the surface (e.g. vtable for
+                # `format_object<char>` -> template `format_object<T>`).
+                tkey = _template_pattern_key(target)
+                if tkey and tkey in template_pattern_keys:
+                    attributed[sym] = (kind, template_owners.get(tkey, target))
         elif kind == "thunk":
             # A thunk carries the FULL mangling of the function it forwards to, so
             # attribute to the exact overload rather than any same-named decl: a
@@ -1131,6 +1154,27 @@ def link_source_abi(
         for entity in tu.all_entities():
             if not (_is_public(entity) or entity.qualified_name in forced):
                 continue
+            # Fold byte-identical entities re-emitted by every TU that includes
+            # the same public header. The key carries every identity- and
+            # hash-bearing field, so overloads (same name, different mangled/sig),
+            # ODR variants (same name/id but a divergent type_hash/body_hash — the
+            # type id intentionally excludes the content hash), and any other
+            # semantic difference still route and are detected; only true
+            # duplicates are dropped. Shrinks the surface, its content-hash
+            # json.dumps, and the relink work proportionally.
+            key = (
+                entity.kind,
+                entity.qualified_name,
+                entity.mangled_name,
+                entity.id,
+                entity.signature_hash,
+                entity.type_hash,
+                entity.body_hash,
+                entity.value,
+            )
+            if key in state.seen_entity_keys:
+                continue
+            state.seen_entity_keys.add(key)
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
 
@@ -1353,6 +1397,10 @@ class _LinkState:
     odr_conflicts: list[dict[str, str]] = field(default_factory=list)
     public_decl_ids: list[str] = field(default_factory=list)
     matched_symbols: set[str] = field(default_factory=set)
+    #: full-identity dedup keys of entities already routed — a per-TU Flow-2 pack
+    #: re-emits each public-header decl once per compile (a ~20x blow-up on
+    #: template-heavy libraries), so byte-identical repeats are folded to one.
+    seen_entity_keys: set[tuple[str, ...]] = field(default_factory=set)
     #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)

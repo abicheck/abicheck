@@ -38,6 +38,7 @@ from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
+    handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -97,7 +98,6 @@ from .cli_resolve import (
     classify_compare_operand,
 )
 from .compat.cli import compat_group
-from .errors import AbicheckError
 from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
@@ -259,6 +259,7 @@ def _write_snapshot_output(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     extractor: str = "auto",
+    inputs_pack: Path | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -295,6 +296,12 @@ def _write_snapshot_output(
                 "see the coverage rows for details.",
                 err=True,
             )
+    # A build-emitted Flow-2 pack (--inputs) folds straight into the dump — the
+    # plugin/wrapper flow in one command, no separate `merge` (after any inline
+    # --sources/--build-info embed, so both fact sources combine).
+    if inputs_pack is not None:
+        from .cli_buildsource_merge import embed_inputs_pack
+        embed_inputs_pack(snap, inputs_pack, output)
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)
@@ -484,6 +491,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
+             inputs_pack: Path | None = None,
              depth: str | None = None, max_depth: bool = False,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
@@ -498,9 +506,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
+    # ``inputs_pack`` is threaded through so a bare ``--inputs`` (no --sources/
+    # --build-info) does not trigger the "no build/source facts" warning — the pack
+    # itself carries the L4 facts.
     collect_mode, headers, compile_db_path, compile_db_path_alt = resolve_dump_collect_context(
         depth, max_depth, _resolved_collect_mode, sources, build_info,
-        headers, compile_db_path, compile_db_path_alt,
+        headers, compile_db_path, compile_db_path_alt, inputs_pack=inputs_pack,
     )
 
     # Source-only dump (no binary) for the parallel-baseline / merge flow.
@@ -509,6 +520,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             raise click.UsageError(
                 "--show-data-sources requires SO_PATH; source-only dump cannot "
                 "produce binary data-source diagnostics."
+            )
+        if inputs_pack is not None:
+            raise click.UsageError(
+                "--inputs folds a pack against a binary's exports, so it needs "
+                "SO_PATH. For a source-only baseline, use `abicheck merge` instead."
             )
         from .cli_buildsource import dump_source_only
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
@@ -555,13 +571,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     header_backend = _cc.frontend
 
     if binary_fmt in ("pe", "macho"):
-        _handle_non_elf_dump(
+        handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
-            follow_deps, git_tag, build_id, no_git, output, public_headers,
-            public_header_dirs, build_info, sources, build_config,
+            follow_deps, git_tag, build_id, no_git, output,
+            _dump_native_binary, _stamp_provenance, _write_snapshot_output,
+            public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
-            header_backend=header_backend,
-            compile_context=_cc,
+            header_backend=header_backend, compile_context=_cc,
+            inputs_pack=inputs_pack,
         )
         return
 
@@ -616,55 +633,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output,
         build_query=build_query,
         build_compile_db=build_compile_db,
-    )
-
-
-def _handle_non_elf_dump(
-    so_path: Path,
-    binary_fmt: str,
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    version: str,
-    lang: str,
-    pdb_path: Path | None,
-    follow_deps: bool,
-    git_tag: str | None,
-    build_id: str | None,
-    no_git: bool,
-    output: Path | None,
-    public_headers: tuple[Path, ...] = (),
-    public_header_dirs: tuple[Path, ...] = (),
-    build_info: Path | None = None,
-    sources: Path | None = None,
-    build_config: Path | None = None,
-    allow_build_query: bool = False,
-    collect_mode: str = "source-target",
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    header_backend: str = "auto",
-    compile_context: CompileContext | None = None,
-) -> None:
-    """Handle PE/Mach-O native dump path and output writing."""
-    if follow_deps:
-        click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
-    try:
-        snap = _dump_native_binary(
-            so_path, binary_fmt, list(headers), list(includes), version, lang,
-            pdb_path=pdb_path,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-            header_backend=header_backend,
-            compile=compile_context,
-        )
-    except click.ClickException:
-        raise
-    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query,
-        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
-        extractor=header_backend,
+        inputs_pack=inputs_pack,
     )
 
 

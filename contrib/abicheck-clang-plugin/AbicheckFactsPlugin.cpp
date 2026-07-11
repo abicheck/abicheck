@@ -67,6 +67,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
@@ -74,6 +75,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -96,6 +98,33 @@ namespace {
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe.
 constexpr const char *kPluginVersion = "0.4";
+
+// ---------------------------------------------------------------------------
+// Optional profiling (ABICHECK_PLUGIN_PROFILE=1): attribute subtree-hash cost
+// to its phases (clang JSON dump / json::parse / canonicalize) so the hot loop
+// can be optimized on evidence. Zero cost when disabled.
+// ---------------------------------------------------------------------------
+struct ProfileCounters {
+  bool enabled = false;
+  uint64_t dumpNs = 0, parseNs = 0, canonNs = 0;
+  uint64_t dumpCalls = 0, canonCalls = 0;
+  uint64_t dumpBytes = 0;
+};
+inline ProfileCounters &prof() {
+  static ProfileCounters p = [] {
+    ProfileCounters c;
+    const char *e = std::getenv("ABICHECK_PLUGIN_PROFILE");
+    c.enabled = e && *e && std::strcmp(e, "0") != 0;
+    return c;
+  }();
+  return p;
+}
+using ProfClock = std::chrono::steady_clock;
+inline uint64_t nowNs() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             ProfClock::now().time_since_epoch())
+      .count();
+}
 
 // ---------------------------------------------------------------------------
 // Hashing — mirrors clang.py::_hash exactly:
@@ -571,8 +600,15 @@ std::string canonical(const Value &node,
 }
 
 std::string subtreeHash(const Value &node, llvm::ArrayRef<std::string> paramIds) {
+  const bool p = prof().enabled;
+  uint64_t t0 = p ? nowNs() : 0;
   auto amap = alphaRenameMap(node, paramIds);
-  return H({"clang-ast", canonical(node, amap)});
+  std::string c = canonical(node, amap);
+  if (p) {
+    prof().canonNs += nowNs() - t0;
+    prof().canonCalls++;
+  }
+  return H({"clang-ast", c});
 }
 
 // clang.py::_WRAPPER_EXPR_KINDS — single-child wrappers descended through when
@@ -729,6 +765,81 @@ std::string mangledFromJson(const Object &o) {
   return "";
 }
 
+// Port of clang.py::_mangled_has_internal_linkage: true when an Itanium mangled
+// name marks internal linkage (its own <source-name> is prefixed with the
+// GCC/clang seniority marker `L`, e.g. `_ZN2nsL7g_constE`, `_ZL1xE`). Parses by
+// length prefixes so an `L` inside a source name is never miscounted, and bails
+// to false (external, keep) on any exotic production. Must stay byte-identical to
+// the Python port so both producers drop the same set (C.6 gate).
+bool mangledHasInternalLinkage(const std::string &m) {
+  if (m.rfind("_Z", 0) != 0)
+    return false;
+  // Anonymous namespace (`namespace { ... }` -> `_ZN12_GLOBAL__N_1...`): internal
+  // linkage with no `L` marker. The component is compiler-reserved, so a plain
+  // substring test is unambiguous (Codex review).
+  if (m.find("_GLOBAL__N_") != std::string::npos)
+    return true;
+  size_t i = 2, n = m.size();
+  if (i < n && m[i] == 'N') {
+    ++i;
+    while (i < n && (m[i] == 'r' || m[i] == 'V' || m[i] == 'K' || m[i] == 'O'))
+      ++i;
+  }
+  while (i < n) {
+    char c = m[i];
+    if (c == 'E')
+      break;
+    if (c == 'L')
+      return i + 1 < n && m[i + 1] >= '0' && m[i + 1] <= '9';
+    if (c >= '0' && c <= '9') {
+      size_t j = i, length = 0;
+      while (j < n && m[j] >= '0' && m[j] <= '9') {
+        length = length * 10 + static_cast<size_t>(m[j] - '0');
+        ++j;
+        if (length > n - j)
+          return false;
+      }
+      i = j + length;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+// Port of clang.py::_is_top_level_const: true when a type spelling is
+// const-qualified at the top level (`const int`, `int *const`, `ns::Foo const`),
+// which at namespace scope without `extern` gives internal linkage in C++.
+// Pointer/reference-to-const (`const char *`) is NOT top-level const.
+bool isTopLevelConst(const std::string &qual) {
+  auto trim = [](std::string s) {
+    size_t b = s.find_first_not_of(" \t");
+    size_t e = s.find_last_not_of(" \t");
+    return (b == std::string::npos) ? std::string() : s.substr(b, e - b + 1);
+  };
+  std::string q = trim(qual);
+  while (!q.empty() && q.back() == '&')
+    q.pop_back();
+  q = trim(q);
+  // Array: const iff the element type (spelled before the first `[`) is const.
+  size_t bracket = q.find('[');
+  if (bracket != std::string::npos)
+    q = trim(q.substr(0, bracket));
+  const std::string kConst = "const";
+  // Trailing `const` must be a standalone token, not the tail of an identifier
+  // (a type named `almost_const` is not const-qualified): the char before it is
+  // a non-identifier char (space / `*`), or the string is exactly `const`.
+  if (q.size() >= kConst.size() &&
+      q.compare(q.size() - kConst.size(), kConst.size(), kConst) == 0) {
+    if (q.size() == kConst.size())
+      return true;
+    char prev = q[q.size() - kConst.size() - 1];
+    if (!(std::isalnum(static_cast<unsigned char>(prev)) || prev == '_'))
+      return true;
+  }
+  return q.rfind("const ", 0) == 0 && q.find('*') == std::string::npos;
+}
+
 // clang.py::_signature over JSON: the node's type.qualType.
 std::string qualTypeFromJson(const Object &o) {
   if (const Object *t = o.getObject("type"))
@@ -737,19 +848,292 @@ std::string qualTypeFromJson(const Object &o) {
   return "";
 }
 
+// clang.py::_signature_desugared over JSON: the node's type.desugaredQualType
+// (the alias-resolved spelling, e.g. `const int` for `using CI = const int`).
+std::string desugaredQualTypeFromJson(const Object &o) {
+  if (const Object *t = o.getObject("type"))
+    if (auto q = t->getString("desugaredQualType"))
+      return q->str();
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Pruned JSON parse (perf, C.2-preserving).
+//
+// clang's `-ast-dump=json` emits full location/range/type/flag detail for every
+// node, but the only keys ANY reader in this file touches are a fixed, small set
+// (verified exhaustively): the recursive `inner` array; the scalars `kind`, `id`,
+// `name`, `storageClass`, `opcode`, `mangledName`, `castKind`, `value`, `init`;
+// and the *shallow* objects `type` (→ `qualType`/`desugaredQualType`) and
+// `referencedDecl` (→ `id`/`name`). Everything else is parsed and then discarded
+// by `canonical()` — pure waste that dominated the profile (json::parse ≈ 68% of
+// subtree-hash time, on ~200 MB of dumped text per TU).
+//
+// This parser walks only the STRUCTURE (objects/arrays) and delegates every kept
+// LEAF token to `llvm::json::parse`, so scalar/escape/number semantics are
+// byte-identical to a full parse — the produced Value is indistinguishable to
+// every reader, and therefore every emitted hash is unchanged (validated by
+// output-identity against the full-parse build). Skipped values are scanned but
+// never materialized, so the discarded ~90% costs only a linear character skip.
+// ---------------------------------------------------------------------------
+class PrunedJsonParser {
+public:
+  explicit PrunedJsonParser(llvm::StringRef s) : S(s), I(0) {}
+
+  std::optional<Value> parse() {
+    skipWs();
+    if (I >= S.size() || S[I] != '{')
+      return std::nullopt; // a Decl dump root is always an object
+    std::optional<Value> v = parseNode();
+    if (!v)
+      return std::nullopt;
+    return v;
+  }
+
+private:
+  llvm::StringRef S;
+  size_t I;
+  bool Failed = false;
+
+  void skipWs() {
+    while (I < S.size()) {
+      char c = S[I];
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+        ++I;
+      else
+        break;
+    }
+  }
+
+  // Scan (and consume) exactly one JSON value, returning its raw [start,end)
+  // slice. Handles nested objects/arrays and string escapes. On malformation it
+  // sets Failed and returns an empty ref.
+  llvm::StringRef captureValue() {
+    skipWs();
+    size_t start = I;
+    if (I >= S.size()) {
+      Failed = true;
+      return {};
+    }
+    char c = S[I];
+    if (c == '"') {
+      scanString();
+    } else if (c == '{' || c == '[') {
+      char open = c, close = (c == '{') ? '}' : ']';
+      int depth = 0;
+      while (I < S.size()) {
+        char d = S[I];
+        if (d == '"') {
+          scanString();
+          continue;
+        }
+        if (d == open)
+          ++depth;
+        else if (d == close) {
+          --depth;
+          if (depth == 0) {
+            ++I;
+            break;
+          }
+        }
+        ++I;
+      }
+    } else {
+      // scalar: number / true / false / null — up to a delimiter
+      while (I < S.size()) {
+        char d = S[I];
+        if (d == ',' || d == '}' || d == ']' || d == ' ' || d == '\t' ||
+            d == '\n' || d == '\r')
+          break;
+        ++I;
+      }
+    }
+    return S.substr(start, I - start);
+  }
+
+  void scanString() {
+    // assumes S[I] == '"'; consumes through the closing quote
+    ++I;
+    while (I < S.size()) {
+      char c = S[I++];
+      if (c == '\\') {
+        if (I < S.size())
+          ++I; // skip escaped char (\uXXXX's trailing hex are skipped by loop)
+      } else if (c == '"') {
+        return;
+      }
+    }
+    Failed = true;
+  }
+
+  // Parse a leaf token slice into a Value with full json semantics.
+  std::optional<Value> leaf(llvm::StringRef raw) {
+    auto parsed = llvm::json::parse(raw);
+    if (!parsed) {
+      llvm::consumeError(parsed.takeError());
+      return std::nullopt;
+    }
+    return std::move(*parsed);
+  }
+
+  // At '{': build an Object keeping only the pruned key set; `recurseInner`
+  // controls whether `inner` children are parsed as full nodes (true for AST
+  // nodes) or skipped (for the shallow `type`/`referencedDecl` objects, which no
+  // reader recurses into).
+  std::optional<Value> parseObject(bool recurseInner,
+                                   bool shallowScalarsOnly) {
+    Object out;
+    ++I; // consume '{'
+    skipWs();
+    if (I < S.size() && S[I] == '}') {
+      ++I;
+      return Value(std::move(out));
+    }
+    while (I < S.size()) {
+      skipWs();
+      if (S[I] != '"') {
+        Failed = true;
+        return std::nullopt;
+      }
+      llvm::StringRef keyRaw = captureValueString();
+      auto keyV = leaf(keyRaw);
+      if (Failed || !keyV || !keyV->getAsString()) {
+        Failed = true;
+        return std::nullopt;
+      }
+      std::string key = keyV->getAsString()->str();
+      skipWs();
+      if (I >= S.size() || S[I] != ':') {
+        Failed = true;
+        return std::nullopt;
+      }
+      ++I; // consume ':'
+      storeMember(out, key, recurseInner, shallowScalarsOnly);
+      if (Failed)
+        return std::nullopt;
+      skipWs();
+      if (I < S.size() && S[I] == ',') {
+        ++I;
+        continue;
+      }
+      if (I < S.size() && S[I] == '}') {
+        ++I;
+        break;
+      }
+      Failed = true;
+      return std::nullopt;
+    }
+    return Value(std::move(out));
+  }
+
+  llvm::StringRef captureValueString() {
+    skipWs();
+    size_t start = I;
+    scanString();
+    return S.substr(start, I - start);
+  }
+
+  void storeMember(Object &out, const std::string &key, bool recurseInner,
+                   bool shallowScalarsOnly) {
+    // Keys read as recursive structure.
+    if (key == "inner") {
+      if (!recurseInner) {
+        captureValue(); // shallow objects never recurse into inner
+        return;
+      }
+      skipWs();
+      if (I >= S.size() || S[I] != '[') {
+        captureValue();
+        return;
+      }
+      Array arr;
+      ++I; // consume '['
+      skipWs();
+      if (I < S.size() && S[I] == ']') {
+        ++I;
+        out["inner"] = Value(std::move(arr));
+        return;
+      }
+      while (I < S.size()) {
+        skipWs();
+        if (S[I] == '{') {
+          if (auto node = parseNode())
+            arr.push_back(std::move(*node));
+          else if (Failed)
+            return;
+        } else {
+          captureValue(); // non-object array element: irrelevant, skip
+        }
+        skipWs();
+        if (I < S.size() && S[I] == ',') {
+          ++I;
+          continue;
+        }
+        if (I < S.size() && S[I] == ']') {
+          ++I;
+          break;
+        }
+        Failed = true;
+        return;
+      }
+      out["inner"] = Value(std::move(arr));
+      return;
+    }
+    // Shallow objects: `type` and `referencedDecl` — keep only their scalars.
+    if (!shallowScalarsOnly && (key == "type" || key == "referencedDecl")) {
+      skipWs();
+      if (I < S.size() && S[I] == '{') {
+        if (auto obj = parseObject(/*recurseInner=*/false,
+                                   /*shallowScalarsOnly=*/true))
+          out[key] = std::move(*obj);
+      } else {
+        captureValue();
+      }
+      return;
+    }
+    // Kept scalar keys (both on AST nodes and inside shallow objects).
+    static const std::set<std::string> kKeptScalars = {
+        "kind",       "id",       "name",     "storageClass", "opcode",
+        "mangledName", "castKind", "value",    "init",         "qualType",
+        "desugaredQualType"};
+    if (kKeptScalars.count(key)) {
+      llvm::StringRef raw = captureValue();
+      if (Failed)
+        return;
+      if (auto v = leaf(raw))
+        out[key] = std::move(*v);
+      return;
+    }
+    // Everything else: skip without materializing.
+    captureValue();
+  }
+
+  std::optional<Value> parseNode() {
+    return parseObject(/*recurseInner=*/true, /*shallowScalarsOnly=*/false);
+  }
+};
+
 // Dump a Decl to clang's JSON (identical to -ast-dump=json for that node) and
-// parse it. Returns nullopt on any dump/parse failure (best-effort, C.3).
+// parse it, KEEPING ONLY the keys any reader uses (see PrunedJsonParser).
+// Returns nullopt on any dump/parse failure (best-effort, C.3).
 std::optional<Value> dumpDeclJson(const Decl *d) {
   std::string buf;
   llvm::raw_string_ostream os(buf);
+  const bool p = prof().enabled;
+  uint64_t t0 = p ? nowNs() : 0;
   d->dump(os, /*Deserialize=*/false, ADOF_JSON);
   os.flush();
-  auto parsed = llvm::json::parse(buf);
-  if (!parsed) {
-    llvm::consumeError(parsed.takeError());
-    return std::nullopt;
+  if (p) {
+    uint64_t t1 = nowNs();
+    prof().dumpNs += t1 - t0;
+    prof().dumpCalls++;
+    prof().dumpBytes += buf.size();
   }
-  return std::move(*parsed);
+  uint64_t t1 = p ? nowNs() : 0;
+  std::optional<Value> parsed = PrunedJsonParser(buf).parse();
+  if (p)
+    prof().parseNs += nowNs() - t1;
+  return parsed;
 }
 
 // clang.py::_emit_type skips a type node whose JSON dump carries no `inner`
@@ -1238,14 +1622,16 @@ private:
 class FactsVisitor : public RecursiveASTVisitor<FactsVisitor> {
 public:
   FactsVisitor(ASTContext &ctx, const std::vector<std::string> &roots,
-               std::vector<Entity> &functions, std::vector<Entity> &types,
-               std::vector<Entity> &templates, std::vector<Entity> &inlineBodies,
+               std::vector<Entity> &functions, std::vector<Entity> &variables,
+               std::vector<Entity> &types, std::vector<Entity> &templates,
+               std::vector<Entity> &inlineBodies,
                std::vector<Entity> &constexprValues, std::set<std::string> &diags,
                bool inferredRoots = false)
       : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
-        Functions(functions), Types(types), Templates(templates),
-        InlineBodies(inlineBodies), ConstexprValues(constexprValues),
-        Diags(diags), InferredRoots(inferredRoots) {}
+        Functions(functions), Variables(variables), Types(types),
+        Templates(templates), InlineBodies(inlineBodies),
+        ConstexprValues(constexprValues), Diags(diags),
+        InferredRoots(inferredRoots) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1382,42 +1768,101 @@ public:
   }
 
   bool VisitVarDecl(VarDecl *vd) {
-    if (vd->isImplicit() || isa<ParmVarDecl>(vd) || !vd->isConstexpr())
+    if (vd->isImplicit() || isa<ParmVarDecl>(vd))
       return true;
-    // Block-scope `constexpr` inside a public inline/header function body IS
-    // emitted (not skipped on getParentFunctionOrMethod): the clang backend
-    // descends accessible function bodies and emits such locals as `constexpr`
-    // entities just like it emits body-local types, so the plugin matches it
-    // (Codex review). scopedName() omits the function scope, so a local `k` in
-    // `demo::f()` is named `demo::k` exactly as the backend names it. Local
-    // constexpr are syntactic (present in the AST regardless of codegen), so
-    // there is no capture-point asymmetry here.
     if (!isAccessible(vd) || vd->getNameAsString().empty())
+      return true;
+    if (vd->isConstexpr()) {
+      // Block-scope `constexpr` inside a public inline/header function body IS
+      // emitted (not skipped on getParentFunctionOrMethod): the clang backend
+      // descends accessible function bodies and emits such locals as `constexpr`
+      // entities just like it emits body-local types, so the plugin matches it
+      // (Codex review). scopedName() omits the function scope, so a local `k` in
+      // `demo::f()` is named `demo::k` exactly as the backend names it. Local
+      // constexpr are syntactic (present in the AST regardless of codegen), so
+      // there is no capture-point asymmetry here.
+      std::string file, origin, visibility;
+      if (!classify(vd, file, origin, visibility))
+        return true;
+      std::optional<Value> json = dumpDeclJson(vd);
+      if (!json || !json->getAsObject()) {
+        Diags.insert("constexpr value unavailable (JSON dump failed)");
+        return true;
+      }
+      const Object &o = *json->getAsObject();
+      const Value *init = initExprJson(o);
+      std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
+      std::string name = scopedName(vd);
+      Entity e;
+      e.id = H({"constexpr", name, value});
+      e.kind = "constexpr";
+      e.qualified_name = name;
+      e.mangled_name = mangledFromJson(o);
+      e.value = value;
+      e.loc_path = file;
+      e.loc_line = presumedLine(vd);
+      e.loc_origin = origin;
+      e.visibility = visibility;
+      stampDeclEvidence(e, vd);
+      ConstexprValues.push_back(e);
+      return true;
+    }
+    // Non-constexpr external-linkage data variables / static data members —
+    // these become exported OBJECT symbols so capturing them lets a binary data
+    // export map to a source decl (ADR-030 D4). Mirrors clang.py's
+    // `_is_variable_node`/`_emit_variable`: skip function-local vars and variable
+    // templates (the clang backend never walks into those); internal-linkage
+    // variables (a namespace/file-scope `static` OR a namespace-scope `const`
+    // without `extern`) are dropped below by their mangled-name marker.
+    if (vd->isLocalVarDecl() || vd->getDescribedVarTemplate() ||
+        isa<VarTemplateSpecializationDecl>(vd))
       return true;
     std::string file, origin, visibility;
     if (!classify(vd, file, origin, visibility))
       return true;
     std::optional<Value> json = dumpDeclJson(vd);
     if (!json || !json->getAsObject()) {
-      Diags.insert("constexpr value unavailable (JSON dump failed)");
+      Diags.insert("variable facts unavailable (JSON dump failed)");
       return true;
     }
     const Object &o = *json->getAsObject();
-    const Value *init = initExprJson(o);
-    std::string value = init ? exprValueJson(*init) : subtreeHash(*json, {});
     std::string name = scopedName(vd);
+    std::string sig = qualTypeFromJson(o);
+    std::string mangled = mangledFromJson(o);
+    // Drop internal-linkage variables (clang's own linkage verdict, encoded as
+    // the Itanium `L` seniority marker / `_GLOBAL__N_` component) so a header
+    // `const`/file-`static`/anon-namespace var never shows up as a decl expected
+    // to map to an export (Codex review).
+    if (mangledHasInternalLinkage(mangled))
+      return true;
+    // C / extern "C" file-scope static: clang gives no mangled name to carry the
+    // marker, so filter on storageClass directly. A static data member is
+    // external (its lexical parent is a record), so keep it.
+    if (vd->getStorageClass() == SC_Static &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()))
+      return true;
+    // MSVC / clang-cl mangling (`?name@...`) carries no Itanium internal-linkage
+    // marker, so a namespace-scope top-level `const` without `extern` (internal
+    // in C++) would slip through. Fall back to the type-based language rule
+    // (Codex review); mirrors clang.py's `_is_top_level_const` branch.
+    if (mangled.rfind("?", 0) == 0 && vd->getStorageClass() != SC_Extern &&
+        !isa<CXXRecordDecl>(vd->getLexicalDeclContext()) &&
+        (isTopLevelConst(sig) ||
+         isTopLevelConst(desugaredQualTypeFromJson(o))))
+      return true;
+    std::string key = mangled.empty() ? name : mangled;
     Entity e;
-    e.id = H({"constexpr", name, value});
-    e.kind = "constexpr";
+    e.id = H({"variable", key, sig});
+    e.kind = "variable";
     e.qualified_name = name;
-    e.mangled_name = mangledFromJson(o);
-    e.value = value;
+    e.mangled_name = mangled;
+    e.type_hash = H({"type", sig});
     e.loc_path = file;
     e.loc_line = presumedLine(vd);
     e.loc_origin = origin;
     e.visibility = visibility;
     stampDeclEvidence(e, vd);
-    ConstexprValues.push_back(e);
+    Variables.push_back(e);
     return true;
   }
 
@@ -1681,6 +2126,7 @@ private:
   PrintingPolicy PP;
   const std::vector<std::string> &Roots;
   std::vector<Entity> &Functions;
+  std::vector<Entity> &Variables;
   std::vector<Entity> &Types;
   std::vector<Entity> &Templates;
   std::vector<Entity> &InlineBodies;
@@ -1714,19 +2160,21 @@ public:
   void HandleTranslationUnit(ASTContext &ctx) override {
     SourceManager &sm = ctx.getSourceManager();
 
-    std::vector<Entity> functions, types, templates, inlineBodies, constexprValues;
+    std::vector<Entity> functions, variables, types, templates, inlineBodies,
+        constexprValues;
     std::set<std::string> diags;
-    FactsVisitor visitor(ctx, Roots, functions, types, templates, inlineBodies,
-                         constexprValues, diags, InferredRootCount > 0);
+    FactsVisitor visitor(ctx, Roots, functions, variables, types, templates,
+                         inlineBodies, constexprValues, diags,
+                         InferredRootCount > 0);
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
     std::vector<Entity> macros = collectMacros(diags);
 
     emitInferenceNote(diags);
 
-    size_t publicCount = functions.size() + types.size() + templates.size() +
-                         inlineBodies.size() + constexprValues.size() +
-                         macros.size();
+    size_t publicCount = functions.size() + variables.size() + types.size() +
+                         templates.size() + inlineBodies.size() +
+                         constexprValues.size() + macros.size();
     emitEmptyPackDiagnostics(visitor, publicCount, diags);
 
     std::string source = resolveMainSource(sm);
@@ -1735,8 +2183,8 @@ public:
     std::string tuId = "cu://" + source + "#cfg:" + cfg;
     std::string targetId = Library.empty() ? "" : "target://" + Library;
 
-    if (!writeTu(source, tuId, targetId, ctxHash, functions, types, templates,
-                 inlineBodies, constexprValues, macros, diags))
+    if (!writeTu(source, tuId, targetId, ctxHash, functions, variables, types,
+                 templates, inlineBodies, constexprValues, macros, diags))
       llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
                    << "\n";
   }
@@ -1902,6 +2350,7 @@ private:
   bool writeTu(const std::string &source, const std::string &tuId,
                const std::string &targetId, const std::string &ctxHash,
                const std::vector<Entity> &functions,
+               const std::vector<Entity> &variables,
                const std::vector<Entity> &types,
                const std::vector<Entity> &templates,
                const std::vector<Entity> &inlineBodies,
@@ -1932,7 +2381,7 @@ private:
         ",\"source\":" + jsonStr(source) + ",\"public_header_roots\":" +
         jsonStrArray(Roots) + ",\"declarations\":[]" +
         ",\"types\":" + arr(types) + ",\"functions\":" + arr(functions) +
-        ",\"variables\":[]" + ",\"macros\":" + arr(macros) +
+        ",\"variables\":" + arr(variables) + ",\"macros\":" + arr(macros) +
         ",\"templates\":" + arr(templates) +
         ",\"inline_bodies\":" + arr(inlineBodies) +
         ",\"constexpr_values\":" + arr(constexprValues) +
@@ -1957,6 +2406,16 @@ private:
     if (!out)
       return false;
     out << tu << "\n";
+    if (prof().enabled) {
+      auto &p = prof();
+      auto ms = [](uint64_t ns) { return ns / 1e6; };
+      llvm::errs() << "abicheck-facts PROFILE " << stem << ": dump="
+                   << llvm::format("%.1f", ms(p.dumpNs)) << "ms parse="
+                   << llvm::format("%.1f", ms(p.parseNs)) << "ms canonicalize="
+                   << llvm::format("%.1f", ms(p.canonNs)) << "ms  (dumps="
+                   << p.dumpCalls << " canon=" << p.canonCalls << " jsonMB="
+                   << llvm::format("%.1f", p.dumpBytes / 1e6) << ")\n";
+    }
     return true;
   }
 

@@ -62,6 +62,11 @@ Implemented and matching `clang.py`, validated by the C.6 CI matrix:
   `relations`, and `ownership` dictionaries; the plugin fills Clang USR /
   canonical USR when available, and both producer paths stamp template-owner and
   public-root ownership hints for later policy/matching layers;
+- **external-linkage variables** — namespace-scope globals and `static` data
+  members (which become exported `OBJECT` symbols) are emitted as `variable`
+  entities keyed on mangled name + type, so a binary data export maps back to a
+  source decl. Internal-linkage namespace/file-scope `static`s and stack locals
+  are dropped (no symbol); `constexpr` variables ride the `constexpr` path;
 - **typedefs / type-aliases** — `type_hash = _hash("typedef-target",
   underlying)`, `value = underlying`;
 - **constexpr variables** — literal *and* computed initializers (a computed
@@ -80,6 +85,23 @@ the plugin serializes the subtree with **clang's own JSON dumper in-process**
 wrapper's clang backend consumes the same clang JSON, the hashes match by
 construction for a given clang version — which is what the C.6 matrix verifies.
 No second parse is added: the dump reads the AST clang already built.
+
+**Pruned parse (perf).** clang's JSON dumper emits full location/range/type/flag
+detail for every node, but `_canonical` keeps only a small fixed key set (`kind`,
+`name`, `value`, `opcode`, `castKind`, `type.qualType`/`desugaredQualType`,
+`referencedDecl.id`/`name`, `id`, `storageClass`, `mangledName`, `init`, and the
+recursive `inner`). Feeding all of clang's output through `llvm::json::parse` and
+then discarding ~90% of it dominated the cost — on a template-heavy TU the dumper
+emits ~200 MB of JSON and the reparse was ≈68% of the subtree-hash time. The
+plugin now parses that text with a **pruned parser** (`PrunedJsonParser`) that
+walks only the structure and delegates every kept leaf token to
+`llvm::json::parse`, so scalar/escape/number semantics — and therefore every
+emitted hash — are byte-identical to a full parse, while the discarded keys cost
+only a linear character skip. Measured on a from-scratch LLVM 18.1.3
+`LLVMSupport`+`LLVMDemangle` build (143 TUs, 4 cores): the plugin's compile-time
+overhead dropped from **3.44× → 2.39×** (tax 82 s → 47 s) with byte-for-byte
+identical `source_facts` and a green C.6 gate. Set `ABICHECK_PLUGIN_PROFILE=1` to
+print the per-TU dump/parse/canonicalize split to stderr.
 
 The one documented residual is a **floating-point literal's textual value inside
 a hashed subtree** (`pyFloat`): clang's JSON emits an approximate numeric value

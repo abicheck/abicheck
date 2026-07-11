@@ -801,7 +801,7 @@ def test_dump_pe_threads_compile_context(
     def _fake_non_elf(*args: object, **kwargs: object) -> None:
         captured.update(kwargs)
 
-    monkeypatch.setattr(cli_mod, "_handle_non_elf_dump", _fake_non_elf)
+    monkeypatch.setattr(cli_mod, "handle_non_elf_dump", _fake_non_elf)
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
     )
@@ -829,7 +829,7 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        cli_mod, "_handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
     )
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--gcc-options", "-DPE=1"]

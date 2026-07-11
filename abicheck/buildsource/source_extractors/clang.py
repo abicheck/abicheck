@@ -96,8 +96,10 @@ from .clang_public_roots import (  # noqa: F401
 )
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
-#: folded into the per-TU cache key (ADR-030 D8).
-CLANG_EXTRACTOR_VERSION = "0.5"
+#: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
+#: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
+#: from an older recipe. 0.6: emit external-linkage ``variables``.
+CLANG_EXTRACTOR_VERSION = "0.6"
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -597,6 +599,20 @@ def _signature(node: dict[str, Any]) -> str:
     return ""
 
 
+def _signature_desugared(node: dict[str, Any]) -> str:
+    """Return the node's ``desugaredQualType`` (the alias-resolved spelling).
+
+    clang carries the sugared ``qualType`` (e.g. ``CI`` for ``using CI = const
+    int``) and the resolved ``desugaredQualType`` (``const int``). Top-level-const
+    detection must see through the alias, so the desugared form is consulted
+    alongside the sugared one. Empty when clang emitted no desugared spelling.
+    """
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        return str(type_obj.get("desugaredQualType", ""))
+    return ""
+
+
 def _mangled(node: dict[str, Any]) -> str:
     mangled = node.get("mangledName")
     name = node.get("name", "")
@@ -631,7 +647,11 @@ def _template_param_name(node: dict[str, Any], position: int) -> str:
     if name:
         return name
     kind = str(node.get("kind") or "")
-    return "N" + str(position) if kind == "NonTypeTemplateParmDecl" else "T" + str(position)
+    return (
+        "N" + str(position)
+        if kind == "NonTypeTemplateParmDecl"
+        else "T" + str(position)
+    )
 
 
 def _template_params(node: dict[str, Any]) -> list[str]:
@@ -953,6 +973,153 @@ def _is_constexpr_var_node(
     )
 
 
+#: Decl containers whose direct ``VarDecl`` children have linkage (become real
+#: symbols). A ``VarDecl`` reached anywhere else in the walk — inside a function
+#: body's ``CompoundStmt``/``DeclStmt`` — is a stack local with no symbol and is
+#: never an ABI variable (``TranslationUnitDecl`` is the walk root's own kind).
+_VARIABLE_SCOPE_KINDS = frozenset(
+    {"TranslationUnitDecl", "NamespaceDecl", "CXXRecordDecl", "LinkageSpecDecl"}
+)
+
+
+def _mangled_has_internal_linkage(mangled: str) -> bool:
+    """Return ``True`` when an Itanium *mangled* name marks internal linkage.
+
+    clang has already done the linkage analysis and encoded it two ways, both
+    handled here:
+
+    * the GCC/clang seniority marker ``L`` prefixing the entity's own
+      ``<unqualified-name>`` — a namespace/file-scope ``static`` *or* a
+      namespace-scope ``const`` without ``extern`` (``_ZN2nsL7g_constE``,
+      ``_ZL1xE``);
+    * an **anonymous-namespace** component ``_GLOBAL__N_`` (``namespace { int x; }``
+      mangles as ``_ZN12_GLOBAL__N_11xE``) — internal linkage with *no* ``L``
+      marker (Codex review).
+
+    Such an entity never appears in the dynamic symbol table, so emitting it as a
+    ``variable`` would populate ``decls_without_symbol`` and risk a spurious
+    ``source_binary_provenance_mismatch`` against the correct binary. This parses
+    by Itanium length prefixes — so an ``L`` *inside* a source name (a namespace
+    literally ending in ``L``) is never miscounted — and bails to ``False``
+    (external, keep) on any exotic production, so a real export is never dropped.
+    """
+    m = mangled
+    if not m.startswith("_Z"):
+        return False
+    # Anonymous namespace: a reserved compiler component, so a plain substring
+    # test is unambiguous (a user cannot name an entity `_GLOBAL__N_`).
+    if "_GLOBAL__N_" in m:
+        return True
+    i = 2
+    n = len(m)
+    if i < n and m[i] == "N":  # nested-name: N [CV/ref] <prefix> <name> E
+        i += 1
+        while i < n and m[i] in "rVKO":  # cv-qualifiers / ref-qualifiers
+            i += 1
+    while i < n:
+        c = m[i]
+        if c == "E":
+            break
+        if c == "L":  # seniority marker before a <source-name> ⇒ internal linkage
+            return i + 1 < n and m[i + 1].isdigit()
+        if c.isdigit():  # <source-name> ::= <length> <identifier> — skip wholesale
+            j = i
+            length = 0
+            while j < n and m[j].isdigit():
+                length = length * 10 + (ord(m[j]) - 48)
+                j += 1
+                if length > n - j:  # malformed length ⇒ bail safe
+                    return False
+            i = j + length
+            continue
+        return False  # template/substitution/other production ⇒ treat as external
+    return False
+
+
+def _is_top_level_const(qual: str) -> bool:
+    """Return ``True`` when a type spelling is const-qualified at the top level.
+
+    Top-level const (``const int``, ``ns::Foo const``, ``int *const``) marks the
+    *object* itself const — which at namespace scope without ``extern`` gives
+    internal linkage in C++. An **array** is const iff its element type is const,
+    so it is reduced to that element type (``const int[2]`` / ``const char[8]``
+    are internal; an array of mutable pointers ``const char *[2]`` is not).
+    Pointer/reference-to-const (``const char *``) is NOT top-level const (the
+    pointer object is mutable, external), so a leading ``const`` only counts when
+    the reduced element type is not a pointer.
+    """
+    q = qual.strip().rstrip("&").strip()
+    # Array: reduce to the element type (spelled before the first ``[``).
+    bracket = q.find("[")
+    if bracket != -1:
+        q = q[:bracket].strip()
+    # Trailing ``const`` must be a standalone token, not the tail of an identifier
+    # (a type named ``almost_const`` is not const-qualified). ``int *const`` /
+    # ``ns::Foo const`` qualify; the char before ``const`` is then a non-identifier
+    # character (space / ``*``) or the string is exactly ``const``.
+    if q.endswith("const") and (len(q) == 5 or not (q[-6].isalnum() or q[-6] == "_")):
+        return True
+    return q.startswith("const ") and "*" not in q
+
+
+def _is_variable_node(
+    kind: str | None,
+    name: str,
+    node: dict[str, Any],
+    accessible: bool,
+    enclosing_kind: str | None,
+) -> bool:
+    """Return ``True`` for a named, accessible **externally-linked** data variable.
+
+    These are the globals and static data members that become exported ``OBJECT``
+    symbols (e.g. ``llvm::raw_ostream::RED``), so capturing them lets a binary
+    data export map back to a source declaration (ADR-030 D4). ``constexpr``
+    variables are handled by ``_emit_constexpr`` and excluded here.
+
+    A block-scope local (enclosing kind is a statement, not a decl container) has
+    no linkage and is dropped. Internal-linkage variables never appear in the
+    dynamic symbol table, so they are dropped two ways: (1) the mangled-name
+    marker — a C++ *namespace/file-scope* ``static``, a namespace-scope ``const``
+    without ``extern``, or an anonymous-namespace variable all carry it; and
+    (2) an explicit ``storageClass == "static"`` filter for the case clang gives
+    **no** mangled name (a C / ``extern "C"`` file-scope ``static``, whose
+    ``mangledName`` is absent or equals ``name``), which (1) cannot see. A
+    ``static`` **data member** (enclosing ``CXXRecordDecl``) has external linkage
+    and is kept by both. The mangled name is clang's own linkage verdict, so this
+    stays authoritative without re-deriving C++ linkage rules.
+    """
+    if kind != "VarDecl" or not name or not accessible:
+        return False
+    if node.get("constexpr"):
+        return False
+    if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
+        return False
+    mangled = _mangled(node)
+    if _mangled_has_internal_linkage(mangled):
+        return False
+    # C / extern "C" file-scope static: no mangled name carries the marker, so
+    # filter on storageClass directly. A static data member is external, so keep
+    # it (its enclosing kind is a record).
+    if node.get("storageClass") == "static" and enclosing_kind != "CXXRecordDecl":
+        return False
+    # MSVC / clang-cl mangling (`?name@...`) has no Itanium internal-linkage
+    # marker, so a namespace-scope top-level `const` without `extern` — internal
+    # linkage in C++ — would slip through the marker check. Fall back to the
+    # language rule from the type (Codex review). A static data member is
+    # external (enclosing record), and `extern` overrides, so both are excluded.
+    if (
+        mangled.startswith("?")
+        and enclosing_kind != "CXXRecordDecl"
+        and node.get("storageClass") != "extern"
+        and (
+            _is_top_level_const(_signature(node))
+            or _is_top_level_const(_signature_desugared(node))
+        )
+    ):
+        return False
+    return True
+
+
 def _is_type_node(kind: str | None, name: str, accessible: bool) -> bool:
     """Return ``True`` for a named, accessible record or enum declaration."""
     return kind in ("CXXRecordDecl", "EnumDecl") and bool(name) and accessible
@@ -977,6 +1144,7 @@ def _emit_node(
     kind: str | None,
     name: str,
     accessible: bool,
+    enclosing_kind: str | None = None,
 ) -> bool:
     """Dispatch a single AST node to the appropriate emit helper.
 
@@ -996,6 +1164,8 @@ def _emit_node(
         _emit_function(node, ctx, tu, scope, file)
     elif _is_constexpr_var_node(kind, name, node, accessible):
         _emit_constexpr(node, ctx, tu, scope, file)
+    elif _is_variable_node(kind, name, node, accessible, enclosing_kind):
+        _emit_variable(node, ctx, tu, scope, file)
     elif _is_type_node(kind, name, accessible):
         _emit_type(node, ctx, tu, scope, file)
     elif _is_typedef_node(kind, name, accessible):
@@ -1037,11 +1207,15 @@ def _walk_children(
     file: str,
     accessible: bool,
     running_access: str,
+    enclosing_kind: str | None = None,
 ) -> str:
     """Iterate a node's ``inner`` list, threading the sticky ``file`` forward.
 
     Handles ``AccessSpecDecl`` sections that switch the running C++ access for
     subsequent siblings. Returns the last file seen in any child's subtree.
+    ``enclosing_kind`` is this node's kind, forwarded so a child ``VarDecl`` knows
+    whether it is a static data member (``CXXRecordDecl`` parent → external
+    linkage) vs a namespace-scope ``static`` (internal linkage).
     """
     for child in node.get("inner", []):
         if not isinstance(child, dict):
@@ -1061,6 +1235,7 @@ def _walk_children(
             scope=child_scope,
             current_file=file,
             access=child.get("access", running_access),
+            enclosing_kind=enclosing_kind,
         )
     return file
 
@@ -1073,6 +1248,7 @@ def _walk(
     scope: list[str],
     current_file: str,
     access: str = "public",
+    enclosing_kind: str | None = None,
 ) -> str:
     """Pre-order traversal that emits public entities, tracking file + scope.
 
@@ -1096,7 +1272,9 @@ def _walk(
     name = node.get("name", "") or ""
     accessible = _is_accessible(access)
 
-    is_template = _emit_node(node, ctx, tu, scope, file, kind, name, accessible)
+    is_template = _emit_node(
+        node, ctx, tu, scope, file, kind, name, accessible, enclosing_kind
+    )
     if is_template:
         return file
 
@@ -1108,6 +1286,7 @@ def _walk(
         file=file,
         accessible=accessible,
         running_access=_initial_running_access(accessible, kind, node, access),
+        enclosing_kind=kind,
     )
 
 
@@ -1163,8 +1342,7 @@ def _emit_function(
     mangled = _mangled(node)
     loc = _location(file, _node_line(node), origin)
     relations = {
-        str(k): str(v)
-        for k, v in dict(node.get("_abicheck_relations", {})).items()
+        str(k): str(v) for k, v in dict(node.get("_abicheck_relations", {})).items()
     }
     # A function entity always carries the signature + default-argument value so
     # default_argument_changed fires; a body present in a public header
@@ -1330,6 +1508,43 @@ def _emit_constexpr(
             qualified_name=name,
             mangled_name=mangled,
             value=value,
+            names=_entity_names(name, mangled),
+            ownership=_entity_ownership(visibility, origin),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=LayerConfidence.HIGH,
+        )
+    )
+
+
+def _emit_variable(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    """Emit an external-linkage data variable / static data member entity.
+
+    Mirrors the castxml ``entity_from_variable`` recipe (``base.py``): identity is
+    keyed on the mangled name (or qualified name) and the variable's type, so a
+    binary ``OBJECT`` export links to it by mangled name and ``variable_type_changed``
+    can fire on a type change.
+    """
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    type_repr = _signature(node)
+    mangled = _mangled(node)
+    tu.variables.append(
+        SourceEntity(
+            id=_hash("variable", mangled or name, type_repr),
+            kind="variable",
+            qualified_name=name,
+            mangled_name=mangled,
+            type_hash=_hash("type", type_repr),
             names=_entity_names(name, mangled),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),

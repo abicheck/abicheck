@@ -216,13 +216,18 @@ def _merge_handle_conflicts(
         _record_merge_conflicts(combined, conflicts, winners)
 
 
-def _merge_attach_combined(
-    combined: BuildSourcePack,
-    base: AbiSnapshot,
-    output: Path,
+def _relink_combined_against_exports(
+    combined: BuildSourcePack, base_exports: tuple[str, ...]
 ) -> None:
-    """Relink source-ABI surface against binary exports (A1) and attach combined to base."""
-    base_exports = _exported_symbols_from_snapshot(base)
+    """Relink a combined pack's L4 surface + L5 graph against a binary's exports.
+
+    Shared by ``merge`` (folding independently-produced dumps) and ``dump
+    --inputs`` (folding a Flow-2 pack straight into the artifact dump): a
+    source-only pack carries no ``exported_symbols`` root, so map its decls/types
+    to the real binary exports here and rebuild the L4/L5 coverage rows. Mutates
+    *combined* in place; a no-op when there are no exports or the surface is
+    already export-linked.
+    """
     if (
         base_exports
         and combined.source_abi is not None
@@ -266,9 +271,42 @@ def _merge_attach_combined(
         ]
         # Mutating payloads invalidates precomputed artifact digests; clear them.
         combined.manifest.artifacts = []
+
+
+def _merge_attach_combined(
+    combined: BuildSourcePack,
+    base: AbiSnapshot,
+    output: Path,
+) -> None:
+    """Relink source-ABI surface against binary exports (A1) and attach combined to base."""
+    base_exports = _exported_symbols_from_snapshot(base)
+    _relink_combined_against_exports(combined, base_exports)
     _warn_if_source_surface_empty(combined, base_exports)
     base.build_source = combined
     base.build_source_pack = combined.to_ref(path_hint=str(output))
+
+
+def embed_inputs_pack(
+    snap: AbiSnapshot, inputs_path: Path, output: Path | None
+) -> None:
+    """Fold a Flow-2 ``abicheck_inputs/`` pack into a binary dump inline.
+
+    ``abicheck dump <binary> --inputs ./abicheck_inputs/`` performs, in one
+    command, exactly the fold that ``abicheck merge <binary>.json
+    ./abicheck_inputs/`` does: ingest the build-emitted pack (no frontend re-run),
+    combine its L3/L4/L5 facts into *snap*, and relink the source surface against
+    the binary's exports. This removes the separate ``merge`` step for the common
+    single-artifact plugin/wrapper flow (``merge`` remains for multi-input folds).
+    """
+    ingested = _ingest_inputs_pack_snapshot(inputs_path)
+    combined = _combine_packs(snap.build_source, ingested.build_source)
+    if combined is None:
+        return
+    base_exports = _exported_symbols_from_snapshot(snap)
+    _relink_combined_against_exports(combined, base_exports)
+    _warn_if_source_surface_empty(combined, base_exports)
+    snap.build_source = combined
+    snap.build_source_pack = combined.to_ref(path_hint=str(output) if output else "")
 
 
 def _warn_if_source_surface_empty(

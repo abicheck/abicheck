@@ -87,7 +87,9 @@ def test_build_command_c_language() -> None:
     assert "-std=c11" in cmd
 
 
-def test_public_package_root_maps_to_equivalent_build_include_dir(tmp_path: Path) -> None:
+def test_public_package_root_maps_to_equivalent_build_include_dir(
+    tmp_path: Path,
+) -> None:
     package_include = tmp_path / "pkg" / "opt" / "dal" / "include"
     build_include = tmp_path / "src" / "__release" / "daal" / "latest" / "include"
     system_build_include = tmp_path / "src" / "__release" / "sys" / "include"
@@ -99,7 +101,9 @@ def test_public_package_root_maps_to_equivalent_build_include_dir(tmp_path: Path
     (build_include / "oneapi" / "dal.hpp").write_text("// build header\n")
     (build_include / "oneapi" / "version.hpp").write_text("// build header\n")
     (system_build_include / "oneapi" / "dal.hpp").write_text("// system build header\n")
-    (system_build_include / "oneapi" / "version.hpp").write_text("// system build header\n")
+    (system_build_include / "oneapi" / "version.hpp").write_text(
+        "// system build header\n"
+    )
 
     roots = _equivalent_public_roots_for_unit(
         [str(package_include)],
@@ -109,7 +113,11 @@ def test_public_package_root_maps_to_equivalent_build_include_dir(tmp_path: Path
         ),
     )
 
-    assert roots == [str(package_include), str(build_include), str(system_build_include)]
+    assert roots == [
+        str(package_include),
+        str(build_include),
+        str(system_build_include),
+    ]
 
 
 def test_public_package_root_maps_relative_include_against_compile_directory(
@@ -165,7 +173,9 @@ def test_relative_mirror_directory_root_classifies_clang_relative_locations() ->
     assert [fn.qualified_name for fn in tu.functions] == ["api_fn"]
 
 
-def test_public_package_root_weak_match_does_not_promote_directory(tmp_path: Path) -> None:
+def test_public_package_root_weak_match_does_not_promote_directory(
+    tmp_path: Path,
+) -> None:
     package_include = tmp_path / "pkg" / "include"
     build_include = tmp_path / "build" / "include"
     (package_include / "api").mkdir(parents=True)
@@ -196,7 +206,10 @@ def test_public_package_root_probes_argv_only_include_dirs(tmp_path: Path) -> No
 
     roots = _equivalent_public_roots_for_unit(
         [str(package_include)],
-        _cu(directory=str(build_dir), argv=["clang++", "-iquote", "quote", "-c", "x.cpp"]),
+        _cu(
+            directory=str(build_dir),
+            argv=["clang++", "-iquote", "quote", "-c", "x.cpp"],
+        ),
     )
 
     assert roots == [str(package_include), "quote/"]
@@ -235,12 +248,11 @@ def test_clang_compiler_override_probes_msvc_argv_include_dirs(tmp_path: Path) -
     (build_include / "api" / "one.h").write_text("// build header\n")
     (build_include / "api" / "two.h").write_text("// build header\n")
 
-    roots = (
-        ClangSourceExtractor(compiler_binary="clang-cl")
-        .effective_public_header_roots_for_cache(
-            _cu(argv=["ccache", "wrapped-cxx", "/I", str(build_include), "/c", "x.cpp"]),
-            [str(package_include)],
-        )
+    roots = ClangSourceExtractor(
+        compiler_binary="clang-cl"
+    ).effective_public_header_roots_for_cache(
+        _cu(argv=["ccache", "wrapped-cxx", "/I", str(build_include), "/c", "x.cpp"]),
+        [str(package_include)],
     )
 
     assert roots == [
@@ -268,7 +280,9 @@ def test_public_package_root_samples_extensionless_headers(tmp_path: Path) -> No
     assert roots == [str(package_include), str(build_include)]
 
 
-def test_public_package_root_samples_lowercase_extensionless_headers(tmp_path: Path) -> None:
+def test_public_package_root_samples_lowercase_extensionless_headers(
+    tmp_path: Path,
+) -> None:
     package_include = tmp_path / "pkg" / "include"
     build_include = tmp_path / "build" / "include"
     (package_include / "boost").mkdir(parents=True)
@@ -392,7 +406,9 @@ def test_installed_include_namespace_prefix_can_map_to_build_include(
     (package_include / "dal" / "services").mkdir(parents=True)
     (build_include / "services").mkdir(parents=True)
     (package_include / "dal" / "services" / "base.h").write_text("// package header\n")
-    (package_include / "dal" / "services" / "status.h").write_text("// package header\n")
+    (package_include / "dal" / "services" / "status.h").write_text(
+        "// package header\n"
+    )
     (build_include / "services" / "base.h").write_text("// build header\n")
     (build_include / "services" / "status.h").write_text("// build header\n")
 
@@ -459,13 +475,19 @@ def test_exact_file_roots_do_not_match_unrelated_same_basename(tmp_path: Path) -
                 {
                     "kind": "FunctionDecl",
                     "name": "public_fn",
-                    "loc": {"file": str(tmp_path / "build" / "api" / "version.h"), "line": 1},
+                    "loc": {
+                        "file": str(tmp_path / "build" / "api" / "version.h"),
+                        "line": 1,
+                    },
                     "type": {"qualType": "void ()"},
                 },
                 {
                     "kind": "FunctionDecl",
                     "name": "private_fn",
-                    "loc": {"file": str(tmp_path / "build" / "private" / "version.h"), "line": 1},
+                    "loc": {
+                        "file": str(tmp_path / "build" / "private" / "version.h"),
+                        "line": 1,
+                    },
                     "type": {"qualType": "void ()"},
                 },
             ],
@@ -535,7 +557,9 @@ def test_public_package_root_samples_template_include_fragments(tmp_path: Path) 
     assert roots == [str(package_include), str(build_include)]
 
 
-def test_public_package_file_root_maps_to_equivalent_build_file_only(tmp_path: Path) -> None:
+def test_public_package_file_root_maps_to_equivalent_build_file_only(
+    tmp_path: Path,
+) -> None:
     package_include = tmp_path / "pkg" / "include"
     build_include = tmp_path / "build" / "include"
     package_include.mkdir(parents=True)
@@ -618,42 +642,70 @@ def _ast() -> dict:
                         "type": {"qualType": "int (int, int)"},
                         "inline": True,
                         "inner": [
-                            {"kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"}},
                             {
-                                "kind": "ParmVarDecl", "name": "y", "type": {"qualType": "int"},
+                                "kind": "ParmVarDecl",
+                                "name": "x",
+                                "type": {"qualType": "int"},
+                            },
+                            {
+                                "kind": "ParmVarDecl",
+                                "name": "y",
+                                "type": {"qualType": "int"},
                                 "init": "c",
                                 "inner": [{"kind": "IntegerLiteral", "value": "1"}],
                             },
                             {
                                 "kind": "CompoundStmt",
-                                "inner": [{"kind": "ReturnStmt", "inner": [
-                                    {"kind": "DeclRefExpr", "name": "x"}]}],
+                                "inner": [
+                                    {
+                                        "kind": "ReturnStmt",
+                                        "inner": [{"kind": "DeclRefExpr", "name": "x"}],
+                                    }
+                                ],
                             },
                         ],
                     },
                     {
-                        "kind": "VarDecl", "name": "kMax", "loc": {"line": 9},
-                        "constexpr": True, "type": {"qualType": "const int"},
+                        "kind": "VarDecl",
+                        "name": "kMax",
+                        "loc": {"line": 9},
+                        "constexpr": True,
+                        "type": {"qualType": "const int"},
                         "inner": [{"kind": "IntegerLiteral", "value": "42"}],
                     },
                     {
-                        "kind": "CXXRecordDecl", "name": "Widget", "loc": {"line": 12},
-                        "inner": [{"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}}],
+                        "kind": "CXXRecordDecl",
+                        "name": "Widget",
+                        "loc": {"line": 12},
+                        "inner": [
+                            {
+                                "kind": "FieldDecl",
+                                "name": "a",
+                                "type": {"qualType": "int"},
+                            }
+                        ],
                     },
                     {
-                        "kind": "FunctionTemplateDecl", "name": "maxv", "loc": {"line": 20},
+                        "kind": "FunctionTemplateDecl",
+                        "name": "maxv",
+                        "loc": {"line": 20},
                         "inner": [
                             {"kind": "TemplateTypeParmDecl", "name": "T"},
-                            {"kind": "FunctionDecl", "name": "maxv",
-                             "inner": [{"kind": "CompoundStmt", "inner": []}]},
+                            {
+                                "kind": "FunctionDecl",
+                                "name": "maxv",
+                                "inner": [{"kind": "CompoundStmt", "inner": []}],
+                            },
                         ],
                     },
                 ],
             },
             {
-                "kind": "FunctionDecl", "name": "priv",
+                "kind": "FunctionDecl",
+                "name": "priv",
                 "loc": {"file": "src/internal.h", "line": 2},
-                "type": {"qualType": "void ()"}, "inline": True,
+                "type": {"qualType": "void ()"},
+                "inline": True,
                 "inner": [{"kind": "CompoundStmt", "inner": []}],
             },
         ],
@@ -670,11 +722,268 @@ def test_ast_mapping_extracts_each_entity_kind() -> None:
     assert funcs["ns::add"].mangled_name == "_ZN2ns3addEii"
     assert {e.qualified_name for e in tu.inline_bodies} == {"ns::add"}
     assert tu.inline_bodies[0].body_hash.startswith("sha256:")
-    assert {e.qualified_name: e.value for e in tu.constexpr_values} == {"ns::kMax": "42"}
+    assert {e.qualified_name: e.value for e in tu.constexpr_values} == {
+        "ns::kMax": "42"
+    }
     assert {e.qualified_name for e in tu.types} == {"ns::Widget"}
     assert {e.qualified_name for e in tu.templates} == {"ns::maxv"}
     # Round-trips through the normalized schema.
     assert SourceAbiTu.from_dict(tu.to_dict()).tu_id == tu.tu_id
+
+
+def _var_ast() -> dict:
+    """AST root exercising every VarDecl linkage case the extractor distinguishes."""
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    # namespace global -> external -> variable
+                    {
+                        "kind": "VarDecl",
+                        "name": "gCount",
+                        "loc": {"line": 2},
+                        "mangledName": "_ZN2ns6gCountE",
+                        "type": {"qualType": "int"},
+                    },
+                    # namespace-scope static -> internal linkage -> dropped
+                    {
+                        "kind": "VarDecl",
+                        "name": "gPriv",
+                        "loc": {"line": 3},
+                        "storageClass": "static",
+                        "mangledName": "_ZN2nsL5gPrivE",
+                        "type": {"qualType": "int"},
+                    },
+                    # namespace-scope `const` without `extern` -> internal linkage
+                    # in C++ (clang marks it with the mangled `L`) -> dropped, so a
+                    # header constant does not populate decls_without_symbol
+                    # (Codex review). Note: no storageClass here — only the mangled
+                    # marker distinguishes it, which is why the marker is the signal.
+                    {
+                        "kind": "VarDecl",
+                        "name": "gConst",
+                        "loc": {"line": 4},
+                        "mangledName": "_ZN2nsL6gConstE",
+                        "type": {"qualType": "const int"},
+                    },
+                    # C / extern "C" file-scope static: storageClass "static" but
+                    # NO mangledName (the marker cannot see it), so the explicit
+                    # storageClass filter must drop it (Codex review).
+                    {
+                        "kind": "VarDecl",
+                        "name": "cStatic",
+                        "loc": {"line": 5},
+                        "storageClass": "static",
+                        "type": {"qualType": "int"},
+                    },
+                    # constexpr -> constexpr_values, not variables
+                    {
+                        "kind": "VarDecl",
+                        "name": "kN",
+                        "loc": {"line": 4},
+                        "constexpr": True,
+                        "type": {"qualType": "const int"},
+                        "inner": [{"kind": "IntegerLiteral", "value": "7"}],
+                    },
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "C",
+                        "loc": {"line": 5},
+                        "inner": [
+                            # static data member -> external -> variable (kept
+                            # despite storageClass "static": lexical parent is a record)
+                            {
+                                "kind": "VarDecl",
+                                "name": "sMember",
+                                "access": "public",
+                                "loc": {"line": 6},
+                                "storageClass": "static",
+                                "mangledName": "_ZN2ns1C7sMemberE",
+                                "type": {"qualType": "int"},
+                            },
+                        ],
+                    },
+                    {
+                        # a public inline function whose body declares a local var:
+                        # a stack local is not a symbol -> never a variable
+                        "kind": "FunctionDecl",
+                        "name": "f",
+                        "loc": {"line": 8},
+                        "mangledName": "_ZN2ns1fEv",
+                        "type": {"qualType": "void ()"},
+                        "inline": True,
+                        "inner": [
+                            {
+                                "kind": "CompoundStmt",
+                                "inner": [
+                                    {
+                                        "kind": "DeclStmt",
+                                        "inner": [
+                                            {
+                                                "kind": "VarDecl",
+                                                "name": "local",
+                                                "type": {"qualType": "int"},
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def test_ast_mapping_emits_external_linkage_variables_only() -> None:
+    tu = source_abi_from_clang_ast(
+        _var_ast(), _cu(), ["include/foo.h"], "target://libfoo"
+    )
+    got = {e.qualified_name: e for e in tu.variables}
+    # external global + external static data member are emitted with mangled names
+    assert set(got) == {"ns::gCount", "ns::C::sMember"}, got
+    assert got["ns::gCount"].mangled_name == "_ZN2ns6gCountE"
+    assert got["ns::C::sMember"].mangled_name == "_ZN2ns1C7sMemberE"
+    assert got["ns::gCount"].kind == "variable"
+    assert got["ns::gCount"].type_hash.startswith("sha256:")
+    # internal-linkage namespace static, a namespace `const`, a C-style
+    # file-scope static with no mangled name (Codex reviews), constexpr, and the
+    # stack local are NOT variables
+    assert "ns::gPriv" not in got
+    assert "ns::gConst" not in got
+    assert "ns::cStatic" not in got
+    assert "ns::kN" not in got
+    assert all("local" not in n for n in got)
+    # constexpr still routes to constexpr_values
+    assert {e.qualified_name for e in tu.constexpr_values} == {"ns::kN"}
+
+
+def test_mangled_internal_linkage_marker() -> None:
+    from abicheck.buildsource.source_extractors.clang import (
+        _mangled_has_internal_linkage as internal,
+    )
+
+    # External: namespace global, extern, static data member (no `L` marker).
+    assert not internal("_ZN2ns8g_globalE")
+    assert not internal("_ZN2ns1C8s_memberE")  # static data member is external
+    assert not internal("_Z3fooi")  # free function
+    assert not internal("")  # no mangling (extern "C") -> treat as external
+    # Internal: namespace static / namespace const, and a top-level static.
+    assert internal("_ZN2nsL8g_staticE")
+    assert internal("_ZN2nsL7g_constE")
+    assert internal("_ZL1xE")
+    # Anonymous namespace: internal linkage with NO `L` marker (Codex review).
+    assert internal("_ZN12_GLOBAL__N_11xE")
+    # Length-prefix parsing: an `L` that is the last char of a *source name*
+    # (namespace `detailL`) must NOT be read as the linkage marker.
+    assert not internal("_ZN7detailL8g_globalE")
+    # Bail-safe branches (all treated as external so a real export is never
+    # dropped): a non-Itanium name, a nested name with cv-qualifiers before the
+    # marker, an exotic/unparseable production, and a malformed length prefix.
+    assert not internal("plain_c_symbol")
+    assert internal("_ZNK2nsL7g_constE")  # cv-qualified nested, still internal
+    assert not internal("_Z1fIiEvv")  # template production -> bail to external
+    assert not internal("_ZN999999999999")  # malformed length -> bail to external
+
+
+def test_top_level_const_detection() -> None:
+    from abicheck.buildsource.source_extractors.clang import (
+        _is_top_level_const as tlc,
+    )
+
+    # top-level const objects (internal at namespace scope)
+    assert tlc("const int")
+    assert tlc("const ns::Foo")
+    assert tlc("int *const")
+    assert tlc("const char *const")
+    assert tlc("const int &")  # reference stripped, underlying const
+    # const arrays: const iff the element type is const (Codex review)
+    assert tlc("const int[4]")
+    assert tlc("const char[8]")
+    assert tlc("int *const[2]")  # array of const pointers
+    # NOT top-level const (external): pointer-to-const, array of mutable
+    # pointers, or plain
+    assert not tlc("const char *")
+    assert not tlc("const char *[2]")  # array of (mutable) pointers to const
+    assert not tlc("int")
+    assert not tlc("ns::Foo *")
+    # trailing `const` must be a standalone token, not the tail of an identifier:
+    # a type named `almost_const` / `xconst` is NOT const-qualified (Codex review)
+    assert not tlc("almost_const")
+    assert not tlc("ns::almost_const")
+    assert not tlc("xconst")
+    assert tlc("const")  # the bare keyword still counts
+
+
+def test_msvc_mangled_namespace_const_is_not_a_variable() -> None:
+    # A namespace-scope `const int c = 1` under clang-cl mangles as
+    # `?c@ns@@3HB` with no `L` marker and no storageClass — internal linkage that
+    # the Itanium marker cannot see. The MSVC/type fallback must drop it so it does
+    # not populate decls_without_symbol (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "mangledName": "?c@ns@@3HB",
+                        "type": {"qualType": "const int"},
+                    },
+                    # a non-const MSVC global stays external -> variable
+                    {
+                        "kind": "VarDecl",
+                        "name": "g",
+                        "loc": {"line": 3},
+                        "mangledName": "?g@ns@@3HA",
+                        "type": {"qualType": "int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == {"ns::g"}, got  # the internal const `c` is dropped
+
+
+def test_msvc_const_alias_variable_is_dropped_via_desugared_type() -> None:
+    # A namespace-scope `using CI = const int; CI c = 1;` under clang-cl: the
+    # sugared qualType is the alias `CI` (not const-spelled), so the MSVC top-level
+    # -const fallback must consult desugaredQualType (`const int`) to see the
+    # internal linkage and drop it (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "mangledName": "?c@ns@@3HB",
+                        "type": {"qualType": "CI", "desugaredQualType": "const int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == set(), got  # the internal const-alias `c` is dropped
 
 
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:
@@ -701,12 +1010,14 @@ def test_ast_mapping_extracts_typedef_underlying_type() -> None:
         "kind": "TranslationUnitDecl",
         "inner": [
             {
-                "kind": "TypedefDecl", "name": "handle_t",
+                "kind": "TypedefDecl",
+                "name": "handle_t",
                 "loc": {"file": "include/foo.h", "line": 4},
                 "type": {"qualType": "int32_t"},
             },
             {
-                "kind": "TypeAliasDecl", "name": "size_alias",
+                "kind": "TypeAliasDecl",
+                "name": "size_alias",
                 "loc": {"file": "include/foo.h", "line": 5},
                 "type": {"qualType": "unsigned long"},
             },
@@ -733,10 +1044,14 @@ def test_typedef_underlying_fallback_and_missing() -> None:
 def test_typedef_without_underlying_is_skipped() -> None:
     ast = {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "TypedefDecl", "name": "opaque",
-            "loc": {"file": "include/foo.h", "line": 2}, "type": {},
-        }],
+        "inner": [
+            {
+                "kind": "TypedefDecl",
+                "name": "opaque",
+                "loc": {"file": "include/foo.h", "line": 2},
+                "type": {},
+            }
+        ],
     }
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
     assert not [e for e in tu.types if e.kind == "typedef"]
@@ -756,27 +1071,70 @@ def _fn_ast(param, local, ret_ref):
     rid, rname = ret_ref
     return {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fi",
-            "loc": {"file": "include/foo.h", "line": 1},
-            "type": {"qualType": "int (int)"},
-            "inner": [
-                {"kind": "ParmVarDecl", "id": pid, "name": pname,
-                 "type": {"qualType": "int"}},
-                {"kind": "CompoundStmt", "inner": [
-                    {"kind": "DeclStmt", "inner": [
-                        {"kind": "VarDecl", "id": lid, "name": lname,
-                         "type": {"qualType": "int"}, "inner": [
-                            {"kind": "ImplicitCastExpr", "inner": [
-                                {"kind": "DeclRefExpr",
-                                 "referencedDecl": {"id": pid, "name": pname}}]}]}]},
-                    {"kind": "ReturnStmt", "inner": [
-                        {"kind": "ImplicitCastExpr", "inner": [
-                            {"kind": "DeclRefExpr",
-                             "referencedDecl": {"id": rid, "name": rname}}]}]},
-                ]},
-            ],
-        }],
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Z1fi",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "type": {"qualType": "int (int)"},
+                "inner": [
+                    {
+                        "kind": "ParmVarDecl",
+                        "id": pid,
+                        "name": pname,
+                        "type": {"qualType": "int"},
+                    },
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [
+                            {
+                                "kind": "DeclStmt",
+                                "inner": [
+                                    {
+                                        "kind": "VarDecl",
+                                        "id": lid,
+                                        "name": lname,
+                                        "type": {"qualType": "int"},
+                                        "inner": [
+                                            {
+                                                "kind": "ImplicitCastExpr",
+                                                "inner": [
+                                                    {
+                                                        "kind": "DeclRefExpr",
+                                                        "referencedDecl": {
+                                                            "id": pid,
+                                                            "name": pname,
+                                                        },
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "kind": "ReturnStmt",
+                                "inner": [
+                                    {
+                                        "kind": "ImplicitCastExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "DeclRefExpr",
+                                                "referencedDecl": {
+                                                    "id": rid,
+                                                    "name": rname,
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ],
     }
 
 
@@ -808,20 +1166,51 @@ def test_body_fingerprint_changes_when_reference_target_differs() -> None:
 def _fn_with_static_local(static_name):
     return {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fv",
-            "loc": {"file": "include/foo.h", "line": 1},
-            "type": {"qualType": "int ()"},
-            "inner": [{"kind": "CompoundStmt", "inner": [
-                {"kind": "DeclStmt", "inner": [
-                    {"kind": "VarDecl", "id": "S1", "name": static_name,
-                     "storageClass": "static", "type": {"qualType": "int"}}]},
-                {"kind": "ReturnStmt", "inner": [
-                    {"kind": "ImplicitCastExpr", "inner": [
-                        {"kind": "DeclRefExpr",
-                         "referencedDecl": {"id": "S1", "name": static_name}}]}]},
-            ]}],
-        }],
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Z1fv",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "type": {"qualType": "int ()"},
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [
+                            {
+                                "kind": "DeclStmt",
+                                "inner": [
+                                    {
+                                        "kind": "VarDecl",
+                                        "id": "S1",
+                                        "name": static_name,
+                                        "storageClass": "static",
+                                        "type": {"qualType": "int"},
+                                    }
+                                ],
+                            },
+                            {
+                                "kind": "ReturnStmt",
+                                "inner": [
+                                    {
+                                        "kind": "ImplicitCastExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "DeclRefExpr",
+                                                "referencedDecl": {
+                                                    "id": "S1",
+                                                    "name": static_name,
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
     }
 
 
@@ -844,32 +1233,55 @@ def test_body_fingerprint_changes_on_global_rename() -> None:
 
 def _fn_binop(op, lname, rname):
     """`int f() {{ return <lname> <op> <rname>; }}` with two global operands."""
+
     def _ref(gid, name):
         return {"kind": "DeclRefExpr", "referencedDecl": {"id": gid, "name": name}}
+
     return {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fv",
-            "loc": {"file": "include/foo.h", "line": 1},
-            "type": {"qualType": "int ()"},
-            "inner": [{"kind": "CompoundStmt", "inner": [
-                {"kind": "ReturnStmt", "inner": [
-                    {"kind": "BinaryOperator", "opcode": op,
-                     "inner": [_ref("GL", lname), _ref("GR", rname)]}]}]}],
-        }],
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Z1fv",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "type": {"qualType": "int ()"},
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [
+                            {
+                                "kind": "ReturnStmt",
+                                "inner": [
+                                    {
+                                        "kind": "BinaryOperator",
+                                        "opcode": op,
+                                        "inner": [_ref("GL", lname), _ref("GR", rname)],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
     }
 
 
 def test_commutative_operands_sorted_in_fingerprint() -> None:
     # `a + b` and `b + a` hash identically; `a == b` / `b == a` too.
     assert _body_hash(_fn_binop("+", "a", "b")) == _body_hash(_fn_binop("+", "b", "a"))
-    assert _body_hash(_fn_binop("==", "a", "b")) == _body_hash(_fn_binop("==", "b", "a"))
+    assert _body_hash(_fn_binop("==", "a", "b")) == _body_hash(
+        _fn_binop("==", "b", "a")
+    )
 
 
 def test_noncommutative_operands_kept_ordered() -> None:
     # `a - b` != `b - a`; short-circuit `&&` is NOT reordered (side-effect order).
     assert _body_hash(_fn_binop("-", "a", "b")) != _body_hash(_fn_binop("-", "b", "a"))
-    assert _body_hash(_fn_binop("&&", "a", "b")) != _body_hash(_fn_binop("&&", "b", "a"))
+    assert _body_hash(_fn_binop("&&", "a", "b")) != _body_hash(
+        _fn_binop("&&", "b", "a")
+    )
 
 
 def test_directory_header_root_classifies_decls_as_public(tmp_path: Path) -> None:
@@ -880,11 +1292,15 @@ def test_directory_header_root_classifies_decls_as_public(tmp_path: Path) -> Non
     (inc / "foo.h").write_text("int x;\n")
     ast = {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "FunctionDecl", "name": "pub",
-            "loc": {"file": str(inc / "foo.h")},
-            "mangledName": "_Z3pubv", "type": {"qualType": "void ()"},
-        }],
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "pub",
+                "loc": {"file": str(inc / "foo.h")},
+                "mangledName": "_Z3pubv",
+                "type": {"qualType": "void ()"},
+            }
+        ],
     }
     # The public root is the directory itself.
     tu = source_abi_from_clang_ast(ast, _cu(), [str(inc)], "t")
@@ -896,10 +1312,15 @@ def test_trailing_slash_root_treated_as_directory() -> None:
     # on disk, so a decl under it is public.
     ast = {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "FunctionDecl", "name": "pub", "loc": {"file": "include/api.h"},
-            "mangledName": "_Z3pubv", "type": {"qualType": "void ()"},
-        }],
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "pub",
+                "loc": {"file": "include/api.h"},
+                "mangledName": "_Z3pubv",
+                "type": {"qualType": "void ()"},
+            }
+        ],
     }
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/"], "t")
     assert any(e.qualified_name == "pub" for e in tu.functions)
@@ -916,26 +1337,38 @@ def _record_ast(tag: str, members: list[dict]) -> dict:
     """A clang AST with one record (``tag`` = class/struct) in a public header."""
     return {
         "kind": "TranslationUnitDecl",
-        "inner": [{
-            "kind": "CXXRecordDecl", "name": "C", "tagUsed": tag,
-            "loc": {"file": "include/foo.h", "line": 1},
-            "inner": members,
-        }],
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "C",
+                "tagUsed": tag,
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": members,
+            }
+        ],
     }
 
 
 def _method(name: str, *, default: str | None = None, body: bool = False) -> dict:
     inner: list[dict] = []
     if default is not None:
-        inner.append({
-            "kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"},
-            "init": "c", "inner": [{"kind": "IntegerLiteral", "value": default}],
-        })
+        inner.append(
+            {
+                "kind": "ParmVarDecl",
+                "name": "x",
+                "type": {"qualType": "int"},
+                "init": "c",
+                "inner": [{"kind": "IntegerLiteral", "value": default}],
+            }
+        )
     if body:
         inner.append({"kind": "CompoundStmt", "inner": []})
     return {
-        "kind": "CXXMethodDecl", "name": name, "loc": {"line": 3},
-        "type": {"qualType": "int (int)"}, "inner": inner,
+        "kind": "CXXMethodDecl",
+        "name": name,
+        "loc": {"line": 3},
+        "type": {"qualType": "int (int)"},
+        "inner": inner,
     }
 
 
@@ -957,12 +1390,15 @@ def test_struct_default_public_members_emitted() -> None:
 
 def test_access_spec_section_switches_visibility() -> None:
     # `public:` exposes following members; `private:` hides them again.
-    ast = _record_ast("class", [
-        {"kind": "AccessSpecDecl", "access": "public"},
-        _method("api", default="1"),
-        {"kind": "AccessSpecDecl", "access": "private"},
-        _method("impl", default="2"),
-    ])
+    ast = _record_ast(
+        "class",
+        [
+            {"kind": "AccessSpecDecl", "access": "public"},
+            _method("api", default="1"),
+            {"kind": "AccessSpecDecl", "access": "private"},
+            _method("impl", default="2"),
+        ],
+    )
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
     names = {e.qualified_name for e in tu.functions}
     assert "C::api" in names
@@ -972,10 +1408,13 @@ def test_access_spec_section_switches_visibility() -> None:
 def test_explicit_per_decl_access_honored() -> None:
     # Newer clang stamps `access` on each member decl; a private one is dropped
     # even in a struct (default public).
-    ast = _record_ast("struct", [
-        dict(_method("api", default="1"), access="public"),
-        dict(_method("impl", default="2"), access="private"),
-    ])
+    ast = _record_ast(
+        "struct",
+        [
+            dict(_method("api", default="1"), access="public"),
+            dict(_method("impl", default="2"), access="private"),
+        ],
+    )
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
     names = {e.qualified_name for e in tu.functions}
     assert "C::api" in names
@@ -986,13 +1425,19 @@ def test_members_of_private_nested_class_excluded() -> None:
     # A private nested class is not public, so its (struct-default-public)
     # members stay off the surface too.
     nested = {
-        "kind": "CXXRecordDecl", "name": "Impl", "tagUsed": "struct",
-        "loc": {"line": 4}, "inner": [_method("run", default="1")],
+        "kind": "CXXRecordDecl",
+        "name": "Impl",
+        "tagUsed": "struct",
+        "loc": {"line": 4},
+        "inner": [_method("run", default="1")],
     }
-    ast = _record_ast("class", [
-        {"kind": "AccessSpecDecl", "access": "private"},
-        nested,
-    ])
+    ast = _record_ast(
+        "class",
+        [
+            {"kind": "AccessSpecDecl", "access": "private"},
+            nested,
+        ],
+    )
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
     names = {e.qualified_name for e in tu.all_entities()}
     assert "C::Impl" not in names
@@ -1157,14 +1602,19 @@ def _constexpr_ast(rhs_literal: str) -> dict:
         "kind": "TranslationUnitDecl",
         "inner": [
             {
-                "kind": "VarDecl", "name": "N", "loc": {"file": "include/foo.h"},
-                "constexpr": True, "type": {"qualType": "const int"},
+                "kind": "VarDecl",
+                "name": "N",
+                "loc": {"file": "include/foo.h"},
+                "constexpr": True,
+                "type": {"qualType": "const int"},
                 "inner": [
                     {
-                        "kind": "ConstantExpr", "value": "x",
+                        "kind": "ConstantExpr",
+                        "value": "x",
                         "inner": [
                             {
-                                "kind": "BinaryOperator", "opcode": "+",
+                                "kind": "BinaryOperator",
+                                "opcode": "+",
                                 "inner": [
                                     {"kind": "IntegerLiteral", "value": "1"},
                                     {"kind": "IntegerLiteral", "value": rhs_literal},
@@ -1186,21 +1636,34 @@ def test_walk_threads_sticky_file_across_siblings() -> None:
         "kind": "TranslationUnitDecl",
         "inner": [
             {
-                "kind": "CXXRecordDecl", "name": "Outer",
+                "kind": "CXXRecordDecl",
+                "name": "Outer",
                 "loc": {"file": "include/pub.h"},
                 "inner": [
                     {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
                     # Nested decl switches the current file to a private header.
-                    {"kind": "CXXRecordDecl", "name": "Nested",
-                     "loc": {"file": "src/detail/priv.h"},
-                     "inner": [{"kind": "FieldDecl", "name": "b",
-                                "type": {"qualType": "int"}}]},
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Nested",
+                        "loc": {"file": "src/detail/priv.h"},
+                        "inner": [
+                            {
+                                "kind": "FieldDecl",
+                                "name": "b",
+                                "type": {"qualType": "int"},
+                            }
+                        ],
+                    },
                 ],
             },
             # Sibling omits loc.file → inherits the last seen file (priv.h),
             # so it is private and must NOT land on the public surface.
-            {"kind": "FunctionDecl", "name": "leaked",
-             "mangledName": "_Z6leakedv", "type": {"qualType": "void ()"}},
+            {
+                "kind": "FunctionDecl",
+                "name": "leaked",
+                "mangledName": "_Z6leakedv",
+                "type": {"qualType": "void ()"},
+            },
         ],
     }
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/pub.h"], "t")
@@ -1237,21 +1700,33 @@ def test_default_argument_compound_expression_change_is_detected() -> None:
     def ast(rhs: str) -> dict:
         return {
             "kind": "TranslationUnitDecl",
-            "inner": [{
-                "kind": "FunctionDecl", "name": "f", "loc": {"file": "include/foo.h"},
-                "mangledName": "_Z1fi", "type": {"qualType": "void (int)"},
-                "inner": [{
-                    "kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"},
-                    "init": "c",
-                    "inner": [{
-                        "kind": "BinaryOperator", "opcode": "+",
-                        "inner": [
-                            {"kind": "IntegerLiteral", "value": "1"},
-                            {"kind": "IntegerLiteral", "value": rhs},
-                        ],
-                    }],
-                }],
-            }],
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "f",
+                    "loc": {"file": "include/foo.h"},
+                    "mangledName": "_Z1fi",
+                    "type": {"qualType": "void (int)"},
+                    "inner": [
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "x",
+                            "type": {"qualType": "int"},
+                            "init": "c",
+                            "inner": [
+                                {
+                                    "kind": "BinaryOperator",
+                                    "opcode": "+",
+                                    "inner": [
+                                        {"kind": "IntegerLiteral", "value": "1"},
+                                        {"kind": "IntegerLiteral", "value": rhs},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
         }
 
     old = source_abi_from_clang_ast(ast("2"), _cu(), ["include/foo.h"], "t")
@@ -1269,44 +1744,88 @@ def _ctor_ast(default: str, *, with_definition: bool = False) -> dict:
     out-of-line inline definition (which carries no default)."""
     inner = [
         {
-            "kind": "CXXConstructorDecl", "name": "Widget", "loc": {"file": "include/foo.h"},
-            "mangledName": "_ZN6WidgetC1Ei", "type": {"qualType": "void (int)"},
-            "inner": [{
-                "kind": "ParmVarDecl", "name": "n", "type": {"qualType": "int"},
-                "init": "c", "inner": [{"kind": "IntegerLiteral", "value": default}],
-            }],
+            "kind": "CXXConstructorDecl",
+            "name": "Widget",
+            "loc": {"file": "include/foo.h"},
+            "mangledName": "_ZN6WidgetC1Ei",
+            "type": {"qualType": "void (int)"},
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "n",
+                    "type": {"qualType": "int"},
+                    "init": "c",
+                    "inner": [{"kind": "IntegerLiteral", "value": default}],
+                }
+            ],
         }
     ]
     if with_definition:
-        inner.append({
-            "kind": "CXXConstructorDecl", "name": "Widget", "loc": {"file": "include/foo.h"},
-            "mangledName": "_ZN6WidgetC1Ei", "type": {"qualType": "void (int)"},
-            "inner": [
-                {"kind": "ParmVarDecl", "name": "n", "type": {"qualType": "int"}},
-                {"kind": "CompoundStmt", "inner": []},
-            ],
-        })
-    return {"kind": "TranslationUnitDecl", "inner": [
-        {"kind": "CXXRecordDecl", "name": "Widget", "loc": {"file": "include/foo.h"},
-         "inner": inner},
-    ]}
+        inner.append(
+            {
+                "kind": "CXXConstructorDecl",
+                "name": "Widget",
+                "loc": {"file": "include/foo.h"},
+                "mangledName": "_ZN6WidgetC1Ei",
+                "type": {"qualType": "void (int)"},
+                "inner": [
+                    {"kind": "ParmVarDecl", "name": "n", "type": {"qualType": "int"}},
+                    {"kind": "CompoundStmt", "inner": []},
+                ],
+            }
+        )
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Widget",
+                "loc": {"file": "include/foo.h"},
+                "inner": inner,
+            },
+        ],
+    }
 
 
 def test_implicit_inline_method_body_is_fingerprinted() -> None:
     # Codex #339 P2: an in-class method definition (CompoundStmt, no `inline`
     # key) is implicitly inline — a body change must fire inline_body_changed.
     def ast(retval: str) -> dict:
-        return {"kind": "TranslationUnitDecl", "inner": [{
-            "kind": "CXXRecordDecl", "name": "W", "loc": {"file": "include/foo.h"},
-            "inner": [{
-                "kind": "CXXMethodDecl", "name": "f", "mangledName": "_ZN1W1fEv",
-                "type": {"qualType": "int ()"},
-                # No "inline" key — clang omits it for in-class definitions.
-                "inner": [{"kind": "CompoundStmt", "inner": [{
-                    "kind": "ReturnStmt", "inner": [
-                        {"kind": "IntegerLiteral", "value": retval}]}]}],
-            }],
-        }]}
+        return {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "W",
+                    "loc": {"file": "include/foo.h"},
+                    "inner": [
+                        {
+                            "kind": "CXXMethodDecl",
+                            "name": "f",
+                            "mangledName": "_ZN1W1fEv",
+                            "type": {"qualType": "int ()"},
+                            # No "inline" key — clang omits it for in-class definitions.
+                            "inner": [
+                                {
+                                    "kind": "CompoundStmt",
+                                    "inner": [
+                                        {
+                                            "kind": "ReturnStmt",
+                                            "inner": [
+                                                {
+                                                    "kind": "IntegerLiteral",
+                                                    "value": retval,
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
 
     old = source_abi_from_clang_ast(ast("1"), _cu(), ["include/foo.h"], "t")
     new = source_abi_from_clang_ast(ast("2"), _cu(), ["include/foo.h"], "t")
@@ -1385,11 +1904,11 @@ def test_macros_suppress_include_guards() -> None:
 
     text = (
         '# 1 "include/foo.h" 1\n'
-        "#define FOO_H\n"            # include guard for foo.h — suppressed
-        "#define __FOO_H__\n"        # guard with underscores — suppressed
-        "#define FOO_ENABLED\n"      # real empty feature flag — kept
-        "#define FOO_H_FEATURE\n"    # starts with stem but is NOT the guard — kept
-        "#define FOO_SIZE 16\n"      # valued macro — kept
+        "#define FOO_H\n"  # include guard for foo.h — suppressed
+        "#define __FOO_H__\n"  # guard with underscores — suppressed
+        "#define FOO_ENABLED\n"  # real empty feature flag — kept
+        "#define FOO_H_FEATURE\n"  # starts with stem but is NOT the guard — kept
+        "#define FOO_SIZE 16\n"  # valued macro — kept
     )
     macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
     names = {e.qualified_name for e in macros}
@@ -1435,12 +1954,7 @@ def test_macros_unfold_line_continuations() -> None:
     # below the first physical line is still visible to the value comparison.
     from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
-    text = (
-        '# 1 "include/foo.h" 1\n'
-        "#define BIG(a, b) \\\n"
-        "    ((a) + \\\n"
-        "     (b))\n"
-    )
+    text = '# 1 "include/foo.h" 1\n#define BIG(a, b) \\\n    ((a) + \\\n     (b))\n'
     macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
     by_name = {e.qualified_name: e.value for e in macros}
     assert "BIG" in by_name
@@ -1451,12 +1965,7 @@ def test_macros_unfold_line_continuations() -> None:
 def test_macros_honor_undef() -> None:
     from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
-    text = (
-        '# 1 "include/foo.h" 1\n'
-        "#define TMP 1\n"
-        "#undef TMP\n"
-        "#define KEEP 2\n"
-    )
+    text = '# 1 "include/foo.h" 1\n#define TMP 1\n#undef TMP\n#define KEEP 2\n'
     macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
     names = {e.qualified_name for e in macros}
     assert "TMP" not in names and "KEEP" in names
@@ -1483,14 +1992,27 @@ def test_param_rename_with_same_default_is_not_a_change() -> None:
     # NOT fire default_argument_changed (callers omitting the arg get the same
     # value). The comparable value is keyed by position, not name.
     def fn(pname: str) -> dict:
-        return {"kind": "TranslationUnitDecl", "inner": [{
-            "kind": "FunctionDecl", "name": "f", "loc": {"file": "include/foo.h"},
-            "mangledName": "_Z1fi", "type": {"qualType": "void (int)"},
-            "inner": [{
-                "kind": "ParmVarDecl", "name": pname, "type": {"qualType": "int"},
-                "init": "c", "inner": [{"kind": "IntegerLiteral", "value": "1"}],
-            }],
-        }]}
+        return {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "f",
+                    "loc": {"file": "include/foo.h"},
+                    "mangledName": "_Z1fi",
+                    "type": {"qualType": "void (int)"},
+                    "inner": [
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": pname,
+                            "type": {"qualType": "int"},
+                            "init": "c",
+                            "inner": [{"kind": "IntegerLiteral", "value": "1"}],
+                        }
+                    ],
+                }
+            ],
+        }
 
     old = source_abi_from_clang_ast(fn("x"), _cu(), ["include/foo.h"], "t")
     new = source_abi_from_clang_ast(fn("y"), _cu(), ["include/foo.h"], "t")
@@ -1507,17 +2029,31 @@ def test_constexpr_referencing_changed_constant_is_detected() -> None:
     # (DeclRefExpr) that changes kOld -> kNew (same type) must be detected;
     # _canonical now preserves the referenced declaration name.
     def ast(ref: str) -> dict:
-        return {"kind": "TranslationUnitDecl", "inner": [{
-            "kind": "VarDecl", "name": "N", "loc": {"file": "include/foo.h"},
-            "constexpr": True, "type": {"qualType": "const int"},
-            "inner": [{
-                "kind": "ConstantExpr", "type": {"qualType": "const int"},
-                "inner": [{
-                    "kind": "DeclRefExpr", "type": {"qualType": "const int"},
-                    "referencedDecl": {"kind": "VarDecl", "name": ref},
-                }],
-            }],
-        }]}
+        return {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "N",
+                    "loc": {"file": "include/foo.h"},
+                    "constexpr": True,
+                    "type": {"qualType": "const int"},
+                    "inner": [
+                        {
+                            "kind": "ConstantExpr",
+                            "type": {"qualType": "const int"},
+                            "inner": [
+                                {
+                                    "kind": "DeclRefExpr",
+                                    "type": {"qualType": "const int"},
+                                    "referencedDecl": {"kind": "VarDecl", "name": ref},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
 
     old = source_abi_from_clang_ast(ast("kOld"), _cu(), ["include/foo.h"], "t")
     new = source_abi_from_clang_ast(ast("kNew"), _cu(), ["include/foo.h"], "t")
@@ -1610,8 +2146,7 @@ def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignor
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert any("recovered" in d for d in tu.diagnostics)
     assert any(
-        "missing generated header 'llvm/IR/Attributes.inc'" in d
-        for d in tu.diagnostics
+        "missing generated header 'llvm/IR/Attributes.inc'" in d for d in tu.diagnostics
     )
 
 
@@ -1633,7 +2168,9 @@ def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-un
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
-def test_run_ast_to_file_unlinks_temp_on_unexpected_error(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_run_ast_to_file_unlinks_temp_on_unexpected_error(
+    monkeypatch, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
     # An unexpected error mid-run must not leak the AST spill temp file (the
     # except-BaseException cleanup path).
     from abicheck.buildsource.source_extractors import clang as clang_mod
@@ -1704,7 +2241,9 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
 
     monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
-    tu = extractor.extract(cu, public_header_roots=["include/foo.h"], target_id="target://x")
+    tu = extractor.extract(
+        cu, public_header_roots=["include/foo.h"], target_id="target://x"
+    )
     assert captured["cwd"] == str(tmp_path)
     assert any(e.qualified_name == "ns::add" for e in tu.functions)
 
@@ -1750,8 +2289,12 @@ def test_clang_extractor_end_to_end(tmp_path: Path) -> None:
     )
     src = tmp_path / "foo.cpp"
     src.write_text('#include "foo.h"\n')
-    cu = CompileUnit(id="cu://foo.cpp", source=str(src), language="CXX", standard="c++17")
-    tu = extractor.extract(cu, public_header_roots=[str(header)], target_id="target://libfoo")
+    cu = CompileUnit(
+        id="cu://foo.cpp", source=str(src), language="CXX", standard="c++17"
+    )
+    tu = extractor.extract(
+        cu, public_header_roots=[str(header)], target_id="target://libfoo"
+    )
     names = {e.qualified_name for e in tu.all_entities()}
     assert any("add" in n for n in names)
     assert any("kAnswer" in e.qualified_name for e in tu.constexpr_values)

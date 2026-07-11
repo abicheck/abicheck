@@ -11,6 +11,65 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`abicheck dump <binary> --inputs ./abicheck_inputs/`** folds a build-emitted
+  Flow-2 pack (from the `abicheck-cc` wrapper or the Clang facts plugin) straight
+  into the artifact snapshot and links the source surface against the binary's
+  exports — the same result as a follow-up `abicheck merge`, in **one command**.
+  Removes the separate `merge` step for the common single-artifact plugin/wrapper
+  flow (`merge` remains for multi-input folds). No compiler frontend is re-run.
+- **External-linkage variables in the clang source backend + Clang plugin.**
+  The clang backend and `contrib/abicheck-clang-plugin` previously emitted an
+  empty `variables` list, so exported data symbols (namespace globals, static
+  data members such as `llvm::raw_ostream::RED`) could never map to a source
+  declaration. Both now emit `variable` entities keyed identically
+  (`id=_hash("variable", mangled|name, type)`), gated to external linkage:
+  block-scope locals and internal-linkage variables are dropped so a header
+  constant never inflates `decls_without_symbol` or triggers a spurious
+  `source_binary_provenance_mismatch`: a C++ namespace/file-scope `static`, a
+  namespace-scope `const` without `extern`, or an anonymous-namespace variable by
+  their Itanium mangled linkage encoding (the `L` seniority marker or a
+  `_GLOBAL__N_` component), a C / `extern "C"` file-scope `static` (which clang
+  gives no mangled name) by an explicit storage-class filter, and an
+  MSVC / clang-cl namespace-scope top-level `const` without `extern` (whose
+  `?…` mangling carries no Itanium marker) by a type-based fallback; a `static`
+  data member stays external. `constexpr` keeps its own path. The
+  `CLANG_EXTRACTOR_VERSION` bump (0.5→0.6) invalidates stale `--cache-dir` dumps
+  that predate the `variables` field. The C.6
+  differential-conformance fixture gains globals, a static member, and an
+  internal `const` so the gate covers variables. Measured on LLVM 18.1.3
+  `LLVMSupport`: +24 exported symbols now map.
+- **Template-instantiation RTTI attribution.** `source_link` now attributes an
+  exported vtable/typeinfo emitted for a template instantiation
+  (`_ZTVN…format_object<char>…E`) to the captured class-*template* pattern when
+  one is on the public surface, closing the largest source of unmatched
+  synthesized exports. Gated on a genuine `template` entity so the
+  exact-specialization guard (only `A<int>` present ⇒ `A<char>` stays an
+  orphan) is preserved. Measured on `LLVMSupport`: unmatched exports 818 → 747,
+  vtable/typeinfo orphans 85 → 14.
+
+### Changed
+
+- **`merge` / `dump --inputs`: fold identical facts once (perf).** A per-TU Flow-2
+  pack re-emits each public-header decl once per compile — a ~20× blow-up on
+  template-heavy libraries — and `link_source_abi` kept every copy, so the linked
+  surface, its content-hash `json.dumps`, and the relink all scaled with the
+  duplication. The linker now folds byte-identical entities on a full-identity key
+  (name + mangled + all `*_hash` fields), so overloads and genuine ODR variants
+  stay split while true duplicates collapse. Measured on LLVM 18.1.3 `LLVMSupport`
+  (174-TU pack): fold time **~120 s → ~16 s**, linked surface **130 512 → 6 599**
+  declarations, embedded baseline **362 MB → 35 MB**, with byte-identical symbol
+  mapping (1656/2613).
+- **Clang plugin: prune the AST-dump JSON parse (perf).** The plugin hashes AST
+  subtrees by dumping them to clang's JSON and canonicalizing; it now parses
+  that JSON keeping only the ~11 hash-relevant keys and skipping the rest
+  (delegating kept leaves to `llvm::json::parse`, so every emitted hash is
+  byte-identical). On a from-scratch LLVM `LLVMSupport`+`LLVMDemangle` build the
+  plugin's compile-time overhead drops from **3.44× → ~2.1×** (parse phase −68%
+  on template-heavy TUs); C.6 conformance stays green and a
+  constexpr-string/nested-template stress case in the fixture guards the
+  parser's escape/skip paths. `ABICHECK_PLUGIN_PROFILE=1` prints the per-TU
+  dump/parse/canonicalize split.
+
 - **Example catalog: five new cases (`case165`–`case169`)** giving five
   previously example-less `ChangeKind`s a dedicated, compilable fixture:
   `polymorphic_type_non_virtual_dtor` (new polymorphic factory type without a

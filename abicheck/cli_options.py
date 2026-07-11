@@ -399,7 +399,9 @@ def merge_compile_config(
             # L2-only dump/scan (no --sources/--build-info) nothing reloads it
             # downstream, so a warn-and-fallback would silently drop the intended
             # compile.std/defines/sysroot/frontend and still exit 0 (Codex review).
-            raise click.ClickException(f"cannot parse build config {cfg}: {exc}") from exc
+            raise click.ClickException(
+                f"cannot parse build config {cfg}: {exc}"
+            ) from exc
         # An *auto-discovered* config stays best-effort: a malformed file found by
         # walking up from cwd / the --sources root shouldn't fail a run the user
         # didn't ask to bind to it. Warn so it isn't silently ignored; the real
@@ -583,10 +585,10 @@ def env_matrix_option(func: F) -> F:
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
         help="Environment-matrix YAML declaring deployment constraints "
-             "(ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "
-             "\"2.28\"}'), a new symbol-version requirement is judged against "
-             "the declared floor: at/below it -> compatible, above it -> "
-             "breaking, instead of the default deployment-risk verdict.",
+        "(ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "
+        '"2.28"}\'), a new symbol-version requirement is judged against '
+        "the declared floor: at/below it -> compatible, above it -> "
+        "breaking, instead of the default deployment-risk verdict.",
     )(func)
     return func
 
@@ -944,6 +946,17 @@ def build_source_dump_options(func: F) -> F:
         help="Optional L3 build context: a build dir, a compile_commands.json, "
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted.",
+    )(func)
+    func = click.option(
+        "--inputs",
+        "inputs_pack",
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        default=None,
+        help="A Flow-2 `abicheck_inputs/` pack emitted by the build (abicheck-cc "
+        "wrapper or the Clang facts plugin). Its L3/L4/L5 facts are folded into "
+        "this dump inline and the source surface is linked against the binary's "
+        "exports — the same result as a follow-up `abicheck merge`, in one "
+        "command. No compiler frontend is re-run.",
     )(func)
     return func
 

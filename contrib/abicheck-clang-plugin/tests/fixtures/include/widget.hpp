@@ -37,6 +37,30 @@ struct Point {
 constexpr int kMaxItems = 128;
 constexpr int kComputed = 4 * 32 + 1;  // non-literal init -> subtree hash
 
+// Pruned-parser stress (perf opt regression guard): the plugin hashes subtrees
+// by parsing clang's JSON keeping only hash-relevant keys and skipping the rest.
+// A string literal with quotes/backslashes exercises the parser's string-escape
+// skipping (its `value` is a KEPT scalar), and a deeply nested template argument
+// exercises balanced object/array skipping — a bug in either would change the
+// subtree hash and break the C.6 differential gate. Non-literal init -> the value
+// is a subtree hash, so the whole escaped-string AST flows through the parser.
+constexpr const char *kEscaped = "a\"b\\c\n\t}]{[";  // escaped quote/backslash/braces
+template <class A, class B>
+struct Pair2 { A first; B second; };
+inline int nestedTemplateSink() {
+  Pair2<Pair2<int, char>, Pair2<double, Pair2<int, int>>> p{};
+  return p.first.first;
+}
+
+// External-linkage data variables — become exported OBJECT symbols, so both
+// producers emit them as `variable` entities (ADR-030 D4). A namespace-scope
+// `static` (internal linkage) and a block-scope local are NOT variables and are
+// dropped by both; a static data member IS external and is kept.
+int gCounter;                          // namespace global -> variable
+extern int gShared;                    // extern global -> variable
+static int gInternal = 0;              // static: internal linkage -> dropped by both
+const int gConstInternal = 3;          // namespace const w/o extern: internal -> dropped
+
 int add(int a, int b = 1);             // default arg (literal int)
 bool toggle(bool on = true);           // default arg (literal bool)
 
@@ -72,6 +96,7 @@ class Widget {
 public:
   Widget();
   int area() const;
+  static int sInstances;   // static data member -> external OBJECT -> variable
 
 private:
   struct Impl {          // private nested type; its public members stay hidden

@@ -56,7 +56,9 @@ def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:
         qualified_name=name,
         mangled_name=mangled,
         signature_hash="sig1",
-        source_location=SourceLocation(path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"),
+        source_location=SourceLocation(
+            path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"
+        ),
         visibility="public_header",
     )
     return SourceAbiTu(
@@ -74,7 +76,9 @@ def _macro_tu(name: str = "FOO_H") -> SourceAbiTu:
         kind="macro",
         qualified_name=name,
         value="",
-        source_location=SourceLocation(path="include/foo.h", line=1, origin="PUBLIC_HEADER"),
+        source_location=SourceLocation(
+            path="include/foo.h", line=1, origin="PUBLIC_HEADER"
+        ),
         visibility="public_header",
     )
     return SourceAbiTu(
@@ -99,7 +103,9 @@ def _write_inputs_pack(
     (pack / "source_facts").mkdir(parents=True)
     if jsonl:
         lines = "\n".join(json.dumps(t.to_dict()) for t in tus)
-        (pack / "source_facts" / "libfoo.jsonl").write_text(lines + "\n", encoding="utf-8")
+        (pack / "source_facts" / "libfoo.jsonl").write_text(
+            lines + "\n", encoding="utf-8"
+        )
     else:
         (pack / "source_facts" / "libfoo.json").write_text(
             json.dumps([t.to_dict() for t in tus]), encoding="utf-8"
@@ -127,7 +133,14 @@ def _compile_db(tmp_path: Path) -> list[dict]:
         {
             "directory": str(tmp_path),
             "file": "src/foo.cpp",
-            "arguments": ["c++", "-std=c++17", "-DNDEBUG", "-Iinclude", "-c", "src/foo.cpp"],
+            "arguments": [
+                "c++",
+                "-std=c++17",
+                "-DNDEBUG",
+                "-Iinclude",
+                "-c",
+                "src/foo.cpp",
+            ],
         }
     ]
 
@@ -224,6 +237,50 @@ def test_ingest_with_explicit_exports_maps_decl_to_symbol(tmp_path: Path) -> Non
     assert "_Z3foov" in surface.roots["exported_symbols"]
 
 
+def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None:
+    # `dump <binary> --inputs pack/` (embed_inputs_pack) folds a Flow-2 pack
+    # straight into the artifact snapshot and links the source decl to the
+    # binary's real export — the same result as a follow-up `merge`, one command.
+    from abicheck.cli_buildsource_merge import embed_inputs_pack
+    from abicheck.model import AbiSnapshot, Function
+
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    # a binary-side snapshot that exports the same symbol
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+
+    embed_inputs_pack(snap, pack, tmp_path / "out.json")
+
+    assert snap.build_source is not None
+    surface = snap.build_source.source_abi
+    assert surface is not None
+    # the source decl is now linked against the binary export (not left orphan)
+    assert "_Z3foov" in surface.roots.get("exported_symbols", [])
+    assert surface.coverage.get("matched_symbols", 0) >= 1
+    assert surface.coverage.get("unmatched_symbols", 1) == 0
+
+
+def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
+    # The dump CLI seam: _write_snapshot_output(..., inputs_pack=pack) folds the
+    # pack and serializes an embedded build_source (single-artifact UX), so a plain
+    # `dump <binary> --inputs pack/` needs no follow-up merge.
+    import json
+
+    from abicheck.cli import _write_snapshot_output
+    from abicheck.model import AbiSnapshot, Function
+
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    out = tmp_path / "baseline.json"
+    _write_snapshot_output(snap, out, inputs_pack=pack)
+
+    d = json.loads(out.read_text())
+    assert "build_source" in d, "embedded L3/L4/L5 facts should ride inline"
+    cov = d["build_source"]["source_abi"]["coverage"]
+    assert cov.get("matched_symbols", 0) >= 1
+
+
 def test_ingest_reads_compile_db_into_l3(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,
@@ -234,9 +291,7 @@ def test_ingest_reads_compile_db_into_l3(tmp_path: Path) -> None:
     assert ingested.pack.build_evidence is not None
     assert ingested.pack.build_evidence.compile_units
     # L3 + L4 coverage present; L5 graph folded from both.
-    statuses = {
-        c.layer: c.status for c in ingested.pack.manifest.coverage
-    }
+    statuses = {c.layer: c.status for c in ingested.pack.manifest.coverage}
     assert statuses[DataLayer.L3_BUILD.value] == CoverageStatus.PRESENT
     assert statuses[DataLayer.L4_SOURCE_ABI.value] == CoverageStatus.PRESENT
     assert ingested.pack.source_graph is not None
@@ -263,7 +318,9 @@ def test_ingest_records_provenance_extractor(tmp_path: Path) -> None:
     ingested = ingest_inputs_pack(pack)
     names = {e.name for e in ingested.pack.manifest.extractors}
     assert "abicheck_inputs" in names
-    rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
+    rec = next(
+        e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs"
+    )
     assert "abicheck-clang-plugin" in rec.detail
 
 
@@ -293,7 +350,9 @@ def test_array_form_non_object_record_is_diagnosed(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     (pack / "source_facts").mkdir(parents=True)
     arr = [_tu("foo", mangled="_Z3foov").to_dict(), 42, None]
-    (pack / "source_facts" / "libfoo.json").write_text(json.dumps(arr), encoding="utf-8")
+    (pack / "source_facts" / "libfoo.json").write_text(
+        json.dumps(arr), encoding="utf-8"
+    )
     (pack / "manifest.json").write_text(
         json.dumps({"kind": INPUTS_KIND, "library": "libfoo.so", "version": "1.0"}),
         encoding="utf-8",
@@ -301,7 +360,9 @@ def test_array_form_non_object_record_is_diagnosed(tmp_path: Path) -> None:
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 1
     assert sum("non-object record" in d for d in ingested.diagnostics) == 2
-    rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
+    rec = next(
+        e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs"
+    )
     assert rec.status == "partial"
 
 
@@ -332,11 +393,15 @@ def test_ingest_surfaces_malformed_record_diagnostics(tmp_path: Path) -> None:
     # extractor ledger, and downgrades the record to `partial`.
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     facts = pack / "source_facts" / "libfoo.jsonl"
-    facts.write_text(facts.read_text(encoding="utf-8") + "{bad json\n", encoding="utf-8")
+    facts.write_text(
+        facts.read_text(encoding="utf-8") + "{bad json\n", encoding="utf-8"
+    )
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 1
     assert ingested.diagnostics
-    rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
+    rec = next(
+        e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs"
+    )
     assert rec.status == "partial"
     assert rec.diagnostics
 
@@ -403,7 +468,9 @@ def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 0
     assert any("resolved to no readable fact files" in d for d in ingested.diagnostics)
-    rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
+    rec = next(
+        e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs"
+    )
     assert rec.status == "partial"
 
 
@@ -442,7 +509,10 @@ def test_ingest_refuses_absolute_compile_db(tmp_path: Path) -> None:
 def test_multiple_jsonl_records_ingest(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,
-        [_tu("foo", mangled="_Z3foov"), _tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        [
+            _tu("foo", mangled="_Z3foov"),
+            _tu("bar", mangled="_Z3barv", source="src/bar.cpp"),
+        ],
     )
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 2
@@ -496,7 +566,9 @@ def test_merge_relinks_surface_against_base_exports(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
+    )
     assert result.exit_code == 0, result.output
     surface = load_snapshot(out).build_source.source_abi
     assert "_Z3foov" in surface.roots["exported_symbols"]
@@ -506,7 +578,9 @@ def test_merge_rebuilds_l4_coverage_after_relink(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_tu("bar", mangled="_Z3barv")])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
+    )
     assert result.exit_code == 0, result.output
     assert "matched 0/1 exported symbol" in result.output
     assert (
@@ -546,16 +620,23 @@ def test_merge_warns_for_macro_only_pack_with_exports(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_macro_tu()])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(main, ["merge", str(bin_json), str(pack), "-o", str(out)])
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
+    )
     assert result.exit_code == 0, result.output
-    assert "public macros/types but no public function/variable declarations" in result.output
+    assert (
+        "public macros/types but no public function/variable declarations"
+        in result.output
+    )
 
 
 def test_merge_rejects_plain_directory(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     plain = tmp_path / "not_a_pack"
     plain.mkdir()
-    result = CliRunner().invoke(main, ["merge", str(bin_json), str(plain), "-o", str(tmp_path / "o.json")])
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_json), str(plain), "-o", str(tmp_path / "o.json")]
+    )
     assert result.exit_code != 0
     assert "abicheck_inputs" in result.output
 

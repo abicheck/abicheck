@@ -14,11 +14,13 @@
 # limitations under the License.
 
 """Helper functions for the ``dump`` CLI command (split from cli.py)."""
+
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import click
 
@@ -69,6 +71,7 @@ class _WriteSnapshotOutput(Protocol):
         build_query: str | None = ...,
         build_compile_db: str | None = ...,
         extractor: str = ...,
+        inputs_pack: Path | None = ...,
     ) -> None: ...
 
 
@@ -198,6 +201,68 @@ def resolve_dump_compile_db(
     return effective_compile_db
 
 
+def handle_non_elf_dump(
+    so_path: Path,
+    binary_fmt: str,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    version: str,
+    lang: str,
+    pdb_path: Path | None,
+    follow_deps: bool,
+    git_tag: str | None,
+    build_id: str | None,
+    no_git: bool,
+    output: Path | None,
+    dump_native_binary: Callable[..., AbiSnapshot],
+    stamp_provenance: _StampProvenance,
+    write_snapshot_output: _WriteSnapshotOutput,
+    public_headers: tuple[Path, ...] = (),
+    public_header_dirs: tuple[Path, ...] = (),
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    allow_build_query: bool = False,
+    collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    header_backend: str = "auto",
+    compile_context: Any = None,
+    inputs_pack: Path | None = None,
+) -> None:
+    """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
+
+    ``dump_native_binary``/``stamp_provenance``/``write_snapshot_output`` are all
+    passed in from cli.py rather than imported, mirroring ``perform_elf_dump`` —
+    the AST-based import-cycle gate counts *any* import (including a lazy
+    function-body ``from .cli_resolve import …`` and a ``TYPE_CHECKING`` import),
+    so importing them here would close a ``cli → cli_dump_helpers → … → cli``
+    cycle. ``compile_context`` is typed ``Any`` for the same reason (its concrete
+    ``CompileContext`` lives in ``service_scan``).
+    """
+    if follow_deps:
+        click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
+    try:
+        snap = dump_native_binary(
+            so_path, binary_fmt, list(headers), list(includes), version, lang,
+            pdb_path=pdb_path,
+            public_headers=list(public_headers),
+            public_header_dirs=list(public_header_dirs),
+            header_backend=header_backend,
+            compile=compile_context,
+        )
+    except click.ClickException:
+        raise
+    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    write_snapshot_output(
+        snap, output, build_info, sources, build_config, allow_build_query,
+        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend, inputs_pack=inputs_pack,
+    )
+
+
 def resolve_dump_collect_context(
     depth: str | None,
     max_depth: bool,
@@ -207,6 +272,7 @@ def resolve_dump_collect_context(
     headers: tuple[Path, ...],
     compile_db_path: Path | None,
     compile_db_path_alt: Path | None,
+    inputs_pack: Path | None = None,
 ) -> tuple[str, tuple[Path, ...], Path | None, Path | None]:
     """Resolve the --depth/--max preset into the internal collect mode for a dump.
 
@@ -249,12 +315,13 @@ def resolve_dump_collect_context(
         depth_requested
         and collect_mode != "off"
         and sources is None and build_info is None
+        and inputs_pack is None
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "
-            "--sources/--build-info was given; the snapshot will carry only "
-            "L0-L2 data (no build/source/graph facts). Pass --sources or "
-            "--build-info, or use --depth headers for an L2-only dump.",
+            "--sources/--build-info/--inputs was given; the snapshot will carry "
+            "only L0-L2 data (no build/source/graph facts). Pass --sources, "
+            "--build-info, or --inputs, or use --depth headers for an L2-only dump.",
             err=True,
         )
     return collect_mode, headers, compile_db_path, compile_db_path_alt
@@ -337,6 +404,7 @@ def perform_elf_dump(
     header_backend: str = "auto",
     user_gcc_options: str | None = None,
     compile_db_filter: str | None = None,
+    inputs_pack: Path | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -440,11 +508,21 @@ def perform_elf_dump(
         snap.python_api = detect_python_api(snap)
 
     if follow_deps:
-        populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
+        populate_dependency_info(
+            snap, so_path, list(search_paths), sysroot, ld_library_path
+        )
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query,
-        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        snap,
+        output,
+        build_info,
+        sources,
+        build_config,
+        allow_build_query,
+        collect_mode,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
         extractor=header_backend,
+        inputs_pack=inputs_pack,
     )

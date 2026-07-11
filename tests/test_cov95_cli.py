@@ -386,7 +386,7 @@ class TestSmallHelpers:
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
         captured: dict[str, object] = {}
         monkeypatch.setattr(
-            cli_mod, "_handle_non_elf_dump", lambda *a, **k: captured.update(k)
+            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
         )
         result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
         assert result.exit_code == 0, result.output
