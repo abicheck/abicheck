@@ -20,8 +20,18 @@ elsewhere in the nav — keep links pointing at the real file path.
   Integrations & Migration.
 - `concepts/` — conceptual docs (verdicts, evidence model, architecture, and
   `abi-api-handling.md` — the consolidated ABI/API handling guide).
-  `abi-cheat-sheet.md` and `abi-api-handling.md` are navigated under the
-  educational **ABI/API Handling & Recommendations** tab, not Concepts.
+  `abi-cheat-sheet.md`, `abi-api-handling.md`, and the deep-dive pages
+  (`abi-surface.md`, `class-layout-abi.md`, `dependency-floors.md`) are
+  navigated under the educational **ABI/API Handling & Recommendations** tab
+  (the deep-dives under its **Deep Dives** group), not Concepts.
+  The evidence model is deliberately a three-page trio with one role each —
+  model (`concepts/evidence-and-detectability.md`, which also owns the
+  `--depth` dial and the deprecated-axes appendix), worked example
+  (`concepts/what-each-level-sees.md`), and flag reference
+  (`user-guide/scan-levels.md`) — don't add a fourth page to that topic.
+  Verdict semantics live on one page (`concepts/verdicts.md`, including the
+  verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive
+  per-command authority.
 - `reference/` — curated reference (change kinds, exit codes, platforms, tool
   comparison, ABICC format compliance). Navigated as its own **Reference** tab.
 - `examples/` — per-case Markdown docs that match the binary fixtures

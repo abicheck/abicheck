@@ -337,7 +337,7 @@ abicheck surface-report libfoo.so -H include/ --format json -o surface.json
 abicheck surface-report libfoo.so -H include/ --audit
 ```
 
-See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
+See [API Surface Intelligence](api-surface-intelligence.md) for what
 the surface metrics, idiom recognizers, and anti-pattern checks mean.
 
 #### `graph compare` — structural source-graph diff

@@ -40,28 +40,17 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv:
-        print("usage: check_stripped_fp.py <results.json> [label]", file=sys.stderr)
-        return 2
-    results_path = Path(argv[0])
-    label = argv[1] if len(argv) > 1 else "stripped"
-    if not results_path.exists():
-        print(f"ERROR: {results_path} not found", file=sys.stderr)
-        return 2
-
-    gt = _load(GROUND_TRUTH)["verdicts"]
-    data = _load(results_path)
-
+def _classify_results(
+    rows: list[dict], gt: dict, label: str
+) -> tuple[list[str], list[str], list[str]]:
+    """Split result rows into (false_positives, downgrades, errors) messages."""
     false_positives: list[str] = []
     downgrades: list[str] = []
     errors: list[str] = []
-    for r in data.get("results", []):
+    for r in rows:
         case = r.get("case_id") or r.get("name")
         got = (r.get("got") or "").upper()
-        entry = gt.get(case, {})
-        expected = (entry.get("expected") or "").upper()
+        expected = (gt.get(case, {}).get("expected") or "").upper()
         status = r.get("status")
         # SKIP is benign (tool/platform/feature unavailable). ERROR is NOT: the
         # validate run is invoked under `set +e`, so an ERROR row is the only
@@ -78,7 +67,13 @@ def main(argv: list[str] | None = None) -> int:
             false_positives.append(f"{case}: expected {expected} got {got}")
         elif expected == "BREAKING" and got in _COMPATIBLE_EXPECTED:
             downgrades.append(f"{case}: {expected}→{got} (evidence lost in {label} mode)")
+    return false_positives, downgrades, errors
 
+
+def _report(
+    label: str, false_positives: list[str], downgrades: list[str], errors: list[str]
+) -> int:
+    """Print the guard report and return the process exit code."""
     if downgrades:
         print(f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}")
         for d in downgrades:
@@ -100,6 +95,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"\n{label} FP guard: no spurious breaks, no errored cases.")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv:
+        print("usage: check_stripped_fp.py <results.json> [label]", file=sys.stderr)
+        return 2
+    results_path = Path(argv[0])
+    label = argv[1] if len(argv) > 1 else "stripped"
+    if not results_path.exists():
+        print(f"ERROR: {results_path} not found", file=sys.stderr)
+        return 2
+
+    gt = _load(GROUND_TRUTH)["verdicts"]
+    data = _load(results_path)
+    false_positives, downgrades, errors = _classify_results(
+        data.get("results", []), gt, label
+    )
+    return _report(label, false_positives, downgrades, errors)
 
 
 if __name__ == "__main__":

@@ -81,6 +81,110 @@ class CudaConstraints:
     require_ptx: bool = False              # require PTX for forward-compat
 
 
+#: Top-level keys :meth:`EnvironmentMatrix.from_dict` understands; anything
+#: else is ignored with a warning.
+_KNOWN_KEYS = frozenset({
+    "compilers", "abi_version", "libstdcxx_dual_abi",
+    "sycl", "cuda", "target_os", "target_arch", "runtime_floors",
+})
+
+
+def _warn_unknown_keys(data: dict[str, Any]) -> None:
+    """Log a warning for top-level keys ``from_dict`` does not understand."""
+    unknown = set(data) - _KNOWN_KEYS
+    if unknown:
+        log.warning("EnvironmentMatrix: unknown keys ignored: %s", unknown)
+
+
+def _section_dict(data: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return the *key* sub-dict of *data* (default empty), validating its type."""
+    section = data.get(key, {})
+    if not isinstance(section, dict):
+        raise ValueError(f"'{key}' must be a dict, got {type(section).__name__}")
+    return section
+
+
+def _parse_sycl_constraints(sycl_data: dict[str, Any]) -> SyclConstraints:
+    """Parse the validated ``sycl`` section into :class:`SyclConstraints`."""
+    backends = sycl_data.get("backends", [])
+    if not isinstance(backends, list):
+        raise ValueError(
+            f"'sycl.backends' must be a list, got {type(backends).__name__}"
+        )
+    return SyclConstraints(
+        implementation=str(sycl_data.get("implementation", "")),
+        backends=[str(b) for b in backends],
+        min_pi_version=str(sycl_data.get("min_pi_version", "")),
+    )
+
+
+def _parse_cuda_constraints(cuda_data: dict[str, Any]) -> CudaConstraints:
+    """Parse the validated ``cuda`` section into :class:`CudaConstraints`."""
+    gpu_archs = cuda_data.get("gpu_architectures", [])
+    if not isinstance(gpu_archs, list):
+        raise ValueError(
+            f"'cuda.gpu_architectures' must be a list, got {type(gpu_archs).__name__}"
+        )
+
+    driver_range_raw = cuda_data.get("driver_range")
+    driver_range = None
+    if isinstance(driver_range_raw, (list, tuple)) and len(driver_range_raw) == 2:
+        driver_range = (str(driver_range_raw[0]), str(driver_range_raw[1]))
+    elif driver_range_raw is not None:
+        raise ValueError(
+            f"'cuda.driver_range' must be a 2-element list [min, max], "
+            f"got {driver_range_raw!r}"
+        )
+
+    require_ptx = cuda_data.get("require_ptx", False)
+    if not isinstance(require_ptx, bool):
+        raise ValueError(
+            f"'cuda.require_ptx' must be a bool, got {type(require_ptx).__name__}"
+        )
+
+    return CudaConstraints(
+        gpu_architectures=[str(a) for a in gpu_archs],
+        driver_range=driver_range,
+        toolkit_version=str(cuda_data.get("toolkit_version", "")),
+        require_ptx=require_ptx,
+    )
+
+
+def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
+    """Parse and validate the ``runtime_floors`` prefix → version mapping."""
+    if not isinstance(floors_raw, dict):
+        raise ValueError(
+            f"'runtime_floors' must be a dict of version-node prefix → "
+            f"version (e.g. {{GLIBC: '2.28'}}), got {type(floors_raw).__name__}"
+        )
+    runtime_floors: dict[str, str] = {}
+    for key, value in floors_raw.items():
+        if isinstance(value, float):
+            # An unquoted YAML floor has already been lossily parsed:
+            # `GLIBC: 2.40` reaches us as the float 2.4, which would
+            # silently declare a *lower* floor than the user wrote.
+            # Reject rather than guess (Codex review #510).
+            raise ValueError(
+                f"'runtime_floors.{key}' must be a quoted string version: "
+                f"unquoted YAML floats lose trailing zeros "
+                f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
+                f"with the intended digits."
+            )
+        floor = str(value)
+        # Every dot-separated component must be purely numeric: the floor
+        # contract parses with int() per component, so a "2.28-1" or "2.x"
+        # would silently truncate to (2,) and flip verdicts. Reject
+        # malformed text here instead (Codex review #510).
+        components = floor.split(".")
+        if not components or not all(p.isdigit() for p in components):
+            raise ValueError(
+                f"'runtime_floors.{key}' must be a dotted numeric version "
+                f"(digits and dots only, e.g. '2.28'), got {value!r}"
+            )
+        runtime_floors[str(key).upper()] = floor
+    return runtime_floors
+
+
 @dataclass
 class EnvironmentMatrix:
     """Declared deployment constraints — shared across SYCL, CUDA, etc.
@@ -124,97 +228,18 @@ class EnvironmentMatrix:
                 f"EnvironmentMatrix expects a dict, got {type(data).__name__}"
             )
 
-        _KNOWN_KEYS = {
-            "compilers", "abi_version", "libstdcxx_dual_abi",
-            "sycl", "cuda", "target_os", "target_arch", "runtime_floors",
-        }
-        unknown = set(data) - _KNOWN_KEYS
-        if unknown:
-            log.warning("EnvironmentMatrix: unknown keys ignored: %s", unknown)
+        _warn_unknown_keys(data)
 
-        sycl_data = data.get("sycl", {})
-        if not isinstance(sycl_data, dict):
-            raise ValueError(f"'sycl' must be a dict, got {type(sycl_data).__name__}")
-        cuda_data = data.get("cuda", {})
-        if not isinstance(cuda_data, dict):
-            raise ValueError(f"'cuda' must be a dict, got {type(cuda_data).__name__}")
+        sycl_data = _section_dict(data, "sycl")
+        cuda_data = _section_dict(data, "cuda")
 
         compilers = data.get("compilers", [])
         if not isinstance(compilers, list):
             raise ValueError(f"'compilers' must be a list, got {type(compilers).__name__}")
 
-        backends = sycl_data.get("backends", [])
-        if not isinstance(backends, list):
-            raise ValueError(
-                f"'sycl.backends' must be a list, got {type(backends).__name__}"
-            )
-
-        sycl = SyclConstraints(
-            implementation=str(sycl_data.get("implementation", "")),
-            backends=[str(b) for b in backends],
-            min_pi_version=str(sycl_data.get("min_pi_version", "")),
-        )
-
-        gpu_archs = cuda_data.get("gpu_architectures", [])
-        if not isinstance(gpu_archs, list):
-            raise ValueError(
-                f"'cuda.gpu_architectures' must be a list, got {type(gpu_archs).__name__}"
-            )
-
-        driver_range_raw = cuda_data.get("driver_range")
-        driver_range = None
-        if isinstance(driver_range_raw, (list, tuple)) and len(driver_range_raw) == 2:
-            driver_range = (str(driver_range_raw[0]), str(driver_range_raw[1]))
-        elif driver_range_raw is not None:
-            raise ValueError(
-                f"'cuda.driver_range' must be a 2-element list [min, max], "
-                f"got {driver_range_raw!r}"
-            )
-
-        require_ptx = cuda_data.get("require_ptx", False)
-        if not isinstance(require_ptx, bool):
-            raise ValueError(
-                f"'cuda.require_ptx' must be a bool, got {type(require_ptx).__name__}"
-            )
-
-        cuda = CudaConstraints(
-            gpu_architectures=[str(a) for a in gpu_archs],
-            driver_range=driver_range,
-            toolkit_version=str(cuda_data.get("toolkit_version", "")),
-            require_ptx=require_ptx,
-        )
-
-        floors_raw = data.get("runtime_floors", {})
-        if not isinstance(floors_raw, dict):
-            raise ValueError(
-                f"'runtime_floors' must be a dict of version-node prefix → "
-                f"version (e.g. {{GLIBC: '2.28'}}), got {type(floors_raw).__name__}"
-            )
-        runtime_floors: dict[str, str] = {}
-        for key, value in floors_raw.items():
-            if isinstance(value, float):
-                # An unquoted YAML floor has already been lossily parsed:
-                # `GLIBC: 2.40` reaches us as the float 2.4, which would
-                # silently declare a *lower* floor than the user wrote.
-                # Reject rather than guess (Codex review #510).
-                raise ValueError(
-                    f"'runtime_floors.{key}' must be a quoted string version: "
-                    f"unquoted YAML floats lose trailing zeros "
-                    f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
-                    f"with the intended digits."
-                )
-            floor = str(value)
-            # Every dot-separated component must be purely numeric: the floor
-            # contract parses with int() per component, so a "2.28-1" or "2.x"
-            # would silently truncate to (2,) and flip verdicts. Reject
-            # malformed text here instead (Codex review #510).
-            components = floor.split(".")
-            if not components or not all(p.isdigit() for p in components):
-                raise ValueError(
-                    f"'runtime_floors.{key}' must be a dotted numeric version "
-                    f"(digits and dots only, e.g. '2.28'), got {value!r}"
-                )
-            runtime_floors[str(key).upper()] = floor
+        sycl = _parse_sycl_constraints(sycl_data)
+        cuda = _parse_cuda_constraints(cuda_data)
+        runtime_floors = _parse_runtime_floors(data.get("runtime_floors", {}))
 
         return cls(
             compilers=compilers,

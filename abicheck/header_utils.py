@@ -343,6 +343,14 @@ def _deferred_include_flag(toks: list[str]) -> str:
     * otherwise the build context is ``-idirafter``-only (a *below-system*
       class) → ``-idirafter`` (after the build's own ``-idirafter`` dirs, in the
       same class, so the build's fallback keeps priority — Codex review).
+
+    Known limitation (#454 item 2): a *mixed* GNU context (``-I build/primary
+    -idirafter build/generated``) is unsatisfiable with a single flag — the
+    root would need to sit both above the standard system dirs (to keep
+    winning a system-colliding basename against the ``-I`` context) and below
+    ``-idirafter`` (which is searched after the system dirs). ``-isystem`` is
+    the deliberate default: it favors the common collision case, and compile
+    DBs essentially never emit ``-idirafter``.
     """
     if _msvc_style_context(toks):
         return _msvc_deferred_flag(toks)

@@ -45,7 +45,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -376,6 +376,25 @@ def _headers_only_set_cover(
     if not public:
         return None
     by_id = {cu.id: cu for cu in build.compile_units}
+    header_owners = _public_header_owner_targets(build)
+    coverage = _tu_public_header_coverage(by_id, include_map, public, header_owners)
+    if not coverage:
+        return None
+    chosen, need = _greedy_set_cover(coverage, public)
+    # A *partial* include graph may not reach every build-declared public header.
+    # Returning the cover for only the reachable ones would silently drop a public
+    # target whose source-only changes would never be parsed. Fall back to the
+    # representative target heuristic for build-owned headers, but keep selected
+    # external CLI-root TUs because those roots have no representative target.
+    if need and any(header_owners.get(ph) for ph in need):
+        return _cover_with_heuristic_fallback(
+            build, chosen, coverage, header_owners, by_id
+        )
+    return [by_id[c] for c in chosen]
+
+
+def _public_header_owner_targets(build: BuildEvidence) -> dict[str, set[str]]:
+    """Map each declared public header to the target ids that own its compile context."""
     # Which target(s) *declare* each public header. A header must be fingerprinted
     # under the compile context of an owning target, not a downstream app/test TU
     # that merely includes it (different defines/include paths would mis-fingerprint
@@ -398,6 +417,16 @@ def _headers_only_set_cover(
             # too broad.
             if target.id not in compile_target_ids:
                 owners.update(reverse_deps.get(target.id, set()))
+    return header_owners
+
+
+def _tu_public_header_coverage(
+    by_id: dict[str, CompileUnit],
+    include_map: dict[str, list[str]],
+    public: list[str],
+    header_owners: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    """Map each recorded TU to the public headers it includes and may cover."""
     public_suffixes = {ph: _suffixes(_norm(ph)) for ph in public}
     # cu_id -> set of public headers that TU includes (build-root-stable match) and
     # whose owning target it belongs to.
@@ -419,8 +448,13 @@ def _headers_only_set_cover(
         }
         if covered:
             coverage[cu_id] = covered
-    if not coverage:
-        return None
+    return coverage
+
+
+def _greedy_set_cover(
+    coverage: dict[str, set[str]], public: list[str]
+) -> tuple[list[str], set[str]]:
+    """Greedily pick TU ids covering ``public``; returns ``(chosen, still_needed)``."""
     need = set(public)
     chosen: list[str] = []
     # Greedy: repeatedly take the TU covering the most still-needed headers;
@@ -435,22 +469,26 @@ def _headers_only_set_cover(
             break
         chosen.append(best)
         need -= coverage[best]
-    # A *partial* include graph may not reach every build-declared public header.
-    # Returning the cover for only the reachable ones would silently drop a public
-    # target whose source-only changes would never be parsed. Fall back to the
-    # representative target heuristic for build-owned headers, but keep selected
-    # external CLI-root TUs because those roots have no representative target.
-    if need and any(header_owners.get(ph) for ph in need):
-        picked = _select_headers_only_heuristic(build)
-        picked_ids = {cu.id for cu in picked}
-        for cu_id in chosen:
-            if any(not header_owners.get(ph) for ph in coverage.get(cu_id, ())):
-                cu = by_id[cu_id]
-                if cu.id not in picked_ids:
-                    picked.append(cu)
-                    picked_ids.add(cu.id)
-        return picked
-    return [by_id[c] for c in chosen]
+    return chosen, need
+
+
+def _cover_with_heuristic_fallback(
+    build: BuildEvidence,
+    chosen: list[str],
+    coverage: dict[str, set[str]],
+    header_owners: dict[str, set[str]],
+    by_id: dict[str, CompileUnit],
+) -> list[CompileUnit]:
+    """Representative-target fallback for a partial cover, keeping external-root TUs."""
+    picked = _select_headers_only_heuristic(build)
+    picked_ids = {cu.id for cu in picked}
+    for cu_id in chosen:
+        if any(not header_owners.get(ph) for ph in coverage.get(cu_id, ())):
+            cu = by_id[cu_id]
+            if cu.id not in picked_ids:
+                picked.append(cu)
+                picked_ids.add(cu.id)
+    return picked
 
 
 def _uncovered_public_headers(
@@ -895,12 +933,7 @@ def run_source_replay(
         include_map=include_map,
         public_header_roots=roots,
     )
-    scope_widened = (
-        scope == "headers-only"
-        and not _norm_include_map(include_map)
-        and len(units) == len(build.compile_units)
-        and len(units) > 1
-    )
+    scope_widened = _headers_only_scope_widened(scope, include_map, units, build)
     # Fresh per-pass dep-digest memo so a shared header is hashed once across all
     # TUs' cache validation (scoped to this call — a file may change before the
     # next pass, so it must not leak out to a later lookup).
@@ -910,8 +943,74 @@ def run_source_replay(
     # thread pool; cache get/put stay single-threaded and results are reassembled
     # in unit order, so the linked surface and diagnostics are byte-for-byte
     # identical to the serial run regardless of worker count.
-    # Phase 1 (serial): cache lookups, split hits from misses keeping order.
     cache_started = time.monotonic()
+    keys, results, misses = _replay_cache_lookup(
+        units, extractor, roots, cache, digest_memo
+    )
+    cache_elapsed = time.monotonic() - cache_started
+
+    jobs = _l4_jobs(len(misses))
+    miss_units = [units[i] for i in misses]
+    worker = partial(_extract_one, extractor, list(roots or []), target_id)
+    extract_started = time.monotonic()
+    extracted = _extract_cache_misses(worker, miss_units, jobs)
+    extract_elapsed = time.monotonic() - extract_started
+
+    tus, diagnostics = _assemble_replay_results(
+        units, results, keys, misses, extracted, cache, digest_memo
+    )
+
+    link_started = time.monotonic()
+    surface = link_source_abi(
+        tus,
+        exported_symbols=exported_symbols,
+        library=library,
+        target_id=target_id,
+        forced_public=forced_public,
+    )
+    link_elapsed = time.monotonic() - link_started
+    _record_replay_coverage(
+        surface,
+        scope=scope,
+        include_map=include_map,
+        units=units,
+        tus=tus,
+        diagnostics=diagnostics,
+        roots=roots,
+        jobs=jobs,
+        n_misses=len(misses),
+        cache_elapsed=cache_elapsed,
+        extract_elapsed=extract_elapsed,
+        link_elapsed=link_elapsed,
+        total_started=total_started,
+        scope_widened=scope_widened,
+    )
+    return surface, diagnostics
+
+
+def _headers_only_scope_widened(
+    scope: str,
+    include_map: Mapping[str, Iterable[str]] | None,
+    units: list[CompileUnit],
+    build: BuildEvidence,
+) -> bool:
+    """Whether a ``headers-only`` scope had nothing to scope by and widened to full."""
+    return (
+        scope == "headers-only"
+        and not _norm_include_map(include_map)
+        and len(units) == len(build.compile_units)
+        and len(units) > 1
+    )
+
+
+def _replay_cache_lookup(
+    units: list[CompileUnit],
+    extractor: SourceAbiExtractor,
+    roots: list[str],
+    cache: SourceAbiCache | None,
+    digest_memo: dict[str, str | None],
+) -> tuple[list[str | None], list[SourceAbiTu | None], list[int]]:
+    """Phase 1 (serial): cache lookups, split hits from misses keeping order."""
     keys: list[str | None] = []
     results: list[SourceAbiTu | None] = [None] * len(units)
     misses: list[int] = []
@@ -931,18 +1030,21 @@ def run_source_replay(
             results[i] = cached
         else:
             misses.append(i)
-    cache_elapsed = time.monotonic() - cache_started
+    return keys, results, misses
 
-    # Phase 2 (parallel): extract the cache misses. Stateless per TU, so the
-    # worker is a module-level function (picklable for the process pool) fed the
-    # actual unit rather than an index into a closed-over list.
-    diags: dict[int, str] = {}
 
-    jobs = _l4_jobs(len(misses))
-    miss_units = [units[i] for i in misses]
-    worker = partial(_extract_one, extractor, list(roots or []), target_id)
-    extract_started = time.monotonic()
-    if jobs > 1 and len(misses) > 1:
+def _extract_cache_misses(
+    worker: Callable[[CompileUnit], tuple[SourceAbiTu | None, str | None]],
+    miss_units: list[CompileUnit],
+    jobs: int,
+) -> list[tuple[SourceAbiTu | None, str | None]]:
+    """Phase 2 (parallel): extract the cache misses, in parallel when ``jobs > 1``.
+
+    The per-TU work is stateless, so the worker is a module-level function
+    (picklable for the process pool) fed the actual unit rather than an index
+    into a closed-over list.
+    """
+    if jobs > 1 and len(miss_units) > 1:
         # Process pool parallelizes the GIL-bound AST post-processing too, not
         # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
         executor_cls = (
@@ -950,7 +1052,7 @@ def run_source_replay(
         )
         try:
             with executor_cls(max_workers=jobs) as pool:
-                extracted = list(pool.map(worker, miss_units))
+                return list(pool.map(worker, miss_units))
         except Exception as exc:  # noqa: BLE001
             # A process pool can fail to start (spawn import error, sandbox with
             # no /dev/shm, …) where threads would not. Degrade to a serial pass
@@ -960,19 +1062,27 @@ def run_source_replay(
                     "L4 process pool failed (%s); falling back to serial extraction",
                     exc,
                 )
-                extracted = [worker(u) for u in miss_units]
-            else:
-                raise
-    else:
-        extracted = [worker(u) for u in miss_units]
-    extract_elapsed = time.monotonic() - extract_started
-    for i, (tu, err) in zip(misses, extracted):
+                return [worker(u) for u in miss_units]
+            raise
+    return [worker(u) for u in miss_units]
+
+
+def _assemble_replay_results(
+    units: list[CompileUnit],
+    results: list[SourceAbiTu | None],
+    keys: list[str | None],
+    misses: list[int],
+    extracted: list[tuple[SourceAbiTu | None, str | None]],
+    cache: SourceAbiCache | None,
+    digest_memo: dict[str, str | None],
+) -> tuple[list[SourceAbiTu], list[str]]:
+    """Phase 3 (serial): cache puts + assemble in unit order (deterministic)."""
+    diags: dict[int, str] = {}
+    for i, (extracted_tu, err) in zip(misses, extracted):
         if err is None:
-            results[i] = tu
+            results[i] = extracted_tu
         else:
             diags[i] = err
-
-    # Phase 3 (serial): cache puts + assemble in unit order (deterministic).
     miss_set = set(misses)
     tus: list[SourceAbiTu] = []
     diagnostics: list[str] = []
@@ -984,16 +1094,27 @@ def run_source_replay(
             tus.append(tu)
         elif i in diags:
             diagnostics.append(diags[i])
+    return tus, diagnostics
 
-    link_started = time.monotonic()
-    surface = link_source_abi(
-        tus,
-        exported_symbols=exported_symbols,
-        library=library,
-        target_id=target_id,
-        forced_public=forced_public,
-    )
-    link_elapsed = time.monotonic() - link_started
+
+def _record_replay_coverage(
+    surface: SourceAbiSurface,
+    *,
+    scope: str,
+    include_map: Mapping[str, Iterable[str]] | None,
+    units: list[CompileUnit],
+    tus: list[SourceAbiTu],
+    diagnostics: list[str],
+    roots: list[str],
+    jobs: int,
+    n_misses: int,
+    cache_elapsed: float,
+    extract_elapsed: float,
+    link_elapsed: float,
+    total_started: float,
+    scope_widened: bool,
+) -> None:
+    """Record replay coverage counters and phase timings on the linked surface."""
     surface.coverage["replay_scope"] = scope
     surface.coverage["include_graph_used"] = bool(_norm_include_map(include_map))
     surface.coverage["compile_units_selected"] = len(units)
@@ -1008,14 +1129,13 @@ def run_source_replay(
     surface.coverage["link_s"] = round(link_elapsed, 3)
     surface.coverage["elapsed_s"] = round(time.monotonic() - total_started, 3)
     surface.coverage["extractor_jobs"] = jobs
-    surface.coverage["cache_misses"] = len(misses)
+    surface.coverage["cache_misses"] = n_misses
     if scope_widened:
         surface.coverage["scope_widened_to_full"] = True
         surface.coverage["scope_widened_reason"] = (
             "headers-only had no include graph/public-header target ownership; "
             "selected every compile unit"
         )
-    return surface, diagnostics
 
 
 #: Hard ceiling on the L4 worker count. Each worker drives a heavyweight clang

@@ -6,12 +6,18 @@ idea: one tiny library, one real release, walked up **every evidence level** so
 you can see — concretely, with the actual data — **what each level knows, how the
 levels correlate, and exactly where each one goes blind.**
 
-> **Where this fits.** For the *model* (what the `L0`–`L5` layers are and how
-> `--depth` selects them) read [Evidence Layers & Scan Depth](scan-and-evidence-levels.md)
-> and [Evidence & Detectability](evidence-and-detectability.md). For the *framing*
-> (why a change is only a "break" if it breaks a promise) read
-> [ABI/API Handling](abi-api-handling.md). **This page is the worked example that
-> makes all of it stick.**
+!!! info "This topic in three pages — you are on **Worked example**"
+    **Model** — [Evidence & Detectability](evidence-and-detectability.md): the
+    `L0`–`L5` evidence layers, what each can and cannot see, and the `--depth`
+    dial that collects them.
+    **Worked example** — this page: one tiny library walked up every level,
+    with the actual data.
+    **Flags** — [Source-Scan Depth](../user-guide/scan-levels.md): the `scan`
+    command reference with recipes.
+
+> For the *framing* (why a change is only a "break" if it breaks a promise)
+> read [ABI/API Handling](abi-api-handling.md). **This page is the worked
+> example that makes the model stick.**
 
 ---
 
@@ -482,12 +488,12 @@ The source scan reaches a *different* set of changes — macros, bodies, build
 flags, hygiene, cross-source conflicts — not a "better" version of the artifact
 scan. It is additive, not a replacement. To enable it on a real project, see the
 [source scan on the ABI/API Handling page](abi-api-handling.md#going-deeper-than-artifacts-the-source-scan)
-and [Evidence Layers & Scan Depth](scan-and-evidence-levels.md).
+and the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
 
 ---
 
 **Next:** [Evidence & Detectability](evidence-and-detectability.md) tracks each
-layer's false-positive / false-negative contribution as a CI gate ·
-[Evidence Layers & Scan Depth](scan-and-evidence-levels.md) maps the `L0`–`L5`
-layers to the `--depth` dial · [Limitations](limitations.md) is the authoritative
-per-change detectability matrix.
+layer's false-positive / false-negative contribution as a CI gate and maps the
+`L0`–`L5` layers to the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect) ·
+[Limitations](limitations.md) is the authoritative per-change detectability
+matrix.

@@ -202,6 +202,19 @@ class Function:
     # older snapshots and default to None / UNKNOWN.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN
+    # C ellipsis (...) — variadic calls use a different convention on common
+    # ABIs (%al on SysV x86-64, stack args on Apple AArch64). Tri-state:
+    # None = dumper/loader does not know (older snapshots); diff skips then.
+    is_variadic: bool | None = None
+    # Semantic contract attributes (nonnull, noreturn, format, alloc_size,
+    # malloc, returns_nonnull, warn_unused_result, sentinel, ...), normalized
+    # spellings. None = not captured (older snapshots / dumpers without
+    # attribute support); [] = captured, none present. Diff skips on None.
+    contract_attributes: list[str] | None = None
+    # Dynamic exception specification spelling ("throw()", "throw(int)", ...).
+    # "" = captured, no dynamic spec; None = not captured. `noexcept` is NOT
+    # folded in here — it keeps its dedicated is_noexcept field and kinds.
+    exception_spec: str | None = None
 
 
 @dataclass
@@ -218,6 +231,9 @@ class Variable:
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN
+    # Declared alignment in bits (alignas / __attribute__((aligned))).
+    # None = not captured (older snapshots / dumpers without support).
+    alignment_bits: int | None = None
 
 
 @dataclass

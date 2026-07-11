@@ -102,12 +102,12 @@ def test_depfile_args_strips_output_side_effect_options() -> None:
     # files during the S2 preprocessor/include replay (for example time traces).
     assert depfile_args_from_argv([
         "clang++", "-c", "foo.cpp", "-I", "include",
-        "-ftime-trace=/tmp/victim.json",
-        "-ftime-trace", "/tmp/victim2.json",
-        "-serialize-diagnostic-file=/tmp/diag",
-        "-fmodules-cache-path", "/tmp/cache",
+        "-ftime-trace=/attack/victim.json",
+        "-ftime-trace", "/attack/victim2.json",
+        "-serialize-diagnostic-file=/attack/diag",
+        "-fmodules-cache-path", "/attack/cache",
         "-save-temps", "--save-temps=obj",
-        "-MJ/tmp/compile.json",
+        "-MJ/attack/compile.json",
     ]) == ["foo.cpp", "-I", "include"]
 
 

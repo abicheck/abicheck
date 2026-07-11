@@ -889,6 +889,56 @@ def _has_public_pointer_factory(
     return False
 
 
+def _cached_bare_re(name: str, cache: dict[str, re.Pattern[str]]) -> re.Pattern[str]:
+    """Return (and memoize in ``cache``) the word-boundary regex for ``name``."""
+    r = cache.get(name)
+    if r is None:
+        r = re.compile(r"\b" + re.escape(name) + r"\b")
+        cache[name] = r
+    return r
+
+
+def _cached_factory_re(name: str, cache: dict[str, re.Pattern[str]]) -> re.Pattern[str]:
+    """Return (and memoize in ``cache``) the pointer-factory regex ``\\bname\\s*\\*``."""
+    r = cache.get(name)
+    if r is None:
+        r = re.compile(r"\b" + re.escape(name) + r"\s*\*")
+        cache[name] = r
+    return r
+
+
+def _record_by_value_uses(
+    text: str | None,
+    ac: _SubstringMatcher,
+    bare_re_cache: dict[str, re.Pattern[str]],
+    used_by_value: set[str],
+) -> None:
+    """Add to ``used_by_value`` every candidate that ``text`` uses by value."""
+    if not text:
+        return
+    for c in ac.find(text):
+        if c not in used_by_value and _type_used_by_value(
+            text, _cached_bare_re(c, bare_re_cache)
+        ):
+            used_by_value.add(c)
+
+
+def _record_factory_returns(
+    return_type: str | None,
+    ac: _SubstringMatcher,
+    factory_re_cache: dict[str, re.Pattern[str]],
+    has_factory: set[str],
+) -> None:
+    """Add to ``has_factory`` every candidate ``return_type`` returns as a pointer factory."""
+    # Pointer factory: a public function returning ``T*`` (never ``T&``).
+    rt = return_type or ""
+    if not rt or "&" in rt:
+        return
+    for c in ac.find(rt):
+        if c not in has_factory and _cached_factory_re(c, factory_re_cache).search(rt):
+            has_factory.add(c)
+
+
 def _opaque_usage_index(
     candidates: set[str],
     snap: AbiSnapshot,
@@ -913,44 +963,18 @@ def _opaque_usage_index(
         return used_by_value, has_factory
     ac = _SubstringMatcher(candidates)
 
-    def _bare(c: str) -> re.Pattern[str]:
-        r = bare_re_cache.get(c)
-        if r is None:
-            r = re.compile(r"\b" + re.escape(c) + r"\b")
-            bare_re_cache[c] = r
-        return r
-
-    def _factory(c: str) -> re.Pattern[str]:
-        r = factory_re_cache.get(c)
-        if r is None:
-            r = re.compile(r"\b" + re.escape(c) + r"\s*\*")
-            factory_re_cache[c] = r
-        return r
-
-    def _scan_by_value(text: str | None) -> None:
-        if not text:
-            return
-        for c in ac.find(text):
-            if c not in used_by_value and _type_used_by_value(text, _bare(c)):
-                used_by_value.add(c)
-
     for f in snap.functions:
         if f.visibility not in _PUBLIC_VIS:
             continue
-        rt = f.return_type or ""
-        # Pointer factory: a public function returning ``T*`` (never ``T&``).
-        if rt and "&" not in rt:
-            for c in ac.find(rt):
-                if c not in has_factory and _factory(c).search(rt):
-                    has_factory.add(c)
-        _scan_by_value(f.return_type)
+        _record_factory_returns(f.return_type, ac, factory_re_cache, has_factory)
+        _record_by_value_uses(f.return_type, ac, bare_re_cache, used_by_value)
         for p in f.params:
-            _scan_by_value(p.type)
+            _record_by_value_uses(p.type, ac, bare_re_cache, used_by_value)
 
     for v in snap.variables:
         if v.visibility not in _PUBLIC_VIS:
             continue
-        _scan_by_value(v.type)
+        _record_by_value_uses(v.type, ac, bare_re_cache, used_by_value)
 
     return used_by_value, has_factory
 

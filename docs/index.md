@@ -20,7 +20,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 ## Why abicheck
 
 - **Five-source evidence model** — abicheck overlays up to five independent, additive sources (the binary, its debug info, its public headers, its build-system data, and optionally its sources — `L0`–`L4`), cross-checks them against each other (DWARF/PDB debug info against the symbol table, header AST against build flags), and lets the strongest evidence win. Each source catches breaks the others miss. See [Evidence & Detectability](concepts/evidence-and-detectability.md).
-- **318 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
+- **342 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
 - **Multiple output formats** — Markdown, JSON, SARIF (GitHub Code Scanning), HTML.
 - **Policy profiles** — `strict_abi`, `sdk_vendor`, `plugin_abi`, or custom YAML overrides.
 - **ABICC drop-in** — full flag parity for migrating from `abi-compliance-checker`.
@@ -36,7 +36,7 @@ The docs are two complementary tracks, each ordered from introductory to expert:
    compatibility is, why libraries break their consumers, and how to design
    against it. Start with the [learning series](concepts/abi-series/00-product-contract.md)
    (part 0 assumes nothing; part 7 is expert-level design guidance) and keep the
-   [162-case example encyclopedia](examples/index.md) as a catalog of real breaks.
+   [example encyclopedia](examples/index.md) as a catalog of real breaks.
 2. **Use the tool** — the [User Guide](getting-started.md) takes you from install
    and first check through CI integration to specialised workflows;
    [Concepts](concepts/verdicts.md) explains how abicheck works — what a verdict

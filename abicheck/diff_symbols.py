@@ -483,6 +483,157 @@ def _check_explicit_change(
     )
 
 
+def _check_variadic_change(
+    mangled: str, f_old: Function, f_new: Function
+) -> list[Change]:
+    """Emit a change if the C ellipsis (...) was added or removed.
+
+    Tri-state — skip when either snapshot did not record variadicness
+    (older snapshots / dumpers without the field).
+    """
+    return bool_transition(
+        f_old.is_variadic,
+        f_new.is_variadic,
+        mangled,
+        skip_none=True,
+        added=(
+            ChangeKind.FUNC_VARIADIC_ADDED,
+            f"Function became variadic (gained ...): {f_old.name}",
+        ),
+        added_values=("fixed-arity", "variadic"),
+        removed=(
+            ChangeKind.FUNC_VARIADIC_REMOVED,
+            f"Function is no longer variadic (lost ...): {f_old.name}",
+        ),
+        removed_values=("variadic", "fixed-arity"),
+    )
+
+
+#: Calling-convention attribute base names. When one of these flips inside
+#: ``contract_attributes`` it is a parameter-passing change, not a semantic
+#: contract change, so it routes to the existing BREAKING kind.
+_CC_ATTRIBUTE_BASES = frozenset({
+    "cdecl", "stdcall", "fastcall", "thiscall", "regparm", "ms_abi",
+    "sysv_abi", "vectorcall",
+})
+
+
+def _is_cc_attribute(token: str) -> bool:
+    return token.split("(", 1)[0] in _CC_ATTRIBUTE_BASES
+
+
+def _check_contract_attributes_change(
+    mangled: str, f_old: Function, f_new: Function
+) -> list[Change]:
+    """Emit changes for gained/lost semantic contract attributes.
+
+    Skips when either side did not capture attributes (None); an empty list
+    means "captured, none present" and does participate. Calling-convention
+    attribute flips (stdcall/regparm/ms_abi/...) route to the dedicated
+    BREAKING ``CALLING_CONVENTION_CHANGED`` kind instead.
+    """
+    if f_old.contract_attributes is None or f_new.contract_attributes is None:
+        return []
+    old_attrs = set(f_old.contract_attributes)
+    new_attrs = set(f_new.contract_attributes)
+    if old_attrs == new_attrs:
+        return []
+    changes: list[Change] = []
+
+    old_cc = {a for a in old_attrs if _is_cc_attribute(a)}
+    new_cc = {a for a in new_attrs if _is_cc_attribute(a)}
+    if old_cc != new_cc:
+        changes.append(
+            make_change(
+                ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol=mangled,
+                description=(
+                    f"Calling-convention attribute changed for {f_old.name}: "
+                    f"{', '.join(sorted(old_cc)) or '(default)'} → "
+                    f"{', '.join(sorted(new_cc)) or '(default)'}"
+                ),
+                old_value=", ".join(sorted(old_cc)) or "(default)",
+                new_value=", ".join(sorted(new_cc)) or "(default)",
+            )
+        )
+        old_attrs -= old_cc
+        new_attrs -= new_cc
+
+    gained = sorted(new_attrs - old_attrs)
+    lost = sorted(old_attrs - new_attrs)
+    if gained:
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED,
+                symbol=mangled,
+                name=f_old.name,
+                detail=", ".join(gained),
+                new_value=", ".join(gained),
+            )
+        )
+    if lost:
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED,
+                symbol=mangled,
+                name=f_old.name,
+                detail=", ".join(lost),
+                old_value=", ".join(lost),
+            )
+        )
+    return changes
+
+
+def _check_exception_spec_change(
+    mangled: str, f_old: Function, f_new: Function
+) -> list[Change]:
+    """Emit a change if the dynamic exception specification changed.
+
+    ``noexcept`` transitions keep their dedicated kinds; this covers the
+    legacy ``throw(...)`` spellings only. Tri-state: None = not captured.
+    """
+    if f_old.exception_spec is None or f_new.exception_spec is None:
+        return []
+    if f_old.exception_spec == f_new.exception_spec:
+        return []
+    return [
+        make_change(
+            ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+            symbol=mangled,
+            name=f_old.name,
+            old=f_old.exception_spec or "(none)",
+            new=f_new.exception_spec or "(none)",
+        )
+    ]
+
+
+def _check_vtable_index_change(
+    mangled: str, f_old: Function, f_new: Function
+) -> list[Change]:
+    """Emit a change when a persisting virtual method moved to another slot.
+
+    ``vtable_index`` is modeled per-function; the per-type vtable array diff
+    misses snapshots that carry indices but no reconstructed vtable list.
+    Reuses TYPE_VTABLE_CHANGED — a moved slot IS a vtable reorder.
+    """
+    if f_old.vtable_index is None or f_new.vtable_index is None:
+        return []
+    if f_old.vtable_index == f_new.vtable_index:
+        return []
+    return [
+        make_change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol=mangled,
+            description=(
+                f"vtable slot index changed for {f_old.name}: "
+                f"{f_old.vtable_index} → {f_new.vtable_index}"
+            ),
+            old_value=str(f_old.vtable_index),
+            new_value=str(f_new.vtable_index),
+        )
+    ]
+
+
 def _check_function_signature(
     mangled: str,
     f_old: Function,
@@ -509,6 +660,10 @@ def _check_function_signature(
     changes.extend(_check_virtual_change(mangled, f_old, f_new))
     changes.extend(_check_hidden_friend_change(mangled, f_old, f_new))
     changes.extend(_check_explicit_change(mangled, f_old, f_new))
+    changes.extend(_check_variadic_change(mangled, f_old, f_new))
+    changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
+    changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
+    changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
     return changes
 
 
@@ -811,13 +966,37 @@ def _diff_inline_hidden_friends(
     return changes
 
 
+def _check_variable_alignment(
+    mangled: str, v_old: Variable, v_new: Variable
+) -> list[Change]:
+    """Emit a change when a variable's declared alignment changed.
+
+    Tri-state: None = not captured (older snapshots / dumpers without
+    alignment support) — skip rather than compare.
+    """
+    if v_old.alignment_bits is None or v_new.alignment_bits is None:
+        return []
+    if v_old.alignment_bits == v_new.alignment_bits:
+        return []
+    return [
+        make_change(
+            ChangeKind.VAR_ALIGNMENT_CHANGED,
+            symbol=mangled,
+            name=v_old.name,
+            old=str(v_old.alignment_bits),
+            new=str(v_new.alignment_bits),
+        )
+    ]
+
+
 def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
     """Compare a matched pair of public variables."""
+    changes = _check_variable_alignment(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
-        return []
+        return changes
     if canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type):
-        return [
+        return changes + [
             make_change(
                 ChangeKind.VAR_TYPE_CHANGED,
                 symbol=mangled,
@@ -827,7 +1006,7 @@ def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chan
             )
         ]
     # const-qualification transitions only matter when the type is unchanged.
-    return bool_transition(
+    return changes + bool_transition(
         v_old.is_const,
         v_new.is_const,
         mangled,

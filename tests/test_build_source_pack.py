@@ -694,8 +694,8 @@ def test_driver_mode_operand_does_not_make_unix_paths_msvc() -> None:
     from abicheck.buildsource.adapters.base import source_from_argv
 
     assert source_from_argv([
-        "gcc", "-MMD", "-MF", "--driver-mode=cl", "-c", "/tmp/foo.c",
-    ]) == "/tmp/foo.c"
+        "gcc", "-MMD", "-MF", "--driver-mode=cl", "-c", "/src/foo.c",
+    ]) == "/src/foo.c"
 
 
 def test_clang_driver_mode_keeps_absolute_posix_source() -> None:

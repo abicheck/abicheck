@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 318,
+  "count": 342,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -28,6 +28,24 @@
       "min_evidence": "L0",
       "doc_slug": "abi_tag_changed",
       "examples": "case113_abi_tag_changed"
+    },
+    {
+      "kind": "allocator_replacement_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "allocator_replacement_added",
+      "examples": ""
+    },
+    {
+      "kind": "allocator_replacement_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "allocator_replacement_removed",
+      "examples": ""
     },
     {
       "kind": "anon_field_changed",
@@ -90,6 +108,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "behavioural_default_changed",
+      "examples": ""
+    },
+    {
+      "kind": "bind_now_disabled",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "bind_now_disabled",
       "examples": ""
     },
     {
@@ -435,6 +462,15 @@
       "examples": ""
     },
     {
+      "kind": "dynamic_loading_flags_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "dynamic_loading_flags_changed",
+      "examples": ""
+    },
+    {
       "kind": "elf_abi_flags_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -450,6 +486,24 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "elf_class_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_endianness_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "elf_endianness_changed",
+      "examples": ""
+    },
+    {
+      "kind": "elf_init_fini_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "elf_init_fini_changed",
       "examples": ""
     },
     {
@@ -597,6 +651,15 @@
       "examples": ""
     },
     {
+      "kind": "exported_object_alignment_reduced",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "exported_object_alignment_reduced",
+      "examples": ""
+    },
+    {
       "kind": "exported_symbol_source_owner_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -741,6 +804,24 @@
       "examples": ""
     },
     {
+      "kind": "func_contract_attribute_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_contract_attribute_added",
+      "examples": ""
+    },
+    {
+      "kind": "func_contract_attribute_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_contract_attribute_removed",
+      "examples": ""
+    },
+    {
       "kind": "func_cv_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -774,6 +855,15 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "func_deleted_elf_fallback",
+      "examples": ""
+    },
+    {
+      "kind": "func_exception_spec_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_exception_spec_changed",
       "examples": ""
     },
     {
@@ -883,6 +973,24 @@
       "min_evidence": "L1",
       "doc_slug": "func_static_changed",
       "examples": "case21_method_became_static"
+    },
+    {
+      "kind": "func_variadic_added",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "func_variadic_added",
+      "examples": ""
+    },
+    {
+      "kind": "func_variadic_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "func_variadic_removed",
+      "examples": ""
     },
     {
       "kind": "func_virtual_added",
@@ -1038,6 +1146,24 @@
       "examples": ""
     },
     {
+      "kind": "imported_symbol_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "imported_symbol_added",
+      "examples": ""
+    },
+    {
+      "kind": "imported_symbol_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "imported_symbol_removed",
+      "examples": ""
+    },
+    {
       "kind": "include_graph_public_header_drift",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1128,6 +1254,15 @@
       "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique"
     },
     {
+      "kind": "interpreter_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "interpreter_changed",
+      "examples": ""
+    },
+    {
       "kind": "kabi_crc_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1200,6 +1335,15 @@
       "examples": ""
     },
     {
+      "kind": "library_version_downgraded",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "library_version_downgraded",
+      "examples": ""
+    },
+    {
       "kind": "link_export_policy_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1233,6 +1377,33 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "macho_cpu_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "macho_filetype_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "macho_filetype_changed",
+      "examples": ""
+    },
+    {
+      "kind": "macho_linkage_flags_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "macho_linkage_flags_changed",
+      "examples": ""
+    },
+    {
+      "kind": "macho_reexport_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "macho_reexport_changed",
       "examples": ""
     },
     {
@@ -1296,6 +1467,15 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "opaque_invariant_broken",
+      "examples": ""
+    },
+    {
+      "kind": "os_deployment_floor_raised",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "os_deployment_floor_raised",
       "examples": ""
     },
     {
@@ -1386,6 +1566,24 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "pe_forwarder_changed",
+      "examples": ""
+    },
+    {
+      "kind": "pe_hardening_improved",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "pe_hardening_improved",
+      "examples": ""
+    },
+    {
+      "kind": "pe_hardening_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "pe_hardening_weakened",
       "examples": ""
     },
     {
@@ -2694,6 +2892,15 @@
       "examples": "case61_var_added"
     },
     {
+      "kind": "var_alignment_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "var_alignment_changed",
+      "examples": ""
+    },
+    {
       "kind": "var_became_const",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -2862,6 +3069,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "writable_executable_segment",
+      "examples": ""
+    },
+    {
+      "kind": "x86_isa_baseline_raised",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "x86_isa_baseline_raised",
       "examples": ""
     }
   ]

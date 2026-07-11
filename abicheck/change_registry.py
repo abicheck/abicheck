@@ -28,6 +28,7 @@ Architecture review: Problem A — eliminates scattered metadata across 5+ locat
 """
 from __future__ import annotations
 
+from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
@@ -1948,4 +1949,9 @@ REGISTRY = ChangeKindRegistry([
               "findings share this single root cause; align _TIME_BITS/"
               "_FILE_OFFSET_BITS across the library and its consumers.",
        description_template="time64/LFS ABI flip detected: {detail}"),
+
+    # Coverage-extension kinds (dynamic loader, PE, Mach-O, language
+    # contracts) live in change_registry_coverage.py to keep this file under
+    # the 2000-line cap; they are part of this same single registry.
+    *COVERAGE_EXTENSION_ENTRIES,
 ])

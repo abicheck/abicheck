@@ -397,6 +397,231 @@ def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool
     return which(tool) is not None
 
 
+def _resolve_inferred_make_launcher(
+    which: Callable[[str], str | None], extractors: list[ExtractorRecord]
+) -> str | None:
+    """Pick the GNU Make launcher path, or append a skip record and return None."""
+    selected = _select_gnu_make_launcher(which)
+    if selected is None:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="skipped",
+                detail=(
+                    "detected a Make project but no GNU Make launcher "
+                    "(`gmake` or GNU `make`) is available; pass "
+                    "--build-info / --compile-db instead"
+                ),
+            )
+        )
+        return None
+    return selected.path
+
+
+def _claim_cmake_build_dir(
+    sources: Path, timeout: float, extractors: list[ExtractorRecord]
+) -> tuple[Path, Callable[[], None]] | None:
+    """Claim the out-of-tree cmake build dir, or append a skip record and return None.
+
+    cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
+    checkout (it may be read-only / shared) and keep generated output away from
+    every tree walker, so no walker needs to prune an in-tree build dir
+    (maintainer decision). cmake writes absolute source/-I paths into
+    compile_commands.json, so an out-of-tree build dir resolves fine.
+
+    The path is DETERMINISTIC per resolved source tree (not a random mkdtemp):
+    cmake records the build dir in each compile unit's `directory` and in
+    generated-header `-I` paths, which feed the L4 replay cache key and
+    compile-unit IDs. A random path would churn both every run (perpetual cache
+    misses, non-reproducible compile-unit IDs); a stable per-tree path keeps them
+    identical run-to-run. It lives inside a per-user 0700 root
+    (`_inferred_cmake_build_base`) so the predictable path can't be pre-planted as
+    a symlink on a shared /tmp (Codex P2). `_claim_inferred_build_dir` takes an
+    exclusive lock on it so concurrent scans of the same checkout serialize
+    instead of sharing one mutable tree (Codex P2); under contention it falls back
+    to a unique dir. Removed (and unlocked) after L4 via `cleanup`.
+    """
+    base = _inferred_cmake_build_base(sources)
+    if base is None:
+        # No owner-private temp dir could be established — refuse to configure
+        # into a predictable shared path (symlink-attack safe; Codex P2).
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="skipped",
+                detail=(
+                    "could not create a private temp directory for the cmake "
+                    "build; pass --build-info / --compile-db instead"
+                ),
+            )
+        )
+        return None
+    build_dir, release = _claim_inferred_build_dir(base, timeout)
+    build_dir.mkdir(parents=True, exist_ok=True)
+    return build_dir, release
+
+
+def _resolve_query_launcher(
+    cmd: list[str],
+    system: str,
+    which: Callable[[str], str | None],
+    extractors: list[ExtractorRecord],
+) -> bool:
+    """Apply the bazelisk fallback to *cmd* in place; False (+ skip record) if the tool is missing."""
+    # Bazelisk is the common launcher when `bazel` isn't on PATH; mirror the
+    # BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
+    if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
+        cmd[0] = "bazelisk"
+    tool = cmd[0]
+    if not _query_tool_available(tool, which):
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="skipped",
+                detail=(
+                    f"detected a {system} project but `{tool}` is not installed; "
+                    "install it or pass --build-info / --compile-db"
+                ),
+            )
+        )
+        return False
+    return True
+
+
+def _run_query_process(
+    cmd: list[str],
+    system: str,
+    sources: Path,
+    timeout: float,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+) -> subprocess.CompletedProcess[str] | None:
+    """Run the inferred query; None (+ failed record + diagnostic) if it cannot run."""
+    try:
+        return subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+            cmd,
+            cwd=str(sources),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=f"auto {system} query failed to run ({cmd[0]}): {exc}",
+            )
+        )
+        merged.diagnostics.append(f"build_query_auto: {exc}")
+        return None
+
+
+def _ingest_make_dry_run_transcript(
+    proc: subprocess.CompletedProcess[str],
+    sources: Path,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    build_dir: Path | None,
+) -> None:
+    """Ingest a failed make dry-run's partial transcript, degrading errors to diagnostics."""
+    try:
+        _ingest_query_output(
+            "make",
+            sources,
+            proc.stdout or "",
+            merged,
+            extractors,
+            build_dir=build_dir,
+            query_returncode=proc.returncode,
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=(
+                    "auto make dry-run failed and its transcript could not "
+                    f"be ingested: {exc}"
+                ),
+            )
+        )
+        merged.diagnostics.append(f"build_query_auto: make ingest failed ({exc})")
+
+
+def _merge_query_result(
+    proc: subprocess.CompletedProcess[str],
+    system: str,
+    sources: Path,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    build_dir: Path | None,
+) -> Path | None:
+    """Merge a completed inferred query into *merged*, recording failures as diagnostics."""
+    if proc.returncode != 0 and system == "make":
+        _ingest_make_dry_run_transcript(proc, sources, merged, extractors, build_dir)
+        return None
+    if proc.returncode != 0:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=(
+                    f"auto {system} query exited {proc.returncode}: "
+                    f"{(proc.stderr or '').strip()[:200]}"
+                ),
+            )
+        )
+        merged.diagnostics.append(
+            f"build_query_auto: {system} exited {proc.returncode}"
+        )
+        return None
+    # Ingestion parses tool output (the cmake compile DB, bazel aquery JSON) —
+    # keep it inside the never-raises contract so a malformed payload or a
+    # transient I/O error degrades to a diagnostic rather than aborting a
+    # `dump --sources` run (review).
+    try:
+        return _ingest_query_output(
+            system,
+            sources,
+            proc.stdout,
+            merged,
+            extractors,
+            build_dir=build_dir,
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=f"auto {system} query ran but its output could not be ingested: {exc}",
+            )
+        )
+        merged.diagnostics.append(f"build_query_auto: ingest failed ({exc})")
+        return None
+
+
+def _schedule_build_dir_release(
+    build_dir: Path | None,
+    release: Callable[[], None],
+    cleanup: list[Callable[[], None]] | None,
+) -> None:
+    """Release the claimed build dir now, or defer it to *cleanup* for after L4 replay."""
+    if build_dir is None:
+        return
+    if cleanup is not None:
+        # Defer removal: L4 replay still needs this dir as clang's cwd, and
+        # the lock must stay held until then so a concurrent same-tree scan
+        # can't reuse or delete the dir mid-replay.
+        cleanup.append(
+            functools.partial(_release_inferred_build_dir, build_dir, release)
+        )
+    else:
+        _release_inferred_build_dir(build_dir, release)
+
+
 def run_inferred_build_query(
     sources: Path | None,
     merged: BuildEvidence,
@@ -432,58 +657,17 @@ def run_inferred_build_query(
     sources = sources.resolve()
     make_launcher = "make"
     if system == "make":
-        selected = _select_gnu_make_launcher(which)
-        if selected is None:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="skipped",
-                    detail=(
-                        "detected a Make project but no GNU Make launcher "
-                        "(`gmake` or GNU `make`) is available; pass "
-                        "--build-info / --compile-db instead"
-                    ),
-                )
-            )
+        launcher = _resolve_inferred_make_launcher(which, extractors)
+        if launcher is None:
             return None
-        make_launcher = selected.path
-    # cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
-    # checkout (it may be read-only / shared) and keep generated output away from
-    # every tree walker, so no walker needs to prune an in-tree build dir
-    # (maintainer decision). cmake writes absolute source/-I paths into
-    # compile_commands.json, so an out-of-tree build dir resolves fine.
-    #
-    # The path is DETERMINISTIC per resolved source tree (not a random mkdtemp):
-    # cmake records the build dir in each compile unit's `directory` and in
-    # generated-header `-I` paths, which feed the L4 replay cache key and
-    # compile-unit IDs. A random path would churn both every run (perpetual cache
-    # misses, non-reproducible compile-unit IDs); a stable per-tree path keeps them
-    # identical run-to-run. It lives inside a per-user 0700 root
-    # (`_inferred_cmake_build_base`) so the predictable path can't be pre-planted as
-    # a symlink on a shared /tmp (Codex P2). `_claim_inferred_build_dir` takes an
-    # exclusive lock on it so concurrent scans of the same checkout serialize
-    # instead of sharing one mutable tree (Codex P2); under contention it falls back
-    # to a unique dir. Removed (and unlocked) after L4 via `cleanup`.
+        make_launcher = launcher
     build_dir: Path | None = None
     release: Callable[[], None] = _noop_release
     if system == "cmake":
-        base = _inferred_cmake_build_base(sources)
-        if base is None:
-            # No owner-private temp dir could be established — refuse to configure
-            # into a predictable shared path (symlink-attack safe; Codex P2).
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="skipped",
-                    detail=(
-                        "could not create a private temp directory for the cmake "
-                        "build; pass --build-info / --compile-db instead"
-                    ),
-                )
-            )
+        claimed = _claim_cmake_build_dir(sources, timeout, extractors)
+        if claimed is None:
             return None
-        build_dir, release = _claim_inferred_build_dir(base, timeout)
-        build_dir.mkdir(parents=True, exist_ok=True)
+        build_dir, release = claimed
     try:
         cmd = inferred_query_command(
             system, sources, build_dir=build_dir, make_launcher=make_launcher
@@ -492,122 +676,14 @@ def run_inferred_build_query(
             cmd is None
         ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
             return None
-        # Bazelisk is the common launcher when `bazel` isn't on PATH; mirror the
-        # BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
-        if (
-            cmd[0] == "bazel"
-            and which("bazel") is None
-            and which("bazelisk") is not None
-        ):
-            cmd[0] = "bazelisk"
-        tool = cmd[0]
-        if not _query_tool_available(tool, which):
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="skipped",
-                    detail=(
-                        f"detected a {system} project but `{tool}` is not installed; "
-                        "install it or pass --build-info / --compile-db"
-                    ),
-                )
-            )
+        if not _resolve_query_launcher(cmd, system, which, extractors):
             return None
-        try:
-            proc = subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
-                cmd,
-                cwd=str(sources),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="failed",
-                    detail=f"auto {system} query failed to run ({tool}): {exc}",
-                )
-            )
-            merged.diagnostics.append(f"build_query_auto: {exc}")
+        proc = _run_query_process(cmd, system, sources, timeout, merged, extractors)
+        if proc is None:
             return None
-        if proc.returncode != 0 and system == "make":
-            try:
-                _ingest_query_output(
-                    system,
-                    sources,
-                    proc.stdout or "",
-                    merged,
-                    extractors,
-                    build_dir=build_dir,
-                    query_returncode=proc.returncode,
-                )
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                extractors.append(
-                    ExtractorRecord(
-                        name="build_query_auto",
-                        status="failed",
-                        detail=(
-                            "auto make dry-run failed and its transcript could not "
-                            f"be ingested: {exc}"
-                        ),
-                    )
-                )
-                merged.diagnostics.append(
-                    f"build_query_auto: make ingest failed ({exc})"
-                )
-            return None
-        if proc.returncode != 0:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="failed",
-                    detail=(
-                        f"auto {system} query exited {proc.returncode}: "
-                        f"{(proc.stderr or '').strip()[:200]}"
-                    ),
-                )
-            )
-            merged.diagnostics.append(
-                f"build_query_auto: {system} exited {proc.returncode}"
-            )
-            return None
-        # Ingestion parses tool output (the cmake compile DB, bazel aquery JSON) —
-        # keep it inside the never-raises contract so a malformed payload or a
-        # transient I/O error degrades to a diagnostic rather than aborting a
-        # `dump --sources` run (review).
-        try:
-            return _ingest_query_output(
-                system,
-                sources,
-                proc.stdout,
-                merged,
-                extractors,
-                build_dir=build_dir,
-            )
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query_auto",
-                    status="failed",
-                    detail=f"auto {system} query ran but its output could not be ingested: {exc}",
-                )
-            )
-            merged.diagnostics.append(f"build_query_auto: ingest failed ({exc})")
-            return None
+        return _merge_query_result(proc, system, sources, merged, extractors, build_dir)
     finally:
-        if build_dir is not None:
-            if cleanup is not None:
-                # Defer removal: L4 replay still needs this dir as clang's cwd, and
-                # the lock must stay held until then so a concurrent same-tree scan
-                # can't reuse or delete the dir mid-replay.
-                cleanup.append(
-                    functools.partial(_release_inferred_build_dir, build_dir, release)
-                )
-            else:
-                _release_inferred_build_dir(build_dir, release)
+        _schedule_build_dir_release(build_dir, release, cleanup)
 
 
 def _ingest_query_output(

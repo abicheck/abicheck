@@ -54,7 +54,7 @@ jobs:
       - name: Type check (mypy)
         run: mypy abicheck
       - name: Install docs dependencies
-        run: pip install mkdocs mkdocs-material pymdown-extensions
+        run: pip install mkdocs mkdocs-material pymdown-extensions mkdocs-redirects
       - name: Build docs (strict)
         run: mkdocs build --strict
 

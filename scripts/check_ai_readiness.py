@@ -666,6 +666,13 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # reaches `cli_scan` function-locally and `cli_scan` imports `cli_options` at
         # module load. `cli_options` itself imports only `cli_params` at module load
         # (it is a leaf), so this too closes only through function-local imports.
+        #
+        # The `compare`/`dump` command bodies are size-split out of `cli.py` into
+        # `cli_compare_helpers.run_compare` / `cli_dump_helpers` (thin click wrappers
+        # in `cli` delegate to them); those helpers reach the shared
+        # `service`/`service_scan`/`cli_buildsource`/`cli_resolve` collectors
+        # (function-local) and are imported back by `cli`, so they join the same SCC
+        # — the package still imports cleanly (no init deadlock).
         frozenset(
             {
                 "appcompat",
@@ -674,8 +681,10 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_baseline",
                 "cli_buildsource",
                 "cli_buildsource_helpers",
+                "cli_compare_helpers",
                 "cli_compare_release",
                 "cli_debian_symbols",
+                "cli_dump_helpers",
                 "cli_helpers_compare",
                 "cli_options",
                 "cli_plugin",

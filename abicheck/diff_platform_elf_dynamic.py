@@ -271,6 +271,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     changes.extend(_diff_gnu_property(old_elf, new_elf))
     changes.extend(_diff_dt_relr(old_elf, new_elf))
     changes.extend(_diff_hash_styles(old_elf, new_elf))
+    changes.extend(_diff_loader_contract(old_elf, new_elf))
+    changes.extend(_diff_kernel_floor(old_elf, new_elf))
 
     return changes
 
@@ -364,6 +366,119 @@ def _diff_hash_styles(old_elf: Any, new_elf: Any) -> list[Change]:
     ]
 
 
+def _diff_loader_contract(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect dynamic-loader contract drift: PT_INTERP, BIND_NOW, DT_FLAGS_1
+    loading flags, and init/fini presence.
+
+    The tri-state fields (``dynamic_flags``/``has_init``/``has_fini`` = None,
+    ``ei_data``/``interpreter`` = "") mean "not captured" on legacy snapshots
+    and are skipped rather than compared, so a re-dump against an old baseline
+    never fabricates a finding.
+    """
+    changes: list[Change] = []
+
+    old_interp = getattr(old_elf, "interpreter", "")
+    new_interp = getattr(new_elf, "interpreter", "")
+    if old_interp and new_interp and old_interp != new_interp:
+        changes.append(
+            make_change(
+                ChangeKind.INTERPRETER_CHANGED,
+                symbol="PT_INTERP",
+                old=old_interp,
+                new=new_interp,
+                old_value=old_interp,
+                new_value=new_interp,
+            )
+        )
+
+    # Eager→lazy binding flip. When the drop also lowers the RELRO level
+    # (full → partial), _diff_security_hardening already reports RELRO_WEAKENED
+    # for the same underlying event — don't double-report.
+    if _both_captured_elf_identity(old_elf, new_elf):
+        old_bind = getattr(old_elf, "bind_now", False)
+        new_bind = getattr(new_elf, "bind_now", False)
+        relro_unchanged = getattr(old_elf, "relro", "none") == getattr(
+            new_elf, "relro", "none"
+        )
+        if old_bind and not new_bind and relro_unchanged:
+            changes.append(
+                make_change(
+                    ChangeKind.BIND_NOW_DISABLED,
+                    symbol="DT_BIND_NOW",
+                    old_value="bind-now",
+                    new_value="lazy",
+                )
+            )
+
+    old_flags = getattr(old_elf, "dynamic_flags", None)
+    new_flags = getattr(new_elf, "dynamic_flags", None)
+    if old_flags is not None and new_flags is not None and old_flags != new_flags:
+        gained = sorted(new_flags - old_flags)
+        lost = sorted(old_flags - new_flags)
+        detail = ", ".join([f"+{f}" for f in gained] + [f"-{f}" for f in lost])
+        changes.append(
+            make_change(
+                ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
+                symbol="DT_FLAGS_1",
+                detail=detail,
+                old_value=", ".join(sorted(old_flags)) or "(none)",
+                new_value=", ".join(sorted(new_flags)) or "(none)",
+            )
+        )
+
+    for attr, label in (("has_init", "init"), ("has_fini", "fini")):
+        old_v = getattr(old_elf, attr, None)
+        new_v = getattr(new_elf, attr, None)
+        if old_v is None or new_v is None or old_v == new_v:
+            continue
+        detail = f"{label} code {'added' if new_v else 'removed'}"
+        changes.append(
+            make_change(
+                ChangeKind.ELF_INIT_FINI_CHANGED,
+                symbol=f"DT_{label.upper()}",
+                detail=detail,
+                old_value="present" if old_v else "absent",
+                new_value="present" if new_v else "absent",
+            )
+        )
+
+    return changes
+
+
+def _kernel_version_tuple(version: str) -> tuple[int, ...] | None:
+    """Parse a dotted kernel version ("3.2.0") into a comparable tuple."""
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return None
+
+
+def _diff_kernel_floor(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect a raised NT_GNU_ABI_TAG minimum-kernel floor.
+
+    Only the raising direction is a finding (consumers on older kernels get
+    rejected by the loader); lowering the floor is an improvement.
+    """
+    old_floor = getattr(old_elf, "min_kernel_version", "")
+    new_floor = getattr(new_elf, "min_kernel_version", "")
+    if not (old_floor and new_floor) or old_floor == new_floor:
+        return []
+    old_t = _kernel_version_tuple(old_floor)
+    new_t = _kernel_version_tuple(new_floor)
+    if old_t is None or new_t is None or new_t <= old_t:
+        return []
+    return [
+        make_change(
+            ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
+            symbol=".note.ABI-tag",
+            old=f"Linux {old_floor}",
+            new=f"Linux {new_floor}",
+            old_value=old_floor,
+            new_value=new_floor,
+        )
+    ]
+
+
 def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
     """Detect ELF header identity drift (G23-A3): machine, class, ABI flags, OS ABI.
 
@@ -411,6 +526,22 @@ def _diff_elf_identity(old_elf: Any, new_elf: Any) -> list[Change]:
                 new=str(new_class),
                 old_value=str(old_class),
                 new_value=str(new_class),
+            )
+        )
+
+    # EI_DATA byte-order flip — the missing sibling of the class check above.
+    # "" = not captured (legacy snapshot); an unknown side is not a change.
+    old_data = getattr(old_elf, "ei_data", "")
+    new_data = getattr(new_elf, "ei_data", "")
+    if old_data and new_data and old_data != new_data:
+        changes.append(
+            make_change(
+                ChangeKind.ELF_ENDIANNESS_CHANGED,
+                symbol="ELF_HEADER",
+                old=old_data,
+                new=new_data,
+                old_value=old_data,
+                new_value=new_data,
             )
         )
 
@@ -569,6 +700,15 @@ def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
 #: GNU-property feature tokens grouped by the kind that reports their drift.
 _CET_FEATURES = frozenset({"IBT", "SHSTK"})
 _BRANCH_FEATURES = frozenset({"BTI", "PAC"})
+#: x86-64 micro-architecture levels from GNU_PROPERTY_X86_ISA_1_NEEDED,
+#: ordered weakest → strongest. A raised maximum level means CPUs that could
+#: run the old build can no longer run the new one.
+_X86_ISA_LEVEL_RANK: dict[str, int] = {
+    "x86-64-baseline": 1,
+    "x86-64-v2": 2,
+    "x86-64-v3": 3,
+    "x86-64-v4": 4,
+}
 
 
 def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
@@ -620,6 +760,33 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
                     symbol=symbol,
                     old=", ".join(sorted(old_f)) or "(none)",
                     new=", ".join(sorted(new_f)) or "(none)",
+                )
+            )
+
+    # x86-64 ISA-needed baseline (GNU_PROPERTY_X86_ISA_1_NEEDED). Fires when the
+    # NEW side declares a level: both ELFs are captured (gated above), so an
+    # absent old note is not "unrecorded" but "no declared micro-architecture
+    # floor" = plain x86-64 (baseline). A common baseline → v3 rebuild must
+    # therefore report. Only the raising direction is a finding (a lowered floor
+    # widens the supported CPU set).
+    old_isa = {t for t in old_props if t in _X86_ISA_LEVEL_RANK}
+    new_isa = {t for t in new_props if t in _X86_ISA_LEVEL_RANK}
+    if new_isa:
+        old_max = (
+            max(old_isa, key=_X86_ISA_LEVEL_RANK.__getitem__)
+            if old_isa
+            else "x86-64-baseline"
+        )
+        new_max = max(new_isa, key=_X86_ISA_LEVEL_RANK.__getitem__)
+        if _X86_ISA_LEVEL_RANK[new_max] > _X86_ISA_LEVEL_RANK[old_max]:
+            changes.append(
+                make_change(
+                    ChangeKind.X86_ISA_BASELINE_RAISED,
+                    symbol=".note.gnu.property",
+                    old=old_max,
+                    new=new_max,
+                    old_value=old_max,
+                    new_value=new_max,
                 )
             )
     return changes

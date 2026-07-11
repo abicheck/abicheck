@@ -27,7 +27,7 @@ from abicheck.dumper_clang_errors import (
     retry_excluding_error_headers,
 )
 
-AGG = Path("/tmp/agg12345.hpp")
+AGG = Path("/aggdir/agg12345.hpp")
 
 
 def test_guard_failure_detector_matches_castxml_style_error():

@@ -197,7 +197,7 @@ def test_cpp_scheme_ignores_camelcase_digit_classes(monkeypatch):
     import abicheck.versioned_symbol_scheme as vs
     dem = {
         "_ZN6Sha256d1E": "Sha256::digest()", "_ZN6Sha512d2E": "Sha512::digest()",
-        "_ZN6Sha256h1E": "Sha256::hash()",   "_ZN6Sha512h2E": "Sha512::hash()",
+        "_ZN6Sha256h1E": "Sha256::hash()", "_ZN6Sha512h2E": "Sha512::hash()",
         "_ZN6Sha256u1E": "Sha256::update()", "_ZN6Sha512u2E": "Sha512::update()",
     }
     rows = [("func_removed", s) for s in dem if "256" in s] + \

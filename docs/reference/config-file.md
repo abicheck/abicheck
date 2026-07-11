@@ -105,7 +105,7 @@ Per-category levels override the preset. When any severity value is in effect,
 ### `scope:`
 
 Public-surface scoping — the main false-positive control. See
-[API-surface intelligence](../concepts/api-surface-intelligence.md).
+[API-surface intelligence](../user-guide/api-surface-intelligence.md).
 
 | Sub-key | Type | Default (effective) | Purpose |
 |---------|------|---------------------|---------|
@@ -140,8 +140,8 @@ Suppression **hygiene policy** (a project rule, distinct from the suppression
 > a specific level here, or leave the key unset and let `--depth`/`--max` drive
 > the collection depth per run.
 
-See [Scan levels](../user-guide/scan-levels.md) and
-[Scan & evidence levels](../concepts/scan-and-evidence-levels.md). (A `graph`
+See [Scan levels](../user-guide/scan-levels.md) and the
+[`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). (A `graph`
 sub-key is accepted here for forward-compat but not consumed; the effective L5
 detail is `sources.graph`.)
 
