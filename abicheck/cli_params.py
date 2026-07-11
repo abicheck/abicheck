@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -145,8 +145,10 @@ class SidedPathParam(click.ParamType):
             prefix = f"{side}="
             if s.startswith(prefix):
                 raw = s[len(prefix):]
-                return (side, self._path.convert(raw, param, ctx))
-        return ("both", self._path.convert(s, param, ctx))
+                # ``click.Path.convert`` is typed ``str | bytes | PathLike`` even
+                # with ``path_type=Path``; it returns a real ``Path`` at runtime.
+                return (side, cast("Path", self._path.convert(raw, param, ctx)))
+        return ("both", cast("Path", self._path.convert(s, param, ctx)))
 
     def get_metavar(self, param: Any, ctx: Any = None) -> str:
         return "[old=|new=]PATH"
