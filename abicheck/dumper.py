@@ -1022,7 +1022,11 @@ def _castxml_dump(
         raise SnapshotError(
             "castxml not found in PATH. Install with: apt install castxml, "
             "brew install castxml, conda install -c conda-forge castxml, "
-            "or choco install castxml (Windows); then ensure castxml is in PATH."
+            "or choco install castxml (Windows); then ensure castxml is in PATH. "
+            "On a clang-only host, run with --ast-frontend clang (or "
+            "ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
+            "instead — note it does not carry record size/alignment/offset "
+            "layout, so layout-only breaks need castxml or debug info (L1)."
         )
 
     # Check disk cache

@@ -415,6 +415,19 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
+    def test_rtti_symbols_are_exempt(self):
+        # Compiler-emitted RTTI/vtable objects (_ZTV/_ZTI/_ZTS/_ZTT) carry an
+        # st_value alignment that is a linker-placement artifact of the mangled
+        # name-string length, not a declared data-object alignment. A drop there
+        # is noise (observed: 21 spurious findings across a pvxs patch release),
+        # so it must not fire — mirroring the _ZT* exemption in the size detector.
+        for rtti in ("_ZTSN4pvxs6client12SubscriptionE", "_ZTVN4pvxs6server6OpBaseE",
+                     "_ZTIN4pvxs4impl6evbase3PvtE", "_ZTTN4pvxs3fooE"):
+            old = _elf(symbols=[_obj(rtti, alignment=2048)])
+            new = _elf(symbols=[_obj(rtti, alignment=32)])
+            r = compare(_snap(old), _snap(new))
+            assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), rtti
+
     def test_value_alignment_helper(self):
         assert _value_alignment(0) == 0
         assert _value_alignment(0x1008) == 8

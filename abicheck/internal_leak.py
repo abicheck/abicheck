@@ -327,8 +327,28 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     return out, True
 
 
+def _build_suffix_index(
+    type_map: dict[str, RecordType],
+) -> dict[str, list[str]]:
+    """Index *type_map* keys by their final ``::``-segment.
+
+    Precomputing this once turns :func:`_resolve_type_name`'s unqualified-name
+    lookup from an O(N) scan of the whole type map into an O(1) dict hit. On a
+    large C++ surface (thousands of types) the BFS in
+    :func:`_bfs_collect_paths` calls the resolver for every visited node, so the
+    scan was quadratic; the index removes that. Mirrors the ``by_short`` index
+    already used in :mod:`abicheck.idioms`.
+    """
+    index: dict[str, list[str]] = {}
+    for name in type_map:
+        index.setdefault(name.rsplit("::", 1)[-1], []).append(name)
+    return index
+
+
 def _resolve_type_name(
-    typename: str, type_map: dict[str, RecordType],
+    typename: str,
+    type_map: dict[str, RecordType],
+    suffix_index: dict[str, list[str]] | None = None,
 ) -> str:
     """Best-effort canonicalisation of *typename* against *type_map*.
 
@@ -340,15 +360,22 @@ def _resolve_type_name(
     name if exactly one such match exists. Ambiguous matches keep the
     literal name (so the caller falls through to its "missing type"
     branch rather than guessing).
+
+    *suffix_index* is an optional precomputed final-segment index (see
+    :func:`_build_suffix_index`); when omitted the map is scanned directly so
+    the helper stays correct for standalone/test callers.
     """
     if not typename or typename in type_map:
         return typename
     if "::" in typename:
         return typename
-    candidates = [
-        name for name in type_map
-        if name.rsplit("::", 1)[-1] == typename
-    ]
+    if suffix_index is not None:
+        candidates: list[str] = suffix_index.get(typename, [])
+    else:
+        candidates = [
+            name for name in type_map
+            if name.rsplit("::", 1)[-1] == typename
+        ]
     if len(candidates) == 1:
         return candidates[0]
     return typename
@@ -492,6 +519,10 @@ def _bfs_collect_paths(
     """Drive the BFS walk; return raw (un-deduped) internal-type paths."""
     paths: dict[str, list[list[str]]] = collections.defaultdict(list)
     visited: set[tuple[str, str, bool]] = set()
+    # Precompute the final-segment index once; the resolver is called for every
+    # dequeued node, so a per-call scan of *type_map* would be quadratic on a
+    # large surface (see _build_suffix_index).
+    suffix_index = _build_suffix_index(type_map)
 
     while queue:
         typename, path = queue.popleft()
@@ -499,7 +530,7 @@ def _bfs_collect_paths(
             continue
         # DWARF can record base-class names un-qualified; resolve against
         # the type map before we record / enqueue children.
-        typename = _resolve_type_name(typename, type_map)
+        typename = _resolve_type_name(typename, type_map, suffix_index)
         # Cycle protection: visit each (entry_point, typename, behind_pointer)
         # triple at most once. The entry-point scope lets two public roots each
         # walk a shared intermediate; the behind-pointer bit additionally lets the

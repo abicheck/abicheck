@@ -20,8 +20,10 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.internal_leak import (
+    _build_suffix_index,
     _candidate_type_names,
     _name_segments,
+    _resolve_type_name,
     _split_top_level_commas,
     _strip_template_args,
     compute_leak_paths,
@@ -155,6 +157,45 @@ def _public_fn(name: str, ret: str = "void", params: list[tuple[str, str]] | Non
 # ---------------------------------------------------------------------------
 # Reachability
 # ---------------------------------------------------------------------------
+
+
+class TestResolveTypeNameSuffixIndex:
+    """The suffix index is a pure O(1) optimisation of the O(N) map scan; it
+    must return byte-for-byte the same resolution the scan did (perf fix for
+    large C++ surfaces such as pvxs, where the per-node scan was quadratic)."""
+
+    _MAP = {"ns::detail::Base": None, "other::Base": None, "ns::Public": None}
+
+    def test_index_matches_scan_unique(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        # "Public" has exactly one final-segment match -> qualifies.
+        assert _resolve_type_name("Public", self._MAP) == "ns::Public"
+        assert _resolve_type_name("Public", self._MAP, idx) == "ns::Public"
+
+    def test_index_matches_scan_ambiguous(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        # "Base" matches two entries -> ambiguous, keep the literal both ways.
+        assert _resolve_type_name("Base", self._MAP) == "Base"
+        assert _resolve_type_name("Base", self._MAP, idx) == "Base"
+
+    def test_index_passthrough_and_qualified(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        assert _resolve_type_name("ns::Public", self._MAP, idx) == "ns::Public"
+        assert _resolve_type_name("", self._MAP, idx) == ""
+        assert _resolve_type_name("Missing", self._MAP, idx) == "Missing"
+
+    def test_unqualified_base_resolves_in_leak_walk(self) -> None:
+        # DWARF may record the base un-qualified; the BFS must still reach the
+        # internal type via the suffix-indexed resolver.
+        snap = _snap(
+            functions=[_public_fn("make", "Public*", [])],
+            types=[
+                RecordType(name="Public", kind="class", bases=["Base"]),
+                RecordType(name="ns::detail::Base", kind="class",
+                           fields=[TypeField(name="f", type="int")]),
+            ],
+        )
+        assert "ns::detail::Base" in compute_leak_paths(snap)
 
 
 class TestComputeLeakPaths:
