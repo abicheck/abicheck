@@ -204,6 +204,58 @@ def test_derive_l2_include_dirs_from_pack(tmp_path):
     assert str(inc) in dirs
 
 
+def test_derive_l2_include_dirs_build_compile_db_override(tmp_path):
+    # A --build-compile-db override points at a non-default DB location; the L2
+    # seeding must resolve *that* DB (mirroring embed_build_source), not only an
+    # auto-discovered compile_commands.json at the tree root.
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    inc = tmp_path / "realinc"
+    inc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    dbdir = tmp_path / "out"
+    dbdir.mkdir()
+    (dbdir / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        encoding="utf-8",
+    )
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path,
+        build_compile_db="out/compile_commands.json",
+    )
+    for fn in cleanups:
+        fn()
+    assert str(inc) in dirs
+
+
+def test_derive_l2_include_dirs_explicit_missing_db_no_stale_fallback(tmp_path):
+    # An explicit --build-compile-db that matches nothing must NOT silently seed
+    # from an unrelated auto-discovered compile_commands.json at the tree root
+    # (compile_db_explicit stops the fallback — the header parse would otherwise
+    # use the wrong include context while L3 correctly reports the DB missing).
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    wrong_inc = tmp_path / "wronginc"
+    wrong_inc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    # An unrelated DB the fallback must NOT use.
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "arguments": ["cc", f"-I{wrong_inc}", "-c", str(src)]}]),
+        encoding="utf-8",
+    )
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path,
+        build_compile_db="does/not/exist.json",  # explicit + missing
+    )
+    for fn in cleanups:
+        fn()
+    assert str(wrong_inc) not in dirs
+
+
 def _compile_db_tree(tmp_path):
     """A source tree with a compile DB whose one TU has a real -I dir."""
     inc = tmp_path / "inc"

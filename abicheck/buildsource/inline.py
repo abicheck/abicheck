@@ -611,6 +611,9 @@ def derive_l2_include_dirs(
     build_info: Path | None,
     sources: Path | None,
     build_config: Path | None = None,
+    *,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> tuple[list[str], list[Callable[[], None]]]:
     """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
 
@@ -642,6 +645,23 @@ def derive_l2_include_dirs(
     # .abicheck.yml is loaded for its non-executable settings but never run).
     cfg_path = build_config or discover_build_config(sources)
     cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
+    # Fold the CLI build-DB overrides into cfg exactly as embed_build_source does,
+    # so the L2 seeding resolves the *same* DB L3 will (an explicit --build-compile-db
+    # / --build-query wins over an auto-discovered one). compile_db_explicit mirrors
+    # embed too: when the DB is explicitly configured, a missing glob must *stop*
+    # here rather than silently seed from an unrelated auto-discovered/inferred DB.
+    if build_query is not None or build_compile_db is not None:
+        import dataclasses
+
+        cfg = dataclasses.replace(
+            cfg,
+            query=build_query if build_query is not None else cfg.query,
+            compile_db=build_compile_db
+            if build_compile_db is not None
+            else cfg.compile_db,
+        )
+    cfg_trusted_for_query = build_config is not None or build_query is not None
+    compile_db_explicit = build_compile_db is not None or build_config is not None
     cleanups: list[Callable[[], None]] = []
     try:
         # Reuse the same L3-collection path embed_build_source drives, restricted
@@ -660,7 +680,8 @@ def derive_l2_include_dirs(
             sources=None if is_pack_dir(sources) else sources,
             build_info=raw_build_info,
             build_config=cfg,
-            build_config_trusted_for_query=build_config is not None,
+            build_config_trusted_for_query=cfg_trusted_for_query,
+            compile_db_explicit=compile_db_explicit,
             base_build=base_build,
             layers=("L3",),
             defer_cleanup=cleanups,
@@ -704,6 +725,8 @@ def seed_l2_includes(
     build_info: Path | None,
     build_config: Path | None,
     defer_cleanup: list[Callable[[], None]] | None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> tuple[list[Path], list[Callable[[], None]]]:
     """Augment *includes* with build-derived L2 include dirs (shared by scan+dump).
 
@@ -723,7 +746,10 @@ def seed_l2_includes(
     incs = list(includes)
     if not (headers and not incs and (sources is not None or build_info is not None)):
         return incs, []
-    derived, cleanups = derive_l2_include_dirs(build_info, sources, build_config)
+    derived, cleanups = derive_l2_include_dirs(
+        build_info, sources, build_config,
+        build_query=build_query, build_compile_db=build_compile_db,
+    )
     if not derived:
         return incs, []
     logger.info(

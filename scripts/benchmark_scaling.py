@@ -511,6 +511,51 @@ def _build_nested_types(n_types: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _build_internal_leak(n_types: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Public types each inheriting an *unqualified* internal-namespace base.
+
+    Drives the internal-leak reachability walk (``compute_leak_paths``): each
+    ``Public_i`` leaks into ``ns::detail::Base_i``, whose layout grows old->new.
+    The walk resolves every un-qualified base name (``Base_i``) against the whole
+    type map — a naive resolver rescans the map per visited node, the O(N^2)
+    hotspot fixed with a suffix index. No other scenario reaches this pass, so
+    without it the ``--max-exponent`` gate cannot catch a re-introduced quadratic
+    here (the bug that hung a real libpvxs compare for minutes).
+    """
+    types_old: list[RecordType] = []
+    types_new: list[RecordType] = []
+    funcs: list[Function] = []
+    for i in range(n_types):
+        # Unqualified base spelling forces the suffix-resolution path.
+        types_old.append(RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"]))
+        types_new.append(RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"]))
+        base = [TypeField(name="a", type="int", offset_bits=0)]
+        grown = base + [TypeField(name="b", type="int", offset_bits=32)]
+        types_old.append(
+            RecordType(name=f"ns::detail::Base_{i}", kind="class", size_bits=32, fields=base)
+        )
+        types_new.append(
+            RecordType(name=f"ns::detail::Base_{i}", kind="class", size_bits=64, fields=grown)
+        )
+        funcs.append(
+            Function(
+                name=f"make_{i}",
+                mangled=f"_Z5make_{i}v",
+                return_type=f"Public_{i} *",
+                params=[],
+                visibility=Visibility.PUBLIC,
+                return_pointer_depth=1,
+            )
+        )
+    old = AbiSnapshot(
+        library="libscale.so", version="1.0", functions=list(funcs), types=types_old
+    )
+    new = AbiSnapshot(
+        library="libscale.so", version="2.0", functions=list(funcs), types=types_new
+    )
+    return old, new
+
+
 def _build_enum_churn(n_enums: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Many enums that each gain a member; every enum is used by a public function.
 
@@ -1002,6 +1047,7 @@ SCENARIOS: dict[str, Scenario] = {
     "typedef_churn": Scenario(_build_typedef_churn),
     "union_churn": Scenario(_build_union_churn),
     "wide_struct": Scenario(_build_wide_struct),
+    "internal_leak": Scenario(_build_internal_leak),
     "vtable_churn": Scenario(_build_vtable_churn),
     "elf_namespace": Scenario(_build_elf_namespace, needs_demangler=True),
     "pe_churn": Scenario(_build_pe_churn),

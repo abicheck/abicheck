@@ -36,6 +36,7 @@ on:
       - "abicheck/checker.py"
       - "abicheck/checker_policy.py"
       - "abicheck/post_processing.py"
+      - "abicheck/internal_leak.py"
       - "abicheck/demangle.py"
       - "abicheck/binary_fingerprint.py"
       - "abicheck/diff_namespaces.py"

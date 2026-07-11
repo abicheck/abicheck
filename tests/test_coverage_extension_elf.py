@@ -27,6 +27,8 @@ import struct
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_platform_elf_dynamic import _kernel_version_tuple
 from abicheck.elf_metadata import (
@@ -415,18 +417,66 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
-    def test_rtti_symbols_are_exempt(self):
-        # Compiler-emitted RTTI/vtable objects (_ZTV/_ZTI/_ZTS/_ZTT) carry an
-        # st_value alignment that is a linker-placement artifact of the mangled
-        # name-string length, not a declared data-object alignment. A drop there
-        # is noise (observed: 21 spurious findings across a pvxs patch release),
-        # so it must not fire — mirroring the _ZT* exemption in the size detector.
-        for rtti in ("_ZTSN4pvxs6client12SubscriptionE", "_ZTVN4pvxs6server6OpBaseE",
-                     "_ZTIN4pvxs4impl6evbase3PvtE", "_ZTTN4pvxs3fooE"):
-            old = _elf(symbols=[_obj(rtti, alignment=2048)])
-            new = _elf(symbols=[_obj(rtti, alignment=32)])
-            r = compare(_snap(old), _snap(new))
-            assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), rtti
+    # Compiler-emitted RTTI/vtable objects (_ZTV/_ZTI/_ZTS/_ZTT) carry an
+    # st_value alignment that is a linker-placement artifact of the mangled
+    # name-string length, not a declared data-object alignment. A drop there is
+    # noise (observed: 21 spurious findings across a pvxs patch release), so it
+    # must not fire — mirroring the _ZT* exemption in the size detector. One
+    # representative of each of the four prefixes, plus the smallest possible
+    # bare-prefix name, to pin the check to the prefix rather than a full mangling.
+    @pytest.mark.parametrize("rtti", [
+        "_ZTVN4pvxs6server6OpBaseE",              # vtable
+        "_ZTIN4pvxs4impl6evbase3PvtE",            # typeinfo
+        "_ZTSN4pvxs6client12SubscriptionE",       # typeinfo name
+        "_ZTTN4pvxs3fooE",                        # VTT
+        "_ZTV1A", "_ZTI1A", "_ZTS1A", "_ZTT1A",   # minimal manglings
+    ])
+    def test_rtti_symbols_are_exempt(self, rtti):
+        old = _elf(symbols=[_obj(rtti, alignment=2048)])
+        new = _elf(symbols=[_obj(rtti, alignment=32)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), rtti
+
+    def test_real_mangled_data_object_still_fires(self):
+        # The exemption is by RTTI prefix, not "looks mangled": a genuine
+        # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose
+        # alignment drop IS an ABI hazard and must still be reported.
+        sym = "_ZN4pvxs6detail13g_lookup_tableE"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    def test_rtti_exemption_is_per_symbol_not_global(self):
+        # An RTTI object and a real object both drop alignment in the same diff.
+        # The RTTI one is suppressed while the real one still fires — the exemption
+        # must not blanket-suppress the whole finding kind for the comparison.
+        old = _elf(symbols=[_obj("_ZTV1A", alignment=2048), _obj("g_real", alignment=64)])
+        new = _elf(symbols=[_obj("_ZTV1A", alignment=32), _obj("g_real", alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        hits = [c for c in r.changes
+                if c.kind == ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED]
+        assert len(hits) == 1
+        assert (hits[0].symbol or hits[0].name) == "g_real"
+
+    def test_rtti_increase_still_not_flagged(self):
+        # Direction guard also holds for RTTI names (an increase never fires,
+        # exempt or not).
+        old = _elf(symbols=[_obj("_ZTI1A", alignment=32)])
+        new = _elf(symbols=[_obj("_ZTI1A", alignment=2048)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    def test_tls_object_reduced_fires(self):
+        # TLS data participates in the ABI like OBJECT/COMMON; a real (non-RTTI)
+        # TLS symbol's alignment drop is a hazard and must fire.
+        def _tls(name, alignment):
+            return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL,
+                             sym_type=SymbolType.TLS, size=8, value_alignment=alignment)
+        old = _elf(symbols=[_tls("tls_buf", alignment=64)])
+        new = _elf(symbols=[_tls("tls_buf", alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
     def test_value_alignment_helper(self):
         assert _value_alignment(0) == 0

@@ -451,6 +451,8 @@ def perform_elf_dump(
         build_info=build_info,
         build_config=build_config,
         defer_cleanup=None,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
     )
     try:
         snap = dump(
