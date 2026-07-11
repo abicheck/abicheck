@@ -1042,7 +1042,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 
 def _source_is_pack(path: Path) -> bool:
     """True if *path* is a real ``collect``-produced evidence pack rather than a
-    raw source checkout — lets ``compare``'s --old/new-sources accept either.
+    raw source checkout — lets ``compare``'s --sources accepts either.
 
     Validates the manifest *content*, not just its presence: a raw checkout that
     happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
@@ -1350,7 +1350,7 @@ def _embed_inline_source_side(
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
+@evidence_options  # --depth/--max, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
@@ -1394,18 +1394,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     \b
       # One-liner: each version has its own header (primary flow)
       abicheck compare libfoo.so.1 libfoo.so.2 \\
-        --old-header include/v1/foo.h --new-header include/v2/foo.h
+        --header old=include/v1/foo.h --header new=include/v2/foo.h
     \b
       # Shorthand: -H when the same header applies to both versions
       abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h
     \b
       # With version labels and SARIF output
       abicheck compare libfoo.so.1 libfoo.so.2 \\
-        --old-header v1/foo.h --new-header v2/foo.h \\
+        --header old=v1/foo.h --header new=v2/foo.h \\
         --old-version 1.0 --new-version 2.0 --format sarif -o abi.sarif
     \b
       # Compare saved snapshot vs current build (mixed mode)
-      abicheck compare baseline.json ./build/libfoo.so --new-header include/foo.h
+      abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
     \b
       # Compare two pre-dumped snapshots (existing workflow)
       abicheck compare libfoo-1.0.json libfoo-2.0.json
