@@ -26,6 +26,7 @@ scores the pair compatible.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -39,12 +40,12 @@ from abicheck.elf_metadata import (
 from abicheck.model import AbiSnapshot
 from abicheck.python_api import (
     KEYWORD_ONLY,
+    MAX_STUB_BYTES,
     POSITIONAL_ONLY,
     POSITIONAL_OR_KEYWORD,
     VAR_KEYWORD,
     VAR_POSITIONAL,
     PythonApiSurface,
-    MAX_STUB_BYTES,
     detect_python_api,
     surface_from_stub_file,
     surface_from_stub_source,
@@ -913,6 +914,16 @@ def test_oversized_stub_is_invalid_without_full_parse(tmp_path) -> None:
     p.write_bytes(b"#" * (MAX_STUB_BYTES + 1))
     surface = surface_from_stub_file(p, module_name="foo")
     assert surface.is_empty and surface.parse_ok is False
+
+
+def test_stub_read_failure_after_stat_is_invalid(tmp_path, caplog) -> None:
+    caplog.set_level("DEBUG", logger="abicheck.python_api")
+    p = tmp_path / "foo.pyi"
+    p.write_text("def f(): ...\n", encoding="utf-8")
+    with patch.object(type(p), "read_text", side_effect=OSError("race")):
+        surface = surface_from_stub_file(p, module_name="foo")
+    assert surface.is_empty and surface.parse_ok is False
+    assert "could not read stub" in caplog.text
 
 
 def test_missing_old_surface_treated_as_empty_baseline() -> None:

@@ -407,7 +407,13 @@ def surface_from_stub_file(
         )
         surface.parse_ok = False
         return surface
-    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        # The file can disappear or become unreadable between stat() and read().
+        _log.debug("python_api: could not read stub %s: %s", path, exc)
+        surface.parse_ok = False
+        return surface
     return surface_from_stub_source(
         text, module_name=module_name, source_path=str(path)
     )
