@@ -80,6 +80,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Quadratic slowdown comparing large C++ libraries.** The internal-leak walk
+  (`internal_leak._resolve_type_name`) scanned the entire type map on every BFS
+  node to canonicalize unqualified type names, making a compare of a
+  thousands-of-types surface (e.g. EPICS pvxs `libpvxs`) hang for minutes at
+  99 % CPU. A precomputed final-`::`-segment suffix index makes the lookup O(1);
+  the affected compare drops from > 340 s to ~70 s with identical results.
+
+- **False `exported_object_alignment_reduced` on RTTI symbols.** The alignment
+  detector reported spurious "alignment reduced" changes on `_ZTV/_ZTI/_ZTS/_ZTT`
+  (vtable / typeinfo / VTT) symbols, whose `st_value` alignment is a
+  linker-placement artifact — 21 false findings on a single clean pvxs patch
+  release. These prefixes are now exempted, matching the symbol-size detector.
+
+- **"castxml not found" error now names the clang fallback.** On a clang-only
+  host, header (`-H`) scans hard-failed with an install-castxml message that
+  never mentioned `--ast-frontend clang` / `ABICHECK_AST_FRONTEND=clang`. The
+  error now points to the clang JSON-AST backend (with its layout-evidence
+  caveat) as an alternative.
+
 - **Misleading "evidence layer not collected" warning.** `dump` warned
   *"supply --build-info/--compile-db or install clang/castxml"* even when the
   layer's extractor had run — e.g. an L4 replay that parsed TUs but linked 0
