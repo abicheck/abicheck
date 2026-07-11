@@ -115,7 +115,7 @@ from `_ZTV5Codec`'s shrunken size, the latter even on a stripped binary —
 they just can't name the devirtualized method.
 
 ```bash
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: BREAKING (func_virtual_removed: flush)
 ```
 

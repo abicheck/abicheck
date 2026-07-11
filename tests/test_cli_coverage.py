@@ -153,14 +153,14 @@ def _make_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 
 class TestCompareIgnoredFlagsWarnings:
-    @pytest.mark.parametrize("flag,arg_maker,expected_warning", [
-        ("-I", "dir", "-I/--include"),
-        ("--old-header", "file", "--old-header"),
-        ("--new-header", "file", "--new-header"),
-        ("--old-include", "dir", "--old-include"),
-        ("--new-include", "dir", "--new-include"),
+    @pytest.mark.parametrize("flag,arg_maker,side_prefix,expected_warning", [
+        ("-I", "dir", "", "-I/--include"),
+        ("--header", "file", "old=", "--header old="),
+        ("--header", "file", "new=", "--header new="),
+        ("--include", "dir", "old=", "--include old="),
+        ("--include", "dir", "new=", "--include new="),
     ])
-    def test_ignored_flag_warning(self, tmp_path, flag, arg_maker, expected_warning):
+    def test_ignored_flag_warning(self, tmp_path, flag, arg_maker, side_prefix, expected_warning):
         """Header/include flags are warned when both inputs are snapshots."""
         old_p, new_p = _make_snapshots(tmp_path)
         if arg_maker == "dir":
@@ -171,7 +171,7 @@ class TestCompareIgnoredFlagsWarnings:
             arg.write_text("int f();", encoding="utf-8")
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), flag, str(arg),
+            "compare", str(old_p), str(new_p), flag, side_prefix + str(arg),
         ])
         assert result.exit_code == 0
         assert expected_warning in result.output

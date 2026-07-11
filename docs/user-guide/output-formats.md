@@ -245,8 +245,8 @@ produce:
   L0–L2 artifact verdict.
 - **Build/source build/source packs (L3/L4)** are what add build-diff/source-diff
   **findings** and the `layer_coverage` table, and only when you pass them at
-  compare time via `--old-build-info`/`--new-build-info` (or a deeper
-  `--depth` over `--old/new-sources`). These findings follow the authority rule
+  compare time via `--build-info` (or a deeper
+  `--depth` over `--sources`). These findings follow the authority rule
   — L3/L4 never overrides an artifact-proven verdict.
 
 See [Evidence & Detectability](../concepts/evidence-and-detectability.md) for the

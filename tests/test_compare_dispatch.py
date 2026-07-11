@@ -369,7 +369,7 @@ def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> Non
     tree = tmp_path / "src"
     tree.mkdir()  # no manifest.json → looks like a raw source checkout
     result = CliRunner().invoke(
-        main, ["compare", str(old_f), str(new_f), "--old-sources", str(tree)]
+        main, ["compare", str(old_f), str(new_f), "--sources", "old=" + str(tree)]
     )
     out = (result.output or "") + (result.stderr or "")
     assert "ignored" in out, out
@@ -573,8 +573,8 @@ class TestCompareDispatch:
         [
             ("--max", None, False),
             ("--depth", "source", False),
-            ("--old-sources", "src", True),
-            ("--new-build-info", "build", True),
+            ("--sources", "old=src", True),
+            ("--build-info", "new=build", True),
         ],
     )
     def test_evidence_flags_rejected_on_set_inputs(
@@ -592,8 +592,10 @@ class TestCompareDispatch:
         if value is None:
             extra = [flag]
         elif is_path:
-            (tmp_path / value).mkdir(exist_ok=True)  # --sources/--build-info need a real path
-            extra = [flag, str(tmp_path / value)]
+            # sided value like "old=src" — the path follows the side prefix
+            side, _, name = value.partition("=")
+            (tmp_path / name).mkdir(exist_ok=True)  # --sources/--build-info need a real path
+            extra = [flag, f"{side}={tmp_path / name}"]
         else:
             extra = [flag, value]  # --depth takes a literal choice value
         code, out, err = _invoke("compare", str(old_dir), str(new_dir), *extra)

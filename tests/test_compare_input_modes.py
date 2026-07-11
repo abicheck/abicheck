@@ -318,18 +318,18 @@ class TestCompareJsonJson:
         assert "ignored" in result.output.lower()
 
     def test_per_side_headers_ignored_warning(self, tmp_path):
-        """When both inputs are JSON, --old-header/--new-header should warn."""
+        """When both inputs are JSON, --header old=/--header new= should warn."""
         old_p, new_p = _write_snapshots(tmp_path)
         hdr = tmp_path / "dummy.h"
         hdr.write_text("// dummy", encoding="utf-8")
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p),
-            "--old-header", str(hdr), "--new-header", str(hdr),
+            "--header", "old=" + str(hdr), "--header", "new=" + str(hdr),
         ])
         assert result.exit_code == 0
-        assert "--old-header" in result.output
-        assert "--new-header" in result.output
+        assert "--header old=" in result.output
+        assert "--header new=" in result.output
         assert "ignored" in result.output.lower()
 
 
@@ -366,7 +366,7 @@ class TestCompareSoSo:
         assert call_count[0] == 2  # dump called for both sides
 
     def test_so_vs_so_with_per_side_headers(self, tmp_path, monkeypatch):
-        """Compare two .so files with --old-header / --new-header."""
+        """Compare two .so files with --header old= / --header new=."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         old_hdr = tmp_path / "v1.h"
@@ -386,8 +386,8 @@ class TestCompareSoSo:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),
-            "--old-header", str(old_hdr),
-            "--new-header", str(new_hdr),
+            "--header", "old=" + str(old_hdr),
+            "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
         assert len(recorded_headers) == 2
@@ -412,7 +412,7 @@ class TestCompareSoSo:
         assert "symbols-only mode" in out or "weaker" in out
 
     def test_so_vs_so_with_version_labels(self, tmp_path, monkeypatch):
-        """--old-version / --new-version are passed through to dump."""
+        """--version old=/new= are passed through to dump."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         hdr = tmp_path / "foo.h"
@@ -430,7 +430,7 @@ class TestCompareSoSo:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf), "-H", str(hdr),
-            "--old-version", "1.0", "--new-version", "2.0",
+            "--version", "old=1.0", "--version", "new=2.0",
         ])
         assert result.exit_code == 0, result.output
         assert recorded_versions == ["1.0", "2.0"]
@@ -532,7 +532,7 @@ class TestCompareMixed:
         assert result.exit_code == 4  # BREAKING
 
     def test_mixed_with_per_side_headers(self, tmp_path, monkeypatch):
-        """--new-header only applies to the .so side, JSON side ignores headers."""
+        """--header new= only applies to the .so side, JSON side ignores headers."""
         old_p = _write_snapshot(tmp_path / "baseline.json", _make_snapshot("1.0"))
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         new_hdr = tmp_path / "v2.h"
@@ -550,7 +550,7 @@ class TestCompareMixed:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_elf),
-            "--new-header", str(new_hdr),
+            "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
         # dump should only be called for the .so side (new)
@@ -625,9 +625,8 @@ class TestCompareHelp:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
-        for flag in ["-H", "--header", "--old-header", "--new-header",
-                     "--old-version", "--new-version", "--old-include",
-                     "--new-include", "--lang"]:
+        for flag in ["-H", "--header", "--include", "--sources", "--build-info",
+                     "--version", "--lang"]:
             assert flag in result.output, f"{flag} not in help output"
 
     def test_help_shows_examples(self):
@@ -691,7 +690,7 @@ class TestHeaderDirectoryInput:
         assert captured[1] == expected
 
     def test_old_new_header_directories(self, tmp_path, monkeypatch):
-        """--old-header/--new-header accept directories and expand recursively."""
+        """--header old=/--header new= accept directories and expand recursively."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
 
@@ -714,8 +713,8 @@ class TestHeaderDirectoryInput:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),
-            "--old-header", str(old_dir),
-            "--new-header", str(new_dir),
+            "--header", "old=" + str(old_dir),
+            "--header", "new=" + str(new_dir),
         ])
         assert result.exit_code == 0, result.output
         assert len(captured) == 2

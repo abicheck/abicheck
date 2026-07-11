@@ -120,7 +120,7 @@ out-of-band per side at compare time:
 ```bash
 # (Advanced) Override or supply facts out-of-band per side instead of embedding:
 abicheck compare old.abi.json new.abi.json \
-  --old-build-info old.bs/ --new-build-info new.bs/
+  --build-info old=old.bs/ --build-info new=new.bs/
 
 # (Advanced) Collect a pack from an existing build tree (no rebuild), then embed.
 #   --source-abi-extractor : clang (default) | castxml | android
@@ -244,8 +244,8 @@ abicheck dump build-old/libfoo.so -H libfoo-1.0/include -p build-old \
 
 # --- At compare time (CI), pass BOTH snapshots AND both packs ---
 abicheck compare libfoo-1.0.abi.json libfoo-2.0.abi.json \
-    --old-build-info libfoo-1.0.evidence/ \
-    --new-build-info libfoo-2.0.evidence/
+    --build-info old=libfoo-1.0.evidence/ \
+    --build-info new=libfoo-2.0.evidence/
 ```
 
 The compare prints the [coverage table and capability report](../concepts/build-source-data.md#evidence-coverage)
@@ -257,7 +257,7 @@ Because `dump --build-info/--sources` embeds the normalized facts into the
 with **no out-of-band directories**. Keeping the `*.evidence/` pack directories
 next to the snapshots (e.g. as CI artifacts) is therefore optional — useful only
 when you want to re-attach raw provenance, override a side at compare time with
-`--old/--new-build-info` / `--old/--new-sources`, or debug what was collected.
+`--build-info` / `--sources`, or debug what was collected.
 
 ## External CLI extractors & the security model (ADR-032)
 

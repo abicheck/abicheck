@@ -452,7 +452,7 @@ def test_compare_drift_fires_without_compile_db_context(tmp_path):
     result = runner.invoke(main, [
         "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
         "-H", str(tmp_path),  # headers present, but NOT parsed with -p
-        "--new-build-info", str(ev_new), "--format", "json",
+        "--build-info", "new=" + str(ev_new), "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" in result.stdout
@@ -480,7 +480,7 @@ def test_compare_drift_suppressed_when_dumped_with_build_context(tmp_path):
     )
     result = runner.invoke(main, [
         "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
-        "--new-build-info", str(ev_new), "--format", "json",
+        "--build-info", "new=" + str(ev_new), "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" not in result.stdout
@@ -505,7 +505,7 @@ def test_compare_binary_only_skips_header_drift(tmp_path):
 
     result = runner.invoke(main, [
         "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
-        "--new-build-info", str(ev_new), "--format", "json",
+        "--build-info", "new=" + str(ev_new), "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" not in result.stdout
@@ -630,7 +630,7 @@ def test_compare_cli_reports_coverage_asymmetry(tmp_path):
 
     result = runner.invoke(main, [
         "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
-        "--old-build-info", str(ev_base), "--format", "json",
+        "--build-info", "old=" + str(ev_base), "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "layer_coverage_asymmetric" in result.stdout

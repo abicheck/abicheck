@@ -36,7 +36,7 @@ source-compatible and not flagged.)
 g++ -shared -fPIC -g v1.cpp -o libnet_v1.so
 g++ -shared -fPIC -g v2.cpp -o libnet_v2.so
 abicheck compare libnet_v1.so libnet_v2.so \
-    --old-header v1.h --new-header v2.h   # → API_BREAK (param_default_value_removed)
+    --header old=v1.h --header new=v2.h   # → API_BREAK (param_default_value_removed)
 abicheck compare libnet_v1.so libnet_v2.so # → NO_CHANGE (object-only)
 ```
 

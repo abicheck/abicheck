@@ -226,7 +226,7 @@ supplied**:
 
 ```bash
 abicheck compare libfoo_v1.so libfoo_v2.so \
-    --old-header include/v1/foo.h --new-header include/v2/foo.h   # both built with -g
+    --header old=include/v1/foo.h --header new=include/v2/foo.h   # both built with -g
 ```
 
 Comparing a **stripped binary with no headers** yields only symbol add/remove

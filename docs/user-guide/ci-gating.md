@@ -45,6 +45,14 @@ above):
 `--report-mode`, and `--format` change what the report *renders*, never the
 verdict or the exit code.
 
+!!! tip "Shortcut: `--profile ci-gate`"
+    A single `--profile ci-gate` bundles the common gating knobs
+    (`--depth headers --format review --exit-code-scheme severity`) so you
+    don't retype them — an explicit flag still overrides the profile. It is a
+    single-pair convenience; for a directory/package (release) gate, configure
+    the same defaults in `.abicheck.yml`. See the `--profile` section of the
+    [CLI usage guide](cli-usage.md).
+
 ## The two exit-code schemes
 
 `compare` has two exit-code regimes, and **any active severity setting — a
@@ -93,7 +101,7 @@ Full matrix, including `appcompat`/`deps`/`compat` and multi-library codes:
 **Breakage-only gate** — report everything, fail only on binary ABI breaks:
 
 ```bash
-abicheck compare baseline.json build/libfoo.so --new-header include/ \
+abicheck compare baseline.json build/libfoo.so --header new=include/ \
   --severity-preset info-only --severity-abi-breaking error
 ```
 
@@ -101,7 +109,7 @@ abicheck compare baseline.json build/libfoo.so --new-header include/ \
 explicitly):
 
 ```bash
-abicheck compare baseline.json build/libfoo.so --new-header include/ \
+abicheck compare baseline.json build/libfoo.so --header new=include/ \
   --exit-code-scheme legacy    # 0 / 2 (API_BREAK) / 4 (BREAKING)
 ```
 
@@ -112,7 +120,7 @@ it to `error` too, or a source-level break that failed under the legacy
 scheme would now exit `0`:
 
 ```bash
-abicheck compare baseline.json build/libfoo.so --new-header include/ \
+abicheck compare baseline.json build/libfoo.so --header new=include/ \
   --severity-potential-breaking error \
   --severity-addition error
 ```
@@ -120,7 +128,7 @@ abicheck compare baseline.json build/libfoo.so --new-header include/ \
 **Vendor-friendly gate with audited waivers**:
 
 ```bash
-abicheck compare baseline.json build/libfoo.so --new-header include/ \
+abicheck compare baseline.json build/libfoo.so --header new=include/ \
   --policy sdk_vendor --suppress suppressions.yaml \
   --strict-suppressions --require-justification
 ```

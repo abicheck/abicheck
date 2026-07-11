@@ -63,14 +63,17 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 )
 from .cli_options import (
     adr027_compare_options,
+    apply_compare_profile,
     build_source_dump_options,
     compile_context_options,
     debug_resolution_options,
     env_matrix_option,
     evidence_options,
     lang_option,
+    normalize_sided_options,
     output_options,
     policy_options,
+    profile_option,
     release_options,
     scope_options,
     set_input_options,
@@ -79,6 +82,8 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import (
+    SIDED_EXISTING_PATH_PARAM,
+    SIDED_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 from .cli_resolve import (
@@ -757,7 +762,7 @@ def _load_probe_matrix_changes(
         return None
     if probe_matrix_old is None or probe_matrix_new is None:
         raise click.UsageError(
-            "--probe-matrix-old and --probe-matrix-new must be given together."
+            "--probe-matrix needs both sides: --probe-matrix old=… --probe-matrix new=…"
         )
     from .diff_build_config import diff_matrix
     from .probe_harness import load_matrix_snapshot
@@ -1039,7 +1044,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 
 def _source_is_pack(path: Path) -> bool:
     """True if *path* is a real ``collect``-produced evidence pack rather than a
-    raw source checkout — lets ``compare``'s --old/new-sources accept either.
+    raw source checkout — lets ``compare``'s --sources accepts either.
 
     Validates the manifest *content*, not just its presence: a raw checkout that
     happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
@@ -1239,13 +1244,11 @@ def _embed_inline_source_side(
               help="Require every suppression rule to have a non-empty 'reason' "
                    "field (config: suppression.require_justification). Demoted to "
                    "config (ADR-037 D4).")
-@click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
-              help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
-                   "Overrides automatic PDB discovery.")
-@click.option("--old-pdb-path", "old_pdb_path", type=click.Path(path_type=Path), default=None,
-              help="PDB file path for old side only (overrides --pdb-path for old).")
-@click.option("--new-pdb-path", "new_pdb_path", type=click.Path(path_type=Path), default=None,
-              help="PDB file path for new side only (overrides --pdb-path for new).")
+@click.option("--pdb-path", "pdb", multiple=True, type=SIDED_PATH_PARAM,
+              help="Explicit PDB file path for Windows PE debug info. Applies to both "
+                   "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
+                   "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
+                   "automatic PDB discovery (ADR-040).")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
@@ -1272,9 +1275,12 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@click.option("--show-redundant", is_flag=True, default=False,
+@click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
+              hidden=True,
               help="Disable redundancy filtering and show all changes including those "
-                   "derived from root type changes.")
+                   "derived from root type changes. Demoted to config "
+                   "(scope.show_redundant, ADR-040 L2); --show-redundant/--no-show-redundant "
+                   "still overrides it either way.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
               hidden=True,
@@ -1304,16 +1310,13 @@ def _embed_inline_source_side(
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --show-filtered).")
-@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
-              default=None,
-              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
-                   "When given with --probe-matrix-new, build-config findings "
-                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+@click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
+              help="Build-configuration matrix snapshot (from 'abicheck probe run'), "
+                   "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
+                   "old=m1 --probe-matrix new=m2). With both sides given, build-config "
+                   "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
                    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
-                   "verdict and report (G2: probe -> compare).")
-@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
-              default=None,
-              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
+                   "verdict and report (G2: probe -> compare; ADR-040).")
 @click.option("--show-only", "show_only", default=None,
               callback=_validate_show_only, expose_value=True, is_eager=False,
               help="Comma-separated filter tokens to limit displayed changes. "
@@ -1347,9 +1350,10 @@ def _embed_inline_source_side(
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
+@evidence_options  # --depth/--max, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
+@profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
 @click.option("--reconcile-build-context", is_flag=True, default=False,
               help="Clear context-free header-parse false positives using the build's "
                    "active preprocessor defines (ADR-039): a conditional field's phantom "
@@ -1390,18 +1394,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     \b
       # One-liner: each version has its own header (primary flow)
       abicheck compare libfoo.so.1 libfoo.so.2 \\
-        --old-header include/v1/foo.h --new-header include/v2/foo.h
+        --header old=include/v1/foo.h --header new=include/v2/foo.h
     \b
       # Shorthand: -H when the same header applies to both versions
       abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h
     \b
       # With version labels and SARIF output
       abicheck compare libfoo.so.1 libfoo.so.2 \\
-        --old-header v1/foo.h --new-header v2/foo.h \\
-        --old-version 1.0 --new-version 2.0 --format sarif -o abi.sarif
+        --header old=v1/foo.h --header new=v2/foo.h \\
+        --version old=1.0 --version new=2.0 --format sarif -o abi.sarif
     \b
       # Compare saved snapshot vs current build (mixed mode)
-      abicheck compare baseline.json ./build/libfoo.so --new-header include/foo.h
+      abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
     \b
       # Compare two pre-dumped snapshots (existing workflow)
       abicheck compare libfoo-1.0.json libfoo-2.0.json
@@ -1417,6 +1421,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from .cli_compare_helpers import run_compare
+
+    # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
+    # --build-info tuples back into the per-side kwargs run_compare consumes.
+    normalize_sided_options(kwargs)
+    # ADR-040 Lever 3: fold the selected --profile's workflow defaults into the
+    # forwarded options (explicit flags always win) and drop the CLI-only
+    # ``profile`` key before delegating to the typed run_compare signature.
+    apply_compare_profile(ctx, kwargs)
 
     run_compare(ctx, **kwargs)
 

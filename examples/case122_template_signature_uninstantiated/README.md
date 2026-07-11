@@ -42,7 +42,7 @@ the two approaches are complementary. See
 g++ -shared -fPIC -g v1.cpp -o libtpl_v1.so
 g++ -shared -fPIC -g v2.cpp -o libtpl_v2.so
 abicheck compare libtpl_v1.so libtpl_v2.so \
-    --old-header v1.h --new-header v2.h   # → NO_CHANGE (documented gap)
+    --header old=v1.h --header new=v2.h   # → NO_CHANGE (documented gap)
 ```
 
 ## How to mitigate

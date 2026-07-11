@@ -24,16 +24,16 @@ command** when you need more confidence or a CI gate.
 
 | Your situation | Minimum command | Stronger / production command |
 |---|---|---|
-| One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --old-header include/v1/ --new-header include/v2/` — the primary flow |
+| One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --header old=include/v1/ --header new=include/v2/` — the primary flow |
 | Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
-| No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root1/2` |
-| Stripped production binaries | `abicheck compare old.so new.so --debug-root1 old-debug --debug-root2 new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
-| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --new-header include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
+| No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root old=old-debug --debug-root new=new-debug` |
+| Stripped production binaries | `abicheck compare old.so new.so --debug-root old=old-debug --debug-root new=new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
+| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck scan --binary build/libfoo.so -H include/ --sources . --baseline baseline.json --since origin/main` | One orchestrator over dump/compare: always-on pattern + cross-source checks plus the pinned L3/L4/L5 level — see [Source & Build Data](../concepts/build-source-data.md) and the [GitHub Action: Source Scans](github-action-source-scans.md) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck merge libfoo.bin.json libfoo.src.json -o baseline.json` (also ingests a Flow B `abicheck_inputs/` pack) | Folds independently-produced L0–L2 and L3/L4/L5 dumps into one self-contained snapshot |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
 | Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
-| RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
+| RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info old=old-debuginfo.rpm --debug-info new=new-debuginfo.rpm` (debuginfo packages) and `--devel-pkg old=old-devel.rpm --devel-pkg new=new-devel.rpm` (header/devel packages) where available |
 | An application + a library upgrade | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against new.so` when no old library exists (symbol-availability only) |
 | A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
 | Will this binary load in this sysroot / rootfs? | `abicheck deps ./app --sysroot /rootfs` | `abicheck deps ./app` alone checks the dependency tree resolves |
@@ -88,7 +88,7 @@ explanation of why each source changes what abicheck can prove.
 - **No `castxml`?** Drop the header flags and abicheck falls back to
   DWARF/symbols analysis. It still works — it just catches less.
 - **Stripped binaries?** Point abicheck at separate debug files with
-  `--debug-root1` / `--debug-root2`, or fetch them by build-id with
+  `--debug-root old=` / `--debug-root new=`, or fetch them by build-id with
   `--debuginfod`. See [CLI Usage → Debug-info
   resolution](cli-usage.md#debug-artifact-resolution).
 - **Compiler flags affect the ABI** (e.g. `-D` macros that change struct
@@ -130,13 +130,13 @@ verdict or exit code.
 # Report everything, fail ONLY on binary ABI breaks
 # (i.e. source/API breaks are allowed through)
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-preset info-only \
   --severity-abi-breaking error
 
 # Fail on binary ABI breaks AND new public API additions
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-addition error
 ```
 
@@ -145,7 +145,7 @@ abicheck compare old.json new.so \
 ```bash
 # Show only additions in a review report — verdict and exit code unchanged
 abicheck compare old.json new.so \
-  --new-header include/ \
+  --header new=include/ \
   --show-only compatible,added
 ```
 

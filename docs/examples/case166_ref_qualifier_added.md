@@ -118,7 +118,7 @@ an unexplained removed+added pair. Detection needs the header AST
 attribute, so abicheck recovers it from the Itanium mangling (`_ZNR…`/`_ZNO…`).
 
 ```bash
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: BREAKING (func_ref_qual_changed: str, (none) → &)
 ```
 

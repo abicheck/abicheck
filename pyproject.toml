@@ -142,7 +142,9 @@ disable_error_code = ["no-any-return", "misc"]
 # ``cli_scan`` uses click decorators (untyped → ``no-any-return``/``misc``, as
 # above) AND imports ``yaml`` for the optional ``--risk-rules`` profile (stubs
 # may be absent → ``import-untyped``). One block so the codes don't conflict.
-module = ["abicheck.cli_scan"]
+# ``cli_scan_baseline`` is the extracted ``--baseline``/``--estimate`` sub-flow
+# (same ``yaml`` + engine-``Any`` surface), so it shares the same relaxations.
+module = ["abicheck.cli_scan", "abicheck.cli_scan_baseline"]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "import-untyped"]
 

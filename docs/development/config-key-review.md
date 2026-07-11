@@ -235,11 +235,12 @@ it's a flag that exists only to qualify another flag.
 
 ### 3.6 Version-label default drift
 
-`--old-version`/`--new-version` default to the literal strings `"old"`/`"new"`;
-`dump --version` defaults to `"unknown"`. Harmless but inconsistent.
+`compare --version old=`/`--version new=` default to the literal strings
+`"old"`/`"new"`; `dump --version` defaults to `"unknown"`. Harmless but
+inconsistent.
 
-**Recommendation:** Make `dump --version` default to `"unknown"` and the
-compare-side default to the input filename stem when resolvable, rather than the
+**Recommendation:** `dump --version` already defaults to `"unknown"`; make the
+compare-side default the input filename stem when resolvable, rather than the
 opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 
 ---

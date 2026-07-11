@@ -213,7 +213,7 @@ single comparison of debug-enabled libraries with their public headers supplied*
 ```bash
 # Build (or obtain) BOTH versions with -g, then compare WITH headers:
 abicheck compare libfoo_v1.so libfoo_v2.so \
-    --old-header include/v1/foo.h --new-header include/v2/foo.h
+    --header old=include/v1/foo.h --header new=include/v2/foo.h
 ```
 
 This combination gives you all three tiers at once:
@@ -229,7 +229,7 @@ These three artifact tiers are layers **L0–L2** of the [five-source evidence
 model](evidence-and-detectability.md). Two further layers refine the result
 without ever overriding an artifact-proven break: **L3** build context
 (`-p build/`, the exact ABI-affecting flags) and **L4** source/build/source packs
-(`--old-build-info`/`--new-build-info`, recovering macro/`constexpr` and
+(`--build-info`, recovering macro/`constexpr` and
 uninstantiated-template facts). They are optional but raise confidence and
 localize findings — see [Source & Build Data](build-source-data.md).
 
@@ -388,7 +388,7 @@ This eliminates ELF-only mode entirely and removes the need for heuristic filter
 
 ### Header scoping on PE and Mach-O
 
-Headers supplied via `-H/--header` (and the per-side `--old-header`/`--new-header`)
+Headers supplied via `-H/--header` (and the per-side `--header old=`/`--header new=`)
 are now honored for PE (Windows DLL) and Mach-O (macOS dylib) inputs, not just ELF.
 When headers are provided, the export-table surface is scoped to the symbols declared
 in those public headers via castxml. This is **best-effort**:

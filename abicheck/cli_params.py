@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -103,6 +103,92 @@ class DepthParam(click.ParamType):
 
 #: Shared instance for every ``--depth`` option.
 DEPTH_PARAM = DepthParam()
+
+
+#: The side prefixes a sided option value may carry (ADR-040 Lever 1).
+_SIDES: tuple[str, ...] = ("old", "new", "both")
+
+
+class SidedPathParam(click.ParamType):
+    """Click type for a side-aware path option (ADR-040 Lever 1).
+
+    Collapses the old ``--X`` / ``--old-X`` / ``--new-X`` triple into one
+    repeatable ``--X`` whose value optionally carries an ``old=`` / ``new=`` /
+    ``both=`` prefix::
+
+        --header v1/foo.h          -> ("both", Path("v1/foo.h"))
+        --header old=v1/foo.h       -> ("old",  Path("v1/foo.h"))
+        --header new=v2/foo.h       -> ("new",  Path("v2/foo.h"))
+
+    A bare value (no recognised prefix) means both sides — the common case stays
+    terminal-cheap. ``both=`` is the explicit escape hatch for the rare path that
+    literally starts ``old=`` / ``new=``. Path validation (existence, file/dir
+    constraints) is delegated to an internal :class:`click.Path` built from the
+    constructor flags, applied to the *stripped* path — so ``--sources`` can
+    require an existing directory while ``--header`` does not check existence
+    (a header may be absent for a symbols-only fallback).
+    """
+
+    name = "sided-path"
+
+    def __init__(
+        self, *, exists: bool = False, file_okay: bool = True, dir_okay: bool = True
+    ) -> None:
+        super().__init__()
+        self._path = click.Path(
+            exists=exists, file_okay=file_okay, dir_okay=dir_okay, path_type=Path
+        )
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, Path]:
+        s = str(value)
+        for side in _SIDES:
+            prefix = f"{side}="
+            if s.startswith(prefix):
+                raw = s[len(prefix):]
+                # ``click.Path.convert`` is typed ``str | bytes | PathLike`` even
+                # with ``path_type=Path``; it returns a real ``Path`` at runtime.
+                return (side, cast("Path", self._path.convert(raw, param, ctx)))
+        return ("both", cast("Path", self._path.convert(s, param, ctx)))
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[old=|new=]PATH"
+
+
+#: Sided path for ``--header``/``--include`` — no existence check (a header may
+#: be absent for a symbols-only fallback).
+SIDED_PATH_PARAM = SidedPathParam()
+#: Sided path for ``--sources`` — an existing directory (raw checkout / pack).
+SIDED_SOURCES_PARAM = SidedPathParam(exists=True, file_okay=False)
+#: Sided path for ``--build-info`` — an existing file (compile DB) or directory.
+SIDED_BUILD_INFO_PARAM = SidedPathParam(exists=True)
+#: Sided path requiring an existing file/dir (e.g. ``--probe-matrix`` snapshots).
+SIDED_EXISTING_PATH_PARAM = SidedPathParam(exists=True)
+
+
+class SidedStrParam(click.ParamType):
+    """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--version``.
+
+    Same ``old=`` / ``new=`` / ``both=`` prefix convention as
+    :class:`SidedPathParam`, but the value stays a bare ``str`` (a version label,
+    not a path). A bare value means both sides.
+    """
+
+    name = "sided-str"
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, str]:
+        s = str(value)
+        for side in _SIDES:
+            prefix = f"{side}="
+            if s.startswith(prefix):
+                return (side, s[len(prefix):])
+        return ("both", s)
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[old=|new=]LABEL"
+
+
+#: Shared instance for sided string options (``--version``).
+SIDED_STR_PARAM = SidedStrParam()
 
 
 def _load_suppression_and_policy(

@@ -68,6 +68,7 @@ nav:
       - Tool Modes: user-guide/tool-modes.md
       - Python API: user-guide/python-api.md
       - MCP Integration: user-guide/mcp-integration.md
+      - Upgrading to 0.5.0: user-guide/migration-0.5.md
       - Migrating from ABICC: user-guide/from-abicc.md
       - Migrating from libabigail: user-guide/from-libabigail.md
   # How the tool works, simplest mental model first: what a verdict means →
@@ -191,6 +192,7 @@ nav:
       - "037: CLI Interface Contract": development/adr/037-cli-interface-contract.md
       - "038: Working With Sources": development/adr/038-build-integrated-fact-collection-variants.md
       - "039: Build-Context Reconciliation": development/adr/039-build-context-reconciliation.md
+      - "040: compare Surface Reduction": development/adr/040-compare-surface-reduction.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

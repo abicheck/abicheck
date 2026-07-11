@@ -41,7 +41,7 @@ g++ -shared -fPIC -g v2.cpp -o libshape_v2.so
 
 # Header mode — detected:
 abicheck compare libshape_v1.so libshape_v2.so \
-    --old-header v1.h --new-header v2.h        # → API_BREAK (type_became_final)
+    --header old=v1.h --header new=v2.h        # → API_BREAK (type_became_final)
 
 # Object-only mode — invisible:
 abicheck compare libshape_v1.so libshape_v2.so # → NO_CHANGE

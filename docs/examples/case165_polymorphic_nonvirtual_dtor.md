@@ -130,7 +130,7 @@ side (pre-existing debt is not nagged about on every run), and it requires the
 opt-in pattern analysis:
 
 ```bash
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h --pattern-verdicts
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --pattern-verdicts
 # Verdict: COMPATIBLE_WITH_RISK (polymorphic_type_non_virtual_dtor: Exporter)
 ```
 

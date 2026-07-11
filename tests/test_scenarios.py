@@ -462,10 +462,10 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
         n,
         "--format",
         "json",
-        "--probe-matrix-old",
-        om,
-        "--probe-matrix-new",
-        nm,
+        "--probe-matrix",
+        "old=" + om,
+        "--probe-matrix",
+        "new=" + nm,
     )
     assert res.exit_code == 2  # API_BREAK from the build-config finding
     doc = json.loads(res.stdout)
@@ -800,10 +800,10 @@ def test_sc_cxx_std_floor(tmp_path: Path) -> None:
         n,
         "--format",
         "json",
-        "--probe-matrix-old",
-        om,
-        "--probe-matrix-new",
-        nm,
+        "--probe-matrix",
+        "old=" + om,
+        "--probe-matrix",
+        "new=" + nm,
     )
     assert res.exit_code == 2
     doc = json.loads(res.stdout)

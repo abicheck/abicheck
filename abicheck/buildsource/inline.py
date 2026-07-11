@@ -141,6 +141,10 @@ class BuildConfig:
     scope_public: bool | None = None
     collapse_versioned_symbols: bool | None = None
     public_symbols: list[str] = field(default_factory=list)
+    #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
+    #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
+    #: stays a visible CLI flag.
+    scope_show_redundant: bool | None = None
     #: ``suppression:`` — hygiene policy (a project rule, not a per-run flag).
     suppression_strict: bool | None = None
     suppression_require_justification: bool | None = None
@@ -156,6 +160,14 @@ class BuildConfig:
     compile_defines: list[str] = field(default_factory=list)
     compile_sysroot: str | None = None
     compile_nostdinc: bool | None = None
+    #: ``debug:`` — separate-debug-file resolution (ADR-021a) demoted off the CLI
+    #: (ADR-040 Lever 2). These are stable per-project debug-artifact knobs; the
+    #: coarse per-run ``--debug-root`` stays a visible CLI override, while the
+    #: format/debuginfod/dwarf-only knobs move here. ``None`` = unset.
+    debug_format: str | None = None
+    debug_dwarf_only: bool | None = None
+    debug_debuginfod: bool | None = None
+    debug_debuginfod_url: str | None = None
     #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
     exit_code_scheme: str = "auto"
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
@@ -177,6 +189,7 @@ class BuildConfig:
             "suppression",
             "source",
             "compile",
+            "debug",
             "exit_code_scheme",
             "version",
             "risk_rules",
@@ -195,7 +208,9 @@ class BuildConfig:
                 "addition",
             }
         ),
-        "scope": frozenset({"public", "collapse_versioned_symbols", "public_symbols"}),
+        "scope": frozenset(
+            {"public", "collapse_versioned_symbols", "public_symbols", "show_redundant"}
+        ),
         "suppression": frozenset({"strict", "require_justification"}),
         "source": frozenset({"method", "graph"}),
         "compile": frozenset(
@@ -207,6 +222,9 @@ class BuildConfig:
                 "sysroot",
                 "nostdinc",
             }
+        ),
+        "debug": frozenset(
+            {"format", "dwarf_only", "debuginfod", "debuginfod_url"}
         ),
     }
 
@@ -253,6 +271,8 @@ class BuildConfig:
         source = source if isinstance(source, dict) else {}
         compile_blk = data.get("compile") if isinstance(data, dict) else None
         compile_blk = compile_blk if isinstance(compile_blk, dict) else {}
+        debug = data.get("debug") if isinstance(data, dict) else None
+        debug = debug if isinstance(debug, dict) else {}
 
         def _str(d: dict[str, object], key: str, default: str = "") -> str:
             v = d.get(key)
@@ -325,6 +345,15 @@ class BuildConfig:
             else 0
         )
 
+        debug_format = _opt_str(debug, "format")
+        if debug_format is not None:
+            debug_format = debug_format.lower()
+            if debug_format not in ("auto", "dwarf", "btf", "ctf"):
+                raise ValueError(
+                    "debug.format must be one of ('auto', 'dwarf', 'btf', 'ctf'), "
+                    f"got {debug_format!r}"
+                )
+
         compile_frontend = _opt_str(compile_blk, "frontend")
         if compile_frontend is not None:
             # The CLI accepts the frontend case-insensitively (Click Choice
@@ -355,6 +384,7 @@ class BuildConfig:
             scope_public=_opt_bool(scope, "public"),
             collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
             public_symbols=_strs(scope, "public_symbols"),
+            scope_show_redundant=_opt_bool(scope, "show_redundant"),
             suppression_strict=_opt_bool(suppression, "strict"),
             suppression_require_justification=_opt_bool(
                 suppression, "require_justification"
@@ -370,6 +400,10 @@ class BuildConfig:
             compile_defines=_safe_compile_atoms("defines"),
             compile_sysroot=_opt_str(compile_blk, "sysroot"),
             compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
+            debug_format=debug_format,
+            debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
+            debug_debuginfod=_opt_bool(debug, "debuginfod"),
+            debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
             exit_code_scheme=scheme,
             version=version,
         )
@@ -416,6 +450,8 @@ class BuildConfig:
             scope["collapse_versioned_symbols"] = self.collapse_versioned_symbols
         if self.public_symbols:
             scope["public_symbols"] = list(self.public_symbols)
+        if self.scope_show_redundant is not None:
+            scope["show_redundant"] = self.scope_show_redundant
         return scope
 
     def _suppression_block(self) -> dict[str, Any]:
@@ -452,6 +488,19 @@ class BuildConfig:
             compile_blk["nostdinc"] = self.compile_nostdinc
         return compile_blk
 
+    def _debug_block(self) -> dict[str, Any]:
+        """Non-default ``debug:`` keys (separate-debug-file resolution; ADR-040 L2)."""
+        debug: dict[str, Any] = {}
+        if self.debug_format is not None:
+            debug["format"] = self.debug_format
+        if self.debug_dwarf_only is not None:
+            debug["dwarf_only"] = self.debug_dwarf_only
+        if self.debug_debuginfod is not None:
+            debug["debuginfod"] = self.debug_debuginfod
+        if self.debug_debuginfod_url is not None:
+            debug["debuginfod_url"] = self.debug_debuginfod_url
+        return debug
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -470,6 +519,7 @@ class BuildConfig:
             ("suppression", self._suppression_block()),
             ("source", self._source_block()),
             ("compile", self._compile_block()),
+            ("debug", self._debug_block()),
         ):
             if block:
                 out[key] = block

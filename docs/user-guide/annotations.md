@@ -162,12 +162,12 @@ set:
 ```bash
 # Annotations silently skipped (GITHUB_ACTIONS not set)
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header v1/foo.h --new-header v2/foo.h \
+  --header old=v1/foo.h --header new=v2/foo.h \
   --annotate
 
 # To test annotation output locally, set the env var:
 GITHUB_ACTIONS=true abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header v1/foo.h --new-header v2/foo.h \
+  --header old=v1/foo.h --header new=v2/foo.h \
   --annotate
 ```
 
@@ -178,7 +178,7 @@ GITHUB_ACTIONS=true abicheck compare libfoo.so.1 libfoo.so.2 \
 Annotations include `file=` and `line=` properties only when abicheck has
 source location information for the change. This is available when:
 
-- Headers are provided (`-H`, `--old-header`, `--new-header`)
+- Headers are provided (`-H`/`--header`, side-aware `old=`/`new=`)
 - DWARF debug info is present in the binary
 - BTF/CTF metadata is available
 

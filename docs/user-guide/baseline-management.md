@@ -322,7 +322,7 @@ Once you have a baseline, comparison is the same regardless of storage:
 
 ```bash
 # JSON snapshot vs new binary
-abicheck compare baseline.json build/libfoo.so --new-header include/foo.h
+abicheck compare baseline.json build/libfoo.so --header new=include/foo.h
 
 # Two snapshots (no headers or tools needed)
 abicheck compare old-baseline.json new-baseline.json

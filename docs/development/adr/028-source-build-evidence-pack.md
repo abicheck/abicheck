@@ -219,8 +219,8 @@ abicheck dump build/libfoo.so -H include/ \
 
 # Compare artifact snapshots and evidence packs together.
 abicheck compare old.abi.json new.abi.json \
-  --old-build-info old.evidence/ \
-  --new-build-info new.evidence/ \
+  --build-info old=old.evidence/ \
+  --build-info new=new.evidence/ \
   --format sarif
 
 # One-shot CI convenience.

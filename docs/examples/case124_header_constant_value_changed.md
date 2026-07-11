@@ -49,7 +49,7 @@ public-contract by construction (`ChangeKind` `constant_changed`).
 g++ -shared -fPIC -g v1.cpp -o libaudio_v1.so
 g++ -shared -fPIC -g v2.cpp -o libaudio_v2.so
 abicheck compare libaudio_v1.so libaudio_v2.so \
-    --old-header v1.h --new-header v2.h   # → API_BREAK (constant_changed 8 → 16)
+    --header old=v1.h --header new=v2.h   # → API_BREAK (constant_changed 8 → 16)
 abicheck compare libaudio_v1.so libaudio_v2.so # → NO_CHANGE (object-only)
 ```
 

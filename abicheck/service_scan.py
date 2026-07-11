@@ -747,9 +747,9 @@ def run_scan(req: ScanRequest) -> ScanResult:
     from .cli_scan import (
         _BudgetOverflow,
         _EvidenceContractError,
-        _public_provenance_set,
         run_scan_core,
     )
+    from .cli_scan_baseline import _public_provenance_set
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")

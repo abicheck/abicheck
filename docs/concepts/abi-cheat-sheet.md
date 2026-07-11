@@ -199,8 +199,8 @@ No immediate breakage, but these compromise the ABI contract or security posture
 
 ```bash
 abicheck compare libfoo.so.old libfoo.so.new \
-  --old-header include/old/foo.h \
-  --new-header include/new/foo.h \
+  --header old=include/old/foo.h \
+  --header new=include/new/foo.h \
   --policy strict_abi
 ```
 

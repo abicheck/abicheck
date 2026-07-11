@@ -35,7 +35,7 @@ scenarios:
       removed exported symbol, a changed struct layout — using the PE export table
       and PDB type info, so Windows is a first-class lane and not ELF-only.
     flow:
-      - abicheck compare old.dll new.dll --old-pdb-path old.pdb --new-pdb-path new.pdb -H include/
+      - abicheck compare old.dll new.dll --pdb-path old=old.pdb --pdb-path new=new.pdb -H include/
     expected:
       exit_code: 4
       verdict: BREAKING

@@ -79,6 +79,34 @@ def _cli_flag(name: str, value: bool) -> bool | None:
     return value if src == click.core.ParameterSource.COMMANDLINE else None
 
 
+def _param_from_cli(name: str) -> bool:
+    """True when parameter *name*'s value came from the command line (not default)."""
+    src = click.get_current_context().get_parameter_source(name)
+    return bool(src == click.core.ParameterSource.COMMANDLINE)
+
+
+def _merge_cli_debug_format(
+    debug_format_opt: str | None,
+    legacy_debug_format: str | None,
+    *,
+    legacy_from_cli: bool,
+) -> str | None:
+    """Effective *command-line* debug format across all CLI spellings (ADR-040 L2).
+
+    ``--debug-format`` (``debug_format_opt``) is the primary selector; the hidden
+    compatibility flags ``--btf``/``--ctf``/``--dwarf`` write the ``debug_format``
+    dest. Either, when typed, must beat a ``.abicheck.yml`` ``debug.format`` — so
+    fold a *command-line-sourced* legacy flag in here (the flag's own default is
+    ``None``, so ``legacy_from_cli`` distinguishes "typed" from "unset"). Returns
+    ``None`` when no format was given on the command line, letting config win.
+    """
+    if debug_format_opt is not None:
+        return debug_format_opt
+    if legacy_from_cli:
+        return legacy_debug_format
+    return None
+
+
 def _resolve_compare_config(
     *,
     config: Path | None,
@@ -93,6 +121,12 @@ def _resolve_compare_config(
     strict_suppressions: bool,
     require_justification: bool,
     exit_code_scheme: str | None,
+    debug_format_opt: str | None,
+    debug_format: str | None,
+    dwarf_only: bool,
+    debuginfod: bool,
+    debuginfod_url: str | None,
+    show_redundant: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -126,6 +160,19 @@ def _resolve_compare_config(
             "require_justification", require_justification
         ),
         cli_exit_code_scheme=exit_code_scheme,
+        # ADR-040 Lever 2: debug-resolution + show-redundant demoted to config.
+        # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
+        # config wins); the is_flags need the COMMANDLINE-source gate so their
+        # default ``False`` doesn't mask a configured ``True``. A typed legacy
+        # --btf/--ctf/--dwarf must also beat config, so fold it into the CLI value.
+        cli_debug_format=_merge_cli_debug_format(
+            debug_format_opt, debug_format,
+            legacy_from_cli=_param_from_cli("debug_format"),
+        ),
+        cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
+        cli_debuginfod=_cli_flag("debuginfod", debuginfod),
+        cli_debuginfod_url=debuginfod_url,
+        cli_show_redundant=_cli_flag("show_redundant", show_redundant),
     )
     return cfg_path, project_cfg, resolved_cfg
 
@@ -331,7 +378,7 @@ def _resolve_debug_roots(
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
 ) -> tuple[list[Path], list[Path]]:
-    """Per-side debug roots: --debug-root1/2 override --debug-root for that side."""
+    """Per-side debug roots: --debug-root old=/new= override the both-sides value."""
     resolved_old = list(debug_roots_old) if debug_roots_old else list(debug_roots)
     resolved_new = list(debug_roots_new) if debug_roots_new else list(debug_roots)
     return resolved_old, resolved_new
@@ -427,12 +474,26 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
         exit_code_scheme=exit_code_scheme,
+        debug_format_opt=debug_format_opt,
+        debug_format=debug_format,
+        dwarf_only=dwarf_only,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
+        show_redundant=show_redundant,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
+    # ADR-040 Lever 2: the demoted debug-resolution + show-redundant knobs are now
+    # resolved (CLI > config > default); overwrite the raw flag locals so the rest
+    # of the flow sees the merged values.
+    debug_format_opt = resolved_cfg.debug_format
+    dwarf_only = resolved_cfg.dwarf_only
+    debuginfod = resolved_cfg.debuginfod
+    debuginfod_url = resolved_cfg.debuginfod_url
+    show_redundant = resolved_cfg.show_redundant
 
     # ADR-037 D7: input-type dispatch. The resolved config (scope/suppression/
     # severity) is forwarded so a set-input compare classifies the same way a

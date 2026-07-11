@@ -10,7 +10,7 @@
 
 [Issue #235](https://github.com/abicheck/abicheck/issues/235) reports that abicheck
 does not filter the ABI surface to the symbols declared in the public headers a user
-supplies via `-H/--header` (and `--old-header`/`--new-header`). Both reference tools do
+supplies via `-H/--header` (and `--header old=`/`--header new=`). Both reference tools do
 this: libabigail filters via `abidw --headers-dir`, and abi-compliance-checker derives
 the public surface from the headers fed to `abi-dumper`. Without it, changes in private
 / internal-but-exported symbols are reported as compliance failures — noise that can

@@ -29,7 +29,7 @@ abidiff --headers-dir1 include-v1/ --headers-dir2 include-v2/ \
 
 # After (abicheck — public-surface scoping is automatic with headers):
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header include-v1/ --new-header include-v2/
+  --header old=include-v1/ --header new=include-v2/
 ```
 
 ## Step 2: Update CI exit-code checks
@@ -70,14 +70,14 @@ the severity-aware scheme).
 | libabigail (`abidiff`) | abicheck equivalent | Notes |
 |---|---|---|
 | `lib1.so lib2.so` positional args | `compare OLD NEW` positional args | abicheck also accepts JSON snapshots and directories/packages |
-| `--headers-dir1 DIR` / `--hd1` | `--old-header DIR` | Directories are scanned recursively; needs `castxml` or `clang` |
-| `--headers-dir2 DIR` / `--hd2` | `--new-header DIR` | Use `-H DIR` once when the same headers apply to both sides |
-| `--header-file1` / `--header-file2` | `--old-header FILE` / `--new-header FILE` | Same flags accept files or directories |
+| `--headers-dir1 DIR` / `--hd1` | `--header old=DIR` | Directories are scanned recursively; needs `castxml` or `clang` |
+| `--headers-dir2 DIR` / `--hd2` | `--header new=DIR` | Use `-H DIR` once when the same headers apply to both sides |
+| `--header-file1` / `--header-file2` | `--header old=FILE` / `--header new=FILE` | Same flags accept files or directories |
 | `--drop-private-types` | *(automatic)* | With headers, abicheck scopes findings to the public surface by default; opt out with `--no-scope-public-headers` |
 | `--suppressions FILE` / `--suppr` | `--suppress FILE` | Different file format: YAML instead of libabigail's INI sections — see [Suppressions](suppressions.md) and the translation section below |
 | `--no-default-suppression` | *(not needed)* | abicheck applies no default suppression specs |
-| `--debug-info-dir1 DIR` / `--d1` | `--debug-root1 DIR` | Sidecar/split debug trees |
-| `--debug-info-dir2 DIR` / `--d2` | `--debug-root2 DIR` | `--debug-root DIR` applies to both sides |
+| `--debug-info-dir1 DIR` / `--d1` | `--debug-root old=DIR` | Sidecar/split debug trees |
+| `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
 | *(no equivalent)* | `--debuginfod` | Fetch debug info from a debuginfod server |
 | `--stat` | `--stat` | One-line summary instead of the full report |
 | `--leaf-changes-only` / `-l` | `--report-mode leaf` | Root-type-grouped leaf view |
@@ -103,7 +103,7 @@ abidiff libfoo.abi build/libfoo.so
 
 # After (abicheck):
 abicheck dump libfoo.so -H include/ --version 1.0 -o libfoo.abi.json
-abicheck compare libfoo.abi.json build/libfoo.so --new-header include/
+abicheck compare libfoo.abi.json build/libfoo.so --header new=include/
 ```
 
 Snapshots and binaries mix freely on either side of `compare`; the input
@@ -119,7 +119,7 @@ abipkgdiff --d1 foo-debuginfo-1.rpm --d2 foo-debuginfo-2.rpm foo-1.rpm foo-2.rpm
 
 # After (abicheck — directory, archive, or package inputs):
 abicheck compare foo-1.rpm foo-2.rpm \
-  --debug-info1 foo-debuginfo-1.rpm --debug-info2 foo-debuginfo-2.rpm
+  --debug-info old=foo-debuginfo-1.rpm --debug-info new=foo-debuginfo-2.rpm
 ```
 
 Multi-library inputs are compared as a co-versioned bundle, with per-library

@@ -46,7 +46,7 @@ conda install -c conda-forge abicheck
 All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abicheck` install.
 
 > **Important:** `pip install abicheck` does **not** install `castxml`. Any command
-> that takes headers (`--old-header` / `--new-header` / `-H`) needs `castxml` on
+> that takes headers (`--header` / `-H`) needs `castxml` on
 > your `PATH` — without it those commands fail with `castxml not found`. Install it
 > with the system/conda packages below (the conda-forge package pulls it in
 > automatically). If you have no `castxml`, run **binary-only mode** by omitting the
@@ -117,7 +117,7 @@ gcc -shared -fPIC -g v2.c -o libv2.so
 
 ```bash
 # Compare (header-aware — needs castxml; see Requirements above)
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: BREAKING (symbol 'helper' was removed)
 ```
 
@@ -134,7 +134,7 @@ For your own library:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header include/v1/foo.h --new-header include/v2/foo.h
+  --header old=include/v1/foo.h --header new=include/v2/foo.h
 ```
 
 If the header is the same for both versions:
@@ -165,7 +165,7 @@ when you need more confidence:
 | **L1** | + debug info (`-g` build / sidecar) | **Medium** | Struct/class layout, field offsets, enum *values*, vtable slots, calling convention |
 | **L2** | + headers (`-H include/`) | **High** | Public API surface: signatures, overloads, access, `noexcept`, templates, public/internal scoping |
 | **L3** | + build data (`-p build/`) | **Higher** | The flags the library was *actually* built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, sysroot, export maps |
-| **L4** | + sources (build/source pack via `compare --old-build-info/--new-build-info`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
+| **L4** | + sources (build/source pack via `compare --build-info`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
 
 The layers are **additive, not a fallback chain**: artifact-backed evidence
 (L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source
@@ -187,7 +187,7 @@ Detectability](concepts/evidence-and-detectability.md) and the per-layer
 reference; build data (L3) and source build/source packs (L4) are documented under
 [CLI Usage → Evidence packs](user-guide/cli-usage.md#evidence-packs-build-source-context-l3-l4).
 For stripped production builds, point abicheck at separate debug files
-(`--debug-root1/2`) or fetch them with `--debuginfod` — see
+(`--debug-root old=/new=`) or fetch them with `--debuginfod` — see
 [CLI Usage](user-guide/cli-usage.md#debug-artifact-resolution).
 
 ---
@@ -234,7 +234,7 @@ abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
 ```bash
 # Compare saved baseline against current build
 abicheck compare baseline.json ./build/libfoo.so \
-  --new-header include/foo.h --new-version 2.0-dev
+  --header new=include/foo.h --version new=2.0-dev
 ```
 
 ```bash
@@ -328,7 +328,7 @@ and [Severity Configuration](user-guide/severity.md) pages have the rest.
 ```bash
 # Breakage-only gate: report everything, fail ONLY on binary ABI breaks
 abicheck compare baseline.json build/libfoo.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-preset info-only \
   --severity-abi-breaking error
 
@@ -337,13 +337,13 @@ abicheck compare baseline.json build/libfoo.so \
 # any --severity-* flag switches to the severity scheme, where that category
 # is only a warning by default)
 abicheck compare baseline.json build/libfoo.so \
-  --new-header include/ \
+  --header new=include/ \
   --severity-potential-breaking error \
   --severity-addition error
 
 # Show only additions in a review report — verdict and exit code unchanged
 abicheck compare baseline.json build/libfoo.so \
-  --new-header include/ \
+  --header new=include/ \
   --show-only compatible,added
 ```
 
@@ -393,7 +393,7 @@ steps:
   - name: Compare ABI
     run: |
       abicheck compare abi-baseline.json ./build/libfoo.so \
-        --new-header include/foo.h \
+        --header new=include/foo.h \
         --format sarif -o abi.sarif
 
   - uses: github/codeql-action/upload-sarif@v3

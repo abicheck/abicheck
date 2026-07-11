@@ -20,6 +20,19 @@ add_flag() {
   fi
 }
 
+# ADR-040 L1: the per-side header/include inputs map to the side-aware --header/
+# --include flags, prefixing each value with old=/new= (e.g. --header old=inc).
+add_sided_flag() {
+  local flag="$1"
+  local side="$2"
+  local value="$3"
+  if [[ -n "$value" ]]; then
+    for item in $value; do
+      CMD+=("$flag" "${side}=${item}")
+    done
+  fi
+}
+
 add_single_flag() {
   local flag="$1"
   local value="$2"
@@ -140,13 +153,13 @@ elif [[ "$MODE" == "compare" ]]; then
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
 
   add_flag "-H" "${INPUT_HEADER:-}"
-  add_flag "--old-header" "${INPUT_OLD_HEADER:-}"
-  add_flag "--new-header" "${INPUT_NEW_HEADER:-}"
+  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_flag "--old-include" "${INPUT_OLD_INCLUDE:-}"
-  add_flag "--new-include" "${INPUT_NEW_INCLUDE:-}"
-  add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
-  add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
+  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
+  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
+  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
 
@@ -197,13 +210,13 @@ elif [[ "$MODE" == "appcompat" ]]; then
   fi
 
   add_flag "-H" "${INPUT_HEADER:-}"
-  add_flag "--old-header" "${INPUT_OLD_HEADER:-}"
-  add_flag "--new-header" "${INPUT_NEW_HEADER:-}"
+  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_flag "--old-include" "${INPUT_OLD_INCLUDE:-}"
-  add_flag "--new-include" "${INPUT_NEW_INCLUDE:-}"
-  add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
-  add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
+  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
+  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
+  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Format — appcompat only supports markdown and json
@@ -241,11 +254,13 @@ elif [[ "$MODE" == "compare-release" ]]; then
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
 
   add_flag "-H" "${INPUT_HEADER:-}"
-  add_flag "--old-header" "${INPUT_OLD_HEADER:-}"
-  add_flag "--new-header" "${INPUT_NEW_HEADER:-}"
+  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
-  add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
+  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
+  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
+  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Format — compare-release only supports markdown and json
@@ -266,10 +281,10 @@ elif [[ "$MODE" == "compare-release" ]]; then
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
 
   # Package-specific options
-  add_single_flag "--debug-info1" "${INPUT_DEBUG_INFO1:-}"
-  add_single_flag "--debug-info2" "${INPUT_DEBUG_INFO2:-}"
-  add_single_flag "--devel-pkg1" "${INPUT_DEVEL_PKG1:-}"
-  add_single_flag "--devel-pkg2" "${INPUT_DEVEL_PKG2:-}"
+  add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
+  add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
+  add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
+  add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
 
   if [[ "${INPUT_DSO_ONLY:-false}" == "true" ]]; then
     CMD+=(--dso-only)

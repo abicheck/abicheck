@@ -622,9 +622,11 @@ class TestCLIDwarfFlags:
         assert "Preview only" in norm
         assert "No snapshot is written" in norm
 
-    def test_compare_help_shows_dwarf_only(self, _cli_help) -> None:
-        """compare --help should mention --dwarf-only."""
-        assert "--dwarf-only" in _cli_help("compare")
+    def test_compare_hides_dwarf_only(self, _cli_help) -> None:
+        """compare --dwarf-only is demoted to the debug.dwarf_only config key and
+        hidden (ADR-040 Lever 2) — still a functional override, just off the
+        visible help. It remains visible on `dump`."""
+        assert "--dwarf-only" not in _cli_help("compare")
 
     @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
     def test_show_data_sources_output(self, tmp_path: Path) -> None:

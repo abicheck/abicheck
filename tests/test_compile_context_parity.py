@@ -767,7 +767,7 @@ def test_compare_config_include_dirs_survive_per_side_include(
         main,
         [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--config", str(cfg), "--old-include", str(old_only),
+            "--config", str(cfg), "--include", "old=" + str(old_only),
         ],
     )
     assert result.exit_code == 0, result.output

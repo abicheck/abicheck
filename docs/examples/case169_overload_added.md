@@ -128,7 +128,7 @@ symbol survives — distinguishing it from a plain signature change
 from symbols alone (`min_evidence: L0`).
 
 ```bash
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: COMPATIBLE_WITH_RISK (overload_added: units::to_celsius, 1 → 2 overloads)
 ```
 

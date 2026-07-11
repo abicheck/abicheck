@@ -16,8 +16,8 @@ abicheck reads debug information directly from binary files:
 - **PDB**: Read from Windows PE binaries via custom parser (`pdb_parser.py`)
 - **BTF/CTF**: Read from ELF `.BTF`/`.ctf` sections (ADR-007)
 
-For package comparison (ADR-006), `compare-release` accepts `--debug-info1/2` and
-`--devel-pkg1/2` flags that each take a **single** package path. The package
+For package comparison (ADR-006), `compare` accepts side-aware `--debug-info` and
+`--devel-pkg` flags that take a per-side package path. The package
 extractor resolves debug files within a package using build-id trees and path
 conventions.
 
@@ -38,7 +38,7 @@ into a single `.dwp` file.
 libabigail's `abidiff` supports `--debug-info-dir1/2` to specify directories
 containing split debug files. Fedora, RHEL, and Debian all install debug info
 in well-known locations (`/usr/lib/debug/.build-id/`). abicheck has no equivalent
-flag for the `compare` command (only `compare-release` has `--debug-info1/2`
+flag for the `compare` command (only directory/package `compare` inputs use `--debug-info`
 for packages).
 
 **3. No debuginfod integration.**
@@ -327,15 +327,15 @@ abicheck compare old.so new.so -H include/
 
 # New: specify debug root directories
 abicheck compare old.so new.so -H include/ \
-    --debug-root1 /usr/lib/debug \
-    --debug-root2 /path/to/new/debuginfo
+    --debug-root old=/usr/lib/debug \
+    --debug-root new=/path/to/new/debuginfo
 
 # New: enable debuginfod
 abicheck compare old.so new.so --debuginfod
 
 # New: macOS dSYM
 abicheck compare old.dylib new.dylib \
-    --debug-root1 /path/to/old.dSYM/..
+    --debug-root old=/path/to/old.dSYM/..
 ```
 
 ### 8. Diagnostic output

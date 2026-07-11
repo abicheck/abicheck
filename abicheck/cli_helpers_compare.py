@@ -145,11 +145,11 @@ def _warn_ignored_flags(
         return
     flag_pairs: list[tuple[tuple[Path, ...], str]] = [
         (headers, "-H/--header"),
-        (old_headers_only, "--old-header"),
-        (new_headers_only, "--new-header"),
+        (old_headers_only, "--header old="),
+        (new_headers_only, "--header new="),
         (includes, "-I/--include"),
-        (old_includes_only, "--old-include"),
-        (new_includes_only, "--new-include"),
+        (old_includes_only, "--include old="),
+        (new_includes_only, "--include new="),
     ]
     ignored_flags = [label for value, label in flag_pairs if value]
     if ignored_flags:
@@ -312,6 +312,14 @@ class ResolvedCompareConfig:
     #: has already been decided from ``severity_active``).
     exit_code_scheme: str
     source_method: str | None
+    #: ADR-040 Lever 2: debug-resolution knobs demoted to the ``debug:`` config
+    #: block (CLI flags still override). ``debug_format`` is ``None`` when unset.
+    debug_format: str | None = None
+    dwarf_only: bool = False
+    debuginfod: bool = False
+    debuginfod_url: str | None = None
+    #: ADR-040 Lever 2: ``--show-redundant`` demoted to ``scope.show_redundant``.
+    show_redundant: bool = False
     #: The CLI-or-config severity values (``None`` when neither set), kept raw so
     #: the directory/package fan-out can forward them to ``compare-release``
     #: without forcing severity-aware mode when nothing is configured.
@@ -336,6 +344,11 @@ def resolve_compare_config(
     cli_strict_suppressions: bool | None = None,
     cli_require_justification: bool | None = None,
     cli_exit_code_scheme: str | None = None,
+    cli_debug_format: str | None = None,
+    cli_dwarf_only: bool | None = None,
+    cli_debuginfod: bool | None = None,
+    cli_debuginfod_url: str | None = None,
+    cli_show_redundant: bool | None = None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
@@ -419,6 +432,21 @@ def resolve_compare_config(
 
     source_method = cfg.source_method if cfg else None
 
+    # ADR-040 Lever 2: debug-resolution + show-redundant demotion (CLI > config).
+    debug_format = _pick(cli_debug_format, cfg.debug_format if cfg else None, None)
+    dwarf_only = bool(
+        _pick(cli_dwarf_only, cfg.debug_dwarf_only if cfg else None, False)
+    )
+    debuginfod = bool(
+        _pick(cli_debuginfod, cfg.debug_debuginfod if cfg else None, False)
+    )
+    debuginfod_url = _pick(
+        cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
+    )
+    show_redundant = bool(
+        _pick(cli_show_redundant, cfg.scope_show_redundant if cfg else None, False)
+    )
+
     return ResolvedCompareConfig(
         severity=severity,
         severity_active=severity_active,
@@ -429,6 +457,11 @@ def resolve_compare_config(
         require_justification=require_just,
         exit_code_scheme=scheme,
         source_method=source_method,
+        debug_format=debug_format if isinstance(debug_format, str) else None,
+        dwarf_only=dwarf_only,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url if isinstance(debuginfod_url, str) else None,
+        show_redundant=show_redundant,
         merged_severity_preset=eff_preset,
         merged_severity_abi_breaking=eff_abi,
         merged_severity_potential_breaking=eff_pot,

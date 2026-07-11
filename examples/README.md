@@ -314,7 +314,7 @@ cd examples/case01_symbol_removal
 gcc -shared -fPIC -g v1.c -o libv1.so
 gcc -shared -fPIC -g v2.c -o libv2.so
 
-abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 # Verdict: BREAKING (symbol 'helper' was removed)
 ```
 

@@ -371,8 +371,8 @@ use_cases:
       tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
       Superseded: the standalone `deep-compare` orchestrator was removed and
-      folded into `compare`. `compare old.so new.so --old-sources ./src1
-      --new-sources ./src2 --max` collects L3-L5 inline from each raw source
+      folded into `compare`. `compare old.so new.so --sources old=./src1
+      --sources new=./src2 --max` collects L3-L5 inline from each raw source
       tree (a pre-built `collect` pack is accepted too) and embeds it in the
       per-side snapshot before comparing — the one-shot deep route, now on
       `compare`. The text below is retained as historical context for G21.
@@ -495,7 +495,7 @@ use_cases:
     status: complete
     note: >
       G2 closed. Matrix findings fold into `compare`/`compare-release` via
-      --probe-matrix-old/--probe-matrix-new. Both build-config kinds are now
+      `--probe-matrix old=... --probe-matrix new=...`. Both build-config kinds are now
       proven end-to-end through the mainline command:
       CXX_STANDARD_FLOOR_RAISED and — after the relocatable-object symbol-surface
       fix — API_DEPENDS_ON_CONSUMER_ENV. parse_elf_metadata now falls back to
@@ -612,7 +612,7 @@ use_cases:
       (`--old-ast-frontend`/`--new-ast-frontend` on `compare`,
       each inheriting `--ast-frontend`) so a release whose new headers need the
       host toolchain parses on clang while the old release keeps the castxml schema
-      reference — the backend mirror of `--old-header`/`--new-header`
+      reference — the backend mirror of `--header old=`/`--header new=`
       (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an
       integration-marked end-to-end check that `compare --headers` over a
       `<math.h>`-including header succeeds on a real CI host, and a dedicated
@@ -624,7 +624,7 @@ use_cases:
     status: complete
     note: >
       Surfaced through the mainline `compare`/`compare-release` command via
-      --probe-matrix-old/--probe-matrix-new; the finding reaches the verdict and
+      `--probe-matrix old=... --probe-matrix new=...`; the finding reaches the verdict and
       the JSON/SARIF output (proven in tests/test_probe_examples.py).
     evidence:
       examples: [examples/case98_cxx_standard_floor_raised, examples/probes/cxx_standard.yaml]

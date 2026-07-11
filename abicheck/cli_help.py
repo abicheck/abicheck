@@ -70,16 +70,15 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {
             "name": "Debug info",
-            "options": [
-                "--dwarf-only", "--debug-format", "--debug-root", "--debug-root1",
-                "--debug-root2", "--debuginfod", "--debuginfod-url",
-            ],
+            # The format/debuginfod/dwarf-only knobs are demoted to the `debug:`
+            # config block (ADR-040 L2) and hidden; only the coarse per-run
+            # --debug-root override stays a visible flag.
+            "options": ["--debug-root"],
         },
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--old-build-info", "--new-build-info", "--old-sources",
-                "--new-sources", "--depth", "--max",
+                "--build-info", "--sources", "--depth", "--max",
             ],
         },
         {
@@ -89,15 +88,13 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-header", "--new-header", "--old-include", "--new-include",
-                "--old-version", "--new-version", "--pdb-path", "--old-pdb-path",
-                "--new-pdb-path",
+                "--version", "--pdb-path",
             ],
         },
         {
             "name": "Build-config matrix & idioms",
             "options": [
-                "--probe-matrix-old", "--probe-matrix-new", "--pattern-verdicts",
+                "--probe-matrix", "--pattern-verdicts",
                 "--explain-patterns", "--surface-metrics",
             ],
         },
@@ -105,7 +102,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Release (directory/package inputs)",
             "options": [
                 "--jobs", "--dso-only", "--output-dir", "--fail-on-removed-library",
-                "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2",
+                "--debug-info", "--devel-pkg",
                 "--include-private-dso", "--keep-extracted", "--manifest",
                 "--bundle-system-providers", "--bundle-cohort", "--no-bundle-analysis",
             ],
@@ -239,8 +236,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--old-header", "--new-header", "--old-include", "--new-include",
-                "--old-version", "--new-version",
+                "--version",
             ],
         },
         {

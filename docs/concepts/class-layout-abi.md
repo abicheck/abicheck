@@ -207,8 +207,8 @@ can reach every tier above:
 
 ```bash
 abicheck compare old.so new.so \
-  --old-header include/v1/foo.h \
-  --new-header include/v2/foo.h \
+  --header old=include/v1/foo.h \
+  --header new=include/v2/foo.h \
   --policy strict_abi \
   --format sarif -o abi.sarif
 ```

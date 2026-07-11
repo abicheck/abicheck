@@ -36,11 +36,13 @@ from .cli import (
     main,
 )
 from .cli_options import (
+    _split_sided_version,
     lang_option,
     output_options,
     policy_options,
     scope_options,
     severity_options,
+    split_sided_paths,
     two_sided_input_options,
     verbose_option,
 )
@@ -92,10 +94,10 @@ def _reject_per_side_flags(
 ) -> None:
     """Reject per-side header/include flags in weak / list-symbols modes."""
     _flags = (
-        ("--old-header", old_headers_only),
-        ("--new-header", new_headers_only),
-        ("--old-include", old_includes_only),
-        ("--new-include", new_includes_only),
+        ("--header old=", old_headers_only),
+        ("--header new=", new_headers_only),
+        ("--include old=", old_includes_only),
+        ("--include new=", new_includes_only),
     )
     _rejected = [name for name, value in _flags if value]
     if _rejected:
@@ -175,15 +177,10 @@ def appcompat_cmd(
     old_lib: Path | None,
     new_lib: Path | None,
     check_against_lib: Path | None,
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
+    header: tuple[tuple[str, Path], ...],
+    include: tuple[tuple[str, Path], ...],
     lang: str,
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...],
-    new_includes_only: tuple[Path, ...],
-    old_version: str,
-    new_version: str,
+    version: tuple[tuple[str, str], ...],
     fmt: str,
     output: Path | None,
     show_irrelevant: bool,
@@ -234,6 +231,12 @@ def appcompat_cmd(
     Missing required symbols/versions always floor the exit at 4.
     """
     _setup_verbosity(verbose)
+
+    # ADR-040 Lever 1: split the side-aware --header/--include tuples into the
+    # both-sides + per-side inputs the appcompat resolver consumes.
+    headers, old_headers_only, new_headers_only = split_sided_paths(header)
+    includes, old_includes_only, new_includes_only = split_sided_paths(include)
+    old_version, new_version = _split_sided_version(version)
 
     from .appcompat import (
         _get_lib_soname,

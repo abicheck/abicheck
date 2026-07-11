@@ -144,7 +144,7 @@ contract violation (CI-checked, D10).
 | `@scope_options` | `--scope-public-headers/--no-`, `--show-filtered` |
 | `@debug_resolution_options` | `--debug-root{,1,2}`, `--debuginfod[-url]`, `--debug-format`, `--dwarf-only` |
 | `@output_options` | `--format`, `-o/--output` |
-| `@evidence_options` | `--depth`, `--max`, `--sources` + per-side `--old/new-sources`, `--build-info` + per-side `--old/new-build-info` (D5) |
+| `@evidence_options` | `--depth`, `--max`, `--sources` + per-side `--sources`, `--build-info` + per-side `--build-info` (D5) |
 | `@compile_context_options` | `--ast-frontend`, `--gcc-path`, `--gcc-prefix`, `--gcc-options`, `--gcc-option`, `--sysroot`, `--nostdinc` — the L2 header-AST compile context (D8.1) |
 
 **D8.1 — `dump` and `scan` share the L2 compile context (no drift).** The
@@ -435,9 +435,9 @@ deprecated alias.
 
 ### S3 — deep one-shot with source evidence (absorbs `deep-compare`)
 ```text
-abicheck compare libfoo.so.1 libfoo.so.2 --old-sources ./v1 --new-sources ./v2 --max
+abicheck compare libfoo.so.1 libfoo.so.2 --sources old=./v1 --sources new=./v2 --max
 ```
-`--max` ⇒ `depth=full` (D5); per-side `--old/new-sources` ride the
+`--max` ⇒ `depth=full` (D5); per-side `--sources` ride the
 `@evidence_options` decorator (D3). Tier 2 collects L3/L4 and builds the L5
 graph internally (D6) — no `graph-*` mode to learn. `deep-compare ...` is a
 deprecated alias.
@@ -480,7 +480,7 @@ abicheck compare arm/old.so arm/new.so --debug-root ./dbg --debuginfod --ast-fro
 `compare`-only before, but the *decorator* makes it uniformly available). One
 `--ast-frontend` (D8) drives both header AST and any L4 replay.
 
-**What the walk-through surfaced** (now fixed above): per-side `--old/new-sources`
+**What the walk-through surfaced** (now fixed above): per-side `--sources`
 must live on `@evidence_options` (S3); set-input runs need `--output-dir`
 fan-out (S2); `exit_code_scheme` belongs in config too (S1). All three were
 gaps in the first draft — the imagination game earned its keep.

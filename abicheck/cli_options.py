@@ -28,12 +28,164 @@ from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
-from .cli_params import DEPTH_PARAM, POLICY_FILE_PARAM
+from .cli_params import (
+    DEPTH_PARAM,
+    POLICY_FILE_PARAM,
+    SIDED_BUILD_INFO_PARAM,
+    SIDED_EXISTING_PATH_PARAM,
+    SIDED_PATH_PARAM,
+    SIDED_SOURCES_PARAM,
+    SIDED_STR_PARAM,
+)
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
+
+
+# ── ADR-040 Lever 1: side-aware option collapse ──────────────────────────────
+#
+# ``--old-X`` / ``--new-X`` / ``--X`` triples collapse to one repeatable ``--X``
+# whose value carries an optional ``old=`` / ``new=`` prefix (:class:`SidedPathParam`
+# returns ``(side, Path)`` pairs). The command bodies stay on their existing
+# internal kwargs (``headers`` / ``old_headers_only`` / …) — the two helpers below
+# translate the sided tuples back into those kwargs at the boundary, so the engine,
+# the Tier-2 service, and the ABICC compat layer are untouched.
+
+
+def split_sided_paths(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
+    """Split ``(side, path)`` pairs into ``(both, old_only, new_only)`` tuples.
+
+    Used by ``header`` / ``include`` (the "both-sides + per-side extra" model,
+    where the both bucket is applied to each side and ``old=``/``new=`` add
+    per-side overrides).
+    """
+    both: list[Path] = []
+    old_only: list[Path] = []
+    new_only: list[Path] = []
+    for side, path in pairs:
+        {"both": both, "old": old_only, "new": new_only}[side].append(path)
+    return tuple(both), tuple(old_only), tuple(new_only)
+
+
+def _split_sided_single(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[Path | None, Path | None]:
+    """Resolve ``(side, path)`` pairs to a single ``(old, new)`` per-side value.
+
+    Used by ``sources`` / ``build-info`` (one pack per side): a bare/``both=``
+    value applies to *both* sides, while ``old=``/``new=`` override that side.
+    Last value wins if a side is given twice.
+    """
+    old: Path | None = None
+    new: Path | None = None
+    for side, path in pairs:
+        if side in ("both", "old"):
+            old = path
+        if side in ("both", "new"):
+            new = path
+    return old, new
+
+
+def _split_sided_base(
+    pairs: Sequence[tuple[str, Path]],
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Resolve ``(side, path)`` pairs to ``(both, old, new)`` single values.
+
+    The "base + per-side" single-valued model (e.g. ``--pdb-path``): a bare/
+    ``both=`` value is the shared base (applied to both sides unless overridden),
+    while ``old=``/``new=`` set a per-side override. Last value wins per bucket.
+    Unlike :func:`_split_sided_single`, ``both`` is kept as its own base value
+    rather than fanned out — the downstream resolver applies the base per side.
+    """
+    both: Path | None = None
+    old: Path | None = None
+    new: Path | None = None
+    for side, path in pairs:
+        if side == "both":
+            both = path
+        elif side == "old":
+            old = path
+        else:
+            new = path
+    return both, old, new
+
+
+def _split_sided_version(
+    pairs: Sequence[tuple[str, str]],
+) -> tuple[str, str]:
+    """Resolve ``(side, label)`` pairs to ``(old_version, new_version)`` labels.
+
+    Same fan-out as :func:`_split_sided_single` (a bare/``both=`` value applies
+    to both sides, ``old=``/``new=`` override that side, last wins) but with the
+    historical per-side *defaults* ``"old"`` / ``"new"`` when a side is unset —
+    version labels are always populated, unlike the optional path families.
+    """
+    old = "old"
+    new = "new"
+    for side, label in pairs:
+        if side in ("both", "old"):
+            old = label
+        if side in ("both", "new"):
+            new = label
+    return old, new
+
+
+def normalize_sided_options(kwargs: dict[str, object]) -> None:
+    """Translate the sided ``header``/``include``/``sources``/``build_info``/
+    ``debug_root``/``pdb``/``probe_matrix``/``version`` dests into the per-side
+    kwargs the command bodies consume, in place (ADR-040 L1).
+
+    Absent keys are left untouched, so this is safe to call on any command that
+    composes only a subset of the sided families.
+    """
+    if "header" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("header"))  # type: ignore[arg-type]
+        kwargs["headers"] = both
+        kwargs["old_headers_only"] = old
+        kwargs["new_headers_only"] = new
+    if "include" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("include"))  # type: ignore[arg-type]
+        kwargs["includes"] = both
+        kwargs["old_includes_only"] = old
+        kwargs["new_includes_only"] = new
+    if "debug_root" in kwargs:
+        both, old, new = split_sided_paths(kwargs.pop("debug_root"))  # type: ignore[arg-type]
+        kwargs["debug_roots"] = both
+        kwargs["debug_roots_old"] = old
+        kwargs["debug_roots_new"] = new
+    if "sources" in kwargs:
+        old_s, new_s = _split_sided_single(kwargs.pop("sources"))  # type: ignore[arg-type]
+        kwargs["old_sources"] = old_s
+        kwargs["new_sources"] = new_s
+    if "build_info" in kwargs:
+        old_b, new_b = _split_sided_single(kwargs.pop("build_info"))  # type: ignore[arg-type]
+        kwargs["old_build_info"] = old_b
+        kwargs["new_build_info"] = new_b
+    if "probe_matrix" in kwargs:
+        old_p, new_p = _split_sided_single(kwargs.pop("probe_matrix"))  # type: ignore[arg-type]
+        kwargs["probe_matrix_old"] = old_p
+        kwargs["probe_matrix_new"] = new_p
+    if "debug_info" in kwargs:
+        old_di, new_di = _split_sided_single(kwargs.pop("debug_info"))  # type: ignore[arg-type]
+        kwargs["debug_info1"] = old_di
+        kwargs["debug_info2"] = new_di
+    if "devel_pkg" in kwargs:
+        old_dp, new_dp = _split_sided_single(kwargs.pop("devel_pkg"))  # type: ignore[arg-type]
+        kwargs["devel_pkg1"] = old_dp
+        kwargs["devel_pkg2"] = new_dp
+    if "pdb" in kwargs:
+        base_p, old_pp, new_pp = _split_sided_base(kwargs.pop("pdb"))  # type: ignore[arg-type]
+        kwargs["pdb_path"] = base_p
+        kwargs["old_pdb_path"] = old_pp
+        kwargs["new_pdb_path"] = new_pp
+    if "version" in kwargs:
+        old_v, new_v = _split_sided_version(kwargs.pop("version"))  # type: ignore[arg-type]
+        kwargs["old_version"] = old_v
+        kwargs["new_version"] = new_v
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -59,68 +211,91 @@ def two_sided_input_options(func: F) -> F:
     inline.)
     """
     func = click.option(
-        "--new-version",
-        "new_version",
-        default="new",
-        show_default=True,
-        help="Version label for new side (used when input is a .so file).",
-    )(func)
-    func = click.option(
-        "--old-version",
-        "old_version",
-        default="old",
-        show_default=True,
-        help="Version label for old side (used when input is a .so file).",
-    )(func)
-    func = click.option(
-        "--new-include",
-        "new_includes_only",
+        "--version",
+        "version",
         multiple=True,
-        type=click.Path(path_type=Path),
-        help="Include dir for new side only (overrides -I for new).",
-    )(func)
-    func = click.option(
-        "--old-include",
-        "old_includes_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Include dir for old side only (overrides -I for old).",
-    )(func)
-    func = click.option(
-        "--new-header",
-        "new_headers_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header for new side only (overrides -H for new). "
-        "Validated for native binaries; ignored for snapshots.",
-    )(func)
-    func = click.option(
-        "--old-header",
-        "old_headers_only",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header for old side only (overrides -H for old). "
-        "Validated for native binaries; ignored for snapshots.",
+        type=SIDED_STR_PARAM,
+        help="Version label used when an input is a bare .so file. Scope to one "
+        "side with an 'old='/'new=' prefix, repeating the flag per side (e.g. "
+        "--version old=1.0 --version new=2.0); a bare value applies to both. "
+        "Defaults: old side 'old', new side 'new' (ADR-040).",
     )(func)
     func = click.option(
         "-I",
         "--include",
-        "includes",
+        "include",
         multiple=True,
-        type=click.Path(path_type=Path),
-        help="Extra include directory for castxml (applied to both sides).",
+        type=SIDED_PATH_PARAM,
+        help="Extra include directory for castxml. Applies to both sides; scope "
+        "to one side with an 'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040).",
     )(func)
     func = click.option(
         "-H",
         "--header",
-        "headers",
+        "header",
         multiple=True,
-        type=click.Path(path_type=Path),
-        help="Public header file or directory applied to both sides (repeat for multiple). "
+        type=SIDED_PATH_PARAM,
+        help="Public header file or directory. Applies to both sides; scope to "
+        "one side with an 'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
         "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
+    )(func)
+    return func
+
+
+def release_input_options(func: F) -> F:
+    """Per-side header/include/version for the *internal* release engine.
+
+    ``compare_release_cmd`` is unregistered (ADR-037 D7): it is never parsed from
+    the CLI, only ``ctx.invoke``-d from ``compare``'s directory/package dispatch
+    with the already-normalised per-side kwargs (``headers`` / ``old_headers_only``
+    / …). So it keeps the pre-ADR-040 per-side param surface — the side-aware
+    ``--header``/``--include`` collapse (Lever 1) applies to the *user-facing*
+    ``compare`` / ``appcompat`` commands, which normalise before dispatching here.
+    These option spellings are inert (the command is not registered) and do not
+    count against any flag budget or option-set snapshot.
+    """
+    func = click.option(
+        "--new-version", "new_version", default="new", show_default=True,
+        help="Version label for new side (used when input is a .so file).",
+    )(func)
+    func = click.option(
+        "--old-version", "old_version", default="old", show_default=True,
+        help="Version label for old side (used when input is a .so file).",
+    )(func)
+    func = click.option(
+        "--new-include", "new_includes_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Include dir for new side only.",
+    )(func)
+    func = click.option(
+        "--old-include", "old_includes_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Include dir for old side only.",
+    )(func)
+    func = click.option(
+        "--new-header", "new_headers_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header for new side only.",
+    )(func)
+    func = click.option(
+        "--old-header", "old_headers_only", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header for old side only.",
+    )(func)
+    func = click.option(
+        "-I", "--include", "includes", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Extra include directory (both sides).",
+    )(func)
+    func = click.option(
+        "-H", "--header", "headers", multiple=True,
+        type=click.Path(path_type=Path),
+        help="Public header file or directory (both sides).",
     )(func)
     return func
 
@@ -695,36 +870,22 @@ def release_options(func: F) -> F:
         "paths. (directory/package inputs only)",
     )(func)
     func = click.option(
-        "--devel-pkg2",
-        "devel_pkg2",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Development package with headers for the new side. "
-        "(directory/package inputs only)",
+        "--devel-pkg",
+        "devel_pkg",
+        multiple=True,
+        type=SIDED_EXISTING_PATH_PARAM,
+        help="Development package with headers, scoped per side with an "
+        "'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg "
+        "new=b-dev.rpm). Directory/package inputs only (ADR-040).",
     )(func)
     func = click.option(
-        "--devel-pkg1",
-        "devel_pkg1",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Development package with headers for the old side. "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--debug-info2",
-        "debug_info2",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Debug info package for the new side (RPM/Deb/tar). "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--debug-info1",
-        "debug_info1",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Debug info package for the old side (RPM/Deb/tar). "
-        "(directory/package inputs only)",
+        "--debug-info",
+        "debug_info",
+        multiple=True,
+        type=SIDED_EXISTING_PATH_PARAM,
+        help="Debug info package (RPM/Deb/tar), scoped per side with an "
+        "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
+        "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
     )(func)
     func = click.option(
         "--fail-on-removed-library/--no-fail-on-removed-library",
@@ -772,49 +933,48 @@ def debug_resolution_options(func: F) -> F:
         "debug_format_opt",
         type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
         default=None,
+        hidden=True,
         help="Force the ELF debug format for both sides (auto=pick best available). "
-        "Supersedes the individual --btf/--ctf/--dwarf flags.",
+        "Supersedes the individual --btf/--ctf/--dwarf flags. Demoted to the "
+        "debug.format config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
         "--debuginfod-url",
         "debuginfod_url",
         default=None,
-        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).",
+        hidden=True,
+        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var). Demoted to "
+        "the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
-        "--debuginfod",
-        is_flag=True,
+        "--debuginfod/--no-debuginfod",
+        "debuginfod",
         default=False,
-        help="Enable debuginfod network resolution for debug info (opt-in).",
-    )(func)
-    func = click.option(
-        "--debug-root2",
-        "debug_roots_new",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Debug root for new side only (overrides --debug-root for new).",
-    )(func)
-    func = click.option(
-        "--debug-root1",
-        "debug_roots_old",
-        multiple=True,
-        type=click.Path(path_type=Path),
-        help="Debug root for old side only (overrides --debug-root for old).",
+        hidden=True,
+        help="Enable debuginfod network resolution for debug info (opt-in). Demoted "
+        "to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod "
+        "still overrides it either way.",
     )(func)
     func = click.option(
         "--debug-root",
-        "debug_roots",
+        "debug_root",
         multiple=True,
-        type=click.Path(path_type=Path),
+        type=SIDED_PATH_PARAM,
         help="Directory containing separate debug files (build-id trees, "
-        "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.",
+        "path-mirror, dSYM bundles). Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
     )(func)
     func = click.option(
-        "--dwarf-only",
-        is_flag=True,
+        "--dwarf-only/--no-dwarf-only",
+        "dwarf_only",
         default=False,
+        hidden=True,
         help="Force DWARF-only mode for both sides: use DWARF debug info "
-        "as primary data source even when headers are available.",
+        "as primary data source even when headers are available. Demoted to the "
+        "debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only "
+        "still overrides it either way (e.g. --no-dwarf-only restores header parsing "
+        "for a one-off run).",
     )(func)
     return func
 
@@ -974,22 +1134,14 @@ def evidence_options(func: F) -> F:
     that take source depth compose it).
 
     By default ``compare old.json new.json`` reads build-info + source facts
-    **embedded** in each snapshot (single-artifact UX). The optional
-    ``--old-build-info`` / ``--new-build-info`` and ``--old-sources`` /
-    ``--new-sources`` point at out-of-band pack directories to supply or
-    override those facts per side; ``--depth`` selects how deep the inline
+    **embedded** in each snapshot (single-artifact UX). The optional side-aware
+    ``--build-info`` and ``--sources`` (ADR-040) point at out-of-band pack
+    directories to supply or override those facts — for both sides, or per side
+    with an ``old=``/``new=`` prefix; ``--depth`` selects how deep the inline
     collection runs (ADR-037 D5). All folded into the verdict as ordinary
     findings, never overriding artifact-backed ABI verdicts (ADR-028 D3).
     Applied bottom-up, so listed in reverse of displayed order.
     """
-    from pathlib import Path
-
-    pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
-    # --build-info also accepts a file (a raw compile_commands.json), not just a
-    # build dir / pack dir — the per-side replacement for the removed
-    # deep-compare, whose build-info option took dirs *or* a compile DB file
-    # (Codex review). The later pack/raw validation still distinguishes them.
-    build_info_path = click.Path(exists=True, path_type=Path)
     func = click.option(
         "--max",
         "max_depth",
@@ -1005,41 +1157,28 @@ def evidence_options(func: F) -> F:
         help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
         "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
         "full=deepest. --max == --depth full. Deeper-than-headers needs "
-        "--old/new-sources or --old/new-build-info.",
+        "--sources or --build-info.",
     )(func)
     func = click.option(
-        "--new-sources",
-        "new_sources",
-        type=pack_dir,
-        default=None,
-        help="New-side L4/L5 source: a raw source checkout (collected inline at "
-        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
-        "pack. Overrides embedded.",
+        "--sources",
+        "sources",
+        multiple=True,
+        type=SIDED_SOURCES_PARAM,
+        help="L4/L5 source: a raw source checkout (collected inline at --depth, "
+        "embedding build/source/graph facts) or a pre-built `collect` pack, "
+        "overriding embedded. Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --sources old=src_v1 --sources new=src_v2) (ADR-040).",
     )(func)
     func = click.option(
-        "--old-sources",
-        "old_sources",
-        type=pack_dir,
-        default=None,
-        help="Old-side L4/L5 source: a raw source checkout (collected inline at "
-        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
-        "pack. Overrides embedded.",
-    )(func)
-    func = click.option(
-        "--new-build-info",
-        "new_build_info",
-        type=build_info_path,
-        default=None,
-        help="Out-of-band L3 build-info for the new side: a build dir, a "
-        "compile_commands.json, or a pack (overrides embedded).",
-    )(func)
-    func = click.option(
-        "--old-build-info",
-        "old_build_info",
-        type=build_info_path,
-        default=None,
-        help="Out-of-band L3 build-info for the old side: a build dir, a "
-        "compile_commands.json, or a pack (overrides embedded).",
+        "--build-info",
+        "build_info",
+        multiple=True,
+        type=SIDED_BUILD_INFO_PARAM,
+        help="Out-of-band L3 build-info: a build dir, a compile_commands.json, or "
+        "a pack, overriding embedded. Applies to both sides; scope to one with an "
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
     )(func)
     return func
 
@@ -1063,12 +1202,7 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--header",
             "--include",
-            "--old-header",
-            "--new-header",
-            "--old-include",
-            "--new-include",
-            "--old-version",
-            "--new-version",
+            "--version",
         }
     ),
     "policy": frozenset({"--policy", "--policy-file", "--suppress"}),
@@ -1090,10 +1224,8 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--depth",
             "--max",
-            "--old-sources",
-            "--new-sources",
-            "--old-build-info",
-            "--new-build-info",
+            "--sources",
+            "--build-info",
         }
     ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
@@ -1103,8 +1235,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--dwarf-only",
             "--debug-root",
-            "--debug-root1",
-            "--debug-root2",
             "--debuginfod",
             "--debuginfod-url",
             "--debug-format",
@@ -1153,30 +1283,86 @@ VERDICT_EMITTING_COMMANDS: dict[str, str] = {
 INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 
 #: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
-#: nudge, enforced by ``tests/test_config_rebalance.py::test_flag_budget``).
+#: nudge, enforced by ``tests/test_config_rebalance.py::TestFlagBudget``).
 #: Counts only the *visible* options: the families demoted to ``.abicheck.yml``
 #: in Phase 5 (per-category severity, scope FP-tuning, suppression hygiene) are
 #: hidden and config-bound (D4), so they don't count against the budget. The
 #: ADR's end-state target is ~20; this interim ceiling keeps new visible flags
-#: from creeping back in while the deprecation window runs. Raised from 60→66 when
-#: the shared ``@compile_context_options`` L2 family (--ast-frontend was already
-#: visible; +6 for --gcc-path/--gcc-prefix/--gcc-options/--gcc-option/--sysroot/
-#: --nostdinc) was unified onto ``compare`` for dump/scan parity (ADR-037 D3): the
-#: family is genuine L2 surface ``compare`` previously lacked, not config-demotable.
-#: Raised 66→77 when the standalone ``compare-release`` command was removed and its
-#: 11 release-only knobs (``@release_options``: package extraction, DSO selection,
-#: removed-library gate, ADR-023 bundle/manifest analysis) folded onto ``compare``'s
-#: directory/package path (ADR-037 D7) — genuine release surface, inert on single
-#: files, grouped in its own ``--help`` panel.
-#: Raised 77→78 for ``--reconcile-build-context`` (ADR-039): a genuine new
-#: analysis capability (clearing context-free header-parse false positives from
-#: build defines), not a project setting demotable to ``.abicheck.yml`` — it is
-#: an invocation-time analysis toggle like ``--pattern-verdicts``.
-#: Raised 78→79 for ``--env-matrix`` (ADR-020b runtime_floors): a genuine new
-#: analysis input (declared deployment constraints that turn version-requirement
-#: RISK findings into decidable COMPATIBLE/BREAKING verdicts), not a stable
-#: project setting — the matrix varies per deployment target being checked.
-COMPARE_FLAG_BUDGET = 79
+#: from creeping back in while the deprecation window runs.
+#:
+#: The budget is **derived** from the ledger below, not a hand-set number:
+#: ``BASE`` is the visible count that settled after the ADR-037 D7
+#: ``compare-release`` fold-in, and every visible flag added since must appear in
+#: ``COMPARE_FLAG_BUDGET_RAISES`` with a one-line rationale (why it is a per-run
+#: analysis input, not a project setting demotable to config). Because the budget
+#: equals ``BASE + len(RAISES)`` and the test asserts ``visible <= budget``, a new
+#: visible flag *cannot* be slipped in by silently consuming slack — the only way
+#: to raise the ceiling is to add a documented ledger entry (a regression that
+#: previously let ``--post-manifest`` land undocumented; see the ledger test).
+#:
+#: History that folded into ``BASE`` (no per-flag ledger — these predate the
+#: ledger and moved the count in bulk): 60→66 when ``@compile_context_options``
+#: (--gcc-*/--sysroot/--nostdinc, ADR-037 D3) unified onto ``compare`` for
+#: dump/scan L2 parity; 66→76 visible when ``compare-release`` was removed and its
+#: release-only knobs (package extraction, DSO selection, removed-library gate,
+#: ADR-023 bundle/manifest) folded onto ``compare``'s directory/package path
+#: (ADR-037 D7) — genuine release surface, inert on single files.
+#: Lowered 76→70 by ADR-040 Lever 1 Phase B: the per-side ``--old/new-header``,
+#: ``--old/new-include``, ``--old/new-sources`` and ``--old/new-build-info``
+#: triples collapsed into the four side-aware flags ``--header`` / ``--include``
+#: / ``--sources`` / ``--build-info`` (``old=``/``new=`` value prefix), a net −6.
+#: Lowered 70→65 by ADR-040 Lever 1 Phase C (slice 1): ``--pdb-path`` and
+#: ``--debug-root`` collapsed their per-side triples (−2 each) and
+#: ``--probe-matrix-old/new`` folded into one side-aware ``--probe-matrix`` (−1).
+#: Lowered 65→63 by Phase C (slice 2): ``--debug-info1/2`` and ``--devel-pkg1/2``
+#: folded into side-aware ``--debug-info`` / ``--devel-pkg`` (−1 each). The
+#: unregistered release engine keeps its per-side ``--debug-info1/2`` etc.
+#: Lowered 63→62 by Phase C (slice 3): ``--old-version``/``--new-version``
+#: folded into one side-aware ``--version`` (``old=``/``new=`` prefix; per-side
+#: defaults ``old``/``new``). The unregistered release engine keeps its per-side
+#: ``--old-version``/``--new-version``.
+#: Lowered 62→57 by ADR-040 Lever 2 (Phase D, constraint-aware subset): the
+#: debug-resolution knobs ``--debug-format``/``--debuginfod``/``--debuginfod-url``/
+#: ``--dwarf-only`` demoted to the ``debug:`` config block and ``--show-redundant``
+#: to ``scope.show_redundant`` — all now ``hidden`` (they still override config,
+#: like the severity family), so they leave the visible surface (−5). The coarse
+#: ``--debug-root`` stays visible; the toolchain family and ``--scope-public-headers``
+#: are documented carve-outs (shared with dump/scan / everyday on-off switch).
+COMPARE_FLAG_BUDGET_BASE = 57
+
+#: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
+#: flag spelling → rationale (why it is a per-run analysis input, not a stable
+#: project setting demotable to ``.abicheck.yml``). Keep in sync with reality:
+#: ``tests/test_config_rebalance.py`` asserts each key is a currently-visible
+#: ``compare`` option, so demoting one to hidden/config means removing its entry
+#: (and lowering ``BASE`` if it belonged to the base surface).
+COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
+    "--post-manifest": (
+        "G23 / #492: scopes the comparison to a POST Python export manifest's "
+        "committed ABI surface. A per-run scoping input (which manifest to hold "
+        "the release to), not a stable project setting — like --manifest."
+    ),
+    "--reconcile-build-context": (
+        "ADR-039: clears context-free header-parse false positives using the "
+        "build's active preprocessor defines. An invocation-time analysis toggle "
+        "like --pattern-verdicts, not a project setting demotable to .abicheck.yml."
+    ),
+    "--env-matrix": (
+        "ADR-020b runtime_floors: declared deployment constraints that turn "
+        "version-requirement RISK findings into decidable COMPATIBLE/BREAKING "
+        "verdicts. The matrix varies per deployment target checked, so it is a "
+        "per-run input, not a stable project setting."
+    ),
+    "--profile": (
+        "ADR-040 Lever 3: a single per-run bundle of workflow defaults "
+        "(ci-gate/release/quick) that explicit flags always override. One visible "
+        "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
+        "1-2 lower BASE to bring the net well below today."
+    ),
+}
+
+#: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
+COMPARE_FLAG_BUDGET = COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
 
 
 def count_visible_options(cmd: object) -> int:
@@ -1188,6 +1374,149 @@ def count_visible_options(cmd: object) -> int:
         ):
             n += 1
     return n
+
+
+#: ADR-040 Lever 3 — named run profiles for ``compare``. Each maps a profile
+#: name to a bundle of ``{option-dest: value}`` defaults for the documented
+#: workflows. A profile is a *default layer*: an explicitly-passed flag always
+#: wins (see :func:`apply_compare_profile`), mirroring the config < CLI rule and
+#: the way ``--severity-preset`` collapses four severity flags into one token.
+#: Values are in each option's *resolved* form (``depth`` uses the canonical
+#: ``USER_DEPTHS`` rungs, ``fmt``/``exit_code_scheme`` the ``Choice`` strings,
+#: booleans as ``bool``) so they can be injected without re-running conversion.
+COMPARE_PROFILES: dict[str, dict[str, object]] = {
+    # CI gate: fast header-depth check, compact review digest, severity-aware
+    # exit codes — the "block the PR" workflow. (Public-surface scoping is the
+    # default, so the profile does not restate it — a project's .abicheck.yml
+    # scope choice stays authoritative.)
+    "ci-gate": {
+        "depth": "headers",
+        "fmt": "review",
+        "exit_code_scheme": "severity",
+    },
+    # Release cut: deepest evidence, full Markdown report with a semver/SONAME
+    # recommendation appended — the "should I bump?" flow.
+    "release": {
+        "depth": "full",
+        "fmt": "markdown",
+        "recommend": True,
+    },
+    # Quick look: symbols-only, one-line summary — the "just tell me" flow.
+    "quick": {
+        "depth": "binary",
+        "stat": True,
+    },
+}
+
+def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
+    """True when the ``compare`` operands are a directory/package (set) input.
+
+    Mirrors the ADR-037 D7 dispatch (:func:`cli_resolve.classify_compare_operand`)
+    so profile handling matches how ``run_compare`` will actually route the
+    comparison, without duplicating the classification rules.
+    """
+    from pathlib import Path
+
+    from .cli_resolve import classify_compare_operand
+
+    kinds: set[str] = set()
+    for key in ("old_input", "new_input"):
+        operand = kwargs.get(key)
+        if operand is None:
+            continue
+        try:
+            kinds.add(classify_compare_operand(Path(str(operand))))
+        except Exception:  # noqa: BLE001 - classification is best-effort here
+            continue
+    return bool(kinds & {"directory", "package"})
+
+
+def profile_option(func: F) -> F:
+    """The ``--profile`` option (ADR-040 Lever 3): one token for a workflow.
+
+    Kept here so ``cli.py`` stays under its size cap and any future front-end
+    shares one spelling/help. The value is validated against
+    :data:`COMPARE_PROFILES`; application (default-layering under explicit flags)
+    happens in :func:`apply_compare_profile`.
+    """
+    func = click.option(
+        "--profile",
+        "profile",
+        type=click.Choice(list(COMPARE_PROFILES), case_sensitive=True),
+        default=None,
+        help="Run-profile preset bundling workflow defaults (ADR-040): "
+        "'ci-gate' (headers depth, review digest, severity exit codes), "
+        "'release' (full depth, recommendation, Markdown), 'quick' "
+        "(symbols-only, one-line summary). Explicit flags override the profile; "
+        "single-pair compares only (configure release defaults in .abicheck.yml).",
+    )(func)
+    return func
+
+
+def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
+    """Fold the selected ``--profile`` defaults into *kwargs*, in place.
+
+    Pops ``profile`` from *kwargs* (it is a CLI-layer concept the downstream
+    ``run_compare`` signature does not take) and fills each setting the profile
+    declares **only** when the user left that option at its default.
+
+    **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
+    (``--depth``, ``--exit-code-scheme``) and single-pair report formats
+    (``review``) that the directory/package *release fan-out* deliberately does
+    not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
+    than silently drop half a profile (the codebase rejects such flags loudly on
+    set inputs, e.g. :func:`cli_resolve._reject_evidence_flags_for_set_inputs`),
+    a ``--profile`` on directory/package operands is rejected with a message that
+    points at the config home for release defaults. This keeps the feature
+    consistent with the existing set-input contract and free of the per-key /
+    per-value special cases the fan-out would otherwise force.
+
+    **Precedence (single-pair): explicit flag > profile > project config >
+    default.** A ``--profile`` is a per-run choice the user typed on the command
+    line, so — like any typed flag — it overrides project ``.abicheck.yml``
+    defaults, while a genuinely typed flag still overrides the profile. Injection
+    is value-only and gated on ``ctx.get_parameter_source`` so an explicit flag
+    is never clobbered; the profile is **not** stamped as a command-line source
+    (nothing downstream needs the source, and not stamping keeps the mechanism
+    simple).
+    """
+    name = kwargs.pop("profile", None)
+    if not name:
+        return
+    import click
+    from click.core import ParameterSource
+
+    if _profile_targets_set_input(kwargs):
+        raise click.UsageError(
+            f"--profile {name} is not supported for directory/package (release) "
+            "comparisons: profiles bundle single-pair-only knobs (--depth, "
+            "--exit-code-scheme, the 'review' format). Configure release defaults "
+            "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
+            "or compare the libraries individually to use a profile."
+        )
+
+    profile = COMPARE_PROFILES[str(name)]
+    get_source = getattr(ctx, "get_parameter_source", None)
+    explicit = {
+        ParameterSource.COMMANDLINE,
+        ParameterSource.ENVIRONMENT,
+    }
+    for dest, value in profile.items():
+        # ``--depth`` and ``--max`` are the same dial on two dests: an explicit
+        # ``--max`` (dest ``max_depth``) is the user's depth choice, so the
+        # profile's ``depth`` must yield to it — otherwise resolve_dump_depth
+        # sees "--max plus a different --depth" and exits 64 (Codex review).
+        if (
+            dest == "depth"
+            and get_source is not None
+            and get_source("max_depth") in explicit
+        ):
+            continue
+        src = get_source(dest) if get_source is not None else None
+        # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
+        # / unknown). An explicit --flag or a mapped env var stays untouched.
+        if src not in explicit:
+            kwargs[dest] = value
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``
@@ -1204,8 +1533,10 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     # input operands
     "old_input": "--old (positional OLD)",
     "new_input": "--new (positional NEW)",
-    "old_headers": "--old-header",
-    "new_headers": "--new-header",
+    # ADR-040 L1: the per-side header params now map to the single side-aware
+    # ``--header`` flag (scoped via an ``old=``/``new=`` value prefix).
+    "old_headers": "--header",
+    "new_headers": "--header",
     "headers": "--header",
     "include_dirs": "--include",
     "language": "--lang",

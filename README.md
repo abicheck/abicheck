@@ -70,14 +70,14 @@ Compare two library versions:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --old-header include/v1/foo.h --new-header include/v2/foo.h
+  --header old=include/v1/foo.h --header new=include/v2/foo.h
 ```
 
 Save a baseline snapshot at release time, then compare every new build against it:
 
 ```bash
 abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
-abicheck compare baseline.json ./build/libfoo.so --new-header include/foo.h
+abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
 ```
 
 Supported output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit`.
