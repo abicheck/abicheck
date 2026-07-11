@@ -20,9 +20,17 @@ from unittest.mock import MagicMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock the mcp package before importing mcp_server (same pattern as the
-# sibling suites so the module imports without the real dependency semantics).
+# Mock the mcp package before importing mcp_server so it imports without the
+# real dependency, then RESTORE sys.modules afterward. Leaving a spec-less
+# MagicMock named "mcp" behind would break any later module that probes
+# ``importlib.util.find_spec("mcp")`` (e.g. tests/test_cli_contract.py), which
+# raises ``ValueError: mcp.__spec__ is not set`` during collection (Codex
+# review). mcp_server keeps its own FastMCP reference after import, so the
+# restore is safe.
 # ---------------------------------------------------------------------------
+_MCP_MODULE_NAMES = ("mcp", "mcp.server", "mcp.server.fastmcp")
+_saved_mcp_modules = {name: sys.modules.get(name) for name in _MCP_MODULE_NAMES}
+
 _mock_fastmcp = MagicMock()
 _mock_mcp_module = MagicMock()
 _mock_mcp_module.server.fastmcp.FastMCP = _mock_fastmcp
@@ -49,6 +57,14 @@ from abicheck.mcp_server import (  # noqa: E402
 )
 from abicheck.model import AbiSnapshot  # noqa: E402
 from abicheck.serialization import snapshot_to_json  # noqa: E402
+
+# Undo any mock modules we injected above so they don't leak to other test
+# modules collected later in the same session.
+for _name, _original in _saved_mcp_modules.items():
+    if _original is None:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _original
 
 # ---------------------------------------------------------------------------
 # Helpers
