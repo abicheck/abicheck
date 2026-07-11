@@ -57,7 +57,7 @@ def _confidence(raw: Any) -> LayerConfidence:
 def _as_bool(raw: Any, default: bool) -> bool:
     """Forward-compat boolean parse: a hand-edited pack may carry the string
     ``"false"``, which ``bool(...)`` would misread as True (evidence/CLAUDE.md
-    "never abort/​misload a hand-edited pack")."""
+    "never abort/misload a hand-edited pack")."""
     if raw is None:
         return default
     if isinstance(raw, bool):

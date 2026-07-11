@@ -102,7 +102,7 @@ from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
-    from .checker_types import Change, DiffResult
+    from .checker_types import Change
     from .debug_resolver import DebugArtifact
     from .service_scan import CompileContext
     from .severity import SeverityConfig
@@ -182,7 +182,7 @@ def _stamp_provenance(
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, check=False,
             )
             if result.returncode == 0:
                 snap.git_commit = result.stdout.strip()
