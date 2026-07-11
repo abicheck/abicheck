@@ -744,7 +744,7 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
             capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -800,7 +800,7 @@ def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
             capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -848,7 +848,7 @@ def run_abidiff(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
     out = r.stdout + r.stderr
     (rdir / f"{case}_abidiff{suffix}.txt").write_text(out)
@@ -912,7 +912,7 @@ def run_abicc_xml(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None
             capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
