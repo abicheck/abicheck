@@ -442,7 +442,8 @@ def perform_elf_dump(
     # headers that reach into a dependency SDK (the pvxs/EPICS case). dump has no
     # defer_cleanup channel, so any inferred temp-build-dir cleanups come back as
     # pending and are run below, after the header parse has consumed the dirs.
-    from .buildsource.inline import _run_cleanups, seed_l2_includes
+    from .buildsource.inline import _run_cleanups
+    from .buildsource.l2_seed import seed_l2_includes
 
     eff_includes, _l2_pending_cleanups = seed_l2_includes(
         headers=headers,

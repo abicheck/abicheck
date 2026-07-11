@@ -358,7 +358,7 @@ def _build_new_snapshot(
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
     """
-    from .buildsource.inline import seed_l2_includes
+    from .buildsource.l2_seed import seed_l2_includes
     from .errors import AbicheckError
     from .service import resolve_input
 

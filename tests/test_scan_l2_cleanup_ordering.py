@@ -53,7 +53,7 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     def fake_embed(*args, **kwargs):
         events.append("embed")
 
-    monkeypatch.setattr("abicheck.buildsource.inline.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
 
@@ -91,7 +91,7 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
 
         raise AbicheckError("boom")
 
-    monkeypatch.setattr("abicheck.buildsource.inline.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
 
     import click
