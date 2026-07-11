@@ -106,10 +106,8 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
 | `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
-| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. (scan can also derive this from the level inputs below.) |
+| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
-| `scan-mode` | scan | **Deprecated alias of `depth`** (ADR-037 D5): `pr`, `pr-deep`, `baseline`, `audit`. Prefer `depth` (or `audit`); this input still defaults to `pr` and emits a deprecation warning. |
-| `source-method` | scan | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto`. Prefer `depth`; emits a deprecation warning when set. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |

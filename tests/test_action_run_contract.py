@@ -37,12 +37,6 @@ import pytest
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
-# Long options that are VALID but hidden from `--help` (deprecated, kept working)
-# — the action may still forward them. Keyed by the subcommand path.
-_HIDDEN_VALID = {
-    "scan": {"--mode", "--source-method"},  # deprecated → --depth (ADR-037 D5)
-}
-
 # add_flag "--x" / add_single_flag "--x"  and  CMD+=(--x ...)
 _ADD_FLAG_RE = re.compile(r'add(?:_single)?_flag\s+"(--[a-z0-9-]+)"')
 _CMD_FLAG_RE = re.compile(r'CMD\+=\((--[a-z0-9-]+)')
@@ -114,7 +108,7 @@ def test_action_flags_are_real_cli_options(subcommand: str) -> None:
     used = by_sub.get(subcommand, set())
     if not used:
         pytest.skip(f"no flags collected for {subcommand}")
-    valid = _valid_flags(subcommand) | _HIDDEN_VALID.get(subcommand, set())
+    valid = _valid_flags(subcommand)
     always_ok = {"--help", "--verbose", "--version"}
     unknown = {f for f in used if f not in valid and f not in always_ok}
     assert not unknown, (

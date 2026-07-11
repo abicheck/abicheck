@@ -9,16 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Added
+### Removed
 
-- **oneDAL integration package** (`contrib/integrations/onedal/`) — a drop-in
-  set of GitHub Actions workflows, an `.abicheck.yml`, and a suppression file for
-  wiring abicheck into [uxlfoundation/oneDAL](https://github.com/uxlfoundation/oneDAL)
-  CI, baselined against the 2026.0.0 release: a buildless per-PR source scan
-  (`mode: scan` against a committed `.abi.json` snapshot), a nightly binary
-  compare (icx+MKL build → SARIF), a one-shot baseline builder, and a Clang
-  facts-plugin data-collection demo. Ships with a validated findings write-up
-  (`README.md`) and a user-guide page (`docs/user-guide/onedal-integration.md`).
+- **Deprecated `scan-mode` / `source-method` GitHub Action inputs.** They mapped
+  to the CLI's deprecated `--mode`/`--source-method` and `scan-mode` defaulted to
+  `pr`, so every scan run emitted a deprecation warning. Removed from `action.yml`
+  and `action/run.sh`; use the `depth` input (omit it for `auto`). The CLI flags
+  themselves are unchanged.
 
 ### Fixed
 

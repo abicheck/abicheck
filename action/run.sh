@@ -352,9 +352,8 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--baseline" "${INPUT_BASELINE:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
-  # Level selection (scan-mode preset, or precise S-/L-axis)
-  add_single_flag "--mode" "${INPUT_SCAN_MODE:-}"
-  add_single_flag "--source-method" "${INPUT_SOURCE_METHOD:-}"
+  # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
+  # --mode/--source-method passthrough was removed; use depth.
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
 
   # Focusing + guards + policy
@@ -665,7 +664,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
         echo "> **Verdict: REMOVED_LIBRARY** — A library present in the old package is missing from the new package."
         ;;
       BUDGET_OVERFLOW)
-        echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (source-method/depth) or raise the budget; a budget never silently shrinks scope."
+        echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
         ;;
       PASS)
         echo "> **Verdict: PASS** — Binary loads and no harmful ABI changes detected."
@@ -709,13 +708,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
       if [[ -n "${INPUT_SOURCES:-}" ]]; then
         echo "| Sources | \`${INPUT_SOURCES}\` |"
       fi
-      echo "| Scan mode | ${INPUT_SCAN_MODE:-pr} |"
-      if [[ -n "${INPUT_SOURCE_METHOD:-}" ]]; then
-        echo "| Source method | ${INPUT_SOURCE_METHOD} |"
-      fi
-      if [[ -n "${INPUT_DEPTH:-}" ]]; then
-        echo "| Depth | ${INPUT_DEPTH} |"
-      fi
+      echo "| Depth | ${INPUT_DEPTH:-auto} |"
     elif [[ "$MODE" == "deps" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi

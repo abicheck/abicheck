@@ -59,13 +59,11 @@ base ref is available.
 
 ### Pin the scan depth
 
-The Action's `scan-mode` input still defaults to `pr` (a deprecated alias), so an
-unset `depth` currently runs the `pr` preset **and emits a deprecation warning** —
-it is not the CLI's `auto`. Pin the modern `depth` dial for reproducible CI (and to
-silence the warning); the raw CLI resolves `auto` only when nothing is passed:
+`depth` is the single evidence-depth dial. Pin it for reproducible CI, or omit it
+for `auto` (risk-driven, best paired with `since:`):
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.4.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -84,12 +82,12 @@ silence the warning); the raw CLI resolves `auto` only when nothing is passed:
 | Full source-ABI replay of the whole library | `depth: full` |
 | Risk-driven (dev/local, opt-in) | omit `depth` (→ `auto`) + `since:` |
 
-!!! note "`scan-mode`/`source-method` are deprecated (ADR-037 D5)"
-    The older `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and `source-method`
-    (`s0…s6`) inputs still work but map onto `depth` and print a deprecation
-    warning. `scan-mode` currently defaults to `pr`, so leaving both new inputs
-    unset still emits that warning — set `depth` (or `audit: 'true'`) to pin the
-    modern dial. The mapping is in the
+!!! note "The deprecated `scan-mode`/`source-method` inputs were removed"
+    Earlier releases exposed `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and
+    `source-method` (`s0…s6`) Action inputs that mapped onto `depth` and emitted a
+    deprecation warning (`scan-mode` even defaulted to `pr`). They have been
+    removed — use `depth` (or `audit: 'true'`). The CLI's own `--depth` dial and
+    the mapping from the old axes are in the
     [Deprecated axes appendix](../concepts/evidence-and-detectability.md#appendix-deprecated-scan-axes-s0s6-and-mode).
 
 ### Single-release audit (no baseline)
