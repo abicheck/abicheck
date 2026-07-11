@@ -947,12 +947,13 @@ def debug_resolution_options(func: F) -> F:
         "the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
-        "--debuginfod",
-        is_flag=True,
+        "--debuginfod/--no-debuginfod",
+        "debuginfod",
         default=False,
         hidden=True,
         help="Enable debuginfod network resolution for debug info (opt-in). Demoted "
-        "to the debug.debuginfod config key (ADR-040 L2); this flag still overrides it.",
+        "to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod "
+        "still overrides it either way.",
     )(func)
     func = click.option(
         "--debug-root",
@@ -965,13 +966,15 @@ def debug_resolution_options(func: F) -> F:
         "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
     )(func)
     func = click.option(
-        "--dwarf-only",
-        is_flag=True,
+        "--dwarf-only/--no-dwarf-only",
+        "dwarf_only",
         default=False,
         hidden=True,
         help="Force DWARF-only mode for both sides: use DWARF debug info "
         "as primary data source even when headers are available. Demoted to the "
-        "debug.dwarf_only config key (ADR-040 L2); this flag still overrides it.",
+        "debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only "
+        "still overrides it either way (e.g. --no-dwarf-only restores header parsing "
+        "for a one-off run).",
     )(func)
     return func
 

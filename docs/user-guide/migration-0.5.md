@@ -75,7 +75,10 @@ scope:
 ```
 
 Precedence is **CLI > config > default**, so a script that still passes
-`--dwarf-only` keeps working and overrides the config value.
+`--dwarf-only` keeps working and overrides the config value. The boolean
+toggles are two-way, so a one-off run can also force the value *off* over a
+config `true`: `--no-dwarf-only` (restore header parsing), `--no-debuginfod`,
+`--no-show-redundant`.
 
 **Not demoted (still visible flags):**
 

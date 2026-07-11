@@ -52,7 +52,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--debuginfod`, `--debuginfod-url`, `--dwarf-only`, `--show-redundant`) are now
   hidden but still function as per-run overrides (`CLI > config > default`, the
   same cadence as the severity family), lowering `compare`'s visible flag count
-  by 5. The coarse `--debug-root` stays a visible override. The toolchain family
+  by 5. The boolean toggles are two-way (`--dwarf-only/--no-dwarf-only`,
+  `--debuginfod/--no-debuginfod`, `--show-redundant/--no-show-redundant`) so a
+  one-off run can force `false` over a config `true`. The coarse `--debug-root` stays a visible override. The toolchain family
   (`--gcc-*`/`--sysroot`/`--nostdinc`) is intentionally **not** demoted — it is
   the shared `compare`/`dump`/`scan` L2 compile-context surface — and
   `--scope-public-headers` stays visible as the everyday scoping on/off switch.

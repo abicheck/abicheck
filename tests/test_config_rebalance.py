@@ -340,6 +340,28 @@ class TestFlagBudget:
         ):
             assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
 
+    def test_demoted_booleans_have_negative_override_forms(self) -> None:
+        """The demoted boolean toggles are two-way flags, so a one-off run can
+        force ``false`` over a config ``true`` (ADR-040 L2; Codex P2). Both the
+        positive and negative spellings must exist and stay hidden."""
+        cmd = main.commands["compare"]
+        all_opts = {
+            opt
+            for p in cmd.params
+            if getattr(p, "param_type_name", None) == "option"
+            for opt in (*p.opts, *p.secondary_opts)
+        }
+        hidden = {
+            opt
+            for p in cmd.params
+            if getattr(p, "param_type_name", None) == "option"
+            and getattr(p, "hidden", False)
+            for opt in (*p.opts, *p.secondary_opts)
+        }
+        for neg in ("--no-dwarf-only", "--no-debuginfod", "--no-show-redundant"):
+            assert neg in all_opts, f"{neg} negative override form is missing (Codex P2)"
+            assert neg in hidden, f"{neg} should be hidden like its positive form"
+
     def test_coarse_overrides_stay_visible(self) -> None:
         cmd = main.commands["compare"]
         visible = {
