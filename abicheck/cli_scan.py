@@ -543,6 +543,115 @@ def _audit_exit_code(
     return ("API_BREAK" if exit_code >= 2 else "COMPATIBLE"), exit_code
 
 
+def _resolve_changed_seed(
+    changed_paths_opt: tuple[str, ...], since: str | None, sources: Path | None,
+) -> tuple[list[str], str, bool]:
+    """Resolve the changed-path seed → ``(changed, changed_src, seeded)``.
+
+    ``--changed-path`` wins; else ``--since`` via git; else none. ``seeded`` tracks
+    whether a *valid* seed was produced — a successful empty diff (seeded, no
+    paths) is distinct from a missing/failed seed (not seeded): the former lets
+    auto pick s0 (no-op PR), the latter falls back to the broad mode preset
+    (ADR-035 D7 / Codex review).
+    """
+    if changed_paths_opt:
+        return list(changed_paths_opt), "--changed-path", True
+    if since:
+        git_changed = _git_changed_paths(since, sources)
+        if git_changed is None:
+            return [], f"--since {since} (seed failed; broad scope)", False
+        return git_changed, f"--since {since}", True
+    return [], "none (no diff seed; broad scope)", False
+
+
+def _warn_deprecated_scan_aliases(mode_explicit: bool, sm_explicit: bool) -> None:
+    """Warn that --mode/--source-method are deprecated aliases for --depth."""
+    if not (mode_explicit or sm_explicit):
+        return
+    dep = [
+        f
+        for f, e in (("--mode", mode_explicit), ("--source-method", sm_explicit))
+        if e
+    ]
+    click.echo(
+        f"warning: {', '.join(dep)} {'is' if len(dep) == 1 else 'are'} "
+        "deprecated (ADR-037 D5); use --depth "
+        "(binary|headers|build|source|full), or omit it for auto. --audit is "
+        "the no-baseline lint switch.",
+        err=True,
+    )
+
+
+def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
+    """Parse the --abi3 target ``Py_LIMITED_API`` floor, or ``None`` when off.
+
+    An invalid floor (non-3 major, implausible minor, trailing junk) is a usage
+    error.
+    """
+    if abi3 is None:
+        return None
+    from . import stable_abi
+
+    floor = stable_abi.parse_abi3_version(abi3)
+    if floor is None:
+        raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
+    return floor
+
+
+def _resolve_auto_source_method(
+    sm: SourceMethod | None,
+    dp: EvidenceDepth | None,
+    mode_explicit: bool,
+    seeded: bool,
+    risk: RiskScore,
+) -> tuple[SourceMethod | None, bool, Any]:
+    """Opt an unpinned scan into risk-driven auto (ADR-037 D5).
+
+    The unset dial means 'auto' — only when *nothing* was pinned (no --depth, no
+    --source-method, no explicit --mode). auto uses the risk score ONLY when a
+    valid diff seed was produced; a missing/failed seed falls back to the mode
+    preset so a bad-ref CI run doesn't silently drop all L3-L5 evidence.
+    """
+    if sm is None and dp is None and not mode_explicit:
+        sm = SourceMethod.AUTO
+    is_auto = sm is SourceMethod.AUTO
+    auto_method = risk.recommended_method if (is_auto and seeded) else None
+    return sm, is_auto, auto_method
+
+
+def _scan_explicit_flags(
+    source_method: str | None, depth: str | None,
+) -> tuple[bool, bool]:
+    """The two deliberately-distinct 'explicit' notions (ADR-037), as a pair.
+
+    ``level_explicit`` — consent to auto-run build.query (a non-auto
+    --source-method, or --depth ONLY when no --source-method is given).
+    ``pinned_explicit`` — the auto-strict evidence contract (an explicit --depth
+    always pins, or a non-auto --source-method). --mode is never a pin.
+    """
+    sm_pin = source_method is not None and source_method != SourceMethod.AUTO.value
+    level_explicit = sm_pin or (source_method is None and depth is not None)
+    pinned_explicit = (depth is not None) or sm_pin
+    return level_explicit, pinned_explicit
+
+
+def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> None:
+    """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
+    text = (
+        json.dumps(outcome.to_dict(), indent=2)
+        if fmt == "json"
+        else _render_text(outcome)
+    )
+    if output:
+        _safe_write_output(output, text)
+        click.echo(f"Report written to {output}", err=True)
+    else:
+        click.echo(text)
+
+    if outcome.exit_code != 0:
+        sys.exit(outcome.exit_code)
+
+
 @main.command("scan")
 @click.option(
     "--binary",
@@ -833,28 +942,9 @@ def scan_cmd(
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
 
-    # Changed-path seed: --changed-path wins; else --since via git; else none.
-    # ``seeded`` tracks whether a *valid* seed was produced — a successful empty
-    # diff (seeded, no paths) is distinct from a missing/failed seed (not seeded):
-    # the former lets auto pick s0 (no-op PR), the latter falls back to the broad
-    # mode preset (ADR-035 D7 / Codex review).
-    seeded = False
-    if changed_paths_opt:
-        changed = list(changed_paths_opt)
-        changed_src = "--changed-path"
-        seeded = True
-    elif since:
-        git_changed = _git_changed_paths(since, sources)
-        if git_changed is None:
-            changed = []
-            changed_src = f"--since {since} (seed failed; broad scope)"
-        else:
-            changed = git_changed
-            changed_src = f"--since {since}"
-            seeded = True
-    else:
-        changed = []
-        changed_src = "none (no diff seed; broad scope)"
+    changed, changed_src, seeded = _resolve_changed_seed(
+        changed_paths_opt, since, sources
+    )
 
     risk_rules = _load_risk_rules(risk_rules_path)
     risk = score_changed_paths(changed, risk_rules)
@@ -869,31 +959,11 @@ def scan_cmd(
         _ctx.get_parameter_source("source_method")
         == click.core.ParameterSource.COMMANDLINE
     )
-    if _mode_explicit or _sm_explicit:
-        _dep = [
-            f
-            for f, e in (("--mode", _mode_explicit), ("--source-method", _sm_explicit))
-            if e
-        ]
-        click.echo(
-            f"warning: {', '.join(_dep)} {'is' if len(_dep) == 1 else 'are'} "
-            "deprecated (ADR-037 D5); use --depth "
-            "(binary|headers|build|source|full), or omit it for auto. --audit is "
-            "the no-baseline lint switch.",
-            err=True,
-        )
+    _warn_deprecated_scan_aliases(_mode_explicit, _sm_explicit)
 
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
-    # --abi3: parse the target Py_LIMITED_API floor for the stable-ABI audit. An
-    # invalid floor (non-3 major, implausible minor, trailing junk) is a usage
-    # error; None means the audit is off.
-    abi3_floor: tuple[int, int] | None = None
-    if abi3 is not None:
-        from . import stable_abi
-
-        abi3_floor = stable_abi.parse_abi3_version(abi3)
-        if abi3_floor is None:
-            raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
+    # --abi3: the target Py_LIMITED_API floor for the stable-ABI audit; None off.
+    abi3_floor = _parse_abi3_floor(abi3)
     sm = SourceMethod(source_method) if source_method else None
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
     # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
@@ -905,14 +975,9 @@ def scan_cmd(
     # so a seeded PR scan escalates by risk and an unseeded one falls back to the
     # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
     # explicit --mode) — a pinned rung stays deterministic.
-    if sm is None and dp is None and not _mode_explicit:
-        sm = SourceMethod.AUTO
-    is_auto = sm is SourceMethod.AUTO
-    # auto uses the risk score ONLY when a valid diff seed was produced. A seeded
-    # empty diff (no-op PR) correctly yields s0 (skip the scan); a missing/failed
-    # seed instead falls back to the mode preset, so a bad-ref / non-repo CI run
-    # does not silently drop all L3-L5 source evidence (Codex review).
-    auto_method = risk.recommended_method if (is_auto and seeded) else None
+    sm, is_auto, auto_method = _resolve_auto_source_method(
+        sm, dp, _mode_explicit, seeded, risk
+    )
     resolved, eff_depth_enum = resolve_level(
         mode=scan_mode,
         source_method=sm,
@@ -975,9 +1040,7 @@ def scan_cmd(
     #    method, not whether the user demanded source depth), or a non-auto
     #    --source-method (CodeRabbit review). --mode is a deprecated preset, never
     #    a pin.
-    _sm_pin = source_method is not None and source_method != SourceMethod.AUTO.value
-    _level_explicit = _sm_pin or (source_method is None and depth is not None)
-    _pinned_explicit = (depth is not None) or _sm_pin
+    _level_explicit, _pinned_explicit = _scan_explicit_flags(source_method, depth)
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )
@@ -1051,20 +1114,7 @@ def scan_cmd(
 
         drain_build_dir_cleanups(build_dir_cleanups)
 
-    outcome = core.outcome
-    text = (
-        json.dumps(outcome.to_dict(), indent=2)
-        if fmt == "json"
-        else _render_text(outcome)
-    )
-    if output:
-        _safe_write_output(output, text)
-        click.echo(f"Report written to {output}", err=True)
-    else:
-        click.echo(text)
-
-    if outcome.exit_code != 0:
-        sys.exit(outcome.exit_code)
+    _emit_scan_report(core.outcome, fmt, output)
 
 
 class _BudgetOverflow(Exception):
@@ -1154,6 +1204,115 @@ def _run_abi3_audit(
     cc.coverage.append({"layer": "abi3_audit", "status": "ran", "detail": detail})
 
 
+def _build_scan_poi(
+    baseline: Path | None,
+    seeded: bool,
+    collect_mode: str,
+    binary: Path,
+    lang: str,
+    changed: list[str],
+    risk: RiskScore,
+    pattern: Any,
+) -> tuple[Any, Any]:
+    """Build the D7 points-of-interest work-list + the baseline export view used.
+
+    Returns ``(poi, poi_baseline)``. The export-delta walk needs both sides'
+    export tables, so a cheap header-free L0 view of the candidate and baseline is
+    loaded only when there is a baseline to diff against (else a wasted parse).
+    """
+    needs_export_delta_poi = (
+        baseline is not None
+        and seeded
+        and collect_mode in {"source-changed", "graph-full"}
+    )
+    poi_baseline = (
+        _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
+    )
+    poi_candidate = (
+        _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
+    )
+    poi = build_points_of_interest(
+        changed_paths=changed,
+        risk=risk,
+        pattern_triggers=pattern.escalation_triggers,
+        baseline=poi_baseline,
+        candidate=poi_candidate,
+    )
+    return poi, poi_baseline
+
+
+def _append_replay_scope_advisory(
+    advisories: list[str], seeded: bool, collect_mode: str, sources: Path | None,
+) -> None:
+    """Advise (ADR-035 P3) when an unseeded run falls back to headers-only replay.
+
+    Only when L4 replay can actually run (a --sources tree is present) does the
+    headers-only fallback apply; firing otherwise would report a replay that never
+    happened (CodeRabbit review).
+    """
+    if not seeded and collect_mode == "source-changed" and sources is not None:
+        advisories.append(
+            "no --since/--changed-path seed; the L4 replay and the L5 call-graph "
+            "pass both cover the public-API surface (headers-only) instead of a "
+            "focused diff — cost grows with the project, not the change. Pass "
+            "--since <ref> or --changed-path to scope both to the changed TUs."
+        )
+
+
+def _check_scan_evidence_contract(
+    advisories: list[str],
+    new_snap: Any,
+    collect_mode: str,
+    pinned_explicit: bool,
+    sources: Path | None,
+    effective_build_info: Path | None,
+    eff_depth_enum: EvidenceDepth,
+    resolved: SourceMethod,
+) -> None:
+    """Fail-loud on a pinned depth with no evidence; else advise on missing L3.
+
+    ADR-037 D5 (#2 auto-strict): a depth the user *explicitly pinned* with no
+    source evidence at all (no --sources/--build-info, and the trusted --config
+    build.query flow produced no L3) is a usage-contract violation → raise. When a
+    source input *was* supplied but L3 still came back empty, that stays a pointed
+    advisory naming the remedy. The implicit 'auto' default never errors here.
+    """
+    if collect_mode == "off":
+        return
+    gave_source_input = sources is not None or effective_build_info is not None
+    l3 = _l3_collected(new_snap)
+    if pinned_explicit and not gave_source_input and not l3:
+        raise _EvidenceContractError(
+            f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
+            "needs source evidence, but no --sources/--build-info was given — there "
+            "is nothing to collect L3/L4/L5 from. Pass --sources <tree> or "
+            "--build-info <dir|compile_commands.json> (or a trusted --config plus "
+            "--allow-build-query), or drop the pin / use the default 'auto' for a "
+            "best-effort binary scan. (Pinned depths are a contract.)"
+        )
+    if gave_source_input and not l3:
+        advisories.append(
+            f"requested depth '{eff_depth_enum.value}' (source-method "
+            f"{resolved.value}) needs an L3 compile database, but none was found — "
+            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
+            "compile_commands.json or build dir), or a trusted --config plus "
+            "--allow-build-query to generate it."
+        )
+
+
+def _check_scan_budget(
+    budget: str | None, budget_s: float | None, elapsed: float,
+) -> None:
+    """Budget overflow FAILS, never shrinks scope (ADR-035 D3)."""
+    if budget_s is not None and elapsed > budget_s:
+        raise _BudgetOverflow(
+            f"error: --budget {budget} exceeded "
+            f"({elapsed:.1f}s > {budget_s:.0f}s). "
+            "Pin a shallower level or raise the budget; a budget never silently "
+            "shrinks the pinned scope."
+        )
+
+
 def run_scan_core(
     *,
     start: float,
@@ -1222,22 +1381,9 @@ def run_scan_core(
     # once, below, with the resulting focus seed. The candidate view is only
     # loaded when there is a baseline to diff it against — the delta walk consumes
     # the two together, so loading it baseline-less would be a wasted L0/L1 parse.
-    needs_export_delta_poi = (
-        baseline is not None
-        and seeded
-        and collect_mode in {"source-changed", "graph-full"}
-    )
     _stage = time.monotonic()
-    poi_baseline = _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
-    poi_candidate = (
-        _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
-    )
-    poi = build_points_of_interest(
-        changed_paths=changed,
-        risk=risk,
-        pattern_triggers=pattern.escalation_triggers,
-        baseline=poi_baseline,
-        candidate=poi_candidate,
+    poi, poi_baseline = _build_scan_poi(
+        baseline, seeded, collect_mode, binary, lang, changed, risk, pattern
     )
     _record_stage("poi", _stage)
 
@@ -1264,18 +1410,7 @@ def run_scan_core(
     # "no auto-warn"). Carried on the result (text + JSON) so it never pollutes a
     # structured-format stdout.
     advisories: list[str] = []
-    # Only when L4 replay can actually run (a --sources tree is present —
-    # `_run_inline_source_abi` returns early without one, and `--build-info`
-    # alone yields L3 but no replay) does the headers-only fallback apply; firing
-    # the advisory otherwise would report a replay that never happened
-    # (CodeRabbit review).
-    if not seeded and collect_mode == "source-changed" and sources is not None:
-        advisories.append(
-            "no --since/--changed-path seed; the L4 replay and the L5 call-graph "
-            "pass both cover the public-API surface (headers-only) instead of a "
-            "focused diff — cost grows with the project, not the change. Pass "
-            "--since <ref> or --changed-path to scope both to the changed TUs."
-        )
+    _append_replay_scope_advisory(advisories, seeded, collect_mode, sources)
     effective_allow_query, _query_advisory = resolve_effective_allow_query(
         allow_build_query, build_config, collect_mode, level_explicit, resolved
     )
@@ -1308,39 +1443,10 @@ def run_scan_core(
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
     # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
     # database; without one the L3/L4/L5 layers cannot be collected.
-    #
-    # ADR-037 D5 (#2 auto-strict): a depth the user *explicitly pinned* is a
-    # contract. If it was pinned with **no source evidence at all** — no
-    # --sources / --build-info, and the trusted --config build.query flow didn't
-    # produce L3 either — there is nothing to collect from, so we ERROR with the
-    # remedy rather than silently produce a shallow binary-only scan. When a
-    # source input *was* supplied (or L3 was actually collected via the config
-    # query) but L3 still came back empty, that stays a pointed *advisory* naming
-    # the remedy, not a hard error. The implicit 'auto' default never errors here.
-    gave_source_input = sources is not None or effective_build_info is not None
-    needs_source = collect_mode != "off"
-    if (
-        needs_source
-        and pinned_explicit
-        and not gave_source_input
-        and not _l3_collected(new_snap)
-    ):
-        raise _EvidenceContractError(
-            f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
-            "needs source evidence, but no --sources/--build-info was given — there "
-            "is nothing to collect L3/L4/L5 from. Pass --sources <tree> or "
-            "--build-info <dir|compile_commands.json> (or a trusted --config plus "
-            "--allow-build-query), or drop the pin / use the default 'auto' for a "
-            "best-effort binary scan. (Pinned depths are a contract.)"
-        )
-    if needs_source and gave_source_input and not _l3_collected(new_snap):
-        advisories.append(
-            f"requested depth '{eff_depth_enum.value}' (source-method "
-            f"{resolved.value}) needs an L3 compile database, but none was found — "
-            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
-            "compile_commands.json or build dir), or a trusted --config plus "
-            "--allow-build-query to generate it."
-        )
+    _check_scan_evidence_contract(
+        advisories, new_snap, collect_mode, pinned_explicit,
+        sources, effective_build_info, eff_depth_enum, resolved,
+    )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
     # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;
@@ -1422,15 +1528,7 @@ def run_scan_core(
         verdict, exit_code = _audit_exit_code(cc.findings, severities)
 
     elapsed = time.monotonic() - start
-
-    # --- budget guard: overflow FAILS, never shrinks scope (ADR-035 D3) -------
-    if budget_s is not None and elapsed > budget_s:
-        raise _BudgetOverflow(
-            f"error: --budget {budget} exceeded "
-            f"({elapsed:.1f}s > {budget_s:.0f}s). "
-            "Pin a shallower level or raise the budget; a budget never silently "
-            "shrinks the pinned scope."
-        )
+    _check_scan_budget(budget, budget_s, elapsed)
 
     outcome = ScanOutcome(
         mode=scan_mode.value,
