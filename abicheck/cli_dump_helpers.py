@@ -457,6 +457,11 @@ def perform_elf_dump(
         # -I and must suppress the seed so the user's search precedence is kept.
         gcc_options=effective_gcc_options,
         gcc_option_tokens=gcc_option_tokens,
+        # An L2-only dump (--depth headers → collect_mode "off") requested no build/
+        # source evidence, so don't let the include-dir seed run a build system;
+        # only the zero-config inferred query is gated, passive discovery stays
+        # (Codex review).
+        allow_inferred_build_query=collect_mode != "off",
     )
     try:
         snap = dump(

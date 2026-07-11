@@ -614,6 +614,7 @@ def derive_l2_include_dirs(
     *,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    allow_inferred_build_query: bool = True,
 ) -> tuple[list[str], list[Callable[[], None]]]:
     """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
 
@@ -699,6 +700,7 @@ def derive_l2_include_dirs(
             build_config=cfg,
             build_config_trusted_for_query=cfg_trusted_for_query,
             compile_db_explicit=compile_db_explicit,
+            allow_inferred_build_query=allow_inferred_build_query,
             base_build=base_build,
             layers=("L3",),
             defer_cleanup=cleanups,
@@ -746,6 +748,7 @@ def seed_l2_includes(
     build_compile_db: str | None = None,
     gcc_options: str | None = None,
     gcc_option_tokens: Sequence[str] = (),
+    allow_inferred_build_query: bool = True,
 ) -> tuple[list[Path], list[Callable[[], None]]]:
     """Augment *includes* with build-derived L2 include dirs (shared by scan+dump).
 
@@ -764,6 +767,13 @@ def seed_l2_includes(
     ``extra_includes`` before the pass-through flags), letting the header AST
     resolve dependency headers from the build DB instead of the user's choice
     (Codex review).
+
+    ``allow_inferred_build_query`` gates the zero-config inferred build-system query
+    (cmake/make/bazel). L2-only callers (``--depth headers`` / ``collect_mode`` "off")
+    pass ``False`` so a source tree with no existing compile DB does not trigger a
+    build just to hint include dirs — passive discovery (explicit ``--build-info``,
+    an existing ``compile_commands.json``, a pack) still applies; only the executing
+    fallback is suppressed (Codex review).
 
     Returns ``(includes, pending_cleanups)``. Temp-build-dir cleanups (an inferred
     CMake dir may hold generated headers the seeded dirs point into) are pushed
@@ -790,6 +800,7 @@ def seed_l2_includes(
     derived, cleanups = derive_l2_include_dirs(
         build_info, sources, build_config,
         build_query=build_query, build_compile_db=build_compile_db,
+        allow_inferred_build_query=allow_inferred_build_query,
     )
     if not derived:
         return incs, []
@@ -820,6 +831,7 @@ def collect_inline_pack(
     allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
     compile_db_explicit: bool = False,
+    allow_inferred_build_query: bool = True,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -888,6 +900,7 @@ def collect_inline_pack(
                 extractors,
                 cleanup=query_build_cleanups,
                 compile_db_explicit=compile_db_explicit,
+                allow_inferred_build_query=allow_inferred_build_query,
             )
         if compile_db is not None:
             _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -1032,6 +1045,7 @@ def _resolve_compile_db(
     extractors: list[ExtractorRecord],
     cleanup: list[Callable[[], None]] | None = None,
     compile_db_explicit: bool = False,
+    allow_inferred_build_query: bool = True,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
@@ -1118,6 +1132,22 @@ def _resolve_compile_db(
     discovered = _autodiscover_compile_db(sources)
     if discovered is not None:
         return discovered
+
+    if not allow_inferred_build_query:
+        # An L2-only caller (e.g. --depth headers, collect_mode "off") reached the
+        # zero-config fallback: it wants build-derived *include dirs* to parse
+        # headers, but no build/source evidence was requested, so we must not run a
+        # build system. Passive discovery above (explicit --build-info, an existing
+        # compile_commands.json, a trusted build.query/compile_db) is honoured; the
+        # inferred cmake/make/bazel query is not — that would violate the L2-only
+        # depth contract and could spend up to the inferred-query timeout evaluating
+        # project build scripts even though evidence collection was off (Codex review).
+        merged.diagnostics.append(
+            "inferred build-system query skipped: no evidence depth requested "
+            "(L2-only); pass --build-info or generate a compile_commands.json to "
+            "seed include dirs"
+        )
+        return None
 
     # Zero-config fallback: no compile DB exists and no explicit L3 input was
     # given, but a --sources tree is present. Detect the build system and run

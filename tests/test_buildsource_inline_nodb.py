@@ -308,6 +308,93 @@ def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
     assert str(stale_inc) not in dirs  # reused source pack does not override it
 
 
+def test_derive_l2_include_dirs_skips_inferred_query_for_l2_only(tmp_path, monkeypatch):
+    # An L2-only caller (allow_inferred_build_query=False) with a build-system tree
+    # (CMakeLists.txt) but no existing compile DB must NOT run the inferred query —
+    # the L2-only depth contract forbids spinning up a build just to hint includes.
+    from abicheck.buildsource import build_query as bq
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n", encoding="utf-8")
+    (tmp_path / "foo.cpp").write_text("int foo(){return 0;}\n", encoding="utf-8")
+
+    called = {"n": 0}
+
+    def boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("inferred query must not run for L2-only")
+
+    monkeypatch.setattr(bq, "run_inferred_build_query", boom)
+
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path, allow_inferred_build_query=False
+    )
+    for fn in cleanups:
+        fn()
+    assert dirs == []
+    assert called["n"] == 0  # never invoked
+
+
+def test_derive_l2_include_dirs_runs_inferred_query_when_allowed(tmp_path, monkeypatch):
+    # The complement: with the default (allow_inferred_build_query=True) the same
+    # no-DB tree DOES reach the inferred query (stubbed here so no real cmake runs).
+    from abicheck.buildsource import build_query as bq
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n", encoding="utf-8")
+    (tmp_path / "foo.cpp").write_text("int foo(){return 0;}\n", encoding="utf-8")
+
+    called = {"n": 0}
+
+    def stub(sources, merged, extractors, cleanup=None):
+        called["n"] += 1
+        return None  # pretend the query produced no DB
+
+    monkeypatch.setattr(bq, "run_inferred_build_query", stub)
+
+    derive_l2_include_dirs(
+        build_info=None, sources=tmp_path, allow_inferred_build_query=True
+    )
+    assert called["n"] == 1  # inferred query reached
+
+
+def test_derive_l2_include_dirs_passive_discovery_survives_l2_only(tmp_path):
+    # Gating the inferred query must NOT disable passive discovery: an existing
+    # compile_commands.json still seeds include dirs even for an L2-only caller.
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    inc = _compile_db_tree(tmp_path)
+    dirs, cleanups = derive_l2_include_dirs(
+        build_info=None, sources=tmp_path, allow_inferred_build_query=False
+    )
+    for fn in cleanups:
+        fn()
+    assert str(inc) in dirs  # discovered DB still used
+
+
+def test_seed_l2_includes_threads_l2_only_gate(tmp_path, monkeypatch):
+    # seed_l2_includes must pass allow_inferred_build_query through to the derivation
+    # so an L2-only scan/dump never triggers a build via the seed.
+    from abicheck.buildsource import build_query as bq
+    from abicheck.buildsource.inline import seed_l2_includes
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n", encoding="utf-8")
+    (tmp_path / "foo.cpp").write_text("int foo(){return 0;}\n", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise AssertionError("inferred query must not run for L2-only seed")
+
+    monkeypatch.setattr(bq, "run_inferred_build_query", boom)
+
+    incs, pending = seed_l2_includes(
+        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
+        build_info=None, build_config=None, defer_cleanup=None,
+        allow_inferred_build_query=False,
+    )
+    assert incs == []
+    assert pending == []
+
+
 def test_seed_l2_includes_noop_when_gcc_options_supply_includes(tmp_path):
     # Include dirs supplied via --gcc-options '-I ...' are as explicit as -I, so the
     # fallback must stay a no-op — seeding compile-DB dirs as extra_includes would

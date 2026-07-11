@@ -390,6 +390,11 @@ def _build_new_snapshot(
         gcc_option_tokens=(
             compile_context.gcc_option_tokens if compile_context else ()
         ),
+        # L2-only pins (--depth headers → collect_mode "off") requested no build/
+        # source evidence, so the include-dir seed must not run a build system just
+        # to hint headers. Passive DB discovery still applies; only the zero-config
+        # inferred cmake/make/bazel query is gated (Codex review).
+        allow_inferred_build_query=collect_mode != "off",
     )
 
     try:
