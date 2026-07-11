@@ -122,7 +122,7 @@ class TestStampProvenance:
         assert snap.git_commit == "abc1234"
         m.assert_called_once_with(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
 
     def test_stamp_no_git_skips_detection(self):

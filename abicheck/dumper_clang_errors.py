@@ -25,11 +25,14 @@ stays under the file-size cap; the parsers are unit-tested without a compiler.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
+
+from .errors import SnapshotError
 
 if TYPE_CHECKING:
     import subprocess
@@ -451,3 +454,36 @@ def retry_excluding_error_headers(
             ", ".join(p.name for p in excluded),
         )
     return result
+
+
+def _parse_clang_ast_result(
+    result: subprocess.CompletedProcess[str], cached: Path,
+) -> dict[str, Any]:
+    """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
+
+    A nonzero exit is a hard parse error: the L2 header AST must be complete to be
+    authoritative (a truncated set → false removals/additions), so fail like the
+    castxml path rather than cache a partial tree (Codex review).
+    """
+    if result.returncode != 0:
+        raise SnapshotError(
+            f"clang failed to parse the header(s) (exit {result.returncode}). The "
+            "header may be malformed or need build flags it was not given (try "
+            f"--gcc-options / -p, or --ast-frontend castxml):\n"
+            f"{result.stderr[:1000].strip()}"
+            f"{diagnose_header_compile_failure(result.stderr) or ''}"
+        )
+    if not result.stdout.strip():
+        raise SnapshotError(
+            f"clang produced no AST for the header(s) (exit {result.returncode}): "
+            f"{result.stderr[:1000].strip()}"
+        )
+    try:
+        root = json.loads(result.stdout)
+    except ValueError as exc:
+        raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
+    try:
+        cached.write_text(json.dumps(root), encoding="utf-8")
+    except OSError:
+        pass
+    return cast("dict[str, Any]", root)

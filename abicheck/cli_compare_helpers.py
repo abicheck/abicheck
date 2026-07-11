@@ -29,6 +29,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 import click
 
@@ -63,6 +64,289 @@ from .cli_resolve import (
     classify_compare_operand,
 )
 from .errors import AbicheckError
+
+if TYPE_CHECKING:
+    from .cli_helpers_compare import ResolvedCompareConfig
+    from .model import AbiSnapshot
+
+
+def _cli_flag(name: str, value: bool) -> bool | None:
+    """Return *value* only when *name* actually came from the command line.
+
+    So a flag default (e.g. ``--scope-public-headers``'s True) doesn't mask config.
+    """
+    src = click.get_current_context().get_parameter_source(name)
+    return value if src == click.core.ParameterSource.COMMANDLINE else None
+
+
+def _resolve_compare_config(
+    *,
+    config: Path | None,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+    scope_public_headers: bool,
+    collapse_versioned_symbols: bool,
+    public_symbols: tuple[str, ...],
+    strict_suppressions: bool,
+    require_justification: bool,
+    exit_code_scheme: str | None,
+) -> tuple[Path | None, object, ResolvedCompareConfig]:
+    """Load the project config and merge CLI flags over it (CLI > config > default).
+
+    ADR-037 D4: resolved *before* dispatch so both the single-file and the
+    directory/package fan-out paths share one resolution. Auto-discovered from the
+    current directory upward, overridable with ``--config``.
+    """
+    from .buildsource.inline import load_build_config
+    from .cli_helpers_compare import discover_project_config, resolve_compare_config
+
+    cfg_path = config if config is not None else discover_project_config()
+    try:
+        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    resolved_cfg = resolve_compare_config(
+        project_cfg,
+        cli_severity_preset=severity_preset,
+        cli_severity_abi_breaking=severity_abi_breaking,
+        cli_severity_potential_breaking=severity_potential_breaking,
+        cli_severity_quality_issues=severity_quality_issues,
+        cli_severity_addition=severity_addition,
+        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+        cli_collapse_versioned_symbols=_cli_flag(
+            "collapse_versioned_symbols", collapse_versioned_symbols
+        ),
+        cli_public_symbols=public_symbols,
+        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
+        cli_require_justification=_cli_flag(
+            "require_justification", require_justification
+        ),
+        cli_exit_code_scheme=exit_code_scheme,
+    )
+    return cfg_path, project_cfg, resolved_cfg
+
+
+def _reject_set_input_flags(
+    exit_code_scheme: str | None,
+    reconcile_build_context: bool,
+    env_matrix_path: Path | None,
+) -> None:
+    """Reject single-pair-only flags on a directory/package (release) compare.
+
+    The per-library fan-out has no public CLI support for these, so reject them
+    loudly rather than silently ignore them (ADR-037 D12).
+    """
+    if exit_code_scheme is not None:
+        raise click.UsageError(
+            "--exit-code-scheme is not supported for directory/package "
+            "(release) comparisons: the per-library fan-out uses the legacy "
+            "verdict scheme, or severity-aware when severity is configured in "
+            ".abicheck.yml. Compare libraries individually for explicit "
+            "scheme control."
+        )
+    if reconcile_build_context:
+        raise click.UsageError(
+            "--reconcile-build-context is not supported for directory/package "
+            "(release) comparisons; it applies to single-file / snapshot "
+            "inputs. Compare the libraries individually to use it."
+        )
+    if env_matrix_path is not None:
+        raise click.UsageError(
+            "--env-matrix is not supported for directory/package (release) "
+            "comparisons yet; it applies to single-file / snapshot inputs. "
+            "Compare the libraries individually to use it."
+        )
+
+
+class _NormalizedCompareOptions(NamedTuple):
+    collect_mode: str
+    headers: tuple[Path, ...]
+    old_headers_only: tuple[Path, ...]
+    new_headers_only: tuple[Path, ...]
+    effective_debug_format: str | None
+    demangle: bool
+    report_mode: str
+    show_impact: bool
+
+
+def _normalize_compare_options(
+    resolved_cfg: ResolvedCompareConfig,
+    *,
+    depth: str | None,
+    max_depth: bool,
+    annotate: bool,
+    annotate_additions: bool,
+    headers: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...],
+    new_headers_only: tuple[Path, ...],
+    debug_format_opt: str | None,
+    debug_format: str | None,
+    demangle: bool | None,
+    fmt: str,
+    report_mode: str,
+    show_impact: bool,
+) -> _NormalizedCompareOptions:
+    """Fold the compare option flags into their resolved, dispatch-ready values."""
+    if annotate_additions and not annotate:
+        raise click.UsageError("--annotate-additions requires --annotate")
+
+    # Fold the unified --depth/--max dial into the internal collect mode
+    # (ADR-037 D5), the same way `dump` does. With no preset, compare reads at
+    # "off"; --depth binary suppresses the L2 header AST (symbols-only).
+    collect_mode = resolve_dump_depth(depth, max_depth, "off")
+    if depth == "binary":
+        headers, old_headers_only, new_headers_only = (), (), ()
+
+    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
+    # flags. The selector supersedes the legacy flags whenever it is given:
+    # an explicit "auto" returns to auto-detection (None) even if a legacy flag
+    # is also present; only when the selector is absent do the legacy flags apply.
+    if debug_format_opt is not None:
+        effective_debug_format = (
+            None if debug_format_opt.lower() == "auto" else debug_format_opt
+        )
+    else:
+        effective_debug_format = debug_format
+
+    # Tri-state --demangle: default ON for the text formats whose renderer
+    # post-processes symbols through demangle_text (markdown/review), OFF for
+    # machine formats (json/sarif/junit) and HTML — the HTML renderer emits
+    # symbols structurally and demangling its string would inject unescaped
+    # '<'/'>'/'&' from C++ names and corrupt the markup. Explicit flag wins.
+    demangle_resolved = fmt in {"markdown", "review"} if demangle is None else demangle
+
+    # --report-mode impact is sugar for "full" report with the impact table on.
+    if report_mode == "impact":
+        report_mode = "full"
+        show_impact = True
+
+    # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
+    # collection depth only when the user gave no explicit --depth/--max signal
+    # (CLI > config).
+    if resolved_cfg.source_method and depth is None and not max_depth:
+        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+        try:
+            collect_mode = method_to_collect_mode(
+                SourceMethod(resolved_cfg.source_method)
+            )
+        except ValueError:
+            raise click.UsageError(
+                f"source.method in .abicheck.yml is invalid: "
+                f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
+            ) from None
+
+    return _NormalizedCompareOptions(
+        collect_mode, headers, old_headers_only, new_headers_only,
+        effective_debug_format, demangle_resolved, report_mode, show_impact,
+    )
+
+
+def _needs_inline_embed(
+    old_sources: Path | None, new_sources: Path | None,
+    old_build_info: Path | None, new_build_info: Path | None,
+) -> bool:
+    """True when a side points at a raw checkout / build dir (not a `collect` pack).
+
+    Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
+    the snapshot; pre-built packs fall through to prepare_embedded_build_source.
+    """
+    def _raw_evidence(p: Path | None) -> bool:
+        return p is not None and not _source_is_pack(p)
+
+    return any(
+        _raw_evidence(p)
+        for p in (old_sources, new_sources, old_build_info, new_build_info)
+    )
+
+
+def _reject_debug_format_for_non_elf(
+    effective_debug_format: str | None,
+    old_fmt: str | None,
+    new_fmt: str | None,
+) -> None:
+    """Reject --debug-format / legacy --btf/--ctf/--dwarf for PE/Mach-O inputs.
+
+    They force an ELF debug format and are silently ignored by the PE/Mach-O dump
+    paths, so reject them up front (mirrors dump_cmd). JSON-snapshot / dump inputs
+    have ``*_fmt == None`` and are unaffected.
+    """
+    if effective_debug_format is None:
+        return
+    for side, bfmt in (("old", old_fmt), ("new", new_fmt)):
+        if bfmt in ("pe", "macho"):
+            raise click.BadParameter(
+                f"--debug-format {effective_debug_format} is only supported "
+                f"for ELF binaries, but the {side} input is {bfmt.upper()}."
+            )
+
+
+def _resolve_post_manifest_allowlist(
+    post_manifest_path: Path | None,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+) -> set[str] | None:
+    """Resolve the --post-manifest committed public surface, or ``None``.
+
+    The manifest *is* the authoritative public surface, so this drives
+    FilterNonPublicSurface directly (no header provenance needed) — private
+    ``__pp_*`` kernel churn is demoted. Union with the binaries' committed
+    (``pp_*``) exports so a *removed* wrapper — absent from a new manifest — stays
+    in-surface instead of being silently demoted.
+    """
+    if post_manifest_path is None:
+        return None
+    from .post_manifest import contract_scope_allowlist, load_manifest
+
+    try:
+        manifest = load_manifest(post_manifest_path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(
+            f"--post-manifest {post_manifest_path}: {exc}"
+        ) from exc
+    return contract_scope_allowlist(manifest, old, new)
+
+
+def _classify_and_reject_operands(
+    old_input: Path, new_input: Path,
+) -> tuple[str, str]:
+    """Classify both compare operands and reject an application/PIE operand.
+
+    ADR-037 D7 input-type dispatch: a directory/package operand fans out to a
+    per-library comparison; an application/PIE operand is not a library `compare`
+    can pair (hint at `appcompat`). A single .so / snapshot / dump falls through.
+    """
+    old_kind = classify_compare_operand(old_input)
+    new_kind = classify_compare_operand(new_input)
+    if old_kind == "app" or new_kind == "app":
+        _reject_application_operand(old_input, new_input, old_kind, new_kind)
+    return old_kind, new_kind
+
+
+def _resolve_debug_roots(
+    debug_roots: tuple[Path, ...],
+    debug_roots_old: tuple[Path, ...],
+    debug_roots_new: tuple[Path, ...],
+) -> tuple[list[Path], list[Path]]:
+    """Per-side debug roots: --debug-root1/2 override --debug-root for that side."""
+    resolved_old = list(debug_roots_old) if debug_roots_old else list(debug_roots)
+    resolved_new = list(debug_roots_new) if debug_roots_new else list(debug_roots)
+    return resolved_old, resolved_new
+
+
+def _warn_force_public_ignored(
+    force_public: object, scope_public_headers: bool,
+) -> None:
+    """Warn that --public-symbol overlays need --scope-public-headers to apply."""
+    if force_public and not scope_public_headers:
+        click.echo(
+            "Warning: --public-symbol/--public-symbols-list only take effect with "
+            "--scope-public-headers; ignoring the widening overlay.",
+            err=True,
+        )
 
 
 def run_compare(
@@ -130,37 +414,19 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    # Auto-discovered from the current directory upward, overridable with --config.
-    from .buildsource.inline import load_build_config
-    from .cli_helpers_compare import discover_project_config, resolve_compare_config
-
-    cfg_path = config if config is not None else discover_project_config()
-    try:
-        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
-
-    def _cli_flag(name: str, value: bool) -> bool | None:
-        # Return the value only when it actually came from the command line, so a
-        # flag default (e.g. --scope-public-headers's True) doesn't mask config.
-        src = click.get_current_context().get_parameter_source(name)
-        return value if src == click.core.ParameterSource.COMMANDLINE else None
-
-    resolved_cfg = resolve_compare_config(
-        project_cfg,
-        cli_severity_preset=severity_preset,
-        cli_severity_abi_breaking=severity_abi_breaking,
-        cli_severity_potential_breaking=severity_potential_breaking,
-        cli_severity_quality_issues=severity_quality_issues,
-        cli_severity_addition=severity_addition,
-        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        cli_collapse_versioned_symbols=_cli_flag(
-            "collapse_versioned_symbols", collapse_versioned_symbols
-        ),
-        cli_public_symbols=public_symbols,
-        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
-        cli_require_justification=_cli_flag("require_justification", require_justification),
-        cli_exit_code_scheme=exit_code_scheme,
+    cfg_path, project_cfg, resolved_cfg = _resolve_compare_config(
+        config=config,
+        severity_preset=severity_preset,
+        severity_abi_breaking=severity_abi_breaking,
+        severity_potential_breaking=severity_potential_breaking,
+        severity_quality_issues=severity_quality_issues,
+        severity_addition=severity_addition,
+        scope_public_headers=scope_public_headers,
+        collapse_versioned_symbols=collapse_versioned_symbols,
+        public_symbols=public_symbols,
+        strict_suppressions=strict_suppressions,
+        require_justification=require_justification,
+        exit_code_scheme=exit_code_scheme,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
@@ -168,47 +434,17 @@ def run_compare(
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
 
-    # ADR-037 D7: input-type dispatch. A directory or package operand fans out to
-    # a per-library comparison (absorbing `compare-release`); an application/PIE
-    # operand is not a library `compare` can pair (hint at `appcompat`). A single
-    # .so / snapshot / dump falls through to the normal one-pair path below. The
-    # resolved config (scope/suppression/severity) is forwarded so a set-input
-    # compare classifies the same way a single-pair one would (ADR-037 D4).
-    old_kind = classify_compare_operand(old_input)
-    new_kind = classify_compare_operand(new_input)
-    if old_kind == "app" or new_kind == "app":
-        _reject_application_operand(old_input, new_input, old_kind, new_kind)
+    # ADR-037 D7: input-type dispatch. The resolved config (scope/suppression/
+    # severity) is forwarded so a set-input compare classifies the same way a
+    # single-pair one would (ADR-037 D4).
+    old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
     if {old_kind, new_kind} & {"directory", "package"}:
         # The per-library fan-out (`compare-release` backend) consumes the
-        # resolved scheme from config, but still has no public CLI support for
-        # an explicit --exit-code-scheme on set inputs. Reject the CLI flag
-        # loudly rather than silently ignore it (ADR-037 D12).
-        if exit_code_scheme is not None:
-            raise click.UsageError(
-                "--exit-code-scheme is not supported for directory/package "
-                "(release) comparisons: the per-library fan-out uses the legacy "
-                "verdict scheme, or severity-aware when severity is configured in "
-                ".abicheck.yml. Compare libraries individually for explicit "
-                "scheme control."
-            )
-        # --reconcile-build-context (ADR-039) is not threaded through the
-        # per-library release fan-out; reject it loudly rather than silently
-        # ignore it (ADR-037 D12). It applies to single-file / snapshot inputs.
-        if reconcile_build_context:
-            raise click.UsageError(
-                "--reconcile-build-context is not supported for directory/package "
-                "(release) comparisons; it applies to single-file / snapshot "
-                "inputs. Compare the libraries individually to use it."
-            )
-        # --env-matrix (ADR-020b) is likewise not threaded through the release
-        # fan-out; a silently ignored runtime floor would leave the default
-        # RISK verdicts in place while the user believes the contract applied.
-        if env_matrix_path is not None:
-            raise click.UsageError(
-                "--env-matrix is not supported for directory/package (release) "
-                "comparisons yet; it applies to single-file / snapshot inputs. "
-                "Compare the libraries individually to use it."
-            )
+        # resolved scheme from config but has no public CLI support for these
+        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
+        _reject_set_input_flags(
+            exit_code_scheme, reconcile_build_context, env_matrix_path
+        )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
         # Resolved through the ``cli`` module (not a by-name import) so a test that
@@ -253,54 +489,19 @@ def run_compare(
         jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
     )
 
-    if annotate_additions and not annotate:
-        raise click.UsageError("--annotate-additions requires --annotate")
-
-    # Fold the unified --depth/--max dial into the internal collect mode
-    # (ADR-037 D5), the same way `dump` does. With no preset, compare reads at
-    # "off"; --depth binary suppresses the L2 header AST (symbols-only).
-    collect_mode = resolve_dump_depth(depth, max_depth, "off")
-    if depth == "binary":
-        headers, old_headers_only, new_headers_only = (), (), ()
-
-    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
-    # flags. The selector supersedes the legacy flags whenever it is given:
-    # an explicit "auto" returns to auto-detection (None) even if a legacy flag
-    # is also present; only when the selector is absent do the legacy flags apply.
-    if debug_format_opt is not None:
-        effective_debug_format = None if debug_format_opt.lower() == "auto" else debug_format_opt
-    else:
-        effective_debug_format = debug_format
-
-    # Tri-state --demangle: default ON for the text formats whose renderer
-    # post-processes symbols through demangle_text (markdown/review), OFF for
-    # machine formats (json/sarif/junit) and HTML — the HTML renderer emits
-    # symbols structurally and demangling its string would inject unescaped
-    # '<'/'>'/'&' from C++ names and corrupt the markup. Explicit flag wins.
-    if demangle is None:
-        demangle = fmt in {"markdown", "review"}
-
-    # --report-mode impact is sugar for "full" report with the impact table on.
-    if report_mode == "impact":
-        report_mode = "full"
-        show_impact = True
-
-    # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth/--max signal
-    # (CLI > config).
-    if (
-        resolved_cfg.source_method
-        and depth is None
-        and not max_depth
-    ):
-        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
-        try:
-            collect_mode = method_to_collect_mode(SourceMethod(resolved_cfg.source_method))
-        except ValueError:
-            raise click.UsageError(
-                f"source.method in .abicheck.yml is invalid: "
-                f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
-            ) from None
+    (
+        collect_mode, headers, old_headers_only, new_headers_only,
+        effective_debug_format, demangle, report_mode, show_impact,
+    ) = _normalize_compare_options(
+        resolved_cfg,
+        depth=depth, max_depth=max_depth,
+        annotate=annotate, annotate_additions=annotate_additions,
+        headers=headers,
+        old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+        debug_format_opt=debug_format_opt, debug_format=debug_format,
+        demangle=demangle, fmt=fmt,
+        report_mode=report_mode, show_impact=show_impact,
+    )
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver folds the project's .abicheck.yml compile: block into the CLI
@@ -345,15 +546,7 @@ def run_compare(
     # side at --depth so its L3-L5 facts ride embedded in the snapshot, the way
     # the standalone deep-compare command used to. Pre-built packs fall through
     # unchanged to prepare_embedded_build_source below.
-    def _raw_evidence(p: Path | None) -> bool:
-        return p is not None and not _source_is_pack(p)
-
-    if (
-        _raw_evidence(old_sources)
-        or _raw_evidence(new_sources)
-        or _raw_evidence(old_build_info)
-        or _raw_evidence(new_build_info)
-    ):
+    if _needs_inline_embed(old_sources, new_sources, old_build_info, new_build_info):
         import shutil
         import tempfile
 
@@ -414,17 +607,7 @@ def run_compare(
     # is honoured (pre-split resolution semantics); the name is re-exported there.
     old_input, old_fmt = cli._normalize_binary_input(old_input)
     new_input, new_fmt = cli._normalize_binary_input(new_input)
-    # --debug-format / legacy --btf/--ctf/--dwarf force an ELF debug format and
-    # are silently ignored by the PE/Mach-O dump paths. Reject them up front for
-    # non-ELF binary inputs (mirrors dump_cmd) so the flag is never accepted but
-    # ignored. JSON-snapshot / dump inputs have *_fmt == None and are unaffected.
-    if effective_debug_format is not None:
-        for side, bfmt in (("old", old_fmt), ("new", new_fmt)):
-            if bfmt in ("pe", "macho"):
-                raise click.BadParameter(
-                    f"--debug-format {effective_debug_format} is only supported "
-                    f"for ELF binaries, but the {side} input is {bfmt.upper()}."
-                )
+    _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None, new_fmt is not None,
         headers, includes,
@@ -432,9 +615,9 @@ def run_compare(
         old_includes_only, new_includes_only,
     )
 
-    # Resolve per-side debug roots: --debug-root1 overrides --debug-root for old, etc.
-    resolved_old_debug = list(debug_roots_old) if debug_roots_old else list(debug_roots)
-    resolved_new_debug = list(debug_roots_new) if debug_roots_new else list(debug_roots)
+    resolved_old_debug, resolved_new_debug = _resolve_debug_roots(
+        debug_roots, debug_roots_old, debug_roots_new
+    )
     _log_debug_resolution(
         old_input, new_input,
         resolved_old_debug, resolved_new_debug,
@@ -463,12 +646,7 @@ def run_compare(
     force_public = _collect_force_public_symbols(
         resolved_cfg.public_symbols, public_symbols_list
     )
-    if force_public and not scope_public_headers:
-        click.echo(
-            "Warning: --public-symbol/--public-symbols-list only take effect with "
-            "--scope-public-headers; ignoring the widening overlay.",
-            err=True,
-        )
+    _warn_force_public_ignored(force_public, scope_public_headers)
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
@@ -484,21 +662,10 @@ def run_compare(
     )
 
     # --post-manifest: scope the comparison to the POST manifest's committed
-    # `pp_*`/ufunc-loop surface. The manifest *is* the authoritative public
-    # surface, so this drives FilterNonPublicSurface directly (no header
-    # provenance needed) — private __pp_* kernel churn is demoted.
-    post_manifest_allowlist: set[str] | None = None
-    if post_manifest_path is not None:
-        from .post_manifest import contract_scope_allowlist, load_manifest
-
-        try:
-            manifest = load_manifest(post_manifest_path)
-        except (ValueError, OSError) as exc:
-            raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
-        # Union with the binaries' committed (pp_*) exports so a *removed* wrapper
-        # — absent from a new manifest — stays in-surface instead of being
-        # silently demoted (its symbol still lives in the old snapshot).
-        post_manifest_allowlist = contract_scope_allowlist(manifest, old, new)
+    # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
+    post_manifest_allowlist = _resolve_post_manifest_allowlist(
+        post_manifest_path, old, new
+    )
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     from .service import compare_snapshots, load_env_matrix

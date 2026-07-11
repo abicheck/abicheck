@@ -63,6 +63,7 @@ from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
+    _parse_clang_ast_result,
     diagnose_header_compile_failure,
     retry_excluding_error_headers,
 )
@@ -212,6 +213,73 @@ def _build_clang_header_command(
     return cmd
 
 
+def _resolve_clang_bin(
+    compiler: str, gcc_path: str | None, gcc_prefix: str | None,
+) -> str:
+    """Resolve the clang executable to run, raising if it is not on ``PATH``.
+
+    ``--gcc-path`` is honored only when it points at a clang (castxml emulates a
+    GCC/G++ binary, which can't take clang-only flags); ``--gcc-prefix`` maps to
+    the prefixed clang driver.
+    """
+    clang_bin: str | None = None
+    if gcc_path and "clang" in Path(gcc_path).name.lower():
+        clang_bin = gcc_path
+    elif gcc_prefix:
+        clang_bin = (
+            f"{gcc_prefix}clang++"
+            if compiler in ("c++", "g++", "clang++")
+            else f"{gcc_prefix}clang"
+        )
+    if not clang_bin:
+        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+    if not _clang_available(clang_bin):
+        raise SnapshotError(
+            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
+            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
+            "clang). Or use the castxml frontend (--ast-frontend castxml)."
+        )
+    return clang_bin
+
+
+def _resolve_clang_langmode(
+    lang: str | None, headers: list[Path], clang_bin: str,
+) -> tuple[bool, bool, bool, str]:
+    """Return ``(force_cpp, force_cpp20, explicit_c_request, cc_id)`` for the TU.
+
+    ``explicit_c_request`` records whether C was *explicitly* requested
+    (``--lang c``) vs auto-detected — both leave ``force_cpp`` False, but the
+    C→C++ self-heal treats them differently (warning vs debug; Codex review).
+    """
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers)
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    explicit_c_request = bool(lang) and not force_cpp
+    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
+    return force_cpp, force_cpp20, explicit_c_request, cc_id
+
+
+def _log_c_to_cpp_selfheal(explicit_c_request: bool) -> None:
+    """Log the C→C++ self-heal at the right level for how C was chosen."""
+    if explicit_c_request:
+        # Explicit --lang c that needs the C++ stdlib: keep the self-heal visible
+        # — the result is C++ ABI evidence, not the C requested (Codex review).
+        log.warning(
+            "clang was asked for C (--lang c) but the header(s) require the "
+            "C++ standard library; self-healing to C++ mode. The result is "
+            "C++ ABI evidence — pass --lang c++ to make this explicit, or "
+            "verify you intended a C library."
+        )
+    else:
+        log.debug(
+            "clang auto-detected C for a pure-#include umbrella header (no "
+            "inline C++ syntax to key on), then self-healed to C++ after a "
+            "missing C++ standard header — an unambiguous C++ signal. The "
+            "result is unaffected; pass --lang c++ to skip the initial C probe."
+        )
+
+
 def _clang_header_dump(
     headers: list[Path],
     extra_includes: list[Path],
@@ -235,47 +303,15 @@ def _clang_header_dump(
     the castxml path. Raises :class:`SnapshotError` when clang is missing, times
     out, or emits no usable AST.
     """
-    # Resolve the clang executable. ``--gcc-path`` is, by its name, a GCC/G++
-    # binary that castxml emulates — running *that* with clang-only
-    # ``-Xclang -ast-dump=json`` flags would fail, so only honor it here when it
-    # actually points at a clang (e.g. a user passing an explicit clang path).
-    # A cross ``--gcc-prefix`` maps to the prefixed clang driver.
-    clang_bin: str | None = None
-    if gcc_path and "clang" in Path(gcc_path).name.lower():
-        clang_bin = gcc_path
-    elif gcc_prefix:
-        clang_bin = (
-            f"{gcc_prefix}clang++"
-            if compiler in ("c++", "g++", "clang++")
-            else f"{gcc_prefix}clang"
-        )
-    if not clang_bin:
-        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
-    if not _clang_available(clang_bin):
-        raise SnapshotError(
-            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
-            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml frontend (--ast-frontend castxml)."
-        )
+    clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
+        lang, headers, clang_bin,
+    )
 
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers)
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    # Was C *explicitly* requested (``--lang c``), as opposed to auto-detected?
-    # Both leave ``force_cpp`` False, but the C→C++ self-heal below must treat
-    # them differently: an explicit C request that reparses as C++ overrides what
-    # the user asked for, so it stays a visible warning; the auto-detected probe
-    # self-healing is just noise and is demoted to debug (Codex review).
-    explicit_c_request = bool(lang) and not force_cpp
-    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
-
-    # castxml↔clang parity: probe the host GNU compiler for its system include
-    # dirs and inject them as ``-isystem`` so clang resolves libstdc++/libc the
-    # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
-    # toolchain change invalidates a stale dump.
+    # castxml↔clang parity: probe the host GNU compiler for its ``-isystem`` dirs
+    # so clang resolves libstdc++/libc the way castxml does via ``--castxml-cc-gnu``.
+    # Folded into the cache key so a toolchain change invalidates a stale dump.
     def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
-        """Probe the host GNU driver's ``-isystem`` dirs for the given language."""
         return _resolve_clang_system_includes(
             compiler,
             gcc_path=gcc_path,
@@ -288,14 +324,11 @@ def _clang_header_dump(
         )
 
     system_includes = _resolve_sysinc(force_cpp=force_cpp)
-    # Pre-resolve the C++ system include set so it (a) folds into the cache key —
-    # the C→C++ retry below parses with these, and the C-mode probe omits the
-    # versioned libstdc++ dirs, so without this a libstdc++/GCC upgrade would not
-    # change the key and abicheck would reuse a stale C++ AST (Codex review); and
-    # (b) is reused by the retry without a second probe. This means a C-mode dump
-    # pays one extra ``g++ -E -v`` probe even when it never retries — accepted as
-    # the cost of a retry-stable cache key (a lazy resolve would reopen the
-    # staleness window). The probe is fast and the clang backend is opt-in.
+    # Pre-resolve the C++ system include set so it folds into the cache key (the
+    # C-mode probe omits the versioned libstdc++ dirs, so without this a
+    # libstdc++/GCC upgrade would not change the key and reuse a stale C++ AST —
+    # Codex review) and is reused by the C→C++ retry without a second probe. Costs
+    # a C-mode dump one extra ``g++ -E -v`` probe — the price of a retry-stable key.
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
@@ -333,7 +366,6 @@ def _clang_header_dump(
     _write_agg(active_headers)
 
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        """Build and run the clang AST-dump command for the given language mode."""
         cmd = _build_clang_header_command(
             clang_bin, cc_id, extra_includes, agg_path,
             sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
@@ -352,36 +384,16 @@ def _clang_header_dump(
     try:
         result = _run_clang(force_cpp, force_cpp20, system_includes)
         # C→C++ self-heal: a pure-``#include`` umbrella header (e.g. oneTBB's
-        # ``oneapi/tbb.h``) carries no inline C++ syntax, so ``_detect_cpp_headers``
-        # picks C mode — then ``#include <cstddef>`` fails because the C-mode probe
-        # never injected the libstdc++ ``-isystem`` dirs. A missing C++ *standard*
-        # header is an unambiguous "this is C++" signal (a C TU never includes one),
-        # so retry once in C++ mode with the pre-resolved C++ system includes.
-        # Mirrors the castxml C→C++ retry; skipped when already in C++ mode or the
-        # failure is anything other than a missing C++ stdlib header.
+        # ``oneapi/tbb.h``) picks C mode, then ``#include <cstddef>`` fails — a
+        # missing C++ *standard* header is an unambiguous "this is C++" signal, so
+        # retry once in C++ mode with the pre-resolved C++ system includes. Skipped
+        # when already C++ or the failure is anything but a missing C++ stdlib header.
         if (
             result.returncode != 0
             and not force_cpp
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
-            if explicit_c_request:
-                # The user asked for C, but the header needs the C++ standard
-                # library — self-heal to C++ so the dump still succeeds, but keep
-                # it visible: the result is C++ ABI evidence, not the C the
-                # request implied (Codex review).
-                log.warning(
-                    "clang was asked for C (--lang c) but the header(s) require the "
-                    "C++ standard library; self-healing to C++ mode. The result is "
-                    "C++ ABI evidence — pass --lang c++ to make this explicit, or "
-                    "verify you intended a C library."
-                )
-            else:
-                log.debug(
-                    "clang auto-detected C for a pure-#include umbrella header (no "
-                    "inline C++ syntax to key on), then self-healed to C++ after a "
-                    "missing C++ standard header — an unambiguous C++ signal. The "
-                    "result is unaffected; pass --lang c++ to skip the initial C probe."
-                )
+            _log_c_to_cpp_selfheal(explicit_c_request)
             cur_fcpp, cur_fcpp20, cur_sysinc = (
                 True, _detect_cpp20_headers(headers), cpp_system_includes,
             )
@@ -400,34 +412,7 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        # A nonzero exit means clang hit a hard parse error. Unlike L4 source
-        # replay (which tolerates partial coverage), the L2 header AST must be
-        # complete to be authoritative — a truncated declaration set would
-        # manifest as false removals/additions. So fail like the castxml path
-        # rather than caching a partial tree (Codex review). ``-ferror-limit=0``
-        # only suppresses the error *cap*; genuine errors still set the exit code.
-        if result.returncode != 0:
-            raise SnapshotError(
-                f"clang failed to parse the header(s) (exit {result.returncode}). The "
-                "header may be malformed or need build flags it was not given (try "
-                f"--gcc-options / -p, or --ast-frontend castxml):\n"
-                f"{result.stderr[:1000].strip()}"
-                f"{diagnose_header_compile_failure(result.stderr) or ''}"
-            )
-        if not result.stdout.strip():
-            raise SnapshotError(
-                f"clang produced no AST for the header(s) (exit {result.returncode}): "
-                f"{result.stderr[:1000].strip()}"
-            )
-        try:
-            root = json.loads(result.stdout)
-        except ValueError as exc:
-            raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
-        try:
-            cached.write_text(json.dumps(root), encoding="utf-8")
-        except OSError:
-            pass
-        return cast("dict[str, Any]", root)
+        return _parse_clang_ast_result(result, cached)
     finally:
         agg_path.unlink(missing_ok=True)
 

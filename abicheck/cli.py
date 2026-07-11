@@ -102,7 +102,7 @@ from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
-    from .checker_types import Change, DiffResult
+    from .checker_types import Change
     from .debug_resolver import DebugArtifact
     from .service_scan import CompileContext
     from .severity import SeverityConfig
@@ -182,7 +182,7 @@ def _stamp_provenance(
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, check=False,
             )
             if result.returncode == 0:
                 snap.git_commit = result.stdout.strip()
@@ -1309,64 +1309,7 @@ def _embed_inline_source_side(
                    "build_context_defines + per-field guards.")
 @verbose_option
 @click.pass_context
-def compare_cmd(
-    ctx: click.Context,
-    old_input: Path, new_input: Path,
-    jobs: int, dso_only: bool, output_dir: Path | None,
-    fail_on_removed: bool,
-    debug_info1: Path | None, debug_info2: Path | None,
-    devel_pkg1: Path | None, devel_pkg2: Path | None,
-    include_private_dso: bool, keep_extracted: bool,
-    manifest_path: Path | None, bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
-    headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
-    header_backend: str,
-    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
-    old_header_backend: str | None, new_header_backend: str | None,
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
-    old_version: str, new_version: str,
-    fmt: str, demangle: bool | None, output: Path | None,
-    suppress: Path | None, strict_suppressions: bool, require_justification: bool,
-    policy: str, policy_file_path: Path | None,
-    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
-    dwarf_only: bool,
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
-    config: Path | None,
-    exit_code_scheme: str | None,
-    follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-    show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
-    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
-    post_manifest_path: Path | None,
-    report_mode: str, show_impact: bool,
-    recommend: bool,
-    debug_format_opt: str | None,
-    debug_format: str | None,
-    annotate: bool,
-    annotate_additions: bool,
-    debug_roots: tuple[Path, ...],
-    debug_roots_old: tuple[Path, ...],
-    debug_roots_new: tuple[Path, ...],
-    debuginfod: bool,
-    debuginfod_url: str | None,
-    pattern_verdicts: bool,
-    explain_patterns: bool,
-    surface_metrics: bool,
-    reconcile_build_context: bool,
-    env_matrix_path: Path | None,
-    verbose: bool,
-    old_build_info: Path | None = None, new_build_info: Path | None = None,
-    old_sources: Path | None = None, new_sources: Path | None = None,
-    depth: str | None = None, max_depth: bool = False,
-    probe_matrix_old: Path | None = None,
-    probe_matrix_new: Path | None = None,
-) -> None:
+def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     """Compare two ABI surfaces and report changes.
 
     Each input (OLD, NEW) can be a .so shared library, a JSON snapshot from
@@ -1418,17 +1361,15 @@ def compare_cmd(
       abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h --policy sdk_vendor
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
-    # Options are parsed by the click wrapper above; the full compare flow
-    # lives in cli_compare_helpers.run_compare (size-split from cli.py to keep
-    # this module under the AI-readiness file-size cap). Forward every parsed
-    # parameter unchanged so behaviour — and the exit-code matrix — is identical
-    # to the previously-inlined body. locals() here is exactly the parameters
-    # (captured before the import adds a name), so no argument can be dropped.
-    _params = dict(locals())
-    _params.pop("ctx")
+    # Options are parsed by the click wrapper above; the full compare flow lives
+    # in cli_compare_helpers.run_compare (size-split from cli.py to keep this
+    # module under the AI-readiness file-size cap). Click collects every declared
+    # option/argument into **kwargs, so forwarding it verbatim keeps behaviour —
+    # and the exit-code matrix — identical while the single typed signature lives
+    # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from .cli_compare_helpers import run_compare
 
-    run_compare(ctx, **_params)
+    run_compare(ctx, **kwargs)
 
 
 @main.command("recommend-collect-mode")

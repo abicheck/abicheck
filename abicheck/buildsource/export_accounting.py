@@ -206,83 +206,82 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
     return None
 
 
-def _external_dependency_origin(
-    symbol: str,
-    needed_libs: list[str],
-    self_names: tuple[str, ...] = (),
-) -> str | None:
-    """Name the external dependency *symbol* leaked from, or ``None`` if native.
+_PREFIX_NO_MATCH: object = object()
+"""Sentinel: the runtime-prefix table did not attribute the symbol."""
 
-    Two signals, cheapest first: the shared
-    :func:`~abicheck.elf_metadata._guess_symbol_origin` runtime-prefix table
-    (libc/libgcc/libmvec/fundamental-RTTI/``operator new`` and the ``_ZNSt``/
-    ``_ZTVSt`` std prefixes), then an **owner-namespace** check that also covers the
-    leaked-definition forms the prefix table misses — a std/libstdc++ vtable,
-    typeinfo, or guard variable for a *nested* std type (``_ZTVNSt…``,
-    ``_ZGVZNSt…``) and a vendored third-party owner (``fmt``/``boost``/…). Reading
-    the *owner* (not any referenced type) keeps a native symbol that merely takes a
-    ``std`` argument from being mislabelled external. Conservative: only a positive
-    match returns a name.
 
-    ``self_names`` are the audited library's own identity tokens (soname /
-    install-name / library name; see :func:`_library_self_names`): a vendored
-    namespace owned by the library *being scanned* (auditing libfmt itself, whose
-    ``fmt::detail`` symbols are native, not a leak) is **not** reported external so
-    the finding does not tell users to unlink their own library (Codex review).
+def _origin_from_prefix_table(
+    symbol: str, needed_libs: list[str], self_names: tuple[str, ...],
+) -> str | None | object:
+    """Prefix-table origin, or :data:`_PREFIX_NO_MATCH` to fall through to owners.
+
+    A non-sentinel return (``None`` or a lib name) is authoritative.
     """
     from ..elf_metadata import _guess_symbol_origin
 
     lib = _guess_symbol_origin(symbol, needed_libs)
-    if lib is not None:
-        # libc++abi is the ABI support library, not libc++ itself. If the prefix
-        # table picked it (DT_NEEDED ordered libc++abi before libc++) for a libc++
-        # ``std::__1`` symbol, re-resolve to the real libc++ runtime (Codex review).
-        if lib.rsplit("/", 1)[-1].startswith("libc++abi") and "St3__1" in symbol:
-            lib = _cxx_runtime_lib(symbol, needed_libs)
-        # If the resolved runtime library *is* the audited library (auditing
-        # libstdc++/libc++ itself), its own std/runtime symbols are native, not a
-        # leak — the self gate covers the runtime path too, not only vendored
-        # namespaces (Codex review).
-        if _resolved_lib_is_self(lib, self_names):
-            return None
-        return lib
-    owner = _mangled_owner_namespace(symbol)
-    if owner is not None:
-        # The owner-fallback runtime path (a guard variable / nested-std form the
-        # prefix table misses) is self-gated the same way as the prefix-table path
-        # above, so auditing the runtime library itself doesn't flag its own exports
-        # (Codex). Itanium C++ runtimes only — MSVC STL attribution is handled below.
-        if owner == "__gnu_cxx":
-            runtime = (
-                "libstdc++.so.6"  # libstdc++-only extension namespace — never libc++
-            )
-        elif owner == "__cxxabiv1":
-            # The Itanium C++ ABI namespace is implemented by libc++abi (or
-            # libstdc++'s merged libsupc++), NOT the std runtime — so ``libc++abi``
-            # is its correct owner and must not be excluded, else auditing libc++abi
-            # flags its own exports (Codex review).
-            runtime = _cxx_abi_runtime_lib(needed_libs, self_names)
-        elif owner == "std" or owner in _STD_OWNER_NAMESPACES:
-            runtime = _cxx_runtime_lib(symbol, needed_libs)
-        else:
-            runtime = None
-        if runtime is not None:
-            return None if _resolved_lib_is_self(runtime, self_names) else runtime
-        google_child = _nested_component(symbol, 1)
-    else:
-        # MSVC decorated name (``?name@scope@…@@sig``): no Itanium owner, but its
-        # outermost ``@``-scope still names a vendored dependency (Boost/{fmt}/
-        # protobuf) statically linked and re-exported on Windows — otherwise those
-        # leaks are miscounted as ``undeclared_export`` (Codex review). MSVC C++
-        # runtime (STL) attribution is a separate concern, so a bare ``std`` owner
-        # stays native here rather than being mislabelled with an ELF soname.
-        comps = _msvc_scope_components(symbol)
-        if len(comps) < 2:
-            return None  # un-nested name — no enclosing scope, no owner
-        owner = comps[-1]  # scopes are inner-to-outer; the top-level ns is last
-        if owner == "std":
-            return None
-        google_child = comps[-2] if len(comps) >= 3 else None
+    if lib is None:
+        return _PREFIX_NO_MATCH
+    # libc++abi is the ABI support library, not libc++ itself. If the prefix
+    # table picked it (DT_NEEDED ordered libc++abi before libc++) for a libc++
+    # ``std::__1`` symbol, re-resolve to the real libc++ runtime (Codex review).
+    if lib.rsplit("/", 1)[-1].startswith("libc++abi") and "St3__1" in symbol:
+        lib = _cxx_runtime_lib(symbol, needed_libs)
+    # If the resolved runtime library *is* the audited library (auditing
+    # libstdc++/libc++ itself), its own std/runtime symbols are native, not a
+    # leak — the self gate covers the runtime path too, not only vendored
+    # namespaces (Codex review).
+    if _resolved_lib_is_self(lib, self_names):
+        return None
+    return lib
+
+
+def _itanium_owner_runtime(
+    owner: str, symbol: str, needed_libs: list[str], self_names: tuple[str, ...],
+) -> str | None:
+    """Resolve an Itanium owner namespace to its C++ runtime lib, else ``None``.
+
+    The owner-fallback runtime path (a guard variable / nested-std form the
+    prefix table misses); Itanium C++ runtimes only — MSVC STL attribution is
+    handled by :func:`_msvc_leaked_owner`.
+    """
+    if owner == "__gnu_cxx":
+        # libstdc++-only extension namespace — never libc++.
+        return "libstdc++.so.6"
+    if owner == "__cxxabiv1":
+        # The Itanium C++ ABI namespace is implemented by libc++abi (or
+        # libstdc++'s merged libsupc++), NOT the std runtime — so ``libc++abi``
+        # is its correct owner and must not be excluded, else auditing libc++abi
+        # flags its own exports (Codex review).
+        return _cxx_abi_runtime_lib(needed_libs, self_names)
+    if owner == "std" or owner in _STD_OWNER_NAMESPACES:
+        return _cxx_runtime_lib(symbol, needed_libs)
+    return None
+
+
+def _msvc_leaked_owner(symbol: str) -> tuple[str, str | None] | None:
+    """``(owner, google_child)`` for an MSVC decorated name, or ``None`` to bail.
+
+    MSVC decorated name (``?name@scope@…@@sig``): no Itanium owner, but its
+    outermost ``@``-scope still names a vendored dependency (Boost/{fmt}/
+    protobuf) statically linked and re-exported on Windows — otherwise those
+    leaks are miscounted as ``undeclared_export`` (Codex review). MSVC C++
+    runtime (STL) attribution is a separate concern, so a bare ``std`` owner
+    stays native here rather than being mislabelled with an ELF soname.
+    """
+    comps = _msvc_scope_components(symbol)
+    if len(comps) < 2:
+        return None  # un-nested name — no enclosing scope, no owner
+    owner = comps[-1]  # scopes are inner-to-outer; the top-level ns is last
+    if owner == "std":
+        return None
+    return owner, (comps[-2] if len(comps) >= 3 else None)
+
+
+def _vendored_owner_result(
+    owner: str, google_child: str | None, self_names: tuple[str, ...],
+) -> str | None:
+    """Map a resolved owner namespace to its vendored dependency lib, or ``None``."""
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
     if owner == "google" and google_child != "protobuf":
         # ``google::`` is shared by many Google libraries (glog's
@@ -293,6 +292,47 @@ def _external_dependency_origin(
     if vendored is not None and _owner_is_self_library(owner, self_names):
         return None  # the audited library *is* this vendored library — native
     return vendored
+
+
+def _external_dependency_origin(
+    symbol: str,
+    needed_libs: list[str],
+    self_names: tuple[str, ...] = (),
+) -> str | None:
+    """Name the external dependency *symbol* leaked from, or ``None`` if native.
+
+    Two signals, cheapest first: the shared
+    :func:`~abicheck.elf_metadata._guess_symbol_origin` runtime-prefix table
+    (libc/libgcc/libmvec/fundamental-RTTI/``operator new`` and the ``_ZNSt``/
+    ``_ZTVSt`` std prefixes) via :func:`_origin_from_prefix_table`, then an
+    **owner-namespace** check that also covers the leaked-definition forms the
+    prefix table misses — a std/libstdc++ vtable, typeinfo, or guard variable for
+    a *nested* std type (``_ZTVNSt…``, ``_ZGVZNSt…``) and a vendored third-party
+    owner (``fmt``/``boost``/…). Reading the *owner* (not any referenced type)
+    keeps a native symbol that merely takes a ``std`` argument from being
+    mislabelled external. Conservative: only a positive match returns a name.
+
+    ``self_names`` are the audited library's own identity tokens (soname /
+    install-name / library name; see :func:`_library_self_names`): a vendored
+    namespace owned by the library *being scanned* (auditing libfmt itself, whose
+    ``fmt::detail`` symbols are native, not a leak) is **not** reported external so
+    the finding does not tell users to unlink their own library (Codex review).
+    """
+    prefix = _origin_from_prefix_table(symbol, needed_libs, self_names)
+    if prefix is not _PREFIX_NO_MATCH:
+        return prefix  # type: ignore[return-value]
+    owner = _mangled_owner_namespace(symbol)
+    if owner is not None:
+        runtime = _itanium_owner_runtime(owner, symbol, needed_libs, self_names)
+        if runtime is not None:
+            return None if _resolved_lib_is_self(runtime, self_names) else runtime
+        google_child = _nested_component(symbol, 1)
+    else:
+        msvc = _msvc_leaked_owner(symbol)
+        if msvc is None:
+            return None
+        owner, google_child = msvc
+    return _vendored_owner_result(owner, google_child, self_names)
 
 
 def _msvc_scope_components(symbol: str) -> list[str]:
