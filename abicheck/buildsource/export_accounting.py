@@ -122,17 +122,22 @@ _VENDORED_OWNER_NAMESPACES: dict[str, str] = {
 }
 
 #: Itanium prefixes whose *operand* is a type whose owning namespace decides
-#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT (``_ZTV``/``_ZTI``/
-#: ``_ZTS``/``_ZTT``) and a guard variable (``_ZGV``, ``_ZGVZ`` for a local static).
-#: Peeling them lets a leaked *dependency* vtable/typeinfo (``_ZTVNSt…``,
-#: ``_ZTIN3fmt…``) be attributed to the dependency instead of exempted as this
-#: library's own class artifact (Codex review). Thunks carry a numeric call-offset
-#: before the operand and are peeled by :data:`_THUNK_PREFIX_RE` instead.
+#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT/construction-vtable
+#: (``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``) and a guard variable (``_ZGV``,
+#: ``_ZGVZ`` for a local static). Peeling them lets a leaked *dependency*
+#: vtable/typeinfo/construction-vtable (``_ZTVNSt…``, ``_ZTIN3fmt…``,
+#: ``_ZTCN3fmt3FooE0_NS_3BarE``) be attributed to the dependency instead of exempted
+#: as this library's own class artifact (Codex review). Prefix order is immaterial —
+#: the fourth char (``C``/``V``/``I``/``S``/``T``) disambiguates them — and the
+#: construction-vtable operand (``N3fmt3FooE0_…``) still begins with the nested-name
+#: ``N`` that :func:`_mangled_owner_namespace` reads. Thunks carry a numeric
+#: call-offset before the operand and are peeled by :data:`_THUNK_PREFIX_RE` instead.
 _ARTIFACT_OPERAND_PREFIXES = (
     "_ZTV",
     "_ZTI",
     "_ZTS",
     "_ZTT",
+    "_ZTC",
     "_ZGVZ",
     "_ZGV",
 )
@@ -349,10 +354,15 @@ def _owner_is_self_library(owner: str, self_names: tuple[str, ...]) -> bool:
     NOT — its leaked fmt surface must still flag (Codex review). Matches when a
     self-name, minus any ``lib`` prefix, is exactly one of the owner's library-name
     stems (:data:`_VENDORED_SELF_ALIASES`, e.g. ``google`` → ``libprotobuf``) or that
-    stem followed by a ``.``/``_``/``-`` separator (``libboost_system`` → ``boost``).
+    stem followed by a ``.``/``_``/``-``/``+`` separator. The ``+`` boundary matters
+    for C++ libraries that carry it in their soname (``libgrpc++.so`` → ``grpc``,
+    ``libc++`` family), so a gRPC self-scan does not report its own ``grpc::`` surface
+    as a vendored-dependency leak (``libboost_system`` → ``boost``; Codex review).
     """
     stems = _VENDORED_SELF_ALIASES.get(owner, (owner,))
-    boundary = re.compile("(?:" + "|".join(re.escape(s) for s in stems) + r")([._-]|$)")
+    boundary = re.compile(
+        "(?:" + "|".join(re.escape(s) for s in stems) + r")([._+-]|$)"
+    )
     for name in self_names:
         stem = name[3:] if name.startswith("lib") else name
         if boundary.match(stem):

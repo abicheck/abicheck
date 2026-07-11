@@ -467,6 +467,11 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
         ("_Z3fmtv", None),
         ("_Z6googlev", None),
         ("_ZTV3Foo", None),  # vtable for a top-level class — no namespace owner
+        # construction vtable (``_ZTC``) for a leaked dependency type: the operand
+        # nested name must be peeled so the {fmt} owner is read (Codex review).
+        ("_ZTCN3fmt3FooE0_NS_3BarE", "{fmt} (vendored third-party)"),
+        ("_ZTCN5boost3FooE0_NS_3BarE", "Boost (vendored third-party)"),
+        ("_ZTC3Foo0_3Bar", None),  # native construction vtable — no namespace owner
         ("_ZN", None),  # degenerate — owner unparseable
         ("plain_c_symbol", None),  # not mangled
     ],
@@ -596,6 +601,17 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     assert (
         _external_dependency_origin(sym, [], ("libfmtshim.so",))
         == "{fmt} (vendored third-party)"
+    )
+    # a C++ library whose soname carries ``+`` (``libgrpc++.so``) is self for the
+    # ``grpc`` owner — its own ``grpc::`` surface is native, not a vendored leak
+    # (the ``+`` must be a recognised stem boundary, Codex review).
+    grpc_sym = "_ZN4grpc6Status2OKEv"
+    assert _external_dependency_origin(grpc_sym, [], ("libgrpc++.so",)) is None
+    assert _external_dependency_origin(grpc_sym, [], ("libgrpc++.so.1",)) is None
+    # but a plain wrapper that merely re-exports grpc still flags.
+    assert (
+        _external_dependency_origin(grpc_sym, [], ("libmyplugin.so",))
+        == "gRPC (vendored third-party)"
     )
     # a per-component vendored lib (libboost_system) scanning its own boost:: is
     # still recognised as self.

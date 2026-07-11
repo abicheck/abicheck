@@ -1264,16 +1264,19 @@ _MANGLE_SIGILS = ("_Z", "?")
 _STRUCTOR_RE = re.compile(r"_ZN.*?[CD][0-4]E")
 
 #: Compiler-generated C++ ABI artifacts that belong to a class, not to a
-#: free function/variable: vtables/typeinfo/VTT/thunks (Itanium ``_ZTV``/``_ZTI``/
-#: ``_ZTS``/``_ZTT``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC ``??_`` vftable/vbtable/
-#: RTTI/deleting-dtor names. castxml records the owning class as a ``RecordType``
-#: (not a ``Function``/``Variable``), so these would never be in the documented
-#: symbol set and must be exempted from ``exported_not_public`` (Codex review).
+#: free function/variable: vtables/typeinfo/VTT/construction-vtables/thunks (Itanium
+#: ``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC
+#: ``??_`` vftable/vbtable/RTTI/deleting-dtor names. castxml records the owning class
+#: as a ``RecordType`` (not a ``Function``/``Variable``), so these would never be in
+#: the documented symbol set and must be exempted from ``exported_not_public`` when
+#: they belong to a *native* class (a leaked *dependency* construction vtable is
+#: caught earlier by the external-dependency origin check — Codex review).
 _CXX_ARTIFACT_PREFIXES = (
     "_ZTV",
     "_ZTI",
     "_ZTS",
     "_ZTT",
+    "_ZTC",
     "_ZTh",
     "_ZTv",
     "_ZTc",
