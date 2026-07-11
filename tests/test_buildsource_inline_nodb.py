@@ -95,6 +95,33 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
         fn()
 
 
+def test_derive_l2_include_dirs_skips_empty_include_entries(tmp_path, monkeypatch):
+    # A CompileUnit may carry an empty include-path string (redaction edge / blank
+    # operand); the seed skips it rather than yielding a bogus "" dir, while still
+    # surfacing the real ones.
+    from abicheck.buildsource import l2_seed
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    realdir = tmp_path / "realinc"
+    realdir.mkdir()
+
+    def fake_collect(**kwargs):
+        pack = BuildSourcePack.empty(tmp_path / "p")
+        pack.build_evidence = BuildEvidence(
+            compile_units=[CompileUnit(id="cu://x", include_paths=["", str(realdir)])]
+        )
+        return pack
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", fake_collect)
+    dirs, cleanups = l2_seed.derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    for fn in cleanups:
+        fn()
+    resolved = {str(Path(d).resolve()) for d in dirs}
+    assert str(realdir.resolve()) in resolved
+    assert "" not in dirs  # blank entry skipped, not surfaced
+
+
 def test_derive_l2_include_dirs_swallows_collection_errors(tmp_path, monkeypatch):
     # The seed is best-effort: if the underlying collection raises, derivation must
     # drain cleanups and return ([], []) rather than propagate — a scan that works

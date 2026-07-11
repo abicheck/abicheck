@@ -345,6 +345,49 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """perform_elf_dump seeds build-derived L2 include dirs into the header parse and
+    drains the pending temp-build-dir cleanup in the finally (the ELF-side parity of
+    the non-ELF seed path)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    captured: dict = {}
+    events: list[str] = []
+
+    def fake_seed(**kwargs):
+        # collect_mode gates the inferred build query; assert it is threaded.
+        captured["allow"] = kwargs["allow_inferred_build_query"]
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        captured["extra_includes"] = kw.get("extra_includes")
+        events.append("dump")
+        return AbiSnapshot(library="lib.so", version="1.0")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None,  # effective_compile_db None
+        False, (), "", None, None, False, None, None, tmp_path, None, False,
+        "build",  # collect_mode (non-"off" → inferred query allowed)
+        _expand, _populate, _stamp, _write,
+    )
+
+    assert captured["allow"] is True  # collect_mode "build" → inferred query allowed
+    assert seeded in captured["extra_includes"]  # build dir reached the header parse
+    assert events == ["dump", "cleanup"]  # cleanup drained after the parse
+
+
 def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     tmp_path: Path, monkeypatch
 ) -> None:
