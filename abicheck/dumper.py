@@ -49,6 +49,7 @@ from xml.etree.ElementTree import (
 if TYPE_CHECKING:
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
+    from .dwarf_unified import DwarfSession
     from .elf_metadata import ElfMetadata
 
 from defusedxml import ElementTree as DefusedET
@@ -66,6 +67,14 @@ from .dumper_clang_errors import (
     _parse_clang_ast_result,
     diagnose_header_compile_failure,
     retry_excluding_error_headers,
+)
+from .dumper_debug import (
+    # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
+    # sibling module (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._is_kernel_binary`` / ``dumper._resolve_debug_metadata`` remain
+    # valid bare-name calls in ``_dump_elf`` and test patch targets.
+    _is_kernel_binary as _is_kernel_binary,
+    _resolve_debug_metadata as _resolve_debug_metadata,
 )
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
@@ -1323,97 +1332,6 @@ def dump(
     return apply_provenance(snapshot, public_headers, public_header_dirs)
 
 
-def _is_kernel_binary(path: Path) -> bool:
-    """Heuristic: is this a kernel binary (vmlinux, *.ko, *.ko.xz, *.ko.zst)?"""
-    name = path.name
-    if name == "vmlinux":
-        return True
-    suffixes = path.suffixes  # e.g. ['.ko', '.xz']
-    suffix_str = "".join(suffixes)
-    if suffix_str in (".ko", ".ko.xz", ".ko.zst", ".ko.gz"):
-        return True
-    # Check for .modinfo section (kernel module indicator)
-    try:
-        from elftools.elf.elffile import ELFFile
-        with open(path, "rb") as f:
-            elf = ELFFile(f)  # type: ignore[no-untyped-call]
-            return elf.get_section_by_name(".modinfo") is not None  # type: ignore[no-untyped-call]
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _resolve_debug_metadata(
-    so_path: Path,
-    debug_format: str | None,
-) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
-    """Resolve debug metadata using the specified or auto-detected format.
-
-    Returns (dwarf_meta, dwarf_adv) — the same types as parse_dwarf().
-    BTF/CTF data is converted to DwarfMetadata for checker compatibility.
-    """
-    from .dwarf_advanced import AdvancedDwarfMetadata
-
-    if debug_format == "btf":
-        from .btf_metadata import parse_btf_metadata
-        btf = parse_btf_metadata(so_path)
-        if not btf.has_btf:
-            log.warning("BTF requested but no .BTF section in %s", so_path)
-        return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
-
-    if debug_format == "ctf":
-        from .ctf_metadata import parse_ctf_metadata
-        ctf = parse_ctf_metadata(so_path)
-        if not ctf.has_ctf:
-            log.warning("CTF requested but no .ctf section in %s", so_path)
-        return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata()
-
-    if debug_format == "dwarf":
-        from .dwarf_unified import parse_dwarf
-        return parse_dwarf(so_path)
-
-    if debug_format is not None:
-        raise ValueError(
-            f"Invalid debug_format {debug_format!r}; expected 'dwarf', 'btf', or 'ctf'."
-        )
-
-    # Auto-detect: kernel binaries prefer BTF, userspace prefers DWARF
-    from .btf_metadata import has_btf_section, parse_btf_metadata
-    from .ctf_metadata import has_ctf_section, parse_ctf_metadata
-    from .dwarf_unified import parse_dwarf
-
-    is_kernel = _is_kernel_binary(so_path)
-
-    if is_kernel:
-        # BTF > DWARF > CTF for kernel binaries
-        if has_btf_section(so_path):
-            btf = parse_btf_metadata(so_path)
-            if btf.has_btf:
-                log.info("Using BTF debug info from %s (kernel binary)", so_path)
-                return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
-
-    # DWARF > BTF > CTF for userspace (or kernel fallback)
-    dwarf_meta, dwarf_adv = parse_dwarf(so_path)
-    if dwarf_meta.has_dwarf:
-        return dwarf_meta, dwarf_adv
-
-    # Fallback to BTF if DWARF not available
-    if has_btf_section(so_path):
-        btf = parse_btf_metadata(so_path)
-        if btf.has_btf:
-            log.info("No DWARF, falling back to BTF in %s", so_path)
-            return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
-
-    # Fallback to CTF
-    if has_ctf_section(so_path):
-        ctf = parse_ctf_metadata(so_path)
-        if ctf.has_ctf:
-            log.info("No DWARF/BTF, falling back to CTF in %s", so_path)
-            return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata()
-
-    # No debug info at all — return empty DWARF metadata
-    return dwarf_meta, dwarf_adv
-
-
 _ELF_VIS_MAP: dict[str, ElfVisibility] = {
     "default": ElfVisibility.DEFAULT,
     "protected": ElfVisibility.PROTECTED,
@@ -1516,6 +1434,7 @@ def _try_dwarf_snapshot(
     profile_hint: str | None,
     headers: list[Path],
     dwarf_only: bool,
+    session: DwarfSession | None = None,
 ) -> tuple[AbiSnapshot | None, list[RecordType]]:
     """Attempt to build a snapshot from DWARF debug info.
 
@@ -1523,6 +1442,10 @@ def _try_dwarf_snapshot(
     used directly, *snapshot* is non-None.  When DWARF produced no symbols
     (and *dwarf_only* is False), *snapshot* is None and *dwarf_only_types*
     carries the partial type list for the symbol-only fallback path.
+
+    *session*, when provided, is the open :class:`DwarfSession` from the
+    metadata parse; the snapshot DIE walk reuses it instead of re-opening
+    ``so_path`` (F5b). The caller retains ownership and closes it.
     """
     from .dwarf_snapshot import build_snapshot_from_dwarf
 
@@ -1540,6 +1463,7 @@ def _try_dwarf_snapshot(
         dwarf_adv,
         version=version,
         language_profile=profile_hint,
+        session=session,
     )
     # If DWARF produced functions (or was explicitly forced), use it.
     if snap.functions or snap.variables or dwarf_only:
@@ -1674,6 +1598,13 @@ def _dump_elf(
     exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
+    # A DWARF metadata parse that finds real debug info leaves its open
+    # DwarfSession here so the snapshot build below can reuse the same
+    # DWARFInfo (and its warm DIE cache) rather than re-parsing every DIE
+    # from a second open (F5b). The session is closed in the finally below on
+    # every exit path; the built snapshot holds extracted model objects, not
+    # live DIE references, so closing after it is returned is safe.
+    _dwarf_session_out: list[DwarfSession] = []
     if symbols_only or debug_presence_only:
         from .dwarf_presence import cheap_debug_presence_metadata
         dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
@@ -1681,28 +1612,36 @@ def _dump_elf(
             debug_format=debug_format,
         )
     else:
-        dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
+        dwarf_meta, dwarf_adv = _resolve_debug_metadata(
+            so_path, debug_format, _session_out=_dwarf_session_out,
+        )
+    dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
     profile_hint = _lang_to_profile(lang)
     # ADR-003: Updated fallback chain
     # --dwarf-only → force DWARF mode regardless of headers
     # no headers + DWARF available -> DWARF-only mode with type-aware checks
     # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
-    if not (symbols_only or debug_presence_only) and (
-        dwarf_only or (not headers and dwarf_meta.has_dwarf)
-    ):
-        snap, dwarf_only_types = _try_dwarf_snapshot(
-            so_path, elf_meta, dwarf_meta, dwarf_adv,
-            version, profile_hint, headers, dwarf_only,
-        )
-        if snap is not None:
-            return snap
-    if symbols_only or not headers:
-        return _build_symbol_only_snapshot(
-            so_path, version, elf_meta, dwarf_meta, dwarf_adv,
-            exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
-            dwarf_only_types, profile_hint,
-        )
+    try:
+        if not (symbols_only or debug_presence_only) and (
+            dwarf_only or (not headers and dwarf_meta.has_dwarf)
+        ):
+            snap, dwarf_only_types = _try_dwarf_snapshot(
+                so_path, elf_meta, dwarf_meta, dwarf_adv,
+                version, profile_hint, headers, dwarf_only,
+                session=dwarf_session,
+            )
+            if snap is not None:
+                return snap
+        if symbols_only or not headers:
+            return _build_symbol_only_snapshot(
+                so_path, version, elf_meta, dwarf_meta, dwarf_adv,
+                exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
+                dwarf_only_types, profile_hint,
+            )
+    finally:
+        if dwarf_session is not None:
+            dwarf_session.close()
 
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,

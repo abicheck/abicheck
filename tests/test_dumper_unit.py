@@ -233,7 +233,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_metadata import DwarfMetadata
 
         expected = (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata())
-        monkeypatch.setattr("abicheck.dwarf_unified.parse_dwarf", lambda _path: expected)
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf", lambda _path, **_kw: expected
+        )
 
         assert _resolve_debug_metadata(tmp_path / "lib.so", "dwarf") is expected
 

@@ -20,8 +20,11 @@ import pytest
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata  # noqa: E402
 from abicheck.dwarf_metadata import DwarfMetadata  # noqa: E402
 from abicheck.dwarf_unified import (  # noqa: E402
+    DwarfSession,
+    open_dwarf_session,
     parse_advanced_dwarf,
     parse_dwarf,
+    parse_dwarf_from_session,
     parse_dwarf_metadata,
 )
 
@@ -234,3 +237,145 @@ class TestSingleOpen:
         assert len(open_calls) == 1, (
             f"Expected 1 file open, got {len(open_calls)}: {open_calls}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Shared DWARF session — one open reused across the metadata + snapshot passes
+# ---------------------------------------------------------------------------
+
+_SESSION_SRC = """
+    #include <string>
+    #include <vector>
+    namespace demo {
+    enum class Color { Red, Green, Blue };
+    struct Point { int x; int y; double z; };
+    template <typename T> struct Box { T value; std::vector<T> hist; };
+    struct Registry { std::vector<Box<int>> counters; Color tint; };
+    }
+    extern "C" int demo_area(int n) { int s = 0; for (int i = 0; i < n; ++i) s += i; return s; }
+    extern "C" demo::Point demo_origin_pt(void) { return demo::Point{1, 2, 3.0}; }
+    extern "C" demo::Color demo_pick_color(void) { return demo::Color::Green; }
+    extern int demo_global; int demo_global = 7;
+"""
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)")
+class TestDwarfSession:
+    """open_dwarf_session + parse_dwarf_from_session must match the one-shot API,
+    and reusing a session for the snapshot build must be byte-for-byte identical."""
+
+    def test_session_parse_matches_parse_dwarf(self, tmp_path: Path) -> None:
+        _require_tool("g++")
+        so = _compile_so(tmp_path, "libsess", _SESSION_SRC, lang="cpp")
+
+        meta_a, adv_a = parse_dwarf(so)
+
+        sess = open_dwarf_session(so)
+        assert isinstance(sess, DwarfSession)
+        try:
+            meta_b, adv_b = parse_dwarf_from_session(sess)
+        finally:
+            sess.close()
+
+        # Identical metadata regardless of whether the file was opened once
+        # (session) or once per call (parse_dwarf).
+        assert meta_a.structs == meta_b.structs
+        assert meta_a.enums == meta_b.enums
+        assert adv_a.target_arch == adv_b.target_arch
+        assert adv_a.calling_conventions == adv_b.calling_conventions
+        assert adv_a.packed_structs == adv_b.packed_structs
+
+    def test_snapshot_via_session_is_byte_identical(self, tmp_path: Path) -> None:
+        """build_snapshot_from_dwarf(session=…) must serialize identically to the
+        legacy re-open path — the core correctness bar for the single-pass merge."""
+        _require_tool("g++")
+        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
+        from abicheck.elf_metadata import parse_elf_metadata
+        from abicheck.serialization import snapshot_to_json
+
+        so = _compile_so(tmp_path, "libsesssnap", _SESSION_SRC, lang="cpp")
+        elf_meta = parse_elf_metadata(so)
+
+        # Path A: independent opens (legacy).
+        meta_a, adv_a = parse_dwarf(so)
+        snap_a = build_snapshot_from_dwarf(so, elf_meta, meta_a, adv_a, version="t")
+
+        # Path B: one shared session reused by the snapshot walk.
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        try:
+            meta_b, adv_b = parse_dwarf_from_session(sess)
+            snap_b = build_snapshot_from_dwarf(
+                so, elf_meta, meta_b, adv_b, version="t", session=sess
+            )
+        finally:
+            sess.close()
+
+        assert snapshot_to_json(snap_a) == snapshot_to_json(snap_b)
+        # And the snapshot genuinely exercised the type/function/enum paths.
+        assert snap_b.types
+        assert snap_b.functions
+        assert snap_b.enums
+
+    def test_snapshot_usable_after_session_closed(self, tmp_path: Path) -> None:
+        """The built snapshot holds extracted model objects, not live DIEs, so it
+        stays fully serializable after the session file handle is closed."""
+        _require_tool("g++")
+        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
+        from abicheck.elf_metadata import parse_elf_metadata
+        from abicheck.serialization import snapshot_to_json
+
+        so = _compile_so(tmp_path, "libsessclose", _SESSION_SRC, lang="cpp")
+        elf_meta = parse_elf_metadata(so)
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        meta, adv = parse_dwarf_from_session(sess)
+        snap = build_snapshot_from_dwarf(so, elf_meta, meta, adv, session=sess)
+        sess.close()  # close BEFORE serializing
+        assert snapshot_to_json(snap)  # must not raise / must be non-empty
+
+    def test_open_dwarf_session_none_cases(self, tmp_path: Path) -> None:
+        """Non-regular / non-ELF / missing inputs return None (no leaked handle)."""
+        assert open_dwarf_session(tmp_path) is None  # directory
+        assert open_dwarf_session(tmp_path / "missing.so") is None  # nonexistent
+        bad = tmp_path / "not_elf.so"
+        bad.write_bytes(b"not an ELF file")
+        assert open_dwarf_session(bad) is None
+
+    def test_close_is_safe_to_call(self, tmp_path: Path) -> None:
+        _require_tool("g++")
+        so = _compile_so(tmp_path, "libsessdbl", _SESSION_SRC, lang="cpp")
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        sess.close()
+        # Double close must not raise.
+        sess.close()
+
+    def test_snapshot_reuses_session_without_reopening(self, tmp_path: Path) -> None:
+        """When a session is supplied, the snapshot build must NOT open the ELF
+        again — the whole point of the single-pass merge."""
+        _require_tool("g++")
+        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
+        from abicheck.elf_metadata import parse_elf_metadata
+
+        so = _compile_so(tmp_path, "libsessreopen", _SESSION_SRC, lang="cpp")
+        elf_meta = parse_elf_metadata(so)
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        meta, adv = parse_dwarf_from_session(sess)
+
+        reopens: list[str] = []
+        original_open = open
+
+        def counting_open(path, mode="r", **kwargs):  # type: ignore[override]
+            if "rb" in str(mode) and str(so) in str(path):
+                reopens.append(str(path))
+            return original_open(path, mode, **kwargs)
+
+        try:
+            with patch("builtins.open", side_effect=counting_open):
+                build_snapshot_from_dwarf(so, elf_meta, meta, adv, session=sess)
+        finally:
+            sess.close()
+
+        assert reopens == [], f"snapshot re-opened the ELF despite a session: {reopens}"
