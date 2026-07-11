@@ -82,7 +82,9 @@ jobs:
           #    no-op in scan mode). scan noise is controlled by scope.public +
           #    sources.exclude in .abicheck.yml and `--crosscheck KEY=off`.
           depth: source                              # L4 source-ABI replay of changed TUs
-          since: origin/${{ github.base_ref }}       # scope the (expensive) replay to the PR
+          # base_ref is only set on pull_request; fall back to the default branch
+          # for workflow_dispatch so a manual run never passes an empty `origin/`.
+          since: origin/${{ github.base_ref || github.event.repository.default_branch }}
           budget: 12m                                # fail loudly rather than overrun
           format: json
           output-file: onedal-scan-${{ matrix.iface.name }}.json
