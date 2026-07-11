@@ -899,6 +899,7 @@ def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatc
         extractors,
         cleanup=None,
         compile_db_explicit=False,
+        allow_inferred_build_query=True,
     ):
         if cleanup is not None:
             cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))
@@ -931,6 +932,7 @@ def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatc
         extractors,
         cleanup=None,
         compile_db_explicit=False,
+        allow_inferred_build_query=True,
     ):
         if cleanup is not None:
             cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))

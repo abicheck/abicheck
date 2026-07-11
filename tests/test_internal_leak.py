@@ -20,8 +20,10 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.internal_leak import (
+    _build_suffix_index,
     _candidate_type_names,
     _name_segments,
+    _resolve_type_name,
     _split_top_level_commas,
     _strip_template_args,
     compute_leak_paths,
@@ -155,6 +157,96 @@ def _public_fn(name: str, ret: str = "void", params: list[tuple[str, str]] | Non
 # ---------------------------------------------------------------------------
 # Reachability
 # ---------------------------------------------------------------------------
+
+
+class TestResolveTypeNameSuffixIndex:
+    """The suffix index is a pure O(1) optimisation of the O(N) map scan; it
+    must return byte-for-byte the same resolution the scan did (perf fix for
+    large C++ surfaces such as pvxs, where the per-node scan was quadratic)."""
+
+    _MAP = {"ns::detail::Base": None, "other::Base": None, "ns::Public": None}
+
+    def test_index_matches_scan_unique(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        # "Public" has exactly one final-segment match -> qualifies.
+        assert _resolve_type_name("Public", self._MAP) == "ns::Public"
+        assert _resolve_type_name("Public", self._MAP, idx) == "ns::Public"
+
+    def test_index_matches_scan_ambiguous(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        # "Base" matches two entries -> ambiguous, keep the literal both ways.
+        assert _resolve_type_name("Base", self._MAP) == "Base"
+        assert _resolve_type_name("Base", self._MAP, idx) == "Base"
+
+    def test_index_passthrough_and_qualified(self) -> None:
+        idx = _build_suffix_index(self._MAP)
+        assert _resolve_type_name("ns::Public", self._MAP, idx) == "ns::Public"
+        assert _resolve_type_name("", self._MAP, idx) == ""
+        assert _resolve_type_name("Missing", self._MAP, idx) == "Missing"
+
+    def test_unqualified_base_resolves_in_leak_walk(self) -> None:
+        # DWARF may record the base un-qualified; the BFS must still reach the
+        # internal type via the suffix-indexed resolver.
+        snap = _snap(
+            functions=[_public_fn("make", "Public*", [])],
+            types=[
+                RecordType(name="Public", kind="class", bases=["Base"]),
+                RecordType(name="ns::detail::Base", kind="class",
+                           fields=[TypeField(name="f", type="int")]),
+            ],
+        )
+        assert "ns::detail::Base" in compute_leak_paths(snap)
+
+    def test_suffix_index_built_once_per_walk(self, monkeypatch) -> None:
+        # Regression guard for the O(N^2) hotspot: the suffix index must be
+        # built ONCE per BFS walk, not rebuilt (or replaced by a full map scan)
+        # per visited node. A snapshot with several public roots and internal
+        # types drives multiple BFS steps; if the fix regressed (index moved
+        # inside the loop, or the per-call scan returned), this count would be
+        # != 1. This is the deterministic complement to the scale test below —
+        # it catches the exact regression that unit tests missed originally.
+        import abicheck.internal_leak as il
+
+        calls = {"n": 0}
+        real = il._build_suffix_index
+
+        def _counting(type_map):
+            calls["n"] += 1
+            return real(type_map)
+
+        monkeypatch.setattr(il, "_build_suffix_index", _counting)
+        snap = _snap(
+            functions=[_public_fn(f"make{i}", f"Public{i}*", []) for i in range(8)],
+            types=(
+                [RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"])
+                 for i in range(8)]
+                + [RecordType(name=f"ns::detail::Base{i}", kind="class",
+                              fields=[TypeField(name="f", type="int")])
+                   for i in range(8)]
+            ),
+        )
+        paths = il.compute_leak_paths(snap)
+        assert calls["n"] == 1, f"index rebuilt {calls['n']}x (should be once)"
+        assert len([k for k in paths if k.startswith("ns::detail::Base")]) == 8
+
+    def test_scale_many_types_resolves_and_terminates(self) -> None:
+        # Scale correctness at pvxs-like magnitude (thousands of types, each
+        # reached via an unqualified base that needs suffix resolution). With the
+        # O(1) index this is sub-second; the pre-fix O(N) per-node scan made the
+        # equivalent pvxs walk hang for minutes. We assert correctness (every
+        # internal base found) rather than a brittle wall-clock bound.
+        n = 3000
+        types: list[RecordType] = []
+        for i in range(n):
+            types.append(RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"]))
+            types.append(RecordType(name=f"ns::detail::Base{i}", kind="class",
+                                    fields=[TypeField(name="f", type="int")]))
+        snap = _snap(
+            functions=[_public_fn(f"make{i}", f"Public{i}*", []) for i in range(n)],
+            types=types,
+        )
+        paths = compute_leak_paths(snap)
+        assert sum(1 for k in paths if k.startswith("ns::detail::Base")) == n
 
 
 class TestComputeLeakPaths:

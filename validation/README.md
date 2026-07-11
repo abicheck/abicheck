@@ -13,6 +13,12 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
 - `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
   live against the ABICC abi-laboratory oracle across 60 libraries / 185
   comparable pairs (94.1 % agreement, 0 confirmed defects).
+- `pvxs-abi-validation-2026-07.md` — **EPICS pvxs integration:** built four
+  releases (1.4.0–1.5.2, two libraries) and scanned across L0–L5. Found and
+  fixed an O(N²) internal-leak hotspot (compare > 340 s → ~70 s), RTTI-symbol
+  alignment false positives, and a castxml-missing error that hid the clang
+  fallback; documents the public-header-scoping requirement and a drop-in CI
+  workflow replacing pvxs's ACC-based `abi-diff.sh`.
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;

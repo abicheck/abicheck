@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -68,6 +69,8 @@ if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
 
 #: Default places to look for a compile DB inside a source checkout, in order.
+logger = logging.getLogger(__name__)
+
 _COMPILE_DB_NAME = "compile_commands.json"
 #: ``builddir`` is the name the Meson docs/tutorials use for `meson setup builddir`
 #: (P12); ``build``/``_build``/``out`` cover CMake/Ninja conventions.
@@ -604,6 +607,14 @@ def effective_graph_scope(graph_detail: str, scope: str) -> str:
     return scope
 
 
+def _run_cleanups(cleanups: list[Callable[[], None]]) -> None:
+    for fn in cleanups:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def collect_inline_pack(
     *,
     sources: Path | None,
@@ -612,6 +623,7 @@ def collect_inline_pack(
     allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
     compile_db_explicit: bool = False,
+    allow_inferred_build_query: bool = True,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -680,6 +692,7 @@ def collect_inline_pack(
                 extractors,
                 cleanup=query_build_cleanups,
                 compile_db_explicit=compile_db_explicit,
+                allow_inferred_build_query=allow_inferred_build_query,
             )
         if compile_db is not None:
             _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -824,6 +837,7 @@ def _resolve_compile_db(
     extractors: list[ExtractorRecord],
     cleanup: list[Callable[[], None]] | None = None,
     compile_db_explicit: bool = False,
+    allow_inferred_build_query: bool = True,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
@@ -910,6 +924,20 @@ def _resolve_compile_db(
     discovered = _autodiscover_compile_db(sources)
     if discovered is not None:
         return discovered
+
+    if not allow_inferred_build_query:
+        # An L2-only caller (--depth headers / collect_mode "off") reached the
+        # zero-config fallback: it wants build-derived include dirs to parse headers,
+        # but no evidence was requested, so we must not run a build system. Passive
+        # discovery above is honoured; the inferred cmake/make/bazel query is not —
+        # that would violate the L2-only depth contract and could spend up to the
+        # inferred-query timeout evaluating build scripts (Codex review).
+        merged.diagnostics.append(
+            "inferred build-system query skipped: no evidence depth requested "
+            "(L2-only); pass --build-info or generate a compile_commands.json to "
+            "seed include dirs"
+        )
+        return None
 
     # Zero-config fallback: no compile DB exists and no explicit L3 input was
     # given, but a --sources tree is present. Detect the build system and run
@@ -1840,3 +1868,21 @@ def build_inline_coverage(
             layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
         )
     return [l3, l4, l5]
+
+
+def __getattr__(name: str) -> object:
+    """Lazily re-export the L2 include-seeding helpers from :mod:`l2_seed`.
+
+    ``derive_l2_include_dirs`` / ``seed_l2_includes`` were split into a sibling
+    module to keep this file under the size cap, but they have historically been
+    imported from ``inline`` (the CLI callers and tests use that path). Resolving
+    them here via ``importlib`` on attribute access preserves those import paths
+    without a static ``inline`` -> ``l2_seed`` import edge, which would re-create
+    the import cycle the split avoids (l2_seed imports collect_inline_pack etc.
+    from here). See ADR-037 D10.1's cli_buildsource shim for the same pattern.
+    """
+    if name in ("derive_l2_include_dirs", "seed_l2_includes"):
+        import importlib
+
+        return getattr(importlib.import_module(".l2_seed", __package__), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

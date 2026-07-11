@@ -165,7 +165,13 @@ def _has_include_build_context(toks: list[str]) -> bool:
     return any(t.startswith(p) for t in toks for p in _INCLUDE_FLAG_PREFIXES)
 
 
-def _build_context_include_dirs(toks: list[str]) -> set[str]:
+def _build_context_include_dirs(
+    toks: list[str],
+    *,
+    base_dir: str | None = None,
+    expand_user: bool = False,
+    prefixes: tuple[str, ...] | None = None,
+) -> set[str]:
     """Resolved include directories the compile-flag *tokens* already search.
 
     Parses every include-search flag (spaced ``-I dir`` / ``-isystem dir`` and
@@ -174,26 +180,47 @@ def _build_context_include_dirs(toks: list[str]) -> set[str]:
     context already covers: re-adding such a root as ``-isystem`` would trip GCC's
     rule that a directory given with *both* ``-I`` and ``-isystem`` has its ``-I``
     ignored — demoting the build's own ``-I`` to the system position and changing
-    search order (Codex review). Best-effort: relative dirs resolve against the
-    cwd, the same basis the inferred roots use.
+    search order (Codex review).
+
+    ``base_dir`` is the directory a *relative* operand is resolved against — pass a
+    compile unit's ``directory`` so a compile-DB flag like ``-iquote ../deps`` (run
+    with ``cwd=directory``) resolves the way the build does, not against the
+    abicheck process cwd (Codex review). ``expand_user`` un-redacts a leading ``~``
+    (compile-DB paths are stored home-relative via ``DEFAULT_REDACTION``) before
+    resolving. ``prefixes`` restricts which include-flag prefixes are parsed (default
+    all of :data:`_INCLUDE_FLAG_PREFIXES`) — a caller that will re-emit the dirs as
+    plain ``-I`` should pass only the *normal-priority* buckets (``-I``/``-iquote``/
+    ``/I``) so it does not promote an *after-system* dir (``-idirafter``) or a
+    system dir (``-isystem``/``-imsvc``) to ``-I`` and shadow a system header (Codex
+    review). All keyword-only and defaulted so existing callers are unchanged.
     """
+    flag_prefixes = prefixes if prefixes is not None else _INCLUDE_FLAG_PREFIXES
+    base = os.path.expanduser(base_dir) if (base_dir and expand_user) else base_dir
+
+    def _resolve(operand: str) -> str:
+        p = os.path.expanduser(operand) if expand_user else operand
+        pp = Path(p)
+        if base and not pp.is_absolute():
+            pp = Path(base) / pp
+        return str(pp.resolve())
+
     dirs: set[str] = set()
     i = 0
     while i < len(toks):
         t = toks[i]
-        prefix = next((p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None)
+        prefix = next((p for p in flag_prefixes if t.startswith(p)), None)
         if prefix is None:
             i += 1
             continue
         if t == prefix:  # spaced form: the directory is the next token
             if i + 1 < len(toks):
-                dirs.add(str(Path(toks[i + 1]).resolve()))
+                dirs.add(_resolve(toks[i + 1]))
             i += 2
             continue
         # Attached form ("-Idir" / "/Idir"): t is strictly longer than the prefix
         # here (the exact-match spaced form was handled above), so the operand is
         # always non-empty.
-        dirs.add(str(Path(t[len(prefix) :]).resolve()))
+        dirs.add(_resolve(t[len(prefix) :]))
         i += 1
     return dirs
 

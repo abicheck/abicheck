@@ -344,8 +344,11 @@ def _build_new_snapshot(
     defer_cleanup: list[Callable[[], None]] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
-) -> Any:
+) -> tuple[Any, list[Path]]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
+
+    Returns ``(snapshot, effective_includes)`` — the effective includes carry any
+    build-derived L2 seed so a ``--baseline`` compare can reuse the same context.
 
     The resolved ``changed_paths`` (from ``--changed-path``/``--since``) are
     threaded into the inline source replay so a ``source-changed`` collection
@@ -358,8 +361,44 @@ def _build_new_snapshot(
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
     """
+    from .buildsource.l2_seed import seed_l2_includes
     from .errors import AbicheckError
     from .service import resolve_input
+
+    # L2 include fallback: when headers are given but the user passed no explicit
+    # -I, seed the build's include dirs so the aggregate public-header parse can
+    # resolve dependency headers (e.g. pvxs headers include EPICS Base's
+    # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    #
+    # Keep the seed's temp-build-dir cleanups LOCAL (defer_cleanup=None), not on the
+    # outer scan list: the seed may run the inferred-CMake query, whose build dir is
+    # held under an exclusive flock until its cleanup runs. embed_build_source()
+    # below runs its *own* inferred query in the same function, so if we deferred the
+    # release to the outer drain (which happens after embed) that second query would
+    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s) before
+    # falling back to a fresh dir. The finally below drains _l2_local_cleanups right
+    # after resolve_input() has consumed the seeded dirs, releasing the lock before
+    # L3/L4 collection replays the query (Codex review).
+    includes, _l2_local_cleanups = seed_l2_includes(
+        headers=headers,
+        includes=includes,
+        sources=sources,
+        build_info=build_info,
+        build_config=build_config,
+        defer_cleanup=None,
+        # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
+        # CompileContext) are explicit too — pass them so the seed stays a no-op
+        # and the user's include search precedence is preserved (Codex review).
+        gcc_options=compile_context.gcc_options if compile_context else None,
+        gcc_option_tokens=(
+            compile_context.gcc_option_tokens if compile_context else ()
+        ),
+        # L2-only pins (--depth headers → collect_mode "off") requested no build/
+        # source evidence, so the include-dir seed must not run a build system just
+        # to hint headers. Passive DB discovery still applies; only the zero-config
+        # inferred cmake/make/bazel query is gated (Codex review).
+        allow_inferred_build_query=collect_mode != "off",
+    )
 
     try:
         snap = resolve_input(
@@ -376,6 +415,15 @@ def _build_new_snapshot(
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
+    finally:
+        # The L2 parse has now consumed the build-derived include dirs (whether it
+        # succeeded or raised), so release any inferred-CMake temp build dir now —
+        # before embed_build_source() below replays its own inferred query — so its
+        # exclusive flock does not block that replay for 600s (see the seed call).
+        if _l2_local_cleanups:
+            from .buildsource.inline import _run_cleanups
+
+            _run_cleanups(_l2_local_cleanups)
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":
@@ -397,7 +445,11 @@ def _build_new_snapshot(
             public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
             defer_cleanup=defer_cleanup,
         )
-    return snap
+    # Return the *effective* includes (the seed above may have added build-derived
+    # dirs) so a --baseline compare header-parses the old native library with the
+    # same include context — else the baseline side fails on dependency headers the
+    # candidate resolved via the seed (Codex review).
+    return snap, includes
 
 
 def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
@@ -1335,7 +1387,7 @@ def run_scan_core(
         advisories.append(_query_advisory)
 
     _stage = time.monotonic()
-    new_snap = _build_new_snapshot(
+    new_snap, eff_includes = _build_new_snapshot(
         binary,
         list(headers),
         list(includes),
@@ -1416,7 +1468,9 @@ def run_scan_core(
             lang,
             collect_mode,
             list(headers),
-            list(includes),
+            # Effective (seeded) includes so the baseline native parse gets the same
+            # build-derived dependency include dirs as the candidate (Codex review).
+            list(eff_includes),
             list(public_headers),
             list(public_header_dirs),
             compile_context=compile_context,

@@ -248,6 +248,33 @@ def _record_kind_from_tag(tag: str) -> str:
     return "struct"
 
 
+# DIE tags whose children can hold ABI-relevant *top-level* declarations the
+# main traversal dispatches on (nested types, member functions, namespace/CU
+# members). Only these are descended into: every other tag — variables,
+# typedefs, enums (their enumerators are consumed in place), members, base/
+# pointer/qualifier type-chain DIEs, parameters — has no such descendant, so
+# pushing its children onto the work stack is pure overhead. Restricting the
+# descent this way, plus reusing one materialized child list per container for
+# both field-collection and descent, makes the walk single-pass over the DIE
+# tree (previously records' children were iterated twice — once to build fields,
+# once by the generic descent — and every leaf DIE's empty child list was still
+# materialized). ``iter_children()`` is the dominant DWARF-parse cost, so halving
+# the calls is the primary saving.
+_DESCEND_TAGS: frozenset[str] = frozenset(
+    {
+        # Compilation-unit roots (top DIE) — their children are the CU's decls.
+        "DW_TAG_compile_unit",
+        "DW_TAG_partial_unit",
+        "DW_TAG_type_unit",
+        # Namespaces and records nest further ABI-relevant declarations.
+        "DW_TAG_namespace",
+        "DW_TAG_structure_type",
+        "DW_TAG_class_type",
+        "DW_TAG_union_type",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Internal builder
 # ---------------------------------------------------------------------------
@@ -369,6 +396,11 @@ class _DwarfSnapshotBuilder:
 
             die_name = _attr_str(die, "DW_AT_name")
             next_scope = scope
+            # Materialize a container's children at most once and reuse the list
+            # for both field-collection (records/enums) and the descent push, so
+            # ``iter_children()`` (the dominant DWARF-parse cost) runs once per DIE,
+            # not twice. ``None`` until a branch that needs the children populates it.
+            children: list[Any] | None = None
 
             if tag == "DW_TAG_namespace" and die_name:
                 next_scope = f"{scope}::{die_name}" if scope else die_name
@@ -383,16 +415,26 @@ class _DwarfSnapshotBuilder:
                 "DW_TAG_union_type",
             ):
                 qualified = f"{scope}::{die_name}" if (scope and die_name) else die_name
-                self._process_record_type(die, CU, scope)
+                children = list(die.iter_children())
+                self._process_record_type(die, CU, scope, children)
                 if die_name:
                     next_scope = qualified or scope
             elif tag == "DW_TAG_enumeration_type":
-                self._process_enum(die, CU, scope)
+                # Enumerators are consumed here; the enum itself is not descended
+                # (not in _DESCEND_TAGS), so this list is used exactly once.
+                children = list(die.iter_children())
+                self._process_enum(die, CU, scope, children)
             elif tag == "DW_TAG_typedef":
                 self._process_typedef(die, CU, scope)
 
-            for child in reversed(list(die.iter_children())):
-                stack.append((child, next_scope))
+            # Only descend into containers that can hold ABI-relevant nested decls
+            # (see _DESCEND_TAGS) — pushing leaf DIEs' (usually empty) child lists
+            # was the redundant half of the old two-pass walk.
+            if tag in _DESCEND_TAGS:
+                if children is None:
+                    children = list(die.iter_children())
+                for child in reversed(children):
+                    stack.append((child, next_scope))
 
     # -------------------------------------------------------------------
     # Subprogram (function) extraction
@@ -612,8 +654,14 @@ class _DwarfSnapshotBuilder:
     # Record type (struct/class/union) extraction
     # -------------------------------------------------------------------
 
-    def _process_record_type(self, die: Any, CU: Any, scope: str) -> None:
-        """Extract a struct/class/union from DWARF."""
+    def _process_record_type(
+        self, die: Any, CU: Any, scope: str, children: list[Any] | None = None
+    ) -> None:
+        """Extract a struct/class/union from DWARF.
+
+        *children*, when supplied by the main traversal, is the already-materialized
+        child DIE list, reused so ``iter_children()`` is not called a second time.
+        """
         name = _attr_str(die, "DW_AT_name")
         if not name:
             return  # anonymous — handled via typedef
@@ -621,10 +669,17 @@ class _DwarfSnapshotBuilder:
             return
 
         qualified = f"{scope}::{name}" if scope else name
-        self._process_record_type_named(die, CU, qualified)
+        self._process_record_type_named(die, CU, qualified, children)
 
-    def _process_record_type_named(self, die: Any, CU: Any, qualified: str) -> None:
-        """Extract a struct/class/union using a given qualified name."""
+    def _process_record_type_named(
+        self, die: Any, CU: Any, qualified: str, children: list[Any] | None = None
+    ) -> None:
+        """Extract a struct/class/union using a given qualified name.
+
+        *children* is the pre-materialized child DIE list from the main traversal
+        (reused to avoid a second ``iter_children()``); ``None`` on the anonymous-
+        typedef path, where the target DIE's children are iterated on demand.
+        """
         byte_size = _attr_int(die, "DW_AT_byte_size")
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
             return  # forward declaration only
@@ -637,7 +692,7 @@ class _DwarfSnapshotBuilder:
         kind = _record_kind_from_tag(tag)
 
         fields, bases, virtual_bases, vtable, base_offsets = (
-            self._collect_record_type_children(die, CU)
+            self._collect_record_type_children(die, CU, children)
         )
 
         alignment = _attr_int(die, "DW_AT_alignment")
@@ -696,8 +751,13 @@ class _DwarfSnapshotBuilder:
         self,
         die: Any,
         CU: Any,
+        children: list[Any] | None = None,
     ) -> tuple[list[TypeField], list[str], list[str], list[str], dict[str, int]]:
         """Iterate over the children of a record-type DIE.
+
+        *children*, when provided, is the already-materialized child DIE list
+        (from the main traversal) and is reused instead of re-walking the DIE; it
+        is ``None`` only on the anonymous-typedef path, which iterates on demand.
 
         Returns ``(fields, bases, virtual_bases, vtable, base_offsets)``.
 
@@ -717,7 +777,8 @@ class _DwarfSnapshotBuilder:
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
 
-        for child in die.iter_children():
+        kids = children if children is not None else die.iter_children()
+        for child in kids:
             if child.tag == "DW_TAG_member":
                 tf = self._process_field(child, CU)
                 if tf is not None:
@@ -881,8 +942,14 @@ class _DwarfSnapshotBuilder:
     # Enum extraction
     # -------------------------------------------------------------------
 
-    def _process_enum(self, die: Any, CU: Any, scope: str) -> None:
-        """Extract an enum from DWARF."""
+    def _process_enum(
+        self, die: Any, CU: Any, scope: str, children: list[Any] | None = None
+    ) -> None:
+        """Extract an enum from DWARF.
+
+        *children* is the pre-materialized child DIE list from the main traversal,
+        reused to avoid a second ``iter_children()``.
+        """
         name = _attr_str(die, "DW_AT_name")
         if not name:
             return
@@ -890,10 +957,16 @@ class _DwarfSnapshotBuilder:
             return
 
         qualified = f"{scope}::{name}" if scope else name
-        self._process_enum_named(die, CU, qualified)
+        self._process_enum_named(die, CU, qualified, children)
 
-    def _process_enum_named(self, die: Any, CU: Any, qualified: str) -> None:
-        """Extract an enum using a given qualified name."""
+    def _process_enum_named(
+        self, die: Any, CU: Any, qualified: str, children: list[Any] | None = None
+    ) -> None:
+        """Extract an enum using a given qualified name.
+
+        *children* is the pre-materialized child DIE list (reused when supplied);
+        ``None`` on the anonymous-typedef path, which iterates on demand.
+        """
         if qualified in self._seen_enum_names:
             if qualified not in self._logged_enum_dups:
                 self._logged_enum_dups.add(qualified)
@@ -911,7 +984,8 @@ class _DwarfSnapshotBuilder:
             underlying, _ = self._resolve_type(die, CU)
 
         members: list[EnumMember] = []
-        for child in die.iter_children():
+        kids = children if children is not None else die.iter_children()
+        for child in kids:
             if child.tag == "DW_TAG_enumerator":
                 m_name = _attr_str(child, "DW_AT_name")
                 m_val = _attr_int(child, "DW_AT_const_value")

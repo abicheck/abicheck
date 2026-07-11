@@ -580,8 +580,17 @@ def _check_object_alignment_reduced(
     already treats them as data objects, so they are included here. Only the
     reduction direction is a hazard — a stricter alignment satisfies every old
     consumer.
+
+    Compiler-emitted RTTI/vtable objects (_ZTV, _ZTI, _ZTS, _ZTT) are skipped —
+    their st_value alignment is a linker-placement artifact of the mangled-name
+    string length and neighbouring symbol layout, not a declared data-object
+    alignment, so a "reduction" there is noise rather than an ABI hazard. This
+    mirrors _check_symbol_size_change, which excludes the same four prefixes as
+    not ABI-meaningful (their real shape changes are owned by diff_elf_layout).
     """
     if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
+        return []
+    if sym_name.startswith(("_ZTV", "_ZTI", "_ZTS", "_ZTT")):
         return []
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)
