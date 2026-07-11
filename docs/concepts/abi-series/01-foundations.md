@@ -146,6 +146,94 @@ Mangling means that in C++ a **parameter type, a `const` qualifier, or a
 namespace change rewrites the symbol name** — turning a source-level edit into a
 linker-level removal. We return to this repeatedly in [Part 4](04-cpp-abi.md).
 
+### Symbols in the wild: full, stripped, and debug-info binaries
+
+The `.o` above is a teaching example. A *shipped* `.so`/`.dll`/`.dylib` comes in
+several distinct shapes, and which shape you have determines what a tool can
+possibly know about it. This matters because the three shapes are easy to
+confuse — "it has symbols" does not mean "it has debug info" — and the gap
+between them is exactly where a compatibility checker goes blind.
+
+Build one small library three ways and look at what each actually contains:
+
+```bash
+$ gcc -g -shared -fPIC math.c -o libmath.debug.so   # (1) debug build, unstripped
+$ cp libmath.debug.so libmath.release.so
+$ strip -s libmath.release.so                       # (2) fully stripped release
+$ objcopy --only-keep-debug libmath.debug.so libmath.release.so.debug   # (3) split debug file
+$ strip -g libmath.release.so.debug -o /dev/null 2>/dev/null; true      # (debug file keeps DWARF)
+$ objcopy --add-gnu-debuglink=libmath.release.so.debug libmath.release.so
+```
+
+**(1) The debug build** carries everything: a `.dynsym` (the *dynamic* symbol
+table — what the loader resolves at runtime), a `.symtab` (every symbol,
+including file-local ones the loader never sees), and full DWARF (`.debug_info`,
+`.debug_line`, …) describing every type's layout:
+
+```bash
+$ readelf -S libmath.debug.so | grep -E '\.dynsym|\.symtab|\.debug_info'
+  [ 6] .dynsym           DYNSYM
+  [23] .symtab           SYMTAB
+  [27] .debug_info       PROGBITS
+```
+
+**(2) The fully stripped release binary** — `strip -s`, which is what most
+distro packages, most `pip`/`conda` wheels, and most vendor SDKs ship — removes
+`.symtab` and every `.debug_*` section. The one thing `strip` does **not**
+remove is `.dynsym`: the *dynamic* symbol table is what the loader needs to
+resolve the library at every future load, so it survives strip by construction.
+
+```bash
+$ readelf -S libmath.release.so | grep -E '\.dynsym|\.symtab|\.debug_info'
+  [ 5] .dynsym           DYNSYM
+$ nm -D libmath.release.so       # -D reads .dynsym — still works, fully stripped
+0000000000001139 T add
+0000000000001149 T tally
+$ nm libmath.release.so          # plain nm reads .symtab — gone
+nm: libmath.release.so: no symbols
+```
+
+This is the detail people miss: **"stripped" does not mean "no symbols" — it
+means "no *local* symbols and no debug info."** The exported, demangled symbol
+names, their versions, and the SONAME are still fully readable on a "fully
+stripped" `.so`.
+
+**(3) The split-debug pair** is how distros ship both: the release `.so` above,
+*plus* a separate `.debug` file holding the DWARF that was stripped out of it,
+linked back together by a `.gnu_debuglink` section (matched by a build-id, not
+by filename):
+
+```bash
+$ readelf -S libmath.release.so.debug | grep debug_info
+  [27] .debug_info       PROGBITS
+$ readelf -n libmath.release.so | grep 'Build ID'
+    Build ID: 3fae1c9e2b7a4d0f...
+```
+
+Fedora/RHEL ship this as a `-debuginfo` package, Debian/Ubuntu as `-dbg`/`-dbgsym`,
+resolvable at runtime via a `debuginfod` server; macOS ships the equivalent as a
+`.dSYM` bundle; Windows keeps DWARF-equivalent type/layout info in a separate
+`.pdb` matched by a GUID embedded in the `.dll`.
+
+| Binary shape | `.dynsym` (exported) | `.symtab` (local) | DWARF/PDB (layout) | Where you meet it |
+|---|:---:|:---:|:---:|---|
+| Debug build (`-g`, unstripped) | ✅ | ✅ | ✅ | what you build locally, CI test binaries |
+| Fully stripped release | ✅ | ❌ | ❌ | what actually ships — distro packages, wheels, SDKs |
+| `strip --strip-debug` only | ✅ | ✅ | ❌ | rare middle ground — keeps local symbols, drops DWARF |
+| Stripped `.so` + separate debug file/package | ✅ (main file) | ❌ (main file) | ✅ (in the `.debug`/`.pdb`/`.dSYM`) | `-dbg`/`-debuginfo` packages, `debuginfod`, `.dSYM`, `.pdb` |
+
+!!! note "How abicheck sees it"
+    `.dynsym` alone is enough for **L0** — symbol add/remove/rename, SONAME,
+    versioning — so abicheck can always do at least a symbol-level compare on a
+    binary you download off a mirror, stripped or not. **L1** (struct layout,
+    calling convention, vtables) needs DWARF/PDB: either the binary is
+    unstripped, or you point abicheck at the split debug file with
+    `--debug-root` (build-id tree / path mirror) or `--debuginfod` (query a
+    debuginfod server by build-id). Full walk-through, `nm`/`readelf` output
+    included, in [Stripped Production Binaries](../limitations.md#stripped-production-binaries)
+    and the level-by-level [L0 section](../what-each-level-sees.md#level-0-the-shipped-binary-symbols-only)
+    of the worked example.
+
 ---
 
 ## 3. Static vs dynamic linking
