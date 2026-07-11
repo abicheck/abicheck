@@ -68,6 +68,7 @@ nav:
       - Tool Modes: user-guide/tool-modes.md
       - Python API: user-guide/python-api.md
       - MCP Integration: user-guide/mcp-integration.md
+      - Upgrading to 0.5.0: user-guide/migration-0.5.md
       - Migrating from ABICC: user-guide/from-abicc.md
       - Migrating from libabigail: user-guide/from-libabigail.md
   # How the tool works, simplest mental model first: what a verdict means →
