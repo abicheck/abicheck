@@ -439,6 +439,73 @@ static int internal_func(int x) {
         assert "GREEN" in member_names
         assert "BLUE" in member_names
 
+    @pytest.fixture()
+    def nested_cpp_lib(self, tmp_path: Path) -> Path:
+        """Compile a C++ library with records, members, inheritance, nested types."""
+        cpp = tmp_path / "lib.cpp"
+        cpp.write_text("""\
+namespace pkg {
+struct Base { virtual ~Base(); virtual int f(int); int b0; double b1; };
+struct Derived : Base {
+    int a0; long a1; char a2;
+    int f(int) override;
+    struct Nested { int x; long y; };
+    enum class E { A, B, C };
+};
+Base::~Base() {}
+int Base::f(int z) { return z; }
+int Derived::f(int z) { return z + a0; }
+}
+""")
+        so_path = tmp_path / "libnested.so"
+        result = subprocess.run(
+            [_GCC.replace("gcc", "g++"), "-shared", "-fPIC", "-g", "-std=c++17",
+             "-o", str(so_path), str(cpp)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_single_pass_no_double_child_iteration(self, nested_cpp_lib: Path) -> None:
+        """The traversal is single-pass: no DIE's children are iterated twice.
+
+        Records used to have their children walked once to build fields/bases/vtable
+        and again by the generic descent; the refactor materializes each container's
+        children once and reuses them. Locking this catches a regression that
+        re-introduces the redundant second ``iter_children()`` (the dominant
+        DWARF-parse cost).
+        """
+        from collections import Counter
+
+        from elftools.dwarf import die as die_mod
+
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.elf_metadata import parse_elf_metadata
+
+        counts: Counter = Counter()
+        orig = die_mod.DIE.iter_children
+
+        def counting_iter_children(self):  # type: ignore[no-untyped-def]
+            counts[(self.cu.cu_offset, self.offset)] += 1
+            return orig(self)
+
+        die_mod.DIE.iter_children = counting_iter_children  # type: ignore[assignment]
+        try:
+            elf_meta = parse_elf_metadata(nested_cpp_lib)
+            builder = _DwarfSnapshotBuilder(nested_cpp_lib, elf_meta)
+            builder.extract()
+        finally:
+            die_mod.DIE.iter_children = orig  # type: ignore[assignment]
+
+        # Sanity: the record content was actually extracted (so the walk ran).
+        type_names = {t.name for t in builder.types}
+        assert "pkg::Derived" in type_names
+        assert "pkg::Base" in type_names
+
+        # Single-pass invariant: every DIE's children materialized at most once.
+        repeated = {k: n for k, n in counts.items() if n > 1}
+        assert not repeated, f"DIEs whose children were iterated more than once: {repeated}"
+
     def test_snapshot_has_variables(self, simple_lib: Path) -> None:
         """DWARF snapshot should contain exported variables."""
         from abicheck.dwarf_unified import parse_dwarf
