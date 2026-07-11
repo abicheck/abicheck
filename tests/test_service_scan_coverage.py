@@ -53,6 +53,16 @@ from abicheck.service_scan import (
     run_scan_subprocess,
 )
 
+# The _kill_process_tree group-termination logic is POSIX-only: it relies on
+# os.getpgid/os.getpgrp/os.killpg and signal.SIGKILL, none of which exist on
+# Windows (there the production code hits AttributeError and degrades to a plain
+# terminate()). These tests assert the POSIX escalation path, so skip them off
+# POSIX rather than forcing an unreachable branch on Windows.
+_posix_process_groups = pytest.mark.skipif(
+    not hasattr(os, "getpgid"),
+    reason="POSIX process-group termination (os.getpgid/killpg, signal.SIGKILL) is POSIX-only",
+)
+
 
 @pytest.fixture
 def snap_path(tmp_path: Path) -> Path:
@@ -315,31 +325,30 @@ def test_kill_process_tree_noop_when_dead() -> None:
     assert proc.terminated == 0 and proc.joins == []
 
 
+@_posix_process_groups
 def test_kill_process_tree_kills_own_group_via_terminate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # When the child never detached (its pgid still equals the parent's group),
     # killpg would nuke the parent — so terminate() the single process instead.
-    # raising=False so the POSIX-only os.getpgid/os.getpgrp can be injected on
-    # Windows too (production catches their AttributeError there); monkeypatch
-    # removes the injected attrs on teardown.
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 777, raising=False)
-    monkeypatch.setattr(os, "getpgrp", lambda: 777, raising=False)
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 777)
+    monkeypatch.setattr(os, "getpgrp", lambda: 777)
     proc = _FakeProc()
     _kill_process_tree(proc)
     assert proc.terminated == 1
     assert 5 in proc.joins  # the trailing reap join
 
 
+@_posix_process_groups
 def test_kill_process_tree_kills_detached_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A detached child (own process group) is killed group-wide: SIGTERM, and —
     # because our fake stays alive — an escalation SIGKILL.
     signals: list[tuple[int, int]] = []
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 999, raising=False)
-    monkeypatch.setattr(os, "getpgrp", lambda: 111, raising=False)
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)), raising=False)
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
     proc = _FakeProc()  # stays alive → triggers the SIGKILL escalation
     _kill_process_tree(proc)
     import signal
@@ -349,6 +358,7 @@ def test_kill_process_tree_kills_detached_group(
     assert 3 in proc.joins and 5 in proc.joins
 
 
+@_posix_process_groups
 def test_kill_process_tree_falls_back_on_oserror(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -356,13 +366,14 @@ def test_kill_process_tree_falls_back_on_oserror(
     def _boom(_pid: int) -> int:
         raise ProcessLookupError("gone")
 
-    monkeypatch.setattr(os, "getpgid", _boom, raising=False)
+    monkeypatch.setattr(os, "getpgid", _boom)
     proc = _FakeProc()
     _kill_process_tree(proc)
     assert proc.terminated == 1
     assert 5 in proc.joins
 
 
+@_posix_process_groups
 def test_kill_process_tree_swallows_terminate_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -370,7 +381,7 @@ def test_kill_process_tree_swallows_terminate_failure(
     # and terminate() *also* raises. The inner guard swallows it, and the trailing
     # reap join still runs, so the helper never propagates.
     monkeypatch.setattr(
-        os, "getpgid", lambda _pid: (_ for _ in ()).throw(OSError("gone")), raising=False
+        os, "getpgid", lambda _pid: (_ for _ in ()).throw(OSError("gone"))
     )
 
     class _StubbornProc(_FakeProc):
