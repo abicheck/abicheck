@@ -1432,6 +1432,16 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         ParameterSource.ENVIRONMENT,
     }
     for dest, value in profile.items():
+        # ``--depth`` and ``--max`` are the same dial on two dests: an explicit
+        # ``--max`` (dest ``max_depth``) is the user's depth choice, so the
+        # profile's ``depth`` must yield to it — otherwise resolve_dump_depth
+        # sees "--max plus a different --depth" and exits 64 (Codex review).
+        if (
+            dest == "depth"
+            and get_source is not None
+            and get_source("max_depth") in explicit
+        ):
+            continue
         src = get_source(dest) if get_source is not None else None
         # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
         # / unknown). An explicit --flag or a mapped env var stays untouched.

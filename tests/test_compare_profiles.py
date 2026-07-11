@@ -112,6 +112,17 @@ class TestApplyProfileUnit:
         assert result.exit_code == 64, result.output
         assert "single-pair" in result.output
 
+    def test_explicit_max_beats_profile_depth(self) -> None:
+        """Regression (Codex P2): an explicit --max must not conflict with a
+        profile's depth. --max writes to the separate max_depth dest, so the
+        profile would otherwise still inject depth and resolve_dump_depth would
+        reject '--max plus a different --depth'."""
+        kwargs: dict[str, object] = {"profile": "quick", "depth": None, "max_depth": True}
+        apply_compare_profile(_FakeCtx(explicit={"max_depth"}), kwargs)
+        # profile's depth='binary' is skipped; the user's --max stands alone
+        assert kwargs["depth"] is None
+        assert kwargs["max_depth"] is True
+
     def test_no_profile_is_a_noop(self) -> None:
         kwargs: dict[str, object] = {"profile": None, "depth": None}
         apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
@@ -151,6 +162,15 @@ class TestProfileEndToEnd:
         assert result.exit_code == 0, result.output
         # ci-gate would pick 'review'; explicit --format json wins → JSON object
         assert result.output.lstrip().startswith("{")
+
+    def test_profile_with_explicit_max_does_not_conflict(self, tmp_path) -> None:
+        """`compare … --profile quick --max` must not exit 64 (depth conflict)."""
+        old_p, new_p = _write_snapshots(tmp_path)
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--profile", "quick", "--max"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "is not one of" not in result.output  # no depth-conflict rejection
 
     def test_unknown_profile_is_a_usage_error(self, tmp_path) -> None:
         old_p, new_p = _write_snapshots(tmp_path)
