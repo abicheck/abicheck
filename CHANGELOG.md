@@ -126,6 +126,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     with `env-newer.yaml`/`env-older.yaml` matrices showing the floor contract
     settling the verdict both ways. Validated compiler-free by
     `tests/test_environment_drift.py`.
+- **Platform-coverage extension (24 new `ChangeKind`s, total 342).** Closes the
+  parsed-but-never-diffed and small-parser gaps found in the checker-coverage
+  review, across four fronts:
+  - **Dynamic loader / import surface (ELF, PE):** `imported_symbol_added` /
+    `imported_symbol_removed` (undefined-symbol set; on PE also per-DLL
+    imported-function drift incl. import-by-ordinal), `interpreter_changed`
+    (PT_INTERP), `bind_now_disabled`, `dynamic_loading_flags_changed`
+    (DF_1_NODELETE/NOOPEN/ORIGIN), `elf_init_fini_changed`,
+    `exported_object_alignment_reduced` (copy-relocation hazard), and
+    `allocator_replacement_added`/`_removed` (global `operator new`/`delete`
+    exports). PE delay-load imports are now parsed and diffed as dependencies.
+  - **Platform identity & deployment floors:** `elf_endianness_changed`
+    (EI_DATA), `x86_isa_baseline_raised` (GNU_PROPERTY_X86_ISA_1_NEEDED,
+    x86-64-v2/v3/v4), `os_deployment_floor_raised` (Mach-O minos, PE subsystem
+    version, ELF NT_GNU_ABI_TAG kernel floor), `pe_hardening_weakened` /
+    `pe_hardening_improved` (DllCharacteristics DEP/ASLR/HIGH_ENTROPY_VA/CFG —
+    the first PE hardening diff), `library_version_downgraded`,
+    `macho_filetype_changed`, `macho_linkage_flags_changed`, and
+    `macho_reexport_changed`. Mach-O now also parses LC_RPATH (feeds
+    `rpath_changed`), decodes arm64e cpusubtypes, walks the dyld export trie
+    (trie-only exports + weak/re-export flags), and reports strong↔weak export
+    flips via the existing binding kinds.
+  - **Language contracts (header tier):** `func_variadic_added`/`_removed`
+    (C ellipsis), `func_contract_attribute_added`/`_removed` (nonnull,
+    noreturn, format, alloc_size, malloc, warn_unused_result, …; a
+    calling-convention attribute flip routes to `calling_convention_changed`),
+    `func_exception_spec_changed` (dynamic `throw(...)`), and
+    `var_alignment_changed` (`alignas` on exported variables). A persisting
+    virtual method whose `vtable_index` moved now emits `type_vtable_changed`.
+  - **MSVC/PDB & kernel type info:** PDB method calling conventions
+    (LF_ONEMETHOD → LF_MFUNCTION CV_call_e) are wired into
+    `calling_convention_changed`; raw BTF/CTF blob snapshots now bridge
+    function prototypes and typedef targets into the signature/typedef
+    detectors instead of dropping them.
 
 - **G23 Phase D — ecosystem detectors (7 new `ChangeKind`s).**
   - **kABI (`Module.symvers`) diff** — pass two kernel `Module.symvers`

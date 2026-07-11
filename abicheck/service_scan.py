@@ -435,24 +435,15 @@ def _count_bazel_build_info_tus(path: Path) -> int | None:
         return None
 
 
-def estimate_scan(
+def _resolve_estimate_level(
     req: ScanRequest,
-    *,
-    resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
-) -> list[CostEstimate]:
-    """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
-
-    Probes the project (TU count from the compile DB or source tree, public-header
-    fan-out, the resolved level's collect mode) and returns one
-    :class:`CostEstimate` per L-layer the chosen level would touch — **without
-    running any compiler or parsing any binary**. The numbers are coarse anchors
-    (see ``_COST_PER_*``); the estimate's job is to *rank* layers so a maintainer
-    can pick a depth/budget, not to be a precise wall-clock prediction.
-    """
+    resolved_level: tuple[SourceMethod, EvidenceDepth] | None,
+) -> tuple[SourceMethod, EvidenceDepth, str]:
+    """Resolve the (method, depth) level and its collect mode for the estimate."""
     (
         RiskRules,
         score_changed_paths,
-        EvidenceDepth,
+        _EvidenceDepth,
         ScanMode,
         SourceMethod,
         level_to_collect_mode,
@@ -485,8 +476,11 @@ def estimate_scan(
         resolved, eff_depth = resolve_level(
             mode=mode, source_method=sm, depth=dp, auto_method=auto_method
         )
-    collect_mode = level_to_collect_mode(resolved, eff_depth)
+    return resolved, eff_depth, level_to_collect_mode(resolved, eff_depth)
 
+
+def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
+    """Project-wide TU count and its provenance note for the estimate."""
     # Count TUs from the *same* effective build-info the real scan uses
     # (`req.compile_db or req.build_info`) so an explicit --compile-db wins over a
     # Bazel --build-info here too — else the estimate could price a different action
@@ -502,29 +496,18 @@ def estimate_scan(
     pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
     compile_db = _discover_compile_db(req.sources, eff_build_info)
     if bazel_tus is not None:
-        total_tus = bazel_tus
-        tu_note = "Bazel aquery/cquery (build_evidence)"
-    elif pack_tus is not None:
-        total_tus = pack_tus
-        tu_note = "abicheck collect pack (build_evidence)"
-    elif compile_db is not None:
-        total_tus = _count_compile_db_tus(compile_db)
-        tu_note = f"compile DB: {compile_db.name}"
-    elif req.sources is not None:
-        total_tus = _count_source_tus(req.sources)
-        tu_note = "counted source files (no compile DB)"
-    else:
-        total_tus = 0
-        tu_note = "no source tree / compile DB"
+        return bazel_tus, "Bazel aquery/cquery (build_evidence)"
+    if pack_tus is not None:
+        return pack_tus, "abicheck collect pack (build_evidence)"
+    if compile_db is not None:
+        return _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
+    if req.sources is not None:
+        return _count_source_tus(req.sources), "counted source files (no compile DB)"
+    return 0, "no source tree / compile DB"
 
-    # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
-    # the estimate must not price an L2_header layer for headers that won't be parsed
-    # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
-    # what executes (Codex review). Keyed on the resolved effective depth.
-    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
-    expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
-    n_headers = len(expanded_headers)
-    l2_seconds = _estimate_header_seconds(expanded_headers)
+
+def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) -> int:
+    """TUs the L4 replay (and its clang call-graph pass) would touch."""
     # The L4 replay scope: a changed-only collection touches at most the changed
     # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
     # budget's max_tus is a documented cap (never shrinks scope silently — it
@@ -553,8 +536,24 @@ def estimate_scan(
         replay_tus = total_tus
     if req.budget.max_tus:
         replay_tus = min(replay_tus, req.budget.max_tus)
+    return replay_tus
 
-    estimates: list[CostEstimate] = [
+
+def _intrinsic_layer_estimates(
+    req: ScanRequest, eff_depth: EvidenceDepth
+) -> list[CostEstimate]:
+    """The always-present L0/L1/L2 rows (intrinsic layers, no S-method)."""
+    from .buildsource.scan_levels import EvidenceDepth
+
+    # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
+    # the estimate must not price an L2_header layer for headers that won't be parsed
+    # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
+    # what executes (Codex review). Keyed on the resolved effective depth.
+    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
+    n_headers = len(expanded_headers)
+    l2_seconds = _estimate_header_seconds(expanded_headers)
+    return [
         CostEstimate(
             None,
             "L0_binary",
@@ -576,6 +575,16 @@ def estimate_scan(
         ),
     ]
 
+
+def _source_layer_estimates(
+    resolved: SourceMethod,
+    collect_mode: str,
+    total_tus: int,
+    tu_note: str,
+    replay_tus: int,
+) -> list[CostEstimate]:
+    """The collect-mode-dependent L3/L4/L5 rows (source-evidence layers)."""
+    estimates: list[CostEstimate] = []
     if collect_mode in ("build", "graph-build", "source-changed", "graph-full"):
         estimates.append(
             CostEstimate(
@@ -625,6 +634,30 @@ def estimate_scan(
                 f"call-graph clang pass ({replay_tus} of {total_tus} TU(s))",
             )
         )
+    return estimates
+
+
+def estimate_scan(
+    req: ScanRequest,
+    *,
+    resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
+) -> list[CostEstimate]:
+    """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
+
+    Probes the project (TU count from the compile DB or source tree, public-header
+    fan-out, the resolved level's collect mode) and returns one
+    :class:`CostEstimate` per L-layer the chosen level would touch — **without
+    running any compiler or parsing any binary**. The numbers are coarse anchors
+    (see ``_COST_PER_*``); the estimate's job is to *rank* layers so a maintainer
+    can pick a depth/budget, not to be a precise wall-clock prediction.
+    """
+    resolved, eff_depth, collect_mode = _resolve_estimate_level(req, resolved_level)
+    total_tus, tu_note = _estimate_total_tus(req)
+    replay_tus = _estimate_replay_tus(req, collect_mode, total_tus)
+    estimates = _intrinsic_layer_estimates(req, eff_depth)
+    estimates.extend(
+        _source_layer_estimates(resolved, collect_mode, total_tus, tu_note, replay_tus)
+    )
     return estimates
 
 

@@ -178,7 +178,7 @@ checking.
 > **A sixth code you may meet later:** the `scan` docs also use **`L5`** — the
 > source *reachability graph* abicheck **derives** from L3/L4 evidence. You
 > provide five sources (L0–L4); L5 is computed, never an input. See
-> [Evidence Layers & Scan Depth](concepts/scan-and-evidence-levels.md).
+> [Evidence & Detectability](concepts/evidence-and-detectability.md).
 
 Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
 found for a binary. For the full picture see [Evidence &

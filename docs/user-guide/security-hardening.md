@@ -71,5 +71,9 @@ two findings appear under the deployment-risk section.
 
 ## Scope
 
-This covers the ELF hardening surface. Non-ELF hardening (PE `/GS`,
-`/DYNAMICBASE`; macOS hardened runtime) is out of scope for now.
+This covers the ELF hardening surface. On Windows, the PE
+`DllCharacteristics` mitigation bits are also diffed: losing
+NX_COMPAT (DEP), DYNAMIC_BASE (ASLR), HIGH_ENTROPY_VA, or GUARD_CF
+(Control Flow Guard) reports `pe_hardening_weakened` (RISK) and gaining
+them reports `pe_hardening_improved` (compatible), mirroring the ELF
+pairs above. macOS hardened runtime remains out of scope for now.

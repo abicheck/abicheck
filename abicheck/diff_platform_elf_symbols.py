@@ -567,6 +567,37 @@ def _check_func_visibility_protected(
     ]
 
 
+def _check_object_alignment_reduced(
+    sym_name: str, s_old: Any, s_new: Any
+) -> list[Change]:
+    """Detect exported data objects whose address alignment dropped.
+
+    Alignment is derived from st_value (power-of-two factor, page-capped) at
+    parse time; 0 means unknown (legacy snapshot), so both sides must carry a
+    positive value. Only data objects matter (copy relocations / aligned data
+    access); function alignment is a codegen artifact. COMMON (tentative
+    definition) exports are copy-relocation data too — the size detector
+    already treats them as data objects, so they are included here. Only the
+    reduction direction is a hazard — a stricter alignment satisfies every old
+    consumer.
+    """
+    if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
+        return []
+    old_align = getattr(s_old, "value_alignment", 0)
+    new_align = getattr(s_new, "value_alignment", 0)
+    if not (old_align > 0 and new_align > 0 and new_align < old_align):
+        return []
+    return [
+        make_change(
+            ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED,
+            symbol=sym_name,
+            name=sym_name,
+            old=str(old_align),
+            new=str(new_align),
+        )
+    ]
+
+
 def _diff_elf_symbol_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -580,4 +611,150 @@ def _diff_elf_symbol_pair(
     changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
     changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
     changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
+    changes.extend(_check_object_alignment_reduced(sym_name, s_old, s_new))
     return changes
+
+
+# ── Import-surface and allocator-replacement detectors (coverage extension) ──
+
+#: Itanium manglings of the *global* (non-placement, non-member) operator
+#: new/delete family: _Znw/_Zna = operator new/new[], _Zdl/_Zda = delete/
+#: delete[] (plain, aligned, nothrow, and sized variants all share these
+#: prefixes). Member operators mangle inside their class (_ZN...) and never
+#: start with these tokens.
+_ALLOCATOR_MANGLING_PREFIXES = ("_Znw", "_Zna", "_Zdl", "_Zda")
+
+#: Placement new/delete forms, which are NOT replaceable global allocation
+#: functions — they only serve explicit placement call sites, so their
+#: presence flipping is not an allocator-contract change. Placement new is
+#: ``operator new(size_t, void*)`` → ``_Zn[wa][jmy]Pv``; placement delete is
+#: ``operator delete(void*, void*)`` → ``_Zd[la]Pv{S_|Pv}`` (the second void*
+#: is spelled ``S_`` by Itanium substitution, or ``Pv`` unsubstituted). Sized
+#: (``_ZdlPvm``), aligned (``…St11align_val_t``) and nothrow delete keep a
+#: non-pointer second parameter and are correctly left in the replaceable set.
+_PLACEMENT_OPERATOR_RE = re.compile(r"^_Zn[wa][jmy]Pv|^_Zd[la]Pv(?:S_|Pv)")
+
+
+def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Diff the undefined-symbol (import) surface of the two binaries.
+
+    A newly-imported symbol is a new obligation on the consumer's link
+    environment — if no loaded dependency provides it, the dynamic linker
+    fails. Weak imports are skipped in the added direction (they resolve to
+    null rather than failing). Gated on captured ELF identity on both sides
+    (not on the lists being non-empty): a parsed ELF with zero undefined
+    symbols is real evidence of "imports nothing", so gaining a first import
+    or dropping the last one must still report; only a header-only or legacy
+    baseline (no parsed identity) is skipped.
+    """
+    from .diff_platform_elf_dynamic import _both_captured_elf_identity
+
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
+    old_imports = getattr(old_elf, "imports", None) or []
+    new_imports = getattr(new_elf, "imports", None) or []
+
+    changes: list[Change] = []
+    old_names = {i.name for i in old_imports}
+    new_names = {i.name for i in new_imports}
+    new_by_name = {i.name: i for i in new_imports}
+    old_by_name = {i.name: i for i in old_imports}
+
+    for name in sorted(new_names - old_names):
+        imp = new_by_name[name]
+        if imp.binding == SymbolBinding.WEAK:
+            continue
+        version = getattr(imp, "version", "")
+        detail = f"@{version}" if version else ""
+        changes.append(
+            make_change(
+                ChangeKind.IMPORTED_SYMBOL_ADDED,
+                symbol=name,
+                name=name,
+                detail=detail,
+                new_value=f"{name}{detail}",
+            )
+        )
+    for name in sorted(old_names - new_names):
+        version = getattr(old_by_name.get(name), "version", "")
+        detail = f"@{version}" if version else ""
+        changes.append(
+            make_change(
+                ChangeKind.IMPORTED_SYMBOL_REMOVED,
+                symbol=name,
+                name=name,
+                detail=detail,
+                old_value=f"{name}{detail}",
+            )
+        )
+    # A persisting import that goes weak → strong becomes a new hard obligation:
+    # the weak form resolved to null when unsatisfied, the strong form makes the
+    # loader fail. The name-only add/remove loops miss it (same name both sides),
+    # so surface it as an added import.
+    for name in sorted(old_names & new_names):
+        old_imp = old_by_name.get(name)
+        new_imp = new_by_name.get(name)
+        if (
+            getattr(old_imp, "binding", None) == SymbolBinding.WEAK
+            and getattr(new_imp, "binding", None) != SymbolBinding.WEAK
+        ):
+            version = getattr(new_imp, "version", "")
+            ver = f"@{version}" if version else ""
+            changes.append(
+                make_change(
+                    ChangeKind.IMPORTED_SYMBOL_ADDED,
+                    symbol=name,
+                    name=name,
+                    detail=f"{ver} (weak→strong)",
+                    new_value=f"{name}{ver}",
+                )
+            )
+    return changes
+
+
+def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect a library starting/stopping to export global operator new/delete.
+
+    These symbols interpose allocation for the whole process, so their
+    presence flipping is a loader-level contract change even though the
+    symbol-level diff also reports the individual adds/removes. Fires once per
+    direction at the library level. Gated on captured ELF identity, not on the
+    symbol lists being non-empty — an export table that is empty on one side
+    is still evidence about which allocator symbols it (doesn't) export.
+    """
+    from .diff_platform_elf_dynamic import _both_captured_elf_identity
+
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
+    old_syms = getattr(old_elf, "symbols", None) or []
+    new_syms = getattr(new_elf, "symbols", None) or []
+    def _is_global_allocator(name: str) -> bool:
+        return name.startswith(_ALLOCATOR_MANGLING_PREFIXES) and not (
+            _PLACEMENT_OPERATOR_RE.match(name)
+        )
+
+    old_alloc = sorted(s.name for s in old_syms if _is_global_allocator(s.name))
+    new_alloc = sorted(s.name for s in new_syms if _is_global_allocator(s.name))
+    if bool(old_alloc) == bool(new_alloc):
+        return []
+    if new_alloc:
+        first = new_alloc[0]
+        suffix = f" (+{len(new_alloc) - 1} more)" if len(new_alloc) > 1 else ""
+        return [
+            make_change(
+                ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
+                symbol=first,
+                detail=f"{first}{suffix}",
+                new_value=str(len(new_alloc)),
+            )
+        ]
+    first = old_alloc[0]
+    suffix = f" (+{len(old_alloc) - 1} more)" if len(old_alloc) > 1 else ""
+    return [
+        make_change(
+            ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED,
+            symbol=first,
+            detail=f"{first}{suffix}",
+            old_value=str(len(old_alloc)),
+        )
+    ]

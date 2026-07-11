@@ -357,7 +357,8 @@ class TestDiffMacho:
         assert any(c.symbol == "baz" for c in removed)
 
     def test_reexported_lib_removed_and_added(self):
-        """Re-exported dylib deltas are reported as NEEDED_REMOVED/NEEDED_ADDED."""
+        """A single re-export removed+added pair collapses to the repoint kind;
+        deltas with no replacement keep the NEEDED_REMOVED/ADDED reporting."""
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
@@ -368,10 +369,19 @@ class TestDiffMacho:
             reexported_libs=["/usr/lib/libA.dylib", "/usr/lib/libC.dylib"],
         ))
         changes = _diff_macho(old, new)
+        repointed = [c for c in changes if c.kind == ChangeKind.MACHO_REEXPORT_CHANGED]
+        assert len(repointed) == 1
+        assert repointed[0].old_value == "/usr/lib/libB.dylib"
+        assert repointed[0].new_value == "/usr/lib/libC.dylib"
+
+        # Removals with no replacement fall back to per-lib reporting.
+        new_two_gone = AbiSnapshot(
+            library="libfoo.dylib", version="2.0", macho=MachoMetadata()
+        )
+        changes = _diff_macho(old, new_two_gone)
         removed = [c for c in changes if c.kind == ChangeKind.NEEDED_REMOVED]
-        added = [c for c in changes if c.kind == ChangeKind.NEEDED_ADDED]
+        assert any("/usr/lib/libA.dylib" in c.symbol for c in removed)
         assert any("/usr/lib/libB.dylib" in c.symbol for c in removed)
-        assert any("/usr/lib/libC.dylib" in c.symbol for c in added)
 
 
 # ── Synthetic Mach-O binary builder ──────────────────────────────────────

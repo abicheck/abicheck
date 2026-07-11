@@ -443,6 +443,59 @@ def _has_virtual_destructor(rec: RecordType) -> bool:
 _MSVC_DTOR_RE = re.compile(r"\?\?1|deleting destructor")
 
 
+def _skip_source_name(entry: str, i: int) -> int:
+    """Skip a length-prefixed ``<source-name>`` starting at ``entry[i]``; return the next index."""
+    # <source-name> ::= <decimal length> <identifier> — skip whole.
+    n = len(entry)
+    j = i
+    while j < n and entry[j].isdigit():
+        j += 1
+    return j + int(entry[i:j])
+
+
+def _skip_substitution(entry: str, i: int) -> int:
+    """Skip an ``S`` substitution (2-char std abbrev or ``S<seq-id>_``) starting at ``entry[i]``."""
+    n = len(entry)
+    nxt = entry[i + 1] if i + 1 < n else ""
+    if nxt in "abdiost":
+        return i + 2
+    j = i + 1
+    while j < n and entry[j] != "_":
+        j += 1
+    return j + 1
+
+
+def _skip_template_args(entry: str, i: int) -> int:
+    """Skip the balanced template-argument group opened by the ``I`` at ``entry[i]``."""
+    # Template args: skip the balanced group. I (args), N (nested
+    # names), and F (function types) all nest and close with E;
+    # length-prefixed names, substitutions, and L…E literals are
+    # skipped whole so their bytes can't be misread as structural
+    # I/N/F/E tokens.
+    n = len(entry)
+    depth = 1
+    j = i + 1
+    while j < n and depth:
+        cj = entry[j]
+        if cj.isdigit():
+            j = _skip_source_name(entry, j)
+        elif cj == "S":
+            j = _skip_substitution(entry, j)
+        elif cj == "L":  # literal: L <type> <value> E
+            while j < n and entry[j] != "E":
+                j += 1
+            j += 1
+        elif cj in "INF":
+            depth += 1
+            j += 1
+        elif cj == "E":
+            depth -= 1
+            j += 1
+        else:
+            j += 1
+    return j
+
+
 def _is_itanium_dtor_symbol(entry: str) -> bool:
     """True when *entry* mangles a destructor clone (``D0``–``D5``).
 
@@ -458,11 +511,7 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
     while i < n:
         ch = entry[i]
         if ch.isdigit():
-            # <source-name> ::= <decimal length> <identifier> — skip whole.
-            j = i
-            while j < n and entry[j].isdigit():
-                j += 1
-            i = j + int(entry[i:j])
+            i = _skip_source_name(entry, i)
             continue
         if ch in "rVKRO":  # CV / ref qualifiers of the nested-name
             i += 1
@@ -474,51 +523,10 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
             i += 1
             continue
         if ch == "S":  # substitution: 2-char std abbrev or S<seq-id>_
-            nxt = entry[i + 1] if i + 1 < n else ""
-            if nxt in "abdiost":
-                i += 2
-                continue
-            j = i + 1
-            while j < n and entry[j] != "_":
-                j += 1
-            i = j + 1
+            i = _skip_substitution(entry, i)
             continue
         if ch == "I":
-            # Template args: skip the balanced group. I (args), N (nested
-            # names), and F (function types) all nest and close with E;
-            # length-prefixed names, substitutions, and L…E literals are
-            # skipped whole so their bytes can't be misread as structural
-            # I/N/F/E tokens.
-            depth = 1
-            j = i + 1
-            while j < n and depth:
-                cj = entry[j]
-                if cj.isdigit():
-                    k = j
-                    while k < n and entry[k].isdigit():
-                        k += 1
-                    j = k + int(entry[j:k])
-                elif cj == "S":
-                    nxt = entry[j + 1] if j + 1 < n else ""
-                    if nxt in "abdiost":
-                        j += 2
-                    else:
-                        while j < n and entry[j] != "_":
-                            j += 1
-                        j += 1
-                elif cj == "L":  # literal: L <type> <value> E
-                    while j < n and entry[j] != "E":
-                        j += 1
-                    j += 1
-                elif cj in "INF":
-                    depth += 1
-                    j += 1
-                elif cj == "E":
-                    depth -= 1
-                    j += 1
-                else:
-                    j += 1
-            i = j
+            i = _skip_template_args(entry, i)
             continue
         # Structural position: a destructor clone is D<digit> here.
         return ch == "D" and i + 1 < n and entry[i + 1].isdigit()

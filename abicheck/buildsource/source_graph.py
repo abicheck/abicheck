@@ -906,34 +906,18 @@ def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
     return out
 
 
-def diff_source_graph_findings(
-    old: SourceGraphSummary, new: SourceGraphSummary
+def _mapping_drift_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    old_labels: dict[str, str],
+    new_labels: dict[str, str],
+    boundary: str,
 ) -> list[Change]:
-    """Map the graph delta onto ADR-031 D6 secondary risk findings.
-
-    Produces three RISK-tier ``ChangeKind``s, each stamped with the
-    ``[L5_SOURCE_GRAPH]`` evidence boundary so it reads as graph-derived, not an
-    artifact diff:
-
-    - ``SOURCE_TO_BINARY_MAPPING_CHANGED`` — a declaration present in *both*
-      graphs now maps to a different exported symbol;
-    - ``PUBLIC_REACHABILITY_CHANGED`` — a declaration entered/left the
-      public-header reachability closure;
-    - ``GENERATED_HEADER_REACHES_PUBLIC_API`` — a generated file newly entered
-      the public declaration closure.
-
-    Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
-    them into the verdict pipeline as ordinary RISK changes that never override
-    an artifact-proven break.
-    """
+    """Source↔binary mapping drift for declarations present in both graphs."""
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
     findings: list[Change] = []
-    boundary = f"[{EVIDENCE_TIER_L5}]"
-    old_labels, new_labels = _label_map(old), _label_map(new)
-
-    # 1) source↔binary mapping drift for declarations present in both graphs.
     old_map, new_map = _decl_to_symbol(old), _decl_to_symbol(new)
     old_decls = {n.id for n in old.nodes if n.kind == "source_decl"}
     new_decls = {n.id for n in new.nodes if n.kind == "source_decl"}
@@ -954,9 +938,23 @@ def diff_source_graph_findings(
                 new_value=new_labels.get(new_sym, new_sym),
                 source_location=boundary,
             ))
+    return findings
 
-    # 2) public-reachability closure changes (only when both sides have a
-    #    closure — an empty baseline would otherwise flag every declaration).
+
+def _public_reachability_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    old_labels: dict[str, str],
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """Public-reachability closure changes (declarations entering/leaving it)."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # Only when both sides have a closure — an empty baseline would otherwise
+    # flag every declaration.
     old_pub, new_pub = _public_decls(old), _public_decls(new)
     if old_pub and new_pub:
         for decl in sorted(new_pub - old_pub):
@@ -987,8 +985,20 @@ def diff_source_graph_findings(
                 new_value="not reachable",
                 source_location=boundary,
             ))
+    return findings
 
-    # 3) generated files that newly entered the public declaration closure.
+
+def _generated_public_closure_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """Generated files that newly entered the public declaration closure."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
     newly_generated = _generated_in_public_closure(new) - _generated_in_public_closure(old)
     for gen in sorted(newly_generated):
         label = new_labels.get(gen, gen)
@@ -1005,10 +1015,22 @@ def diff_source_graph_findings(
             new_value="in public closure",
             source_location=boundary,
         ))
+    return findings
 
-    # 4) implementation reachable from an exported entry changed (phase 6, needs
-    #    Clang call edges). Quality signal only — reported for entries present in
-    #    both graphs whose approximate call-reachable set differs.
+
+def _call_reachability_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """Implementation reachable from an exported entry changed (phase 6)."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # Needs Clang call edges. Quality signal only — reported for entries
+    # present in both graphs whose approximate call-reachable set differs.
     old_reach = _public_entry_call_reachability(old)
     new_reach = _public_entry_call_reachability(new)
     for entry in sorted(old_reach.keys() & new_reach.keys()):
@@ -1028,9 +1050,22 @@ def diff_source_graph_findings(
                 new_value=f"{new_n} reachable",
                 source_location=boundary,
             ))
+    return findings
 
-    # 5) public headers entering/leaving the compiled include graph (needs
-    #    COMPILE_UNIT_INCLUDES_FILE edges from a depfile/-M include extractor).
+
+def _include_graph_drift_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    old_labels: dict[str, str],
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """Public headers entering/leaving the compiled include graph."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # Needs COMPILE_UNIT_INCLUDES_FILE edges from a depfile/-M include extractor.
     old_inc, new_inc = _public_headers_in_include_graph(old), _public_headers_in_include_graph(new)
     if old_inc or new_inc:
         for hdr in sorted(new_inc - old_inc) + sorted(old_inc - new_inc):
@@ -1048,9 +1083,21 @@ def diff_source_graph_findings(
                 new_value="in include graph" if entered else "not included",
                 source_location=boundary,
             ))
+    return findings
 
-    # 6) a changed ABI-relevant build option that now reaches a public symbol
-    #    (added BUILD_OPTION_AFFECTS_SYMBOL edges), grouped by option.
+
+def _build_option_reach_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """A changed ABI-relevant build option that now reaches a public symbol."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # Added BUILD_OPTION_AFFECTS_SYMBOL edges, grouped by option.
     added_opt_edges = _option_symbol_edges(new) - _option_symbol_edges(old)
     # Only a *changed* (newly introduced) ABI-relevant flag is interesting here:
     # a new target that merely reuses a pre-existing flag produces "added" edges
@@ -1079,18 +1126,31 @@ def diff_source_graph_findings(
             new_value=f"reaches {n_syms} public symbol(s)",
             source_location=boundary,
         ))
+    return findings
 
-    # 7) a public entry point that newly reaches an internal (non-public)
-    #    declaration through the call graph — the version-over-version analogue
-    #    of the intra-version public-to-internal cross-check. Gate on *both*
-    #    graphs carrying the two evidence kinds this diff subtracts over — call
-    #    edges (DECL_CALLS_DECL) AND a public-header closure (SOURCE_DECLARES) —
-    #    so an evidence-poor baseline (call edges but no public closure, or no
-    #    call pass) cannot make every pre-existing internal callee look newly
-    #    added (Codex review).
-    def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
-        return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
 
+def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
+    """Whether a graph carries both call edges and a public-header closure."""
+    return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
+
+
+def _internal_dependency_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """A public entry that newly reaches an internal declaration via calls."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # The version-over-version analogue of the intra-version
+    # public-to-internal cross-check. Gate on *both* graphs carrying the two
+    # evidence kinds this diff subtracts over — call edges (DECL_CALLS_DECL)
+    # AND a public-header closure (SOURCE_DECLARES) — so an evidence-poor
+    # baseline (call edges but no public closure, or no call pass) cannot make
+    # every pre-existing internal callee look newly added (Codex review).
     newly_internal = (
         _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
         if _has_internal_reach_coverage(old) and _has_internal_reach_coverage(new)
@@ -1116,8 +1176,20 @@ def diff_source_graph_findings(
             new_value=f"reaches {len(targets)} internal decl(s)",
             source_location=boundary,
         ))
+    return findings
 
-    # 8) a new inter-target build/link dependency (added TARGET_DEPENDS_ON edge).
+
+def _target_dependency_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """A new inter-target build/link dependency (added TARGET_DEPENDS_ON edge)."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
     added_target_deps = _target_dependency_edges(new) - _target_dependency_edges(old)
     for target, dep in sorted(added_target_deps):
         tlabel = new_labels.get(target, target)
@@ -1136,14 +1208,28 @@ def diff_source_graph_findings(
             new_value=dlabel,
             source_location=boundary,
         ))
+    return findings
 
-    # 9) an exported symbol whose *declaring* file moved (its public declaration
-    #    relocated to a different header / source file) although its
-    #    name/signature are unchanged. NB: this is the declaration owner, not the
-    #    definition TU — the call-graph `def_file` provenance cannot be used here
-    #    because add_node is first-writer-wins and the exported decl node is
-    #    always created by the source-ABI pass before the call-graph augmentation,
-    #    so its def_file attr is dropped (Codex review).
+
+def _symbol_owner_findings(
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    old_labels: dict[str, str],
+    new_labels: dict[str, str],
+    boundary: str,
+) -> list[Change]:
+    """An exported symbol whose *declaring* file moved between versions."""
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    # The symbol's public declaration relocated to a different header / source
+    # file although its name/signature are unchanged. NB: this is the
+    # declaration owner, not the definition TU — the call-graph `def_file`
+    # provenance cannot be used here because add_node is first-writer-wins and
+    # the exported decl node is always created by the source-ABI pass before
+    # the call-graph augmentation, so its def_file attr is dropped (Codex
+    # review).
     old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
     for symbol in sorted(set(old_owner) & set(new_owner)):
         if old_owner[symbol] != new_owner[symbol]:
@@ -1163,5 +1249,49 @@ def diff_source_graph_findings(
                 new_value=new_labels.get(new_owner[symbol], new_owner[symbol]),
                 source_location=boundary,
             ))
+    return findings
 
+
+def diff_source_graph_findings(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> list[Change]:
+    """Map the graph delta onto ADR-031 D6 secondary risk findings.
+
+    Aggregates the per-family helpers below, each producing RISK-tier
+    ``ChangeKind``s stamped with the ``[L5_SOURCE_GRAPH]`` evidence boundary so
+    they read as graph-derived, not an artifact diff:
+
+    - ``SOURCE_TO_BINARY_MAPPING_CHANGED`` (:func:`_mapping_drift_findings`);
+    - ``PUBLIC_REACHABILITY_CHANGED`` (:func:`_public_reachability_findings`);
+    - ``GENERATED_HEADER_REACHES_PUBLIC_API``
+      (:func:`_generated_public_closure_findings`);
+    - ``CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED``
+      (:func:`_call_reachability_findings`);
+    - ``INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT``
+      (:func:`_include_graph_drift_findings`);
+    - ``BUILD_OPTION_REACHES_PUBLIC_SYMBOL``
+      (:func:`_build_option_reach_findings`);
+    - ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+      (:func:`_internal_dependency_findings`);
+    - ``TARGET_DEPENDENCY_ADDED`` (:func:`_target_dependency_findings`);
+    - ``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED``
+      (:func:`_symbol_owner_findings`).
+
+    Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
+    them into the verdict pipeline as ordinary RISK changes that never override
+    an artifact-proven break.
+    """
+    boundary = f"[{EVIDENCE_TIER_L5}]"
+    old_labels, new_labels = _label_map(old), _label_map(new)
+
+    findings: list[Change] = []
+    findings += _mapping_drift_findings(old, new, old_labels, new_labels, boundary)
+    findings += _public_reachability_findings(old, new, old_labels, new_labels, boundary)
+    findings += _generated_public_closure_findings(old, new, new_labels, boundary)
+    findings += _call_reachability_findings(old, new, new_labels, boundary)
+    findings += _include_graph_drift_findings(old, new, old_labels, new_labels, boundary)
+    findings += _build_option_reach_findings(old, new, new_labels, boundary)
+    findings += _internal_dependency_findings(old, new, new_labels, boundary)
+    findings += _target_dependency_findings(old, new, new_labels, boundary)
+    findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
     return findings

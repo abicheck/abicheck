@@ -71,7 +71,7 @@ See [Architecture](../concepts/architecture.md) for the full per-layer breakdown
 
 abicheck is a superset of the external modes for most categories — see the
 [quick-reference table](#tool-comparison-quick-reference) below and the
-[318-kind Change Kind Reference](../reference/change-kinds.md). Highlights the
+[342-kind Change Kind Reference](../reference/change-kinds.md). Highlights the
 single external tools miss:
 
 - ✅ `noexcept`, `const`/`static` qualifier, and access-level changes (header AST)
@@ -118,7 +118,7 @@ quantifies the cumulative gain across the compare-mode example catalog (33% →
 75% → 90% → 95% → 98% → 100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
 keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
 (and the `L5` source graph abicheck derives from them — see
-[Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)) explain, scope,
+[Evidence & Detectability](../concepts/evidence-and-detectability.md)) explain, scope,
 and add their own source-/API-level findings.
 
 > **Quick decision.** Stripped production binary → **L0**. Debug build, no

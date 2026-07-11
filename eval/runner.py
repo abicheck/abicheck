@@ -38,6 +38,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -50,7 +51,8 @@ except ImportError:  # pragma: no cover
 
 EVAL_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EVAL_DIR / "results"
-WORK = Path(os.environ.get("ABICHECK_EVAL_CACHE", "/tmp/abicheck-eval")).parent / "abicheck-eval"
+_DEFAULT_CACHE = str(Path(tempfile.gettempdir()) / "abicheck-eval")
+WORK = Path(os.environ.get("ABICHECK_EVAL_CACHE", _DEFAULT_CACHE)).parent / "abicheck-eval"
 SNAP_DIR = WORK / "snap"
 SRC_DIR = WORK / "src"        # source-tier git checkouts
 BUILD_DIR = WORK / "build"    # source-tier configure output (compile DB)
@@ -199,7 +201,7 @@ def _checkout_key(repo: str, tag: str) -> str:
     is never silently reused for a different revision (Codex review) — the dir
     name no longer omits the tag.
     """
-    return hashlib.sha1(f"{repo}@{tag}".encode()).hexdigest()[:10]
+    return hashlib.sha1(f"{repo}@{tag}".encode(), usedforsecurity=False).hexdigest()[:10]
 
 
 def _git_clone_tag(repo: str, tag: str, dest: Path) -> None:

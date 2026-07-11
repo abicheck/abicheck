@@ -599,6 +599,20 @@ def _signature(node: dict[str, Any]) -> str:
     return ""
 
 
+def _signature_desugared(node: dict[str, Any]) -> str:
+    """Return the node's ``desugaredQualType`` (the alias-resolved spelling).
+
+    clang carries the sugared ``qualType`` (e.g. ``CI`` for ``using CI = const
+    int``) and the resolved ``desugaredQualType`` (``const int``). Top-level-const
+    detection must see through the alias, so the desugared form is consulted
+    alongside the sugared one. Empty when clang emitted no desugared spelling.
+    """
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        return str(type_obj.get("desugaredQualType", ""))
+    return ""
+
+
 def _mangled(node: dict[str, Any]) -> str:
     mangled = node.get("mangledName")
     name = node.get("name", "")
@@ -1039,7 +1053,11 @@ def _is_top_level_const(qual: str) -> bool:
     bracket = q.find("[")
     if bracket != -1:
         q = q[:bracket].strip()
-    if q.endswith("const"):  # e.g. ``int *const`` / ``ns::Foo const``
+    # Trailing ``const`` must be a standalone token, not the tail of an identifier
+    # (a type named ``almost_const`` is not const-qualified). ``int *const`` /
+    # ``ns::Foo const`` qualify; the char before ``const`` is then a non-identifier
+    # character (space / ``*``) or the string is exactly ``const``.
+    if q.endswith("const") and (len(q) == 5 or not (q[-6].isalnum() or q[-6] == "_")):
         return True
     return q.startswith("const ") and "*" not in q
 
@@ -1093,7 +1111,10 @@ def _is_variable_node(
         mangled.startswith("?")
         and enclosing_kind != "CXXRecordDecl"
         and node.get("storageClass") != "extern"
-        and _is_top_level_const(_signature(node))
+        and (
+            _is_top_level_const(_signature(node))
+            or _is_top_level_const(_signature_desugared(node))
+        )
     ):
         return False
     return True

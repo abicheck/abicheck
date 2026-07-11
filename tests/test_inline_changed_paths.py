@@ -372,7 +372,7 @@ def test_run_inline_source_abi_no_sources_returns_empty_selection():
 def test_run_inline_source_abi_no_compile_units_returns_empty_selection():
     # A source tree but no L3 compile units: nothing to replay/select.
     surface, units = inline._run_inline_source_abi(
-        Path("/tmp/x"),
+        Path("/no-such-tree/x"),
         BuildEvidence(),
         [],
         extractor="clang",

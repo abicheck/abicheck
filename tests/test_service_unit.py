@@ -509,6 +509,22 @@ class TestResolveInferredHeaderRoots:
         assert after[after.index(str(root)) - 1] == "-idirafter"
         assert "-isystem" not in after
 
+    def test_mixed_above_system_and_idirafter_defaults_to_isystem(self, tmp_path):
+        # #454 item 2: a mixed GNU context (-I + -idirafter) is unsatisfiable
+        # with a single flag — the root can't be both above the system dirs
+        # (to win the -I-context basename collision) and below -idirafter.
+        # -isystem is the documented default (favors the common collision
+        # case; compile DBs essentially never emit -idirafter). This locks
+        # that choice in so a refactor can't silently flip it to -idirafter.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, mixed = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-I /build/primary -idirafter /build/generated"
+        )
+        assert mixed[mixed.index(str(root)) - 1] == "-isystem"
+        assert "-idirafter" not in mixed
+
     def test_root_already_in_build_context_is_skipped(self, tmp_path):
         # A root the build context already supplies as -I must NOT be re-added as
         # -isystem (GCC would then ignore the build's -I). Here the build provides

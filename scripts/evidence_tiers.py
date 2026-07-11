@@ -303,6 +303,34 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # rtti_for_internal_type needs header provenance to know a type is internal.
     "unversioned_exported_symbol": "L0",
     "rtti_for_internal_type": "L2",
+    # ── Coverage extension: dynamic-loader / platform metadata (all read from
+    # the binary's headers, dynamic section, notes, or symbol tables alone). ──
+    "imported_symbol_added": "L0",
+    "imported_symbol_removed": "L0",
+    "interpreter_changed": "L0",
+    "bind_now_disabled": "L0",
+    "elf_endianness_changed": "L0",
+    "x86_isa_baseline_raised": "L0",
+    "os_deployment_floor_raised": "L0",
+    "dynamic_loading_flags_changed": "L0",
+    "exported_object_alignment_reduced": "L0",
+    "elf_init_fini_changed": "L0",
+    "allocator_replacement_added": "L0",
+    "allocator_replacement_removed": "L0",
+    "pe_hardening_weakened": "L0",
+    "pe_hardening_improved": "L0",
+    "library_version_downgraded": "L0",
+    "macho_filetype_changed": "L0",
+    "macho_linkage_flags_changed": "L0",
+    "macho_reexport_changed": "L0",
+    # ── Coverage extension: language contracts, extracted by the header AST
+    # dumpers (castxml/clang) — first visible at the header tier. ──
+    "func_variadic_added": "L2",
+    "func_variadic_removed": "L2",
+    "func_contract_attribute_added": "L2",
+    "func_contract_attribute_removed": "L2",
+    "var_alignment_changed": "L2",
+    "func_exception_spec_changed": "L2",
 }
 
 # Cases with no ``expected_kinds`` (NO_CHANGE baselines, scoped-internal cases,

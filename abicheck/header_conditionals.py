@@ -365,6 +365,297 @@ class _Scope:
         self.recorded: list[tuple[dict[str, object], int]] = []
 
 
+class _ScanState:
+    """Mutable state threaded through one :func:`scan_conditional_fields` pass."""
+
+    __slots__ = (
+        "include_guard",
+        "registry",
+        "scope_stack",
+        "guard_stack",
+        "locally_undefined",
+        "conditionally_touched",
+        "saw_include",
+        "brace_depth",
+        "pending",
+    )
+
+    def __init__(self, include_guard: str | None) -> None:
+        self.include_guard = include_guard
+        self.registry: dict[str, dict[str, dict[str, object]]] = {}
+        # scope_stack: every open namespace/record body, outermost first. The
+        # innermost record (if any) owns the fields on the current line; its
+        # ``qualified`` name keys the registry.
+        self.scope_stack: list[_Scope] = []
+        # guard_stack entries: the positive macro for a simple ``#ifdef`` region,
+        # ``None`` for an opaque region we must not record fields in
+        # (negative/compound/else), or the ``_INCLUDE_GUARD`` sentinel for a
+        # transparent file include guard (ignored when deciding to record).
+        self.guard_stack: list[object] = []
+        # Macros the header itself ``#undef``s (and has not since ``#define``d). A
+        # guard whose macro is header-locally undefined is *inactive* in the real
+        # build even if the compile DB defines it, so a field under it must not be
+        # recorded as reconcilable — the build really pruned it (Codex review #498).
+        self.locally_undefined: set[str] = set()
+        # Macros ``#undef``'d or ``#define``'d **inside a branch the scanner cannot
+        # evaluate** (a non-transparent conditional). Such an operation only fires when
+        # its enclosing condition is active under the build's defines — which the
+        # context-free scan does not know — so a field guarded by such a macro cannot be
+        # resolved by the simple ``macro ∈ defines`` test. It is recorded with
+        # ``ambiguous: True`` and the reconciler refuses to reconcile its type at all,
+        # rather than risk adding back / pruning the wrong field (Codex review #498).
+        self.conditionally_touched: set[str] = set()
+        # Whether an ``#include`` has appeared so far. A scanned header cannot see what
+        # an included file does to a macro — an ``#include "config.h"`` that ``#undef``s
+        # the guard would make the real build prune a field this text scan still
+        # records. So a guarded field *after* any include is marked ``ambiguous`` (its
+        # guard state is unprovable without a preprocessor), and the reconciler keeps
+        # its type rather than risk a wrong clear (Codex review #498, P1). Self-contained
+        # headers (no preceding include) stay reconcilable.
+        self.saw_include = False
+        self.brace_depth = 0
+        # pending: (kind, name, keyword) awaiting its opening brace. kind is "ns" or
+        # "rec"; keyword is the record keyword (or "" for a namespace).
+        self.pending: tuple[str, str | None, str] | None = None
+
+    def innermost_record(self) -> _Scope | None:
+        """The innermost open scope when it is a record body, else ``None``."""
+        if self.scope_stack and self.scope_stack[-1].kind == "rec":
+            return self.scope_stack[-1]
+        return None
+
+    def only_transparent(self) -> bool:
+        """True when nothing but the (transparent) file include guard is open — i.e. we are effectively at file top level."""
+        return all(g is _INCLUDE_GUARD for g in self.guard_stack)
+
+
+def _note_macro_touch(state: _ScanState, macro: str, *, define: bool) -> None:
+    """Track a header-local ``#undef``/``#define`` of *macro* at the current conditional depth."""
+    if state.only_transparent():
+        if define:
+            # A **top-level** ``#define`` reactivates a locally-undefined
+            # guard (it is defined for every build).
+            state.locally_undefined.discard(macro)
+        else:
+            # A **top-level** ``#undef`` genuinely undefines the macro for
+            # every build, so a later guard on it is never active — mark it
+            # header-locally undefined (its guarded fields are not recorded).
+            state.locally_undefined.add(macro)
+        return
+    # An ``#undef`` **inside a branch we cannot evaluate** fires only
+    # when its condition is active under the build's defines. We
+    # cannot tell statically, so the macro is *ambiguous* — a field
+    # guarded by it must not be reconciled either way (Codex #498):
+    # ignoring the undef wrongly adds back a pruned field when the
+    # branch is active; honouring it wrongly prunes a present field
+    # when the branch is inactive. A conditional ``#define`` makes the
+    # macro's state build-context dependent for the same reason. (It does
+    # not reactivate a top-level ``#undef``; a build skipping the branch
+    # keeps the macro undefined.)
+    state.conditionally_touched.add(macro)
+
+
+def _push_ifndef(state: _ScanState, macro: str) -> None:
+    """Push an ``#ifndef`` *macro* region: the transparent file include guard or a negative guard."""
+    if macro == state.include_guard and _INCLUDE_GUARD not in state.guard_stack:
+        state.guard_stack.append(_INCLUDE_GUARD)  # transparent file guard
+    else:
+        state.guard_stack.append(_NegGuard(macro))  # simple #ifndef
+
+
+def _track_conditional_directive(state: _ScanState, line: str) -> bool:
+    """Push/pop the guard stack for a ``#if*``/``#else``/``#elif``/``#endif`` *line*; True when it was one."""
+    ifdef = _IFDEF.match(line)
+    if_defined = None if ifdef else _IF_DEFINED.match(line)
+    ifndef_m = _IFNDEF.match(line)
+    if ifdef:
+        state.guard_stack.append(ifdef.group(1))
+    elif if_defined:
+        state.guard_stack.append(if_defined.group(1) or if_defined.group(2))
+    elif ifndef_m is not None:
+        _push_ifndef(state, ifndef_m.group(1))
+    elif _PP_OPEN_OTHER.match(line):
+        state.guard_stack.append(None)  # compound #if <expr>: not recordable
+    elif _ELSE_ELIF.match(line):
+        if state.guard_stack:
+            state.guard_stack[-1] = None  # the else/elif branch is not the guard
+    elif _ENDIF.match(line):
+        if state.guard_stack:
+            state.guard_stack.pop()
+    else:
+        return False
+    return True
+
+
+def _track_directive(state: _ScanState, line: str) -> None:
+    """Update *state* for one preprocessor-directive *line* (any other directive is ignored)."""
+    if _INCLUDE.match(line):
+        state.saw_include = True  # subsequent guards may be altered by the include
+        return
+    if _track_conditional_directive(state, line):
+        return
+    if (um := _UNDEF.match(line)) is not None:
+        _note_macro_touch(state, um.group(1), define=False)
+    elif (dm := _DEFINE.match(line)) is not None:
+        _note_macro_touch(state, dm.group(1), define=True)
+
+
+def _active_guard(guard_stack: list[object]) -> tuple[str | None, bool]:
+    """The single recordable guard as ``(macro, is_negative)``, or ``(None, False)``.
+
+    Recordable means exactly one active guard — a positive ``#ifdef`` or a
+    negative ``#ifndef`` — with no opaque region and the transparent include
+    guard ignored."""
+    positive = [g for g in guard_stack if isinstance(g, str)]
+    negatives = [g for g in guard_stack if isinstance(g, _NegGuard)]
+    has_opaque = any(g is None for g in guard_stack)
+    if has_opaque or len(positive) + len(negatives) != 1:
+        return None, False
+    if positive:
+        return positive[0], False
+    return negatives[0].macro, True
+
+
+def _body_opens_first(rest: str) -> bool:
+    """Whether *rest* (the text after an opener's name) reaches ``{`` before any ``;``.
+
+    A ``;`` before any ``{`` marks a forward declaration / variable / namespace
+    alias (``namespace x = y;``) — not a body opener — so it is ignored. When
+    neither appears, the brace may follow on a later line (the opener stays
+    pending)."""
+    brace = rest.find("{")
+    semi = rest.find(";")
+    return (brace != -1 and (semi == -1 or brace < semi)) or (brace == -1 and semi == -1)
+
+
+def _detect_scope_opener(line: str) -> tuple[str, str | None, str] | None:
+    """A ``(kind, name, keyword)`` namespace/record opener on *line*, or ``None``.
+
+    A namespace or record *definition* may open on this line (``struct
+    Name {`` / ``namespace api {``) or name first and brace next. kind is "ns"
+    or "rec"; keyword is the record keyword (or "" for a namespace)."""
+    nsm = _NAMESPACE_OPEN.match(line)
+    rm = None if nsm else _RECORD_OPEN.search(line)
+    if nsm and _body_opens_first(line[nsm.end() :]):
+        return ("ns", nsm.group(1), "")
+    if rm and _body_opens_first(line[rm.end() :]):
+        return ("rec", rm.group(2), rm.group(1))
+    return None
+
+
+def _guarded_field_entry(
+    state: _ScanState,
+    parsed: tuple[str, str, bool, int | None, bool, bool, bool],
+    guard: str,
+    is_negative: bool,
+    access: str,
+) -> dict[str, object]:
+    """The registry entry for one *parsed* field recorded under *guard*."""
+    _name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable = parsed
+    entry: dict[str, object] = {
+        "guard": guard,
+        "type": type_str,
+        "is_bitfield": is_bitfield,
+        "bitfield_bits": bits,
+        "access": access,
+        "is_const": is_const,
+        "is_volatile": is_volatile,
+        "is_mutable": is_mutable,
+    }
+    if is_negative:
+        # An ``#ifndef GUARD`` field: observed context-free, but
+        # pruned by a build that *defines* GUARD.
+        entry["negative"] = True
+    if guard in state.conditionally_touched or state.saw_include:
+        # The guard macro is ``#undef``/``#define``d inside a branch
+        # we cannot evaluate, **or** an earlier ``#include`` may have
+        # altered it (the text scan cannot follow includes) → its
+        # state is unprovable. Flag the field so the reconciler keeps
+        # (never reconciles) findings on this type (Codex review #498).
+        entry["ambiguous"] = True
+    return entry
+
+
+def _capture_guarded_field(state: _ScanState, rec: _Scope, line: str) -> None:
+    """Record a field of *rec* declared on *line* under a single recordable guard.
+
+    Records a field only when exactly one active guard — a positive ``#ifdef``
+    or a negative ``#ifndef`` — is open, with no opaque region and the
+    transparent include guard ignored, directly in a recordable body (not an
+    anonymous namespace)."""
+    qualified = rec.qualified
+    if qualified is None:
+        return  # anonymous-namespace record — its fields are never recorded
+    fm = _FIELD.match(line)
+    parsed = _parse_field(fm.group("decl")) if fm else None
+    # Count **every** member-looking declaration in source order — not just
+    # the ones ``_parse_field`` can decode. Array members (``int t[4];``),
+    # default-initialised members (``int x = 0;``), and methods all advance
+    # the position, so a guarded field *before* them is never wrongly marked
+    # terminal (Codex review #498, P1). A line starting with ``}`` (the
+    # record's own close) is excluded so a genuinely-last field keeps
+    # ``is_last``. Over-counting a non-layout member only *suppresses* a
+    # reconciliation (safe); under-counting could hide a real reorder.
+    is_memberish = bool(line) and (line[0].isalpha() or line[0] == "_") and line.endswith(";")
+    if parsed is None and not is_memberish:
+        return
+    pos = rec.field_index
+    rec.field_index += 1
+    guard, is_negative = _active_guard(state.guard_stack)
+    if parsed is None or guard is None or guard in state.locally_undefined:
+        return
+    entry = _guarded_field_entry(state, parsed, guard, is_negative, rec.access)
+    state.registry.setdefault(qualified, {})[parsed[0]] = entry
+    rec.recorded.append((entry, pos))
+
+
+def _open_pending_scope(state: _ScanState, pending: tuple[str, str | None, str]) -> None:
+    """Push the *pending* namespace/record opener as a newly opened scope."""
+    kind, sc_name, keyword = pending
+    if kind == "rec":
+        qualified = _record_qualified_name(state.scope_stack, sc_name or "")
+        sc = _Scope("rec", sc_name, state.brace_depth, qualified)
+        sc.access = "private" if keyword == "class" else "public"
+        state.scope_stack.append(sc)
+    else:
+        state.scope_stack.append(_Scope("ns", sc_name, state.brace_depth, None))
+
+
+def _close_scope(state: _ScanState) -> None:
+    """Pop the innermost scope and stamp ``is_last`` on its recorded guarded fields."""
+    closing = state.scope_stack.pop()
+    # Now that every member is counted, stamp ``is_last`` on the
+    # record's recorded guarded fields: True iff the field is the
+    # final data member in source order (Codex review #498). A
+    # reconciled field must be terminal so re-adding / pruning it
+    # cannot reorder a sibling.
+    last_index = closing.field_index - 1
+    for rec_entry, member_pos in closing.recorded:
+        rec_entry["is_last"] = member_pos == last_index
+
+
+def _track_braces(state: _ScanState, line: str) -> None:
+    """Advance ``brace_depth`` across *line*, opening/closing scopes as braces pass."""
+    for ch in line:
+        if ch == "{":
+            if state.pending is not None:
+                _open_pending_scope(state, state.pending)
+                state.pending = None
+            state.brace_depth += 1
+        elif ch == ";" and state.pending is not None:
+            # A ``;`` reached before the pending opener's ``{`` terminates a
+            # *split* forward declaration (``struct S`` then ``;`` on the next
+            # line). Clear ``pending`` so a later ``struct T { … }`` opens its
+            # own scope instead of being keyed to ``S`` — otherwise ``T``'s
+            # guarded fields would be misattributed to ``S`` and could
+            # reconcile away a real ``S`` field change (Codex review #498).
+            state.pending = None
+        elif ch == "}":
+            state.brace_depth = max(0, state.brace_depth - 1)
+            if state.scope_stack and state.brace_depth == state.scope_stack[-1].depth:
+                _close_scope(state)
+
+
 def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object]]]:
     """Scan header *source* for record fields under a single positive ``#ifdef``.
 
@@ -384,237 +675,27 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     """
     src = _strip_comments(source)
     lines = src.splitlines()
-    include_guard = _include_guard_macro(lines)
-    registry: dict[str, dict[str, dict[str, object]]] = {}
-    # scope_stack: every open namespace/record body, outermost first. The
-    # innermost record (if any) owns the fields on the current line; its
-    # ``qualified`` name keys the registry.
-    scope_stack: list[_Scope] = []
-    # guard_stack entries: the positive macro for a simple ``#ifdef`` region,
-    # ``None`` for an opaque region we must not record fields in
-    # (negative/compound/else), or the ``_INCLUDE_GUARD`` sentinel for a
-    # transparent file include guard (ignored when deciding to record).
-    guard_stack: list[object] = []
-    # Macros the header itself ``#undef``s (and has not since ``#define``d). A
-    # guard whose macro is header-locally undefined is *inactive* in the real
-    # build even if the compile DB defines it, so a field under it must not be
-    # recorded as reconcilable — the build really pruned it (Codex review #498).
-    locally_undefined: set[str] = set()
-    # Macros ``#undef``'d or ``#define``'d **inside a branch the scanner cannot
-    # evaluate** (a non-transparent conditional). Such an operation only fires when
-    # its enclosing condition is active under the build's defines — which the
-    # context-free scan does not know — so a field guarded by such a macro cannot be
-    # resolved by the simple ``macro ∈ defines`` test. It is recorded with
-    # ``ambiguous: True`` and the reconciler refuses to reconcile its type at all,
-    # rather than risk adding back / pruning the wrong field (Codex review #498).
-    conditionally_touched: set[str] = set()
-    # Whether an ``#include`` has appeared so far. A scanned header cannot see what
-    # an included file does to a macro — an ``#include "config.h"`` that ``#undef``s
-    # the guard would make the real build prune a field this text scan still
-    # records. So a guarded field *after* any include is marked ``ambiguous`` (its
-    # guard state is unprovable without a preprocessor), and the reconciler keeps
-    # its type rather than risk a wrong clear (Codex review #498, P1). Self-contained
-    # headers (no preceding include) stay reconcilable.
-    saw_include = False
-    brace_depth = 0
-    # pending: (kind, name, keyword) awaiting its opening brace. kind is "ns" or
-    # "rec"; keyword is the record keyword (or "" for a namespace).
-    pending: tuple[str, str | None, str] | None = None
-
-    def _innermost_record() -> _Scope | None:
-        return scope_stack[-1] if scope_stack and scope_stack[-1].kind == "rec" else None
-
-    def _only_transparent() -> bool:
-        # True when nothing but the (transparent) file include guard is open —
-        # i.e. we are effectively at file top level.
-        return all(g is _INCLUDE_GUARD for g in guard_stack)
-
+    state = _ScanState(_include_guard_macro(lines))
     for raw in lines:
         line = raw.strip()
         if not line:
             continue
         if line.startswith("#"):
-            if _INCLUDE.match(line):
-                saw_include = True  # subsequent guards may be altered by the include
-                continue
-            ifdef = _IFDEF.match(line)
-            if_defined = None if ifdef else _IF_DEFINED.match(line)
-            ifndef_m = _IFNDEF.match(line)
-            if ifdef:
-                guard_stack.append(ifdef.group(1))
-            elif if_defined:
-                guard_stack.append(if_defined.group(1) or if_defined.group(2))
-            elif (
-                ifndef_m is not None
-                and ifndef_m.group(1) == include_guard
-                and _INCLUDE_GUARD not in guard_stack
-            ):
-                guard_stack.append(_INCLUDE_GUARD)  # transparent file guard
-            elif ifndef_m is not None:
-                guard_stack.append(_NegGuard(ifndef_m.group(1)))  # simple #ifndef
-            elif _PP_OPEN_OTHER.match(line):
-                guard_stack.append(None)  # compound #if <expr>: not recordable
-            elif _ELSE_ELIF.match(line):
-                if guard_stack:
-                    guard_stack[-1] = None  # the else/elif branch is not the guard
-            elif _ENDIF.match(line):
-                if guard_stack:
-                    guard_stack.pop()
-            elif (um := _UNDEF.match(line)) is not None:
-                if _only_transparent():
-                    # A **top-level** ``#undef`` genuinely undefines the macro for
-                    # every build, so a later guard on it is never active — mark it
-                    # header-locally undefined (its guarded fields are not recorded).
-                    locally_undefined.add(um.group(1))
-                else:
-                    # An ``#undef`` **inside a branch we cannot evaluate** fires only
-                    # when its condition is active under the build's defines. We
-                    # cannot tell statically, so the macro is *ambiguous* — a field
-                    # guarded by it must not be reconciled either way (Codex #498):
-                    # ignoring the undef wrongly adds back a pruned field when the
-                    # branch is active; honouring it wrongly prunes a present field
-                    # when the branch is inactive.
-                    conditionally_touched.add(um.group(1))
-            elif (dm := _DEFINE.match(line)) is not None:
-                if _only_transparent():
-                    # A **top-level** ``#define`` reactivates a locally-undefined
-                    # guard (it is defined for every build).
-                    locally_undefined.discard(dm.group(1))
-                else:
-                    # A conditional ``#define`` makes the macro's state build-context
-                    # dependent for the same reason — mark it ambiguous. (It does not
-                    # reactivate a top-level ``#undef``; a build skipping the branch
-                    # keeps the macro undefined.)
-                    conditionally_touched.add(dm.group(1))
+            _track_directive(state, line)
             continue
-
-        rec_here = _innermost_record()
-
-        # An access label (``public:``) alone on a line switches the current
-        # access for the enclosing record body.
-        if rec_here is not None and brace_depth == rec_here.depth + 1:
+        rec_here = state.innermost_record()
+        if rec_here is not None and state.brace_depth == rec_here.depth + 1:
+            # An access label (``public:``) alone on a line switches the current
+            # access for the enclosing record body.
             am = _ACCESS_LABEL.match(line)
             if am:
                 rec_here.access = am.group(1)
                 continue
-
-        # A namespace or record *definition* may open on this line (``struct
-        # Name {`` / ``namespace api {``) or name first and brace next. A ``;``
-        # before any ``{`` marks a forward declaration / variable — not a body
-        # opener — so it is ignored.
-        if pending is None:
-            nsm = _NAMESPACE_OPEN.match(line)
-            rm = None if nsm else _RECORD_OPEN.search(line)
-            if nsm:
-                rest = line[nsm.end() :]
-                brace = rest.find("{")
-                semi = rest.find(";")  # a namespace alias (``namespace x = y;``)
-                if (brace != -1 and (semi == -1 or brace < semi)) or (
-                    brace == -1 and semi == -1
-                ):
-                    pending = ("ns", nsm.group(1), "")
-            elif rm:
-                rest = line[rm.end() :]
-                brace = rest.find("{")
-                semi = rest.find(";")
-                if (brace != -1 and (semi == -1 or brace < semi)) or (
-                    brace == -1 and semi == -1
-                ):
-                    pending = ("rec", rm.group(2), rm.group(1))
-
-        # Record a field: exactly one active guard — a positive ``#ifdef`` or a
-        # negative ``#ifndef`` — with no opaque region and the transparent include
-        # guard ignored, directly in a recordable body (not an anonymous namespace).
-        positive = [g for g in guard_stack if isinstance(g, str)]
-        negatives = [g for g in guard_stack if isinstance(g, _NegGuard)]
-        has_opaque = any(g is None for g in guard_stack)
-        guard: str | None = None
-        is_negative = False
-        if not has_opaque and len(positive) + len(negatives) == 1:
-            if positive:
-                guard = positive[0]
-            else:
-                guard, is_negative = negatives[0].macro, True
-        if (
-            rec_here is not None
-            and rec_here.qualified is not None
-            and brace_depth == rec_here.depth + 1
-        ):
-            fm = _FIELD.match(line)
-            parsed = _parse_field(fm.group("decl")) if fm else None
-            # Count **every** member-looking declaration in source order — not just
-            # the ones ``_parse_field`` can decode. Array members (``int t[4];``),
-            # default-initialised members (``int x = 0;``), and methods all advance
-            # the position, so a guarded field *before* them is never wrongly marked
-            # terminal (Codex review #498, P1). A line starting with ``}`` (the
-            # record's own close) is excluded so a genuinely-last field keeps
-            # ``is_last``. Over-counting a non-layout member only *suppresses* a
-            # reconciliation (safe); under-counting could hide a real reorder.
-            is_memberish = bool(line) and (line[0].isalpha() or line[0] == "_") and line.endswith(";")
-            if parsed is not None or is_memberish:
-                pos = rec_here.field_index
-                rec_here.field_index += 1
-                if parsed is not None and guard is not None and guard not in locally_undefined:
-                    name, type_str, is_bitfield, bits, is_const, is_volatile, is_mutable = parsed
-                    entry: dict[str, object] = {
-                        "guard": guard,
-                        "type": type_str,
-                        "is_bitfield": is_bitfield,
-                        "bitfield_bits": bits,
-                        "access": rec_here.access,
-                        "is_const": is_const,
-                        "is_volatile": is_volatile,
-                        "is_mutable": is_mutable,
-                    }
-                    if is_negative:
-                        # An ``#ifndef GUARD`` field: observed context-free, but
-                        # pruned by a build that *defines* GUARD.
-                        entry["negative"] = True
-                    if guard in conditionally_touched or saw_include:
-                        # The guard macro is ``#undef``/``#define``d inside a branch
-                        # we cannot evaluate, **or** an earlier ``#include`` may have
-                        # altered it (the text scan cannot follow includes) → its
-                        # state is unprovable. Flag the field so the reconciler keeps
-                        # (never reconciles) findings on this type (Codex review #498).
-                        entry["ambiguous"] = True
-                    registry.setdefault(rec_here.qualified, {})[name] = entry
-                    rec_here.recorded.append((entry, pos))
-
-        for ch in line:
-            if ch == "{":
-                if pending is not None:
-                    kind, sc_name, keyword = pending
-                    if kind == "rec":
-                        qualified = _record_qualified_name(scope_stack, sc_name or "")
-                        sc = _Scope("rec", sc_name, brace_depth, qualified)
-                        sc.access = "private" if keyword == "class" else "public"
-                        scope_stack.append(sc)
-                    else:
-                        scope_stack.append(_Scope("ns", sc_name, brace_depth, None))
-                    pending = None
-                brace_depth += 1
-            elif ch == ";" and pending is not None:
-                # A ``;`` reached before the pending opener's ``{`` terminates a
-                # *split* forward declaration (``struct S`` then ``;`` on the next
-                # line). Clear ``pending`` so a later ``struct T { … }`` opens its
-                # own scope instead of being keyed to ``S`` — otherwise ``T``'s
-                # guarded fields would be misattributed to ``S`` and could
-                # reconcile away a real ``S`` field change (Codex review #498).
-                pending = None
-            elif ch == "}":
-                brace_depth = max(0, brace_depth - 1)
-                if scope_stack and brace_depth == scope_stack[-1].depth:
-                    closing = scope_stack.pop()
-                    # Now that every member is counted, stamp ``is_last`` on the
-                    # record's recorded guarded fields: True iff the field is the
-                    # final data member in source order (Codex review #498). A
-                    # reconciled field must be terminal so re-adding / pruning it
-                    # cannot reorder a sibling.
-                    last_index = closing.field_index - 1
-                    for rec_entry, member_pos in closing.recorded:
-                        rec_entry["is_last"] = member_pos == last_index
-
-    return {rec: fields for rec, fields in registry.items() if fields}
+            _capture_guarded_field(state, rec_here, line)
+        if state.pending is None:
+            state.pending = _detect_scope_opener(line)
+        _track_braces(state, line)
+    return {rec: fields for rec, fields in state.registry.items() if fields}
 
 
 def _has_forced_include(tokens: Iterable[str]) -> bool:

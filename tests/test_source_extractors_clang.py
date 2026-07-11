@@ -912,6 +912,12 @@ def test_top_level_const_detection() -> None:
     assert not tlc("const char *[2]")  # array of (mutable) pointers to const
     assert not tlc("int")
     assert not tlc("ns::Foo *")
+    # trailing `const` must be a standalone token, not the tail of an identifier:
+    # a type named `almost_const` / `xconst` is NOT const-qualified (Codex review)
+    assert not tlc("almost_const")
+    assert not tlc("ns::almost_const")
+    assert not tlc("xconst")
+    assert tlc("const")  # the bare keyword still counts
 
 
 def test_msvc_mangled_namespace_const_is_not_a_variable() -> None:
@@ -949,6 +955,35 @@ def test_msvc_mangled_namespace_const_is_not_a_variable() -> None:
     tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
     got = {e.qualified_name for e in tu.variables}
     assert got == {"ns::g"}, got  # the internal const `c` is dropped
+
+
+def test_msvc_const_alias_variable_is_dropped_via_desugared_type() -> None:
+    # A namespace-scope `using CI = const int; CI c = 1;` under clang-cl: the
+    # sugared qualType is the alias `CI` (not const-spelled), so the MSVC top-level
+    # -const fallback must consult desugaredQualType (`const int`) to see the
+    # internal linkage and drop it (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "mangledName": "?c@ns@@3HB",
+                        "type": {"qualType": "CI", "desugaredQualType": "const int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == set(), got  # the internal const-alias `c` is dropped
 
 
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:

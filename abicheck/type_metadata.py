@@ -34,6 +34,12 @@ class FuncProto:
     name: str
     return_type: str
     params: list[tuple[str, str]]  # [(param_name, param_type), ...]
+    # BTF_KIND_FUNC linkage (the record's vlen field): 0 = static,
+    # 1 = global, 2 = extern. None when the source format doesn't encode
+    # linkage (CTF). Legacy BTF encoders wrote 0 for every function, so a 0
+    # is only trustworthy when the same blob also carries non-zero linkages
+    # (see service._typeinfo_functions).
+    linkage: int | None = None
 
 
 def read_null_terminated_string(data: bytes, offset: int) -> str:

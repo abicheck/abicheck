@@ -4,14 +4,15 @@
 the changed paths, runs the always-on compiler-free pattern pre-scan, then runs a
 **pinned evidence depth** and (with `--baseline`) compares against it.
 
-!!! tip "First time here? Read the model, then the flags."
-    `--depth` selects how far down a fixed ladder of **evidence layers**
-    (`L0`–`L5`) the scan collects. If the dial and the layers look like they
-    overlap, read [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)
-    for the mental model first — this page is the practical flag reference and the
-    [worked examples](#worked-examples) below. To *see the actual data* each level
-    (L0→L5) extracts on one running example, and where each goes blind, read the
-    [level-by-level walk-through](../concepts/what-each-level-sees.md).
+!!! info "This topic in three pages — you are on **Flags**"
+    **Model** — [Evidence & Detectability](../concepts/evidence-and-detectability.md):
+    the `L0`–`L5` evidence layers, what each can and cannot see, and the
+    `--depth` dial that collects them. Read it first if the dial and the layers
+    look like they overlap.
+    **Worked example** — [What Each Level Sees](../concepts/what-each-level-sees.md):
+    one tiny library walked up every level, with the actual data.
+    **Flags** — this page: the practical flag reference and the
+    [worked examples](#worked-examples) below.
 
 **One dial selects how deep it goes — `--depth`, named by the evidence you get:**
 
@@ -34,7 +35,7 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
     `--mode pr|pr-deep|baseline|audit` presets. Both still parse but are now
     **hidden, deprecated aliases** (they print a warning and map onto `--depth`).
     Prefer `--depth`. The mapping table is in the
-    [Deprecated axes appendix](../concepts/scan-and-evidence-levels.md#appendix-deprecated-scan-axes-s0s6-and-mode).
+    [Deprecated axes appendix](../concepts/evidence-and-detectability.md#appendix-deprecated-scan-axes-s0s6-and-mode).
     (`--depth symbols` was renamed to `--depth binary`; `symbols` keeps working as
     a warned alias.)
 
@@ -98,7 +99,7 @@ cheap tier for a fast CI gate.
 
 The scan-depth table is scoped to the comparable v1/v2 shared-library targets.
 That scope is complete: **141/141 targets scanned at every pinned depth**. The
-full catalog has 162 cases, but audit, cross-source, bundle, BTF, and snapshot
+full catalog is larger, but audit, cross-source, bundle, BTF, and snapshot
 cases run through their dedicated proof lanes rather than this compare-style
 scan matrix. `Eval targets` now covers that whole comparable-target scope: the
 `NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes, and the

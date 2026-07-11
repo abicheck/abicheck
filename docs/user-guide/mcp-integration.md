@@ -224,7 +224,7 @@ from disk instead.
 
 ### `abi_list_changes` — List detectable change kinds
 
-Enumerates all 318 `ChangeKind` values with their impact classification. See
+Enumerates all 342 `ChangeKind` values with their impact classification. See
 the [Change Kinds Reference](../reference/change-kinds.md) for canonical
 documentation of each kind.
 
@@ -238,7 +238,7 @@ documentation of each kind.
 
 ```json
 {
-  "count": 318,
+  "count": 342,
   "change_kinds": [
     {
       "kind": "func_removed",
@@ -340,7 +340,7 @@ tier (compiler-free pattern pre-scan + intra-version cross-source checks) → th
 pinned evidence level — and, when `baseline` is given, a compare against it.
 Returns one coverage-/confidence-annotated scan result. The authority rule is
 preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
-`BREAKING` on their own. See [Evidence Layers & Scan Depth](../concepts/scan-and-evidence-levels.md)
+`BREAKING` on their own. See the [`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect)
 for the `depth` model (`mode`/`source_method` are deprecated aliases).
 
 **Parameters:**
