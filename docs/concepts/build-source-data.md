@@ -76,12 +76,11 @@ are plain JSON (or JSON Lines) under the pack's `raw`/normalized split
 described in [Schema & storage](#schema-storage); field names below are the
 real `to_dict()` output of each layer's dataclass, not illustrative pseudo-JSON.
 
-### L3 — one compile action (`BuildEvidence.compile_units[]`)
+### L3 — one compile action, and the option record the diff actually reads
 
 Each translation unit the build compiled becomes one `CompileUnit` record.
-`abi_relevant_flags` is the subset of `argv` the build-flag diff actually
-watches — everything else in `argv` is carried for provenance but ignored by
-comparison:
+`abi_relevant_flags` is carried for provenance/localization, but it is **not**
+what `build_diff.py` compares:
 
 ```json
 {
@@ -97,10 +96,29 @@ comparison:
 }
 ```
 
+The actual L3 diff input is `BuildEvidence.build_options[]` — a separate,
+flatter `BuildOption` record per canonical option key, which the adapters
+*project* from `compile_units[].abi_relevant_flags` (and other sources):
+
+```json
+{
+  "key": "glibcxx_use_cxx11_abi",
+  "value": "1",
+  "abi_relevant": true,
+  "scope": "global"
+}
+```
+
 Comparing this record between old and new is exactly the "L3 build-flag delta"
-table you see in a report: change `_GLIBCXX_USE_CXX11_ABI` from `1` to `0` here
-and the diff emits `abi_relevant_build_flag_changed` — nothing about the source
-itself needs to change for that finding to fire.
+table you see in a report: change `value` from `"1"` to `"0"` here and
+`_diff_options()` emits `abi_relevant_build_flag_changed` — nothing about the
+source itself needs to change for that finding to fire. **This is the record a
+third-party/build-emitted producer must populate** (see
+[Build-emitted facts](#build-emitted-facts-the-abicheck_inputs-protocol-flow-2)
+below): shipping only `compile_units[].abi_relevant_flags` without the
+corresponding `build_options[]` entries silently drops L3 flag-drift detection,
+because only the built-in adapters (CMake/Ninja/Bazel/Make) perform that
+projection automatically.
 
 ### L4 — one source declaration (`SourceAbiTu.macros[] / .functions[] / …`)
 
@@ -141,7 +159,7 @@ the record `graph explain` walks to answer "what does this declaration reach":
 {
   "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
   "src": "decl://cart::Cart::total",
-  "dst": "sym://_ZNK4cart4Cart5totalEb",
+  "dst": "binary_symbol://_ZNK4cart4Cart5totalEb",
   "provenance": "source_abi_link",
   "confidence": "high"
 }
