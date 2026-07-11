@@ -124,14 +124,45 @@ clang JSON-AST omits record layout.) **Fix** (`abicheck/dumper.py`): the error
 now also points to `--ast-frontend clang` / `ABICHECK_AST_FRONTEND=clang` and
 states the layout-evidence caveat.
 
-### F5 — Usability: scan L2 needs dependency includes explicitly *(documented)*
+### F5 — Scan flow: L2 header parse ignored the build's include dirs *(fixed)*
 
-`scan -H include --compile-db …` still failed to parse public headers until the
-EPICS-Base include dirs were added via `-I`; the L2 aggregate-header parse does
-not inherit include paths from the compile DB (which only scopes the L4 TUs). A
-future ergonomic improvement is to seed L2 header includes from the compile DB.
-For now, pass the dependency `-I` dirs to `scan`/`compare` when headers pull in
-an external SDK (EPICS Base here).
+The loudest gap: a zero-config `scan --sources . --depth source -H include` (no
+`-I`, no committed compile DB) **hard-failed** with
+`fatal error: 'epicsTime.h' file not found`. Root cause: in
+`cli_scan._build_new_snapshot` the L2 aggregate public-header parse runs
+*before* the compile DB is resolved, and only ever searched the user's `-I`
+inputs — so although the L4 replay compiled every TU fine with the build's
+include dirs, the L2 parse of the public headers (which `#include` EPICS Base)
+had none. Providing sources genuinely did *not* "just work."
+
+**Fix**: a best-effort `derive_l2_include_dirs` (`buildsource/inline.py`)
+resolves the same compile DB the L4 replay uses — explicit `--build-info`,
+auto-discovered `compile_commands.json`, or the inferred build-system query —
+and returns the de-duplicated, existing `-I`/`-isystem` dirs. `_build_new_snapshot`
+seeds them into the L2 parse **only when the user passed no `-I`** (a pure
+fallback; explicit `-I` still wins and any resolution failure returns `[]`, so no
+working scan regresses). After the fix the same zero-config command runs clean:
+
+```
+INFO: L2 header parse: seeded 13 include dir(s) from the build's compile database (no -I given).
+L2_header: present — 632 type(s) from public headers    # was: fatal error
+```
+
+### F5b — Timing: parse cost tracks *total* debug info, not the public API *(analysis)*
+
+Even after F1, a two-library compare is ~60–80 s and the single-binary source
+scan ~130 s — slow for a library with only ~1104 exports. Profiling an L1-only
+compare shows **~100 % of the time is DWARF traversal**: `_process_cu` (15 %),
+pyelftools `iter_DIE_children` (13 %) / `_get_cached_DIE` (11 %), `parse_dwarf`
+(12 %), `_process_struct` (9 %), `_extract_calling_convention` (7 %). libpvxs is
+not "small" in DWARF terms: its 8.5 MB `-g` build carries **4046 types** — mostly
+`std::`/template/EPICS-internal — and abicheck parses *every* DIE with **no
+public-surface pruning**, so cost scales with the whole debug section rather than
+the exported surface. Peak RSS is **~1 GB** (the DIE cache + full type model).
+Two optimisation opportunities for a follow-up: (a) prune DWARF DIE processing to
+types reachable from exported/public symbols; (b) `_extract_calling_convention`
+at 7 % of a compare looks like redundant per-DIE work worth memoizing. These are
+larger changes than this PR carries and are logged here as the next perf target.
 
 ### F6 — Minor: `DW_TAG_ptr_to_member_type` unhandled *(documented)*
 
@@ -144,6 +175,31 @@ noise, no verdict impact). Low-priority modelling gap.
 A `runpath_changed` RISK appears because the two sides were built in different
 directories (RUNPATH encodes the build tree). In CI both releases must be built
 in an identical layout, or the finding suppressed — otherwise it is noise.
+
+## Why the existing test suite missed the functional bugs
+
+Both fixed defects (F1 perf, F2 RTTI) had **100 % line coverage** — they executed
+in tests, but no test *observed* the wrong behaviour. The gaps:
+
+- **F1 (O(N²)) — no scale/complexity test.** Unit and Hypothesis tests build
+  tiny snapshots (a handful of types); the quadratic only manifests at thousands.
+  Coverage measures *reach*, not *cost*. Closed here by
+  `test_suffix_index_built_once_per_walk` (deterministic: asserts the index is
+  built once per walk, not per node — the exact regression) plus
+  `test_scale_many_types_resolves_and_terminates` (3000-type graph; sub-second
+  with the fix, minutes without).
+- **F2 (RTTI alignment) — synthetic symbols never used real C++ names.** The
+  alignment detector's tests used clean names (`g_table`, `g_pool`); no case fed
+  a mangled `_ZTS*`/`_ZTV*` symbol, which only appear in real compiled C++.
+  Closed by `test_rtti_symbols_are_exempt`. The deeper lesson: detectors that key
+  on symbol-name *shape* need at least one real-C++-binary fixture in the FP
+  corpus — synthetic-only cases can't reach them.
+
+Takeaway for the release: the property/FP-gate corpus is strong on *verdict*
+correctness but blind to *performance* and to *real-mangled-symbol* shapes. This
+run adds regression coverage for both; a standing large-real-C++-binary case
+(pvxs is a good candidate) in the `libabigail`/`integration` lane would guard the
+class going forward.
 
 ## Recommended CI integration for pvxs
 
@@ -159,6 +215,7 @@ on:
     tags: ['*']
 permissions:
   contents: read
+  security-events: write   # required for upload-sarif (see docs/user-guide/github-action.md)
 jobs:
   abi:
     runs-on: ubuntu-24.04
@@ -168,7 +225,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       # Build EPICS Base + the base ref and the PR/tag ref of pvxs with -g -Og,
-      # emitting lib/<arch>/ dirs for each (see abi-diff.sh setupsrc()).
+      # emitting lib/<arch>/ dirs for each (see abi-diff.sh setupsrc()). Export
+      # EPICS_BASE so the include: paths below can reference it.
       - name: Build old + new
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
       - name: Compare both libraries (public-header scoped)
@@ -177,10 +235,16 @@ jobs:
           old-library: old/lib/linux-x86_64        # directory → compares libpvxs + libpvxsIoc
           new-library: new/lib/linux-x86_64
           header: new/include                       # installed public headers only
+          # pvxs public headers include EPICS Base headers, so the L2 parse needs
+          # the Base include dirs too (F5); `include:` maps to -I (both sides).
+          include: >-
+            ${{ env.EPICS_BASE }}/include
+            ${{ env.EPICS_BASE }}/include/os/Linux
+            ${{ env.EPICS_BASE }}/include/compiler/gcc
           scope-public-headers: 'true'
           fail-on-removed-library: 'true'
           format: sarif
-          output: abi.sarif
+          output-file: abi.sarif                    # the action's input is `output-file`
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with: { sarif_file: abi.sarif }
@@ -188,6 +252,9 @@ jobs:
 
 Notes:
 - Directory inputs make `compare` fan out over both SONAME-matched libraries.
+- `include:` maps to `-I` for the L2 header parse; because pvxs's public headers
+  `#include` EPICS Base, its include dirs must be supplied here (F5) — omitting
+  them makes header parsing fail with `epicsTime.h file not found`.
 - The Action installs castxml, so `--ast-frontend` is unnecessary there; on a
   clang-only host set `ast-frontend: clang` (F4).
 - For a deeper nightly, add a `scan` job with `depth: source` and `sources: .`
@@ -196,8 +263,12 @@ Notes:
 
 ## Status
 
-- **Fixed & tested in this branch:** F1 (perf), F2 (accuracy), F4 (UX error).
-  Full fast unit suite green (13 689 passed); mypy + ruff + AI-readiness clean.
-- **Documented for the release:** F3 (scoping requirement), F5/F6/F7.
+- **Fixed & tested in this branch:** F1 (perf O(N²)), F2 (RTTI alignment FP),
+  F4 (castxml-error UX), **F5 (zero-config `--sources` L2 include seeding)**,
+  plus scale/RTTI/derive-includes regression tests. Full fast unit suite green;
+  mypy + ruff + AI-readiness clean.
+- **Documented for the release:** F3 (public-header-scoping requirement),
+  F5b (DWARF-parse-dominated timing + ~1 GB memory; next perf target is
+  public-surface DIE pruning), F6 (`ptr_to_member` warning), F7 (RUNPATH).
 - Binaries are not committed (per `validation/` convention); reproduce with the
   commands above.

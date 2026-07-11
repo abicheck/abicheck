@@ -47,6 +47,7 @@ side-effect at the bottom of :mod:`abicheck.cli` so ``@main.command`` runs.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -107,6 +108,8 @@ from .cli_scan_helpers import (
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
+
+logger = logging.getLogger(__name__)
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -360,6 +363,22 @@ def _build_new_snapshot(
     """
     from .errors import AbicheckError
     from .service import resolve_input
+
+    # L2 include fallback: when headers are given but the user passed no explicit
+    # -I, the aggregate public-header parse cannot see the include dirs the build
+    # already knows (e.g. pvxs public headers include EPICS Base's <epicsTime.h>).
+    # Reuse the build's compile DB — the same one the L4 replay uses — to seed
+    # those dirs so `scan/dump --sources` parses headers without a manual -I.
+    if headers and not includes and (sources is not None or build_info is not None):
+        from .buildsource.inline import derive_l2_include_dirs
+
+        derived = derive_l2_include_dirs(build_info, sources, None)
+        if derived:
+            includes = [Path(d) for d in derived]
+            logger.info(
+                "L2 header parse: seeded %d include dir(s) from the build's "
+                "compile database (no -I given).", len(derived),
+            )
 
     try:
         snap = resolve_input(

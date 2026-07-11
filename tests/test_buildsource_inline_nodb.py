@@ -60,6 +60,41 @@ def test_compile_db_present_does_not_warn(tmp_path, capsys):
     assert snap.build_source.build_evidence.compile_units  # L3 collected
 
 
+def test_derive_l2_include_dirs_from_compile_db(tmp_path):
+    # The L2 header parse needs the build's include dirs when the user gives no
+    # -I (e.g. pvxs public headers include EPICS Base). derive_l2_include_dirs
+    # must surface the -I/-isystem dirs from the discovered compile DB, filtering
+    # out non-existent ones, so scan/dump --sources can parse dependency headers.
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    sysinc = tmp_path / "sysinc"
+    sysinc.mkdir()
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "command": f"cc -I{inc} -isystem {sysinc} -I/nonexistent/xyz -c {src}",
+        }]),
+        encoding="utf-8",
+    )
+
+    dirs = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+    assert str(inc) in dirs
+    assert str(sysinc) in dirs
+    assert "/nonexistent/xyz" not in dirs  # non-existent dirs filtered out
+
+
+def test_derive_l2_include_dirs_no_inputs_is_empty():
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    # No sources and no build-info → nothing to derive, and never raises.
+    assert derive_l2_include_dirs(build_info=None, sources=None) == []
+
+
 def test_graph_build_collect_mode_skips_l4(tmp_path):
     # P18: graph-build collects L3 + the L5 graph from build facts alone, with NO
     # L4 source replay — so the structural graph + build options are available even

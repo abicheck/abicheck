@@ -604,6 +604,57 @@ def effective_graph_scope(graph_detail: str, scope: str) -> str:
     return scope
 
 
+def derive_l2_include_dirs(
+    build_info: Path | None,
+    sources: Path | None,
+    build_config: BuildConfig | None = None,
+) -> list[str]:
+    """Best-effort union of ``-I``/``-isystem`` dirs from the build's compile DB.
+
+    The L2 public-header parse (castxml/clang over ``-H`` headers) only searches
+    the user's ``-I`` inputs and the inferred public-header roots — it does *not*
+    see the include directories the build already knows about. When a project's
+    public headers ``#include`` a dependency's headers (e.g. EPICS pvxs headers
+    including ``<epicsTime.h>``), a ``scan``/``dump`` with just ``--sources`` (no
+    explicit ``-I``) then fails to parse them. This resolves the same compile DB
+    the L4 replay uses (explicit ``--build-info`` / auto-discovered
+    ``compile_commands.json`` / the inferred build-system query) and returns the
+    de-duplicated, existing include dirs so the caller can feed them to L2 as a
+    **fallback** (only when the user gave no ``-I``). Purely best-effort: any
+    failure returns ``[]`` so a scan that works today never regresses.
+    """
+    if sources is None and build_info is None:
+        return []
+    cfg = build_config or BuildConfig()
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    cleanups: list[Callable[[], None]] = []
+    try:
+        compile_db = _resolve_compile_db(
+            build_info, sources, cfg,
+            build_config_trusted_for_query=build_config is not None,
+            merged=merged, extractors=extractors, cleanup=cleanups,
+        )
+        if compile_db is not None:
+            _run_compile_db(compile_db, cfg.system, merged, extractors, None)
+        seen: set[str] = set()
+        out: list[str] = []
+        for cu in merged.compile_units:
+            for inc in (*cu.include_paths, *cu.system_include_paths):
+                if inc and inc not in seen and Path(inc).is_dir():
+                    seen.add(inc)
+                    out.append(inc)
+        return out
+    except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
+        return []
+    finally:
+        for fn in cleanups:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def collect_inline_pack(
     *,
     sources: Path | None,

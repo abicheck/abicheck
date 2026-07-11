@@ -80,6 +80,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`scan`/`dump --sources` now seeds L2 header includes from the build.** A
+  zero-config source scan whose public headers `#include` a dependency's headers
+  (e.g. EPICS pvxs headers pulling in `<epicsTime.h>`) hard-failed the L2 parse
+  with `fatal error: … file not found`, because the aggregate-header parse only
+  searched the user's `-I` — even though the discovered compile database (used by
+  the L4 replay) already knew the dirs. When no explicit `-I` is given, abicheck
+  now derives the include-dir union from that compile DB and feeds it to the L2
+  parse (best-effort fallback; explicit `-I` still wins, failures degrade to the
+  old behaviour). Providing `--sources` alone now parses headers that reach into
+  a dependency SDK.
+
 - **Quadratic slowdown comparing large C++ libraries.** The internal-leak walk
   (`internal_leak._resolve_type_name`) scanned the entire type map on every BFS
   node to canonicalize unqualified type names, making a compare of a
