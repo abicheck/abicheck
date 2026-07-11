@@ -1276,8 +1276,10 @@ def _embed_inline_source_side(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @click.option("--show-redundant", is_flag=True, default=False,
+              hidden=True,
               help="Disable redundancy filtering and show all changes including those "
-                   "derived from root type changes.")
+                   "derived from root type changes. Demoted to config "
+                   "(scope.show_redundant, ADR-040 L2); this flag still overrides it.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
               hidden=True,

@@ -45,6 +45,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (its base flag is shared with `dump`/`scan`). The GitHub Action's per-side
   inputs are unchanged — they map to the side-aware flags internally.
 
+- **Debug-resolution + `--show-redundant` demoted to `.abicheck.yml` (ADR-040
+  Lever 2).** A new `debug:` config block carries `format`, `dwarf_only`,
+  `debuginfod`, and `debuginfod_url`; `scope.show_redundant` carries the
+  redundancy-filter toggle. The corresponding CLI flags (`--debug-format`,
+  `--debuginfod`, `--debuginfod-url`, `--dwarf-only`, `--show-redundant`) are now
+  hidden but still function as per-run overrides (`CLI > config > default`, the
+  same cadence as the severity family), lowering `compare`'s visible flag count
+  by 5. The coarse `--debug-root` stays a visible override. The toolchain family
+  (`--gcc-*`/`--sysroot`/`--nostdinc`) is intentionally **not** demoted — it is
+  the shared `compare`/`dump`/`scan` L2 compile-context surface — and
+  `--scope-public-headers` stays visible as the everyday scoping on/off switch.
+
 - **`compare` flag budget is now derived from a documented ledger.** The
   `COMPARE_FLAG_BUDGET` ceiling is computed as `BASE + len(COMPARE_FLAG_BUDGET_RAISES)`,
   so a new visible flag cannot be added without a rationale entry — closing the

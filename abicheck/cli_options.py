@@ -933,20 +933,26 @@ def debug_resolution_options(func: F) -> F:
         "debug_format_opt",
         type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
         default=None,
+        hidden=True,
         help="Force the ELF debug format for both sides (auto=pick best available). "
-        "Supersedes the individual --btf/--ctf/--dwarf flags.",
+        "Supersedes the individual --btf/--ctf/--dwarf flags. Demoted to the "
+        "debug.format config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
         "--debuginfod-url",
         "debuginfod_url",
         default=None,
-        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).",
+        hidden=True,
+        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var). Demoted to "
+        "the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
         "--debuginfod",
         is_flag=True,
         default=False,
-        help="Enable debuginfod network resolution for debug info (opt-in).",
+        hidden=True,
+        help="Enable debuginfod network resolution for debug info (opt-in). Demoted "
+        "to the debug.debuginfod config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     func = click.option(
         "--debug-root",
@@ -962,8 +968,10 @@ def debug_resolution_options(func: F) -> F:
         "--dwarf-only",
         is_flag=True,
         default=False,
+        hidden=True,
         help="Force DWARF-only mode for both sides: use DWARF debug info "
-        "as primary data source even when headers are available.",
+        "as primary data source even when headers are available. Demoted to the "
+        "debug.dwarf_only config key (ADR-040 L2); this flag still overrides it.",
     )(func)
     return func
 
@@ -1310,7 +1318,14 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: folded into one side-aware ``--version`` (``old=``/``new=`` prefix; per-side
 #: defaults ``old``/``new``). The unregistered release engine keeps its per-side
 #: ``--old-version``/``--new-version``.
-COMPARE_FLAG_BUDGET_BASE = 62
+#: Lowered 62→57 by ADR-040 Lever 2 (Phase D, constraint-aware subset): the
+#: debug-resolution knobs ``--debug-format``/``--debuginfod``/``--debuginfod-url``/
+#: ``--dwarf-only`` demoted to the ``debug:`` config block and ``--show-redundant``
+#: to ``scope.show_redundant`` — all now ``hidden`` (they still override config,
+#: like the severity family), so they leave the visible surface (−5). The coarse
+#: ``--debug-root`` stays visible; the toolchain family and ``--scope-public-headers``
+#: are documented carve-outs (shared with dump/scan / everyday on-off switch).
+COMPARE_FLAG_BUDGET_BASE = 57
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

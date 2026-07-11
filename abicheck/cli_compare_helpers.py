@@ -93,6 +93,11 @@ def _resolve_compare_config(
     strict_suppressions: bool,
     require_justification: bool,
     exit_code_scheme: str | None,
+    debug_format_opt: str | None,
+    dwarf_only: bool,
+    debuginfod: bool,
+    debuginfod_url: str | None,
+    show_redundant: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -126,6 +131,15 @@ def _resolve_compare_config(
             "require_justification", require_justification
         ),
         cli_exit_code_scheme=exit_code_scheme,
+        # ADR-040 Lever 2: debug-resolution + show-redundant demoted to config.
+        # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
+        # config wins); the is_flags need the COMMANDLINE-source gate so their
+        # default ``False`` doesn't mask a configured ``True``.
+        cli_debug_format=debug_format_opt,
+        cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
+        cli_debuginfod=_cli_flag("debuginfod", debuginfod),
+        cli_debuginfod_url=debuginfod_url,
+        cli_show_redundant=_cli_flag("show_redundant", show_redundant),
     )
     return cfg_path, project_cfg, resolved_cfg
 
@@ -427,12 +441,25 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
         exit_code_scheme=exit_code_scheme,
+        debug_format_opt=debug_format_opt,
+        dwarf_only=dwarf_only,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
+        show_redundant=show_redundant,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
+    # ADR-040 Lever 2: the demoted debug-resolution + show-redundant knobs are now
+    # resolved (CLI > config > default); overwrite the raw flag locals so the rest
+    # of the flow sees the merged values.
+    debug_format_opt = resolved_cfg.debug_format
+    dwarf_only = resolved_cfg.dwarf_only
+    debuginfod = resolved_cfg.debuginfod
+    debuginfod_url = resolved_cfg.debuginfod_url
+    show_redundant = resolved_cfg.show_redundant
 
     # ADR-037 D7: input-type dispatch. The resolved config (scope/suppression/
     # severity) is forwarded so a set-input compare classifies the same way a

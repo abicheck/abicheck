@@ -148,6 +148,57 @@ class TestConfigPrecedence:
         )
         assert r.exit_code_scheme == "severity"
 
+    def test_debug_and_show_redundant_default(self) -> None:
+        r = resolve_compare_config(
+            None,
+            cli_severity_preset=None, cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
+            cli_severity_addition=None, cli_scope_public=None,
+            cli_collapse_versioned_symbols=None,
+        )
+        assert r.debug_format is None
+        assert r.dwarf_only is False
+        assert r.debuginfod is False
+        assert r.debuginfod_url is None
+        assert r.show_redundant is False
+
+    def test_debug_and_show_redundant_config_beats_default(self) -> None:
+        # ADR-040 Lever 2: the demoted knobs come from the debug:/scope: blocks.
+        cfg = BuildConfig(
+            debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
+            debug_debuginfod_url="https://dbginfo.example", scope_show_redundant=True,
+        )
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None, cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
+            cli_severity_addition=None, cli_scope_public=None,
+            cli_collapse_versioned_symbols=None,
+        )
+        assert r.debug_format == "dwarf"
+        assert r.dwarf_only is True
+        assert r.debuginfod is True
+        assert r.debuginfod_url == "https://dbginfo.example"
+        assert r.show_redundant is True
+
+    def test_debug_and_show_redundant_cli_beats_config(self) -> None:
+        cfg = BuildConfig(
+            debug_format="dwarf", debug_dwarf_only=True, scope_show_redundant=True,
+        )
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None, cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
+            cli_severity_addition=None, cli_scope_public=None,
+            cli_collapse_versioned_symbols=None,
+            cli_debug_format="btf",       # CLI override
+            cli_dwarf_only=False,         # CLI override (flag not passed → False here)
+            cli_show_redundant=False,     # CLI override
+        )
+        assert r.debug_format == "btf"
+        assert r.dwarf_only is False
+        assert r.show_redundant is False
+
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
 
@@ -160,9 +211,32 @@ class TestConfigRoundtrip:
             severity_potential_breaking="warning", severity_quality_issues="info",
             severity_addition="info", scope_public=False,
             collapse_versioned_symbols=True, public_symbols=["_Z3foov"],
+            scope_show_redundant=True,
             suppression_strict=True, suppression_require_justification=False,
-            source_method="s5", exit_code_scheme="severity", version=2,
+            source_method="s5",
+            debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
+            debug_debuginfod_url="https://dbginfo.example",
+            exit_code_scheme="severity", version=2,
         )
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_debug_block_invalid_format_rejected(self) -> None:
+        with pytest.raises(ValueError, match="debug.format"):
+            BuildConfig.from_dict({"debug": {"format": "elf"}})
+
+    def test_debug_block_parses_and_roundtrips(self) -> None:
+        cfg = BuildConfig.from_dict({
+            "debug": {
+                "format": "btf", "dwarf_only": True,
+                "debuginfod": True, "debuginfod_url": "https://x.example",
+            },
+            "scope": {"show_redundant": True},
+        })
+        assert cfg.debug_format == "btf"
+        assert cfg.debug_dwarf_only is True
+        assert cfg.debug_debuginfod is True
+        assert cfg.debug_debuginfod_url == "https://x.example"
+        assert cfg.scope_show_redundant is True
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:
@@ -260,6 +334,9 @@ class TestFlagBudget:
             "--severity-abi-breaking", "--severity-quality-issues",
             "--strict-suppressions", "--require-justification",
             "--collapse-versioned-symbols", "--public-symbol",
+            # ADR-040 Lever 2 (Phase D): debug-resolution + show-redundant demotion
+            "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
+            "--show-redundant",
         ):
             assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
 
@@ -273,7 +350,10 @@ class TestFlagBudget:
             for opt in p.opts
         }
         for flag in ("--severity-preset", "--show-filtered", "--depth",
-                     "--exit-code-scheme", "--scope-public-headers"):
+                     "--exit-code-scheme", "--scope-public-headers",
+                     # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
+                     # the toolchain family (shared with dump/scan) stay visible.
+                     "--debug-root", "--gcc-path", "--sysroot"):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
 
 

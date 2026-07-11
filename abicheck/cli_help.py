@@ -70,10 +70,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {
             "name": "Debug info",
-            "options": [
-                "--dwarf-only", "--debug-format", "--debug-root",
-                "--debuginfod", "--debuginfod-url",
-            ],
+            # The format/debuginfod/dwarf-only knobs are demoted to the `debug:`
+            # config block (ADR-040 L2) and hidden; only the coarse per-run
+            # --debug-root override stays a visible flag.
+            "options": ["--debug-root"],
         },
         {
             "name": "Build/source evidence (L3–L5)",

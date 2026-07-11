@@ -50,6 +50,7 @@ malformed YAML file is a hard error.
 | [`suppression:`](#suppression) | mapping | — | Suppression hygiene policy |
 | [`source:`](#source) | mapping | — | Precise S-axis (evidence method) selection |
 | [`compile:`](#compile) | mapping | — | Stable half of the L2 header compile context |
+| [`debug:`](#debug) | mapping | — | Separate-debug-file resolution (format / debuginfod / dwarf-only) |
 | [`exit_code_scheme:`](#exit_code_scheme) | string | `auto` | Which exit-code scheme `compare` uses |
 | [`version:`](#version) | integer | `0` | Config schema version (forward-compat) |
 | [`risk_rules:`](#risk_rules-and-crosschecks) | mapping | — | Path-glob risk profile (loaded via `--risk-rules`) |
@@ -112,6 +113,7 @@ Public-surface scoping — the main false-positive control. See
 | `public` | boolean | unset → `true` | Restrict analysis to the public exported surface. |
 | `collapse_versioned_symbols` | boolean | unset → `false` | Collapse symbol-versioned duplicates before diffing. |
 | `public_symbols` | list of strings | `[]` | Explicit public-symbol overlay. Additive with any CLI `--public-symbol` values. Entries are matched **exactly** — by the raw symbol, or (for a qualified name) its trailing `::` segment, so `foo` also matches `ns::foo`. **Globs/wildcards are not supported** (`mylib_*` matches nothing); list each symbol. |
+| `show_redundant` | boolean | unset → `false` | Disable redundancy filtering (show all changes, including those derived from a root type change). Demoted from `--show-redundant` (ADR-040 L2); the hidden CLI flag still overrides it. |
 
 ---
 
@@ -164,6 +166,23 @@ cross-compile flags stay CLI overrides (`CLI > config`).
 > Values in `compile.std`/`compile.defines` must be a single whitespace-free
 > compiler-option atom (a config scalar cannot expand into multiple compiler
 > arguments).
+
+---
+
+### `debug:`
+
+Separate-debug-file resolution for ELF (ADR-021a), demoted off the CLI in
+ADR-040 Lever 2. These are stable per-project debug-artifact knobs; the coarse
+per-run `--debug-root` stays a visible CLI flag, while the settings below move
+here. Each corresponds to a now-hidden CLI flag that still overrides the config
+value (`CLI > config`).
+
+| Sub-key | Type | Default (effective) | Purpose (was) |
+|---------|------|---------------------|---------------|
+| `format` | `auto` \| `dwarf` \| `btf` \| `ctf` (case-insensitive) | unset → auto-pick | Force the ELF debug format for both sides (`--debug-format`). |
+| `dwarf_only` | boolean | unset → `false` | Use DWARF debug info as the primary source even when headers are available (`--dwarf-only`). |
+| `debuginfod` | boolean | unset → `false` | Enable debuginfod network resolution (`--debuginfod`). |
+| `debuginfod_url` | string | unset | debuginfod server URL, overriding `DEBUGINFOD_URLS` (`--debuginfod-url`). |
 
 ---
 
@@ -246,6 +265,12 @@ compile:
     - MYLIB_STATIC=0
   nostdinc: false
 
+# Separate-debug-file resolution (coarse --debug-root stays a CLI flag)
+debug:
+  format: auto
+  dwarf_only: false
+  debuginfod: false
+
 # Severity policy consumed by `compare`
 severity:
   preset: default
@@ -257,6 +282,7 @@ severity:
 scope:
   public: true
   collapse_versioned_symbols: false
+  show_redundant: false
   public_symbols:
     - mylib_foo
     - mylib_bar

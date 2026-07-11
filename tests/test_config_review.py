@@ -152,17 +152,19 @@ class TestExitSchemeAnnouncement:
 
 
 class TestDebugFormatSelector:
-    def test_compare_exposes_debug_format(self):
+    def test_compare_hides_debug_format(self):
+        # ADR-040 Lever 2: --debug-format is demoted to the debug.format config
+        # key and hidden on compare (still a functional override; see
+        # test_debug_format_auto_accepted). It stays visible on `dump`.
         out = CliRunner().invoke(main, ["compare", "--help"]).output
-        assert "--debug-format" in out
-        # The legacy --btf/--ctf/--dwarf flags are hidden: they have no
-        # left-column option entry (they only appear in the selector's help
-        # text). The selector entry shows the [auto|dwarf|btf|ctf] choices.
-        assert "[auto|dwarf|btf|ctf]" in out
+        assert "--debug-format" not in out
+        assert "--debug-root" in out  # the coarse per-run override stays visible
 
     def test_dump_exposes_debug_format(self):
         out = CliRunner().invoke(main, ["dump", "--help"]).output
         assert "--debug-format" in out
+        # The dump selector still shows the [auto|dwarf|btf|ctf] choices; the
+        # legacy --btf/--ctf/--dwarf flags remain hidden.
         assert "[auto|dwarf|btf|ctf]" in out
 
     def test_legacy_dwarf_flag_still_works(self, tmp_path):

@@ -2,7 +2,9 @@
 
 **Status:** Accepted — phased implementation (Phase A run profiles + Phase B
 evidence-family collapse landed; Phase C Lever-1 remainder landed except the
-`ast-frontend` carve-out; Phase D staged, see "Rollout"). Targets
+`ast-frontend` carve-out; Phase D landed as a constraint-aware subset —
+debug-resolution + `--show-redundant` demoted to config, toolchain and
+`--scope-public-headers` deliberately retained, see "Rollout"). Targets
 **0.5.0** (hard break, no alias window — consistent with how ADR-037 removed
 `--header-backend`).
 
@@ -78,13 +80,20 @@ useful.
 
 | Family | New config block | CLI after |
 |--------|------------------|-----------|
-| Toolchain (`--gcc-path/-prefix/-options/-option`, `--sysroot`, `--nostdinc`) | `compile:` (already read for the L2 context — extend to carry these) | *(removed; `--gcc-option` kept hidden as a one-off escape hatch under D11)* |
-| Debug resolution (`--debug-root{,1,2}`, `--debuginfod`, `--debuginfod-url`, `--debug-format`, `--dwarf-only`) | `debug:` | `--debug-root` (coarse, both-sides) only |
-| Public-surface scoping (`--scope-public-headers`, `--show-redundant`) | `scope:` (already exists) | *(removed; `--show-filtered` debugging view kept)* |
+| Toolchain (`--gcc-path/-prefix/-options/-option`, `--sysroot`, `--nostdinc`) | `compile:` (already read for the L2 context) | **retained** — the family is declared in the `compare`/`dump`/`scan`-shared `@compile_context_options` decorator (ADR-037 D3 parity); demoting it for `compare` alone would fork that shared family, out of scope for a *compare* reduction. |
+| Debug resolution (`--debuginfod`, `--debuginfod-url`, `--debug-format`, `--dwarf-only`) | `debug:` (new) | hidden + config-read (still overrides config); the coarse per-run `--debug-root` stays a **visible** override. |
+| Public-surface scoping (`--show-redundant`) | `scope:` (already exists — `show_redundant` key) | hidden + config-read; `--scope-public-headers` **retained visible** (everyday on/off switch), `--show-filtered` debugging view kept. |
 
-Demotion follows the established **hide-then-remove** cadence: the flags are
-already `hidden` in 0.4.x for the severity/suppression families; 0.5.0
-removes the hidden flags whose config home now exists and are wired to read
+As implemented (the constraint-aware subset chosen for this PR), demotion follows
+the established **hide-then-config** cadence used by the severity/suppression
+families: the demoted flags are marked `hidden` and read their default from the
+new/extended config block, while an explicit flag still wins (`CLI > config`).
+Earlier drafts of this table proposed hard-removing the toolchain family and
+`--scope-public-headers`; both are retained for the reasons in the cells above.
+
+Historically the severity/suppression families were already `hidden` in 0.4.x;
+this phase wires the debug/scope config home the same way. A later revision may
+still remove the hidden flags whose config home now exists and are wired to read
 from it. **~14 flags → ~2.**
 
 ### Lever 3 — Run profiles (removes the need to *type* common combos)
@@ -119,23 +128,29 @@ that keeps casual invocations short without adding one flag per knob.
 
 ### Net effect
 
-| | flags |
-|---|---|
-| Today | 79 |
-| After Lever 1 (−~17) | ~62 |
-| After Lever 2 (−~12) | ~50 |
-| After per-side + config reach the reference target set | **~20** (+ `--profile`) |
+| | flags | landed `BASE` |
+|---|---|---|
+| Today | 79 | 76 |
+| After Lever 1 (−~17) | ~62 | 62 |
+| After Lever 2 (this PR's constraint-aware subset, −5) | ~57 | 57 |
+| After Lever 2 reaches the full reference target set (toolchain redesigned cross-command, later) | **~20** (+ `--profile`) | — |
 
-The precise ~20 target set is the reference list in
-`docs/development/adr/037-cli-interface-contract.md#d4` plus the side-aware
-single flags and `--profile`.
+The original `~50`/`~20` projection assumed the full Lever-2 table (hard-removing
+the toolchain family and `--scope-public-headers`). This PR lands the
+constraint-aware subset (−5 visible: the `debug:` block + `scope.show_redundant`);
+the deeper cut needs the shared `@compile_context_options` family redesigned
+across `compare`/`dump`/`scan`, tracked separately. The precise ~20 target set is
+the reference list in `docs/development/adr/037-cli-interface-contract.md#d4` plus
+the side-aware single flags and `--profile`.
 
 ## Consequences
 
 * **Breaking (0.5.0, no alias window).** Existing invocations using
-  `--old-header X --new-header Y` become `--header old=X --header new=Y`; toolchain and
-  debug-resolution flags move to `.abicheck.yml`. A migration table ships in
-  `docs/user-guide/migration-0.5.md` and the CHANGELOG. This matches the
+  `--old-header X --new-header Y` become `--header old=X --header new=Y`; the
+  debug-resolution knobs (`--debug-format`/`--debuginfod`/`--debuginfod-url`/
+  `--dwarf-only`) and `--show-redundant` move to `.abicheck.yml` (still accepted
+  as hidden overrides). The toolchain family is retained. A migration table ships
+  in `docs/user-guide/migration-0.5.md` and the CHANGELOG. This matches the
   ADR-037 precedent (hard removal of `--header-backend`).
 * The `COMPARE_FLAG_BUDGET` ledger (`cli_options.py`) is the machine-checked
   scoreboard: each collapsed concept lowers `COMPARE_FLAG_BUDGET_BASE`, and
@@ -168,8 +183,20 @@ half-migrated with red tests.
   `--ast-frontend` is shared with `dump`/`scan` through
   `@compile_context_options`, so a side-aware collapse would fork that shared
   family for one command only — the two per-side overrides stay as-is.
-* **Phase D — Lever 2 config demotion.** Remove hidden toolchain /
-  debug-resolution / scope flags whose config home is wired.
+* **Phase D — Lever 2 config demotion.** *(landed as a constraint-aware subset
+  — `BASE` 62→57.)* A new `debug:` config block absorbs `--debug-format`,
+  `--debuginfod`, `--debuginfod-url`, `--dwarf-only`; `--show-redundant` moves to
+  `scope.show_redundant`. All five are now `hidden` and read from config, but
+  still override it (CLI > config, the severity-family cadence) rather than being
+  hard-removed. The coarse `--debug-root` stays a visible per-run override.
+  **Deliberately retained** (not demoted): the toolchain family
+  (`--gcc-path/-prefix/-options/-option`, `--sysroot`, `--nostdinc`) is declared
+  in the shared `@compile_context_options` decorator that `compare`/`dump`/`scan`
+  all compose (ADR-037 D3 parity), so demoting it for `compare` alone would fork
+  that family — out of scope for a *compare*-surface reduction; and
+  `--scope-public-headers` stays visible as the everyday on/off switch for the
+  default public-surface scoping (moving it to config-only would make a
+  one-token operation require editing a file).
 
 Each phase updates `COMPARE_FLAG_BUDGET_BASE` downward and the
 `_OPTION_SET_SNAPSHOT`; the `TestFlagBudget` ledger tests keep the count and
