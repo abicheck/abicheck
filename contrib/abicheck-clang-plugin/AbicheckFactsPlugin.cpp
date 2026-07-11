@@ -1835,6 +1835,15 @@ public:
     // to map to an export (Codex review).
     if (mangledHasInternalLinkage(mangled))
       return true;
+    // MSVC / clang-cl anonymous-namespace members have internal linkage but carry
+    // no Itanium marker (mangledHasInternalLinkage is Itanium-only), so an
+    // anon-namespace `inline const` would bypass it and the inline-exempt MSVC
+    // const fallback below and leak out as an external variable (Codex review).
+    // Reject any anonymous-namespace variable directly from the AST, mirroring
+    // clang.py's `_msvc_anonymous_namespace` guard and the Itanium `_GLOBAL__N_`
+    // case.
+    if (vd->isInAnonymousNamespace())
+      return true;
     // C / extern "C" file-scope static: clang gives no mangled name to carry the
     // marker, so filter on storageClass directly. A static data member is
     // external (its lexical parent is a record), so keep it.

@@ -1017,6 +1017,57 @@ def test_msvc_inline_const_variable_is_kept() -> None:
     assert got == {"ns::c"}, got  # the external inline const is kept
 
 
+def test_msvc_anonymous_namespace_inline_const_is_dropped() -> None:
+    # `namespace { inline const int c = 1; }` under clang-cl mangles with an
+    # anonymous-namespace component `?A0x...` and carries `inline: true` with no
+    # storageClass. It has INTERNAL linkage (anon namespace), so the inline-const
+    # exemption must NOT keep it — the MSVC anon-namespace guard drops it before
+    # the exemption, mirroring Itanium's `_GLOBAL__N_` (Codex review).
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",  # anonymous namespace (no `name`)
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [
+                    {
+                        "kind": "VarDecl",
+                        "name": "c",
+                        "loc": {"line": 2},
+                        "inline": True,
+                        "mangledName": "?c@?A0xdeadbeef@@3HB",
+                        "type": {"qualType": "const int"},
+                    },
+                ],
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "target://libfoo")
+    got = {e.qualified_name for e in tu.variables}
+    assert got == set(), got  # the internal anon-ns inline const is dropped
+
+
+def test_msvc_anonymous_namespace_helper() -> None:
+    from abicheck.buildsource.source_extractors.clang import (
+        _msvc_anonymous_namespace as anon,
+    )
+
+    assert anon("?c@?A0xdeadbeef@@3HB")  # modern clang-cl anon-ns component
+    assert anon("?x@?A@@3HA")  # legacy MSVC anon-ns component
+    assert not anon("?c@ns@@3HB")  # ordinary named namespace
+    assert not anon("_ZN2ns1cE")  # Itanium name (handled elsewhere)
+
+
+def test_clang_extractor_version_is_current() -> None:
+    # Guard: the emitted `variables` recipe changed (keep MSVC inline const, drop
+    # anon-namespace), so CLANG_EXTRACTOR_VERSION must advance past 0.6 or an
+    # existing --cache-dir would serve stale 0.6 dumps for unchanged TUs since
+    # compute_tu_cache_key() folds in the extractor version (Codex review).
+    from abicheck.buildsource.source_extractors.clang import CLANG_EXTRACTOR_VERSION
+
+    assert CLANG_EXTRACTOR_VERSION >= "0.7"
+
+
 def test_clang_ast_yields_nonzero_reachable_surface() -> None:
     # A1 acceptance (gap G4): the eval reported `reachable_declarations: 0` /
     # `reachable_types: 0` on real C++ libs because the source surface came back

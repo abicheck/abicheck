@@ -98,8 +98,10 @@ from .clang_public_roots import (  # noqa: F401
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
 #: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
-#: from an older recipe. 0.6: emit external-linkage ``variables``.
-CLANG_EXTRACTOR_VERSION = "0.6"
+#: from an older recipe. 0.6: emit external-linkage ``variables``. 0.7: keep
+#: MSVC/clang-cl ``inline const`` variables (externally linked) but drop
+#: MSVC anonymous-namespace members (internal linkage).
+CLANG_EXTRACTOR_VERSION = "0.7"
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -982,6 +984,19 @@ _VARIABLE_SCOPE_KINDS = frozenset(
 )
 
 
+def _msvc_anonymous_namespace(mangled: str) -> bool:
+    """Return ``True`` when an MSVC/clang-cl mangled name names an anon-ns member.
+
+    MSVC encodes an anonymous namespace as a ``?A0x<hex>@`` component (modern
+    clang-cl / MSVC) or the legacy ``?A@`` — both reserved, so a plain substring
+    test is unambiguous (a user cannot spell them). A variable nested in one has
+    *internal* linkage, the MSVC analogue of Itanium's ``_GLOBAL__N_``; MSVC
+    manglings carry no ``L``-style seniority marker, so ``_mangled_has_internal_
+    linkage`` (Itanium-only) cannot see it and it must be caught here.
+    """
+    return "?A0x" in mangled or "?A@" in mangled
+
+
 def _mangled_has_internal_linkage(mangled: str) -> bool:
     """Return ``True`` when an Itanium *mangled* name marks internal linkage.
 
@@ -1096,6 +1111,14 @@ def _is_variable_node(
         return False
     mangled = _mangled(node)
     if _mangled_has_internal_linkage(mangled):
+        return False
+    # MSVC / clang-cl anonymous-namespace members have internal linkage but carry
+    # no Itanium marker (`_mangled_has_internal_linkage` is Itanium-only), so an
+    # anon-namespace `inline const` would bypass both it and the inline-exempt
+    # MSVC const fallback below and leak out as an external variable (Codex
+    # review). Reject the MSVC anon-namespace component up front, mirroring the
+    # Itanium `_GLOBAL__N_` case.
+    if mangled.startswith("?") and _msvc_anonymous_namespace(mangled):
         return False
     # C / extern "C" file-scope static: no mangled name carries the marker, so
     # filter on storageClass directly. A static data member is external, so keep
