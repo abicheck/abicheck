@@ -158,8 +158,8 @@ def two_sided_input_options(func: F) -> F:
         multiple=True,
         type=SIDED_PATH_PARAM,
         help="Extra include directory for castxml. Applies to both sides; scope "
-        "to one side with an 'old='/'new=' prefix (e.g. --include old=inc1 "
-        "new=inc2). Repeat for multiple (ADR-040).",
+        "to one side with an 'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040).",
     )(func)
     func = click.option(
         "-H",
@@ -168,8 +168,8 @@ def two_sided_input_options(func: F) -> F:
         multiple=True,
         type=SIDED_PATH_PARAM,
         help="Public header file or directory. Applies to both sides; scope to "
-        "one side with an 'old='/'new=' prefix (e.g. --header old=v1/foo.h "
-        "new=v2/foo.h). Repeat for multiple (ADR-040). "
+        "one side with an 'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
         "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
@@ -1113,7 +1113,8 @@ def evidence_options(func: F) -> F:
         help="L4/L5 source: a raw source checkout (collected inline at --depth, "
         "embedding build/source/graph facts) or a pre-built `collect` pack, "
         "overriding embedded. Applies to both sides; scope to one with an "
-        "'old='/'new=' prefix (e.g. --sources old=src_v1 new=src_v2) (ADR-040).",
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --sources old=src_v1 --sources new=src_v2) (ADR-040).",
     )(func)
     func = click.option(
         "--build-info",
@@ -1122,7 +1123,8 @@ def evidence_options(func: F) -> F:
         type=SIDED_BUILD_INFO_PARAM,
         help="Out-of-band L3 build-info: a build dir, a compile_commands.json, or "
         "a pack, overriding embedded. Applies to both sides; scope to one with an "
-        "'old='/'new=' prefix (e.g. --build-info old=b1 new=b2) (ADR-040).",
+        "'old='/'new=' prefix, repeating the flag per side "
+        "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
     )(func)
     return func
 

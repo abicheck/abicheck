@@ -132,7 +132,7 @@ single flags and `--profile`.
 ## Consequences
 
 * **Breaking (0.5.0, no alias window).** Existing invocations using
-  `--header old=X --header new=Y` become `--header old=X new=Y`; toolchain and
+  `--old-header X --new-header Y` become `--header old=X --header new=Y`; toolchain and
   debug-resolution flags move to `.abicheck.yml`. A migration table ships in
   `docs/user-guide/migration-0.5.md` and the CHANGELOG. This matches the
   ADR-037 precedent (hard removal of `--header-backend`).
