@@ -9,7 +9,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Added
+### Removed
+
+- **Deprecated `scan-mode` / `source-method` GitHub Action inputs.** They mapped
+  to the CLI's deprecated `--mode`/`--source-method` and `scan-mode` defaulted to
+  `pr`, so every scan run emitted a deprecation warning. Removed from `action.yml`
+  and `action/run.sh`; use the `depth` input (omit it for `auto`). The CLI flags
+  themselves are unchanged.
+
+### Fixed
+
+- **Misleading "evidence layer not collected" warning.** `dump` warned
+  *"supply --build-info/--compile-db or install clang/castxml"* even when the
+  layer's extractor had run — e.g. an L4 replay that parsed TUs but linked 0
+  symbols, or an unseeded `--depth source` that selected 0 TUs. The warning now
+  distinguishes a genuinely **absent** layer (→ supply a compile DB / install the
+  frontend) from one that **ran but linked nothing** (→ points at the coverage
+  rows: public-header-roots mismatch, use `--max`/`--changed-path`/`--since`, or a
+  snapshot/source mismatch). No more "install the tools you already have."
+
+- **Action installs `bear`.** `action/install-deps.sh` now installs `bear` (and
+  notes `bear -- make`) so Make/Autotools projects that don't emit a
+  `compile_commands.json` get authoritative L3/L4 instead of reduced-confidence
+  `make -n` scraping.
+
+- **GitHub Action `scan` mode passed the wrong config flag.** `action/run.sh`
+  forwarded the `build-config` input as `--build-config` in `scan` mode, but
+  `abicheck scan` only accepts `--config` (as `dump` already used) — so setting
+  `build-config` on a `scan` step hard-failed with exit 64
+  (`No such option '--build-config'`). Now passes `--config`.
 
 - **`abicheck dump <binary> --inputs ./abicheck_inputs/`** folds a build-emitted
   Flow-2 pack (from the `abicheck-cc` wrapper or the Clang facts plugin) straight

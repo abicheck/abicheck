@@ -214,23 +214,12 @@ inputs:
       Used by scan and dump modes.
     required: false
     default: 'false'
-  scan-mode:
-    description: >
-      scan mode only. Fixed (L,S) preset selecting how deep the scan runs:
-      'pr' (default), 'pr-deep', 'baseline', or 'audit'. Maps to scan --mode.
-    required: false
-    default: 'pr'
-  source-method:
-    description: >
-      scan mode only. Precise S-axis level to reach (deterministic):
-      s0, s1, s2, s3, s4, s5, s6, or 'auto' (risk-driven, opt-in).
-      Maps to scan --source-method.
-    required: false
   depth:
     description: >
-      Coarse evidence-depth selector (scan and dump modes): binary, headers,
-      build, source, or full. In scan mode, source-method wins if both are set.
-      Maps to --depth.
+      Evidence-depth selector (scan and dump modes): binary, headers, build,
+      source, or full. In scan mode, omit it for 'auto' (risk-driven). Maps to
+      --depth. (The deprecated scan-mode/source-method inputs have been removed;
+      use depth.)
     required: false
   since:
     description: >
@@ -531,8 +520,6 @@ runs:
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
         INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
         INPUT_ALLOW_BUILD_QUERY: ${{ inputs.allow-build-query }}
-        INPUT_SCAN_MODE: ${{ inputs.scan-mode }}
-        INPUT_SOURCE_METHOD: ${{ inputs.source-method }}
         INPUT_DEPTH: ${{ inputs.depth }}
         INPUT_SINCE: ${{ inputs.since }}
         INPUT_CHANGED_PATH: ${{ inputs.changed-path }}

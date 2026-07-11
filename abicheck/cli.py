@@ -248,6 +248,36 @@ def _missing_requested_evidence_layers(
     return missing
 
 
+def _classify_missing_layers(
+    pack: BuildSourcePack | None, missing: list[str]
+) -> tuple[list[str], list[str]]:
+    """Split *missing* layer values into (absent, ran_but_empty).
+
+    ``absent`` — the layer never ran (no coverage row, or NOT_COLLECTED): the
+    actionable fix is a compile DB / an installed frontend. ``ran_but_empty`` —
+    a coverage row exists (PARTIAL/PRESENT) but the payload linked no facts: the
+    fix is scoping/roots, not installing tools. Distinguishing the two stops the
+    warning from telling users to install clang/castxml when those already ran.
+    With no pack (or an unknown layer), default to ``absent`` so the legacy
+    "not collected" wording still appears.
+    """
+    if pack is None:
+        return list(missing), []
+    from .buildsource.model import CoverageStatus, DataLayer
+
+    by_value = {layer.value: layer for layer in DataLayer}
+    absent: list[str] = []
+    ran_empty: list[str] = []
+    for value in missing:
+        layer = by_value.get(value)
+        cov = pack.manifest.coverage_for(layer) if layer is not None else None
+        if cov is not None and cov.status != CoverageStatus.NOT_COLLECTED:
+            ran_empty.append(value)
+        else:
+            absent.append(value)
+    return absent, ran_empty
+
+
 def _write_snapshot_output(
     snap: AbiSnapshot,
     output: Path | None,
@@ -289,11 +319,30 @@ def _write_snapshot_output(
         # `collect` remains the hard-fail path (ADR-028 D3).
         missing = _missing_requested_evidence_layers(snap.build_source, collect_mode)
         if missing:
+            absent, ran_empty = _classify_missing_layers(snap.build_source, missing)
+            parts: list[str] = []
+            if absent:
+                # Genuinely absent: no extractor / no compile DB / layer never ran.
+                parts.append(
+                    f"not collected: {', '.join(absent)} — supply "
+                    "--build-info/--compile-db (a compile_commands.json, e.g. from "
+                    "`bear -- make`), or install the clang/castxml source frontend"
+                )
+            if ran_empty:
+                # Ran but produced/linked nothing — do NOT tell the user to install
+                # tools they already have; point at the real cause in the coverage
+                # rows (usually a public-header-roots or snapshot/source mismatch).
+                parts.append(
+                    f"collected but linked no facts: {', '.join(ran_empty)} — the "
+                    "extractor ran but matched nothing; see the coverage rows for "
+                    "the reason (commonly a public-header-roots mismatch, an "
+                    "unseeded `--depth source` that selected 0 TUs — use --max or "
+                    "--changed-path/--since — or the snapshot binary not matching "
+                    "--sources; a '0/N symbols matched' means source decls did not "
+                    "link to the binary's exports)"
+                )
             click.echo(
-                f"Warning: requested evidence layer(s) not collected: "
-                f"{', '.join(missing)}. The snapshot embeds no facts for them — "
-                "supply --build-info/--compile-db or install clang/castxml, and "
-                "see the coverage rows for details.",
+                "Warning: requested evidence layer(s) " + "; ".join(parts) + ".",
                 err=True,
             )
     # A build-emitted Flow-2 pack (--inputs) folds straight into the dump — the

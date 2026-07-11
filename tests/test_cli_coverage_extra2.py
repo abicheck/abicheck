@@ -321,3 +321,80 @@ class TestWriteSnapshotOutput:
         err = capsys.readouterr().err
         assert "requested evidence layer(s) not collected" in err
         assert "L4" in err and "L5" in err
+
+
+class TestClassifyMissingLayers:
+    """The absent-vs-ran-but-empty split behind the accurate coverage warning."""
+
+    def test_none_pack_defaults_all_absent(self) -> None:
+        from abicheck.cli import _classify_missing_layers
+
+        absent, ran_empty = _classify_missing_layers(None, ["L4_source_abi"])
+        assert absent == ["L4_source_abi"]
+        assert ran_empty == []
+
+    def test_splits_partial_from_absent(self) -> None:
+        from abicheck.buildsource.model import (
+            CoverageStatus,
+            DataLayer,
+            LayerCoverage,
+        )
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.cli import _classify_missing_layers
+
+        pack = BuildSourcePack(root="")
+        # L4 ran (PARTIAL row) but linked nothing; L5 has no row at all.
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L4_SOURCE_ABI.value,
+                status=CoverageStatus.PARTIAL,
+            )
+        ]
+        absent, ran_empty = _classify_missing_layers(
+            pack, ["L4_source_abi", "L5_source_graph"]
+        )
+        assert ran_empty == ["L4_source_abi"]
+        assert absent == ["L5_source_graph"]
+
+    def test_warning_distinguishes_absent_and_ran_empty(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        """The dump warning must not tell users to install tools that already ran."""
+        import abicheck.cli as cli_mod
+        import abicheck.cli_buildsource as cbs_mod
+        from abicheck.buildsource.model import (
+            CoverageStatus,
+            DataLayer,
+            LayerCoverage,
+        )
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        snap = AbiSnapshot(library="lib.so", version="1.0")
+
+        pack = BuildSourcePack(root="")
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L4_SOURCE_ABI.value,
+                status=CoverageStatus.PARTIAL,  # ran, linked nothing
+            )
+        ]
+
+        def _fake_embed(s, build_info, sources, **kwargs):
+            s.build_source = pack
+
+        monkeypatch.setattr(cbs_mod, "embed_build_source", _fake_embed)
+        monkeypatch.setattr(
+            cli_mod,
+            "_missing_requested_evidence_layers",
+            lambda p, mode: ["L4_source_abi", "L5_source_graph"],
+        )
+        srcs = tmp_path / "src"
+        srcs.mkdir()
+        _write_snapshot_output(snap, None, sources=srcs, collect_mode="source-target")
+        err = capsys.readouterr().err
+        # L5 (no row) → absent branch keeps the "not collected" wording.
+        assert "not collected: L5_source_abi" not in err  # sanity: exact layer id
+        assert "not collected" in err and "L5_source_graph" in err
+        # L4 (PARTIAL) → the ran-but-empty branch, NOT "install clang/castxml".
+        assert "collected but linked no facts" in err
+        assert "L4_source_abi" in err
