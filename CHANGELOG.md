@@ -9,6 +9,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
+  flag bundles common workflow defaults so you don't retype them: `ci-gate`
+  (`--depth headers --scope-public-headers --format review --exit-code-scheme
+  severity`), `release` (`--depth full --scope-public-headers --format markdown
+  --recommend`), and `quick` (`--depth binary --stat`). Explicit flags always
+  override the profile. First step of the ADR-040 plan to reduce `compare`'s
+  flag surface from 79 toward the ADR-037 ~20 target.
+
+### Changed
+
+- **`compare` flag budget is now derived from a documented ledger.** The
+  `COMPARE_FLAG_BUDGET` ceiling is computed as `BASE + len(COMPARE_FLAG_BUDGET_RAISES)`,
+  so a new visible flag cannot be added without a rationale entry — closing the
+  gap that previously let `--post-manifest` land undocumented by silently
+  consuming budget slack. Backfills the missing `--post-manifest` rationale.
+
+- **`scan --baseline`/`--estimate` extracted to `cli_scan_baseline.py`.**
+  Internal refactor: `cli_scan.py` dropped from 1898 to 1483 lines (clearing the
+  1500-line soft cap) with no behaviour change; historical import paths are
+  preserved.
+
 ### Removed
 
 - **Deprecated `scan-mode` / `source-method` GitHub Action inputs.** They mapped
