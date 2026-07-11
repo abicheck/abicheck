@@ -27,6 +27,7 @@ action→CLI flag drift, for every mode, not just the one that broke.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -80,10 +81,14 @@ def _flags_by_subcommand() -> dict[str, set[str]]:
 def _valid_flags(subcommand: str) -> set[str]:
     """The set of long options the real CLI accepts for *subcommand*."""
     parts = subcommand.split()  # e.g. "stack-check" stays one token
+    # rich-click renders help with UTF-8 box-drawing chars. On Windows the child
+    # would otherwise encode stdout as cp1252 and crash (exit 1) on those chars,
+    # so force UTF-8 in the child too — not just in our decode.
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     out = subprocess.run(
         [sys.executable, "-m", "abicheck", *parts, "--help"],
         capture_output=True, text=True, check=True,
-        encoding="utf-8", errors="replace",  # rich help has box chars; avoid cp1252
+        encoding="utf-8", errors="replace", env=env,
     ).stdout
     # rich-click wraps help lines, so a flag can be split across the box; join
     # first, then scoop every "--flag" token.
