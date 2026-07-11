@@ -740,6 +740,7 @@ class ChangeKind(str, Enum):
     PYTHON_API_PARAMETER_KIND_CHANGED = "python_api_parameter_kind_changed"  # a parameter's binding changed — positional↔keyword-only, keyword→positional-only, or the positional order/position shifted — so existing call sites bind arguments differently even though the names are unchanged → API_BREAK
     PYTHON_API_CALLABLE_KIND_CHANGED = "python_api_callable_kind_changed"  # a callable's protocol changed — def↔async def (callers must/mustn't await), or method↔property / static↔class↔instance binding — so existing call/access sites break even with an unchanged parameter list → API_BREAK
     PYTHON_API_OVERLOAD_REMOVED = "python_api_overload_removed"  # an @overload signature variant was dropped from an overloaded function/method → typed callers that relied on that call shape lose it → API_BREAK
+    PYTHON_API_STUB_INVALID = "python_api_stub_invalid"  # a shipped .pyi stub could not be parsed or exceeded safety limits → API_BREAK
 
     # ── Toolchain / runtime environment drift (binutils & glibc skew) ────────
     # Artifacts of relinking on a different binutils or building against a

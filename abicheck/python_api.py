@@ -44,8 +44,9 @@ The recovered :class:`PythonApiSurface` is attached to :class:`AbiSnapshot`
 (like ``python_ext``); :mod:`abicheck.diff_python_api` diffs two surfaces and
 emits Python-level ``ChangeKind``s through the existing reporter/verdict
 machinery. When no stub can be found the surface is simply absent (``None``) and
-the detector is skipped — the check degrades honestly rather than
-false-negating silently.
+the detector is skipped; when a stub is present but invalid or oversized, the
+surface is retained with ``parse_ok=False`` so compare fails closed instead of
+losing Python API coverage.
 """
 
 from __future__ import annotations
@@ -55,6 +56,8 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+MAX_STUB_BYTES = 1_048_576
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -166,9 +169,9 @@ class PythonApiSurface:
     #: top-level class name → :class:`PyClass`
     classes: dict[str, PyClass] = field(default_factory=dict)
     #: True when the stub parsed cleanly. ``False`` marks an *unrecoverable*
-    #: surface (a syntax error): the emptiness is a parse failure, not an
-    #: intentionally-empty API, so the diff must skip it rather than read every
-    #: old name as removed.
+    #: surface (a syntax error or size limit): the emptiness is a parse failure,
+    #: not an intentionally-empty API, so the diff must report the invalid
+    #: checked input rather than read every old name as removed.
     parse_ok: bool = True
 
     @property
@@ -362,8 +365,8 @@ def surface_from_stub_source(
     Extraction is static (:func:`ast.parse`, never imported/executed). Only
     top-level public functions and classes are collected; private
     (leading-underscore) names are excluded. A syntax error yields an empty
-    surface rather than raising, so a malformed stub degrades to "nothing
-    recovered".
+    surface with ``parse_ok`` set to ``False`` so compare-time policy can flag
+    the checked stub as invalid instead of silently dropping coverage.
     """
     surface = PythonApiSurface(
         module_name=module_name, source="stub", source_path=source_path
@@ -386,6 +389,24 @@ def surface_from_stub_file(
     path: Path, *, module_name: str | None = None
 ) -> PythonApiSurface:
     """Read and parse a ``.pyi`` file into a :class:`PythonApiSurface`."""
+    surface = PythonApiSurface(
+        module_name=module_name, source="stub", source_path=str(path)
+    )
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        _log.debug("python_api: could not stat stub %s: %s", path, exc)
+        surface.parse_ok = False
+        return surface
+    if size > MAX_STUB_BYTES:
+        _log.debug(
+            "python_api: stub %s is too large (%d bytes > %d)",
+            path,
+            size,
+            MAX_STUB_BYTES,
+        )
+        surface.parse_ok = False
+        return surface
     text = path.read_text(encoding="utf-8", errors="replace")
     return surface_from_stub_source(
         text, module_name=module_name, source_path=str(path)
@@ -460,14 +481,8 @@ def detect_python_api(snap: AbiSnapshot) -> PythonApiSurface | None:
     stub = _find_stub(snap.source_path, module_name)
     if stub is None:
         return None
-    # A *present, cleanly-parsed* stub yields a surface even when it is empty
-    # (all public names removed, or only private helpers remain): that empty
-    # surface is meaningful, so a version deleting its last public function is
-    # still diffed as a removal. ``None`` is reserved for "no stub / not an
-    # extension / unrecoverable". A malformed stub (``parse_ok`` False) is
-    # unrecoverable — returning its empty surface would make the diff read every
-    # old name as removed, so skip it.
-    surface = surface_from_stub_file(stub, module_name=module_name)
-    if not surface.parse_ok:
-        return None
-    return surface
+    # A *present* stub yields a surface even when it is empty or invalid. Clean
+    # empty stubs are meaningful (all public names removed), while invalid stubs
+    # must stay distinguishable from "no stub" so comparison reports a hard
+    # coverage failure instead of disabling the Python API detector.
+    return surface_from_stub_file(stub, module_name=module_name)

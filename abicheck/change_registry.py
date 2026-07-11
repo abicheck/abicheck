@@ -1950,6 +1950,12 @@ REGISTRY = ChangeKindRegistry([
               "_FILE_OFFSET_BITS across the library and its consumers.",
        description_template="time64/LFS ABI flip detected: {detail}"),
 
+    _E("python_api_stub_invalid", _A,
+       impact="A shipped Python type stub for the new extension artifact could "
+              "not be safely parsed (syntax error, unreadable file, or size "
+              "limit). The Python API surface is therefore untrusted and must "
+              "fail closed rather than disabling Python-level API checks.",
+       description_template="Invalid Python API stub for extension module: {detail}"),
     # Coverage-extension kinds (dynamic loader, PE, Mach-O, language
     # contracts) live in change_registry_coverage.py to keep this file under
     # the 2000-line cap; they are part of this same single registry.

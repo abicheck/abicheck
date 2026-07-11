@@ -29,8 +29,9 @@ caller — it breaks *re-import / re-call at the source*. Additions are
 ``COMPATIBLE``.
 
 Registered via ``@registry.detector("python_api")`` and skipped automatically
-when the new snapshot carries no recovered Python surface (no stub shipped), so
-the check degrades honestly rather than reporting a phantom mass removal.
+when the new snapshot carries no recovered Python surface (no stub shipped). A
+present-but-invalid stub is reported as a hard source-level coverage failure so
+untrusted artifacts cannot disable this check.
 """
 
 from __future__ import annotations
@@ -729,6 +730,17 @@ def _diff_python_api(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     o = old.python_api if old.python_api is not None else PythonApiSurface()
 
     prefix = _module_prefix(n, o)
+    if not n.parse_ok:
+        detail = n.source_path or n.module_name or "<unknown stub>"
+        return [
+            make_change(
+                ChangeKind.PYTHON_API_STUB_INVALID,
+                symbol=prefix,
+                name=prefix,
+                detail=detail,
+            )
+        ]
+
     changes: list[Change] = []
     changes.extend(_diff_functions(o, n, prefix))
     changes.extend(_diff_classes(o, n, prefix))
