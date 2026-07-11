@@ -32,9 +32,7 @@ from dataclasses import dataclass, field
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 
 
-def _try_demangle(
-    demangler: Callable[[str], str | None], symbol: str
-) -> str | None:
+def _try_demangle(demangler: Callable[[str], str | None], symbol: str) -> str | None:
     """*demangler*(*symbol*), with any demangler failure collapsed to ``None``.
 
     The attribution loops iterate exported symbols and simply skip any the
@@ -46,6 +44,7 @@ def _try_demangle(
         return demangler(symbol)
     except Exception:  # noqa: BLE001 - a demangler failure means "skip this symbol"
         return None
+
 
 #: C++ Itanium ctor/dtor "ABI clone" tags. The compiler emits *several* object
 #: symbols for one source ctor/dtor — ``C1`` (complete), ``C2`` (base), ``C3``
@@ -410,16 +409,38 @@ _TBB_MALLOC_PROXY_C_SYMBOLS = frozenset(
         "valloc",
     }
 )
+# The full set of replaceable global ``operator new``/``operator delete`` forms a
+# malloc-interposition proxy may define: the plain and ``nothrow`` overloads plus
+# the C++14 *sized* delete (``…m`` size_t operand) and the C++17 *aligned*
+# overloads (``St11align_val_t``) and their sized/nothrow combinations. A proxy
+# links against a C++17 runtime and can legitimately replace any of these, so all
+# are intentional interposer exports — not a leaked libstdc++ dependency (Codex
+# review).
 _TBB_MALLOC_PROXY_CPP_SYMBOLS = frozenset(
     {
-        "_ZdaPv",
-        "_ZdaPvRKSt9nothrow_t",
-        "_ZdlPv",
-        "_ZdlPvRKSt9nothrow_t",
-        "_Znam",
-        "_ZnamRKSt9nothrow_t",
+        # operator new / new[] — plain, nothrow, aligned, aligned+nothrow
         "_Znwm",
         "_ZnwmRKSt9nothrow_t",
+        "_ZnwmSt11align_val_t",
+        "_ZnwmSt11align_val_tRKSt9nothrow_t",
+        "_Znam",
+        "_ZnamRKSt9nothrow_t",
+        "_ZnamSt11align_val_t",
+        "_ZnamSt11align_val_tRKSt9nothrow_t",
+        # operator delete / delete[] — plain, nothrow, sized, aligned,
+        # sized+aligned, aligned+nothrow
+        "_ZdlPv",
+        "_ZdlPvRKSt9nothrow_t",
+        "_ZdlPvm",
+        "_ZdlPvSt11align_val_t",
+        "_ZdlPvmSt11align_val_t",
+        "_ZdlPvSt11align_val_tRKSt9nothrow_t",
+        "_ZdaPv",
+        "_ZdaPvRKSt9nothrow_t",
+        "_ZdaPvm",
+        "_ZdaPvSt11align_val_t",
+        "_ZdaPvmSt11align_val_t",
+        "_ZdaPvSt11align_val_tRKSt9nothrow_t",
     }
 )
 
@@ -779,11 +800,7 @@ def _template_pattern_key(name: str) -> str:
     depth = 0
     saw_template = False
     for i, c in enumerate(s):
-        if (
-            c == "<"
-            and depth == 0
-            and s[max(0, i - len("operator")) : i] == "operator"
-        ):
+        if c == "<" and depth == 0 and s[max(0, i - len("operator")) : i] == "operator":
             out.append(c)
             continue
         if c == "<":
@@ -857,9 +874,7 @@ def _template_instantiation_attribution(
         if owner is not None:
             attributed[sym] = owner.qualified_name
             continue
-        special_owner = source_owners.get(
-            _template_special_member_owner_key(demangled)
-        )
+        special_owner = source_owners.get(_template_special_member_owner_key(demangled))
         if special_owner is not None:
             attributed[sym] = special_owner
     return attributed
@@ -1155,7 +1170,8 @@ def link_source_abi(
             sorted(template_instantiations.items())
         )
     allocator_interposers = _attribute_allocator_interposer_exports(
-        exported, exported - decl_matched - set(synthesized) - set(template_instantiations)
+        exported,
+        exported - decl_matched - set(synthesized) - set(template_instantiations),
     )
     if allocator_interposers:
         surface.mappings["allocator_interposer_symbol_to_owner"] = dict(

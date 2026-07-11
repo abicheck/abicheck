@@ -247,27 +247,44 @@ def _external_dependency_origin(
             return None
         return lib
     owner = _mangled_owner_namespace(symbol)
-    if owner is None:
-        return None
-    # The owner-fallback runtime path (a guard variable / nested-std form the prefix
-    # table misses) is self-gated the same way as the prefix-table path above, so
-    # auditing the runtime library itself doesn't flag its own exports (Codex).
-    if owner == "__gnu_cxx":
-        runtime = "libstdc++.so.6"  # libstdc++-only extension namespace — never libc++
-    elif owner == "__cxxabiv1":
-        # The Itanium C++ ABI namespace is implemented by libc++abi (or libstdc++'s
-        # merged libsupc++), NOT the std runtime — so ``libc++abi`` is its correct
-        # owner and must not be excluded, else auditing libc++abi flags its own
-        # exports (Codex review).
-        runtime = _cxx_abi_runtime_lib(needed_libs, self_names)
-    elif owner == "std" or owner in _STD_OWNER_NAMESPACES:
-        runtime = _cxx_runtime_lib(symbol, needed_libs)
+    if owner is not None:
+        # The owner-fallback runtime path (a guard variable / nested-std form the
+        # prefix table misses) is self-gated the same way as the prefix-table path
+        # above, so auditing the runtime library itself doesn't flag its own exports
+        # (Codex). Itanium C++ runtimes only — MSVC STL attribution is handled below.
+        if owner == "__gnu_cxx":
+            runtime = (
+                "libstdc++.so.6"  # libstdc++-only extension namespace — never libc++
+            )
+        elif owner == "__cxxabiv1":
+            # The Itanium C++ ABI namespace is implemented by libc++abi (or
+            # libstdc++'s merged libsupc++), NOT the std runtime — so ``libc++abi``
+            # is its correct owner and must not be excluded, else auditing libc++abi
+            # flags its own exports (Codex review).
+            runtime = _cxx_abi_runtime_lib(needed_libs, self_names)
+        elif owner == "std" or owner in _STD_OWNER_NAMESPACES:
+            runtime = _cxx_runtime_lib(symbol, needed_libs)
+        else:
+            runtime = None
+        if runtime is not None:
+            return None if _resolved_lib_is_self(runtime, self_names) else runtime
+        google_child = _nested_component(symbol, 1)
     else:
-        runtime = None
-    if runtime is not None:
-        return None if _resolved_lib_is_self(runtime, self_names) else runtime
+        # MSVC decorated name (``?name@scope@…@@sig``): no Itanium owner, but its
+        # outermost ``@``-scope still names a vendored dependency (Boost/{fmt}/
+        # protobuf) statically linked and re-exported on Windows — otherwise those
+        # leaks are miscounted as ``undeclared_export`` (Codex review). MSVC C++
+        # runtime (STL) attribution is a separate concern, so a bare ``std`` owner
+        # stays native here rather than being mislabelled with an ELF soname.
+        comps = _msvc_scope_components(symbol)
+        if len(comps) < 2:
+            return None  # un-nested name — no enclosing scope, no owner
+        owner = comps[-1]  # scopes are inner-to-outer; the top-level ns is last
+        if owner == "std":
+            return None
+        google_child = comps[-2] if len(comps) >= 3 else None
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)
-    if owner == "google" and _nested_component(symbol, 1) != "protobuf":
+    if owner == "google" and google_child != "protobuf":
         # ``google::`` is shared by many Google libraries (glog's
         # ``google::LogMessage``, gflags, googletest, …); only ``google::protobuf``
         # is Protocol Buffers. A bare ``google::`` owner is not a protobuf leak
@@ -276,6 +293,22 @@ def _external_dependency_origin(
     if vendored is not None and _owner_is_self_library(owner, self_names):
         return None  # the audited library *is* this vendored library — native
     return vendored
+
+
+def _msvc_scope_components(symbol: str) -> list[str]:
+    """The components of an MSVC decorated *symbol*'s name, entity-first.
+
+    ``?foo@system@boost@@YAXXZ`` → ``["foo", "system", "boost"]`` — the entity name
+    first, then each enclosing scope inner-to-outer, so the **top-level** namespace
+    is the *last* element and the scope nested directly inside it is second-to-last.
+    Reads only the name portion (up to the ``@@`` that introduces the type
+    signature). Empty for a non-MSVC name. Best-effort: special/template forms
+    (``??0…`` ctors, ``?$Name@…`` templates) still yield their outer scopes, which
+    is all the vendored-owner lookup needs.
+    """
+    if not symbol.startswith("?"):
+        return []
+    return [c for c in symbol.lstrip("?").split("@@", 1)[0].split("@") if c]
 
 
 def _nested_component(symbol: str, index: int) -> str | None:

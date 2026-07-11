@@ -700,6 +700,41 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
 
 
 @pytest.mark.parametrize(
+    "symbol, self_names, expected",
+    [
+        # MSVC scopes are inner-to-outer, so the top-level namespace is the last
+        # ``@``-component. A statically re-exported Boost/{fmt}/protobuf symbol on
+        # Windows is a vendored-dependency leak, not an undeclared export (Codex).
+        ("?bar@fmt@@YAXXZ", (), "{fmt} (vendored third-party)"),
+        ("?foo@system@boost@@YAXXZ", (), "Boost (vendored third-party)"),
+        (
+            "?Msg@protobuf@google@@YAXXZ",
+            (),
+            "Google/protobuf (vendored third-party)",
+        ),
+        # a bare ``google::`` scope (glog/gflags) is not a protobuf leak.
+        ("?LogMessage@google@@YAXXZ", (), None),
+        # an MSVC ``std::`` symbol stays native here (MSVC STL attribution is a
+        # separate concern; not mislabelled with an ELF soname).
+        ("?x@std@@YAXXZ", (), None),
+        # an un-nested MSVC name (no enclosing scope) has no owner.
+        ("?globalfunc@@YAXXZ", (), None),
+        # ctor/special-name form still resolves its outer vendored scope.
+        ("??0Foo@boost@@QEAA@XZ", (), "Boost (vendored third-party)"),
+        # auditing the vendored library itself (a Windows fmt.dll): native, not a
+        # leak — the self gate covers MSVC owners too.
+        ("?bar@fmt@@YAXXZ", ("fmt.dll",), None),
+        # not an MSVC name -> no MSVC owner path.
+        ("plain_c_symbol", (), None),
+    ],
+)
+def test_external_dependency_origin_msvc_scopes(symbol, self_names, expected):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, [], self_names) == expected
+
+
+@pytest.mark.parametrize(
     "symbol, index, expected",
     [
         ("_ZN6google8protobuf7MessageEv", 0, "google"),
@@ -774,16 +809,29 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
     # A malloc-proxy library (it exports the __TBB_malloc_proxy marker) deliberately
     # replaces the global allocator; its operator new / malloc exports are native,
     # not a leaked libstdc++/libc dependency (Codex review).
-    proxy = _snap(elf=_elf("__TBB_malloc_proxy", "_Znwm", "malloc"))
+    # Includes the C++14 sized delete (_ZdlPvm) and C++17 aligned new
+    # (_ZnwmSt11align_val_t) forms — a proxy replaces those overloads too (Codex).
+    proxy = _snap(
+        elf=_elf(
+            "__TBB_malloc_proxy",
+            "_Znwm",
+            "malloc",
+            "_ZdlPvm",
+            "_ZnwmSt11align_val_t",
+        )
+    )
     proxy.functions = [_public_fn()]
     res = run_crosschecks(proxy, CrosscheckConfig(max_per_check=0))
     counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
     assert counters.get("external_dependency", 0) == 0
     # accounted as a legitimate interposer category — and no finding advises hiding
     # the allocator replacements OR the proxy marker itself.
-    assert counters.get("allocator_interposer", 0) == 3  # marker + _Znwm + malloc
+    assert counters.get("allocator_interposer", 0) == 5  # marker + 4 allocator hooks
     finding_syms = {c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)}
-    assert not ({"_Znwm", "malloc", "__TBB_malloc_proxy"} & finding_syms)
+    assert not (
+        {"_Znwm", "malloc", "_ZdlPvm", "_ZnwmSt11align_val_t", "__TBB_malloc_proxy"}
+        & finding_syms
+    )
 
     # The same operator new in a library that is NOT an interposer is a real leak.
     leaky = _snap(elf=_elf("_Znwm"))

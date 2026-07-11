@@ -71,7 +71,6 @@ from ..model import (
     ScopeOrigin,
     Variable,
 )
-from .source_graph import GraphNode, SourceGraphSummary
 
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
@@ -91,6 +90,7 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
+from .source_graph import GraphNode, SourceGraphSummary
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
