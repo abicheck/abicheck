@@ -92,7 +92,7 @@ def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
                 "layer": layer,
                 "status": "not_collected",
                 "detail": "no build/source evidence collected "
-                "(pass --sources, or a deeper --source-method)",
+                "(pass --sources, or a deeper --depth)",
             }
             for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
         ]
