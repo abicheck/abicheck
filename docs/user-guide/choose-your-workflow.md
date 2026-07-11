@@ -89,8 +89,8 @@ explanation of why each source changes what abicheck can prove.
   DWARF/symbols analysis. It still works — it just catches less.
 - **Stripped binaries?** Point abicheck at separate debug files with
   `--debug-root old=` / `--debug-root new=`, or fetch them by build-id with
-  `--debuginfod`. See [CLI Usage → Debug-info
-  resolution](cli-usage.md#debug-artifact-resolution).
+  `--debuginfod`. See [Evidence, Build-Context, and Debug Flags → Debug-info
+  resolution](dump-compare-flags.md#debug-artifact-resolution).
 - **Compiler flags affect the ABI** (e.g. `-D` macros that change struct
   layout)? Capture the build context at **dump** time with
   `abicheck dump … -p build/` / `--compile-db` so the header AST is parsed the

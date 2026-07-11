@@ -185,10 +185,10 @@ found for a binary. For the full picture see [Evidence &
 Detectability](concepts/evidence-and-detectability.md) and the per-layer
 [Tool Modes](user-guide/tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
 reference; build data (L3) and source build/source packs (L4) are documented under
-[CLI Usage → Evidence packs](user-guide/cli-usage.md#evidence-packs-build-source-context-l3-l4).
+[Evidence, Build-Context, and Debug Flags → Evidence packs](user-guide/dump-compare-flags.md#evidence-packs-build-source-context-l3-l4).
 For stripped production builds, point abicheck at separate debug files
 (`--debug-root old=/new=`) or fetch them with `--debuginfod` — see
-[CLI Usage](user-guide/cli-usage.md#debug-artifact-resolution).
+[Evidence, Build-Context, and Debug Flags](user-guide/dump-compare-flags.md#debug-artifact-resolution).
 
 ---
 

@@ -41,6 +41,8 @@ nav:
       - 'Scanning a Conda-Forge Package': user-guide/scanning-conda-packages.md
     - Everyday Use:
       - CLI Usage: user-guide/cli-usage.md
+      - Evidence, Build-Context & Debug Flags: user-guide/dump-compare-flags.md
+      - Companion Commands: user-guide/companion-commands.md
       - Source-Scan Depth: user-guide/scan-levels.md
       - Producing Source Facts: user-guide/producing-source-facts.md
       - Output Formats: user-guide/output-formats.md
@@ -48,12 +50,14 @@ nav:
     - CI & Gating:
       - CI Gating Pipeline: user-guide/ci-gating.md
       - GitHub Action: user-guide/github-action.md
+      - 'GitHub Action: More Recipes': user-guide/github-action-recipes.md
       - 'GitHub Action: Source Scans': user-guide/github-action-source-scans.md
       - GitHub PR Annotations: user-guide/annotations.md
       - Severity Configuration: user-guide/severity.md
       - Policy Profiles: user-guide/policies.md
       - Suppressions: user-guide/suppressions.md
     - Specialised Checks:
+      - Debian Symbols Files: user-guide/debian-symbols.md
       - Multi-Binary Releases: user-guide/multi-binary.md
       - Application Compatibility: user-guide/appcompat.md
       - Plugin Systems: user-guide/plugin-systems.md
