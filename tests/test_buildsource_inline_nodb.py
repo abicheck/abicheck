@@ -19,6 +19,7 @@ embedded, no error)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from abicheck.cli_buildsource import embed_build_source
 from abicheck.model import AbiSnapshot
@@ -93,6 +94,38 @@ def test_derive_l2_include_dirs_no_inputs_is_empty():
 
     # No sources and no build-info → nothing to derive, and never raises.
     assert derive_l2_include_dirs(build_info=None, sources=None) == []
+
+
+def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
+    # CompileDbAdapter redacts home-rooted paths (a CI runner's
+    # /home/runner/work) to a literal ``~`` via DEFAULT_REDACTION. The fallback
+    # must expand ~ back before the existence check, or every home-rooted include
+    # dir — the exact CI case it targets — is dropped. Use a real dir under $HOME
+    # so the adapter redacts it and the helper has to un-redact it.
+    import os
+    import tempfile
+
+    from abicheck.buildsource.inline import derive_l2_include_dirs
+
+    home = Path(os.path.expanduser("~"))
+    with tempfile.TemporaryDirectory(dir=home) as home_dir:
+        inc = Path(home_dir) / "inc"
+        inc.mkdir()
+        src = tmp_path / "foo.c"
+        src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+        (tmp_path / "compile_commands.json").write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "file": str(src),
+                "command": f"cc -I{inc} -c {src}",  # absolute home path -> redacted to ~/...
+            }]),
+            encoding="utf-8",
+        )
+        dirs = derive_l2_include_dirs(build_info=None, sources=tmp_path)
+        # The returned path must be the real, expanded dir (usable by castxml/clang),
+        # not the ~-prefixed redacted form.
+        assert str(inc) in dirs
+        assert not any(d.startswith("~") for d in dirs)
 
 
 def test_graph_build_collect_mode_skips_l4(tmp_path):

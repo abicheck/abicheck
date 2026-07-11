@@ -641,9 +641,18 @@ def derive_l2_include_dirs(
         out: list[str] = []
         for cu in merged.compile_units:
             for inc in (*cu.include_paths, *cu.system_include_paths):
-                if inc and inc not in seen and Path(inc).is_dir():
-                    seen.add(inc)
-                    out.append(inc)
+                if not inc:
+                    continue
+                # CompileDbAdapter stores paths through DEFAULT_REDACTION, which
+                # rewrites the home prefix to a literal ``~`` (e.g. a CI runner's
+                # /home/runner/work -> ~/work). This derivation is ephemeral and
+                # runs on the same host as the build, so expand ~ back before the
+                # existence check — otherwise every home-rooted include dir (the
+                # common CI case this fallback targets) would be silently dropped.
+                real = os.path.expanduser(inc)
+                if real not in seen and Path(real).is_dir():
+                    seen.add(real)
+                    out.append(real)
         return out
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         return []
