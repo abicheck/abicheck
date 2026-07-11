@@ -180,6 +180,19 @@ def test_compare_snapshots_recovers_removed_wrapper_from_raw_allowlist() -> None
     assert plain.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
 
 
+def test_compare_snapshots_recovers_omitted_still_exported_wrapper() -> None:
+    from abicheck.checker_policy import Verdict
+    from abicheck.service import compare_snapshots
+
+    old = _snap([_cfn("pp_foo"), _cfn("pp_omitted", "int", ("int",))])
+    new = _snap([_cfn("pp_foo"), _cfn("pp_omitted", "long", ("long",))])
+
+    result = compare_snapshots(old, new, public_surface_allowlist={"pp_foo"})
+
+    assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+    assert not any("pp_omitted" == c.symbol for c in result.out_of_surface_changes)
+
+
 def test_loader_level_finding_survives_manifest_scope() -> None:
     # Codex: a SONAME/NEEDED change (symbol is a pseudo-name like DT_SONAME, not
     # a real export) breaks linked clients regardless of the POST export set, so
