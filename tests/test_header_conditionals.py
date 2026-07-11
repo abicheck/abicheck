@@ -500,8 +500,17 @@ def test_scan_is_last_counts_unparsed_members():
     assert _guard(scan_conditional_fields(init), "S", "legacy")["is_last"] is False
     method = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n void run();\n};"
     assert _guard(scan_conditional_fields(method), "S", "legacy")["is_last"] is False
-    # A genuinely-terminal guarded field (only the record's `};` follows) stays last.
-    last = "struct S {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\n};"
+    maybe_unused = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n [[maybe_unused]] int tail;\n};"
+    assert _guard(scan_conditional_fields(maybe_unused), "S", "legacy")["is_last"] is False
+    no_unique = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n [[no_unique_address]] T tail;\n};"
+    assert _guard(scan_conditional_fields(no_unique), "S", "legacy")["is_last"] is False
+    nested = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n struct Tail {};\n};"
+    assert _guard(scan_conditional_fields(nested), "S", "legacy")["is_last"] is False
+    multiline = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int tail\n ;\n};"
+    assert _guard(scan_conditional_fields(multiline), "S", "legacy")["is_last"] is False
+    # Access labels and the record's own close are not members, so a genuinely
+    # terminal guarded field keeps its proof even when an access label follows.
+    last = "struct S {\n int version;\n#ifdef KEEP\n int legacy;\n#endif\nprivate:\n};"
     assert _guard(scan_conditional_fields(last), "S", "legacy")["is_last"] is True
 
 
