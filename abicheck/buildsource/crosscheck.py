@@ -58,6 +58,7 @@ unit tests.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,6 +70,25 @@ from ..model import (
     Function,
     ScopeOrigin,
     Variable,
+)
+
+# Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
+# 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
+# keep importing these names from ``crosscheck``.
+from .export_accounting import (
+    _ALLOCATOR_INTERPOSER_MARKER,
+    _ALLOCATOR_INTERPOSER_SYMBOLS,
+    _UNDOCUMENTED_ACCOUNTS,
+    ACCOUNT_ALLOCATOR_INTERPOSER,
+    ACCOUNT_CXX_ARTIFACT,
+    ACCOUNT_EXTERNAL_DEP,
+    ACCOUNT_INTERNAL_NS,
+    ACCOUNT_PUBLIC,
+    ACCOUNT_TEMPLATE_INST,
+    _account_undocumented_export,
+    _external_dependency_origin,
+    _library_self_names,
+    _linked_library_names,
 )
 from .source_graph import GraphNode, SourceGraphSummary
 
@@ -246,6 +266,15 @@ def _check_exported_not_public(
     Provenance only runs when a public-header set was supplied, so the check
     skips cleanly on an ELF-only / no-header snapshot; it also needs an export
     table to compare against.
+
+    Every export is *accounted* with a precise reason (ADR-035 D4 accounting): a
+    documented public-API symbol and a compiler artifact are legitimate; each
+    undocumented one is bucketed as an external-dependency leak (libstdc++/{fmt}/…,
+    named on the finding), an internal-namespace escape, a template instantiation,
+    or a bare undeclared export. The per-category counts ride the coverage row's
+    ``counters`` and sum to the export count, so a report can state "100 %
+    accounted" and a maintainer can triage a leaked dependency differently from an
+    internal-namespace escape.
     """
     providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
     if not _origin_resolvable(snapshot):
@@ -268,31 +297,130 @@ def _check_exported_not_public(
             if d.origin == ScopeOrigin.PUBLIC_HEADER:
                 public_syms.add(sym)
 
+    # The binary's linked-library list (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE
+    # imports) feeds the external-dependency origin finders, so a leaked C++-runtime
+    # symbol names the runtime the binary actually links (e.g. the ``libc++.1.dylib``
+    # dylib on macOS rather than a hard-coded ELF soname).
+    needed_libs = _linked_library_names(snapshot)
+    # The audited library's own identity — a vendored namespace (fmt/boost/…) that
+    # is the library *being scanned* is native, not a leaked dependency.
+    self_names = _library_self_names(snapshot)
+    # An allocator-interposition library (malloc proxy) deliberately exports
+    # malloc/operator-new/… replacements; those are native, not a leaked dependency.
+    interposer = _ALLOCATOR_INTERPOSER_MARKER in exported
+
+    # Account for *every* export with a precise reason so the report can state
+    # "100 % accounted": documented API and compiler artifacts are legitimate;
+    # each undocumented reason yields a finding whose message names the reason
+    # (an external-dependency leak reads very differently from an internal-
+    # namespace escape). ``account`` sums to len(exported).
+    account: Counter[str] = Counter()
     findings: list[Change] = []
     for sym in sorted(exported):
-        if sym in public_syms or _is_cxx_implementation_symbol(sym):
+        if sym in public_syms:
+            account[ACCOUNT_PUBLIC] += 1
             continue
-        decl: Function | Variable | None = decl_by_sym.get(sym)
-        where = ""
-        if decl is not None:
-            kind = "function" if isinstance(decl, Function) else "variable"
-            where = f" (declared as {kind} {decl.name!r} in a non-public header)"
-        findings.append(
-            _change(
-                ChangeKind.EXPORTED_NOT_PUBLIC,
-                sym,
-                f"Symbol {sym!r} is exported by the binary but declared in no "
-                f"public header{where}. It is accidental ABI surface — hide it "
-                "(visibility/version script) or document it.",
-                new_value=sym,
-                confidence=Confidence.HIGH,
+        # A malloc-proxy library deliberately exports allocator replacements
+        # (``malloc``/``operator new``/…); they are native + intentional, so account
+        # them as legitimate and emit no finding — never advise hiding them (Codex).
+        if interposer and sym in _ALLOCATOR_INTERPOSER_SYMBOLS:
+            account[ACCOUNT_ALLOCATOR_INTERPOSER] += 1
+            continue
+        # The external-dependency check runs *before* the C++ compiler-artifact
+        # exemption: a leaked libstdc++/{fmt} vtable or typeinfo (``_ZTVNSt…``,
+        # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
+        # exempting it as a class artifact would silently undercount it (Codex
+        # review). Only a *native* class's artifact is then exempted below.
+        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
+        if origin_lib is not None:
+            account[ACCOUNT_EXTERNAL_DEP] += 1
+            findings.append(
+                _exported_not_public_finding(
+                    sym, ACCOUNT_EXTERNAL_DEP, origin_lib, decl_by_sym.get(sym)
+                )
             )
+            continue
+        if _is_cxx_implementation_symbol(sym):
+            account[ACCOUNT_CXX_ARTIFACT] += 1
+            continue
+        category = _account_undocumented_export(sym)
+        account[category] += 1
+        findings.append(
+            _exported_not_public_finding(sym, category, None, decl_by_sym.get(sym))
         )
-    detail = (
-        f"binary exports ↔ public headers: {len(findings)} exported symbol(s) "
-        "with no public declaration"
+
+    documented = (
+        account[ACCOUNT_PUBLIC]
+        + account[ACCOUNT_CXX_ARTIFACT]
+        + account[ACCOUNT_ALLOCATOR_INTERPOSER]
     )
-    return _CheckOutput(findings, "present", detail, providers)
+    breakdown = ", ".join(
+        f"{cat}={account[cat]}" for cat in _UNDOCUMENTED_ACCOUNTS if account[cat]
+    )
+    detail = (
+        f"binary exports ↔ public headers: {len(findings)} of {sum(account.values())} "
+        f"export(s) undocumented ({documented} accounted as documented API / "
+        f"compiler artifact)" + (f"; by reason: {breakdown}" if breakdown else "")
+    )
+    return _CheckOutput(findings, "present", detail, providers, counters=dict(account))
+
+
+#: Per-category message templates for an undocumented export. Each states the
+#: precise reason and the fix, so a maintainer can triage a leaked dependency
+#: symbol differently from an internal-namespace escape (ADR-035 D4 accounting).
+def _exported_not_public_finding(
+    sym: str,
+    category: str,
+    origin_lib: str | None,
+    decl: Function | Variable | None,
+) -> Change:
+    """Build the ``exported_not_public`` finding for one undocumented export.
+
+    The message is category-specific — an external-dependency leak names the
+    originating library and points at the linkage fix, an internal-namespace or
+    template escape points at the visibility fix — so the *precise reason* rides
+    on the finding, not just the aggregate count.
+    """
+    where = ""
+    if decl is not None and category != ACCOUNT_EXTERNAL_DEP:
+        kind = "function" if isinstance(decl, Function) else "variable"
+        where = f" (declared as {kind} {decl.name!r} in a non-public header)"
+    if category == ACCOUNT_EXTERNAL_DEP:
+        message = (
+            f"Symbol {sym!r} is exported by the binary but originates from an "
+            f"external dependency ({origin_lib}) statically linked and re-exported "
+            "— not part of this library's API. Hide it (visibility/version script) "
+            "or link the dependency dynamically; a differing dependency version on "
+            "another host makes the leaked symbol an ODR/compatibility hazard."
+        )
+    elif category == ACCOUNT_INTERNAL_NS:
+        message = (
+            f"Symbol {sym!r} is exported by the binary but declared in no public "
+            f"header{where}; it belongs to an internal namespace "
+            "(impl/internal/detail/anonymous). It is accidental ABI surface — hide "
+            "it with -fvisibility=hidden or a version script."
+        )
+    elif category == ACCOUNT_TEMPLATE_INST:
+        message = (
+            f"Symbol {sym!r} is an exported C++ template instantiation with no "
+            f"matching public declaration{where} (the public headers declare the "
+            "template, the binary carries this instantiation). Confirm it is "
+            "intended surface, or hide it."
+        )
+    else:  # ACCOUNT_UNDECLARED
+        message = (
+            f"Symbol {sym!r} is exported by the binary but declared in no public "
+            f"header{where}. It is accidental ABI surface — hide it "
+            "(visibility/version script) or document it."
+        )
+    return _change(
+        ChangeKind.EXPORTED_NOT_PUBLIC,
+        sym,
+        message,
+        new_value=sym,
+        old_value=origin_lib,
+        confidence=Confidence.HIGH,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +580,11 @@ def _check_private_header_leak(
     # so checking presence alone would record a provider with no fact behind it and
     # mask regressions in real source-graph extraction (ADR-035 D4 coverage honesty
     # — Codex review).
-    sg = snapshot.build_source.source_graph if snapshot.build_source is not None else None
+    sg = (
+        snapshot.build_source.source_graph
+        if snapshot.build_source is not None
+        else None
+    )
     if sg is not None and sg.nodes:
         providers.append(PROVIDER_SOURCE_INDEX)
     if not _origin_resolvable(snapshot):
@@ -1169,16 +1301,19 @@ _MANGLE_SIGILS = ("_Z", "?")
 _STRUCTOR_RE = re.compile(r"_ZN.*?[CD][0-4]E")
 
 #: Compiler-generated C++ ABI artifacts that belong to a class, not to a
-#: free function/variable: vtables/typeinfo/VTT/thunks (Itanium ``_ZTV``/``_ZTI``/
-#: ``_ZTS``/``_ZTT``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC ``??_`` vftable/vbtable/
-#: RTTI/deleting-dtor names. castxml records the owning class as a ``RecordType``
-#: (not a ``Function``/``Variable``), so these would never be in the documented
-#: symbol set and must be exempted from ``exported_not_public`` (Codex review).
+#: free function/variable: vtables/typeinfo/VTT/construction-vtables/thunks (Itanium
+#: ``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC
+#: ``??_`` vftable/vbtable/RTTI/deleting-dtor names. castxml records the owning class
+#: as a ``RecordType`` (not a ``Function``/``Variable``), so these would never be in
+#: the documented symbol set and must be exempted from ``exported_not_public`` when
+#: they belong to a *native* class (a leaked *dependency* construction vtable is
+#: caught earlier by the external-dependency origin check — Codex review).
 _CXX_ARTIFACT_PREFIXES = (
     "_ZTV",
     "_ZTI",
     "_ZTS",
     "_ZTT",
+    "_ZTC",
     "_ZTh",
     "_ZTv",
     "_ZTc",

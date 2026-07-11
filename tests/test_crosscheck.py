@@ -286,6 +286,562 @@ def test_exported_not_public_clean_when_everything_declared():
 
 
 # --------------------------------------------------------------------------- #
+# exported_not_public — precise export accounting (ADR-035 D4)
+# --------------------------------------------------------------------------- #
+
+
+def _public_fn() -> Function:
+    """A documented public function so provenance is resolvable (``_Z3fooi``)."""
+    return Function(
+        name="foo",
+        mangled="_Z3fooi",
+        return_type="void",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+
+
+def test_exported_not_public_marks_external_dependency_leak():
+    # A leaked libstdc++ symbol (``_ZNSt…``) is not this library's API: it must be
+    # accounted as an external dependency, name the originating library, and say so
+    # in the message — a maintainer fixes a leak differently from an API mistake.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZNSt6vectorIiSaIiEE9push_backEOi"))
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert [c.symbol for c in hits] == ["_ZNSt6vectorIiSaIiEE9push_backEOi"]
+    assert hits[0].old_value == "libstdc++.so.6"
+    assert "external dependency" in hits[0].description
+    assert "libstdc++.so.6" in hits[0].description
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 1
+    assert counters["documented_public_api"] == 1
+
+
+def test_exported_not_public_marks_vendored_third_party():
+    # A statically-linked, re-exported {fmt} symbol is a vendored third-party leak.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3fmt3v106detail11format_errorEPKc"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    assert hits[0].old_value == "{fmt} (vendored third-party)"
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 1
+
+
+def test_exported_not_public_marks_internal_namespace():
+    # An export in the library's own ``::impl`` namespace is a visibility leak,
+    # distinct from an external dependency: no origin lib, internal_namespace bucket.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib4impl6secretEv"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    assert hits[0].old_value is None
+    assert "internal namespace" in hits[0].description
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["internal_namespace"] == 1
+
+
+def test_exported_not_public_marks_template_instantiation():
+    # An exported template instantiation (Itanium ``I…E`` args) with no matching
+    # public decl is its own accounted reason, not a bare undeclared export.
+    snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib9transformIdEEvT_"))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert len(hits) == 1
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["template_instantiation"] == 1
+
+
+def test_exported_not_public_accounting_sums_to_all_exports():
+    # The accounting partitions the whole export table — documented API +
+    # compiler artifact + every undocumented reason == number of exports, so the
+    # report can honestly state "100 % accounted".
+    snap = _snap(
+        elf=_elf(
+            "_Z3fooi",  # documented
+            "_ZTV6Widget",  # cxx artifact
+            "_ZNSt6vectorIiSaIiEE9push_backEOi",  # external dependency
+            "_ZN3lib4impl6secretEv",  # internal namespace
+            "_ZN3lib9transformIdEEvT_",  # template instantiation
+            "raw_entry",  # undeclared
+        )
+    )
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert sum(counters.values()) == 6
+    assert counters == {
+        "documented_public_api": 1,
+        "cxx_abi_artifact": 1,
+        "external_dependency": 1,
+        "internal_namespace": 1,
+        "template_instantiation": 1,
+        "undeclared_export": 1,
+    }
+
+
+def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
+    # Regression (Codex review): a leaked libstdc++/{fmt} vtable or typeinfo is
+    # checked for external origin BEFORE the C++ compiler-artifact exemption, so it
+    # counts as the leaked surface these counters measure — not silently exempted
+    # as a legitimate class artifact. A *native* class's vtable still is exempted.
+    snap = _snap(
+        elf=_elf(
+            "_Z3fooi",  # documented
+            "_ZTVNSt7__cxx1112basic_stringIcEE",  # leaked std vtable -> external
+            "_ZTIN3fmt3v106detail5errorE",  # leaked {fmt} typeinfo -> external
+            "_ZThn16_N3fmt3v106detail5errorE",  # leaked {fmt} thunk -> external
+            "_ZTV6Widget",  # native class vtable -> cxx artifact
+            "_ZThn8_N6Widget3fooEv",  # native class thunk -> cxx artifact
+        )
+    )
+    snap.functions = [_public_fn()]
+    snap.types = [
+        RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["external_dependency"] == 3  # std vtable + fmt typeinfo + fmt thunk
+    assert counters["cxx_abi_artifact"] == 2  # native Widget vtable + native thunk
+    ext = {
+        c.symbol: c.old_value for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    }
+    assert ext["_ZTVNSt7__cxx1112basic_stringIcEE"] == "libstdc++.so.6"
+    assert ext["_ZTIN3fmt3v106detail5errorE"] == "{fmt} (vendored third-party)"
+    assert ext["_ZThn16_N3fmt3v106detail5errorE"] == "{fmt} (vendored third-party)"
+
+
+@pytest.mark.parametrize(
+    "symbol, expected",
+    [
+        ("_ZNSt6vectorIiSaIiEE9push_backEOi", "libstdc++.so.6"),  # std prefix
+        ("_ZTVNSt7__cxx1112basic_stringIcEE", "libstdc++.so.6"),  # leaked std vtable
+        ("_ZTISt9exception", "libstdc++.so.6"),  # leaked std typeinfo
+        # an un-nested std substitution the prefix table misses (Ss = std::string)
+        # resolves via the owner path.
+        ("_ZSsD1Ev", "libstdc++.so.6"),
+        # std forms the _guess_symbol_origin prefix table misses, caught by the
+        # owner-namespace check: a std guard variable and the libstdc++
+        # implementation namespaces (__gnu_cxx / __cxxabiv1).
+        ("_ZGVZNSt3_V216generic_categoryEvE7c", "libstdc++.so.6"),
+        ("_ZN9__gnu_cxx17__normal_iteratorEv", "libstdc++.so.6"),
+        ("_ZN10__cxxabiv117__class_type_infoE", "libstdc++.so.6"),
+        ("_ZGVZN3fmt3v107formatterISt6localeEE", "{fmt} (vendored third-party)"),
+        ("_ZN5boost6system10error_codeC1Ev", "Boost (vendored third-party)"),
+        ("_ZN4absl4TimeEv", "Abseil (vendored third-party)"),
+        # CV-/ref-qualified member exports keep their namespace owner (Codex review).
+        ("_ZNK3fmt9formatterEv", "{fmt} (vendored third-party)"),
+        ("_ZNKO5boost3barEv", "Boost (vendored third-party)"),
+        # thunks: the numeric call-offset before the operand must be peeled so the
+        # dependency owner is still read (Codex review).
+        ("_ZThn16_N3fmt3v106detail5errorE", "{fmt} (vendored third-party)"),
+        ("_ZTv0_n24_N5boost6system5errorE", "Boost (vendored third-party)"),
+        ("_ZThn8_N6Widget3fooEv", None),  # native thunk -> stays a class artifact
+        # a native internal symbol that merely *references* std in a parameter is
+        # NOT external — the owner (dnnl), not the argument type, decides.
+        ("_ZN4dnnl4impl3fooENSt7__cxx1112basic_stringIcEE", None),
+        ("_ZN3lib3barEv", None),  # native, nested
+        ("_Z3fooi", None),  # native, non-nested (_Z, not _ZN)
+        # an un-nested global named after a vendor (a *function* fmt(), not the fmt
+        # namespace) has no namespace owner and must not be a vendored leak (Codex).
+        ("_Z3fmtv", None),
+        ("_Z6googlev", None),
+        ("_ZTV3Foo", None),  # vtable for a top-level class — no namespace owner
+        # construction vtable (``_ZTC``) for a leaked dependency type: the operand
+        # nested name must be peeled so the {fmt} owner is read (Codex review).
+        ("_ZTCN3fmt3FooE0_NS_3BarE", "{fmt} (vendored third-party)"),
+        ("_ZTCN5boost3FooE0_NS_3BarE", "Boost (vendored third-party)"),
+        ("_ZTC3Foo0_3Bar", None),  # native construction vtable — no namespace owner
+        ("_ZN", None),  # degenerate — owner unparseable
+        ("plain_c_symbol", None),  # not mangled
+    ],
+)
+def test_external_dependency_origin_owner_based(symbol, expected):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, ["libstdc++.so.6"]) == expected
+
+
+@pytest.mark.parametrize(
+    "symbol, needed, expected",
+    [
+        # libc++ std uses the std::__1 inline namespace: a leaked std guard var the
+        # prefix table misses must name libc++, not libstdc++ (Codex review).
+        ("_ZGVZNSt3__116generic_categoryEvE3loc", ["libc++.so.1"], "libc++.so.1"),
+        # No __1 marker but the binary links libc++ -> prefer libc++.
+        ("_ZN10__cxxabiv117__class_type_infoE", ["libc++.so.1"], "libc++.so.1"),
+        # __gnu_cxx is libstdc++-only, even alongside a libc++ DT_NEEDED.
+        ("_ZN9__gnu_cxx17__normal_iteratorEv", ["libc++.so.1"], "libstdc++.so.6"),
+        # no __1 marker, libc++ absent: skip past a non-runtime DT_NEEDED entry and
+        # pick the linked libstdc++.
+        (
+            "_ZGVZNSt3_V216generic_categoryEvE7c",
+            ["libz.so.1", "libstdc++.so.6"],
+            "libstdc++.so.6",
+        ),
+        # neither C++ runtime linked -> fall back to the libstdc++ default.
+        ("_ZGVZNSt3_V216generic_categoryEvE7c", ["libz.so.1"], "libstdc++.so.6"),
+        # Mach-O libc++ names the actual loaded dylib, not a hard-coded ELF soname.
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["/usr/lib/libc++.1.dylib"],
+            "libc++.1.dylib",
+        ),
+        # a libc++ marker skips a non-runtime dependency before matching the dylib.
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["libz.so.1", "/usr/lib/libc++.1.dylib"],
+            "libc++.1.dylib",
+        ),
+        # a libc++ marker with no dependency list falls back to the canonical soname.
+        ("_ZGVZNSt3__116generic_categoryEvE3loc", [], "libc++.so.1"),
+        # libc++abi is a *different* runtime — a std::__1 symbol must resolve to
+        # libc++ even when libc++abi precedes it in the dependency list (Codex).
+        (
+            "_ZGVZNSt3__116generic_categoryEvE3loc",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++.so.1",
+        ),
+        # even a plain std::__1 export the prefix table resolves to libc++abi first
+        # is normalized to the real libc++ runtime (Codex review).
+        (
+            "_ZNSt3__16vectorIiEE9push_backEOi",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++.so.1",
+        ),
+        # a __cxxabiv1 ABI symbol is owned by libc++abi (NOT excluded like the std
+        # runtime), preferring the linked ABI library, else libstdc++ (Codex review).
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libc++abi.so.1", "libc++.so.1"],
+            "libc++abi.so.1",
+        ),
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libstdc++.so.6"],
+            "libstdc++.so.6",
+        ),
+        # no C++ runtime linked at all -> libstdc++ default.
+        ("_ZN10__cxxabiv121__vmi_class_type_infoD2Ev", [], "libstdc++.so.6"),
+        # a libc++ toolchain without a separate libc++abi still owns its ABI symbols.
+        (
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev",
+            ["libc++.so.1"],
+            "libc++.so.1",
+        ),
+        # covariant thunk with h/v-tagged call-offsets still resolves its owner.
+        ("_ZTchn16_h16_N3fmt3v105eventE", [], "{fmt} (vendored third-party)"),
+    ],
+)
+def test_external_dependency_origin_runtime_and_covariant_thunk(
+    symbol, needed, expected
+):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, needed) == expected
+
+
+def test_linked_library_names_across_platforms():
+    # The linked-library list is gathered from whichever binary format the snapshot
+    # carries (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE imports) so the C++-runtime
+    # picker can name the real dependency on each platform.
+    from abicheck.buildsource.crosscheck import _linked_library_names
+
+    elf_snap = _snap(elf=ElfMetadata(symbols=[], needed=["libstdc++.so.6"]))
+    assert _linked_library_names(elf_snap) == ["libstdc++.so.6"]
+
+    macho_snap = _snap(
+        macho=MachoMetadata(exports=[], dependent_libs=["/usr/lib/libc++.1.dylib"])
+    )
+    assert _linked_library_names(macho_snap) == ["/usr/lib/libc++.1.dylib"]
+
+    pe_snap = _snap(pe=PeMetadata(exports=[], imports={"msvcp140.dll": ["?x@@"]}))
+    assert _linked_library_names(pe_snap) == ["msvcp140.dll"]
+
+
+def test_external_dependency_origin_ignores_audited_library_own_namespace():
+    # Auditing a vendored library itself (libfmt): its own ``fmt::detail`` symbols
+    # are native, not a leaked dependency — the vendored-namespace fallback is gated
+    # on the audited library's identity (Codex review).
+    from abicheck.buildsource.crosscheck import (
+        _external_dependency_origin,
+        _library_self_names,
+    )
+
+    sym = "_ZN3fmt6detail6secretEv"
+    # libfmt scanning itself -> native (no external finding).
+    assert _external_dependency_origin(sym, [], ("libfmt.so.9",)) is None
+    # a different library that statically linked and re-exported fmt -> leak.
+    assert (
+        _external_dependency_origin(sym, [], ("libmylib.so.1",))
+        == "{fmt} (vendored third-party)"
+    )
+    # a wrapper/plugin whose name merely *contains* the token is NOT self — its
+    # leaked fmt surface must still flag (boundary-aware match, Codex review).
+    assert (
+        _external_dependency_origin(sym, [], ("libfmtshim.so",))
+        == "{fmt} (vendored third-party)"
+    )
+    # a C++ library whose soname carries ``+`` (``libgrpc++.so``) is self for the
+    # ``grpc`` owner — its own ``grpc::`` surface is native, not a vendored leak
+    # (the ``+`` must be a recognised stem boundary, Codex review).
+    grpc_sym = "_ZN4grpc6Status2OKEv"
+    assert _external_dependency_origin(grpc_sym, [], ("libgrpc++.so",)) is None
+    assert _external_dependency_origin(grpc_sym, [], ("libgrpc++.so.1",)) is None
+    # but a plain wrapper that merely re-exports grpc still flags.
+    assert (
+        _external_dependency_origin(grpc_sym, [], ("libmyplugin.so",))
+        == "gRPC (vendored third-party)"
+    )
+    # a per-component vendored lib (libboost_system) scanning its own boost:: is
+    # still recognised as self.
+    assert (
+        _external_dependency_origin(
+            "_ZN5boost6system3barEv", [], ("libboost_system.so.1",)
+        )
+        is None
+    )
+    # protobuf's google::protobuf namespace ships in libprotobuf — auditing it is
+    # self, not a leaked Google/protobuf dependency (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libprotobuf.so.32",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libother.so",)
+        )
+        == "Google/protobuf (vendored third-party)"
+    )
+    # protobuf's library is libprotobuf, not any libgoogle_* — a wrapper like
+    # libgoogle_cloud_cpp that re-exports protobuf must still flag (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN6google8protobuf7MessageEv", [], ("libgoogle_cloud_cpp.so",)
+        )
+        == "Google/protobuf (vendored third-party)"
+    )
+    # ``google::`` is shared by many Google libraries — only google::protobuf is
+    # protobuf. glog's google::LogMessage / gflags are native, not a leak (Codex).
+    assert (
+        _external_dependency_origin("_ZN6google10LogMessageEv", [], ("libglog.so",))
+        is None
+    )
+    # auditing a runtime library itself: its own std/runtime exports are native,
+    # not a leak — the self gate covers the _guess_symbol_origin path too (Codex).
+    assert (
+        _external_dependency_origin(
+            "_ZNSt6vectorIiEE9push_backEOi", ["libstdc++.so.6"], ("libstdc++.so.6",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZNSt6vectorIiEE9push_backEOi", ["libstdc++.so.6"], ("libmylib.so",)
+        )
+        == "libstdc++.so.6"
+    )
+    # the owner-fallback runtime path (a guard variable / __gnu_cxx form the prefix
+    # table misses) is self-gated the same way (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZGVZNSt3_V216generic_categoryEvE7c", [], ("libstdc++.so.6",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin("_ZN9__gnu_cxx5xyz_Ev", [], ("libstdc++.so.6",))
+        is None
+    )
+    # auditing libc++abi itself (no self-dep in DT_NEEDED): its own __cxxabiv1 ABI
+    # exports are native (Codex review).
+    assert (
+        _external_dependency_origin(
+            "_ZN10__cxxabiv121__vmi_class_type_infoD2Ev", [], ("libc++abi.so.1",)
+        )
+        is None
+    )
+    assert (
+        _external_dependency_origin(
+            "_ZN6google20ParseCommandLineFlagsEPiPPPcb", [], ("libgflags.so",)
+        )
+        is None
+    )
+    # self-names are derived from library name / soname / Mach-O install-name.
+    snap = _snap(library="libfmt", elf=ElfMetadata(symbols=[], soname="libfmt.so.9"))
+    assert set(_library_self_names(snap)) == {"libfmt", "libfmt.so.9"}
+    macho_snap = _snap(
+        library="",
+        macho=MachoMetadata(exports=[], install_name="/usr/lib/libboost.dylib"),
+    )
+    assert _library_self_names(macho_snap) == ("libboost.dylib",)
+
+
+@pytest.mark.parametrize(
+    "symbol, self_names, expected",
+    [
+        # MSVC scopes are inner-to-outer, so the top-level namespace is the last
+        # ``@``-component. A statically re-exported Boost/{fmt}/protobuf symbol on
+        # Windows is a vendored-dependency leak, not an undeclared export (Codex).
+        ("?bar@fmt@@YAXXZ", (), "{fmt} (vendored third-party)"),
+        ("?foo@system@boost@@YAXXZ", (), "Boost (vendored third-party)"),
+        (
+            "?Msg@protobuf@google@@YAXXZ",
+            (),
+            "Google/protobuf (vendored third-party)",
+        ),
+        # a bare ``google::`` scope (glog/gflags) is not a protobuf leak.
+        ("?LogMessage@google@@YAXXZ", (), None),
+        # an MSVC ``std::`` symbol stays native here (MSVC STL attribution is a
+        # separate concern; not mislabelled with an ELF soname).
+        ("?x@std@@YAXXZ", (), None),
+        # an un-nested MSVC name (no enclosing scope) has no owner.
+        ("?globalfunc@@YAXXZ", (), None),
+        # ctor/special-name form still resolves its outer vendored scope.
+        ("??0Foo@boost@@QEAA@XZ", (), "Boost (vendored third-party)"),
+        # auditing the vendored library itself (a Windows fmt.dll): native, not a
+        # leak — the self gate covers MSVC owners too.
+        ("?bar@fmt@@YAXXZ", ("fmt.dll",), None),
+        # not an MSVC name -> no MSVC owner path.
+        ("plain_c_symbol", (), None),
+    ],
+)
+def test_external_dependency_origin_msvc_scopes(symbol, self_names, expected):
+    from abicheck.buildsource.crosscheck import _external_dependency_origin
+
+    assert _external_dependency_origin(symbol, [], self_names) == expected
+
+
+@pytest.mark.parametrize(
+    "symbol, index, expected",
+    [
+        ("_ZN6google8protobuf7MessageEv", 0, "google"),
+        ("_ZN6google8protobuf7MessageEv", 1, "protobuf"),
+        ("_ZN6google8protobuf7MessageEv", 2, "Message"),
+        ("_ZN6google8protobuf7MessageEv", 3, None),  # past the last component
+        # template arguments on a component are skipped, not counted as components.
+        ("_ZN3lib3BoxIiE3barEv", 1, "Box"),
+        ("_ZN3lib3BoxIiE3barEv", 2, "bar"),
+        ("_Z3fooi", 0, None),  # un-nested name has no nested components
+    ],
+)
+def test_nested_component(symbol, index, expected):
+    from abicheck.buildsource.export_accounting import _nested_component
+
+    assert _nested_component(symbol, index) == expected
+
+
+@pytest.mark.parametrize(
+    "symbol, expected",
+    [
+        ("_ZN3lib4impl6secretEv", "internal_namespace"),
+        ("_ZN3lib8internal6secretEv", "internal_namespace"),
+        ("_ZN12_GLOBAL__N_13fooEv", "internal_namespace"),
+        # a parameter type referencing an internal namespace does NOT make the
+        # exported entity internal — only the entity's own name counts (Codex).
+        ("_ZN3lib3fooEPN3lib6detail4TypeE", "undeclared_export"),
+        # a name merely *containing* an internal token is not internal — the match
+        # is against a whole component, not a substring (Codex review).
+        ("_ZN3lib6SimpleEv", "undeclared_export"),  # "Simple" contains "impl"
+        ("_ZN3lib11implementEv", "undeclared_export"),  # "implement" ≠ "impl"
+        ("_ZN3lib9transformIdEEvT_", "template_instantiation"),
+        ("_ZNSt6vectorIiEE9push_backEOi", "template_instantiation"),
+        ("_Z9transformIdEv", "template_instantiation"),  # un-nested template fn
+        ("_ZNK3lib9transformIdEEv", "template_instantiation"),  # const template method
+        # a member of an enclosing class-template specialization is a template
+        # instantiation even though the final component isn't templated (Codex).
+        ("_ZN3lib3BoxIiE3barEv", "template_instantiation"),
+        ("_ZNK3lib3BoxIiE3barEv", "template_instantiation"),
+        # nested template arguments (Box<vector<int>>) keep the depth bookkeeping
+        # correct — still one template instantiation.
+        ("_ZN3lib3BoxISt6vectorIiEEE3barEv", "template_instantiation"),
+        # an ``I`` *inside* an identifier is not a template — must not be
+        # misclassified (Codex review).
+        ("_ZL4mainv", "undeclared_export"),  # un-nested, no leading length digit
+        ("_ZN3foo", "undeclared_export"),  # truncated nested name (no closing E)
+        ("_ZN3lib10InitEngineEv", "undeclared_export"),
+        ("_ZN3lib9InterfaceEv", "undeclared_export"),
+        # a template argument in a *parameter* type does not make the entity a
+        # template instantiation — the entity (lib::foo) is not one (Codex review).
+        ("_ZN3lib3fooESt6vectorIiSaIiEE", "undeclared_export"),
+        ("_Z3fooi", "undeclared_export"),
+        ("raw_c_entry", "undeclared_export"),
+        # a function whose *own name* is detail/impl but whose enclosing namespace
+        # is not internal is NOT internal — only enclosing scopes count (Codex).
+        ("_ZN3lib6detailEv", "undeclared_export"),  # lib::detail()
+        ("_ZN3lib4implEv", "undeclared_export"),  # lib::impl()
+        # MSVC decorated names keep the internal-namespace reason on PE/COFF (Codex).
+        ("?secret@detail@lib@@YAXXZ", "internal_namespace"),
+        ("?Compute@impl@dnnl@@YAXXZ", "internal_namespace"),
+        ("?PublicApi@dnnl@@YAXXZ", "undeclared_export"),
+        ("?detail@lib@@YAXXZ", "undeclared_export"),  # lib::detail() — name, not scope
+    ],
+)
+def test_account_undocumented_export_categories(symbol, expected):
+    from abicheck.buildsource.crosscheck import _account_undocumented_export
+
+    assert _account_undocumented_export(symbol) == expected
+
+
+def test_exported_not_public_allocator_interposer_is_native_not_leak():
+    # A malloc-proxy library (it exports the __TBB_malloc_proxy marker) deliberately
+    # replaces the global allocator; its operator new / malloc exports are native,
+    # not a leaked libstdc++/libc dependency (Codex review).
+    # Includes the C++14 sized delete (_ZdlPvm) and C++17 aligned new
+    # (_ZnwmSt11align_val_t) forms — a proxy replaces those overloads too (Codex).
+    proxy = _snap(
+        elf=_elf(
+            "__TBB_malloc_proxy",
+            "_Znwm",
+            "malloc",
+            "_ZdlPvm",
+            "_ZnwmSt11align_val_t",
+        )
+    )
+    proxy.functions = [_public_fn()]
+    res = run_crosschecks(proxy, CrosscheckConfig(max_per_check=0))
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters.get("external_dependency", 0) == 0
+    # accounted as a legitimate interposer category — and no finding advises hiding
+    # the allocator replacements OR the proxy marker itself.
+    assert counters.get("allocator_interposer", 0) == 5  # marker + 4 allocator hooks
+    finding_syms = {c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)}
+    assert not (
+        {"_Znwm", "malloc", "_ZdlPvm", "_ZnwmSt11align_val_t", "__TBB_malloc_proxy"}
+        & finding_syms
+    )
+
+    # The same operator new in a library that is NOT an interposer is a real leak.
+    leaky = _snap(elf=_elf("_Znwm"))
+    leaky.functions = [_public_fn()]
+    res2 = run_crosschecks(leaky, CrosscheckConfig(max_per_check=0))
+    counters2 = _coverage(res2, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters2.get("external_dependency", 0) == 1
+
+
+# --------------------------------------------------------------------------- #
 # public_not_exported
 # --------------------------------------------------------------------------- #
 
@@ -446,9 +1002,7 @@ def test_reconciliation_underscore_strip_is_macho_only():
 
     # Mach-O: the export table strips one underscore, so a raw `__ZN…`/`_foo`
     # mapping value still reconciles against the stripped export set.
-    macho_snap = _snap(
-        macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")])
-    )
+    macho_snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="__ZN1A3fooEv")]))
     surf2 = SourceAbiSurface(library="l")
     surf2.mappings["source_decl_to_binary_symbol"] = {"__ZN1A3fooEv": "__ZN1A3fooEv"}
     macho_snap.build_source = BuildSourcePack(root="", source_abi=surf2)
@@ -1559,7 +2113,9 @@ def test_public_to_internal_dependency_elevates_via_callgraph_def_file():
         [
             _decl("decl://pub", "pubFn", "public_header"),
             GraphNode(
-                id="decl://impl", kind="source_decl", label="implHelper",
+                id="decl://impl",
+                kind="source_decl",
+                label="implHelper",
                 attrs={"defined_in_project": True, "def_file": "/work/src/impl.cc"},
             ),
         ],
