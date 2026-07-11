@@ -98,11 +98,14 @@ def _compile_multi_cu_lib(tmp_path: Path, label: str, n_cus: int) -> Path:
         cpp_files.append(cpp)
 
     so_file = src_dir / f"lib{label}.so"
-    r = subprocess.run(
-        ["g++", "-shared", "-fPIC", "-g", "-Og", "-o", str(so_file)]
-        + [str(c) for c in cpp_files],
-        capture_output=True, text=True,
-    )
+    try:
+        r = subprocess.run(
+            ["g++", "-shared", "-fPIC", "-g", "-Og", "-o", str(so_file)]
+            + [str(c) for c in cpp_files],
+            capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("g++ compilation timed out after 60s")
     if r.returncode != 0:
         pytest.skip(f"g++ compilation failed: {r.stderr[:300]}")
     with open(so_file, "rb") as f:
