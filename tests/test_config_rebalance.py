@@ -31,7 +31,12 @@ from click.testing import CliRunner
 from abicheck.buildsource.inline import BuildConfig, load_build_config
 from abicheck.cli import main
 from abicheck.cli_helpers_compare import resolve_compare_config
-from abicheck.cli_options import COMPARE_FLAG_BUDGET, count_visible_options
+from abicheck.cli_options import (
+    COMPARE_FLAG_BUDGET,
+    COMPARE_FLAG_BUDGET_BASE,
+    COMPARE_FLAG_BUDGET_RAISES,
+    count_visible_options,
+)
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.serialization import snapshot_to_json
 from abicheck.severity import SeverityLevel
@@ -189,7 +194,58 @@ class TestFlagBudget:
         visible = count_visible_options(main.commands["compare"])
         assert visible <= COMPARE_FLAG_BUDGET, (
             f"compare exposes {visible} visible flags (> {COMPARE_FLAG_BUDGET}); "
-            "demote stable project settings to .abicheck.yml (ADR-037 D4)."
+            "demote stable project settings to .abicheck.yml (ADR-037 D4), or — if "
+            "the flag is a genuine per-run analysis input — add a documented entry "
+            "to COMPARE_FLAG_BUDGET_RAISES in cli_options.py."
+        )
+
+    def test_budget_is_derived_from_ledger(self) -> None:
+        """The ceiling must equal BASE + the documented raises, never a bare number.
+
+        This is the guard that closes the ``--post-manifest`` gap: because the
+        only way to raise the budget is to add a rationale-carrying ledger entry,
+        a new visible flag can no longer be slipped in by silently consuming
+        slack between a hand-set number and the real count.
+        """
+        assert (
+            COMPARE_FLAG_BUDGET
+            == COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
+        )
+
+    def test_every_ledger_flag_is_visible_and_documented(self) -> None:
+        """Each ledger key must be a currently-visible compare flag with a reason.
+
+        Keeps the ledger honest: a flag later demoted to hidden/config (or removed)
+        must have its entry dropped, so the ledger cannot accumulate stale
+        justifications for flags the surface no longer exposes.
+        """
+        cmd = main.commands["compare"]
+        visible = {
+            opt
+            for p in cmd.params
+            if getattr(p, "param_type_name", None) == "option"
+            and not getattr(p, "hidden", False)
+            for opt in p.opts
+        }
+        for flag, rationale in COMPARE_FLAG_BUDGET_RAISES.items():
+            assert flag in visible, (
+                f"{flag} is in COMPARE_FLAG_BUDGET_RAISES but is not a visible "
+                "compare flag — drop its ledger entry (and adjust BASE if needed)."
+            )
+            assert rationale.strip(), f"{flag} ledger entry has an empty rationale"
+
+    def test_no_undocumented_visible_flag_beyond_base(self) -> None:
+        """Visible count above BASE must be fully covered by ledger entries.
+
+        Equivalent to ``visible <= budget`` today, but stated in ledger terms so
+        the failure message points a future author straight at the fix: any flag
+        pushing the count past BASE needs a COMPARE_FLAG_BUDGET_RAISES rationale.
+        """
+        visible = count_visible_options(main.commands["compare"])
+        assert visible - COMPARE_FLAG_BUDGET_BASE <= len(COMPARE_FLAG_BUDGET_RAISES), (
+            f"compare has {visible} visible flags; BASE is "
+            f"{COMPARE_FLAG_BUDGET_BASE} and only {len(COMPARE_FLAG_BUDGET_RAISES)} "
+            "raises are documented — add a ledger entry for the new flag."
         )
 
     def test_demoted_families_are_hidden(self) -> None:

@@ -1153,30 +1153,59 @@ VERDICT_EMITTING_COMMANDS: dict[str, str] = {
 INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 
 #: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
-#: nudge, enforced by ``tests/test_config_rebalance.py::test_flag_budget``).
+#: nudge, enforced by ``tests/test_config_rebalance.py::TestFlagBudget``).
 #: Counts only the *visible* options: the families demoted to ``.abicheck.yml``
 #: in Phase 5 (per-category severity, scope FP-tuning, suppression hygiene) are
 #: hidden and config-bound (D4), so they don't count against the budget. The
 #: ADR's end-state target is ~20; this interim ceiling keeps new visible flags
-#: from creeping back in while the deprecation window runs. Raised from 60→66 when
-#: the shared ``@compile_context_options`` L2 family (--ast-frontend was already
-#: visible; +6 for --gcc-path/--gcc-prefix/--gcc-options/--gcc-option/--sysroot/
-#: --nostdinc) was unified onto ``compare`` for dump/scan parity (ADR-037 D3): the
-#: family is genuine L2 surface ``compare`` previously lacked, not config-demotable.
-#: Raised 66→77 when the standalone ``compare-release`` command was removed and its
-#: 11 release-only knobs (``@release_options``: package extraction, DSO selection,
-#: removed-library gate, ADR-023 bundle/manifest analysis) folded onto ``compare``'s
-#: directory/package path (ADR-037 D7) — genuine release surface, inert on single
-#: files, grouped in its own ``--help`` panel.
-#: Raised 77→78 for ``--reconcile-build-context`` (ADR-039): a genuine new
-#: analysis capability (clearing context-free header-parse false positives from
-#: build defines), not a project setting demotable to ``.abicheck.yml`` — it is
-#: an invocation-time analysis toggle like ``--pattern-verdicts``.
-#: Raised 78→79 for ``--env-matrix`` (ADR-020b runtime_floors): a genuine new
-#: analysis input (declared deployment constraints that turn version-requirement
-#: RISK findings into decidable COMPATIBLE/BREAKING verdicts), not a stable
-#: project setting — the matrix varies per deployment target being checked.
-COMPARE_FLAG_BUDGET = 79
+#: from creeping back in while the deprecation window runs.
+#:
+#: The budget is **derived** from the ledger below, not a hand-set number:
+#: ``BASE`` is the visible count that settled after the ADR-037 D7
+#: ``compare-release`` fold-in, and every visible flag added since must appear in
+#: ``COMPARE_FLAG_BUDGET_RAISES`` with a one-line rationale (why it is a per-run
+#: analysis input, not a project setting demotable to config). Because the budget
+#: equals ``BASE + len(RAISES)`` and the test asserts ``visible <= budget``, a new
+#: visible flag *cannot* be slipped in by silently consuming slack — the only way
+#: to raise the ceiling is to add a documented ledger entry (a regression that
+#: previously let ``--post-manifest`` land undocumented; see the ledger test).
+#:
+#: History that folded into ``BASE`` (no per-flag ledger — these predate the
+#: ledger and moved the count in bulk): 60→66 when ``@compile_context_options``
+#: (--gcc-*/--sysroot/--nostdinc, ADR-037 D3) unified onto ``compare`` for
+#: dump/scan L2 parity; 66→76 visible when ``compare-release`` was removed and its
+#: release-only knobs (package extraction, DSO selection, removed-library gate,
+#: ADR-023 bundle/manifest) folded onto ``compare``'s directory/package path
+#: (ADR-037 D7) — genuine release surface, inert on single files.
+COMPARE_FLAG_BUDGET_BASE = 76
+
+#: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
+#: flag spelling → rationale (why it is a per-run analysis input, not a stable
+#: project setting demotable to ``.abicheck.yml``). Keep in sync with reality:
+#: ``tests/test_config_rebalance.py`` asserts each key is a currently-visible
+#: ``compare`` option, so demoting one to hidden/config means removing its entry
+#: (and lowering ``BASE`` if it belonged to the base surface).
+COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
+    "--post-manifest": (
+        "G23 / #492: scopes the comparison to a POST Python export manifest's "
+        "committed ABI surface. A per-run scoping input (which manifest to hold "
+        "the release to), not a stable project setting — like --manifest."
+    ),
+    "--reconcile-build-context": (
+        "ADR-039: clears context-free header-parse false positives using the "
+        "build's active preprocessor defines. An invocation-time analysis toggle "
+        "like --pattern-verdicts, not a project setting demotable to .abicheck.yml."
+    ),
+    "--env-matrix": (
+        "ADR-020b runtime_floors: declared deployment constraints that turn "
+        "version-requirement RISK findings into decidable COMPATIBLE/BREAKING "
+        "verdicts. The matrix varies per deployment target checked, so it is a "
+        "per-run input, not a stable project setting."
+    ),
+}
+
+#: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
+COMPARE_FLAG_BUDGET = COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
 
 
 def count_visible_options(cmd: object) -> int:
