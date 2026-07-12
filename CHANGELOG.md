@@ -127,7 +127,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `extractor_passes[...]` stamp across all three call sites
   (`inline._fold_call_graph`/`_fold_type_graph`,
   `cli_buildsource_helpers._collect_call_graph`) — one failing TU disqualifies
-  the whole pass from claiming confirmed coverage.
+  the whole pass from claiming confirmed coverage. An eighth review found a
+  related false positive from *node*-level (not edge-level) evidence
+  improving between versions: a Kythe-ingested or older-pack target with no
+  classifying provenance is silently dropped from the old side's
+  internal-reach set even though the dependency edge already existed there —
+  so if the new side later gains real provenance for that same, unchanged
+  target, it looked like a newly-added dependency. Fixed by checking raw
+  reachability (ignoring classification) against the old graph and excluding
+  any pair whose target was already reachable there, regardless of whether
+  either side could classify it as internal.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

@@ -737,6 +737,71 @@ def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
+def test_l5_internal_dep_not_flagged_when_edge_unchanged_but_provenance_improves() -> None:
+    # Eighth Codex review: the pub -> target edge already existed in the old
+    # graph (a Kythe/older-pack callee with no SOURCE_DECLARES/
+    # defined_in_project provenance, so old could not classify it internal),
+    # and still exists unchanged in the new graph, where it has *also* gained
+    # provenance (a SOURCE_DECLARES edge marking it private_header). Only the
+    # classification evidence improved — the dependency itself is not new —
+    # so this must not fire.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("priv_hdr", "header", "detail/impl.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        # No visibility/defined_in_project on the old side's copy of this
+        # node — unclassifiable, exactly like a Kythe-ingested callee.
+        _N("target", "source_decl", "detail::helper()"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "target", "DECL_CALLS_DECL"),
+    ], extractor_passes={"call_graph": True})
+    new = SourceGraphSummary(nodes=[
+        *nodes[:-1],
+        _N("target", "source_decl", "detail::helper()", visibility="private_header"),
+    ], edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("priv_hdr", "target", "SOURCE_DECLARES"),
+        _E("pub", "target", "DECL_CALLS_DECL"),
+    ], extractor_passes={"call_graph": True})
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_flagged_when_edge_is_genuinely_new_even_with_provenance_gain() -> None:
+    # Contrast case: the pub -> target edge is genuinely NEW in this version
+    # (unreachable at all in the old graph) and the target also happens to be
+    # classifiable as internal in the new graph — this must still fire, since
+    # the fix above must not overcorrect into silence for real new edges.
+    nodes_old = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+    ]
+    old = SourceGraphSummary(nodes=nodes_old, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),
+    ], extractor_passes={"call_graph": True})
+    new = SourceGraphSummary(nodes=[
+        *nodes_old,
+        _N("priv_hdr", "header", "detail/impl.h"),
+        _N("target", "source_decl", "detail::helper()", visibility="private_header"),
+    ], edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),
+        _E("priv_hdr", "target", "SOURCE_DECLARES"),
+        _E("pub", "target", "DECL_CALLS_DECL"),
+    ], extractor_passes={"call_graph": True})
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_dependency_path_same_node_returns_empty_list() -> None:
     g = SourceGraphSummary(
         nodes=[_N("a", "source_decl")], edges=[_E("a", "a", "DECL_CALLS_DECL")]

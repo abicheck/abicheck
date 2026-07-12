@@ -1581,13 +1581,26 @@ def _internal_dependency_findings(
     # public closure, or no semantic pass at all) cannot make every
     # pre-existing internal dependency look newly added (earlier Codex review).
     common_kinds = _common_dependency_edge_kinds(old, new)
-    newly_internal = (
-        _public_entry_internal_reach(new, common_kinds)
-        - _public_entry_internal_reach(old, common_kinds)
-        if _has_internal_reach_coverage(old, common_kinds)
-        and _has_internal_reach_coverage(new, common_kinds)
-        else set()
-    )
+    if _has_internal_reach_coverage(old, common_kinds) and _has_internal_reach_coverage(
+        new, common_kinds
+    ):
+        new_internal = _public_entry_internal_reach(new, common_kinds)
+        # Exclude a pair whose *edge* already existed in the old graph, even if
+        # the old side never classified its target as internal (eighth Codex
+        # review): a Kythe/older-pack target with no SOURCE_DECLARES/
+        # defined_in_project provenance is unclassifiable there, so
+        # _public_entry_internal_reach(old, ...) silently drops it — but the
+        # dependency itself is not new, only the classification evidence
+        # improved. Raw reachability (ignoring classification) is the
+        # authority on whether the edge is new.
+        old_reach = _dependency_reachability(old, common_kinds)
+        newly_internal = {
+            (entry, target)
+            for entry, target in new_internal
+            if target not in old_reach.get(entry, frozenset())
+        }
+    else:
+        newly_internal = set()
     reached_by_entry: dict[str, list[str]] = {}
     for entry, target in newly_internal:
         reached_by_entry.setdefault(entry, []).append(target)

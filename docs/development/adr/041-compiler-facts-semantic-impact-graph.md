@@ -475,6 +475,29 @@ even if most TUs succeeded — consistent with this ADR's running theme:
 under-call (fall back to the pre-existing edge-presence inference) rather
 than risk a false positive on an evidence-poor side.
 
+An eighth Codex review found a distinct false-positive path through the same
+finding, this time from *node*-level (not edge-level) evidence improving
+between two versions. `_internal_dependency_findings` computed
+`_public_entry_internal_reach(new, …) - _public_entry_internal_reach(old, …)`
+— a set difference over pairs that are *both* reachable *and* classified
+internal. But a target with no classifying provenance at all (e.g. a
+Kythe-ingested or older-pack callee with no `SOURCE_DECLARES`/
+`defined_in_project` marker) is unclassifiable, so
+`_public_entry_internal_reach` silently drops it from the *old* side's set
+even though the dependency **edge** already existed and was reachable there.
+If the *new* side later gains real provenance for that same, unchanged
+target (a `SOURCE_DECLARES` edge marking it `private_header`, say), the pair
+reappears in `new`'s internal-reach set but was never in `old`'s — a "newly
+internal" delta driven entirely by improved classification metadata, not by
+any actual new edge. Fixed by checking raw reachability, not classification,
+against the old side: `_internal_dependency_findings` now also computes
+`_dependency_reachability(old, common_kinds)` (ignoring internal
+classification entirely) and excludes any pair from `new`'s internal-reach
+set whose target was already reachable from that entry in `old` — reachable-
+but-unclassified in the old graph is still "the edge already existed," so it
+must not count as newly added regardless of what classification evidence
+either side happens to carry.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work
