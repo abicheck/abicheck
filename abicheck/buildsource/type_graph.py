@@ -918,6 +918,50 @@ def _walk_types(
             )
         return
 
+    if kind in _OTHER_TYPE_DECL_KINDS and name:
+        # A public alias's *underlying* type was never emitted as a
+        # dependency at all — only the alias's own name was indexed as a
+        # resolvable target (Codex review: `using Handle = detail::Impl *;`
+        # produced no edge from `Handle` to the private `detail::Impl` it
+        # actually wraps, so `public_to_internal_dependency` had nothing to
+        # report for APIs that only ever spell the public alias name).
+        qname = "::".join([*scope, name])
+        raw_underlying = _decl_type_name(node)
+        _emit_type_edges(
+            edges,
+            qname,
+            raw_underlying,
+            EDGE_TYPE_HAS_FIELD_TYPE,
+            "alias",
+            scope,
+            name_index,
+            decl_file,
+        )
+
+    if kind == "VarDecl" and name and not enclosing_func:
+        # A public/exported data declaration's *own* type was never emitted
+        # either — this module only ever read a VarDecl's type when it was
+        # the *target* of a DeclRefExpr, never at its own declaration site
+        # (Codex review: `extern detail::Impl *g;` or a public static data
+        # member produced no DECL_HAS_TYPE edge for the private pointee).
+        # Block-scope locals are excluded the same way
+        # `_index_declared_entities`'s `in_body` tracking excludes them from
+        # provenance — `enclosing_func` is only truthy inside a function/
+        # method body, never for a namespace- or class-scope declaration.
+        ident = _decl_identity(node)
+        if ident:
+            raw_var = _decl_type_name(node)
+            _emit_type_edges(
+                edges,
+                ident,
+                raw_var,
+                EDGE_DECL_HAS_TYPE,
+                "var",
+                scope,
+                name_index,
+                decl_file,
+            )
+
     if kind in _FUNCTION_DECL_KINDS:
         ident = _decl_identity(node)
         if ident:

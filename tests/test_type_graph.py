@@ -1492,3 +1492,99 @@ def test_field_default_member_initializer_reference_edge() -> None:
             "Widget::x", "_ZN6detail1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref"
         )
     ]
+
+
+def test_type_alias_underlying_type_edge() -> None:
+    # A public alias's *underlying* type was never emitted as a dependency
+    # at all — only the alias's own name was indexed as a resolvable
+    # target, so `using Handle = detail::Impl *;` produced no edge from
+    # `Handle` to the private `detail::Impl` it actually wraps (Codex
+    # review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "TypeAliasDecl",
+            "name": "Handle",
+            "type": {"qualType": "detail::Impl *"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    alias_edges = [e for e in edges if e.role == "alias"]
+    assert alias_edges == [
+        TypeEdge("Handle", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "alias")
+    ]
+
+
+def test_typedef_underlying_type_edge() -> None:
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "TypedefDecl",
+            "name": "Handle",
+            "type": {"qualType": "detail::Impl *"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    alias_edges = [e for e in edges if e.role == "alias"]
+    assert alias_edges == [
+        TypeEdge("Handle", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "alias")
+    ]
+
+
+def test_public_var_decl_own_type_edge() -> None:
+    # A public/exported data declaration's own type was never emitted
+    # either — only read when the VarDecl was the *target* of a DeclRefExpr,
+    # never at its own declaration site, so `extern detail::Impl *g;`
+    # produced no DECL_HAS_TYPE edge for the private pointee (Codex
+    # review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "VarDecl",
+            "name": "g",
+            "mangledName": "_Z1g",
+            "type": {"qualType": "detail::Impl *"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    var_edges = [e for e in edges if e.role == "var"]
+    assert var_edges == [
+        TypeEdge("_Z1g", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "var")
+    ]
+
+
+def test_block_scope_local_var_decl_gets_no_own_type_edge() -> None:
+    # A block-scope local must not get a "var" DECL_HAS_TYPE edge for its
+    # own type — it's a private implementation detail, same rationale as
+    # excluding it from reference-edge provenance.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "mangledName": "_Z3apiv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclStmt",
+                            "inner": [
+                                {
+                                    "kind": "VarDecl",
+                                    "name": "local",
+                                    "id": "0x1",
+                                    "type": {"qualType": "detail::Impl *"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    assert not [e for e in edges if e.role == "var"]
