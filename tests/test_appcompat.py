@@ -1279,6 +1279,36 @@ class TestCheckAppcompat:
         assert result.symbol_coverage == 100.0
         assert result.missing_symbols == []
 
+    def test_headers_passed_as_public_headers(self, tmp_path):
+        """appcompat's -H/--header is documented as "Public header file or
+        directory" (like compare's) — check_appcompat must thread the same
+        paths through to dump() as public_headers so provenance is actually
+        classified, matching the compare/compare-release fix."""
+        app = tmp_path / "app"
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_hdr = tmp_path / "old.h"
+        new_hdr = tmp_path / "new.h"
+
+        app_reqs = AppRequirements(undefined_symbols=set())
+        diff = DiffResult(old_version="1", new_version="2", library="libfoo")
+
+        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
+             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
+             patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump, \
+             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
+             patch("abicheck.appcompat._detect_app_format", return_value=None):
+            check_appcompat(
+                app, old_lib, new_lib,
+                old_headers=[old_hdr], new_headers=[new_hdr],
+            )
+
+        assert mock_dump.call_count == 2
+        old_call, new_call = mock_dump.call_args_list
+        assert old_call.kwargs["public_headers"] == [old_hdr]
+        assert new_call.kwargs["public_headers"] == [new_hdr]
+
     def test_missing_symbols_breaking(self, tmp_path):
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"

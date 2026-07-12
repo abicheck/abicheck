@@ -1240,7 +1240,11 @@ def _common_prefix_len(node_ids: list[str]) -> int:
     ]
     if len(seg_lists) < 2:
         return 0
-    shortest = min(len(s) for s in seg_lists)
+    # Cap below the shortest path's final segment (the filename) so an
+    # all-symbols-in-one-file side never strips down to an empty key — that
+    # would hide a same-side rename and, asymmetrically, false-positive a
+    # multi-file side's untouched files as "moved" relative to it.
+    shortest = max(0, min(len(s) for s in seg_lists) - 1)
     n = 0
     for i in range(shortest):
         if len({s[i] for s in seg_lists}) == 1:

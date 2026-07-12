@@ -28,6 +28,8 @@ silently scoped out as ``non-public-type`` / ``no-provenance`` instead of
 surfacing as real ABI breaks.
 """
 
+from __future__ import annotations
+
 from xml.etree.ElementTree import Element, SubElement
 
 from abicheck.dumper import _CastxmlParser

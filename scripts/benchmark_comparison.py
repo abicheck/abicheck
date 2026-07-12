@@ -1906,7 +1906,7 @@ def _run_bundle_case(
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV)
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - started) * 1000)
     elapsed_ms = (time.monotonic() - started) * 1000
     out = r.stdout + r.stderr
     (rdir / f"{name}_abicheck_bundle.txt").write_text(out)
@@ -1943,7 +1943,7 @@ def _run_snapshot_pair_case(
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV)
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - started) * 1000)
     elapsed_ms = (time.monotonic() - started) * 1000
     out = r.stdout + r.stderr
     (rdir / f"{name}_abicheck_snapshot_pair.txt").write_text(out)
@@ -1966,10 +1966,10 @@ def _run_l3l5_case(name: str, entry: dict[str, Any]) -> ToolResult:
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
     started = time.monotonic()
-    old = json.loads((EXAMPLES_DIR / name / "old.json").read_text())
-    new = json.loads((EXAMPLES_DIR / name / "new.json").read_text())
-    tier = entry.get("min_evidence")
     try:
+        old = json.loads((EXAMPLES_DIR / name / "old.json").read_text())
+        new = json.loads((EXAMPLES_DIR / name / "new.json").read_text())
+        tier = entry.get("min_evidence")
         from abicheck.checker_policy import compute_verdict  # noqa: PLC0415
 
         if tier == "L3":

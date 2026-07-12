@@ -419,6 +419,59 @@ def test_owner_changed_when_relative_path_actually_moves() -> None:
     assert owner[0].symbol == "_Zc"
 
 
+def test_owner_changed_when_sole_declaring_file_is_renamed_both_sides() -> None:
+    # When every exported symbol on a side declares in the SAME file, the
+    # common prefix spans the whole path including the filename. If
+    # _common_prefix_len didn't reserve the filename segment, both sides
+    # would strip down to an empty "scheme://" key and a same-shape rename
+    # (foo.h -> bar.h on both sides) would be missed entirely.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/foo.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/bar.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/bar.h"), ("foo::c", "/root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    owner_syms = {
+        c.symbol for c in findings
+        if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED
+    }
+    assert owner_syms == {"_Za", "_Zc"}
+
+
+def test_owner_unchanged_when_one_side_single_file_other_multi_file() -> None:
+    # Asymmetric shapes: old has every symbol in one file (so its own common
+    # prefix would include the filename before the fix), new spreads them
+    # across two files. Declarations didn't actually move, so nothing should
+    # fire even though the two sides' "common prefix" lengths differ.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/foo.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root2/inc/foo.h", "/root2/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/root2/inc/foo.h"), ("foo::c", "/root2/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
+
+
 def test_findings_identical_graphs_yield_nothing() -> None:
     b = _build_with_public_header()
     g = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
