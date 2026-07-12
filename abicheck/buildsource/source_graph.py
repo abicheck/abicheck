@@ -1236,16 +1236,20 @@ def _common_dependency_edge_kinds(
     scan folding only the changed compile units) never sets ``extractor_passes``
     for that name, so it always falls to the per-kind branch above — but its
     edges are only representative of the narrow subset it actually walked, not
-    the whole project. If the *other* side confirms a full, unnarrowed pass for
-    that family, the narrowed side's edge of the same exact kind must not count
-    as coverage either (eleventh Codex review): a baseline scoped to a few
-    changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge from that subset says
-    nothing about dependencies elsewhere in the project a full-pass candidate
-    can see, so treating it as comparable coverage lets never-examined
-    dependencies read as newly added. This exclusion only applies against a
-    confirmed *full* pass on the other side — the common, intended case of both
-    sides scoped identically to the same PR diff is unaffected (neither side has
-    a confirmed full pass to disqualify the other's edges).
+    the whole project. A narrowed side's edge of a given kind must not count as
+    coverage for that kind unless the *other* side is narrowed the same way
+    (eleventh/twelfth Codex review): a baseline scoped to a few changed TUs
+    having one ``TYPE_HAS_FIELD_TYPE`` edge from that subset says nothing about
+    dependencies elsewhere in the project — whether the other side is a
+    confirmed *full* pass that saw the rest of the project (eleventh review),
+    or simply carries no pass marker at all, e.g. a pre-slice-2/externally-
+    ingested pack whose true scope is unknown (twelfth review: "the other side
+    lacks a full-pass bit" is not evidence it was equally narrow). Only
+    symmetric narrowing — both sides scoped the same way, e.g. the common
+    PR-diff workflow comparing two runs narrowed to the same changed TUs — is
+    trusted to leave the pre-existing per-kind comparison unaffected; any
+    asymmetry (one side narrowed, the other not, regardless of *why* it isn't)
+    excludes that side's edge from vouching for the kind.
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
@@ -1259,12 +1263,12 @@ def _common_dependency_edge_kinds(
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:
-            # A narrowed side's edge only counts against an other side that
-            # has *not* confirmed a full pass for this family — a confirmed
-            # full pass has seen the whole project and the narrowed side's
-            # partial view cannot vouch for it.
-            old_present = (kind in old_kinds) and not (old_narrowed and new_pass)
-            new_present = (kind in new_kinds) and not (new_narrowed and old_pass)
+            # A narrowed side's edge only counts as coverage when the other
+            # side is narrowed the same way — any asymmetry (confirmed full
+            # pass, no marker at all, or the reverse narrowing) means the
+            # other side's true scope relative to this one is not established.
+            old_present = (kind in old_kinds) and not (old_narrowed and not new_narrowed)
+            new_present = (kind in new_kinds) and not (new_narrowed and not old_narrowed)
             old_has = old_present or old_pass
             new_has = new_present or new_pass
             if old_has and new_has:

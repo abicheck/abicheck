@@ -578,6 +578,31 @@ identically to the same changed TUs is unaffected, since in that case
 neither side has a confirmed full pass to disqualify the other's edges, so
 the pre-existing per-kind comparison behavior is preserved exactly.
 
+A twelfth Codex review found the eleventh-round fix itself too narrow: it
+only excluded a narrowed side's edge from vouching for a kind when the
+*other* side confirmed a full pass — but a side with no pass marker at all
+(no `extractor_passes`, no `narrowed_passes` — a pre-slice-2 pack, or one
+built from an externally-ingested backend like `graph_backends.py`'s Kythe/
+CodeQL ingestion) is not evidence it was equally narrow either; its true
+scope relative to the narrowed side is simply unknown. The eleventh-round
+condition (`old_narrowed and new_pass`) only fires when the other side
+*positively* proves comprehensive coverage, so an unmarked-vs-narrowed
+comparison — arguably the more common shape for an old/legacy pack, which
+would rarely carry either marker — fell straight through to the pre-existing
+per-kind fallback and could still credit a narrowed baseline's unrelated edge
+of a kind as coverage for a completely different, never-examined region a
+wider (but unmarked) candidate happens to also have an edge of that kind in.
+Fixed by generalizing the exclusion from "narrowed vs. confirmed full pass"
+to "narrowed vs. anything not narrowed the same way": `old_present`/
+`new_present` now read `(kind in old_kinds) and not (old_narrowed and not
+new_narrowed)` (and the symmetric form for `new_present`) — a side's edge
+counts as coverage for a kind only when the other side is narrowed
+identically, or itself has no narrowing at all to be asymmetric against.
+Symmetric cases (both narrowed, or neither) are bit-for-bit unaffected;
+only genuine narrowed/not-narrowed asymmetry — confirmed full pass,
+unmarked pack, or the reverse narrowing — now excludes the kind, regardless
+of *why* the other side isn't narrowed the same way.
+
 ## Decision — P0 slice 4 (this change)
 
 Roadmap item 2's remaining half, "semantic graph diff — same public decl,

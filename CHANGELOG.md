@@ -171,7 +171,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   given kind specifically when the other side confirms a full pass for that
   family — the common, both-sides-narrowed PR-diff workflow is unaffected
   since neither side then has a confirmed full pass to disqualify the other's
-  edges.
+  edges. A twelfth review found that fix itself too narrow: it only excluded
+  a narrowed side's edge when the other side *confirmed* a full pass, but a
+  side with no pass marker at all (a pre-slice-2 pack, or one built from an
+  externally-ingested Kythe/CodeQL backend) is not evidence it was equally
+  narrow either — its true scope is simply unknown, and this unmarked shape
+  is arguably the *more* common one for an old/legacy pack. Generalized the
+  exclusion from "narrowed vs. confirmed full pass" to "narrowed vs. anything
+  not narrowed the same way": a side's edge now counts as coverage for a kind
+  only when the other side is narrowed identically, or itself carries no
+  narrowing to be asymmetric against — symmetric cases (both narrowed, or
+  neither) are bit-for-bit unaffected.
 
 - **Correlate a public entry's own body/type-hash change with a new internal
   dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,

@@ -797,6 +797,67 @@ def test_common_dependency_edge_kinds_both_narrowed_unaffected() -> None:
     assert common == frozenset({"DECL_HAS_TYPE"})
 
 
+def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarked_pack() -> None:
+    # Twelfth Codex review: the eleventh-round fix only excluded a narrowed
+    # side's edge when the *other* side confirmed a full pass — but an
+    # unmarked pack (no extractor_passes, no narrowed_passes at all, e.g. a
+    # pre-slice-2 pack or one built from an externally-ingested backend) is
+    # not evidence it was equally narrow either; its true scope is simply
+    # unknown. If a narrowed baseline's one TYPE_HAS_FIELD_TYPE edge (from the
+    # small subset it examined) is compared against an unmarked candidate's
+    # edge of the same exact kind — from a wholly different, unexamined part
+    # of the project — the kind must not read as common, or dependencies the
+    # narrowed baseline never inspected could pass the coverage gate.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
+        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
+        # No extractor_passes, no narrowed_passes: an unmarked/legacy pack.
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
+
+
+def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate() -> None:
+    # End-to-end version of the twelfth-round fix: the narrowed baseline's
+    # pre-existing dependency is unrelated to the new public entry the
+    # unmarked candidate reveals a private dependency for — the unmarked
+    # side's edge must not be trusted as proof the narrowed baseline's
+    # per-kind coverage extends there.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("pub2", "source_decl", "pub2()"),
+        _N("sym2", "binary_symbol", "pub2"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
+    ]
+    shared_edges = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub2", "sym2", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub2", "SOURCE_DECLARES"),
+        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=list(shared_edges),
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[*shared_edges, _E("pub2", "other_priv", "TYPE_HAS_FIELD_TYPE")],
+        # No extractor_passes, no narrowed_passes: unmarked candidate.
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
 def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_scope() -> None:
     # End-to-end version of Codex's exact scenario: the baseline was collected
     # by a narrowed (PR/--since-scoped) inline run that only ever examined
