@@ -2146,6 +2146,15 @@ def _try_special_case(
     Returns True when this function fully handled (printed + recorded) the
     case, so the caller should not fall through to the normal build/dump/
     compare flow.
+
+    Each branch credits the SAME ToolResult to both "abicheck" and
+    "abicheck_full": these fixtures (audit/cross-source, bundles, BTF,
+    snapshot/L3-L5 packs, Python stubs) never go through a build lane at
+    all — the diff already ran against whatever evidence tier is intrinsic
+    to the fixture (several are deliberately hand-built AT L3-L5). Leaving
+    "abicheck_full" at its SKIP default here would understate the L3-L5
+    lane's real coverage for a reason that has nothing to do with L3-L5
+    detection quality.
     """
     rdir = REPORT_DIR / name
     rdir.mkdir(exist_ok=True)
@@ -2156,7 +2165,7 @@ def _try_special_case(
                 "concept) scored MATCH/MISS against expected_crosscheck_kinds, "
                 "mirroring tests/test_g20_catalog.py — abidiff/ABICC have no mode "
                 "for this at all")
-        _record_special_case_row(name, "MATCH", results, note, {"abicheck": tr})
+        _record_special_case_row(name, "MATCH", results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     if entry.get("skip"):
@@ -2167,7 +2176,7 @@ def _try_special_case(
         # BTF support at all.
         tr = _run_btf_case(case_dir)
         note = str(entry.get("reason", "excluded by ground_truth.json (skip=true)"))
-        _record_special_case_row(name, expected, results, note, {"abicheck": tr})
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     if entry.get("bundle") is True or entry.get("category") == "bundle":
@@ -2177,7 +2186,7 @@ def _try_special_case(
         # Bundle cases carry their expected verdict under expected_bundle_verdict
         # (the top-level "expected" is None — there is no single-library verdict).
         bundle_expected = entry.get("expected_bundle_verdict") or expected
-        _record_special_case_row(name, bundle_expected, results, note, {"abicheck": tr})
+        _record_special_case_row(name, bundle_expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     if entry.get("mode") in ("snapshot-pair", "reconcile"):
@@ -2186,21 +2195,21 @@ def _try_special_case(
         note = (f"committed {'/'.join(str(f) for f in entry.get('fixtures', []))} snapshot "
                 "pair, no compilable v1/v2 source — no abidiff/ABICC equivalent for this "
                 "evidence shape")
-        _record_special_case_row(name, expected, results, note, {"abicheck": tr})
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     if entry.get("fixtures") == ["old.json", "new.json"]:
         tr = _run_l3l5_case(name, entry)
         note = (f"L3/L4/L5 build-source-pack replay (min_evidence={entry.get('min_evidence')}), "
                 "no compilable v1/v2 source — no abidiff/ABICC equivalent for this evidence shape")
-        _record_special_case_row(name, expected, results, note, {"abicheck": tr})
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     if entry.get("stub_pair"):
         tr = _run_stub_pair_case(case_dir, entry)
         note = ("Python .pyi stub pair, compiled binary is byte-identical — abidiff/ABICC "
                 "have no Python-API comparison mode")
-        _record_special_case_row(name, expected, results, note, {"abicheck": tr})
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
     return False
