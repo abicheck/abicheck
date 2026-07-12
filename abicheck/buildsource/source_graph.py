@@ -948,7 +948,17 @@ def _public_reachability_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """Public-reachability closure changes (declarations entering/leaving it)."""
+    """Public-reachability closure changes for a *persisting* declaration.
+
+    Only fires for a decl id present in both graphs' full node sets — a decl
+    that only exists on one side is a brand-new/removed declaration, not a
+    persisting one whose reachability state changed. "Entering the closure"
+    is a trivial, expected consequence of being newly added (nothing risky
+    about a symbol being public from birth); that event is already reported
+    at the correct severity by the ordinary addition/removal findings. The
+    genuinely risk-worthy signal here is an *existing* declaration crossing
+    the public/private boundary unexpectedly.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -957,7 +967,11 @@ def _public_reachability_findings(
     # flag every declaration.
     old_pub, new_pub = _public_decls(old), _public_decls(new)
     if old_pub and new_pub:
+        old_node_ids = {n.id for n in old.nodes}
+        new_node_ids = {n.id for n in new.nodes}
         for decl in sorted(new_pub - old_pub):
+            if decl not in old_node_ids:
+                continue
             label = new_labels.get(decl, decl)
             findings.append(Change(
                 kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,
@@ -972,6 +986,8 @@ def _public_reachability_findings(
                 source_location=boundary,
             ))
         for decl in sorted(old_pub - new_pub):
+            if decl not in new_node_ids:
+                continue
             label = old_labels.get(decl, decl)
             findings.append(Change(
                 kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,

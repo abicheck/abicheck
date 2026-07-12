@@ -340,15 +340,46 @@ def test_findings_mapping_changed_for_persisting_decl() -> None:
     assert c.source_location == f"[{EVIDENCE_TIER_L5}]"
 
 
-def test_findings_reachability_entered_and_left() -> None:
+def test_findings_reachability_ignores_brand_new_or_removed_decls() -> None:
+    # A decl id absent from the OTHER side entirely (not merely absent from
+    # its public closure) is a brand-new/removed declaration, not a
+    # persisting one whose reachability state changed. "Entering the
+    # closure" is a trivial, expected consequence of being newly added —
+    # nothing risky about a symbol being public from birth — and that event
+    # is already reported (at the correct COMPATIBLE severity) by the
+    # ordinary addition/removal findings elsewhere in the pipeline.
     b = _build_with_public_header()
     old = build_source_graph(b, source_abi=_surface_with(
         [("foo::a", "inc/foo.h"), ("foo::gone", "inc/foo.h")], {"foo::a": "_Za"}))
     new = build_source_graph(b, source_abi=_surface_with(
         [("foo::a", "inc/foo.h"), ("foo::new", "inc/foo.h")], {"foo::a": "_Za"}))
     kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
-    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") in kinds_syms
-    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") in kinds_syms
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") not in kinds_syms
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") not in kinds_syms
+
+
+def test_findings_reachability_fires_for_persisting_decl_crossing_boundary() -> None:
+    # foo::b exists on BOTH sides (same identity, so the same "decl://foo::b"
+    # node id) but is only linked to a public header on the new side — an
+    # existing declaration crossing the public/private boundary, the
+    # genuinely risk-worthy signal this finding exists for.
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
+    kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
+
+
+def test_findings_reachability_fires_when_persisting_decl_leaves_closure() -> None:
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
+    kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
 
 
 def test_findings_empty_baseline_does_not_spam_reachability() -> None:
