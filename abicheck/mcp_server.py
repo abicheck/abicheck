@@ -306,6 +306,9 @@ def _resolve_input(
     includes: list[Path],
     version: str,
     lang: str,
+    *,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -323,11 +326,25 @@ def _resolve_input(
     huge library could defeat the resource limit. Disabling the follow keeps the
     size check authoritative (and matches the MCP server's pre-unification
     behaviour, which never followed linker scripts).
+
+    ``public_headers`` / ``public_header_dirs``: several MCP tools (``abi_dump``,
+    ``abi_compare``, ``abi_audit``) document their plain ``headers`` parameter as
+    "Public header files" — they have no separate opt-in provenance flag the way
+    ``dump``'s CLI ``-H``/``--public-header`` split does. Callers making that same
+    claim should pass the same paths here so declaration provenance is actually
+    classified (ADR-024), matching the CLI ``compare --header`` fix.
     """
     from . import service
 
     return service.resolve_input(
-        path, headers, includes, version, lang, follow_linker_scripts=False
+        path,
+        headers,
+        includes,
+        version,
+        lang,
+        follow_linker_scripts=False,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
     )
 
 
@@ -467,7 +484,13 @@ def abi_dump(
         # so we don't block the MCP stdio server indefinitely.
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
-                _resolve_input, lib, hdr_paths, inc_paths, version, language
+                _resolve_input,
+                lib,
+                hdr_paths,
+                inc_paths,
+                version,
+                language,
+                public_headers=hdr_paths,
             )
             try:
                 snap = future.result(timeout=MCP_TIMEOUT)
@@ -623,8 +646,12 @@ def abi_compare(
         # Resolve inputs, load suppression/policy, and compare — all under
         # a real timeout so we don't block the MCP stdio server.
         def _do_compare() -> tuple[AbiSnapshot, AbiSnapshot, DiffResult]:
-            old_snap = _resolve_input(old_path, old_h, inc, "old", language)
-            new_snap = _resolve_input(new_path, new_h, inc, "new", language)
+            old_snap = _resolve_input(
+                old_path, old_h, inc, "old", language, public_headers=old_h
+            )
+            new_snap = _resolve_input(
+                new_path, new_h, inc, "new", language, public_headers=new_h
+            )
             suppression = None
             if suppression_file:
                 from .suppression import SuppressionList
@@ -911,7 +938,13 @@ def abi_audit(
 
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
-                _resolve_input, lib, hdr_paths, inc_paths, "", language
+                _resolve_input,
+                lib,
+                hdr_paths,
+                inc_paths,
+                "",
+                language,
+                public_headers=hdr_paths,
             )
             try:
                 snap = future.result(timeout=MCP_TIMEOUT)
