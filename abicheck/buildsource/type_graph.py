@@ -61,6 +61,7 @@ is future work; see ADR-041 P0/P1.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess  # noqa: S404 - type-graph extraction shells out to clang (never shell=True)
 import time
@@ -265,14 +266,26 @@ def _matching_close_paren(s: str, open_idx: int) -> int:
     return -1
 
 
+#: A parenthesized group that contains *only* a function-pointer/reference
+#: declarator (``"*"``, ``"&"``, or a pointer-to-member ``"Widget::*"``), not
+#: any real parameter. A direct (non-template) callback parameter like
+#: ``"void (*)(detail::Impl)"`` has *two* top-level paren groups — the
+#: declarator wrapper ``"(*)"`` and the actual parameter list
+#: ``"(detail::Impl)"`` — and only the second is the real parameter list
+#: (Codex review).
+_DECLARATOR_ONLY_RE = re.compile(r"^(\*|&|[\w:]+::\*)?$")
+
+
 def _resolve_nested_type_names(raw: str) -> list[str]:
     """Every type name reachable from one (possibly callback-shaped)
-    template-argument spelling: its own base name, its own template
-    arguments (recursively), and — for a callback-shaped spelling like
-    ``"void (detail::Impl)"`` (``std::function<void(detail::Impl)>``'s
-    single argument) — each of its written parameter types too.
+    type spelling: its own base name, its own template arguments
+    (recursively), and — for a callback-shaped spelling, whether written as
+    a template argument (``"void (detail::Impl)"``,
+    ``std::function<void(detail::Impl)>``'s single argument) or as a direct
+    function-pointer declarator (``"void (*)(detail::Impl)"``) — each of its
+    written parameter types too.
 
-    Truncating a callback-shaped argument at its first top-level ``(`` (the
+    Truncating a callback-shaped spelling at its first top-level ``(`` (the
     same split ``_base_type_name`` applies to a *non-nested* callback type)
     would discard the parameter list entirely, so a private type appearing
     only as a callback *parameter* — not the whole instantiation, not the
@@ -285,12 +298,29 @@ def _resolve_nested_type_names(raw: str) -> list[str]:
     if base:
         names.append(base)
         names.extend(_template_arg_types(base))
-    if paren != -1:
-        close = _matching_close_paren(raw, paren)
-        params = raw[paren + 1 : close] if close != -1 else raw[paren + 1 :]
-        for p in _split_top_level_commas(params):
-            if p.strip():
-                names.extend(_resolve_nested_type_names(p))
+    if paren == -1:
+        return names
+    close = _matching_close_paren(raw, paren)
+    inner = raw[paren + 1 : close] if close != -1 else raw[paren + 1 :]
+    if close != -1 and _DECLARATOR_ONLY_RE.match(inner.strip()):
+        # This first paren group is just a pointer/reference declarator
+        # ("(*)"), not the parameter list — the real one is the *next*
+        # top-level paren group.
+        next_rel = _top_level_paren_index(raw[close + 1 :])
+        if next_rel == -1:
+            return names
+        next_paren = close + 1 + next_rel
+        next_close = _matching_close_paren(raw, next_paren)
+        params = (
+            raw[next_paren + 1 : next_close]
+            if next_close != -1
+            else raw[next_paren + 1 :]
+        )
+    else:
+        params = inner
+    for p in _split_top_level_commas(params):
+        if p.strip():
+            names.extend(_resolve_nested_type_names(p))
     return names
 
 
@@ -333,39 +363,52 @@ def _template_arg_types(base_type: str) -> list[str]:
 
 
 def _decl_type_name(node: dict[str, Any]) -> str:
+    """A field/parameter decl's raw ``type.qualType`` spelling, unprocessed.
+
+    Deliberately *not* run through :func:`_base_type_name` here — a direct
+    (non-template) callback parameter like ``void (*)(detail::Impl)`` needs
+    its parameter-list region intact for :func:`_resolve_nested_type_names`
+    to still reach ``detail::Impl``; stripping to a bare base name this early
+    would discard it before that extraction ever runs (Codex review).
+    """
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
-        return _base_type_name(str(type_obj.get("qualType", "")))
+        return str(type_obj.get("qualType", ""))
     return ""
 
 
 def _decl_return_type_name(node: dict[str, Any]) -> str:
-    """A function/method decl's return type, from its own ``type.qualType``.
+    """A function/method decl's raw return-type spelling, from its own
+    ``type.qualType`` — unprocessed, like :func:`_decl_type_name`.
 
     clang spells a function decl's own type as the *whole signature*
     (``"detail::Impl *(int)"``, return type immediately followed by the
     parenthesized parameter list — Codex review: this was never read at all,
     so a public factory function returning a private type produced no
-    ``DECL_HAS_TYPE`` edge). Best-effort split on the first *top-level*
-    ``(`` (not nested inside a ``<...>`` template-angle group — Codex
-    review: a return type like ``std::function<detail::Impl ()>`` prints the
-    whole function's own type as ``"std::function<detail::Impl ()> ()"``,
-    and a naive ``find("(")`` stops at the callback's *inner* parameter
-    list, truncating mid-template instead of at the function's own outer
+    ``DECL_HAS_TYPE`` edge). A **trailing** return type instead spells as
+    ``"auto (Args) -> RetType"`` — the region before the parameter list is
+    just the literal ``auto`` placeholder, not the real return type, so this
+    checks for ``"->"`` first and uses what follows it when present (Codex
+    review). Otherwise, best-effort split on the first *top-level* ``(``
+    (not nested inside a ``<...>`` template-angle group — Codex review: a
+    return type like ``std::function<detail::Impl ()>`` prints the whole
+    function's own type as ``"std::function<detail::Impl ()> ()"``, and a
+    naive ``find("(")`` stops at the callback's *inner* parameter list,
+    truncating mid-template instead of at the function's own outer
     parameter list): correct for the overwhelmingly common case, but not
-    real declarator parsing, so a return type that is itself a function
-    pointer (parens before the outer parameter list) is not handled
-    precisely — the same approximate-textual tradeoff the rest of this
-    module accepts.
+    real declarator parsing.
     """
     type_obj = node.get("type")
     if not isinstance(type_obj, dict):
         return ""
     qual_type = str(type_obj.get("qualType", ""))
+    arrow = qual_type.find("->")
+    if arrow != -1:
+        return qual_type[arrow + 2 :].strip()
     paren = _top_level_paren_index(qual_type)
     if paren == -1:
         return ""
-    return _base_type_name(qual_type[:paren])
+    return qual_type[:paren].strip()
 
 
 def _decl_identity(node: dict[str, Any]) -> str:
@@ -590,9 +633,10 @@ def _emit_type_edges(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
 ) -> None:
-    """Resolve *raw* and, when it's a template instantiation, each of its
-    (recursive) template arguments too, appending a :class:`TypeEdge` for
-    each resolved, non-excluded name.
+    """Resolve *raw* — a **raw, unprocessed** ``qualType`` spelling — and
+    every nested type name :func:`_resolve_nested_type_names` finds inside
+    it (template arguments, callback parameter/return types, recursively),
+    appending a :class:`TypeEdge` for each resolved, non-excluded name.
 
     A field typed ``std::unique_ptr<detail::Impl>`` — the common PImpl/
     container pattern — would otherwise only produce an edge to the whole,
@@ -602,7 +646,7 @@ def _emit_type_edges(
     once per call site.
     """
     seen: set[str] = set()
-    for candidate in (raw, *_template_arg_types(raw)):
+    for candidate in _resolve_nested_type_names(raw):
         name, matched = _resolve_type_name(candidate, scope, name_index)
         if not name or _is_excluded_type(name) or name in seen:
             continue
@@ -705,7 +749,7 @@ def _walk_types(
                 if not isinstance(base, dict):
                     continue
                 base_type = base.get("type")
-                raw_base = _base_type_name(
+                raw_base = (
                     str(base_type.get("qualType", ""))
                     if isinstance(base_type, dict)
                     else ""

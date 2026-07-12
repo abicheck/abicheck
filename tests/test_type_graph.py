@@ -367,6 +367,60 @@ def test_return_type_resolves_when_return_is_callback_template() -> None:
     assert any(e.dst == "std::function<detail::Impl ()>" for e in returns)
 
 
+def test_return_type_resolves_trailing_return_type() -> None:
+    # A trailing return type spells as "auto (Args) -> RetType" — the region
+    # before the parameter list is just the literal "auto" placeholder, not
+    # the real return type, so truncating at the first top-level "(" (as the
+    # non-trailing case does) only ever sees "auto", excluded as a builtin
+    # (Codex review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "make",
+            "mangledName": "_Z4makev",
+            "type": {"qualType": "auto () -> detail::Impl *"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    returns = [e for e in edges if e.role == "return"]
+    assert returns == [
+        TypeEdge("_Z4makev", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "return")
+    ]
+
+
+def test_param_type_resolves_direct_function_pointer_callback_parameter() -> None:
+    # A *direct* (non-template) callback parameter, e.g.
+    # `void set_cb(void (*cb)(detail::Impl))`, has two top-level paren
+    # groups: the pointer-declarator wrapper "(*)" and the real parameter
+    # list "(detail::Impl)". Only running the callback-parameter extraction
+    # from inside _template_arg_types() (as std::function<...> uses) missed
+    # this direct-callback shape entirely — it never goes through a template
+    # argument at all (Codex review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record(
+            "Widget",
+            inner=[
+                _method(
+                    "set_cb",
+                    "_ZN6Widget6set_cbE",
+                    [_param("cb", "void (*)(detail::Impl)")],
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.role == "param"]
+    assert (
+        TypeEdge(
+            "_ZN6Widget6set_cbE", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "param"
+        )
+        in params
+    )
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
     # references it in this TU — the two-pass design (a full indexing pass
