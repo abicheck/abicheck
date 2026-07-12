@@ -198,6 +198,29 @@ def _decl_type_name(node: dict[str, Any]) -> str:
     return ""
 
 
+def _decl_return_type_name(node: dict[str, Any]) -> str:
+    """A function/method decl's return type, from its own ``type.qualType``.
+
+    clang spells a function decl's own type as the *whole signature*
+    (``"detail::Impl *(int)"``, return type immediately followed by the
+    parenthesized parameter list — Codex review: this was never read at all,
+    so a public factory function returning a private type produced no
+    ``DECL_HAS_TYPE`` edge). Best-effort split on the first ``(``: correct
+    for the overwhelmingly common case, but not real declarator parsing, so
+    a return type that is itself a function pointer (parens before the outer
+    parameter list) is not handled precisely — the same approximate-textual
+    tradeoff the rest of this module accepts.
+    """
+    type_obj = node.get("type")
+    if not isinstance(type_obj, dict):
+        return ""
+    qual_type = str(type_obj.get("qualType", ""))
+    paren = qual_type.find("(")
+    if paren == -1:
+        return ""
+    return _base_type_name(qual_type[:paren])
+
+
 def _decl_identity(node: dict[str, Any]) -> str:
     """Stable identity for a decl node: mangled name when clang emits one."""
     return str(node.get("mangledName") or node.get("name") or "")
@@ -236,7 +259,8 @@ class TypeEdge:
     dst: str
     kind: str
     confidence: str = CONF_HIGH
-    #: "base" | "field" | "param" | "ref" — the role of *dst* relative to *src*.
+    #: "base" | "field" | "param" | "return" | "ref" — the role of *dst*
+    #: relative to *src*.
     role: str = ""
     #: The file *dst* is declared in, when resolvable within this TU's AST —
     #: used to mark an AST-only dependency node ``defined_in_project`` (Codex
@@ -386,17 +410,22 @@ def _resolve_type_name(
     """
     if not raw:
         return raw, False
-    leaf = raw.rsplit("::", 1)[-1]
+    # A leading "::" is C++'s global-scope qualifier ("::ns::detail::Impl"),
+    # not part of the name itself — the index stores declarations without it
+    # (Codex review: matching on the unstripped spelling built "::::..." and
+    # never joined the indexed "ns::detail::Impl").
+    lookup = raw[2:] if raw.startswith("::") else raw
+    leaf = lookup.rsplit("::", 1)[-1]
     candidates = name_index.get(leaf)
     if not candidates:
         return raw, False
-    suffix = "::" + raw
-    matching = [c for c in candidates if c == raw or c.endswith(suffix)]
+    suffix = "::" + lookup
+    matching = [c for c in candidates if c == lookup or c.endswith(suffix)]
     if not matching:
         return raw, False
     for k in range(len(scope), -1, -1):
         prefix = "::".join(scope[:k])
-        target = f"{prefix}::{raw}" if prefix else raw
+        target = f"{prefix}::{lookup}" if prefix else lookup
         if target in matching:
             return target, True
     if len(matching) == 1:
@@ -557,6 +586,20 @@ def _walk_types(
     if kind in _FUNCTION_DECL_KINDS:
         ident = _decl_identity(node)
         if ident:
+            raw_return = _decl_return_type_name(node)
+            if raw_return:
+                return_name, matched = _resolve_type_name(raw_return, scope, name_index)
+                if return_name and not _is_excluded_type(return_name):
+                    edges.append(
+                        TypeEdge(
+                            ident,
+                            return_name,
+                            EDGE_DECL_HAS_TYPE,
+                            CONF_HIGH if matched else CONF_REDUCED,
+                            "return",
+                            decl_file.get(return_name, ""),
+                        )
+                    )
             for child in node.get("inner", []) or []:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                     raw_param = _decl_type_name(child)

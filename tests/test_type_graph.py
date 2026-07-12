@@ -710,6 +710,85 @@ def test_non_dict_and_empty_ast_produce_no_edges() -> None:
     )
 
 
+def test_return_type_edge_for_private_type() -> None:
+    # clang spells a function decl's own type as the whole signature
+    # ("detail::Impl *()", return type immediately followed by the
+    # parenthesized param list) — only ParmVarDecl children were read, so
+    # `detail::Impl *make();` produced no DECL_HAS_TYPE edge at all (Codex
+    # review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "make",
+            "mangledName": "_Z4makev",
+            "type": {"qualType": "detail::Impl *()"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    returns = [e for e in edges if e.role == "return"]
+    assert returns == [
+        TypeEdge("_Z4makev", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "return")
+    ]
+
+
+def test_return_type_edge_with_parameters() -> None:
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "make",
+            "mangledName": "_Z4makei",
+            "type": {"qualType": "detail::Impl *(int)"},
+            "inner": [_param("n", "int")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    returns = [e for e in edges if e.role == "return"]
+    assert returns == [
+        TypeEdge("_Z4makei", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "return")
+    ]
+
+
+def test_builtin_return_type_produces_no_edge() -> None:
+    ast = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "type": {"qualType": "int ()"},
+            "inner": [],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    assert not [e for e in edges if e.role == "return"]
+
+
+def test_leading_global_scope_qualifier_is_stripped_before_matching() -> None:
+    # A field/base/param can spell a project type with a leading global-scope
+    # qualifier ("::ns::detail::Impl *"); the index stores declarations
+    # without it. Matching on the unstripped spelling built "::::ns::..." and
+    # never joined the indexed node (Codex review's exact example).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+                _record("Widget", inner=[_field("p", "::ns::detail::Impl *")]),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge(
+            "ns::Widget", "ns::detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field"
+        )
+    ]
+
+
 # ── augment_graph_with_types ─────────────────────────────────────────────────
 
 
