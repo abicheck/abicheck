@@ -38,6 +38,7 @@ from abicheck.buildsource.source_graph import (
     _dependency_reachability,
     _format_dependency_path,
     _public_entry_internal_reach,
+    _public_types,
     diff_source_graph_findings,
 )
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind
@@ -334,7 +335,7 @@ def test_l5_public_type_gains_private_field_type() -> None:
     # already ran the semantic pass, so the coverage gate does not skip.
     nodes = [
         _N("pub_hdr", "header", "api.h"),
-        _N("pub_type", "record_type", "Public"),
+        _N("pub_type", "record_type", "Public", visibility="public_header"),
         _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     base = [
@@ -358,7 +359,7 @@ def test_l5_public_type_gains_thirdparty_field_type_not_flagged() -> None:
     # private project entity just because it also isn't public.
     nodes = [
         _N("pub_hdr", "header", "api.h"),
-        _N("pub_type", "record_type", "Public"),
+        _N("pub_type", "record_type", "Public", visibility="public_header"),
         _N("ext_type", "record_type", "std::vector<int>"),  # no visibility/provenance at all
     ]
     base = [
@@ -381,7 +382,7 @@ def test_l5_public_type_gains_unannotated_project_field_type_flagged() -> None:
     # crosscheck.py's `_is_internal_decl` already accepts for this case.
     nodes = [
         _N("pub_hdr", "header", "api.h"),
-        _N("pub_type", "record_type", "Public"),
+        _N("pub_type", "record_type", "Public", visibility="public_header"),
         _N("impl_type", "record_type", "detail::Impl", defined_in_project=True),
     ]
     base = [
@@ -396,10 +397,55 @@ def test_l5_public_type_gains_unannotated_project_field_type_flagged() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
+def test_l5_private_type_gaining_own_dependency_not_flagged() -> None:
+    # Sixth Codex review: a private-header type must not be treated as a
+    # dependency-closure *entry*. _augment_with_source_abi's header_declares
+    # creates a `header`-kind node for EVERY declaring file, public or
+    # private — privacy lives on the type's own `visibility` attr, not the
+    # node kind. Without checking that attr, a private type gaining its own
+    # new private field/base would wrongly emit
+    # PUBLIC_API_INTERNAL_DEPENDENCY_ADDED even though no public API is
+    # involved at all.
+    nodes = [
+        _N("priv_hdr", "header", "detail/impl.h"),
+        _N("priv_type", "record_type", "detail::Impl", visibility="private_header"),
+        _N("priv_field_type", "record_type", "detail::Helper", visibility="private_header"),
+    ]
+    base = [
+        _E("priv_hdr", "priv_type", "SOURCE_DECLARES"),
+        _E("priv_type", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("priv_type", "priv_field_type", "TYPE_HAS_FIELD_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_public_types_requires_own_visibility_not_just_declaring_header() -> None:
+    # Direct unit test of the helper itself: a type declared by a `header`-kind
+    # node with no (or non-public) visibility on the type's own attrs is not
+    # public, even though the declaring file node kind is indistinguishable
+    # from a public header's.
+    nodes = [
+        _N("hdr", "header", "some/path.h"),
+        _N("pub", "record_type", "Public", visibility="public_header"),
+        _N("priv", "record_type", "Private", visibility="private_header"),
+        _N("unannotated", "record_type", "Unannotated"),
+    ]
+    g = SourceGraphSummary(nodes=nodes, edges=[
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("hdr", "priv", "SOURCE_DECLARES"),
+        _E("hdr", "unannotated", "SOURCE_DECLARES"),
+    ])
+    assert _public_types(g) == {"pub"}
+
+
 def test_l5_public_type_gains_private_base_class() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
-        _N("pub_type", "record_type", "Public"),
+        _N("pub_type", "record_type", "Public", visibility="public_header"),
         _N("priv_type", "record_type", "detail::Base", visibility="private_header"),
     ]
     base = [
@@ -461,7 +507,7 @@ def test_l5_internal_type_dep_skipped_without_baseline_coverage() -> None:
     # TYPE_HAS_FIELD_TYPE edge must not look newly added.
     nodes = [
         _N("pub_hdr", "header", "api.h"),
-        _N("pub_type", "record_type", "Public"),
+        _N("pub_type", "record_type", "Public", visibility="public_header"),
         _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     old = SourceGraphSummary(

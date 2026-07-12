@@ -166,6 +166,9 @@ def test_inline_graph_folds_call_edges_for_l4_l5_mode(monkeypatch):
     )
     assert graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    # Unscoped (whole compile DB) run: confirmed pass coverage is recorded
+    # (ADR-041 P0 slice 2/3; sixth Codex review — only an unscoped run may).
+    assert graph.extractor_passes["call_graph"] is True
 
 
 def test_inline_graph_no_call_edges_when_clang_absent(monkeypatch):
@@ -221,7 +224,7 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -231,6 +234,11 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     )
     # Only the changed TU was parsed for call edges.
     assert seen_sources == ["src/a.cpp"]
+    # Narrowed (changed-path-scoped) run: does NOT claim confirmed pass
+    # coverage — it only examined a subset of TUs, so "found nothing" there
+    # says nothing about the rest of the codebase (sixth Codex review).
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
 
 
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
@@ -263,7 +271,7 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -273,6 +281,10 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     )
     # Header change → all TUs parsed for call edges.
     assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+    # Not narrowed (fanned out to the whole compile DB despite changed_paths
+    # being set) — confirmed pass coverage is still recorded.
+    assert graph is not None
+    assert graph.extractor_passes["call_graph"] is True
 
 
 def _fake_call_extractor(monkeypatch, seen_sources: list[str]):
@@ -313,7 +325,7 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     # The L4 replay selected only a.cpp (the headers-only representative subset).
     l4_units = [CompileUnit(id="cu://src/a.cpp", source="src/a.cpp")]
     rows: list = []
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -327,6 +339,9 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     row = next(r for r in rows if r.name == "call_graph:clang")
     assert "headers-only scope" in row.detail
     assert "from 1 compile unit" in row.detail
+    # Narrowed (headers-only scope, matching L4): no confirmed pass coverage.
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
 
 
 def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
@@ -342,7 +357,7 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -352,6 +367,9 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
         call_graph_units=None,
     )
     assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+    # Fully unscoped: confirmed pass coverage is recorded.
+    assert graph is not None
+    assert graph.extractor_passes["call_graph"] is True
 
 
 def test_run_inline_source_abi_no_sources_returns_empty_selection():

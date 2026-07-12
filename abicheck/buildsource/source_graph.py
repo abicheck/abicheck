@@ -942,21 +942,31 @@ def _public_decls(graph: SourceGraphSummary) -> set[str]:
 
 
 def _public_types(graph: SourceGraphSummary) -> set[str]:
-    """Type (``record_type``/``enum_type``/``typedef``) ids declared by a public header.
+    """Type (``record_type``/``enum_type``/``typedef``) ids that are genuinely public.
 
-    The type-level analogue of :func:`_public_decls`: a public header
-    ``SOURCE_DECLARES`` the type directly (ADR-041 P0) — needed so a public
-    struct/enum/typedef, which rarely has its own exported binary symbol, still
-    counts as a dependency-closure entry and as a "not internal" target.
+    The type-level analogue of :func:`_public_decls` — but "declared by a
+    ``header``-kind node" alone is not enough (sixth Codex review):
+    ``_augment_with_source_abi``'s ``header_declares`` creates a ``header``
+    node for *every* declaring file regardless of whether it is a public or a
+    private-project header — privacy lives on the type's own ``visibility``
+    attr (from ``ent.visibility``), not the node kind. Without the visibility
+    check, a private type is treated as a dependency-closure *entry*
+    (:func:`_dependency_reachability`), so a private type that gains a private
+    field/base of its own could wrongly emit ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+    even though no public API is involved.
     """
     kinds = _kind_map(graph)
-    return {
-        e.dst
-        for e in graph.edges
-        if e.kind == "SOURCE_DECLARES"
-        and kinds.get(e.src) == "header"
-        and kinds.get(e.dst) in _TYPE_ENTITY_KINDS
-    }
+    node_by_id = {n.id: n for n in graph.nodes}
+    out: set[str] = set()
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        if kinds.get(e.src) != "header" or kinds.get(e.dst) not in _TYPE_ENTITY_KINDS:
+            continue
+        node = node_by_id.get(e.dst)
+        if node is not None and str(node.attrs.get("visibility", "")) in PUBLIC_VISIBILITIES:
+            out.add(e.dst)
+    return out
 
 
 def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:

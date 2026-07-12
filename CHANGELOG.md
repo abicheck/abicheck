@@ -107,6 +107,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   only ever produces `DECL_REFERENCES_DECL`, never the Clang type graph's
   other three kinds, so a lone Kythe ref edge was wrongly granting blanket
   coverage credit to base-class/field-type/parameter-type checks it never ran.
+  Two more fixes from a sixth review: (1) `extractor_passes` is no longer
+  stamped for a *narrowed* run (a changed-path/`--since` scan or an unseeded
+  run scoped to L4's `headers-only` selection) — only a pass that examined
+  the whole compile DB may claim confirmed coverage, since a scoped pass's
+  "found nothing" says nothing about the rest of the codebase; (2)
+  `_public_types()` now requires the type's own `visibility` attr to be
+  public, not just "declared by a `header`-kind node" (every declaring file,
+  public or private, gets a `header` node) — otherwise a private type could
+  be treated as a dependency-closure entry and a private type gaining its own
+  new private field/base could wrongly emit `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  with no public API involved.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

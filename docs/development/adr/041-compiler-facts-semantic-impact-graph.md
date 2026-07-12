@@ -412,6 +412,42 @@ edge-presence intersection (no widening at all) — the same conservative
 behavior the very first fix in this slice used, now correctly scoped to
 exactly the case it's sound for.
 
+A sixth Codex review found two more issues, both about a signal claiming more
+than it actually proves:
+
+- **`extractor_passes` didn't encode extraction *scope*.** `_fold_call_graph`/
+  `_fold_type_graph` stamped the pass-ran flag unconditionally, but the pass
+  itself can run over only a *subset* of compile units — a changed-path/
+  `--since` scan (parses only the changed TUs) or an unseeded run matched to
+  L4's `headers-only` scope (parses only the L4-selected TU). "Ran" is
+  necessary but not sufficient for the zero-edge-widening fix (third round)
+  to be sound: a scoped baseline's "found nothing" is only true of the TUs it
+  actually examined, not the whole codebase, so comparing it against a fuller
+  (unscoped) candidate could read edges from TUs the baseline never parsed as
+  newly-introduced dependencies. Fixed by tracking a local `narrowed` flag
+  through the same scope-selection branches already in each function
+  (`_is_header_path`-driven changed-path narrowing, `scoped_units` narrowing)
+  and only stamping `extractor_passes[...]` when the run was **not**
+  narrowed — a changed-path scan whose changed path is a header (which fans
+  out to *all* TUs, per the existing scope-selection comment) still counts as
+  unscoped. A narrowed run instead falls back to the pre-existing (already
+  reviewed) edge-presence inference, never claiming confirmed coverage it
+  cannot back up.
+- **A private-header type could be a dependency-closure *entry*.**
+  `_public_types()` treated any type reached by a `SOURCE_DECLARES` edge from
+  a `header`-kind node as public — but `_augment_with_source_abi`'s
+  `header_declares` creates a `header` node for *every* declaring file,
+  public or private (privacy lives on the type's own `visibility` attr, not
+  the declaring-file node's kind). A private type was therefore eligible as a
+  dependency-closure entry (`_dependency_reachability`), so a private type
+  gaining its own new private field/base could wrongly emit
+  `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` with no public API involved at all.
+  Fixed by requiring the type node's own `visibility` attr to be in
+  `PUBLIC_VISIBILITIES`, mirroring the same positive-provenance discipline the
+  fourth review already established for internal-*target* classification
+  (`is_internal_dependency_node`) — now applied symmetrically to what counts
+  as a public *entry*.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

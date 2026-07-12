@@ -1687,12 +1687,14 @@ def _fold_call_graph(
     # stay narrowed to the matching TUs.
     target = merged
     scoped_note = ""
+    narrowed = False
     if changed_paths and not any(_is_header_path(p) for p in changed_paths):
         scoped = [
             cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
         ]
         target = replace(merged, compile_units=scoped)
         scoped_note = " (changed-scoped)"
+        narrowed = True
     elif changed_paths:
         scoped_note = " (header change → all TUs)"
     elif scoped_units is not None:
@@ -1700,6 +1702,7 @@ def _fold_call_graph(
         # out to the whole compile DB (Gap-1 fix).
         target = replace(merged, compile_units=list(scoped_units))
         scoped_note = " (headers-only scope, matching L4)"
+        narrowed = True
     edges = extractor.extract_from_build(target)
     # The project's own compile-unit sources — used to mark call-graph decls
     # ``defined_in_project`` from source-location provenance, so the cross-checks
@@ -1712,8 +1715,15 @@ def _fold_call_graph(
     added = augment_graph_with_calls(graph, edges, project_files or None)
     # Recorded regardless of `added` — a pass that ran and found zero edges is
     # still "covered" (ADR-041 P0 slice 2 follow-up): edge presence alone
-    # cannot tell a version diff "ran, zero output" from "never ran".
-    graph.extractor_passes["call_graph"] = True
+    # cannot tell a version diff "ran, zero output" from "never ran". But
+    # *only* when the pass ran over the whole compile DB (not `narrowed`) —
+    # a changed-path/headers-only-scoped run only examined a subset of TUs, so
+    # "found nothing" there says nothing about the rest of the codebase; a
+    # comparison against a fuller run must still fall back to edge-presence
+    # inference rather than claim confirmed, comparable coverage (sixth Codex
+    # review).
+    if not narrowed:
+        graph.extractor_passes["call_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
     timing = (
@@ -1772,24 +1782,31 @@ def _fold_type_graph(
         return
     target = merged
     scoped_note = ""
+    narrowed = False
     if changed_paths and not any(_is_header_path(p) for p in changed_paths):
         scoped = [
             cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
         ]
         target = replace(merged, compile_units=scoped)
         scoped_note = " (changed-scoped)"
+        narrowed = True
     elif changed_paths:
         scoped_note = " (header change → all TUs)"
     elif scoped_units is not None:
         target = replace(merged, compile_units=list(scoped_units))
         scoped_note = " (headers-only scope, matching L4)"
+        narrowed = True
     edges = extractor.extract_from_build(target)
     from .call_graph import project_source_files
 
     project_files = project_source_files(merged)
     added = augment_graph_with_types(graph, edges, project_files or None)
-    # Recorded regardless of `added` — see the matching note in _fold_call_graph.
-    graph.extractor_passes["type_graph"] = True
+    # Recorded regardless of `added` — see the matching note in
+    # _fold_call_graph. Also gated on `not narrowed` for the same reason
+    # (sixth Codex review): a changed-path/headers-only-scoped run only
+    # examined a subset of TUs, so it cannot confirm coverage for the rest.
+    if not narrowed:
+        graph.extractor_passes["type_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"type_graph: {diag}")
     timing = (
