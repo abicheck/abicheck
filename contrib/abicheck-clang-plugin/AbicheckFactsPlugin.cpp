@@ -69,6 +69,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
 #include "llvm/Support/raw_ostream.h"
@@ -1516,6 +1517,76 @@ bool looksLikeIncludeGuard(llvm::StringRef name, llvm::StringRef file) {
          tail == "_HXX";
 }
 
+// Strips `/* ... */` block and `//` line comments so a leading file-header
+// comment (near-universal above a guard) doesn't masquerade as "code before
+// the guard" to isStructuralIncludeGuard's scan. Best-effort, not a real
+// lexer: doesn't account for string/char literals containing comment-like
+// text, which essentially never appears ahead of a file's own include guard.
+std::string stripCComments(llvm::StringRef text) {
+  std::string out;
+  out.reserve(text.size());
+  for (size_t i = 0; i < text.size();) {
+    if (text[i] == '/' && i + 1 < text.size() && text[i + 1] == '*') {
+      size_t end = text.find("*/", i + 2);
+      i = (end == llvm::StringRef::npos) ? text.size() : end + 2;
+      continue;
+    }
+    if (text[i] == '/' && i + 1 < text.size() && text[i + 1] == '/') {
+      size_t end = text.find('\n', i + 2);
+      i = (end == llvm::StringRef::npos) ? text.size() : end; // keep the '\n'
+      continue;
+    }
+    out.push_back(text[i]);
+    ++i;
+  }
+  return out;
+}
+
+// Structural fallback for a project-prefixed guard (e.g. `MYLIB_FOO_H`,
+// `CASE47_V1_HPP`) that doesn't derive from the filename at all, so
+// looksLikeIncludeGuard's spelling-only heuristic misses it. Mirrors
+// clang.py's `_include_guard_macro` / `_is_include_guard` structural
+// fallback: read the file directly and check whether `name` is genuinely
+// its leading `#ifndef`/`#define` pair — the classic whole-file guard idiom
+// — regardless of naming convention. A leading `#pragma once` is neutral and
+// skipped. Best-effort: any read failure or non-matching shape returns false
+// (never turns a real macro into a false suppression).
+bool isStructuralIncludeGuard(llvm::StringRef name, llvm::StringRef file) {
+  if (file.empty())
+    return false;
+  auto bufOrErr = llvm::MemoryBuffer::getFile(file);
+  if (!bufOrErr)
+    return false;
+  std::string stripped = stripCComments((*bufOrErr)->getBuffer());
+  llvm::StringRef text(stripped);
+  llvm::SmallVector<llvm::StringRef, 8> lines;
+  text.split(lines, '\n');
+  std::string guard;
+  bool sawIfndef = false;
+  for (llvm::StringRef raw : lines) {
+    llvm::StringRef line = raw.trim();
+    if (line.empty())
+      continue;
+    if (!line.starts_with("#"))
+      return false; // code before any directive → not a whole-file guard
+    if (!sawIfndef) {
+      if (line == "#pragma once")
+        continue; // neutral — keep probing for a classic guard after it
+      if (!line.consume_front("#ifndef"))
+        return false;
+      guard = line.trim().str();
+      if (guard.empty())
+        return false;
+      sawIfndef = true;
+      continue;
+    }
+    if (!line.consume_front("#define"))
+      return false;
+    return line.trim().str() == guard && guard == name.str();
+  }
+  return false;
+}
+
 std::string joinStrings(const std::vector<std::string> &v, char sep) {
   std::string out;
   for (size_t i = 0; i < v.size(); ++i) {
@@ -2342,7 +2413,8 @@ private:
       const std::string &name = kv.first;
       const std::string &value = kv.second.value;
       const std::string &file = kv.second.file;
-      if (looksLikeIncludeGuard(name, file) &&
+      if ((looksLikeIncludeGuard(name, file) ||
+           isStructuralIncludeGuard(name, file)) &&
           (value.empty() || value == "1"))
         continue;
       if (value.empty()) {

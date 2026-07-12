@@ -45,6 +45,7 @@ N/A — confined to an internal type, this is the intended compatible outcome.
 
 ## Source files
 
+- `CMakeLists.txt`
 - `app.c`
 - `v1.c`
 - `v1.h`
