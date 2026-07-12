@@ -1209,11 +1209,24 @@ def _dependency_kinds_covered(graph: SourceGraphSummary, edge_kinds: frozenset[s
     ``inline._fold_call_graph``/``_fold_type_graph`` right after a successful
     extraction, regardless of edge count) breaks that tie; absent that record
     (a hand-built or pre-slice-2 graph) this falls back to edge presence alone.
+
+    ``narrowed_passes`` also counts as "a pass ran" here (fifteenth Codex
+    review) — this is a coarse, single-graph "is there *any* reason to trust
+    this graph enough to attempt a closure" gate, not the fine-grained
+    per-kind trust decision (that's :func:`_common_dependency_edge_kinds`,
+    which already knows whether a narrowed graph's zero-edge family is safe to
+    compare — matched scope against an identically-narrowed other side, or
+    excluded otherwise). A narrowed pass unambiguously is *not* "no semantic
+    pass at all"; relaxing this coarse gate to admit it is safe because
+    ``common_kinds`` remains the sole per-kind trust source downstream — a
+    kind excluded there restricts the closure to zero edges of that kind
+    regardless of whether this gate passed.
     """
     if any(e.kind in edge_kinds for e in graph.edges):
         return True
     return any(
-        graph.extractor_passes.get(pass_name, False) and (family & edge_kinds)
+        (graph.extractor_passes.get(pass_name, False) or graph.narrowed_passes.get(pass_name, False))
+        and (family & edge_kinds)
         for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items()
     )
 
@@ -1290,14 +1303,22 @@ def _common_dependency_edge_kinds(
     earlier revision of this fix did, symmetrically with ``old``) wrongly
     dropped real additions a fully-covered ``old`` baseline had already proven
     absent everywhere.
+
+    An *identical*, non-empty ``narrowed_scope`` on both sides is trusted
+    enough to widen to the whole family too (fifteenth Codex review), the same
+    way a confirmed full pass on both sides already does: two sides narrowed
+    to the same compile units ran the *same* single AST walk, just restricted
+    to that shared region, so one kind's absence there is a real, verified
+    zero *within that scope* — not merely "found an edge of this exact kind
+    somewhere" (the per-kind fallback). Without this, a same-scope PR scan
+    whose narrowed baseline genuinely found zero edges of a family couldn't
+    credit that as coverage, and a first-ever edge the candidate finds in that
+    exact shared TU would be silently dropped instead of reported.
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
         old_pass = old.extractor_passes.get(pass_name, False)
         new_pass = new.extractor_passes.get(pass_name, False)
-        if old_pass and new_pass:
-            common |= family
-            continue
         old_narrowed = old.narrowed_passes.get(pass_name, False)
         new_narrowed = new.narrowed_passes.get(pass_name, False)
         old_scope = old.narrowed_scope.get(pass_name, frozenset())
@@ -1306,6 +1327,16 @@ def _common_dependency_edge_kinds(
         # the *identical*, non-empty scope — "both narrowed" alone does not
         # establish they examined the same code (fourteenth Codex review).
         scope_matches = bool(old_scope) and old_scope == new_scope
+        # Two sides narrowed to that identical scope examined the *same*
+        # single AST walk, restricted — exactly the confirmed-full-pass
+        # rationale below, just scoped to the shared region instead of the
+        # whole project (fifteenth Codex review): a kind's absence there is a
+        # real, verified zero *within that scope*, safe to widen to the whole
+        # family, not merely a per-kind fallback.
+        narrowed_confirmed = old_narrowed and new_narrowed and scope_matches
+        if (old_pass and new_pass) or narrowed_confirmed:
+            common |= family
+            continue
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:

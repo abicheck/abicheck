@@ -249,6 +249,49 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
 
 
+def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pass(monkeypatch):
+    # Fifteenth Codex review: narrowed_passes now doubles as "this narrowed
+    # scope's zero-edge family is trustworthy" (not just "discount this run's
+    # edges elsewhere"), so a narrowed run that hit a per-TU diagnostic (a
+    # clang crash/timeout/degenerate AST inside the scope) must NOT claim
+    # narrowed_passes — the scope was not examined cleanly, mirroring the
+    # seventh review's rationale for the full-pass case.
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FlakyCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = ["clang timed out on src/a.cpp"]
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FlakyCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
+    assert "call_graph" not in graph.narrowed_passes
+    assert "call_graph" not in graph.narrowed_scope
+
+
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     # A changed *header* has no compile unit of its own; the call-graph pass must
     # fan out to all TUs (like the L4 selector) rather than match cu.source and

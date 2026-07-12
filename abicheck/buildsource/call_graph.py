@@ -375,9 +375,36 @@ def extractor_pass_fully_covered(
     """
     if narrowed:
         return False
+    return _pass_ran_cleanly(target, extractor)
+
+
+def _pass_ran_cleanly(target: BuildEvidence, extractor: Any) -> bool:
+    """Whether *extractor* examined at least one TU in *target* with no diagnostics.
+
+    The scope-independent half of :func:`extractor_pass_fully_covered`'s
+    checks, shared with :func:`narrowed_pass_confirmed` — narrowing changes
+    only whether the examined scope may be trusted as *whole-project*
+    coverage, not whether the run itself succeeded cleanly.
+    """
     if not any(cu.source for cu in target.compile_units):
         return False
     return not extractor.diagnostics
+
+
+def narrowed_pass_confirmed(target: BuildEvidence, extractor: Any) -> bool:
+    """Whether a *narrowed* call/type-graph run may claim ``narrowed_passes`` coverage.
+
+    Same rigor as :func:`extractor_pass_fully_covered` minus the "not
+    narrowed" requirement (the caller already knows the run was narrowed) —
+    at least one compile unit examined, and no per-TU diagnostics (seventh
+    Codex review's rationale applies identically to a narrowed run: a
+    silently-degraded TU inside the narrow scope must not read as "the scope
+    was cleanly examined, zero found," fifteenth Codex review). Only once
+    this holds does a narrowed run's zero-edge family become trustworthy
+    enough for :func:`source_graph._common_dependency_edge_kinds` to widen a
+    matched-scope comparison to the whole family.
+    """
+    return _pass_ran_cleanly(target, extractor)
 
 
 def augment_graph_with_calls(

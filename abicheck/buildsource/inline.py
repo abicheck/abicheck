@@ -1719,7 +1719,11 @@ def _fold_call_graph(
     # can flag a public→impl-helper dependency the built-in call graph produced
     # without L4 ``SOURCE_DECLARES`` evidence, while still excluding third-party
     # header-inline callees (ADR-035 D4 / Codex review).
-    from .call_graph import extractor_pass_fully_covered, project_source_files
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+        project_source_files,
+    )
 
     project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
@@ -1732,11 +1736,8 @@ def _fold_call_graph(
     # to edge-presence inference rather than claim confirmed coverage.
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["call_graph"] = True
-    elif narrowed:
-        # A narrowed pass never confirms full-project coverage, but its edges
-        # are real for the subset it walked — record that (plus the actual
-        # scope) so a comparison doesn't credit them as coverage elsewhere
-        # (eleventh/fourteenth Codex review; see narrowed_scope's docstring).
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        # A narrowed-but-clean pass is trustworthy against an identically-scoped side.
         graph.narrowed_passes["call_graph"] = True
         graph.narrowed_scope["call_graph"] = scope_key
     for diag in extractor.diagnostics:
@@ -1797,17 +1798,18 @@ def _fold_type_graph(
         merged, changed_paths, scoped_units
     )
     edges = extractor.extract_from_build(target)
-    from .call_graph import extractor_pass_fully_covered, project_source_files
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+        project_source_files,
+    )
 
     project_files = project_source_files(merged)
     added = augment_graph_with_types(graph, edges, project_files or None)
-    # Recorded regardless of `added` — see the matching note in
-    # _fold_call_graph (extractor_pass_fully_covered gates on not narrowed,
-    # having units to examine, and no per-TU parse failures). The scope key
-    # mirrors _fold_call_graph too (fourteenth Codex review).
+    # Recorded regardless of `added` — mirrors _fold_call_graph's coverage gate.
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["type_graph"] = True
-    elif narrowed:
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
         graph.narrowed_passes["type_graph"] = True
         graph.narrowed_scope["type_graph"] = scope_key
     for diag in extractor.diagnostics:

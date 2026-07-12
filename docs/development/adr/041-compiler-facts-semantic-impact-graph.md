@@ -645,6 +645,41 @@ between the two, now factored into one `_scope_narrowed_target()` helper to
 keep `inline.py` under its line-count cap while adding this field) stamps
 `narrowed_scope` alongside `narrowed_passes` whenever `narrowed` is `True`.
 
+A fifteenth Codex review pointed out the fourteenth-round fix was one-sided:
+it only used a matched `narrowed_scope` to *exclude* a mismatched comparison,
+never to *credit* a matched one. Two sides narrowed to the identical scope ran
+the exact same single AST walk, just restricted to that shared region — the
+same rationale the confirmed-full-pass family-widening branch already uses,
+just scoped smaller. Without crediting this, a same-scope PR scan whose
+narrowed baseline genuinely found zero edges of a family (a real, verified
+zero *within that shared scope*) couldn't have that zero trusted as coverage,
+so a first-ever edge the candidate found in that exact shared TU was silently
+dropped instead of reported as `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`. Fixed
+in three parts:
+
+- `_common_dependency_edge_kinds` computes `narrowed_confirmed = old_narrowed
+  and new_narrowed and scope_matches` and widens to the whole family
+  (`common |= family`) exactly like the `old_pass and new_pass` branch already
+  does, when either condition holds.
+- `_dependency_kinds_covered` (the coarse, single-graph "is there *any* reason
+  to trust this graph enough to attempt a closure" gate feeding
+  `_has_internal_reach_coverage`) now also accepts `narrowed_passes` as
+  evidence "a pass ran," not only `extractor_passes` — a narrowed pass is
+  unambiguously not "no semantic pass at all." This is safe on its own: the
+  fine-grained per-kind trust decision still lives entirely in
+  `_common_dependency_edge_kinds`, so relaxing this coarse gate cannot by
+  itself let an untrustworthy kind through — a kind `common_kinds` excludes
+  still restricts the closure to zero edges of that kind regardless of
+  whether this gate passed.
+- Trusting a narrowed pass's *zero-edge* family as real evidence raises the
+  stakes on the run having succeeded cleanly, so `call_graph.py` gained
+  `narrowed_pass_confirmed()` (sharing its "at least one TU, no diagnostics"
+  check with `extractor_pass_fully_covered` via new `_pass_ran_cleanly()`) —
+  `narrowed_passes` is now stamped only when the narrowed run itself hit no
+  per-TU diagnostics, mirroring the seventh review's rationale for the
+  full-pass case: a silently-degraded TU inside the narrow scope must not
+  read as "the scope was cleanly examined, zero found."
+
 ## Decision — P0 slice 4 (this change)
 
 Roadmap item 2's remaining half, "semantic graph diff — same public decl,

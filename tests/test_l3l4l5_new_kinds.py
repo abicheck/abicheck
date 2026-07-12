@@ -34,6 +34,7 @@ from abicheck.buildsource.source_graph import (
     GraphNode,
     SourceGraphSummary,
     _common_dependency_edge_kinds,
+    _dependency_kinds_covered,
     _dependency_path,
     _dependency_reachability,
     _format_dependency_path,
@@ -775,15 +776,15 @@ def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_confirm
     assert common == frozenset()
 
 
-def test_common_dependency_edge_kinds_both_narrowed_unaffected() -> None:
-    # Contrast case: the common, intended PR-diff workflow scopes *both* sides
-    # identically (e.g. comparing two narrowed runs over the same changed
-    # TUs — the same ``narrowed_scope``, per the fourteenth Codex review).
-    # Neither side has a *confirmed full* pass to disqualify the other's
-    # edges, so this is a no-op here — behavior is identical to the
-    # pre-eleventh-round per-kind fallback (only the exact kind both sides
-    # have an edge of is common; a kind only the new side has an edge of is
-    # excluded from comparison, not flagged).
+def test_common_dependency_edge_kinds_matched_narrowed_scope_widens_to_family() -> None:
+    # The common, intended PR-diff workflow scopes *both* sides identically
+    # (e.g. comparing two narrowed runs over the same changed TUs — the same
+    # ``narrowed_scope``). Per the fifteenth Codex review, this is trusted the
+    # same way a confirmed full pass on both sides already is: the *whole*
+    # family widens, not just the exact kinds each side happens to have an
+    # edge of — a matched-scope pass examines every kind in its family
+    # together within that shared region, same as a full pass does
+    # project-wide.
     old = SourceGraphSummary(
         nodes=[_N("a", "source_decl"), _N("b", "record_type")],
         edges=[_E("a", "b", "DECL_HAS_TYPE")],
@@ -797,7 +798,9 @@ def test_common_dependency_edge_kinds_both_narrowed_unaffected() -> None:
         narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
     )
     common = _common_dependency_edge_kinds(old, new)
-    assert common == frozenset({"DECL_HAS_TYPE"})
+    assert common == frozenset({
+        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    })
 
 
 def test_common_dependency_edge_kinds_narrowed_same_boolean_different_scope() -> None:
@@ -919,6 +922,59 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrow
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_flagged_for_matched_narrowed_scope_zero_edge_baseline() -> None:
+    # End-to-end version of the fifteenth-round fix: both packs are narrowed
+    # to the *identical* scope, and the baseline's narrowed pass genuinely
+    # found zero type-graph edges within it — a real, verified zero, since
+    # both sides examined the exact same TU. The candidate's first-ever
+    # DECL_HAS_TYPE edge in that same shared TU is real, newly-added evidence
+    # and must be flagged, not silently dropped for lack of coverage.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+    ]
+    shared_scope = {"type_graph": frozenset({"src/pub.cpp"})}
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope=shared_scope,
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "priv_type", "DECL_HAS_TYPE"),
+        ],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope=shared_scope,
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_dependency_kinds_covered_accepts_narrowed_pass_with_zero_edges() -> None:
+    # Fifteenth Codex review: a narrowed pass with zero edges of the family
+    # must not read as "no semantic pass at all" for the coarse per-graph
+    # coverage gate — narrowed_passes counts the same way extractor_passes
+    # already does, since the fine-grained per-kind trust decision (whether
+    # this specific zero-edge family is safe to compare) lives entirely in
+    # _common_dependency_edge_kinds, not here.
+    g = SourceGraphSummary(
+        nodes=[_N("a", "source_decl")],
+        edges=[],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
+    )
+    assert _dependency_kinds_covered(g, frozenset({"DECL_HAS_TYPE"})) is True
 
 
 def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confirmed_full_old() -> None:

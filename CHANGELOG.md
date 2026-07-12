@@ -205,7 +205,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   against a new side narrowed to an *identical*, non-empty scope. The
   duplicated scoping decision in `_fold_call_graph`/`_fold_type_graph` was
   factored into one shared `_scope_narrowed_target()` helper to make room for
-  the new field within `inline.py`'s line-count cap.
+  the new field within `inline.py`'s line-count cap. A fifteenth review found
+  that fix one-sided: it only used a matched `narrowed_scope` to *exclude* a
+  mismatched comparison, never to *credit* a matched one, so a same-scope PR
+  scan whose narrowed baseline genuinely found zero edges of a family
+  couldn't have that zero trusted, dropping a real first-ever dependency the
+  candidate found in the same shared TU. Fixed in three parts:
+  `_common_dependency_edge_kinds` now widens to the whole family when both
+  sides are narrowed to an identical scope, exactly like the confirmed-full-
+  pass branch already does; `_dependency_kinds_covered` now also accepts
+  `narrowed_passes` as "a pass ran" (safe on its own, since the fine-grained
+  per-kind trust decision still lives in `_common_dependency_edge_kinds`);
+  and new `call_graph.narrowed_pass_confirmed()` (sharing its "at least one
+  TU, no diagnostics" check with `extractor_pass_fully_covered`) means
+  `narrowed_passes` is only stamped when the narrowed run itself hit no
+  per-TU diagnostics — trusting a narrowed zero-edge family as real evidence
+  raises the stakes on the run having succeeded cleanly.
 
 - **Correlate a public entry's own body/type-hash change with a new internal
   dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,
