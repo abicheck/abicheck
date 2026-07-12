@@ -1619,11 +1619,37 @@ def _has_internal_reach_coverage(g: SourceGraphSummary, edge_kinds: frozenset[st
     return _dependency_kinds_covered(g, edge_kinds) and bool(_public_decls(g) or _public_types(g))
 
 
+#: source_diff.py findings whose old/new value is literally a body_hash or
+#: type_hash (ADR-041 P0 roadmap item 2) — the narrow subset of the nine
+#: source-replay findings that prove a *public* decl's own implementation
+#: changed, as opposed to e.g. a default-argument or macro-value change.
+_BODY_OR_TYPE_HASH_CHANGE_KINDS = frozenset({
+    "inline_body_changed", "template_body_changed", "public_typedef_target_changed",
+})
+
+
+def _public_decl_source_changes(
+    source_diff_changes: list[Change] | None,
+) -> dict[str, Change]:
+    """Map a public decl's ``symbol`` (qualified name) to its own body/type-hash
+    change (:data:`_BODY_OR_TYPE_HASH_CHANGE_KINDS`), from ``source_diff.diff_source_abi``'s
+    output — the L4 half of ADR-041 P0 roadmap item 2's correlation.
+    """
+    if not source_diff_changes:
+        return {}
+    return {
+        c.symbol: c
+        for c in source_diff_changes
+        if c.symbol and c.kind.value in _BODY_OR_TYPE_HASH_CHANGE_KINDS
+    }
+
+
 def _internal_dependency_findings(
     old: SourceGraphSummary,
     new: SourceGraphSummary,
     new_labels: dict[str, str],
     boundary: str,
+    source_diff_changes: list[Change] | None = None,
 ) -> list[Change]:
     """A public entry that newly reaches an internal declaration/type.
 
@@ -1634,10 +1660,19 @@ def _internal_dependency_findings(
     gained a call into internal code. Per ADR-041 P0 roadmap item 3 ("graph
     explain proof path"), the description names the concrete edge chain
     (:func:`_dependency_path`) proving each dependency, not just the endpoints.
+
+    Per ADR-041 P0 roadmap item 2, when ``source_diff_changes`` is supplied
+    (the L4 ``source_diff.diff_source_abi`` findings for the same version
+    pair) and the same public entry *also* has its own body/type_hash changed
+    this version (:func:`_public_decl_source_changes`), the description notes
+    it — correlating "X's own implementation changed" with "X now reaches
+    internal Y" into one finding instead of two disjoint ones a reader has to
+    connect manually.
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
+    own_changes = _public_decl_source_changes(source_diff_changes)
     findings: list[Change] = []
     # The version-over-version analogue of the intra-version
     # public-to-internal cross-check. Restrict the closure to edge kinds
@@ -1684,6 +1719,14 @@ def _internal_dependency_findings(
             if (path := _dependency_path(new, common_kinds, entry, t))
         ]
         proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""
+        own_change = own_changes.get(label)
+        correlation = (
+            f" This entry's own implementation also changed this version "
+            f"({own_change.kind.value}: {own_change.old_value!r} → "
+            f"{own_change.new_value!r}) — likely the source of the new dependency."
+            if own_change is not None
+            else ""
+        )
         findings.append(Change(
             kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             symbol=label,
@@ -1693,7 +1736,7 @@ def _internal_dependency_findings(
                 "before (via a call, reference, or field/base/parameter type). "
                 "The public surface has taken on an undeclared dependency; a "
                 "change to that internal entity becomes a hidden risk. "
-                "Source-graph evidence to review." + proof
+                "Source-graph evidence to review." + proof + correlation
             ),
             old_value="no internal dependency",
             new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
@@ -1776,7 +1819,9 @@ def _symbol_owner_findings(
 
 
 def diff_source_graph_findings(
-    old: SourceGraphSummary, new: SourceGraphSummary
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    source_diff_changes: list[Change] | None = None,
 ) -> list[Change]:
     """Map the graph delta onto ADR-031 D6 secondary risk findings.
 
@@ -1803,6 +1848,14 @@ def diff_source_graph_findings(
     Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
     them into the verdict pipeline as ordinary RISK changes that never override
     an artifact-proven break.
+
+    ``source_diff_changes`` is the optional L4 ``source_diff.diff_source_abi``
+    finding list for the same version pair (ADR-041 P0 roadmap item 2) — when
+    supplied, ``_internal_dependency_findings`` correlates a public entry's own
+    body/type_hash change with it newly reaching an internal dependency,
+    instead of leaving a reader to connect the two disjoint findings.
+    Omitted (``None``) by callers with no L4 surface diff (e.g. `graph diff`),
+    which get the uncorrelated description exactly as before.
     """
     boundary = f"[{EVIDENCE_TIER_L5}]"
     old_labels, new_labels = _label_map(old), _label_map(new)
@@ -1814,7 +1867,9 @@ def diff_source_graph_findings(
     findings += _call_reachability_findings(old, new, new_labels, boundary)
     findings += _include_graph_drift_findings(old, new, old_labels, new_labels, boundary)
     findings += _build_option_reach_findings(old, new, new_labels, boundary)
-    findings += _internal_dependency_findings(old, new, new_labels, boundary)
+    findings += _internal_dependency_findings(
+        old, new, new_labels, boundary, source_diff_changes
+    )
     findings += _target_dependency_findings(old, new, new_labels, boundary)
     findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
     return findings

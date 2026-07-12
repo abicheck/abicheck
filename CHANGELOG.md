@@ -173,6 +173,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   since neither side then has a confirmed full pass to disqualify the other's
   edges.
 
+- **Correlate a public entry's own body/type-hash change with a new internal
+  dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,
+  a public entry whose own implementation changed this version
+  (`source_diff.diff_source_abi`'s `INLINE_BODY_CHANGED`/
+  `TEMPLATE_BODY_CHANGED`/`PUBLIC_TYPEDEF_TARGET_CHANGED` — the three of the
+  nine L4 findings keyed on a `body_hash`/`type_hash` delta) that *also*
+  gained a new internal dependency this version
+  (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`) produced two entirely disjoint
+  findings with nothing connecting them. `diff_source_graph_findings(old,
+  new, source_diff_changes=...)` now takes the caller's already-computed L4
+  surface diff and threads it to `_internal_dependency_findings`; new
+  `_public_decl_source_changes()` maps each public entry's `symbol`
+  (qualified name) to its own body/type-hash `Change`, and when a
+  newly-internal-dependency entry has one, the description gains a sentence
+  naming it ("This entry's own implementation also changed this version
+  (`<kind>`: `<old>` → `<new>`) — likely the source of the new dependency.").
+  `cli_buildsource_helpers.diff_embedded_build_source` (the only production
+  caller with both diffs available) passes its L4 findings through;
+  `graph compare` (bare `SourceGraphSummary` files, no build-source facts)
+  keeps the default `None` and is unaffected. No new `ChangeKind` — same
+  convention as slice 3's proof paths, riding in `Change.description`.
+
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
   (`--depth headers --scope-public-headers --format review --exit-code-scheme

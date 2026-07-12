@@ -2,9 +2,10 @@
 
 **Date:** 2026-07-12
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
-graph diff over the full dependency-edge family), and P0 slice 3 (`graph
-explain` proof paths) implemented; the rest of this ADR is a roadmap, not a
-commitment to ship on any timeline.
+graph diff over the full dependency-edge family), P0 slice 3 (`graph
+explain` proof paths), and P0 slice 4 (body/type-hash-change correlation)
+implemented; the rest of this ADR is a roadmap, not a commitment to ship on
+any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -577,21 +578,62 @@ identically to the same changed TUs is unaffected, since in that case
 neither side has a confirmed full pass to disqualify the other's edges, so
 the pre-existing per-kind comparison behavior is preserved exactly.
 
+## Decision — P0 slice 4 (this change)
+
+Roadmap item 2's remaining half, "semantic graph diff — same public decl,
+different `body_hash`/`type_hash` combined with a new/changed graph edge, so
+a report can say 'X now reaches internal Y, defined in changed file Z'
+instead of two disjoint findings." Before this slice, a public entry whose
+own implementation changed this version (`source_diff.diff_source_abi`'s
+`INLINE_BODY_CHANGED`/`TEMPLATE_BODY_CHANGED`/`PUBLIC_TYPEDEF_TARGET_CHANGED`
+— the three of the nine L4 source-replay findings literally keyed on a
+`body_hash`/`type_hash` delta) and that *also* gained a new internal
+dependency this version (`source_graph`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`)
+produced two entirely disjoint `Change` objects with nothing connecting
+them — a reader had to notice both findings named the same symbol and infer
+the likely causal link themselves.
+
+Fixed by threading the L4 surface diff into the L5 graph diff:
+`diff_source_graph_findings(old, new, source_diff_changes=...)` takes an
+optional `list[Change]` (the caller's already-computed
+`source_diff.diff_source_abi()` output for the same version pair) and passes
+it to `_internal_dependency_findings`. New `_public_decl_source_changes()`
+maps each public entry's `symbol` (qualified name — the same string
+`source_graph`'s decl/type node `label` uses) to its own body/type-hash
+`Change`, when one of the three kinds above fired for it. When a newly-
+internal-dependency entry has an own-change in that map,
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`'s description gains a sentence naming
+it (`"This entry's own implementation also changed this version (<kind>:
+<old> → <new>) — likely the source of the new dependency."`) instead of
+leaving the correlation implicit. `cli_buildsource_helpers.diff_embedded_build_source`
+(the only production caller with both an L4 and L5 diff available) now
+passes its `_src` (the L4 findings list) through; `graph compare`
+(`cli_graph.py`), which only ever loads bare `SourceGraphSummary` files with
+no build-source facts, keeps the default `None` and gets the exact
+uncorrelated description as before — this is additive, no existing caller's
+behavior changes without also supplying the new argument.
+
+No new `ChangeKind` — same convention as slice 3's proof paths: the
+correlation rides in `Change.description`, keeping this additive and
+low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all carry
+`description` verbatim already).
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work
 
 1. ~~Populate `DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/
    `TYPE_INHERITS`~~ — **done, ADR-041 P0 slice 1.**
-2. **Semantic graph diff.**
-   ~~Same public decl/type, new internal-dependency edge over the full
-   dependency-edge family~~ — **done, ADR-041 P0 slice 2**
+2. ~~**Semantic graph diff.** Same public decl/type, new internal-dependency
+   edge over the full dependency-edge family~~ — **done, ADR-041 P0 slice 2**
    (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`, generalized beyond
-   `DECL_CALLS_DECL`). Still open: same public decl, different
-   `body_hash`/`type_hash` (already on `SourceEntity`, cf. `source_diff.py`'s
-   nine findings) *combined with* a new/changed graph edge, so a report can
-   say "X now reaches internal Y, defined in changed file Z" instead of two
-   disjoint findings.
+   `DECL_CALLS_DECL`). ~~Same public decl, different `body_hash`/`type_hash`
+   (already on `SourceEntity`, cf. `source_diff.py`'s nine findings) combined
+   with a new/changed graph edge~~ — **done, ADR-041 P0 slice 4**
+   (`diff_source_graph_findings(..., source_diff_changes=...)` correlates a
+   public entry's own body/type-hash change with it newly reaching an
+   internal dependency, in one finding's description instead of two disjoint
+   ones).
 3. ~~`graph explain` proof path per finding~~ — **done, ADR-041 P0 slice 3**
    (`_dependency_path`/`_format_dependency_path`, threaded into
    `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` / `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED`

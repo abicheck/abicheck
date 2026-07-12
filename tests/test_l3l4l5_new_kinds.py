@@ -1091,3 +1091,73 @@ def test_l5_identical_graph_emits_nothing() -> None:
     nodes = [_N("t:libA", "target", "libA"), _N("t:libB", "target", "libB")]
     g = SourceGraphSummary(nodes=nodes, edges=[_E("t:libA", "t:libB", "TARGET_DEPENDS_ON")])
     assert diff_source_graph_findings(g, g) == []
+
+
+def _internal_dep_scenario() -> tuple[SourceGraphSummary, SourceGraphSummary]:
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_HAS_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(nodes=nodes, edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")])
+    return old, new
+
+
+def test_l5_internal_dependency_correlates_with_own_body_hash_change() -> None:
+    # ADR-041 P0 roadmap item 2: "same public decl, different body_hash/
+    # type_hash combined with a new/changed graph edge" — when the L4 surface
+    # diff (source_diff.diff_source_abi) proves the SAME public entry also had
+    # its own implementation change this version, PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    # should say so, instead of leaving two disjoint findings (INLINE_BODY_CHANGED
+    # for "pub", PUBLIC_API_INTERNAL_DEPENDENCY_ADDED for "pub" -> priv_type) for
+    # a reader to connect by hand.
+    old_graph, new_graph = _internal_dep_scenario()
+    old_surface = _surf(reachable_inline_bodies=[_ent("inline", "pub", body_hash="h1")])
+    new_surface = _surf(reachable_inline_bodies=[_ent("inline", "pub", body_hash="h2")])
+    src_changes = diff_source_abi(old_surface, new_surface)
+    assert ChangeKind.INLINE_BODY_CHANGED.value in _kinds(src_changes)
+
+    findings = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=src_changes)
+    dep_finding = next(
+        f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    )
+    assert "own implementation also changed" in dep_finding.description
+    assert "'h1'" in dep_finding.description
+    assert "'h2'" in dep_finding.description
+
+
+def test_l5_internal_dependency_uncorrelated_without_source_diff_changes() -> None:
+    # Same scenario, but the caller passes no L4 surface diff (e.g. `abicheck
+    # graph compare`, which only ever has bare SourceGraphSummary files, no
+    # build-source facts) — behavior is unchanged from before this roadmap item:
+    # no correlation text, since there is nothing to correlate against.
+    old_graph, new_graph = _internal_dep_scenario()
+    findings = diff_source_graph_findings(old_graph, new_graph)
+    dep_finding = next(
+        f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    )
+    assert "own implementation also changed" not in dep_finding.description
+
+
+def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> None:
+    # The correlation must be keyed on the *same* public entry, not any change
+    # in the source_diff result set — an unrelated decl's body change must not
+    # be attached to this entry's finding.
+    old_graph, new_graph = _internal_dep_scenario()
+    old_surface = _surf(reachable_inline_bodies=[_ent("inline", "other", body_hash="h1")])
+    new_surface = _surf(reachable_inline_bodies=[_ent("inline", "other", body_hash="h2")])
+    src_changes = diff_source_abi(old_surface, new_surface)
+    assert ChangeKind.INLINE_BODY_CHANGED.value in _kinds(src_changes)
+
+    findings = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=src_changes)
+    dep_finding = next(
+        f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    )
+    assert "own implementation also changed" not in dep_finding.description
