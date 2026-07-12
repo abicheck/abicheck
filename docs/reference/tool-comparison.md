@@ -385,7 +385,7 @@ python3 scripts/benchmark_comparison.py \
 | Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
 | **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
-| **abicheck (L3-L5, +sources)** | 104 | 61.2% | 17 | 49 | 3977s (~66 min) |
+| **abicheck (L3-L5, +sources)** | 116 | 68.2% | 16 | 38 | 694s (~12 min) |
 | libabigail (`abidiff`) | 52 | 30.6% | 3 | 115 | **~1s** |
 | libabigail + headers | 52 | 30.6% | 3 | 115 | **~2-5s** |
 | ABICC (abi-dumper) | 73 | 42.9% | 2 | 90 | 2534s (**~42 min**) |
@@ -413,10 +413,29 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
   wrong-but-confident verdict — see the slowest-case tables the benchmark
   prints (`case85`, `case09`, `case105`, `case109`... routinely hit the 90s
   timeout on both ABICC modes in this environment).
-- **abicheck L3-L5's 17 false positives** are the one lane here with a real
+- **abicheck L3-L5's 16 false positives** are the one lane here with a real
   over-calling problem — the source-replay/build-context path is
   intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
   doesn't attempt), and this is tracked as a known gap, not hidden.
+
+> **abicheck L3-L5's numbers above are post-fix.** An earlier pass of this
+> benchmark scored the L3-L5 lane at only 104/170 (61.2%, FP=17, FN=49,
+> 3977s) — but most of that gap was two **benchmark-harness** bugs, not a
+> real product regression: (1) `_build_plugin_side` forced `-include
+> <header>` into every plugin-instrumented compile, which crashes any
+> fixture whose `.c` file independently redefines a type also declared in
+> its header (a common, legal pattern — case07, case08, case09, case14,
+> case19, case21-23, case25, case26, ...); the CMake macro already has a
+> proper per-case opt-in for this (`V{version}_FORCE_INCLUDE`), so the
+> blanket duplicate was redundant and actively harmful. (2) the pack
+> validator rejected `case04_no_change` as "wrong release translation
+> units" because its `CMakeLists.txt` deliberately points both
+> `V1_SOURCES`/`V2_SOURCES` at the same file to guarantee zero diff — the
+> naive `v1.c`/`v2.c` filename guess couldn't see that. Fixing both (removing
+> the forced include; reading the real compiled source from
+> `CMakeLists.txt` via a new `_cmake_declared_source()` helper) recovered
+> 12 cases and cut total time by ~5.7× (no more burning the full 90s
+> timeout on doomed builds).
 
 abicheck L2's 10 misses (170 − 160): `case20`, `case78`, `case97`
 (enum-as-literal-constant / hidden-friend-adjacent gaps sharing one root
