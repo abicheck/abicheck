@@ -464,10 +464,36 @@ def _find_or_build_abicheck_plugin(timeout: int) -> tuple[Path | None, str]:
     return None, "plugin build succeeded but library was not produced"
 
 
+def _cmake_declared_source(case_dir: Path, version: str) -> Path | None:
+    """Read ``V{version}_SOURCES`` from the case's ``CMakeLists.txt``.
+
+    ``find_sources()``'s naive ``v1.c``/``v2.c`` filename convention is only a
+    *guess* at what each target actually compiles — some fixtures (e.g. a
+    deliberate "no ABI change" case) point both ``V1_SOURCES`` and
+    ``V2_SOURCES`` at the identical file to guarantee zero diff. Returns the
+    real compiled source for *version* ("v1"/"v2"), or ``None`` if it can't be
+    determined (caller falls back to the naive guess).
+    """
+    cmakelists = case_dir / "CMakeLists.txt"
+    if not cmakelists.is_file():
+        return None
+    m = re.search(rf"{version.upper()}_SOURCES\s+([^\s)]+)", cmakelists.read_text())
+    if not m:
+        return None
+    candidate = case_dir / m.group(1)
+    return candidate if candidate.is_file() else None
+
+
 def _plugin_pack_is_target_specific(
     pack: Path, version: str, src: Path, opposite_src: Path,
 ) -> tuple[bool, str]:
-    """Reject empty, wrong-version, or cross-release plugin evidence packs."""
+    """Reject empty, wrong-version, or cross-release plugin evidence packs.
+
+    When *src* and *opposite_src* resolve to the identical file (a fixture
+    that deliberately compiles the same translation unit for both releases),
+    there is no "wrong release" to detect — the facts are legitimately shared
+    by design, so the cross-contamination check is skipped for that pair.
+    """
     try:
         manifest = json.loads((pack / "manifest.json").read_text())
         fact_files = sorted((pack / "source_facts").glob("*.jsonl"))
@@ -476,9 +502,10 @@ def _plugin_pack_is_target_specific(
         return False, f"invalid plugin pack: {exc}"
     if manifest.get("version") != version or not fact_files or not records:
         return False, f"missing {version} target-specific source facts"
-    sources = {Path(str(record.get("source", ""))).resolve() for record in records}
-    if src.resolve() not in sources or opposite_src.resolve() in sources:
-        return False, f"{version} pack contains wrong release translation units"
+    if src.resolve() != opposite_src.resolve():
+        sources = {Path(str(record.get("source", ""))).resolve() for record in records}
+        if src.resolve() not in sources or opposite_src.resolve() in sources:
+            return False, f"{version} pack contains wrong release translation units"
     evidence_keys = {
         "declarations", "types", "functions", "variables", "macros", "templates",
         "inline_bodies", "constexpr_values", "source_edges",
@@ -517,10 +544,17 @@ def _build_plugin_side(
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"library={case}",
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"version={version}",
     ]
-    # Compact fixtures often define the API without including their public
-    # header. Force it into the real target compile so the pack sees that API.
-    if header and header.exists():
-        flags += ["-include", str(header)]
+    # NOTE: no forced `-include header` here. That used to be injected
+    # unconditionally so "compact fixtures that don't include their own
+    # header" would still expose it to the plugin's fact capture — but a
+    # fixture that independently redefines a type also declared in its header
+    # (a common, legal pattern in these minimal test .c files) then fails to
+    # compile with a hard redefinition error (case07/08/09/14/19/21-23/25/26
+    # and others). The CMake macro already has a real, per-case opt-in for
+    # this (`V1_FORCE_INCLUDE`/`V2_FORCE_INCLUDE` in examples/CMakeLists.txt,
+    # honored by this same target build), so duplicating it here blanket-wide
+    # was both redundant for cases that need it and actively harmful for ones
+    # that don't.
     flag_string = shlex.join(flags)
     # Inject only after CMake has validated the compilers. Putting the plugin in
     # CMAKE_{C,CXX}_FLAGS would instrument CMake's compiler probes and contaminate
@@ -550,7 +584,10 @@ def _build_plugin_side(
     except (OSError, subprocess.SubprocessError) as exc:
         return None, None, str(exc)
     library = _find_cmake_lib(side_build / case, version)
-    valid, error = _plugin_pack_is_target_specific(pack, version, src, opposite_src)
+    other_version = "v2" if version == "v1" else "v1"
+    actual_src = _cmake_declared_source(case_dir, version) or src
+    actual_opposite_src = _cmake_declared_source(case_dir, other_version) or opposite_src
+    valid, error = _plugin_pack_is_target_specific(pack, version, actual_src, actual_opposite_src)
     if library is None:
         return None, None, f"target {case}_{version} produced no shared library"
     if not valid:

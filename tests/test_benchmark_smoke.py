@@ -306,6 +306,93 @@ def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
     _write_plugin_pack(wrong, "v1", v2)
     assert not mod._plugin_pack_is_target_specific(wrong, "v1", v1, v2)[0]
 
+
+def test_plugin_pack_accepts_deliberately_shared_source(tmp_path):
+    """A "no ABI change" fixture whose CMakeLists.txt points both
+    V1_SOURCES and V2_SOURCES at the identical file (case04_no_change's
+    shape) has no "wrong release" to detect — the same translation unit's
+    facts are legitimately valid evidence for both sides."""
+    mod = _load_benchmark()
+    shared = tmp_path / "v1.c"
+    shared.touch()
+    pack = tmp_path / "pack"
+    _write_plugin_pack(pack, "v2", shared)
+    ok, error = mod._plugin_pack_is_target_specific(pack, "v2", shared, shared)
+    assert ok, error
+
+
+def test_cmake_declared_source_resolves_shared_v2_target(tmp_path):
+    """find_sources()'s naive v1.c/v2.c filename guess can't see that a
+    case's CMakeLists.txt actually compiles v1.c for BOTH targets (a
+    deliberate no-op fixture) — _cmake_declared_source must read the real
+    V{version}_SOURCES value instead."""
+    mod = _load_benchmark()
+    case_dir = tmp_path / "case04_no_change"
+    case_dir.mkdir()
+    (case_dir / "v1.c").touch()
+    (case_dir / "v2.c").touch()
+    (case_dir / "CMakeLists.txt").write_text(
+        "abicheck_add_case(case04_no_change\n"
+        "    V1_SOURCES v1.c\n"
+        "    V2_SOURCES v1.c\n"
+        "    V1_HEADERS v1.h\n"
+        ")\n"
+    )
+    v1_declared = mod._cmake_declared_source(case_dir, "v1")
+    v2_declared = mod._cmake_declared_source(case_dir, "v2")
+    assert v1_declared == case_dir / "v1.c"
+    assert v2_declared == case_dir / "v1.c"
+    assert v1_declared == v2_declared
+
+
+def test_cmake_declared_source_missing_cmakelists_returns_none(tmp_path):
+    mod = _load_benchmark()
+    assert mod._cmake_declared_source(tmp_path, "v1") is None
+
+
+def test_build_plugin_side_does_not_force_include_header(tmp_path):
+    """Regression: a blanket `-include header` used to be injected into every
+    plugin-instrumented build, which crashes any fixture whose .c file
+    independently redefines a type also declared in its header (a common,
+    legal C pattern) — case07/08/09/etc. The CMake macro's own opt-in
+    V{version}_FORCE_INCLUDE already covers cases that genuinely need it, so
+    the benchmark harness must not duplicate it unconditionally."""
+    mod = _load_benchmark()
+    case = "case07_struct_layout"
+    case_dir = tmp_path / "examples" / case
+    case_dir.mkdir(parents=True)
+    v1_src = case_dir / "v1.c"
+    v1_h = case_dir / "v1.h"
+    v1_src.write_text("struct Point { int x; int y; };\n")
+    v1_h.write_text("typedef struct Point { int x; int y; } Point;\n")
+    plugin = tmp_path / "libabicheck-facts.so"
+    plugin.touch()
+    root = tmp_path / "root"
+    root.mkdir()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(x) for x in cmd])
+        return Result()
+
+    with patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
+        mod, "_find_cmake_lib", return_value=None
+    ):
+        mod._build_plugin_side(
+            case_dir, case, "v1", v1_src, v1_src, v1_h, plugin, root, 90,
+        )
+
+    injection = root / "plugin_flags_v1.cmake"
+    assert injection.exists()
+    assert "-include" not in injection.read_text()
+
 def test_default_tools_include_both_abicheck_lanes():
     mod = _load_benchmark()
     with patch("sys.argv", ["benchmark_comparison.py"]):
