@@ -1359,7 +1359,19 @@ def _build_case_artifacts(
 
     if not used_prebuilt_artifacts:
         if not (cmake_file.exists() and shutil.which("cmake")):
-            print(f"  {name:<35} BUILD_PATH_UNAVAILABLE(prebuilt|cmake)")
+            # No CMakeLists.txt (optional per examples/CLAUDE.md) and no
+            # prebuilt artifact — fall back to compiling v1_src/v2_src
+            # directly, same as the CMake-less cases the direct-compile path
+            # was written for.
+            if compile_so(
+                v1_src, v1_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v1_src),
+            ) and compile_so(
+                v2_src, v2_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v2_src),
+            ):
+                return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=True)
+            print(f"  {name:<35} BUILD_PATH_UNAVAILABLE(prebuilt|cmake|direct)")
             results.append(_error_entry(name, expected))
             return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
 
