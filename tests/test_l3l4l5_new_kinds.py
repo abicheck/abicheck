@@ -322,6 +322,107 @@ def test_l5_internal_dep_skipped_without_baseline_public_closure() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
+def test_l5_public_type_gains_private_field_type() -> None:
+    # ADR-041 P0: a public struct with a new private field type. No call graph
+    # sees this at all — it is exactly the "not a call" case the ADR opens with.
+    # A self-referential TYPE_HAS_FIELD_TYPE edge establishes that both graphs
+    # already ran the semantic pass, so the coverage gate does not skip.
+    nodes = [
+        _N("pub_hdr", "header", "api.h"),
+        _N("pub_type", "record_type", "Public"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    base = [
+        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+        _E("pub_type", "pub_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_public_type_gains_private_base_class() -> None:
+    nodes = [
+        _N("pub_hdr", "header", "api.h"),
+        _N("pub_type", "record_type", "Public"),
+        _N("priv_type", "record_type", "detail::Base"),
+    ]
+    base = [
+        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+        _E("pub_type", "pub_type", "TYPE_INHERITS"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub_type", "priv_type", "TYPE_INHERITS")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_public_fn_gains_private_parameter_type() -> None:
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_HAS_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_public_fn_gains_private_constant_reference() -> None:
+    # inline int f() { return detail::k; } — the ADR's own motivating example.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "f()"),
+        _N("sym", "binary_symbol", "f"),
+        _N("priv_const", "source_decl", "detail::k"),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_REFERENCES_DECL"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "priv_const", "DECL_REFERENCES_DECL")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_internal_type_dep_skipped_without_baseline_coverage() -> None:
+    # Only the NEW graph carries a SOURCE_DECLARES public closure for the type;
+    # the baseline has no public-type closure at all, so the pre-existing
+    # TYPE_HAS_FIELD_TYPE edge must not look newly added.
+    nodes = [
+        _N("pub_hdr", "header", "api.h"),
+        _N("pub_type", "record_type", "Public"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes, edges=[_E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE")]
+    )  # no SOURCE_DECLARES at all on the baseline
+    new = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+        _E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ])
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
 def test_l5_owner_changed_reads_header_declaring_nodes() -> None:
     # Production graphs attach SOURCE_DECLARES from a `header`-kind node
     # (build_source_graph.header_declares), so the owner map must read those.

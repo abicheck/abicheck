@@ -89,6 +89,18 @@ CONF_HIGH = "high"
 CONF_REDUCED = "reduced"
 CONF_UNKNOWN = "unknown"
 
+#: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
+#: non-call reference to a global/constant, a parameter/field type, or a base
+#: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
+#: check and this module's version-over-version internal-dependency diff both
+#: read exactly this set, so the two stay in lockstep on what "a public entity
+#: reaches an internal one" means — a struct's private field type or base
+#: class is exactly the "not a call at all" risk ADR-041 opens with.
+DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset({
+    "DECL_CALLS_DECL", "DECL_REFERENCES_DECL", "DECL_HAS_TYPE",
+    "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+})
+
 
 def _conf_from_build(conf: Confidence) -> str:
     """Map an ADR-029 build-evidence confidence onto a graph confidence label."""
@@ -380,6 +392,12 @@ _TYPE_NODE_KINDS: dict[str, str] = {"enum": "enum_type", "typedef": "typedef"}
 
 def _type_node_kind(decl_kind: str) -> str:
     return _TYPE_NODE_KINDS.get(decl_kind, "record_type")
+
+
+#: Graph node kinds a type entity (as opposed to a function/variable
+#: ``source_decl``) can carry. Mirrors ``crosscheck._DECL_NODE_KINDS`` minus
+#: ``source_decl``.
+_TYPE_ENTITY_KINDS: frozenset[str] = frozenset({"record_type", "enum_type", "typedef"})
 
 
 # ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
@@ -783,6 +801,24 @@ def _public_decls(graph: SourceGraphSummary) -> set[str]:
     }
 
 
+def _public_types(graph: SourceGraphSummary) -> set[str]:
+    """Type (``record_type``/``enum_type``/``typedef``) ids declared by a public header.
+
+    The type-level analogue of :func:`_public_decls`: a public header
+    ``SOURCE_DECLARES`` the type directly (ADR-041 P0) — needed so a public
+    struct/enum/typedef, which rarely has its own exported binary symbol, still
+    counts as a dependency-closure entry and as a "not internal" target.
+    """
+    kinds = _kind_map(graph)
+    return {
+        e.dst
+        for e in graph.edges
+        if e.kind == "SOURCE_DECLARES"
+        and kinds.get(e.src) == "header"
+        and kinds.get(e.dst) in _TYPE_ENTITY_KINDS
+    }
+
+
 def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:
     """``generated_file`` ids that are exposed as a target's public header.
 
@@ -832,6 +868,47 @@ def _public_entry_call_reachability(graph: SourceGraphSummary) -> dict[str, froz
     return out
 
 
+def _dependency_reachability(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
+    """For each public entry (exported decl or public type), what it reaches.
+
+    Generalizes :func:`_public_entry_call_reachability` from ``DECL_CALLS_DECL``
+    alone to the full ADR-041 P0 dependency-edge family
+    (:data:`DEPENDENCY_EDGE_KINDS`): a public struct's private base class
+    (``TYPE_INHERITS``) or private field type (``TYPE_HAS_FIELD_TYPE``), a
+    function's private parameter type (``DECL_HAS_TYPE``), and a body reading a
+    private constant (``DECL_REFERENCES_DECL``) are exactly the "not a call at
+    all" risks ADR-041 opens with — a call-only closure never sees them.
+
+    Entries are ``source_decl`` nodes backing an exported symbol
+    (``SOURCE_DECL_MAPS_TO_SYMBOL``, as before) *union* public types
+    (:func:`_public_types`) — a public type is a dependency-closure starting
+    point in its own right even though it rarely has its own exported symbol.
+    Returns ``{}`` when the graph carries none of the dependency edge kinds, so
+    callers can skip the comparison entirely.
+    """
+    adjacency: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind in DEPENDENCY_EDGE_KINDS:
+            adjacency.setdefault(e.src, []).append(e.dst)
+    if not adjacency:
+        return {}
+    entries = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    } | _public_types(graph)
+    out: dict[str, frozenset[str]] = {}
+    for entry in entries:
+        seen: set[str] = set()
+        stack = list(adjacency.get(entry, []))
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(adjacency.get(node, []))
+        out[entry] = frozenset(seen)
+    return out
+
+
 def _public_headers_in_include_graph(graph: SourceGraphSummary) -> set[str]:
     """Public-header node ids that actually appear in the compiled include graph.
 
@@ -856,25 +933,29 @@ def _option_symbol_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
 
 
 def _public_entry_internal_reach(graph: SourceGraphSummary) -> set[tuple[str, str]]:
-    """``(public_entry_decl, internal_decl)`` pairs the entry reaches by calls.
+    """``(public_entry, internal_target)`` pairs the entry reaches via a dependency edge.
 
-    An *internal* decl is a ``source_decl`` reachable from an exported entry via
-    the ``DECL_CALLS_DECL`` closure that is **not** in the public-header
-    reachability set (:func:`_public_decls`). Returns ``set()`` when the graph
-    carries no call edges or no public closure, so the version diff skips rather
+    An *internal* target is a ``source_decl``/type node reachable from a public
+    entry (exported decl or public type) via the :data:`DEPENDENCY_EDGE_KINDS`
+    closure (:func:`_dependency_reachability`) that is **not** itself public
+    (:func:`_public_decls` / :func:`_public_types`) — this covers calls,
+    non-call references, and the field/base/parameter type edges ADR-041 P0
+    added, not calls alone. Returns ``set()`` when the graph carries no
+    dependency edges or no public closure, so the version diff skips rather
     than flagging noise on an evidence-poor side.
     """
-    reach = _public_entry_call_reachability(graph)
+    reach = _dependency_reachability(graph)
     if not reach:
         return set()
-    public = _public_decls(graph)
+    public = _public_decls(graph) | _public_types(graph)
     if not public:
         return set()
     kinds = _kind_map(graph)
+    internal_target_kinds = {"source_decl"} | _TYPE_ENTITY_KINDS
     out: set[tuple[str, str]] = set()
     for entry, reachable in reach.items():
         for target in reachable:
-            if kinds.get(target) == "source_decl" and target not in public:
+            if kinds.get(target) in internal_target_kinds and target not in public:
                 out.add((entry, target))
     return out
 
@@ -1147,8 +1228,9 @@ def _build_option_reach_findings(
 
 
 def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
-    """Whether a graph carries both call edges and a public-header closure."""
-    return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
+    """Whether a graph carries both a dependency edge and a public closure."""
+    has_dependency_edges = any(e.kind in DEPENDENCY_EDGE_KINDS for e in g.edges)
+    return has_dependency_edges and bool(_public_decls(g) or _public_types(g))
 
 
 def _internal_dependency_findings(
@@ -1157,17 +1239,25 @@ def _internal_dependency_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """A public entry that newly reaches an internal declaration via calls."""
+    """A public entry that newly reaches an internal declaration/type.
+
+    "Reaches" spans the full ADR-041 P0 dependency-edge family
+    (:data:`DEPENDENCY_EDGE_KINDS`): a call, a non-call reference to a
+    global/constant, or a field/base/parameter type — a public struct that
+    gained a private field type is caught here exactly like a function that
+    gained a call into internal code.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
     findings: list[Change] = []
     # The version-over-version analogue of the intra-version
     # public-to-internal cross-check. Gate on *both* graphs carrying the two
-    # evidence kinds this diff subtracts over — call edges (DECL_CALLS_DECL)
-    # AND a public-header closure (SOURCE_DECLARES) — so an evidence-poor
-    # baseline (call edges but no public closure, or no call pass) cannot make
-    # every pre-existing internal callee look newly added (Codex review).
+    # evidence kinds this diff subtracts over — a dependency edge
+    # (DEPENDENCY_EDGE_KINDS) AND a public closure (SOURCE_DECLARES) — so an
+    # evidence-poor baseline (dependency edges but no public closure, or no
+    # semantic pass at all) cannot make every pre-existing internal dependency
+    # look newly added (Codex review).
     newly_internal = (
         _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
         if _has_internal_reach_coverage(old) and _has_internal_reach_coverage(new)
@@ -1184,13 +1274,14 @@ def _internal_dependency_findings(
             symbol=label,
             description=(
                 f"Public entry {label!r} now reaches internal (non-public) "
-                f"declaration(s) {', '.join(targets)} that it did not before. The "
-                "public surface has taken on an undeclared dependency; a change to "
-                "that internal entity becomes a hidden risk. Source-graph evidence "
-                "to review."
+                f"declaration(s)/type(s) {', '.join(targets)} that it did not "
+                "before (via a call, reference, or field/base/parameter type). "
+                "The public surface has taken on an undeclared dependency; a "
+                "change to that internal entity becomes a hidden risk. "
+                "Source-graph evidence to review."
             ),
             old_value="no internal dependency",
-            new_value=f"reaches {len(targets)} internal decl(s)",
+            new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
             source_location=boundary,
         ))
     return findings

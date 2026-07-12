@@ -90,7 +90,7 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
-from .source_graph import GraphNode, SourceGraphSummary
+from .source_graph import DEPENDENCY_EDGE_KINDS, GraphNode, SourceGraphSummary
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -798,15 +798,10 @@ def _check_odr_type_variant(
 #: only by an S4/S5 semantic pass (``call_graph``/AST augmentation), so a
 #: structural-only graph carries none of them — the check then skips with a soft
 #: advisory rather than reading clean (ADR-035 D4 coverage honesty).
-_DEPENDENCY_EDGE_KINDS = frozenset(
-    {
-        "DECL_CALLS_DECL",
-        "DECL_REFERENCES_DECL",
-        "DECL_HAS_TYPE",
-        "TYPE_HAS_FIELD_TYPE",
-        "TYPE_INHERITS",
-    }
-)
+#: Sourced from ``source_graph.DEPENDENCY_EDGE_KINDS`` (ADR-041 P0) so this
+#: intra-version check and the version-over-version diff never drift apart on
+#: what "reaches an internal entity" means.
+_DEPENDENCY_EDGE_KINDS = DEPENDENCY_EDGE_KINDS
 
 #: Graph node kinds that carry a declaration/type visibility we can classify.
 _DECL_NODE_KINDS = frozenset({"source_decl", "record_type", "enum_type", "typedef"})

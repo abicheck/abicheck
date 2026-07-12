@@ -1,7 +1,8 @@
 # ADR-041: Compiler-Facts Semantic Impact Graph — Roadmap and P0 Slice
 
 **Date:** 2026-07-12
-**Status:** Accepted — P0 slice 1 implemented (`type_graph.py`); the rest of
+**Status:** Accepted — P0 slice 1 (`type_graph.py`) and P0 slice 2 (semantic
+graph diff over the full dependency-edge family) implemented; the rest of
 this ADR is a roadmap, not a commitment to ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
@@ -220,20 +221,69 @@ better, one Flow-C plugin emission, see P1 below) is deliberately deferred
 rather than risking `call_graph.py`'s existing tested extraction path in this
 change.
 
+## Decision — P0 slice 2 (this change)
+
+`diff_source_graph_findings()`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` check
+(`_internal_dependency_findings` in `source_graph.py`) was the version-over-
+version analogue of `crosscheck.py`'s intra-version
+`public_to_internal_dependency` check — but only over `DECL_CALLS_DECL`
+edges, while the intra-version check already read the full five-edge
+dependency family (`_DEPENDENCY_EDGE_KINDS`, ADR-041 P0 slice 1). A public
+struct that gained a private field type or base class between two versions,
+or a public function that gained a private parameter type or a reference to
+an internal constant, was invisible to the version diff even though the
+same-version cross-check would have caught it — exactly the "same public
+type, different field/base dependency closure" gap this roadmap item names.
+
+Fixed by generalizing the closure computation:
+
+- `source_graph.DEPENDENCY_EDGE_KINDS` — the same five edge kinds
+  (`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/
+  `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`) `crosscheck.py` already used, now the
+  single shared source of truth; `crosscheck._DEPENDENCY_EDGE_KINDS` is an
+  alias onto it so the two checks cannot drift apart on what "reaches an
+  internal entity" means.
+- `_dependency_reachability()` — generalizes `_public_entry_call_reachability`
+  from a call-only closure to one over all five kinds. Entries are decls
+  backing an exported symbol (as before) *union* public types
+  (`_public_types()`, new) — a public struct/enum/typedef rarely has its own
+  exported symbol, so it needs to be its own closure-walk starting point to
+  catch a newly-added private field/base edge hanging directly off it.
+- `_public_entry_internal_reach()` now walks that broader closure and
+  classifies an internal *target* as any `source_decl`/type-kind node absent
+  from the broadened public set (`_public_decls() | _public_types()`), not
+  `source_decl` alone — so a private type reached as a field/base/parameter
+  type is recognized as internal, not silently dropped for the wrong node kind.
+- `_has_internal_reach_coverage()` gates on *any* dependency edge kind (not
+  `DECL_CALLS_DECL` specifically) being present on both sides, preserving the
+  existing coverage-honesty rule: an evidence-poor baseline (no semantic pass,
+  or no public closure) makes the check skip rather than flag every
+  pre-existing dependency as newly added.
+
+No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
+broadening its recall exactly as slice 1 broadened `public_to_internal_dependency`'s
+— the type/reference edges the P0 slice 1 extractor started producing were
+already the only missing ingredient.
+
+The remaining half of P0 item 2 — combining a `body_hash`/`type_hash` change
+(`source_diff.py`'s nine findings) with a new/changed graph edge into one
+finding — is still open, along with item 3 (`graph explain` proof paths).
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work
 
 1. ~~Populate `DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/
-   `TYPE_INHERITS`~~ — **done, this ADR.**
-2. **Semantic graph diff.** `diff_source_graph()` (ADR-031 D6) is structural
-   (nodes/edges added/removed). Extend it to notice: same public decl, new
-   internal-dependency edge (already partly covered by
-   `PUBLIC_TO_INTERNAL_DEPENDENCY`); same public type, different field/base
-   dependency closure; same public decl, different `body_hash`/`type_hash`
-   (already on `SourceEntity`, cf. `source_diff.py`'s nine findings) *combined
-   with* a new/changed graph edge, so a report can say "X now reaches
-   internal Y, defined in changed file Z" instead of two disjoint findings.
+   `TYPE_INHERITS`~~ — **done, ADR-041 P0 slice 1.**
+2. **Semantic graph diff.**
+   ~~Same public decl/type, new internal-dependency edge over the full
+   dependency-edge family~~ — **done, ADR-041 P0 slice 2**
+   (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`, generalized beyond
+   `DECL_CALLS_DECL`). Still open: same public decl, different
+   `body_hash`/`type_hash` (already on `SourceEntity`, cf. `source_diff.py`'s
+   nine findings) *combined with* a new/changed graph edge, so a report can
+   say "X now reaches internal Y, defined in changed file Z" instead of two
+   disjoint findings.
 3. **`graph explain` proof path per finding.** `localize_symbol` already walks
    symbol → target → source decls → headers → build options → static callees
    (ADR-031 D7). Thread a path (not just an endpoint list) into

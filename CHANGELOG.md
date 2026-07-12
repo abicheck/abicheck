@@ -43,6 +43,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `coverage.type_edges` / `coverage.reference_edges` counters on the L5
   graph report collection honestly.
 
+- **Version-over-version internal-dependency finding now spans the full
+  dependency-edge family, not calls alone (ADR-041 P0 slice 2).** The L5
+  semantic graph diff's `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` check
+  (`diff_source_graph_findings`) previously only walked `DECL_CALLS_DECL`
+  edges to find a public entry newly reaching an internal declaration —
+  missing the `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`/`DECL_HAS_TYPE`/
+  `DECL_REFERENCES_DECL` edges the P0 slice-1 type graph started producing.
+  A public struct that gains a private field type or base class, or a public
+  function that gains a private parameter type or a reference to an internal
+  constant, is now caught between two versions exactly like a newly-added
+  internal call already was. `crosscheck.py`'s intra-version
+  `public_to_internal_dependency` check already covered all five edge kinds;
+  both checks now share one `source_graph.DEPENDENCY_EDGE_KINDS` constant so
+  they cannot drift apart again. No new `ChangeKind` — this only broadens the
+  recall of the existing `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding.
+
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
   (`--depth headers --scope-public-headers --format review --exit-code-scheme
