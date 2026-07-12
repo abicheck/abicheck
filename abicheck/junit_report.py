@@ -133,13 +133,23 @@ def _is_failure(
     return False
 
 
-def _failure_type(change: Change, result: DiffResult) -> str:
+def _failure_type(change: Change, result: DiffResult, kind_sets: KindSets) -> str:
     """Return the ``type`` attribute for a ``<failure>`` element.
 
     Uses the same canonical per-finding verdict as ``_is_failure`` so the
-    reported type always matches why the finding failed.
+    reported type always matches why the finding failed. Takes the caller's
+    precomputed *kind_sets* rather than recomputing them (``_build_testsuite``
+    already builds them once per report; ``DiffResult._effective_verdict_for_change``
+    would otherwise rebuild them per finding).
     """
-    verdict = result._effective_verdict_for_change(change)
+    from .severity import effective_verdict_for_change
+
+    verdict = effective_verdict_for_change(
+        change,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
+    )
     return _VERDICT_TO_JUNIT_TYPE.get(verdict, "COMPATIBLE")
 
 
@@ -267,7 +277,7 @@ def _append_extra_failures(
         if _is_failure(c, result, kind_sets, severity_config):
             for tc in ts:
                 if tc.get("name") == c.symbol:
-                    _add_failure(tc, c, result)
+                    _add_failure(tc, c, result, kind_sets)
                     break
 
 
@@ -327,16 +337,17 @@ def _maybe_add_failure(
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure."""
     if _is_failure(change, result, kind_sets, severity_config):
-        _add_failure(tc, change, result)
+        _add_failure(tc, change, result, kind_sets)
 
 
 def _add_failure(
     tc: ET.Element,
     change: Change,
     result: DiffResult,
+    kind_sets: KindSets,
 ) -> None:
     """Append a ``<failure>`` element to testcase *tc*."""
-    ftype = _failure_type(change, result)
+    ftype = _failure_type(change, result, kind_sets)
     description = change.description or change.kind.value.replace("_", " ")
     message = f"{change.kind.value}: {description}"
 

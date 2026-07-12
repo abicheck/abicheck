@@ -49,7 +49,13 @@ from abicheck.sarif import _severity as sarif_severity
 
 
 def _fn(name: str, ret: str = "void") -> Function:
-    return Function(name=name, mangled=name, return_type=ret, params=[], visibility=Visibility.PUBLIC)
+    return Function(
+        name=name,
+        mangled=name,
+        return_type=ret,
+        params=[],
+        visibility=Visibility.PUBLIC,
+    )
 
 
 def _result():
@@ -70,7 +76,15 @@ def _result():
 # ── Canonical maps are total over the reportable verdicts ────────────────────
 
 
-@pytest.mark.parametrize("verdict", [Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK, Verdict.COMPATIBLE])
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
+        Verdict.COMPATIBLE_WITH_RISK,
+        Verdict.COMPATIBLE,
+    ],
+)
 def test_canonical_maps_cover_every_reportable_verdict(verdict: Verdict) -> None:
     assert verdict in VERDICT_TO_SEVERITY_LABEL
     assert verdict in VERDICT_TO_SARIF_LEVEL
@@ -93,8 +107,12 @@ def test_presentation_table_is_exactly_the_reportable_verdicts() -> None:
 def test_single_table_is_the_source_of_truth() -> None:
     # The back-compat projections must be derived from VERDICT_PRESENTATION, not
     # a second hand-maintained copy.
-    assert VERDICT_TO_SEVERITY_LABEL == {v: p.severity_label for v, p in VERDICT_PRESENTATION.items()}
-    assert VERDICT_TO_SARIF_LEVEL == {v: p.sarif_level for v, p in VERDICT_PRESENTATION.items()}
+    assert VERDICT_TO_SEVERITY_LABEL == {
+        v: p.severity_label for v, p in VERDICT_PRESENTATION.items()
+    }
+    assert VERDICT_TO_SARIF_LEVEL == {
+        v: p.sarif_level for v, p in VERDICT_PRESENTATION.items()
+    }
 
 
 def test_presentation_internally_consistent() -> None:
@@ -102,7 +120,9 @@ def test_presentation_internally_consistent() -> None:
     # the one table — no row can say "breaking" on one axis and "compatible" on
     # another.
     for pres in VERDICT_PRESENTATION.values():
-        assert pres.breaking_boundary == (pres.severity_label in ("breaking", "api_break"))
+        assert pres.breaking_boundary == (
+            pres.severity_label in ("breaking", "api_break")
+        )
         assert pres.breaking_boundary == (pres.sarif_level == "error")
 
 
@@ -148,7 +168,9 @@ def test_json_severity_matches_canonical_label() -> None:
 
     result = _result()
     model = ReportModel.from_result(result)
-    by_symbol = {(c.kind.value, c.symbol): model.severity_label(c) for c in model.changes}
+    by_symbol = {
+        (c.kind.value, c.symbol): model.severity_label(c) for c in model.changes
+    }
 
     payload = json.loads(to_json(result))
     rendered = payload.get("changes", [])
@@ -167,7 +189,14 @@ def test_a4_override_propagates_across_channels() -> None:
     # COMPATIBLE must read as compatible in every native channel — this is the
     # exact divergence the unification prevents.
     result = _result()
-    breaking = next((c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.BREAKING), None)
+    breaking = next(
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.BREAKING
+        ),
+        None,
+    )
     assert breaking is not None, "fixture must produce a breaking change"
 
     demoted = Change(
@@ -198,10 +227,29 @@ def test_policy_file_override_propagates_across_channels() -> None:
 
     result = _result()
     breaking = next(
-        (c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.BREAKING),
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.BREAKING
+        ),
         None,
     )
     assert breaking is not None, "fixture must produce a breaking change"
+
+    # Capture the genuinely compatible change before any override is applied —
+    # once `breaking.kind` is demoted below, a lookup by Verdict.COMPATIBLE
+    # would risk matching the just-demoted change instead (they'd share a
+    # verdict at that point), weakening the escalation case below.
+    compatible = next(
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE
+        ),
+        None,
+    )
+    assert compatible is not None, "fixture must produce a compatible change"
+    assert compatible.kind != breaking.kind
 
     # Demote: a kind normally BREAKING is overridden to COMPATIBLE.
     result.policy_file = PolicyFile(overrides={breaking.kind: Verdict.COMPATIBLE})
@@ -213,11 +261,6 @@ def test_policy_file_override_propagates_across_channels() -> None:
     assert _is_failure(breaking, result, kind_sets) is False
 
     # Escalate: a compatible finding overridden up to BREAKING.
-    compatible = next(
-        (c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE),
-        None,
-    )
-    assert compatible is not None, "fixture must produce a compatible change"
     result.policy_file = PolicyFile(overrides={compatible.kind: Verdict.BREAKING})
     model = ReportModel.from_result(result)
     assert model.verdict_of(compatible) == Verdict.BREAKING
