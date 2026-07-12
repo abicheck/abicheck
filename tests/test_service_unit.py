@@ -1132,6 +1132,36 @@ class TestRunCompare:
         result, _, _ = run_compare(old_p, new_p, suppress=sf)
         assert isinstance(result, DiffResult)
 
+    def test_headers_passed_as_public_headers(self, tmp_path, monkeypatch):
+        """run_compare_request (the CompareRequest chokepoint used by the
+        compare-release/directory-package fan-out) must thread each side's
+        headers through as its public-header set for provenance tagging —
+        same rule as the single-pair CLI's compare --header fix. Regression:
+        this was silently dropped, unlike the single-pair path."""
+        from abicheck import service as service_mod
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        old_h = tmp_path / "old.h"
+        new_h = tmp_path / "new.h"
+
+        calls: list[dict] = []
+        original_resolve = service_mod.resolve_input
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            calls.append({"path": path, "version": version, **kwargs})
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+
+        run_compare(
+            old_p, new_p, old_headers=[old_h], new_headers=[new_h],
+        )
+        assert len(calls) == 2
+        old_call, new_call = calls
+        assert old_call["public_headers"] == [old_h]
+        assert new_call["public_headers"] == [new_h]
+
 
 # ── render_output() ─────────────────────────────────────────────────────────
 

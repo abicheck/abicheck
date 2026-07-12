@@ -133,9 +133,5 @@ Inline→non-inline: old binary uses inlined copy, runtime unaffected
 
 - `CMakeLists.txt`
 - `app.cpp`
-- `v1.cpp`
-- `v1.hpp`
-- `v2.cpp`
-- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

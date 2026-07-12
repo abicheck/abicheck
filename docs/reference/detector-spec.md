@@ -66,7 +66,7 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `elf_osabi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `elf_osabi_changed` | — |
 | `enum_last_member_value_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `enum_last_member_value_changed` | — |
 | `enum_member_added` | addition | `COMPATIBLE` | `warning` | L1 | `enum_member_added` | [case25](../examples/case25_enum_member_added.md) |
-| `enum_member_removed` | breaking | `BREAKING` | `error` | L1 | `enum_member_removed` | [case19](../examples/case19_enum_member_removed.md), [case78](../examples/case78_task_arena_attach_tag.md) |
+| `enum_member_removed` | breaking | `BREAKING` | `error` | L1 | `enum_member_removed` | [case19](../examples/case19_enum_member_removed.md) |
 | `enum_member_renamed` | api_break | `API_BREAK` | `warning` | L1 | `enum_member_renamed` | [case31](../examples/case31_enum_rename.md) |
 | `enum_member_value_changed` | breaking | `BREAKING` | `error` | L1 | `enum_member_value_changed` | [case08](../examples/case08_enum_value_change.md), [case20](../examples/case20_enum_member_value_changed.md) |
 | `enum_size_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `enum_size_flag_changed` | [case152](../examples/case152_enum_size_flag_flip.md) |

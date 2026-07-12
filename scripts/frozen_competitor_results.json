@@ -1,0 +1,1718 @@
+{
+  "frozen_at": "2026-07-12T10:35:37Z",
+  "git_commit": "9a2babea7855f1139ea4cb3dcb94c7c4f4f2d597",
+  "ground_truth_sha256": "99ffed75852d748b3b4313d3e19523bb208498e7fb0d6fd8d90d5c3cbf0fc056",
+  "results_by_case": {
+    "case01_symbol_removal": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 480,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 516,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 9
+    },
+    "case02_param_type_change": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 428,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 498,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case03_compat_addition": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 458,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 514,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case04_no_change": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 431,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 493,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case05_soname": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 29653,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 894,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 204,
+      "abidiff_ms": 6
+    },
+    "case06_visibility": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 30731,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 875,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 274,
+      "abidiff_ms": 14
+    },
+    "case07_struct_layout": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 451,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 491,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case08_enum_value_change": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 452,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 528,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case09_cpp_vtable": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90352,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1074,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 10
+    },
+    "case100_experimental_removed_without_replacement": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 384,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 617,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 6
+    },
+    "case101_inline_namespace_version_bumped": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 386,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 569,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 10
+    },
+    "case102_frozen_runtime_signature_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 404,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90082,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case103_toolchain_flag_drift": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 423,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 617,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case104_glibcxx_dual_abi_flip": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 537,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90091,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 81,
+      "abidiff_ms": 81
+    },
+    "case105_concept_tightening": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90358,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90095,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case106_ctor_became_explicit": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1006,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 1259,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case107_task_scheduler_init_removed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 653,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1231,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 10
+    },
+    "case108_task_class_removed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1047,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1709,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 10
+    },
+    "case109_flow_graph_policy_renames": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 91034,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90091,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case10_return_type": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1230,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 2118,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case110_concurrent_unordered_map_api_drift": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1179,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 2507,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 14,
+      "abidiff_ms": 5
+    },
+    "case111_enumerable_thread_specific_lambda_ambiguity": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1581,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2075,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 10
+    },
+    "case112_lp64_ilp64": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1272,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1451,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case113_abi_tag_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 838,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90092,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case114_char8t_migration": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1412,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90091,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 13,
+      "abidiff_ms": 14
+    },
+    "case115_bit_int_width_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1735,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90090,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case116_atomic_qualifier_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1347,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1515,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 11,
+      "abidiff_ms": 9
+    },
+    "case117_no_unique_address": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1634,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90089,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 5
+    },
+    "case118_internal_struct_field_added_scoped": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2485,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2578,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case119_internal_struct_field_removed_scoped": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 516,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 1332,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case11_global_var_type": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 1882,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1460,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 8
+    },
+    "case120_internal_struct_reordered_scoped": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2304,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2609,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 11,
+      "abidiff_ms": 9
+    },
+    "case121_kernel_btf_struct_field_added": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case122_template_signature_uninstantiated": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2126,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3093,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 5
+    },
+    "case123_default_argument_removed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2004,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2956,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case124_header_constant_value_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2048,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 1826,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case125_class_became_final": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2239,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5694,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 5
+    },
+    "case126_sycl_device_impl_ptr": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2004,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 15557,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 14,
+      "abidiff_ms": 14
+    },
+    "case127_data_object_size_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2148,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 2658,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 6
+    },
+    "case128_symbol_binding_strengthened": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2529,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2496,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case129_struct_return_convention": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1517,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90089,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case12_function_removed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2633,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 2903,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 4
+    },
+    "case130_exceptions_mode_flip": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1769,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90094,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 4
+    },
+    "case131_rtti_mode_flip": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 754,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90090,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 10
+    },
+    "case132_threadsafe_statics_flip": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2036,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90089,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case133_tls_model_flip": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 1887,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90095,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 4
+    },
+    "case134_relro_weakened": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90151,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5223,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 193,
+      "abidiff_ms": 5
+    },
+    "case135_stack_canary_removed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90099,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4922,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 190,
+      "abidiff_ms": 5
+    },
+    "case136_executable_stack_removed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90093,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 6292,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 180,
+      "abidiff_ms": 4
+    },
+    "case137_runpath_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90132,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5859,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 195,
+      "abidiff_ms": 4
+    },
+    "case138_needed_added": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90105,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 6111,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 200,
+      "abidiff_ms": 4
+    },
+    "case139_symbol_version_node_removed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90102,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5626,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 170,
+      "abidiff_ms": 5
+    },
+    "case13_symbol_versioning": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90147,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5843,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 191,
+      "abidiff_ms": 4
+    },
+    "case140_empty_base_optimization_lost": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3456,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4910,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 8
+    },
+    "case141_versioned_symbol_scheme": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2931,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3879,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case142_vtable_slot_count_binary_only": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3316,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7230,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 10,
+      "abidiff_ms": 6
+    },
+    "case143_audit_accidental_export": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case144_audit_private_header_leak": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case145_audit_unversioned_export": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case146_audit_rtti_for_internal": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case147_scan_depth_ladder": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case148_xcheck_header_build_mismatch": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case149_xcheck_odr_variant": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case14_cpp_class_size": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3258,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 7193,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 8
+    },
+    "case150_xcheck_export_public_pair": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case151_xcheck_provider_matrix": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case152_enum_size_flag_flip": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case153_struct_packing_flip": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case154_lto_mode_flip": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case155_char_signedness_flip": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case156_public_macro_removed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case157_inline_function_removed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case158_public_typedef_removed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case15_noexcept_change": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3066,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8025,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 17,
+      "abidiff_ms": 18
+    },
+    "case160_public_api_internal_dep_added": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case161_target_dependency_added": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case162_symbol_source_owner_changed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case163_python_kwarg_renamed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case164_preproc_conditional_field": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case165_polymorphic_nonvirtual_dtor": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3235,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 7012,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case166_ref_qualifier_added": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3057,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3822,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case167_base_became_virtual": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2748,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 8087,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 15,
+      "abidiff_ms": 16
+    },
+    "case168_virtual_method_devirtualized": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3088,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7097,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 16
+    },
+    "case169_overload_added": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2922,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4600,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case16_inline_to_non_inline": {
+      "abicc_dumper": "ERROR",
+      "abicc_dumper_ms": 362,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90098,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 10
+    },
+    "case170_env_runtime_floor_raised": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case17_template_abi": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2865,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8503,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 12,
+      "abidiff_ms": 11
+    },
+    "case18_dependency_leak": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4974,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4301,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 10
+    },
+    "case19_enum_member_removed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2429,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4066,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case20_enum_member_value_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2937,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3623,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case21_method_became_static": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 398,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 702,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 21,
+      "abidiff_ms": 26
+    },
+    "case22_method_const_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 367,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4028,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 8
+    },
+    "case23_pure_virtual_added": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2555,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5861,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 10,
+      "abidiff_ms": 9
+    },
+    "case24_union_field_removed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3053,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3372,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 9
+    },
+    "case25_enum_member_added": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3627,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3697,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case26_union_field_added": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2786,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3218,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case26b_union_field_added_compatible": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3028,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3823,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 12
+    },
+    "case27_symbol_binding_weakened": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3060,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3123,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 8
+    },
+    "case28_typedef_opaque": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4053,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4327,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case29_ifunc_transition": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2690,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3811,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case30_field_qualifiers": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3666,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3462,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case31_enum_rename": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4798,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3747,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 11,
+      "abidiff_ms": 6
+    },
+    "case32_param_defaults": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3495,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4307,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case33_pointer_level": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3690,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3702,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case34_access_level": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3415,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4947,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 11,
+      "abidiff_ms": 11
+    },
+    "case35_field_rename": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3396,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4991,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case36_anon_struct": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3754,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 3997,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 7
+    },
+    "case37_base_class": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3391,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 9679,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 13
+    },
+    "case38_virtual_methods": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3399,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 8839,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 10
+    },
+    "case39_var_const": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3630,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4639,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 4
+    },
+    "case40_field_layout": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 4306,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5894,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 23,
+      "abidiff_ms": 9
+    },
+    "case41_type_changes": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3981,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5212,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case42_type_alignment_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90107,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 11626,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 201,
+      "abidiff_ms": 5
+    },
+    "case43_base_class_member_added": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3636,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8995,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 14
+    },
+    "case44_cyclic_type_member_added": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3179,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 6096,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case45_multi_dim_array_change": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3537,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4523,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 9
+    },
+    "case46_pointer_chain_type_change": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3399,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3885,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case47_inline_to_outlined": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3140,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5120,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 10,
+      "abidiff_ms": 6
+    },
+    "case48_leaf_struct_through_pointer": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3716,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3898,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 12,
+      "abidiff_ms": 5
+    },
+    "case49_executable_stack": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90120,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8438,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 181,
+      "abidiff_ms": 4
+    },
+    "case50_soname_inconsistent": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90103,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8206,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 178,
+      "abidiff_ms": 8
+    },
+    "case51_protected_visibility": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2757,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 6411,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case52_rpath_leak": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90104,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8959,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 184,
+      "abidiff_ms": 5
+    },
+    "case53_namespace_pollution": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90104,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 8215,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 195,
+      "abidiff_ms": 6
+    },
+    "case54_used_reserved_field": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90104,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 12097,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 177,
+      "abidiff_ms": 7
+    },
+    "case55_type_kind_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90097,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7356,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 215,
+      "abidiff_ms": 9
+    },
+    "case56_struct_packing_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90103,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8229,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 178,
+      "abidiff_ms": 5
+    },
+    "case57_enum_underlying_size_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90100,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 9044,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 182,
+      "abidiff_ms": 7
+    },
+    "case58_var_removed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90128,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7261,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 311,
+      "abidiff_ms": 5
+    },
+    "case59_func_became_inline": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90108,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5854,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 186,
+      "abidiff_ms": 5
+    },
+    "case60_base_class_position_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2516,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90123,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 23,
+      "abidiff_ms": 13
+    },
+    "case61_var_added": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90111,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8668,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 178,
+      "abidiff_ms": 5
+    },
+    "case62_type_field_added_compatible": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 90100,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 10197,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 171,
+      "abidiff_ms": 11
+    },
+    "case63_bitfield_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3317,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4361,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 10
+    },
+    "case64_calling_convention_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4187,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 7123,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 4
+    },
+    "case65_symbol_version_removed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 6391,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4384,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case66_language_linkage_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3663,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4923,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 7
+    },
+    "case67_tls_var_size_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3044,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4730,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case68_virtual_method_added": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3940,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 9347,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case69_trivial_to_nontrivial": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4115,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 6407,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 12,
+      "abidiff_ms": 9
+    },
+    "case70_flexible_array_member_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3898,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5072,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 19,
+      "abidiff_ms": 21
+    },
+    "case71_inline_namespace_moved": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3479,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4643,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case72_covariant_return_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2864,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8341,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 16,
+      "abidiff_ms": 11
+    },
+    "case73_typedef_underlying_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3795,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 3406,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case74_detail_base_class_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3518,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7778,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case75_detail_embedded_by_value": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 2203,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 8495,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case76_detail_pimpl_vtable_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3917,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 7498,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 17,
+      "abidiff_ms": 17
+    },
+    "case77_detail_templated_base_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3548,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 7681,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 9,
+      "abidiff_ms": 9
+    },
+    "case78_task_arena_attach_tag": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3271,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 4943,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case79_missing_template_instantiation": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3416,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4911,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 7
+    },
+    "case80_pimpl_shared_to_unique": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3698,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 43324,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 31,
+      "abidiff_ms": 37
+    },
+    "case81_serialization_tag_reassigned": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3999,
+      "abicc_xml": "TIMEOUT",
+      "abicc_xml_ms": 90092,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case82_sycl_overload_set_removed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3250,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5010,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 17
+    },
+    "case83_cpu_dispatch_isa_dropped": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3902,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5335,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case84_bundle_soname_skew": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case85_internal_template_signature_changed": {
+      "abicc_dumper": "TIMEOUT",
+      "abicc_dumper_ms": 92889,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5685,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 13,
+      "abidiff_ms": 5
+    },
+    "case86_tag_struct_renamed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3839,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5653,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 14,
+      "abidiff_ms": 11
+    },
+    "case87_default_template_arg_changed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2629,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5434,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 7
+    },
+    "case88_cpo_kind_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3807,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 5423,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 7
+    },
+    "case89_inline_accessor_renamed_pimpl_member": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 4108,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 48564,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 42,
+      "abidiff_ms": 39
+    },
+    "case90_bundle_intra_dep_removed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case91_bundle_intra_signature_drift": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case92_bundle_provider_changed": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case93_bundle_manifest_drift": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
+    },
+    "case94_empty_tag_gained_state": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3595,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 8595,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case95_allocator_nested_typedef_removed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3919,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 2837,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 8
+    },
+    "case96_hidden_friend_removed": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 2940,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5572,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 14,
+      "abidiff_ms": 11
+    },
+    "case97_api_depends_on_consumer_env": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 3921,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5090,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 4
+    },
+    "case98_cxx_standard_floor_raised": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3712,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 5276,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 12,
+      "abidiff_ms": 20
+    },
+    "case99_experimental_graduated": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 3536,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 4726,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 5
+    }
+  },
+  "schema": "abicheck-frozen-competitor/1.0",
+  "tool_versions": {
+    "abi-compliance-checker": "2.3",
+    "abidiff": "abidiff: 2.4.0"
+  },
+  "tools": [
+    "abicc_dumper",
+    "abicc_xml",
+    "abidiff",
+    "abidiff_headers"
+  ]
+}

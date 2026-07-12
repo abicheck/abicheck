@@ -367,7 +367,159 @@ Two directions matter, not just one:
 
 ---
 
+## Full-catalog benchmark (2026-07-12, all 170 cases)
+
+Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
+misses** — a tool that hung, crashed, or simply has no mode for a case shape
+scores exactly like a wrong verdict. This is a stricter (and more honest)
+denominator than "accuracy over cases the tool managed to complete," so read
+it as the answer to *"if I pointed this tool at the whole catalog blind, how
+often would it tell me the truth?"*
+
+```bash
+python3 scripts/benchmark_comparison.py \
+  --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
+  --skip-compat --freeze abidiff abidiff_headers abicc_dumper abicc_xml
+```
+
+| Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
+|------|:---:|:---:|:---:|:---:|:---:|
+| **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
+| **abicheck (L3-L5, +sources)** | 153 | 90.0% | 7 | 10 | 719s (~12 min) |
+| libabigail (`abidiff`) | 52 | 30.6% | 3 | 115 | **~1s** |
+| libabigail + headers | 52 | 30.6% | 3 | 115 | **~2-5s** |
+| ABICC (abi-dumper) | 73 | 42.9% | 2 | 90 | 2534s (**~42 min**) |
+| ABICC (xml/legacy) | 80 | 47.1% | 1 | 84 | 2143s (**~36 min**) |
+
+**ABICC is roughly 500-2500× slower than libabigail** for the identical
+170-case catalog (2143-2534s vs ~1-5s) while scoring *lower* on accuracy than
+abicheck's L2 lane. This is why ABICC/libabigail results are frozen
+(`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
+reference file merged into every subsequent run automatically — rather than
+re-run on every abicheck iteration; nothing in a competitor's own verdict
+changes when abicheck itself is patched.
+
+**Reading the false-positive/false-negative split:** a false positive is a
+tool *over-calling* severity (reporting a worse verdict than the true one —
+crying wolf); a false negative is *under-calling* it (silence on a real
+break, including every SKIP/ERROR/TIMEOUT, since a tool that cannot tell you
+about a break failed to warn just as surely as one that said COMPATIBLE).
+
+- **libabigail's misses are overwhelmingly false negatives** (115/170,
+  DWARF has no view into noexcept/static/const/layout-invisible changes) —
+  it rarely cries wolf (FP=3), it mostly stays silent.
+- **ABICC's misses skew false-negative too** (84-90/170) but for a different
+  reason: a large share are `SKIP`/`ERROR`/`TIMEOUT` outright rather than a
+  wrong-but-confident verdict — see the slowest-case tables the benchmark
+  prints (`case85`, `case09`, `case105`, `case109`... routinely hit the 90s
+  timeout on both ABICC modes in this environment).
+- **abicheck L3-L5's 7 false positives** are the one lane here with a real
+  over-calling problem — the source-replay/build-context path is
+  intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
+  doesn't attempt), and this is tracked as a known gap, not hidden.
+
+> **abicheck L3-L5's numbers above are post-fix (three rounds).** An earlier
+> pass scored the L3-L5 lane at only 104/170 (61.2%, FP=17, FN=49, 3977s).
+> Most of that gap was benchmark-harness bugs, not a product regression:
+>
+> 1. `_build_plugin_side` forced `-include <header>` into every
+>    plugin-instrumented compile, which crashes any fixture whose `.c` file
+>    independently redefines a type also declared in its header (a common,
+>    legal pattern — case07, case08, case09, case14, case19, case21-23,
+>    case25, case26, ...); the CMake macro already has a proper per-case
+>    opt-in for this (`V{version}_FORCE_INCLUDE`), so the blanket duplicate
+>    was redundant and actively harmful. Removed it.
+> 2. The pack validator rejected `case04_no_change` as "wrong release
+>    translation units" because its `CMakeLists.txt` deliberately points
+>    both `V1_SOURCES`/`V2_SOURCES` at the same file to guarantee zero diff
+>    — the naive `v1.c`/`v2.c` filename guess couldn't see that. Fixed via
+>    a new `_cmake_declared_source()` helper that reads the real compiled
+>    source from `CMakeLists.txt`.
+>
+> These two recovered 12 cases and cut total time ~5.7× (104/170, 61.2% →
+> 116/170, 68.2%; 3977s → 694s).
+>
+> 3. The special-case dispatcher (audit/cross-source, bundles, BTF, L3-L5
+>    fixture packs, snapshot-pairs, Python stubs — 28 cases with no
+>    compilable v1/v2 source at all) only ever credited the `abicheck`
+>    column, leaving `abicheck_full` at its `SKIP` default regardless of
+>    which tools were active — these fixtures never go through a build lane,
+>    so there is no L2-vs-full distinction to make. Now credits both.
+>    `case16_inline_to_non_inline`'s `.cpp` is genuinely header-only (empty,
+>    inline function lives entirely in the header) and needed
+>    `V{version}_FORCE_INCLUDE` to produce any plugin facts at all — added
+>    it, converting an `ERROR` into a real verdict.
+>
+> Recovered 28 more cases: 116/170 (68.2%) → 144/170 (84.7%).
+>
+> 4. `PUBLIC_REACHABILITY_CHANGED` was firing for declarations entering the
+>    public-reachability closure even when they were *brand new* (didn't
+>    exist in the old version at all) or fully removed — duplicating the
+>    already-correct `var_added`/`func_added`/`var_removed`/`func_removed`
+>    finding at an inflated severity. Narrowed to only fire for a
+>    declaration present in *both* graphs (a real "persisting decl crosses
+>    the public boundary" signal, not a same-turn addition/removal) —
+>    a deliberate product-policy change, not a benchmark-harness fix, since
+>    it replaces the behavior an existing test previously locked in.
+> 5. 14 example cases (`case03`, `case05`, `case13`, `case16`, `case47`,
+>    `case49`, `case52`, `case54`, `case61`, `case62`, `case99`, `case136`-
+>    `138`) named their per-version source files inconsistently (`v1.c`/
+>    `v2.c`, `bad.c`/`good.c` — a different basename per version) instead of
+>    the `old/lib.<ext>`+`new/lib.<ext>` convention already used by
+>    `case19` onward. For a case with only one declaring file per side,
+>    `_common_prefix_len()` had no sibling file to structurally compare
+>    against, so it fell back to comparing the full absolute path —
+>    `old/lib.c` vs `new/lib.c` still differ there, so
+>    `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED` false-fired on every one of
+>    them. Renamed all 14 to the shared-basename convention and gave
+>    `_common_prefix_len()` a single-declaring-file fallback (reserve just
+>    the filename, matching the "unmoved" outcome multi-file sides already
+>    reach structurally) so a lone declaring file can't be mistaken for a
+>    real cross-version move.
+>
+> Recovered 9 more cases and cut the false-positive count more than half:
+> 144/170 (84.7%, FP=17) → **153/170 (90.0%, FP=7)**.
+
+**What's structurally left for the L3-L5 lane** (17 remaining misses):
+
+- **3 (`case118`-`120`) have no `CMakeLists.txt` at all** — the plugin-build
+  lane can only compile CMake targets, so these are structurally unreachable
+  without a direct-compile-with-plugin-flags fallback (mirroring the L2
+  lane's `compile_so()`), not yet implemented. They `ERROR` rather than score.
+- **6 are documented detector gaps shared with the L2 lane** (`case20`,
+  `case78`, `case97`, `case105`, `case111`, `case165`) — not new, not
+  L3-L5-specific; see the L2 miss list below for the root cause of each.
+- **5 are a residual, smaller-scale version of the reachability over-call**
+  (`case16`, `case47`, `case54`, `case62`, `case99`): each is a genuinely
+  compatible change whose declaration crosses the public-reachability
+  boundary in a way that isn't a same-turn add/remove (e.g. an
+  already-existing-but-newly-reachable inline definition), so the narrowed
+  `PUBLIC_REACHABILITY_CHANGED` still fires — correctly, by its own logic —
+  at `COMPATIBLE_WITH_RISK`/`API_BREAK` instead of the expected
+  `COMPATIBLE`. This is the same over-sensitivity tradeoff as before, just
+  scoped down from 15 cases to 5 by the fix above; further narrowing is
+  again a product-policy call (how much cross-boundary movement should
+  read as risk vs. noise), not a mechanical bug.
+- **3 remaining are one-off** (`case83`, `case103`, `case122`) needing
+  individual triage.
+
+abicheck L2's 10 misses (170 − 160): `case20`, `case78`, `case97`
+(enum-as-literal-constant / hidden-friend-adjacent gaps sharing one root
+cause, see `docs/development/goals.md`), `case105`, `case111` (documented
+detector gaps), `case130`-`case133` (build-mode flips that structurally
+need `-p build/` L3 context, which the L2-only lane doesn't pass), and
+`case165_polymorphic_nonvirtual_dtor` (returned `COMPATIBLE` instead of
+`COMPATIBLE_WITH_RISK` — a deployment-risk classification gap, not a missed
+break).
+
+---
+
 ## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
+
+> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
+> above, which covers all 170 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
+> count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
+> release-pinned methodology and historical numbers.
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
 74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.

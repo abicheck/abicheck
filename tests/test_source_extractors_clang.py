@@ -1959,6 +1959,47 @@ def test_macros_suppress_hpp_include_guard() -> None:
     assert names == {"BAR_VALUE"}
 
 
+def test_macros_suppress_project_prefixed_include_guard(tmp_path) -> None:
+    # A project-prefixed guard (e.g. CASE47_V1_HPP) doesn't derive from the
+    # filename at all, so the filename-only heuristic misses it — this is
+    # exactly what examples/case47_inline_to_outlined's headers do, and it
+    # was firing a false public_macro_removed between two such guards. The
+    # structural fallback reads the file and recognizes the leading
+    # #ifndef/#define pair as the real guard regardless of its spelling.
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
+
+    header = tmp_path / "lib.hpp"
+    header.write_text(
+        "/* case47: a leading file-header comment, like the real fixture. */\n"
+        "#ifndef CASE47_V1_HPP\n#define CASE47_V1_HPP\n\nclass Calculator {};\n"
+    )
+    text = (
+        f'# 1 "{header}" 1\n'
+        "#define CASE47_V1_HPP\n"
+        "#define CASE47_VALUE 3\n"
+    )
+    macros, _ = macros_from_preprocessor(text, [str(header)])
+    names = {e.qualified_name for e in macros}
+    assert names == {"CASE47_VALUE"}
+
+
+def test_macros_keep_project_prefixed_guard_lookalike_when_not_leading(
+    tmp_path,
+) -> None:
+    # The structural fallback only recognizes the *leading* #ifndef/#define
+    # pair as a whole-file guard (see _include_guard_macro) — a same-spelled
+    # macro defined after real code is a deliberate re-definition, not a
+    # guard, and must survive as a real macro entity.
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
+
+    header = tmp_path / "lib.hpp"
+    header.write_text("class Calculator {};\n#define CASE47_V1_HPP\n")
+    text = f'# 1 "{header}" 1\n#define CASE47_V1_HPP\n'
+    macros, _ = macros_from_preprocessor(text, [str(header)])
+    names = {e.qualified_name for e in macros}
+    assert names == {"CASE47_V1_HPP"}
+
+
 def test_macros_track_private_macro_only_header_as_cache_dep() -> None:
     # A private header that defines a macro gating an #if in a public header is
     # seen only by the preprocessor (no public macro entity, no AST node), but it

@@ -54,6 +54,7 @@ reported.
 
 ## Source files
 
+- `CMakeLists.txt`
 - `app.c`
 - `v1.c`
 - `v1.h`

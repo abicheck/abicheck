@@ -144,6 +144,25 @@ class TestAbiAudit:
         assert data["status"] == "error"
         assert "timed out" in data["error"]
 
+    def test_header_is_passed_as_public_header(self, tmp_path: Path, monkeypatch):
+        """abi_audit documents ``headers`` as "Public header files" — it must
+        actually classify provenance with them, matching abi_dump/abi_compare."""
+        snap = _snapshot_file(tmp_path)
+        hdr = tmp_path / "api.h"
+        hdr.write_text("int foo(void);\n", encoding="utf-8")
+
+        captured: dict[str, object] = {}
+        original_resolve = ms._resolve_input
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            captured["public_headers"] = kwargs.get("public_headers")
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(ms, "_resolve_input", _spy)
+        data = json.loads(abi_audit(str(snap), headers=[str(hdr)]))
+        assert data["status"] == "ok"
+        assert captured["public_headers"] == [hdr]
+
 
 # ===================================================================
 # abi_estimate  (lines 982-1032)

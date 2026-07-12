@@ -65,6 +65,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .diff_cxx_rules import owner_class_of
 from .model import ScopeOrigin, Visibility
 
 if TYPE_CHECKING:
@@ -87,6 +88,15 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "constant_changed",
         "constant_removed",
         "constant_added",
+        # A hidden friend (an in-class `friend` operator with no namespace-
+        # scope declaration, found only via ADL) can never produce an
+        # exported symbol by construction — it is compiled inline into every
+        # caller. Requiring ELF-export presence for this kind is therefore
+        # never satisfiable, so the reachability classifier would demote
+        # every hidden-friend finding as "not-exported" regardless of how
+        # genuinely public the operator is (examples/case96_hidden_friend_removed).
+        "hidden_friend_removed",
+        "hidden_friend_added",
     }
 )
 
@@ -383,6 +393,16 @@ def _seed_public_roots(
             seed_types |= _type_identifiers(fn.return_type)
             for p in fn.params:
                 seed_types |= _type_identifiers(getattr(p, "type", None))
+            # A public *method* makes its enclosing class directly public even
+            # when the method's own signature carries no class-typed return/
+            # param (e.g. `void process();`) — the class is exported and
+            # consumers can declare/allocate/inherit it by value, so its own
+            # layout and base-class changes must not be scoped out as
+            # "non-public-type" just because no *other* signature happens to
+            # reference it.
+            owner = owner_class_of(fn)
+            if owner:
+                seed_types |= _type_identifiers(owner)
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys

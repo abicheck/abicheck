@@ -836,6 +836,32 @@ class TestAbiDump:
         data = json.loads(raw)
         assert data["status"] == "ok"
 
+    def test_headers_are_passed_as_public_headers(self, tmp_path: Path, monkeypatch):
+        """abi_dump documents ``headers`` as "Public header file paths" — it
+        must actually classify provenance with them, mirroring the CLI
+        ``compare --header`` fix."""
+        from abicheck import mcp_server
+
+        snap = _make_snapshot("1.0")
+        snap_path = tmp_path / "input.json"
+        _write_snapshot(snap_path, snap)
+        hdr = tmp_path / "api.h"
+        hdr.write_text("int foo(void);\n", encoding="utf-8")
+
+        captured: dict[str, object] = {}
+        original_resolve = mcp_server._resolve_input
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            captured["public_headers"] = kwargs.get("public_headers")
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
+
+        raw = abi_dump(str(snap_path), headers=[str(hdr)])
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert captured["public_headers"] == [hdr]
+
 
 # ===================================================================
 # 11. abi_compare (with mocked _resolve_input)
@@ -1087,9 +1113,9 @@ class TestAbiCompare:
         captured: list[tuple[str, list]] = []
         original_resolve = mcp_server._resolve_input
 
-        def _spy(path, headers, includes, version, lang):
+        def _spy(path, headers, includes, version, lang, **kwargs):
             captured.append((str(path), list(headers)))
-            return original_resolve(path, headers, includes, version, lang)
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
 
         monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
 
@@ -1111,6 +1137,39 @@ class TestAbiCompare:
         assert len(captured) == 2
         for _path, hdrs in captured:
             assert hdrs == []
+
+    def test_headers_are_passed_as_public_headers(self, tmp_path: Path, monkeypatch):
+        """abi_compare's ``old_headers``/``new_headers`` are documented as
+        header files just like the CLI's ``compare --header`` — both sides
+        must be threaded through as the public-header set for provenance."""
+        from abicheck import mcp_server
+
+        captured: list[tuple[str, object]] = []
+        original_resolve = mcp_server._resolve_input
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            captured.append((version, kwargs.get("public_headers")))
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
+
+        snap = _make_snapshot("1.0")
+        old_p, new_p = self._make_pair(tmp_path, snap, snap)
+        old_hdr = tmp_path / "old.h"
+        old_hdr.write_text("int foo(void);\n", encoding="utf-8")
+        new_hdr = tmp_path / "new.h"
+        new_hdr.write_text("int foo(void);\n", encoding="utf-8")
+
+        raw = abi_compare(
+            str(old_p),
+            str(new_p),
+            old_headers=[str(old_hdr)],
+            new_headers=[str(new_hdr)],
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert dict(captured)["old"] == [old_hdr]
+        assert dict(captured)["new"] == [new_hdr]
 
     def test_report_mode_leaf(self, tmp_path: Path):
         snap = _make_snapshot("1.0")

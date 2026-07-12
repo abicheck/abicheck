@@ -47,15 +47,30 @@ from .provenance import build_public_set, classify_origin, header_from_location
 #: diffing. castxml passes GNU attributes through its compound ``attributes``
 #: string, optionally prefixed (``gnu:nonnull(1)``); arguments are kept as
 #: part of the normalized token so ``nonnull(1)`` → ``nonnull(2)`` is a change.
-_CONTRACT_ATTRIBUTE_BASES = frozenset({
-    "noreturn", "nonnull", "returns_nonnull", "malloc", "format",
-    "format_arg", "alloc_size", "alloc_align", "warn_unused_result",
-    "sentinel",
-    # calling-convention selections — a flip is an ABI change on the
-    # affected targets, reported via the contract-attribute kinds.
-    "cdecl", "stdcall", "fastcall", "thiscall", "regparm", "ms_abi",
-    "sysv_abi", "vectorcall",
-})
+_CONTRACT_ATTRIBUTE_BASES = frozenset(
+    {
+        "noreturn",
+        "nonnull",
+        "returns_nonnull",
+        "malloc",
+        "format",
+        "format_arg",
+        "alloc_size",
+        "alloc_align",
+        "warn_unused_result",
+        "sentinel",
+        # calling-convention selections — a flip is an ABI change on the
+        # affected targets, reported via the contract-attribute kinds.
+        "cdecl",
+        "stdcall",
+        "fastcall",
+        "thiscall",
+        "regparm",
+        "ms_abi",
+        "sysv_abi",
+        "vectorcall",
+    }
+)
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:
@@ -70,7 +85,7 @@ def _extract_contract_attributes(attributes: str) -> list[str]:
         token = raw
         for prefix in ("gnu::", "gnu:", "__"):
             if token.startswith(prefix):
-                token = token[len(prefix):]
+                token = token[len(prefix) :]
         token = token.strip("_")
         base = token.split("(", 1)[0]
         if base in _CONTRACT_ATTRIBUTE_BASES:
@@ -104,6 +119,20 @@ def _ref_qualifier_from_mangled(mangled: str) -> str:
     if m is None:
         return ""
     return "&" if m.group(1) == "R" else "&&"
+
+
+#: Prefix marking a snapshot key synthesized for a constructor overload whose
+#: real mangled name castxml omitted (see ``_CastxmlParser._function_mangled_name``).
+#: It is intentionally not a real ABI symbol, only a stable per-overload
+#: identity — ``diff_symbols._public_functions()`` reads this to exempt such
+#: entries from its ELF-export-set narrowing, which they could never pass (the
+#: key has no real exported symbol to match).
+SYNTHETIC_CTOR_KEY_PREFIX = "__abicheck_ctor__"
+
+
+def is_synthetic_ctor_key(key: str) -> bool:
+    """Whether *key* is a castxml constructor-overload synthetic identity."""
+    return key.startswith(SYNTHETIC_CTOR_KEY_PREFIX)
 
 
 class _CastxmlParser:
@@ -219,6 +248,14 @@ class _CastxmlParser:
             base = self._type_name(el.get("type", ""), depth + 1)
             const = "const " if el.get("const") == "1" else ""
             return f"{const}{base}"
+        if tag == "ElaboratedType":
+            # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
+            # Foo`, `enum Foo` used directly rather than via a typedef) in an
+            # ElaboratedType node with no `name` attribute of its own — resolve
+            # through to the real underlying type instead of falling through to
+            # the `tag` fallback below (which would literally return
+            # "ElaboratedType").
+            return self._type_name(el.get("type", ""), depth + 1)
         if tag in ("Struct", "Class", "Union"):
             return el.get("name", "?")
         if tag == "Typedef":
@@ -264,6 +301,54 @@ class _CastxmlParser:
             return Visibility.ELF_ONLY
         if name and name in self._exported_static:
             return Visibility.ELF_ONLY
+        return Visibility.HIDDEN
+
+    def _constructor_visibility(
+        self,
+        raw_mangled: str,
+        name: str,
+        access: AccessLevel,
+        is_deleted: bool,
+        is_artificial: bool,
+    ) -> Visibility:
+        """Visibility for a Constructor element, with a source-access fallback.
+
+        ``_visibility()`` is an ELF-symbol-table lookup: it needs a real
+        mangled name to check. When castxml omits the mangled name for a
+        user-declared, overloaded constructor (a documented castxml gap —
+        see :func:`_function_mangled_name`'s synthesis comment), the ELF
+        lookup can never match *any* overload of that constructor — the
+        class's bare name never appears as its own exported symbol (Itanium
+        mangling always applies to constructors), so every such overload
+        would silently classify HIDDEN regardless of whether it is genuinely
+        callable from outside the library. That hid both a removed public
+        constructor overload (case78: FUNC_REMOVED never fired for
+        ``task_arena(attach_mode_t)``) and an added one (case111: FUNC_ADDED
+        never fired for the new ``std::function<int()>`` overload) behind
+        `_public_functions()`'s PUBLIC/ELF_ONLY filter.
+
+        Falls back to the real ELF lookup first (it stays authoritative
+        whenever it can actually resolve something); only when that lookup
+        has no mangled name to work with does a public, non-deleted,
+        **user-declared** (``is_artificial`` false) constructor default to
+        PUBLIC — the same "declared public in a public header, without
+        contrary evidence" principle already used for source-graph
+        public-surface classification
+        (:data:`abicheck.buildsource.source_graph.PUBLIC_VISIBILITIES`).
+        Compiler-generated implicit constructors (default/copy/move, marked
+        ``artificial="1"``) are excluded: they have no source declaration of
+        their own to compare across versions, so promoting them would treat
+        every trivial aggregate's synthesized ctors as a churny "added"/
+        "removed" API surface instead of staying silent like the clang
+        header backend already does for them.
+        """
+        resolved = self._visibility(raw_mangled, name)
+        if raw_mangled:
+            return resolved  # a real name was checked — trust a negative too
+        if resolved is not Visibility.HIDDEN:
+            return resolved  # matched via the bare name (e.g. C linkage)
+        if access == AccessLevel.PUBLIC and not is_deleted and not is_artificial:
+            return Visibility.PUBLIC
         return Visibility.HIDDEN
 
     def _is_builtin_element(self, el: Element) -> bool:
@@ -402,7 +487,7 @@ class _CastxmlParser:
             # normalized parameter types; it is intentionally not an ABI
             # symbol, only a stable snapshot key for source-level overloads.
             param_sig = ",".join(p.type for p in params)
-            return f"__abicheck_ctor__{name}({param_sig})"
+            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{name}({param_sig})"
         return name  # C functions: use plain name
 
     def _function_source_location(
@@ -506,13 +591,22 @@ class _CastxmlParser:
         )
 
         source_loc, loc_el = self._function_source_location(el)
+        access = self._access_level(el)
+        is_deleted = el.get("deleted") == "1"
+        visibility = (
+            self._constructor_visibility(
+                raw_mangled, name, access, is_deleted, el.get("artificial") == "1"
+            )
+            if el.tag == "Constructor"
+            else self._visibility(raw_mangled, name)
+        )
 
         return Function(
             name=name,
             mangled=mangled,
             return_type=ret_type,
             params=params,
-            visibility=self._visibility(raw_mangled, name),
+            visibility=visibility,
             is_virtual=is_virtual,
             is_noexcept=bool(noexcept_re),
             is_extern_c=is_extern_c,
@@ -522,10 +616,10 @@ class _CastxmlParser:
             is_const=el.get("const") == "1",
             is_volatile=el.get("volatile") == "1",
             is_pure_virtual=el.get("pure_virtual") == "1",
-            is_deleted=el.get("deleted") == "1",
+            is_deleted=is_deleted,
             # castxml emits inline="1" for inline functions/methods
             is_inline=el.get("inline") == "1",
-            access=self._access_level(el),
+            access=access,
             return_pointer_depth=ret_ptr_depth,
             ref_qualifier=self._function_ref_qualifier(el, mangled),
             is_explicit=self._function_is_explicit(el, loc_el),

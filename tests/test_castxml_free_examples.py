@@ -117,6 +117,11 @@ def _sources(case_dir: Path) -> tuple[Path, Path]:
             if not v2.exists() and case_dir.name == "case04_no_change":
                 v2 = v1  # identical sources → NO_CHANGE
             return v1, v2
+    # old/lib.<ext>+new/lib.<ext> subdirectory convention (case19+).
+    for ext in (".c", ".cpp"):
+        v1 = case_dir / "old" / f"lib{ext}"
+        if v1.exists():
+            return v1, case_dir / "new" / f"lib{ext}"
     pytest.fail(f"{case_dir.name}: no v1/v2 source layout")
 
 

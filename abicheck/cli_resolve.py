@@ -258,6 +258,8 @@ def _resolve_input(
     debug_format: str | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -280,6 +282,11 @@ def _resolve_input(
             detects the format from magic bytes.
         dwarf_only: If True, force DWARF-only mode (ADR-003).
         debug_format: Force debug format ("dwarf", "btf", "ctf") or None for auto.
+        public_headers / public_header_dirs: Public-header set used to tag
+            declaration provenance (ADR-024/ADR-015). Callers that already
+            treat *headers* as the public contract (e.g. ``compare``'s
+            ``--header``, which is documented as "Public header file or
+            directory") should pass the same paths here too.
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -297,6 +304,8 @@ def _resolve_input(
             debug_format=debug_format,
             header_backend=header_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -489,6 +498,10 @@ def _resolve_compare_snapshots(
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
+    # compare's --header is documented as "Public header file or directory"
+    # (unlike dump's split -H/--public-header, compare has no lower-level
+    # "parse only, don't classify" mode) — so the same paths given via
+    # --header double as the public-header set for provenance tagging.
     old = _resolve_input(
         old_input,
         old_h,
@@ -501,6 +514,7 @@ def _resolve_compare_snapshots(
         debug_format=debug_format,
         header_backend=old_backend,
         compile=compile_context,
+        public_headers=old_h,
     )
     new = _resolve_input(
         new_input,
@@ -514,6 +528,7 @@ def _resolve_compare_snapshots(
         debug_format=debug_format,
         header_backend=new_backend,
         compile=compile_context,
+        public_headers=new_h,
     )
     if follow_deps:
         if old_fmt == "elf":

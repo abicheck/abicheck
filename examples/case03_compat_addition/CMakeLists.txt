@@ -1,8 +1,8 @@
 abicheck_add_case(case03_compat_addition
-    V1_SOURCES v1.c
-    V2_SOURCES v2.c
-    V1_HEADERS v1.h
-    V2_HEADERS v2.h
+    V1_SOURCES old/lib.c
+    V2_SOURCES new/lib.c
+    V1_HEADERS old/lib.h
+    V2_HEADERS new/lib.h
     APP_SOURCES app.c
     PLATFORMS linux macos windows
 )

@@ -60,6 +60,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
 from ..source_abi import SourceAbiTu, SourceEntity, SourceLocation
@@ -749,30 +750,38 @@ def _is_include_guard(name: str, value: str, file: str) -> bool:
     """Whether ``name`` is the include guard of ``file`` (ADR-030 follow-up #2).
 
     Include guards (``#ifndef FOO_H`` / ``#define FOO_H``) surface from the
-    ``-E -dD`` pass as empty-valued macro entities — harmless but noisy. They are
-    suppressed when **both** hold, which keeps a real empty feature flag (e.g.
+    ``-E -dD`` pass as empty-valued macro entities — harmless but noisy. Both
+    checks below require an empty replacement (a guard never expands to
+    anything), which keeps a real empty feature flag (e.g.
     ``#define FOO_ENABLED``) from being dropped:
 
-    - the macro has an empty replacement (a guard never expands to anything), and
-    - its normalized name, with any surrounding underscores stripped, equals the
-      header's filename-derived token including the extension suffix
-      (``foo.h`` → ``FOO_H``; matches ``FOO_H``, ``_FOO_H``, ``FOO_H_``,
-      ``__FOO_H__``).
-
-    The match is *exact*, not a substring, so an intentional empty feature macro
-    that merely starts with the stem (``FOO_H_FEATURE``, ``FOO_H_DEPRECATED``) is
-    **not** dropped — only the guard spelling itself is. A guard that does not
-    derive from the filename (``#ifndef GUARD_12345``) is left in place — a
-    deliberate false-negative over risking a false suppression. (The parser does
-    not see the matching ``#ifndef``, so the spelling is the only signal.)
+    - **Filename-derived** (cheap, no I/O): the name, with surrounding
+      underscores stripped, equals the header's filename-derived token
+      including the extension suffix (``foo.h`` → ``FOO_H``; matches
+      ``FOO_H``, ``_FOO_H``, ``FOO_H_``, ``__FOO_H__``). Exact match, not a
+      substring, so an intentional empty feature macro that merely starts
+      with the stem (``FOO_H_FEATURE``) is not dropped.
+    - **Structural** (fallback): a project-prefixed guard
+      (``MYLIB_FOO_H``, ``CASE47_V1_HPP``) doesn't derive from the filename
+      at all, so the preprocessed ``-E -dD`` stream's spelling-only signal
+      misses it. Reading the file's own source and checking whether ``name``
+      is genuinely its leading ``#ifndef``/``#define`` pair (the standard
+      whole-file guard idiom, see :func:`_include_guard_macro`) catches this
+      regardless of naming convention. Best-effort: a read failure just skips
+      to the false-negative default below.
     """
     if value or not file:
         return False
     base = re.split(r"[\\/]", file)[-1]
     stem = re.sub(r"[^A-Za-z0-9]+", "_", base).upper().strip("_")  # foo.h -> FOO_H
-    if not stem:
+    if stem and name.upper().strip("_") == stem:
+        return True
+    try:
+        text = Path(file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
         return False
-    return name.upper().strip("_") == stem
+    lines = _strip_comments(text).splitlines()
+    return _include_guard_macro(lines) == name
 
 
 def _unfold_continuations(lines: list[str]) -> list[str]:

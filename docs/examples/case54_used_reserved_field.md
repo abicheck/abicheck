@@ -94,9 +94,5 @@ cp /tmp/abicheck-examples-build/case55_used_reserved_field/libv2.so "$tmp/libv1.
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `bad.h`
-- `good.c`
-- `good.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

@@ -217,6 +217,34 @@ class TestComputePublicSurface:
         surf = compute_public_surface(snap)
         assert {"ns1::Impl", "ns2::Impl"} <= surf.public_types
 
+    def test_public_method_seeds_its_own_class_even_without_typed_signature(self):
+        # A public method with an all-void/no-param signature (`void
+        # process();`) carries no return/param type for the closure to seed
+        # from — but the class itself is directly exported/instantiable, so
+        # its own layout and base classes must stay public regardless
+        # (examples/case37_base_class, case43_base_class_member_added).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("process", mangled="_ZN11ReorderDemo7processEv")],
+            types=[_rec("ReorderDemo", bases=("Logger",)), _rec("Logger")],
+        )
+        surf = compute_public_surface(snap)
+        assert "ReorderDemo" in surf.public_types
+        assert "Logger" in surf.public_types
+
+    def test_free_function_does_not_seed_unrelated_class(self):
+        # Sanity check: a free function's mangled name has no class scope to
+        # extract, so it must not spuriously mark some unrelated type public.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("free_fn", mangled="_Z7free_fnv")],
+            types=[_rec("Unrelated")],
+        )
+        surf = compute_public_surface(snap)
+        assert "Unrelated" not in surf.public_types
+
 
 # ── change_in_public_surface ────────────────────────────────────────────────
 

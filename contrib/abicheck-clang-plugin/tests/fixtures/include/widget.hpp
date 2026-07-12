@@ -17,6 +17,7 @@
 #define WIDGET_LOG(fmt, args...) fmt  // GNU named variadic → params keep `args...`
 
 #include "generated/config.hpp"  // generated public header → GENERATED origin
+#include "guarded.hpp"  // project-prefixed include guard — see guarded.hpp
 
 namespace demo {
 

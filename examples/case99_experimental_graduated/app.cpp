@@ -3,7 +3,7 @@
 // The v1-era consumer keeps compiling against v2 because the
 // experimental alias is preserved alongside the stable name. The
 // abicheck finding here is COMPATIBLE — informational, not breaking.
-#include "v1.h"
+#include "old/lib.h"
 
 int main() {
     lib::experimental::sort();

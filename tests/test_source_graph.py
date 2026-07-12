@@ -340,15 +340,46 @@ def test_findings_mapping_changed_for_persisting_decl() -> None:
     assert c.source_location == f"[{EVIDENCE_TIER_L5}]"
 
 
-def test_findings_reachability_entered_and_left() -> None:
+def test_findings_reachability_ignores_brand_new_or_removed_decls() -> None:
+    # A decl id absent from the OTHER side entirely (not merely absent from
+    # its public closure) is a brand-new/removed declaration, not a
+    # persisting one whose reachability state changed. "Entering the
+    # closure" is a trivial, expected consequence of being newly added —
+    # nothing risky about a symbol being public from birth — and that event
+    # is already reported (at the correct COMPATIBLE severity) by the
+    # ordinary addition/removal findings elsewhere in the pipeline.
     b = _build_with_public_header()
     old = build_source_graph(b, source_abi=_surface_with(
         [("foo::a", "inc/foo.h"), ("foo::gone", "inc/foo.h")], {"foo::a": "_Za"}))
     new = build_source_graph(b, source_abi=_surface_with(
         [("foo::a", "inc/foo.h"), ("foo::new", "inc/foo.h")], {"foo::a": "_Za"}))
     kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
-    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") in kinds_syms
-    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") in kinds_syms
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") not in kinds_syms
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") not in kinds_syms
+
+
+def test_findings_reachability_fires_for_persisting_decl_crossing_boundary() -> None:
+    # foo::b exists on BOTH sides (same identity, so the same "decl://foo::b"
+    # node id) but is only linked to a public header on the new side — an
+    # existing declaration crossing the public/private boundary, the
+    # genuinely risk-worthy signal this finding exists for.
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
+    kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
+
+
+def test_findings_reachability_fires_when_persisting_decl_leaves_closure() -> None:
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
+    kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
 
 
 def test_findings_empty_baseline_does_not_spam_reachability() -> None:
@@ -368,6 +399,136 @@ def test_findings_generated_header_reaches_public_api() -> None:
     gen = [c for c in findings if c.kind == ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API]
     assert len(gen) == 1
     assert "gen/config.h" in gen[0].symbol
+
+
+def test_owner_unchanged_across_different_absolute_checkout_roots() -> None:
+    # Two independent checkouts of the *same* tree (e.g. a benchmark's old/
+    # new directories, or two separate CI job workspaces) share no absolute
+    # root. The declaring file's path relative to its own tree is identical
+    # ("inc/foo.h"/"inc/bar.h" in both), so this must NOT look like every
+    # file moved just because the checkout root differs (regression for the
+    # false positive this produced across most of examples/, since the
+    # catalog's own v1/v2 fixture convention is exactly this shape).
+    old = build_source_graph(
+        _build_with_public_header(headers=("/old_root/inc/foo.h", "/old_root/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/old_root/inc/foo.h"), ("foo::c", "/old_root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/new_root/inc/foo.h", "/new_root/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/new_root/inc/foo.h"), ("foo::c", "/new_root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
+
+
+def test_owner_changed_when_relative_path_actually_moves() -> None:
+    # A genuine relocation *within* the same tree (same root, different
+    # relative path) must still fire — only the checkout-root difference is
+    # meant to be ignored, not a real declaration move.
+    b = _build_with_public_header(
+        headers=("/root/inc/foo.h", "/root/inc/bar.h", "/root/inc/baz.h"),
+    )
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/bar.h")],
+        {"foo::a": "_Za", "foo::c": "_Zc"},
+    ))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/baz.h")],
+        {"foo::a": "_Za", "foo::c": "_Zc"},
+    ))
+    findings = diff_source_graph_findings(old, new)
+    owner = [c for c in findings if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED]
+    assert len(owner) == 1
+    assert owner[0].symbol == "_Zc"
+
+
+def test_owner_changed_when_sole_declaring_file_is_renamed_both_sides() -> None:
+    # When every exported symbol on a side declares in the SAME file, the
+    # common prefix spans the whole path including the filename. If
+    # _common_prefix_len didn't reserve the filename segment, both sides
+    # would strip down to an empty "scheme://" key and a same-shape rename
+    # (foo.h -> bar.h on both sides) would be missed entirely.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/foo.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/bar.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/bar.h"), ("foo::c", "/root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    owner_syms = {
+        c.symbol for c in findings
+        if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED
+    }
+    assert owner_syms == {"_Za", "_Zc"}
+
+
+def test_owner_unchanged_when_one_side_single_file_other_multi_file() -> None:
+    # Asymmetric shapes: old has every symbol in one file (so its own common
+    # prefix would include the filename before the fix), new spreads them
+    # across two files. Declarations didn't actually move, so nothing should
+    # fire even though the two sides' "common prefix" lengths differ.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/inc/foo.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root2/inc/foo.h", "/root2/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/root2/inc/foo.h"), ("foo::c", "/root2/inc/foo.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
+
+
+def test_owner_unchanged_when_only_one_persisting_symbol_declares() -> None:
+    # A side with exactly ONE declaring file has no sibling entry to compute
+    # a shared directory prefix against, so the "reserve the filename" rule
+    # (case04-style) never engaged and the raw absolute path was compared —
+    # "case03/old/lib.h" vs "case03/new/lib.h" looked like a real move for
+    # any case whose only persisting exported symbol shares its header with
+    # no other symbol (a single-symbol library, or a brand-new symbol added
+    # alongside the one persisting symbol). Must fall back to basename-only
+    # identity, same as the multi-symbol cases below it.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/old/lib.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/old/lib.h")], {"foo::a": "_Za"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root/new/lib.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/new/lib.h"), ("foo::b", "/root/new/lib.h")],
+            {"foo::a": "_Za", "foo::b": "_Zb"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
 
 
 def test_findings_identical_graphs_yield_nothing() -> None:

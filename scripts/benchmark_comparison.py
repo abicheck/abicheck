@@ -84,8 +84,9 @@ def _abicheck_available() -> bool:
 _HAS_ABICHECK: bool = _abicheck_available()
 
 
-DEFAULT_ABICC_TIMEOUT = 120  # seconds
-DEFAULT_ABICHECK_FULL_TIMEOUT = 120  # seconds per dump/compare call
+DEFAULT_ABICC_TIMEOUT = 90  # seconds; ABICC is the slowest tool and can hang
+DEFAULT_ABICHECK_FULL_TIMEOUT = 90  # seconds per dump/compare call
+DEFAULT_TIMEOUT = 90  # seconds; shared per-tool-call budget for one example run
 
 # Historical release-pinned cross-tool benchmark:
 # cases 01-73 plus the 26b compatible-union edge case.  The full catalog can
@@ -354,10 +355,15 @@ def _try_v1v2_layout(case_dir: Path) -> _SourceResult:
         v1 = case_dir / f"v1{ext}"
         v2 = case_dir / f"v2{ext}"
         if v1.exists() and v2.exists():
-            hext = _header_ext(ext)
-            v1h = case_dir / f"v1{hext}"
-            v2h = case_dir / f"v2{hext}"
-            return v1, v2, v1h if v1h.exists() else None, v2h if v2h.exists() else None
+            # A .cpp source's header may still be named .h (a common C++
+            # convention) — try the language-typical extension first, but
+            # fall back to the other rather than silently resolving to no
+            # header at all (which drops the case to ELF/DWARF-only mode
+            # and hides any header-only-visible finding, e.g. case123's
+            # default-argument removal, case125's `final` specifier).
+            v1h = _find_header(case_dir, "v1")
+            v2h = _find_header(case_dir, "v2")
+            return v1, v2, v1h, v2h
     return _NO_SOURCES
 
 
@@ -458,10 +464,40 @@ def _find_or_build_abicheck_plugin(timeout: int) -> tuple[Path | None, str]:
     return None, "plugin build succeeded but library was not produced"
 
 
+def _cmake_declared_source(case_dir: Path, version: str) -> Path | None:
+    """Read ``V{version}_SOURCES`` from the case's ``CMakeLists.txt``.
+
+    ``find_sources()``'s naive ``v1.c``/``v2.c`` filename convention is only a
+    *guess* at what each target actually compiles — some fixtures (e.g. a
+    deliberate "no ABI change" case) point both ``V1_SOURCES`` and
+    ``V2_SOURCES`` at the identical file to guarantee zero diff. Returns the
+    real compiled source for *version* ("v1"/"v2"), or ``None`` if it can't be
+    determined (caller falls back to the naive guess).
+    """
+    cmakelists = case_dir / "CMakeLists.txt"
+    if not cmakelists.is_file():
+        return None
+    try:
+        text = cmakelists.read_text()
+    except OSError:
+        return None
+    m = re.search(rf"{version.upper()}_SOURCES\s+([^\s)]+)", text)
+    if not m:
+        return None
+    candidate = case_dir / m.group(1)
+    return candidate if candidate.is_file() else None
+
+
 def _plugin_pack_is_target_specific(
     pack: Path, version: str, src: Path, opposite_src: Path,
 ) -> tuple[bool, str]:
-    """Reject empty, wrong-version, or cross-release plugin evidence packs."""
+    """Reject empty, wrong-version, or cross-release plugin evidence packs.
+
+    When *src* and *opposite_src* resolve to the identical file (a fixture
+    that deliberately compiles the same translation unit for both releases),
+    there is no "wrong release" to detect — the facts are legitimately shared
+    by design, so the cross-contamination check is skipped for that pair.
+    """
     try:
         manifest = json.loads((pack / "manifest.json").read_text())
         fact_files = sorted((pack / "source_facts").glob("*.jsonl"))
@@ -470,9 +506,10 @@ def _plugin_pack_is_target_specific(
         return False, f"invalid plugin pack: {exc}"
     if manifest.get("version") != version or not fact_files or not records:
         return False, f"missing {version} target-specific source facts"
-    sources = {Path(str(record.get("source", ""))).resolve() for record in records}
-    if src.resolve() not in sources or opposite_src.resolve() in sources:
-        return False, f"{version} pack contains wrong release translation units"
+    if src.resolve() != opposite_src.resolve():
+        sources = {Path(str(record.get("source", ""))).resolve() for record in records}
+        if src.resolve() not in sources or opposite_src.resolve() in sources:
+            return False, f"{version} pack contains wrong release translation units"
     evidence_keys = {
         "declarations", "types", "functions", "variables", "macros", "templates",
         "inline_bodies", "constexpr_values", "source_edges",
@@ -511,10 +548,17 @@ def _build_plugin_side(
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"library={case}",
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", f"version={version}",
     ]
-    # Compact fixtures often define the API without including their public
-    # header. Force it into the real target compile so the pack sees that API.
-    if header and header.exists():
-        flags += ["-include", str(header)]
+    # NOTE: no forced `-include header` here. That used to be injected
+    # unconditionally so "compact fixtures that don't include their own
+    # header" would still expose it to the plugin's fact capture — but a
+    # fixture that independently redefines a type also declared in its header
+    # (a common, legal pattern in these minimal test .c files) then fails to
+    # compile with a hard redefinition error (case07/08/09/14/19/21-23/25/26
+    # and others). The CMake macro already has a real, per-case opt-in for
+    # this (`V1_FORCE_INCLUDE`/`V2_FORCE_INCLUDE` in examples/CMakeLists.txt,
+    # honored by this same target build), so duplicating it here blanket-wide
+    # was both redundant for cases that need it and actively harmful for ones
+    # that don't.
     flag_string = shlex.join(flags)
     # Inject only after CMake has validated the compilers. Putting the plugin in
     # CMAKE_{C,CXX}_FLAGS would instrument CMake's compiler probes and contaminate
@@ -544,7 +588,10 @@ def _build_plugin_side(
     except (OSError, subprocess.SubprocessError) as exc:
         return None, None, str(exc)
     library = _find_cmake_lib(side_build / case, version)
-    valid, error = _plugin_pack_is_target_specific(pack, version, src, opposite_src)
+    other_version = "v2" if version == "v1" else "v1"
+    actual_src = _cmake_declared_source(case_dir, version) or src
+    actual_opposite_src = _cmake_declared_source(case_dir, other_version) or opposite_src
+    valid, error = _plugin_pack_is_target_specific(pack, version, actual_src, actual_opposite_src)
     if library is None:
         return None, None, f"target {case}_{version} produced no shared library"
     if not valid:
@@ -552,14 +599,14 @@ def _build_plugin_side(
     return library, pack, ""
 
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                 case: str, rdir: Path) -> ToolResult:
+                 case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run the normal binary+headers abicheck benchmark lane.
 
     Keep this lane comparable with libabigail's binary/header modes.  The
     deeper source/build evidence path is exposed separately as
     ``abicheck_full``.
     """
-    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir)
+    return _run_abicheck_dump_compare(v1_so, v2_so, v1_h, v2_h, case, rdir, timeout=timeout)
 
 
 def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
@@ -597,7 +644,14 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
                     "-o", str(base), "--version", version]
             if header and header.exists():
-                dump += ["-H", str(header)]
+                # -H alone only feeds castxml which headers to parse; it does
+                # NOT mark them public for provenance classification (that's
+                # the separate, opt-in --public-header flag per ADR-015 D4).
+                # Without it every declaration's origin stays UNKNOWN, which
+                # demotes surface-scope confidence to "reduced"/"no-provenance"
+                # across the board. The benchmark's headers ARE the case's
+                # real public headers, so tell the classifier that.
+                dump += ["-H", str(header), "--public-header", str(header)]
             dr = subprocess.run(dump, capture_output=True, text=True,
                                 timeout=timeout, env=_ABICHECK_ENV)
             if dr.returncode != 0 or not base.exists():
@@ -635,7 +689,7 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
 
 def _run_abicheck_dump_compare(
     v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-    case: str, rdir: Path, *, suffix: str = "", timeout: int = 60,
+    case: str, rdir: Path, *, suffix: str = "", timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     """Run the baseline binary plus public-header dump/compare lane."""
     if not _HAS_ABICHECK:
@@ -650,7 +704,11 @@ def _run_abicheck_dump_compare(
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap),
                "--version", version]
         if header and header.exists():
-            cmd += ["-H", str(header)]
+            # See run_abicheck_full's dump() for why --public-header is
+            # needed alongside -H: without it, origin stays UNKNOWN for
+            # every declaration (ADR-015 D4 opt-in), demoting surface-scope
+            # confidence to "reduced"/"no-provenance" across the board.
+            cmd += ["-H", str(header), "--public-header", str(header)]
         run = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout, env=_ABICHECK_ENV)
         return run.returncode == 0 and snap.exists(), run.stderr or run.stdout
@@ -725,7 +783,7 @@ def _write_compat_descriptor(so: Path, h: Path | None, ver: str, out: Path) -> N
 
 # ── abicheck compat (ABICC XML drop-in) ──────────────────────────────────────
 def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run abicheck compat with ABICC-format XML descriptors."""
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
@@ -740,10 +798,10 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
         r = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compat", "check", "-lib", case,
              "-old", str(v1_xml), "-new", str(v2_xml)],
-            capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
+            capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=60_000.0)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -775,7 +833,7 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 
 # ── abicheck compat strict mode ───────────────────────────────────────────────
 def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path, timeout: int = 60) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
     """Run abicheck compat in strict mode (-s flag promotes API_BREAK→BREAKING)."""
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
@@ -799,7 +857,7 @@ def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
             capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -831,7 +889,7 @@ def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 def run_abidiff(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
                 case: str, rdir: Path,
                 headers_dir: str | None = None,
-                suffix: str = "", **_kw: Any) -> ToolResult:
+                suffix: str = "", timeout: int = DEFAULT_TIMEOUT, **_kw: Any) -> ToolResult:
     if not shutil.which("abidiff"):
         return ToolResult(verdict="SKIP")
 
@@ -845,9 +903,9 @@ def run_abidiff(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
 
     _t0 = time.monotonic()
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=60_000.0)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
     out = r.stdout + r.stderr
     (rdir / f"{case}_abidiff{suffix}.txt").write_text(out)
@@ -911,7 +969,7 @@ def run_abicc_xml(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None
             capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(verdict="TIMEOUT", elapsed_ms=float(timeout) * 1000)
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - _t0) * 1000)
     elapsed_ms = (time.monotonic() - _t0) * 1000
 
     out = r.stdout + r.stderr
@@ -998,7 +1056,8 @@ def run_abicc_dumper(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | N
 
 
 def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
-                        case: str, rdir: Path, **kw: Any) -> ToolResult:
+                        case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT,
+                        **kw: Any) -> ToolResult:
     """Wrapper: run abidiff with headers_dir resolved from v1_h/v2_h."""
     if v1_h and v1_h.exists() and v2_h and v2_h.exists() and v1_h.parent != v2_h.parent:
         headers_dir: str | tuple | None = (str(v1_h.parent), str(v2_h.parent))
@@ -1008,7 +1067,8 @@ def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
         headers_dir = str(v2_h.parent)
     else:
         headers_dir = None
-    return run_abidiff(v1_so, v2_so, v1_h, v2_h, case, rdir, headers_dir=headers_dir, suffix="_headers")
+    return run_abidiff(v1_so, v2_so, v1_h, v2_h, case, rdir, headers_dir=headers_dir,
+                       suffix="_headers", timeout=timeout)
 
 
 TOOL_REGISTRY: list[Tool] = [
@@ -1051,8 +1111,12 @@ def _correct(verdict: str, expected: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark abicheck vs abidiff vs ABICC")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help="Timeout per tool call for abicheck/abicheck_compat/"
+                        f"abicheck_strict/abidiff(+headers) (default: {DEFAULT_TIMEOUT}s)")
     p.add_argument("--abicc-timeout", type=int, default=DEFAULT_ABICC_TIMEOUT,
-                   help=f"Timeout per ABICC call (default: {DEFAULT_ABICC_TIMEOUT}s)")
+                   help="Timeout per ABICC call — ABICC is the slowest tool and can "
+                        f"hang, so keep this bounded (default: {DEFAULT_ABICC_TIMEOUT}s)")
     p.add_argument("--abicheck-full-timeout", type=int,
                    default=DEFAULT_ABICHECK_FULL_TIMEOUT,
                    help="Timeout per abicheck full-lane call "
@@ -1079,6 +1143,15 @@ def parse_args() -> argparse.Namespace:
                         "source discovers, instead of the cross-tool comparison. "
                         "Slow path: builds each case once, then runs the full "
                         "dump+compare pipeline up to 4x per case.")
+    p.add_argument("--freeze", nargs="+", metavar="TOOL",
+                   help=f"After this run, persist the named tools' per-case results to "
+                        f"{FROZEN_COMPETITOR_PATH.relative_to(REPO_DIR)} (committed reference "
+                        "data). Use for abidiff/ABICC once, then iterate on abicheck-only "
+                        "runs without re-paying their 30-50min cost — frozen columns are "
+                        "merged into every subsequent run's summary automatically.")
+    p.add_argument("--no-frozen", action="store_true",
+                   help="Don't merge in previously-frozen competitor data (default: merge "
+                        "it in for any tool not actively selected this run).")
     return p.parse_args()
 
 
@@ -1158,8 +1231,64 @@ def _accuracy(results: list[dict], key: str, expected_key: str = "expected") -> 
     return correct, len(scored)
 
 
+def _coverage_accuracy(results: list[dict], key: str, expected_key: str = "expected") -> tuple[int, int]:
+    """Accuracy over the full catalog denominator (every row in *results*).
+
+    Unlike :func:`_accuracy`, a SKIP/ERROR/TIMEOUT is *not* excluded from the
+    denominator — it counts as a miss, same as a wrong verdict: whether a tool
+    got the wrong answer, hung, crashed, or simply cannot scan the case at all
+    is immaterial to "did it produce the right answer for this catalog entry".
+    """
+    correct = sum(
+        1 for r in results
+        if r.get(expected_key, "?") != "?" and r[key] == r[expected_key]
+    )
+    return correct, len(results)
+
+
 def _total_ms(results: list[dict], ms_key: str) -> float:
     return sum(r.get(ms_key, 0) for r in results)
+
+
+# Ordinal severity so a mismatch can be classified as an over-call (false
+# positive: reported worse than reality) or an under-call (false negative:
+# reported better than reality, including SKIP/ERROR/TIMEOUT/incapacity —
+# a tool that cannot tell you about a real break failed to warn just as
+# surely as one that said COMPATIBLE). MATCH/MISS are the G20 audit lane's
+# pseudo-verdicts (there is no BREAKING/COMPATIBLE concept for a
+# single-artifact crosscheck), mapped onto the same 0/4 poles so they fold
+# into the same count.
+_VERDICT_SEVERITY_RANK: dict[str, int] = {
+    "NO_CHANGE": 0,
+    "MATCH": 0,
+    "COMPATIBLE": 1,
+    "COMPATIBLE_WITH_RISK": 2,
+    "API_BREAK": 3,
+    "BREAKING": 4,
+    "MISS": 4,
+}
+
+
+def _fp_fn_counts(
+    results: list[dict], key: str, expected_key: str = "expected",
+) -> tuple[int, int]:
+    """Count false positives (over-called) and false negatives (under-called
+    or simply incapable of scanning the case), scored over the full catalog —
+    same denominator philosophy as :func:`_coverage_accuracy`.
+    """
+    fp = fn = 0
+    for r in results:
+        exp_rank = _VERDICT_SEVERITY_RANK.get(r.get(expected_key, "?"))
+        if exp_rank is None:
+            continue
+        got_rank = _VERDICT_SEVERITY_RANK.get(r[key], -1)
+        if got_rank == exp_rank:
+            continue
+        if got_rank > exp_rank:
+            fp += 1
+        else:
+            fn += 1
+    return fp, fn
 
 
 def _tool_version(cmd: list[str]) -> str | None:
@@ -1183,6 +1312,76 @@ def _git_commit() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+# ── Frozen competitor data ────────────────────────────────────────────────────
+# ABICC/abidiff results don't depend on anything abicheck-side: nothing in
+# these tools' verdicts changes when abicheck itself is fixed, and ABICC in
+# particular takes 30-50 minutes per full-catalog run. Freeze their results
+# once into a committed JSON file and reuse it on every subsequent run instead
+# of re-running the slow tools just to re-confirm abicheck's own iteration.
+FROZEN_COMPETITOR_PATH = REPO_DIR / "scripts" / "frozen_competitor_results.json"
+
+
+def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) -> None:
+    """Persist *tool_names*' per-case verdict + timing to a committed JSON file."""
+    frozen: dict[str, Any] = {
+        "schema": "abicheck-frozen-competitor/1.0",
+        "frozen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_commit": _git_commit(),
+        "ground_truth_sha256": _ground_truth_digest(),
+        "tool_versions": {
+            "abidiff": _tool_version(["abidiff", "--version"]),
+            "abi-compliance-checker": _tool_version(["abi-compliance-checker", "-dumpversion"]),
+        },
+        "tools": tool_names,
+        "results_by_case": {},
+    }
+    for r in results:
+        entry = {
+            k: r[k]
+            for name in tool_names
+            for k in (name, f"{name}_ms")
+            if k in r
+        }
+        if entry:
+            frozen["results_by_case"][r["case"]] = entry
+    out_path.write_text(json.dumps(frozen, indent=2, sort_keys=True) + "\n")
+
+
+def _load_frozen(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def _merge_frozen_into_results(
+    results: list[dict], frozen: dict[str, Any], skip_tools: set[str],
+) -> list[str]:
+    """Merge frozen per-case tool columns into *results* in place.
+
+    *skip_tools* are tools actively run this session — frozen data must never
+    overwrite a fresh result. Returns the tool names actually merged in, so
+    the caller can fold them into the accuracy summary.
+    """
+    tools = [t for t in frozen.get("tools", []) if t not in skip_tools]
+    if not tools:
+        return []
+    by_case = frozen.get("results_by_case", {})
+    for r in results:
+        entry = by_case.get(r["case"])
+        if not entry:
+            continue
+        for name in tools:
+            if name in entry:
+                r[name] = entry[name]
+            ms_key = f"{name}_ms"
+            if ms_key in entry:
+                r[ms_key] = entry[ms_key]
+    return tools
 
 
 def _ground_truth_digest() -> str | None:
@@ -1209,6 +1408,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
         abicheck_version = "unknown"
 
     accuracy: dict[str, dict[str, Any]] = {}
+    coverage_accuracy: dict[str, dict[str, Any]] = {}
     for t in active_tools:
         correct, total = _accuracy(results, t.name, t.expected_key)
         accuracy[t.name] = {
@@ -1217,6 +1417,16 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "scored": total,
             "pct": round(100 * correct / total, 1) if total else None,
             "total_ms": round(_total_ms(results, t.ms_key)),
+        }
+        cov_correct, cov_total = _coverage_accuracy(results, t.name, t.expected_key)
+        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
+        coverage_accuracy[t.name] = {
+            "label": t.label,
+            "correct": cov_correct,
+            "total": cov_total,
+            "pct": round(100 * cov_correct / cov_total, 1) if cov_total else None,
+            "false_positives": fp,
+            "false_negatives": fn,
         }
 
     return {
@@ -1234,6 +1444,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "castxml": _tool_version(["castxml", "--version"]),
         },
         "accuracy": accuracy,
+        "coverage_accuracy": coverage_accuracy,
         "results": results,
     }
 
@@ -1352,7 +1563,19 @@ def _build_case_artifacts(
 
     if not used_prebuilt_artifacts:
         if not (cmake_file.exists() and shutil.which("cmake")):
-            print(f"  {name:<35} BUILD_PATH_UNAVAILABLE(prebuilt|cmake)")
+            # No CMakeLists.txt (optional per examples/CLAUDE.md) and no
+            # prebuilt artifact — fall back to compiling v1_src/v2_src
+            # directly, same as the CMake-less cases the direct-compile path
+            # was written for.
+            if compile_so(
+                v1_src, v1_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v1_src),
+            ) and compile_so(
+                v2_src, v2_so, preferred_family=preferred_family,
+                extra_link_opts=_fallback_link_opts(case_dir, v2_src),
+            ):
+                return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=True)
+            print(f"  {name:<35} BUILD_PATH_UNAVAILABLE(prebuilt|cmake|direct)")
             results.append(_error_entry(name, expected))
             return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
 
@@ -1361,6 +1584,21 @@ def _build_case_artifacts(
             shutil.rmtree(str(cmake_build))
         cmake_build.mkdir(parents=True)
         cmake_env = _configure_cmake_env(force_case64_compile, preferred_family)
+        if name == "case115_bit_int_width_changed":
+            # Needs C23 _BitInt(N); the default system gcc may predate GCC 14
+            # (which added _BitInt support). Prefer the newest gcc-1N on PATH
+            # over the bare "gcc" alias rather than reporting a build error —
+            # this is a toolchain-availability question, not a product gap.
+            newer_gcc = _first_available_tool(
+                "gcc-15", "gcc-14", "gcc-13", "gcc-12",
+            )
+            newer_gxx = _first_available_tool(
+                "g++-15", "g++-14", "g++-13", "g++-12",
+            )
+            if newer_gcc:
+                cmake_env = {**cmake_env, "CC": newer_gcc}
+            if newer_gxx:
+                cmake_env = {**cmake_env, "CXX": newer_gxx}
         cr = _run_cmake_configure_and_build(case_dir, cmake_build, name, cmake_env)
         return _resolve_cmake_libs(
             name, expected, cmake_build, cr, v1_so, v2_so,
@@ -1372,7 +1610,7 @@ def _build_case_artifacts(
 
 def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> None:
     """Print per-tool accuracy bars with timing totals."""
-    print("  Accuracy vs expected verdicts:")
+    print("  Accuracy vs expected verdicts (scored cases only — SKIP/ERROR/TIMEOUT excluded):")
     for t in active_tools:
         c, total = _accuracy(results, t.name, t.expected_key)
         if total > 0:
@@ -1380,6 +1618,15 @@ def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> N
             bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
             tot_s = _total_ms(results, t.ms_key) / 1000
             print(f"    {t.label}: {c:>2}/{total} ({pct:3}%) {bar}  [{tot_s:6.1f}s total]")
+
+    print(f"\n  Accuracy vs full catalog ({len(results)} cases — SKIP/ERROR/TIMEOUT/"
+          "incapacity all count as misses, not exclusions):")
+    for t in active_tools:
+        c, total = _coverage_accuracy(results, t.name, t.expected_key)
+        pct = 100 * c // total if total else 0
+        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
+        print(f"    {t.label}: {c:>3}/{total} ({pct:3}%) {bar}  FP={fp:<3} FN={fn:<3}")
 
 
 def _print_abicheck_divergences(results: list[dict]) -> None:
@@ -1527,6 +1774,7 @@ def _run_tools_for_case(
     rdir: Path,
     abicc_timeout: int,
     abicheck_full_timeout: int = DEFAULT_ABICHECK_FULL_TIMEOUT,
+    timeout: int = DEFAULT_TIMEOUT,
     case_dir: Path | None = None,
     v1_src: Path | None = None,
     v2_src: Path | None = None,
@@ -1542,12 +1790,13 @@ def _run_tools_for_case(
                 build_dir=build_dir, timeout=abicheck_full_timeout,
             )
         elif t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
-            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir,
+                                            timeout=timeout)
         elif t.name in ("abicc_dumper", "abicc_xml"):
             tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
         else:
             # abidiff and abidiff_headers share the common signature
-            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir)
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=timeout)
     return tool_results
 
 
@@ -1570,6 +1819,402 @@ def _build_result_entry(
     return entry
 
 
+# ── Special-shape example cases (bundle / snapshot-pair / L3-L5 / stub-pair) ──
+# Several catalog cases do not fit the compilable v1/v2-.so shape every other
+# tool in TOOL_REGISTRY assumes — ABICC/abidiff only understand a single ELF/
+# PE/Mach-O pair. abicheck itself *can* compare most of these shapes through a
+# different entry point, so they run abicheck-only here instead of being left
+# out of the catalog scan entirely; every other tool is recorded SKIP with an
+# explicit capability-gap note rather than silently absent from the scan.
+
+
+def _case_gt_entry(name: str) -> dict[str, Any]:
+    return _gt_data["verdicts"].get(name, {})
+
+
+def _record_special_case_row(
+    name: str, expected: str, results: list[dict], note: str,
+    tool_results: dict[str, ToolResult],
+) -> None:
+    verdict = tool_results.get("abicheck", ToolResult(verdict="SKIP")).verdict
+    print(f"  {name:<33} {expected:<12} {_col(verdict, 12)}  [{note}]")
+    entry = _build_result_entry(name, expected, tool_results)
+    entry["notes"] = note
+    results.append(entry)
+
+
+def _bundle_libs_for(name: str, case_dir: Path) -> list[str]:
+    entry = _case_gt_entry(name)
+    libs = list(entry.get("bundle_libraries") or [])
+    if libs:
+        return libs
+    for side in ("old", "new"):
+        found = sorted(p.stem for p in (case_dir / side).glob("lib*.c*") if p.is_file())
+        if found:
+            return found
+    return []
+
+
+def _build_case84_bundle(case_dir: Path, old_dir: Path, new_dir: Path, timeout: int) -> str:
+    """Direct-gcc build for case84 (no CMakeLists.txt; SONAME-skewed bundle)."""
+    gcc = _first_available_tool("gcc")
+    if not gcc:
+        return "gcc not found"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    new_dir.mkdir(parents=True, exist_ok=True)
+    specs = [
+        (old_dir, "onedal_core.c", "libonedal_core.so.1"),
+        (old_dir, "onedal_thread.c", "libonedal_thread.so.1"),
+        (old_dir, "onedal_dpc.c", "libonedal_dpc.so.1"),
+        (new_dir, "onedal_core.c", "libonedal_core.so.2"),
+        (new_dir, "onedal_thread.c", "libonedal_thread.so.1"),
+        (new_dir, "onedal_dpc.c", "libonedal_dpc.so.2"),
+    ]
+    for out_dir, src_name, soname in specs:
+        r = subprocess.run(
+            [gcc, "-shared", "-fPIC", f"-Wl,-soname,{soname}",
+             str(case_dir / src_name), "-o", str(out_dir / soname)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if r.returncode != 0:
+            return r.stderr or r.stdout
+    return ""
+
+
+def _build_cmake_bundle(
+    case_dir: Path, name: str, old_dir: Path, new_dir: Path, timeout: int,
+) -> str:
+    """CMake build for the abicheck_add_bundle_case()-based bundle cases (90-93)."""
+    del old_dir, new_dir  # populated by CMake itself at <build>/<case>/{old,new}
+    if not shutil.which("cmake"):
+        return "cmake not found"
+    libs = _bundle_libs_for(name, case_dir)
+    if not libs:
+        return "no bundle libraries declared or discovered"
+    cmake_build = BUILD_DIR / "_bundle_build"
+    cmake_build.mkdir(parents=True, exist_ok=True)
+    cr = subprocess.run(
+        ["cmake", "-S", str(EXAMPLES_DIR), "-B", str(cmake_build), "-DCMAKE_BUILD_TYPE=Debug"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if cr.returncode != 0:
+        return cr.stderr or cr.stdout
+    targets = [f"{name}_{side}_{lib}" for side in ("old", "new") for lib in libs]
+    br = subprocess.run(
+        ["cmake", "--build", str(cmake_build), "--target", *targets],
+        capture_output=True, text=True, timeout=max(timeout, 120),
+    )
+    if br.returncode != 0:
+        return br.stderr or br.stdout
+    return ""
+
+
+def _run_bundle_case(
+    case_dir: Path, name: str, entry: dict[str, Any], rdir: Path, timeout: int,
+) -> ToolResult:
+    """Run `abicheck compare old/ new/` on a multi-library bundle case (ADR-023)."""
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+
+    if name == "case84_bundle_soname_skew":
+        bdir = BUILD_DIR / name
+        old_dir, new_dir = bdir / "old", bdir / "new"
+        error = _build_case84_bundle(case_dir, old_dir, new_dir, timeout)
+    else:
+        cmake_build = BUILD_DIR / "_bundle_build"
+        old_dir = cmake_build / name / "old"
+        new_dir = cmake_build / name / "new"
+        error = _build_cmake_bundle(case_dir, name, old_dir, new_dir, timeout)
+    if error:
+        return ToolResult(verdict="ERROR", raw_output=error,
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+
+    report_dir = BUILD_DIR / name / "bundle_reports"
+    if report_dir.exists():
+        shutil.rmtree(report_dir)
+    report_dir.mkdir(parents=True)
+    cmd = [_PYTHON, "-m", "abicheck.cli", "compare", str(old_dir), str(new_dir),
+           "--format", "json", "--output-dir", str(report_dir)]
+    manifest_file = entry.get("manifest_file")
+    if manifest_file:
+        cmd += ["--manifest", str(case_dir / str(manifest_file))]
+    bundle_cohort = entry.get("bundle_cohort")
+    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_bundle_kinds") or []):
+        bundle_cohort = "libonedal_"
+    if bundle_cohort:
+        cmd += ["--bundle-cohort", str(bundle_cohort)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV)
+    except subprocess.TimeoutExpired:
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - started) * 1000)
+    elapsed_ms = (time.monotonic() - started) * 1000
+    out = r.stdout + r.stderr
+    (rdir / f"{name}_abicheck_bundle.txt").write_text(out)
+    try:
+        payload = json.loads(r.stdout)
+    except (json.JSONDecodeError, AttributeError):
+        return ToolResult(verdict="ERROR", raw_output=out, elapsed_ms=elapsed_ms)
+    verdict = str(payload.get("bundle_verdict") or payload.get("verdict") or "ERROR").upper()
+    return ToolResult(verdict=verdict, raw_output=out, elapsed_ms=elapsed_ms)
+
+
+def _run_snapshot_pair_case(
+    case_dir: Path, name: str, entry: dict[str, Any], rdir: Path, timeout: int,
+    *, reconcile: bool,
+) -> ToolResult:
+    """Run `abicheck compare` directly on a committed AbiSnapshot pair.
+
+    Covers ``mode: snapshot-pair`` (case170, plain old.abi.json/new.abi.json)
+    and ``mode: reconcile`` (case164, v1.abi.json/v2.abi.json, needs
+    --reconcile-build-context to clear the phantom finding, ADR-039).
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    fixtures = entry.get("fixtures") or []
+    if len(fixtures) != 2:
+        return ToolResult(verdict="ERROR", raw_output=f"unexpected fixtures {fixtures!r}")
+    old_file = case_dir / str(fixtures[0])
+    new_file = case_dir / str(fixtures[1])
+    started = time.monotonic()
+    cmd = [_PYTHON, "-m", "abicheck.cli", "compare", str(old_file), str(new_file),
+           "--format", "json"]
+    if reconcile:
+        cmd.append("--reconcile-build-context")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV)
+    except subprocess.TimeoutExpired:
+        return ToolResult(verdict="TIMEOUT", elapsed_ms=(time.monotonic() - started) * 1000)
+    elapsed_ms = (time.monotonic() - started) * 1000
+    out = r.stdout + r.stderr
+    (rdir / f"{name}_abicheck_snapshot_pair.txt").write_text(out)
+    return ToolResult(
+        verdict=_abicheck_verdict_from_compare(r.stdout, r.returncode),
+        raw_output=out, elapsed_ms=elapsed_ms,
+    )
+
+
+def _run_l3l5_case(name: str, entry: dict[str, Any]) -> ToolResult:
+    """Run the L3/L4/L5 build-source-pack replay directly in-process.
+
+    Cases 152-158/160-162 ship a hand-built evidence-model fixture pair
+    (old.json/new.json) rather than compilable v1/v2 source — the same
+    fixtures ``tests/test_l3l4l5_examples.py`` validates. No CLI path accepts
+    this pack shape directly, so this calls the same diff_* functions that
+    test file uses, then reuses the normal ChangeKind verdict policy so the
+    result is comparable to every other row in this table.
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+    try:
+        old = json.loads((EXAMPLES_DIR / name / "old.json").read_text())
+        new = json.loads((EXAMPLES_DIR / name / "new.json").read_text())
+        tier = entry.get("min_evidence")
+        from abicheck.checker_policy import compute_verdict  # noqa: PLC0415
+
+        if tier == "L3":
+            from abicheck.buildsource.build_diff import (
+                diff_build_evidence,  # noqa: PLC0415
+            )
+            from abicheck.buildsource.build_evidence import (
+                BuildEvidence,  # noqa: PLC0415
+            )
+
+            changes = diff_build_evidence(BuildEvidence.from_dict(old), BuildEvidence.from_dict(new))
+        elif tier == "L4":
+            from abicheck.buildsource.source_abi import (
+                SourceAbiSurface,  # noqa: PLC0415
+            )
+            from abicheck.buildsource.source_diff import (
+                diff_source_abi,  # noqa: PLC0415
+            )
+
+            changes = diff_source_abi(SourceAbiSurface.from_dict(old), SourceAbiSurface.from_dict(new))
+        elif tier == "L5":
+            from abicheck.buildsource.source_graph import (  # noqa: PLC0415
+                SourceGraphSummary,
+                diff_source_graph_findings,
+            )
+
+            changes = diff_source_graph_findings(
+                SourceGraphSummary.from_dict(old), SourceGraphSummary.from_dict(new)
+            )
+        else:
+            return ToolResult(verdict="ERROR", raw_output=f"unexpected min_evidence {tier!r}")
+        verdict = compute_verdict(changes).value.upper()
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
+def _run_stub_pair_case(case_dir: Path, entry: dict[str, Any]) -> ToolResult:
+    """Compare a Python .pyi stub pair in-process (no compiled-binary change).
+
+    Mirrors ``tests/test_python_api_examples.py``: no CLI path builds a
+    python_api-only AbiSnapshot from a bare .pyi pair (there is no compiled
+    binary at all for these cases — that's the point, see case163's README).
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    del entry
+    started = time.monotonic()
+    try:
+        from abicheck.checker import compare  # noqa: PLC0415
+        from abicheck.model import AbiSnapshot  # noqa: PLC0415
+        from abicheck.python_api import surface_from_stub_file  # noqa: PLC0415
+
+        def snap(side: str) -> Any:
+            s = AbiSnapshot(library="mymod.abi3.so", version=side)
+            s.python_api = surface_from_stub_file(case_dir / f"{side}.pyi", module_name="mymod")
+            return s
+
+        result = compare(snap("v1"), snap("v2"))
+        verdict = result.verdict.value.upper()
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
+def _run_btf_case(case_dir: Path) -> ToolResult:
+    """Compare committed v1.btf/v2.btf blobs in-process (no kernel toolchain).
+
+    The CLI's `dump` command has no path for a raw BTF blob (it requires an
+    ELF/PE/Mach-O binary), but abicheck's own BTF parser + compare() do handle
+    it — mirrors tests/test_workflow_kernel_accel.py::
+    test_committed_btf_example_matches_ground_truth exactly.
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+    try:
+        from abicheck.btf_metadata import parse_btf_from_bytes  # noqa: PLC0415
+        from abicheck.checker import compare  # noqa: PLC0415
+        from abicheck.model import AbiSnapshot  # noqa: PLC0415
+
+        def snap(blob: str) -> Any:
+            meta = parse_btf_from_bytes((case_dir / blob).read_bytes())
+            return AbiSnapshot(library="vmlinux", version=blob, dwarf=meta.to_dwarf_metadata())
+
+        result = compare(snap("v1.btf"), snap("v2.btf"))
+        verdict = result.verdict.value.upper()
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
+def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
+    """Run the single-artifact audit/cross-source check and score it pass/fail.
+
+    G20 cases (143-151) assert on a different surface than a BREAKING/
+    COMPATIBLE verdict — the cross-check findings a single committed
+    ``snapshot.abi.json`` produces (no old-vs-new pair at all). There is no
+    verdict to compare, so this reduces to a boolean: did abicheck's
+    run_crosschecks recover every kind ``expected_crosscheck_kinds``
+    declares? Reported as the pseudo-verdict "MATCH"/"MISS" so it folds into
+    the same accuracy accounting as every other row (paired with
+    expected="MATCH" by the caller) — mirrors tests/test_g20_catalog.py.
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+    try:
+        from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: PLC0415
+        from abicheck.serialization import load_snapshot  # noqa: PLC0415
+
+        snap_path = EXAMPLES_DIR / name / str((entry.get("fixtures") or ["snapshot.abi.json"])[0])
+        snapshot = load_snapshot(snap_path)
+        res = run_crosschecks(snapshot)
+        emitted = {c.kind.value for c in res.findings}
+        expected_kinds = set(entry.get("expected_crosscheck_kinds") or [])
+        verdict = "MATCH" if expected_kinds <= emitted else "MISS"
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
+def _try_special_case(
+    case_dir: Path, name: str, expected: str, entry: dict[str, Any],
+    results: list[dict], args: Any,
+) -> bool:
+    """Route a catalog case that doesn't fit the compilable v1/v2-.so shape.
+
+    Returns True when this function fully handled (printed + recorded) the
+    case, so the caller should not fall through to the normal build/dump/
+    compare flow.
+
+    Each branch credits the SAME ToolResult to both "abicheck" and
+    "abicheck_full": these fixtures (audit/cross-source, bundles, BTF,
+    snapshot/L3-L5 packs, Python stubs) never go through a build lane at
+    all — the diff already ran against whatever evidence tier is intrinsic
+    to the fixture (several are deliberately hand-built AT L3-L5). Leaving
+    "abicheck_full" at its SKIP default here would understate the L3-L5
+    lane's real coverage for a reason that has nothing to do with L3-L5
+    detection quality.
+    """
+    rdir = REPORT_DIR / name
+    rdir.mkdir(exist_ok=True)
+
+    if entry.get("mode") == "audit":
+        tr = _run_g20_audit_case(name, entry)
+        note = ("single-artifact audit/cross-source check (no old-vs-new verdict "
+                "concept) scored MATCH/MISS against expected_crosscheck_kinds, "
+                "mirroring tests/test_g20_catalog.py — abidiff/ABICC have no mode "
+                "for this at all")
+        _record_special_case_row(name, "MATCH", results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    if entry.get("skip"):
+        # Currently only case121 (kernel BTF): ground_truth.json marks it
+        # skip=true because the CLI's dump command has no path for a raw BTF
+        # blob, but abicheck's own BTF parser + compare() handle it directly
+        # (mirrors tests/test_workflow_kernel_accel.py) — abidiff/ABICC have no
+        # BTF support at all.
+        tr = _run_btf_case(case_dir)
+        note = str(entry.get("reason", "excluded by ground_truth.json (skip=true)"))
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    if entry.get("bundle") is True or entry.get("category") == "bundle":
+        tr = _run_bundle_case(case_dir, name, entry, rdir, args.timeout)
+        note = ("multi-library bundle (ADR-023) — no abidiff/ABICC equivalent for "
+                "directory-of-libraries comparison")
+        # Bundle cases carry their expected verdict under expected_bundle_verdict
+        # (the top-level "expected" is None — there is no single-library verdict).
+        bundle_expected = entry.get("expected_bundle_verdict") or expected
+        _record_special_case_row(name, bundle_expected, results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    if entry.get("mode") in ("snapshot-pair", "reconcile"):
+        tr = _run_snapshot_pair_case(case_dir, name, entry, rdir, args.timeout,
+                                     reconcile=entry.get("mode") == "reconcile")
+        note = (f"committed {'/'.join(str(f) for f in entry.get('fixtures', []))} snapshot "
+                "pair, no compilable v1/v2 source — no abidiff/ABICC equivalent for this "
+                "evidence shape")
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    if entry.get("fixtures") == ["old.json", "new.json"]:
+        tr = _run_l3l5_case(name, entry)
+        note = (f"L3/L4/L5 build-source-pack replay (min_evidence={entry.get('min_evidence')}), "
+                "no compilable v1/v2 source — no abidiff/ABICC equivalent for this evidence shape")
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    if entry.get("stub_pair"):
+        tr = _run_stub_pair_case(case_dir, entry)
+        note = ("Python .pyi stub pair, compiled binary is byte-identical — abidiff/ABICC "
+                "have no Python-API comparison mode")
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr, "abicheck_full": tr})
+        return True
+
+    return False
+
+
 def _process_case(
     case_dir: Path,
     active_tools: list[Any],
@@ -1588,6 +2233,13 @@ def _process_case(
     if CURRENT_PLATFORM not in case_platforms:
         print(f"  {name:<33} {expected:<12} {'SKIP(platform)':<12}")
         results.append(_skip_row_entry(name, expected))
+        return
+
+    # Cases that don't fit the compilable v1/v2-.so shape (bundle directories,
+    # single-artifact audits, build-source-pack replay, Python stub pairs) are
+    # routed to abicheck's own capability instead of falling through to
+    # find_sources()'s NO_SOURCE — see _try_special_case.
+    if _try_special_case(case_dir, name, expected, _case_gt_entry(name), results, args):
         return
 
     v1_src, v2_src, v1_h_hint, v2_h_hint = find_sources(case_dir)
@@ -1621,7 +2273,7 @@ def _process_case(
 
     tool_results = _run_tools_for_case(
         active_tools, v1_so, v2_so, v1_h, v2_h, v1_h_abicheck, v2_h_abicheck,
-        name, rdir, args.abicc_timeout, args.abicheck_full_timeout,
+        name, rdir, args.abicc_timeout, args.abicheck_full_timeout, args.timeout,
         case_dir=case_dir, v1_src=v1_src, v2_src=v2_src, build_dir=build_info,
     )
 
@@ -1677,7 +2329,9 @@ def _abicheck_tier_result(
     def dump(so: Path, h: Path | None, snap: Path, ver: str) -> bool:
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap), "--version", ver]
         if h and h.exists():
-            cmd += ["-H", str(h)]
+            # See _run_abicheck_dump_compare's dump() for why --public-header
+            # is needed alongside -H (ADR-015 D4 opt-in provenance).
+            cmd += ["-H", str(h), "--public-header", str(h)]
         if build_dir is not None:
             cmd += ["-p", str(build_dir)]
         try:
@@ -1897,6 +2551,22 @@ def main() -> None:
 
     for case_dir in all_cases:
         _process_case(case_dir, active_tools, case_prefixes, results, args)
+
+    if args.freeze:
+        _freeze_tools(results, args.freeze, FROZEN_COMPETITOR_PATH)
+        print(f"\n  Froze {', '.join(args.freeze)} results to {FROZEN_COMPETITOR_PATH}\n")
+
+    if not args.no_frozen:
+        frozen = _load_frozen(FROZEN_COMPETITOR_PATH)
+        if frozen:
+            merged_tools = _merge_frozen_into_results(results, frozen, selected_tools)
+            if merged_tools:
+                active_tools = active_tools + [
+                    t for t in TOOL_REGISTRY if t.name in merged_tools
+                ]
+                print(f"  Merged frozen results for: {', '.join(merged_tools)} "
+                      f"(frozen at {frozen.get('frozen_at', '?')}, "
+                      f"commit {frozen.get('git_commit', '?')[:12]})\n")
 
     # ── Accuracy summary ──────────────────────────────────────────────────────
     _print_accuracy_summary(results, active_tools, selected_tools)

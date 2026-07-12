@@ -120,7 +120,5 @@ readelf -W -l /tmp/abicheck-examples-build/case50_executable_stack/libv2.so | gr
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

@@ -1,5 +1,5 @@
 /* bad.c — v1: struct has reserved fields as placeholders. */
-#include "bad.h"
+#include "lib.h"
 #include <stdlib.h>
 
 Config* config_create(void) {

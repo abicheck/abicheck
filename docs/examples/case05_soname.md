@@ -92,7 +92,5 @@ binaries won't find it and packaging tools (ldconfig, dpkg) can't manage the sym
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

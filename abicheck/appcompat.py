@@ -727,6 +727,9 @@ def check_appcompat(
     _old_inc = old_includes if old_includes is not None else (includes or [])
     _new_inc = new_includes if new_includes is not None else (includes or [])
 
+    # appcompat's -H/--header is documented as "Public header file or
+    # directory" (like compare's), so the same paths double as the
+    # public-header set for provenance tagging (ADR-024/ADR-015).
     old_snap = dump(
         so_path=old_lib_path,
         headers=_old_h,
@@ -734,6 +737,7 @@ def check_appcompat(
         version=old_version,
         compiler="c++" if lang == "c++" else "cc",
         lang="c" if lang == "c" else None,
+        public_headers=list(_old_h),
     )
     new_snap = dump(
         so_path=new_lib_path,
@@ -742,6 +746,7 @@ def check_appcompat(
         version=new_version,
         compiler="c++" if lang == "c++" else "cc",
         lang="c" if lang == "c" else None,
+        public_headers=list(_new_h),
     )
 
     # Route through the Tier-2 service (lazy import avoids a
