@@ -267,13 +267,25 @@ def _matching_close_paren(s: str, open_idx: int) -> int:
 
 
 #: A parenthesized group that contains *only* a function-pointer/reference
-#: declarator (``"*"``, ``"&"``, or a pointer-to-member ``"Widget::*"``), not
-#: any real parameter. A direct (non-template) callback parameter like
-#: ``"void (*)(detail::Impl)"`` has *two* top-level paren groups — the
-#: declarator wrapper ``"(*)"`` and the actual parameter list
-#: ``"(detail::Impl)"`` — and only the second is the real parameter list
-#: (Codex review).
-_DECLARATOR_ONLY_RE = re.compile(r"^(\*|&|[\w:]+::\*)?$")
+#: declarator (``"*"``, ``"&"``, or a pointer-to-member-function
+#: ``"Widget::*"``), not any real parameter. A direct (non-template)
+#: callback parameter like ``"void (*)(detail::Impl)"`` has *two* top-level
+#: paren groups — the declarator wrapper ``"(*)"`` and the actual parameter
+#: list ``"(detail::Impl)"`` — and only the second is the real parameter
+#: list (Codex review).
+_DECLARATOR_ONLY_RE = re.compile(r"^(\*|&|(?P<owner>[\w:]+)::\*)?$")
+
+#: A pointer-to-*member-data* spelling (no parens at all — distinct from a
+#: pointer-to-member-*function*, which is parenthesized and matched by
+#: ``_DECLARATOR_ONLY_RE`` instead): ``"int detail::Impl::*"`` names both a
+#: member type (``int``) and an owner class (``detail::Impl``) — the owner
+#: is the actual dependency a public field/parameter of this shape exposes,
+#: but the plain trailing-``"*"``-stripping in ``_base_type_name`` leaves a
+#: dangling ``"detail::Impl::"`` that matches no indexed declaration (Codex
+#: review).
+_PTR_TO_MEMBER_DATA_RE = re.compile(
+    r"^(?P<member>.+?)\s+(?P<owner>[\w:]+)::\*\s*(?:const|volatile)?\s*$"
+)
 
 
 def _resolve_nested_type_names(raw: str) -> list[str]:
@@ -281,9 +293,10 @@ def _resolve_nested_type_names(raw: str) -> list[str]:
     type spelling: its own base name, its own template arguments
     (recursively), and — for a callback-shaped spelling, whether written as
     a template argument (``"void (detail::Impl)"``,
-    ``std::function<void(detail::Impl)>``'s single argument) or as a direct
-    function-pointer declarator (``"void (*)(detail::Impl)"``) — each of its
-    written parameter types too.
+    ``std::function<void(detail::Impl)>``'s single argument), a direct
+    function-pointer declarator (``"void (*)(detail::Impl)"``), or a
+    pointer-to-member(-function) (``"void (Owner::*)(Args)"`` /
+    ``"int Owner::*"``) — each of its written parameter/owner types too.
 
     Truncating a callback-shaped spelling at its first top-level ``(`` (the
     same split ``_base_type_name`` applies to a *non-nested* callback type)
@@ -291,9 +304,18 @@ def _resolve_nested_type_names(raw: str) -> list[str]:
     only as a callback *parameter* — not the whole instantiation, not the
     return type — produced no edge at all (Codex review).
     """
+    ptm = _PTR_TO_MEMBER_DATA_RE.match(raw.strip())
+    if ptm:
+        names: list[str] = []
+        for group in ("owner", "member"):
+            base = _base_type_name(ptm.group(group))
+            if base:
+                names.append(base)
+                names.extend(_template_arg_types(base))
+        return names
     paren = _top_level_paren_index(raw)
     ret_raw = raw[:paren] if paren != -1 else raw
-    names: list[str] = []
+    names = []
     base = _base_type_name(ret_raw)
     if base:
         names.append(base)
@@ -302,10 +324,17 @@ def _resolve_nested_type_names(raw: str) -> list[str]:
         return names
     close = _matching_close_paren(raw, paren)
     inner = raw[paren + 1 : close] if close != -1 else raw[paren + 1 :]
-    if close != -1 and _DECLARATOR_ONLY_RE.match(inner.strip()):
-        # This first paren group is just a pointer/reference declarator
-        # ("(*)"), not the parameter list — the real one is the *next*
-        # top-level paren group.
+    declarator = _DECLARATOR_ONLY_RE.match(inner.strip()) if close != -1 else None
+    if declarator:
+        # This first paren group is just a pointer/reference/pointer-to-
+        # member-function declarator ("(*)", "(Owner::*)"), not the
+        # parameter list — the real one is the *next* top-level paren group.
+        owner = declarator.group("owner")
+        if owner:
+            owner_base = _base_type_name(owner)
+            if owner_base:
+                names.append(owner_base)
+                names.extend(_template_arg_types(owner_base))
         next_rel = _top_level_paren_index(raw[close + 1 :])
         if next_rel == -1:
             return names
@@ -397,6 +426,19 @@ def _decl_return_type_name(node: dict[str, Any]) -> str:
     truncating mid-template instead of at the function's own outer
     parameter list): correct for the overwhelmingly common case, but not
     real declarator parsing.
+
+    A function *returning a function pointer* (``void (*make_cb())(detail::
+    Impl)``) is a further wrinkle: clang nests the outer decl's own
+    parameter list *inside* the first top-level paren group, alongside the
+    return type's own declarator (``"void (*())(detail::Impl)"`` — the
+    empty ``"()"`` right after ``"*"`` is ``make_cb``'s own args, not part
+    of the return type). If that first group contains its own nested paren
+    pair, this strips it out — collapsing ``"(*())"`` to ``"(*)"`` — leaving
+    the properly-shaped ``"void (*)(detail::Impl)"`` return-type spelling
+    :func:`_resolve_nested_type_names` already parses correctly (Codex
+    review). Own-args content itself is discarded; the outer decl's real
+    parameters are separately read from its ``ParmVarDecl`` children, not
+    from this string.
     """
     type_obj = node.get("type")
     if not isinstance(type_obj, dict):
@@ -408,7 +450,18 @@ def _decl_return_type_name(node: dict[str, Any]) -> str:
     paren = _top_level_paren_index(qual_type)
     if paren == -1:
         return ""
-    return qual_type[:paren].strip()
+    close = _matching_close_paren(qual_type, paren)
+    if close == -1:
+        return qual_type[:paren].strip()
+    group = qual_type[paren + 1 : close]
+    inner_paren = group.find("(")
+    if inner_paren == -1:
+        return qual_type[:paren].strip()
+    inner_close = _matching_close_paren(group, inner_paren)
+    declarator = group[:inner_paren] + (
+        group[inner_close + 1 :] if inner_close != -1 else ""
+    )
+    return (qual_type[:paren] + "(" + declarator + ")" + qual_type[close + 1 :]).strip()
 
 
 def _decl_identity(node: dict[str, Any]) -> str:

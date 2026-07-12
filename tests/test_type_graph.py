@@ -421,6 +421,51 @@ def test_param_type_resolves_direct_function_pointer_callback_parameter() -> Non
     )
 
 
+def test_field_type_resolves_pointer_to_member_data_owner() -> None:
+    # A pointer-to-member-data field, e.g. `int detail::Impl::* p;`, names
+    # both a member type ("int", builtin) and an owner class
+    # ("detail::Impl") — the owner is the actual dependency exposed. The
+    # plain trailing "*"-stripping in _base_type_name left a dangling
+    # "detail::Impl::" that matched no indexed declaration (Codex review's
+    # exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record("Widget", inner=[_field("p", "int detail::Impl::*")]),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert (
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+        in fields
+    )
+
+
+def test_return_type_resolves_when_return_is_function_pointer() -> None:
+    # A function returning a function pointer whose own parameter list
+    # names a private type, e.g. `void (*make_cb())(detail::Impl);`, spells
+    # its own type as "void (*())(detail::Impl)" — the outer decl's own
+    # (empty) argument list "()" is nested *inside* the return type's own
+    # declarator group "(*())", not simply prefixed before a single
+    # top-level paren the way an ordinary function is (Codex review's exact
+    # example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "make_cb",
+            "mangledName": "_Z7make_cbv",
+            "type": {"qualType": "void (*())(detail::Impl)"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    returns = [e for e in edges if e.role == "return"]
+    assert (
+        TypeEdge("_Z7make_cbv", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "return")
+        in returns
+    )
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
     # references it in this TU — the two-pass design (a full indexing pass
