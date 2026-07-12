@@ -1651,7 +1651,7 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
         return SimpleNamespace(outcome=outcome, findings=[])
 
     monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", fake_core)
+    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
 
     req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
     res = _ss.run_scan(req)
@@ -1659,7 +1659,7 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
     assert ran["n"] == 1  # the finally ran the deferred cleanup on success
 
     # And it still runs when the core raises a budget overflow mid-scan.
-    from abicheck.cli_scan import _BudgetOverflow
+    from abicheck.scan_engine import _BudgetOverflow
 
     ran["n"] = 0
 
@@ -1667,7 +1667,7 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
         kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
         raise _BudgetOverflow("over budget")
 
-    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", raising_core)
+    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
     res = _ss.run_scan(req)
     assert res.exit_code == 5  # budget overflow surfaced
     assert ran["n"] == 1  # finally still ran the cleanup on the raise path

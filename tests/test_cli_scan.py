@@ -1357,7 +1357,9 @@ def test_scan_public_header_dir_forwarded_to_snapshot(
     # The CLI flag must reach the snapshot builder as public_header_dirs so
     # apply_provenance can classify origins (unlocking the leakage/RTTI/exported-
     # vs-public cross-checks).
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot is called from within run_scan_core, which lives in
+    # scan_engine.py — patch it there, not on the cli_scan re-export.
+    import abicheck.scan_engine as cs
 
     pub = tmp_path / "pub"
     pub.mkdir()
@@ -1391,7 +1393,8 @@ def test_scan_lone_header_file_does_not_activate_provenance(
 ):
     # A lone -H file (no dir) must NOT activate provenance — empty sets reach the
     # snapshot builder so behaviour is unchanged.
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
 
     umbrella = tmp_path / "all.hpp"
     umbrella.write_text("// umbrella\n", encoding="utf-8")
@@ -1436,7 +1439,8 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
     # `_Z3barv` → src/bar.cpp, and a candidate that *removes* that export, must
     # point the replay at src/bar.cpp — even though git only changed an unrelated
     # file. Proves the cheap L0 export delta steers the expensive scan's scope.
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_graph import (
         GraphEdge,
@@ -1631,7 +1635,8 @@ def test_depth_headers_keeps_source_tree_out_of_pattern_scan(
     # Matrix runners may pass --sources to every depth. The headers rung is
     # L0/L1/L2-only: it should pattern-scan public headers, not the whole source
     # tree, and it should use the cheap binary surface instead of a DWARF DIE walk.
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
 
     include = tmp_path / "include"
     include.mkdir()
@@ -1684,7 +1689,8 @@ def test_depth_binary_skips_export_delta_poi_loads(
     # The export-delta POI walk only focuses source replay. Effective binary
     # depth has no replay, so loading candidate+baseline L0 views would duplicate
     # native binary dumps and make "binary" scans unexpectedly expensive.
-    import abicheck.cli_scan as cs
+    # _load_exports_for_poi lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
 
     def _unexpected(*args, **kwargs):
         raise AssertionError("binary depth must not load POI export snapshots")
@@ -1707,7 +1713,9 @@ def test_depth_binary_skips_export_delta_poi_loads(
 
 def test_export_delta_poi_load_is_symbols_only(monkeypatch, tmp_path):
     import abicheck.service as service
-    from abicheck import cli_scan as cs
+
+    # _load_exports_for_poi lives in scan_engine.py (called from run_scan_core).
+    from abicheck import scan_engine as cs
 
     captured: dict[str, object] = {}
 

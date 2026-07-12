@@ -895,11 +895,6 @@ class TestIntraTypeReachability:
         # A risk-demoted BUNDLE_INTRA_TYPE_CHANGED must follow its EFFECTIVE risk
         # category in JUnit, not the original breaking kind's severity — so by
         # default it is NOT a <failure> (Codex review).
-        from abicheck.checker_policy import (
-            API_BREAK_KINDS,
-            BREAKING_KINDS,
-            RISK_KINDS,
-        )
         from abicheck.junit_report import _is_failure
 
         demoted = Change(
@@ -909,12 +904,8 @@ class TestIntraTypeReachability:
             effective_verdict=Verdict.COMPATIBLE_WITH_RISK,
             modulation_reason="consumer-internal-use",
         )
-        assert not _is_failure(
-            demoted,
-            frozenset(BREAKING_KINDS),
-            frozenset(API_BREAK_KINDS),
-            frozenset(RISK_KINDS),
-        )
+        result = DiffResult(old_version="1.0", new_version="2.0", library="lib")
+        assert not _is_failure(demoted, result, result._effective_kind_sets())
 
 
 # ---------------------------------------------------------------------------

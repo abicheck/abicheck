@@ -128,7 +128,7 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
     model = ReportModel.from_result(result)
     assert model.changes, "expected at least one change to classify"
 
-    breaking_set, api_break_set, risk_set, _ = result._effective_kind_sets()
+    kind_sets = result._effective_kind_sets()
 
     for ch in model.changes:
         breaking = model.is_breaking_boundary(ch)
@@ -137,10 +137,10 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
         assert (model.severity_label(ch) in ("breaking", "api_break")) == breaking
 
         # SARIF "error" iff breaking; non-breaking must not be "error".
-        assert (sarif_severity(ch) == "error") == breaking
+        assert (sarif_severity(ch, result) == "error") == breaking
 
         # JUnit failure iff breaking (no severity-config gate here).
-        assert _is_failure(ch, breaking_set, api_break_set, risk_set) == breaking
+        assert _is_failure(ch, result, kind_sets) == breaking
 
 
 def test_json_severity_matches_canonical_label() -> None:
@@ -181,6 +181,47 @@ def test_a4_override_propagates_across_channels() -> None:
     assert model.severity_label(demoted) == "compatible"
     assert model.is_breaking_boundary(demoted) is False
     # Override propagates to every native channel: not error, not failure.
-    assert sarif_severity(demoted) == "note"
-    breaking_set, api_break_set, risk_set, _ = result._effective_kind_sets()
-    assert _is_failure(demoted, breaking_set, api_break_set, risk_set) is False
+    assert sarif_severity(demoted, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(demoted, result, kind_sets) is False
+
+
+def test_policy_file_override_propagates_across_channels() -> None:
+    """A PolicyFile override demoting a BREAKING kind to COMPATIBLE must read as
+    compatible in every native channel — SARIF and JUnit must not fall back to
+    the kind's default (pre-override) severity (regression test: SARIF's
+    ``_severity`` and JUnit's ``_is_failure`` used to consult only the A4
+    per-finding ``effective_verdict`` field and the kind's default policy
+    severity, silently ignoring a ``PolicyFile.overrides`` demotion/escalation).
+    """
+    from abicheck.policy_file import PolicyFile
+
+    result = _result()
+    breaking = next(
+        (c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.BREAKING),
+        None,
+    )
+    assert breaking is not None, "fixture must produce a breaking change"
+
+    # Demote: a kind normally BREAKING is overridden to COMPATIBLE.
+    result.policy_file = PolicyFile(overrides={breaking.kind: Verdict.COMPATIBLE})
+    model = ReportModel.from_result(result)
+    assert model.verdict_of(breaking) == Verdict.COMPATIBLE
+    assert model.is_breaking_boundary(breaking) is False
+    assert sarif_severity(breaking, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(breaking, result, kind_sets) is False
+
+    # Escalate: a compatible finding overridden up to BREAKING.
+    compatible = next(
+        (c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE),
+        None,
+    )
+    assert compatible is not None, "fixture must produce a compatible change"
+    result.policy_file = PolicyFile(overrides={compatible.kind: Verdict.BREAKING})
+    model = ReportModel.from_result(result)
+    assert model.verdict_of(compatible) == Verdict.BREAKING
+    assert model.is_breaking_boundary(compatible) is True
+    assert sarif_severity(compatible, result) == "error"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(compatible, result, kind_sets) is True

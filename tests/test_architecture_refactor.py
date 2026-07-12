@@ -328,6 +328,66 @@ class TestPostProcessingPipeline:
         assert len(ctx.kept) == 1
         assert ctx.kept[0].kind == ChangeKind.FUNC_REMOVED
 
+    def test_kept_alias_violation_raises_runtime_error(self):
+        """A step that rebinds ``changes`` to a new list after FilterRedundant,
+        without resyncing ``ctx.kept``, must fail loudly.
+
+        Regression guard for the ``ctx.kept`` aliasing contract: FilterRedundant
+        sets ``ctx.kept = kept`` and later steps (DetectCppPatterns,
+        DemoteUnreachableInternalChurn) rely on that being the *same list
+        object* so their in-place suppression/demotion is visible through
+        ``ctx.kept``. A step that instead rebinds ``changes`` to a fresh list
+        (e.g. a list comprehension) without updating ``ctx.kept`` would
+        silently discard whatever was tracked there — this must raise instead.
+        """
+        import pytest
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.model import AbiSnapshot
+        from abicheck.post_processing import FilterRedundant, PostProcessingPipeline
+
+        class _ReboundStep:
+            name = "rebinds_changes_bug"
+
+            def run(self, changes, ctx):
+                # Simulates the exact bug class the contract guards against:
+                # a fresh list instead of an in-place mutation or ctx.kept resync.
+                return [c for c in changes]
+
+        old = AbiSnapshot(library="test", version="1.0")
+        new = AbiSnapshot(library="test", version="2.0")
+        changes = [
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="foo", description="added"),
+        ]
+        pipeline = PostProcessingPipeline([FilterRedundant(), _ReboundStep()])
+        with pytest.raises(RuntimeError, match="aliasing contract"):
+            pipeline.run(changes, old, new)
+
+    def test_kept_alias_preserved_through_default_pipeline(self):
+        """End-to-end regression: a finding demoted by
+        DemoteUnreachableInternalChurn (which runs after FilterRedundant) must
+        actually disappear from ``ctx.kept`` — not just from that step's own
+        return value — proving the ``ctx.kept`` alias survives every
+        intervening step (DetectInternalLeaks, EnrichAffectedSymbols, etc.)."""
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.model import AbiSnapshot
+        from abicheck.post_processing import DEFAULT_PIPELINE
+
+        old = AbiSnapshot(library="test", version="1.0")
+        new = AbiSnapshot(library="test", version="2.0")
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Private",
+                description="size changed",
+            ),
+        ]
+        ctx = DEFAULT_PIPELINE.run(changes, old, new)
+        assert any(c.symbol == "ns::detail::Private" for c in ctx.out_of_surface)
+        assert all(c.symbol != "ns::detail::Private" for c in ctx.kept)
+
     def test_custom_pipeline_with_subset_of_steps(self):
         """Custom pipeline with only some steps."""
         from abicheck.model import AbiSnapshot

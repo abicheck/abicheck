@@ -56,12 +56,24 @@ def _tool_version() -> str:
 # above under its historical private name so call sites are unchanged.
 
 
-def _severity(change: Change) -> str:
-    # Honour an A4 per-finding effective_verdict (ADR-027): a demoted opaque/
-    # PIMPL layout change reports as a SARIF "note", not an "error".
-    eff = getattr(change, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        return _VERDICT_TO_SARIF_LEVEL.get(eff, policy_for(change.kind).severity)
+def _severity(change: Change, result: DiffResult) -> str:
+    """Return the SARIF ``level`` for *change*.
+
+    On the override path — an A4 per-finding ``effective_verdict`` (ADR-027)
+    or a PolicyFile verdict override for this change's kind — the canonical
+    verdict→SARIF-level table (ADR-036) applies, routed through
+    ``result._effective_verdict_for_change`` so SARIF can never disagree
+    with the JSON report or the gate/exit code. Non-overridden findings keep
+    the coarser per-kind default severity from the policy registry.
+    """
+    has_override = isinstance(
+        getattr(change, "effective_verdict", None), Verdict
+    ) or (
+        result.policy_file is not None and change.kind in result.policy_file.overrides
+    )
+    if has_override:
+        verdict = result._effective_verdict_for_change(change)
+        return _VERDICT_TO_SARIF_LEVEL.get(verdict, policy_for(change.kind).severity)
     return policy_for(change.kind).severity
 
 
@@ -84,10 +96,9 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     }
 
 
-def _result_for(
-    change: Change, library: str, old_version: str, new_version: str
-) -> dict[str, Any]:
+def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
     """Produce a SARIF result object for a Change."""
+    library, old_version, new_version = result.library, result.old_version, result.new_version
     msg_parts = [change.description]
     if change.old_value or change.new_value:
         msg_parts.append(f"({change.old_value or '?'} → {change.new_value or '?'})")
@@ -129,7 +140,7 @@ def _result_for(
 
     return {
         "ruleId": change.kind.value,
-        "level": _severity(change),
+        "level": _severity(change, result),
         "message": {
             "text": " ".join(msg_parts),
         },
@@ -168,9 +179,7 @@ def to_sarif(
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
-        sarif_results.append(
-            _result_for(change, result.library, result.old_version, result.new_version)
-        )
+        sarif_results.append(_result_for(change, result))
 
     # Overall ABI verdict as a notification
     invocation_success = result.verdict != Verdict.BREAKING

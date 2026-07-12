@@ -681,6 +681,24 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # exactly as `cli_scan` did before the split — so it joins the same SCC and
         # introduces no new *runtime* edge (`service_scan` re-imports
         # `_public_provenance_set` from it function-locally).
+        #
+        # `scan_engine` joins the same SCC (ADR-037 D1 dependency-direction fix):
+        # the scan engine core (classify → always-on tier → level → compare,
+        # `run_scan_core`) was split out of `cli_scan.py` into `scan_engine.py` so
+        # the CLI (`cli_scan.py`) and the typed service API (`service_scan.py`)
+        # both depend on one engine module instead of `service_scan.run_scan`
+        # reaching into a front-end module — that inversion is exactly what this
+        # split removes. What remains is a lateral engine-to-engine reference, not
+        # a frontend dependency: `service_scan.run_scan` imports `run_scan_core`/
+        # `_BudgetOverflow`/`_EvidenceContractError` from `scan_engine` (function-
+        # local, avoiding an init-order issue); `scan_engine` type-annotates
+        # `compile_context: CompileContext | None` with the type defined in
+        # `service_scan` (under `if TYPE_CHECKING`, so it never executes) and
+        # reaches `cli_buildsource.embed_build_source` / `cli_scan_baseline`
+        # helpers function-locally, exactly as `cli_scan.py` did before the
+        # split — so it closes the same cluster of cycles through already-member
+        # modules rather than introducing a new one. No init deadlock — the
+        # package still imports cleanly.
         frozenset(
             {
                 "appcompat",
@@ -704,6 +722,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",
+                "scan_engine",
                 "service",
                 "service_scan",
             }
