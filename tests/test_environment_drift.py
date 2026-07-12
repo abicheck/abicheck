@@ -141,6 +141,29 @@ class TestRuntimeFloorRaised:
         changes = _diff_elf_symbol_versioning(self._old(), new)
         assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
 
+    def test_overlong_unchanged_version_tag_is_unparseable_not_crash(self) -> None:
+        malicious = "GLIBC_" + ("9" * 5000)
+        old = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.28", malicious]},
+        )
+        new = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.28", malicious]},
+        )
+        changes = _diff_elf_symbol_versioning(old, new)
+        assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
+
+    def test_malformed_partial_version_tag_is_unparseable_not_floor(self) -> None:
+        new = _elf(
+            needed=["libc.so.6"],
+            versions_required={
+                "libc.so.6": ["GLIBC_2.17", "GLIBC_2.28", "GLIBC_2.28-1"]
+            },
+        )
+        changes = _diff_elf_symbol_versioning(self._old(), new)
+        assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
+
     def test_floor_is_risk_verdict_through_compare(self) -> None:
         new = _elf(
             needed=["libc.so.6"],
@@ -237,6 +260,13 @@ class TestRuntimeFloorContract:
         ))
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
+    def test_overlong_direct_floor_left_at_default_not_crash(self) -> None:
+        old, new = self._pair()
+        result = compare(old, new, env_matrix=EnvironmentMatrix(
+            runtime_floors={"GLIBC": "9" * 5000}
+        ))
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
     def test_floor_keys_case_insensitive(self) -> None:
         changes = [
             c for c in compare(*self._pair()).changes
@@ -294,7 +324,9 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 3}})
         assert m.runtime_floors == {"GLIBC": "3"}
 
-    @pytest.mark.parametrize("bad", ["2.28-1", "2.x", "v2.28", "2..28", ""])
+    @pytest.mark.parametrize(
+        "bad", ["2.28-1", "2.x", "v2.28", "2..28", "", "9" * 5000]
+    )
     def test_partially_numeric_floor_rejected(self, bad: str) -> None:
         # The floor contract parses per dot-component with int(); a floor like
         # "2.28-1" would silently truncate to (2,) and flip verdicts — reject

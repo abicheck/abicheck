@@ -59,6 +59,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .diff_versioning import _parse_dotted_numeric_version
+
 log = logging.getLogger(__name__)
 
 
@@ -175,11 +177,11 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
         # contract parses with int() per component, so a "2.28-1" or "2.x"
         # would silently truncate to (2,) and flip verdicts. Reject
         # malformed text here instead (Codex review #510).
-        components = floor.split(".")
-        if not components or not all(p.isdigit() for p in components):
+        if _parse_dotted_numeric_version(floor) is None:
             raise ValueError(
                 f"'runtime_floors.{key}' must be a dotted numeric version "
-                f"(digits and dots only, e.g. '2.28'), got {value!r}"
+                f"(digits and dots only, e.g. '2.28'), with each component "
+                f"at most 9 digits, got {value!r}"
             )
         runtime_floors[str(key).upper()] = floor
     return runtime_floors
