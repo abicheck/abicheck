@@ -598,7 +598,14 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
                     "-o", str(base), "--version", version]
             if header and header.exists():
-                dump += ["-H", str(header)]
+                # -H alone only feeds castxml which headers to parse; it does
+                # NOT mark them public for provenance classification (that's
+                # the separate, opt-in --public-header flag per ADR-015 D4).
+                # Without it every declaration's origin stays UNKNOWN, which
+                # demotes surface-scope confidence to "reduced"/"no-provenance"
+                # across the board. The benchmark's headers ARE the case's
+                # real public headers, so tell the classifier that.
+                dump += ["-H", str(header), "--public-header", str(header)]
             dr = subprocess.run(dump, capture_output=True, text=True,
                                 timeout=timeout, env=_ABICHECK_ENV)
             if dr.returncode != 0 or not base.exists():
@@ -651,7 +658,11 @@ def _run_abicheck_dump_compare(
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap),
                "--version", version]
         if header and header.exists():
-            cmd += ["-H", str(header)]
+            # See run_abicheck_full's dump() for why --public-header is
+            # needed alongside -H: without it, origin stays UNKNOWN for
+            # every declaration (ADR-015 D4 opt-in), demoting surface-scope
+            # confidence to "reduced"/"no-provenance" across the board.
+            cmd += ["-H", str(header), "--public-header", str(header)]
         run = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout, env=_ABICHECK_ENV)
         return run.returncode == 0 and snap.exists(), run.stderr or run.stdout
@@ -1698,7 +1709,9 @@ def _abicheck_tier_result(
     def dump(so: Path, h: Path | None, snap: Path, ver: str) -> bool:
         cmd = [_PYTHON, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap), "--version", ver]
         if h and h.exists():
-            cmd += ["-H", str(h)]
+            # See _run_abicheck_dump_compare's dump() for why --public-header
+            # is needed alongside -H (ADR-015 D4 opt-in provenance).
+            cmd += ["-H", str(h), "--public-header", str(h)]
         if build_dir is not None:
             cmd += ["-p", str(build_dir)]
         try:
