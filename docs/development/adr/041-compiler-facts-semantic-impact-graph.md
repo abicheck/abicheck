@@ -160,6 +160,58 @@ made it provably a no-op: `decl_file` is fully built by
 `decl_file.get(...)` lookup inside the walk already sees the complete index
 regardless of declaration order.
 
+A third review pass (CodeRabbit + Codex, on the second fix commit) found two
+more instances of the same two bug classes, deeper in each:
+
+- **A `_type_confidence` case CodeRabbit found and Codex found again in a
+  different shape.** A uniquely-resolved *global* declaration (`"Base"` at
+  namespace scope, where the resolved spelling equals the raw spelling
+  because there was nothing to qualify) was mis-scored `CONF_REDUCED` by a
+  naive `raw == resolved` check. Fixed by having `_resolve_type_name` return
+  an explicit `(name, matched)` tuple instead of inferring success from
+  string equality — the confidence call sites now use `matched` directly.
+- **Field/base types resolved against the wrong scope.** A field/base type
+  naming a sibling nested in the *same* record (`Outer::Inner` referenced as
+  bare `"Inner"` from inside `Outer`) was resolved against the record's
+  *enclosing* scope, not its own — real C++ member lookup checks the
+  record's own body first. Fixed by resolving base/field types against
+  `child_scope` (`[*scope, name]`) instead of `scope`; `_resolve_type_name`'s
+  existing descending-prefix loop still falls through to every shorter
+  (enclosing) prefix, so this is a strict superset of the old lookup, not a
+  narrowing.
+- **Cross-TU edge merging discarded richer provenance.** `ClangTypeGraphExtractor
+  .extract_from_build`'s per-TU dedup kept whichever TU's edge for a given
+  `(src, dst, kind)` key was seen *first* — if that TU didn't include the
+  header declaring a private `dst` (so no `dst_file`) while a later TU did,
+  the richer edge was silently dropped. Fixed with `_merge_type_edges`:
+  keeps the stronger `confidence` and backfills a missing `dst_file` from
+  either edge.
+- **Only a partially-qualified spelling was handled, not the fully general
+  case, and only handled at edge-creation time.** Two more instances of the
+  earlier "unqualified name" and "provenance only set on the winning branch"
+  bug classes, found one layer deeper:
+  - `_resolve_type_name`'s `"::" in raw` early-return treated *any* spelling
+    containing `::` as already fully qualified. That's wrong for a
+    **partially** qualified spelling — `detail::Impl` written inside
+    `namespace ns { namespace detail { ... } }` prints exactly as
+    `"detail::Impl"`, not `"ns::detail::Impl"`, so the old shortcut still
+    created a disconnected `type://detail::Impl` node. The fix generalizes
+    the *fully*-unqualified-name logic to handle both cases uniformly: index
+    lookups key on the spelling's *last* component, candidates are filtered
+    to those whose full qualified name equals or ends with `"::" + raw`
+    (so `detail::Impl` only matches a candidate ending `"::detail::Impl"`,
+    never an unrelated `other::Impl`), then the same nearest-enclosing-scope
+    search applies.
+  - `augment_graph_with_types` only set `defined_in_project` when *creating*
+    a node. A private type first observed as another edge's `src` (e.g.
+    `detail::Impl`'s own base-class edge) got a bare, unannotated node; a
+    later edge establishing it as a project-internal `dst` had nothing left
+    to attach the marker to, since the node already existed. Fixed by
+    tracking a local `node_by_id` map and backfilling the marker onto an
+    already-existing node — unless that node already carries a `visibility`
+    attr (real L4 evidence), which this best-effort AST-only marker must
+    never override.
+
 **Known limitation, accepted for this slice**: this is still a **second**,
 independent `clang -ast-dump=json` pass per translation unit, alongside the
 call graph's own pass — the exact "AST replay is expensive, run it once"

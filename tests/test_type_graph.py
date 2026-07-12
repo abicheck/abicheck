@@ -370,14 +370,18 @@ def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
 
 
 def test_field_type_edge_excludes_builtins() -> None:
+    # detail::Impl is declared elsewhere in the same TU (as any real clang AST
+    # would have it, at least forward-declared) so it resolves confidently;
+    # "int" is a builtin and excluded regardless.
     ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
         _record(
             "Widget",
             inner=[
                 _field("p", "detail::Impl *"),
                 _field("count", "int"),
             ],
-        )
+        ),
     )
     edges = parse_clang_ast_types(ast)
     field_edges = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
@@ -386,12 +390,26 @@ def test_field_type_edge_excludes_builtins() -> None:
     ]
 
 
+def test_field_type_with_no_matching_declaration_stays_reduced_confidence() -> None:
+    # A qualified-looking spelling with no matching declaration anywhere in
+    # the TU (e.g. it lives in a header this fixture doesn't model) cannot be
+    # verified — the old "contains ::  ⇒ CONF_HIGH" shortcut used to
+    # over-claim confidence here (Codex review); it must stay CONF_REDUCED.
+    ast = _tu(_record("Widget", inner=[_field("p", "detail::Impl *")]))
+    edges = parse_clang_ast_types(ast)
+    field_edges = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert field_edges == [
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_REDUCED, "field")
+    ]
+
+
 def test_param_type_edge() -> None:
     ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
         _record(
             "Widget",
             inner=[_method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])],
-        )
+        ),
     )
     edges = parse_clang_ast_types(ast)
     param_edges = [e for e in edges if e.kind == "DECL_HAS_TYPE"]
@@ -487,6 +505,51 @@ def test_nested_namespace_qualifies_names() -> None:
     assert inherits[0].dst == "outer::inner::Base"
 
 
+def test_partially_qualified_type_resolves_against_enclosing_scope() -> None:
+    # clang writes a *partially* qualified spelling exactly as the source
+    # wrote it: a field typed `detail::Impl` inside `namespace ns { namespace
+    # detail { ... } }` prints as "detail::Impl", not "ns::detail::Impl". The
+    # old "contains :: => already fully qualified" shortcut left this
+    # disconnected from the L4-derived `type://ns::detail::Impl` node (Codex
+    # review) — the PR's own example, `namespace ns { namespace detail {
+    # struct Impl; } struct Widget { detail::Impl *p; }; }`.
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+                _record("Widget", inner=[_field("p", "detail::Impl *")]),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge(
+            "ns::Widget", "ns::detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field"
+        )
+    ]
+
+
+def test_partially_qualified_name_does_not_match_unrelated_type() -> None:
+    # "detail::Impl" must only match a candidate ending "::detail::Impl" —
+    # not an unrelated "other::Impl" that merely shares the leaf name.
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "other",
+            "inner": [_record("Impl")],
+        },
+        _record("Widget", inner=[_field("p", "detail::Impl *")]),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_REDUCED, "field")
+    ]
+
+
 def test_non_dict_and_empty_ast_produce_no_edges() -> None:
     assert parse_clang_ast_types({}) == []
     assert (
@@ -554,6 +617,65 @@ def test_augment_graph_marks_dst_defined_in_project() -> None:
     node = next(n for n in graph.nodes if n.id == "type://ns::detail::Impl")
     assert node.attrs.get("defined_in_project") is True
     assert node.attrs.get("def_file") == "src/detail/impl.h"
+
+
+def test_augment_graph_backfills_provenance_onto_earlier_created_node() -> None:
+    # detail::Impl is first observed as the *src* of its own base-class edge
+    # (no dst_file known there, so no provenance is set on creation), then
+    # ns::Widget's field edge later establishes it as a project-internal
+    # dst. The marker must be backfilled onto the already-existing node
+    # rather than only applying at node-creation time (Codex review).
+    graph = SourceGraphSummary()
+    edges = [
+        TypeEdge(
+            "ns::detail::Impl", "ns::detail::Base", "TYPE_INHERITS", CONF_HIGH, "base"
+        ),
+        TypeEdge(
+            "ns::Widget",
+            "ns::detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="src/detail/impl.h",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+    node = next(n for n in graph.nodes if n.id == "type://ns::detail::Impl")
+    assert node.attrs.get("defined_in_project") is True
+    assert node.attrs.get("def_file") == "src/detail/impl.h"
+
+
+def test_augment_graph_never_overrides_l4_visibility() -> None:
+    # A node already carrying real L4 evidence (visibility) must never be
+    # overwritten by this best-effort AST-only marker, even if a later edge
+    # would otherwise qualify it as a project-internal backfill target.
+    graph = SourceGraphSummary()
+    graph.add_node(
+        GraphNode(
+            id="type://ns::detail::Impl",
+            kind="record_type",
+            label="ns::detail::Impl",
+            provenance="source_abi",
+            confidence=CONF_HIGH,
+            attrs={"visibility": "public_header"},
+        )
+    )
+    edges = [
+        TypeEdge(
+            "ns::Widget",
+            "ns::detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="src/detail/impl.h",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+    node = next(n for n in graph.nodes if n.id == "type://ns::detail::Impl")
+    assert "defined_in_project" not in node.attrs
+    assert node.attrs.get("visibility") == "public_header"
 
 
 def test_augment_graph_does_not_mark_non_project_dst() -> None:

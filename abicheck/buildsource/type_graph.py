@@ -324,37 +324,49 @@ def _index_declared_entities(
 def _resolve_type_name(
     raw: str, scope: list[str], name_index: dict[str, list[str]]
 ) -> tuple[str, bool]:
-    """Resolve an unqualified type spelling to a fully qualified name.
+    """Resolve a possibly-unqualified or partially-qualified type spelling to
+    a fully qualified name.
 
     clang's ``qualType`` prints a type *as written*, not fully qualified — a
     field typed ``Base`` inside ``namespace ns { struct Widget { ... }; }``
-    prints as ``"Base"`` even when ``Base`` is ``ns::Base`` (Codex review).
-    Approximates C++ unqualified name lookup: try the nearest enclosing scope
-    first, then each enclosing scope outward, then fall back to a unique
-    single candidate. An already-qualified spelling (contains ``::``) is
-    returned unchanged and treated as resolved (the source already qualified
-    it). Returns ``(name, matched)`` — *matched* is ``True`` only when the
-    name was already qualified or found in *name_index*, so a **global**
-    declaration whose resolved spelling happens to equal the raw spelling
-    (e.g. ``"Base"`` at namespace scope) is still reported as a real match
-    rather than mistaken for "unresolved" by a naive string-equality check
-    (Codex review). Best effort, not a real semantic lookup: an unmatched
-    name is returned unchanged with ``matched=False``.
+    prints as ``"Base"``, not ``"ns::Base"`` (Codex review). The same holds
+    for a *partially* qualified spelling: a field typed ``detail::Impl``
+    written inside ``namespace ns { namespace detail { ... } }`` prints as
+    ``"detail::Impl"``, not ``"ns::detail::Impl"`` — a naive "already has
+    ``::`` so it must be fully qualified" shortcut misses this (Codex
+    review). Both cases are handled uniformly: index lookups key on the
+    spelling's *last* component (``"Impl"`` for either ``"Impl"`` or
+    ``"detail::Impl"``), candidates are filtered to those whose full
+    qualified name ends with the raw spelling (so ``"detail::Impl"`` only
+    matches a candidate ending ``"::detail::Impl"``, never an unrelated
+    ``"other::Impl"``), then the nearest enclosing scope is tried first,
+    each enclosing scope outward next, and a unique remaining candidate last.
+
+    Returns ``(name, matched)`` — *matched* is ``True`` only when a
+    qualifying declaration was found, so a **global** declaration whose
+    resolved spelling happens to equal the raw spelling (e.g. ``"Base"`` at
+    namespace scope) is still reported as a real match rather than mistaken
+    for "unresolved" by a naive string-equality check (Codex review). Best
+    effort, not a real semantic lookup: an unmatched name is returned
+    unchanged with ``matched=False``.
     """
     if not raw:
         return raw, False
-    if "::" in raw:
-        return raw, True
-    candidates = name_index.get(raw)
+    leaf = raw.rsplit("::", 1)[-1]
+    candidates = name_index.get(leaf)
     if not candidates:
+        return raw, False
+    suffix = "::" + raw
+    matching = [c for c in candidates if c == raw or c.endswith(suffix)]
+    if not matching:
         return raw, False
     for k in range(len(scope), -1, -1):
         prefix = "::".join(scope[:k])
         target = f"{prefix}::{raw}" if prefix else raw
-        if target in candidates:
+        if target in matching:
             return target, True
-    if len(candidates) == 1:
-        return candidates[0], True
+    if len(matching) == 1:
+        return matching[0], True
     return raw, False
 
 
@@ -580,18 +592,25 @@ def augment_graph_with_types(
     visibility) is left untouched — first-writer-wins (``add_node``).
 
     When *project_files* (the project's compile-unit sources + private
-    headers, see ``call_graph.project_source_files``) is supplied, a **new**
-    ``dst`` node whose ``dst_file`` is one of them is marked
-    ``defined_in_project`` — the exact case this module exists for (a public
-    decl/type reaching a private-header type/variable) would otherwise create
-    an unannotated node that ``crosscheck.public_to_internal_dependency``
-    cannot classify as internal (Codex review). A node already present (e.g.
-    from L4, or already marked by the call graph) is left untouched.
+    headers, see ``call_graph.project_source_files``) is supplied, a ``dst``
+    node whose ``dst_file`` is one of them is marked ``defined_in_project`` —
+    the exact case this module exists for (a public decl/type reaching a
+    private-header type/variable) would otherwise create an unannotated node
+    that ``crosscheck.public_to_internal_dependency`` cannot classify as
+    internal. This applies whether the node is created fresh by this edge
+    *or* was already added by an earlier edge in this same call (e.g. the
+    private type was first seen as another edge's ``src`` and had no
+    provenance yet) — the marker is backfilled onto the existing node rather
+    than only being set at creation time (Codex review), unless the node
+    already carries a ``visibility`` attr (real L4 evidence, never
+    overridden by this best-effort AST-only marker).
 
     Returns the number of edges added.
     """
     from .call_graph import _file_in_project
     from .source_graph import _decl_node_id, _type_node_id
+
+    node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
 
     added = 0
     for e in edges:
@@ -611,22 +630,31 @@ def augment_graph_with_types(
             (src_id, src_kind, e.src, False),
             (dst_id, dst_kind, e.dst, True),
         ):
-            if not graph.has_node(node_id):
+            existing = node_by_id.get(node_id)
+            if existing is None:
                 attrs = (
                     {"defined_in_project": True, "def_file": e.dst_file}
                     if is_dst and dst_in_project
                     else {}
                 )
-                graph.add_node(
-                    GraphNode(
-                        id=node_id,
-                        kind=node_kind,
-                        label=ident,
-                        provenance="type_graph",
-                        confidence=e.confidence,
-                        attrs=attrs,
-                    )
+                node = GraphNode(
+                    id=node_id,
+                    kind=node_kind,
+                    label=ident,
+                    provenance="type_graph",
+                    confidence=e.confidence,
+                    attrs=attrs,
                 )
+                graph.add_node(node)
+                node_by_id[node_id] = node
+            elif (
+                is_dst
+                and dst_in_project
+                and not existing.attrs.get("defined_in_project")
+                and not existing.attrs.get("visibility")
+            ):
+                existing.attrs["defined_in_project"] = True
+                existing.attrs["def_file"] = e.dst_file
         before = len(graph.edges)
         graph.add_edge(
             GraphEdge(
