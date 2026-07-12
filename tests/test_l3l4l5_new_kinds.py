@@ -858,6 +858,65 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
+def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confirmed_full_old() -> None:
+    # Thirteenth Codex review: the twelfth-round fix over-corrected by gating
+    # NEW's own presence on its narrowing too, symmetrically with OLD. But this
+    # closure only ever detects *additions* (new vs old's reach) — the
+    # false-positive risk lives entirely in whether OLD's absence of a kind is
+    # trustworthy, not in NEW's scope. When OLD ran a confirmed full pass and
+    # genuinely found zero edges of this kind anywhere, that absence is
+    # authoritative regardless of how narrow NEW's own scan was: a real edge
+    # NEW observes, even from a changed-scoped run, is still real, newly-added
+    # evidence within the region NEW examined. Excluding it created a false
+    # negative with no offsetting false-positive protection.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[],  # confirmed full pass, zero type edges anywhere
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({"TYPE_HAS_FIELD_TYPE"})
+
+
+def test_l5_internal_dep_flagged_for_narrowed_candidate_against_confirmed_full_baseline() -> None:
+    # End-to-end version of the thirteenth-round fix: a confirmed-full-pass
+    # baseline that genuinely has zero dependency edges of this family proves
+    # the dependency did not exist anywhere in the old version. A narrowed
+    # candidate that observes a first-ever private-field dependency within the
+    # TU it examined is real, newly-added evidence and must still be flagged —
+    # narrowing the candidate's own scan must not suppress it.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+        narrowed_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_scope() -> None:
     # End-to-end version of Codex's exact scenario: the baseline was collected
     # by a narrowed (PR/--since-scoped) inline run that only ever examined

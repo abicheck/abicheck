@@ -181,7 +181,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   not narrowed the same way": a side's edge now counts as coverage for a kind
   only when the other side is narrowed identically, or itself carries no
   narrowing to be asymmetric against — symmetric cases (both narrowed, or
-  neither) are bit-for-bit unaffected.
+  neither) are bit-for-bit unaffected. A thirteenth review found that
+  generalization itself over-corrected: the closure only ever computes
+  *additions* (new reach minus old's), so the false-positive risk is
+  one-directional, living entirely in whether old's absence of a kind is
+  trustworthy — never in new's own scope. Gating new's presence on its own
+  narrowing dropped a genuine finding whenever a confirmed-full-pass baseline
+  had proven a kind absent everywhere and a narrowed candidate then observed
+  a real, newly-added edge of it: new being narrower than old can only ever
+  miss an addition outside the TUs it examined, never manufacture a false
+  positive. Fixed by dropping the narrowing guard from `new_present` entirely
+  (unconditional `kind in new_kinds`), leaving `old_present`'s guard as the
+  sole asymmetry check — the only side whose absence this closure leans on.
 
 - **Correlate a public entry's own body/type-hash change with a new internal
   dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,

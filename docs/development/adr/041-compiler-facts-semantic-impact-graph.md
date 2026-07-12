@@ -603,6 +603,25 @@ only genuine narrowed/not-narrowed asymmetry — confirmed full pass,
 unmarked pack, or the reverse narrowing — now excludes the kind, regardless
 of *why* the other side isn't narrowed the same way.
 
+A thirteenth Codex review found the twelfth round's symmetric generalization
+itself over-corrected: `_internal_dependency_findings` only ever computes an
+*additions* closure (`new`'s reach minus `old`'s), so the false-positive risk
+is one-directional — it lives entirely in whether `old`'s absence of a kind is
+trustworthy evidence the dependency truly did not exist before, never in
+`new`'s own scope. Gating `new_present` on `new`'s own narrowing (symmetric
+with `old_present`) meant a confirmed-full-pass baseline that genuinely found
+zero edges of a kind anywhere — an authoritative, verified negative — still
+had a narrowed candidate's real, newly-observed edge of that same kind
+excluded from `common_kinds`, dropping a genuine `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+finding with no offsetting false-positive protection: `new` being narrower
+than `old` can only ever cause a *missed* addition outside the TUs it
+examined (an accepted false negative), never manufacture a false positive,
+regardless of how comprehensive or narrow `old`'s own coverage is. Fixed by
+dropping the narrowing guard from `new_present` entirely (`new_present = kind
+in new_kinds`, unconditional) while leaving `old_present`'s eleventh/twelfth-
+round guard exactly as before — the asymmetry-detection logic now applies
+only to the side whose *absence* the closure actually leans on.
+
 ## Decision — P0 slice 4 (this change)
 
 Roadmap item 2's remaining half, "semantic graph diff — same public decl,
