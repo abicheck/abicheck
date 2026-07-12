@@ -61,6 +61,7 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _canonical_int_spelling as _canonical_int_spelling,
     _scalar_repr as _scalar_repr,
 )
+from .dumper_castxml import is_synthetic_ctor_key
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -178,6 +179,14 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
             k in exported
             or (v.name in exported and name_counts.get(v.name) == 1)
             or (v.is_deleted and not v.deleted_from_dwarf)
+            # A synthetic constructor-overload key (castxml omitted its real
+            # mangled name) can never equal a real exported symbol — it isn't
+            # one, by construction (see dumper_castxml's synthesis comment).
+            # Requiring an ELF match here would always fail and silently drop
+            # a genuinely public, non-deleted constructor overload (case78's
+            # removed / case111's added overload); its visibility was already
+            # resolved from source access when castxml gave no name to check.
+            or is_synthetic_ctor_key(k)
         )
     }
 
@@ -512,10 +521,18 @@ def _check_variadic_change(
 #: Calling-convention attribute base names. When one of these flips inside
 #: ``contract_attributes`` it is a parameter-passing change, not a semantic
 #: contract change, so it routes to the existing BREAKING kind.
-_CC_ATTRIBUTE_BASES = frozenset({
-    "cdecl", "stdcall", "fastcall", "thiscall", "regparm", "ms_abi",
-    "sysv_abi", "vectorcall",
-})
+_CC_ATTRIBUTE_BASES = frozenset(
+    {
+        "cdecl",
+        "stdcall",
+        "fastcall",
+        "thiscall",
+        "regparm",
+        "ms_abi",
+        "sysv_abi",
+        "vectorcall",
+    }
+)
 
 
 def _is_cc_attribute(token: str) -> bool:
