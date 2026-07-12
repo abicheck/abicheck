@@ -247,7 +247,7 @@ def _index_declared_entities(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
-) -> None:
+) -> str:
     """First pass: record every type declaration's qualified name (+declaring
     file) and every var/enum-constant's identity (+declaring file, +bare-name
     index) seen anywhere in the TU, so the second pass can resolve an
@@ -259,9 +259,16 @@ def _index_declared_entities(
     typedef/type-alias declarations are all indexed as resolvable type
     targets (Codex review: a private enum/typedef used as a field/param type
     was previously left un-indexed, same gap as an un-indexed record).
+
+    Returns the last-seen file after visiting *node* and its whole subtree.
+    clang emits ``loc.file`` only on the *first* declaration in a file — later
+    siblings just carry line/column (Codex review) — so this sticky state
+    must be threaded from one sibling call to the next in every loop below,
+    not just passed down independently to each child from the parent's
+    value, or every sibling after the first loses its file.
     """
     if not isinstance(node, dict):
-        return
+        return cur_file
     f = _node_file(node)
     if f:
         cur_file = f
@@ -277,10 +284,10 @@ def _index_declared_entities(
             decl_file[qname] = cur_file
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _index_declared_entities(
+            cur_file = _index_declared_entities(
                 child, child_scope, cur_file, name_index, decl_file, ref_name_index
             )
-        return
+        return cur_file
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
         qname = "::".join([*scope, name])
@@ -293,18 +300,18 @@ def _index_declared_entities(
         # scope is opened — an unscoped/scoped enum's own name is not part of
         # its enumerators' spelling in clang's AST dump.
         for child in node.get("inner", []) or []:
-            _index_declared_entities(
+            cur_file = _index_declared_entities(
                 child, scope, cur_file, name_index, decl_file, ref_name_index
             )
-        return
+        return cur_file
 
     if kind == "NamespaceDecl" and name:
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _index_declared_entities(
+            cur_file = _index_declared_entities(
                 child, child_scope, cur_file, name_index, decl_file, ref_name_index
             )
-        return
+        return cur_file
 
     if kind in _REFERENCE_DECL_KINDS:
         ident = _decl_identity(node)
@@ -316,9 +323,10 @@ def _index_declared_entities(
                 candidates.append(ident)
 
     for child in node.get("inner", []) or []:
-        _index_declared_entities(
+        cur_file = _index_declared_entities(
             child, scope, cur_file, name_index, decl_file, ref_name_index
         )
+    return cur_file
 
 
 def _resolve_type_name(

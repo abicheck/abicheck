@@ -210,6 +210,49 @@ def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     assert fields[0].dst_file == "src/detail/impl.h"
 
 
+def test_sticky_file_state_carries_across_sibling_declarations() -> None:
+    # clang emits loc.file only on the *first* declaration in a file; a later
+    # sibling in the same file carries no "file" key at all (sticky
+    # semantics, mirroring call_graph._node_file's own doc comment). The
+    # sticky state must be threaded from one sibling call to the next in
+    # every loop, not reset to the parent-supplied value for each sibling
+    # independently, or every declaration after the first in a file loses
+    # its dst_file (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Base",
+                    "loc": {"file": "src/detail/shared.h", "line": 3},
+                    "inner": [],
+                },
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Impl",
+                    "loc": {"line": 10},  # no "file" -- sticky from Base
+                    "inner": [],
+                },
+            ],
+        },
+        _record("Widget", inner=[_field("p", "detail::Impl *")]),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge(
+            "Widget",
+            "detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            "src/detail/shared.h",
+        )
+    ]
+
+
 def test_private_enum_field_type_is_indexed_and_qualified() -> None:
     # A field/param typed with a private *enum* (not a record) previously fell
     # through un-indexed: qualType prints the bare "Mode", and nothing tracked
