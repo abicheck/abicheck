@@ -448,6 +448,33 @@ than it actually proves:
   (`is_internal_dependency_node`) — now applied symmetrically to what counts
   as a public *entry*.
 
+A seventh Codex review found the last instance of the same "ran" ≠ "fully
+observed" gap, one layer deeper than the sixth review's scope fix: even an
+*unscoped* run examining the whole compile DB can still fail to observe
+anything meaningful. `ClangCallGraphExtractor.extract_from_build`/
+`ClangTypeGraphExtractor.extract_from_build` are per-TU best-effort — a clang
+crash, timeout, empty stdout, or a degenerate AST that blows Python's
+recursion limit degrades that *one* TU to zero edges *silently*, recording
+only a `diagnostics` entry; the returned edge list alone cannot distinguish
+"every TU parsed cleanly, found nothing" from "some TU never actually got
+parsed." An entirely empty target (no compile units at all) has the identical
+problem for a different reason: it trivially "finds nothing" without having
+looked at anything. Either gap meant a failed/empty baseline extraction could
+still stamp `extractor_passes[...] = True`, so a later *successful* run's
+first real call/type edge would misread as newly-introduced instead of
+"the baseline never actually got to observe this." Fixed with
+`call_graph.extractor_pass_fully_covered(target, extractor, narrowed)` — a
+single shared predicate (not narrowed, at least one compile unit with a
+source, and no diagnostics recorded on `extractor`) now gates every
+`extractor_passes[...]` stamp across all three call sites:
+`inline._fold_call_graph`/`_fold_type_graph` (which already had `narrowed`
+computed) and `cli_buildsource_helpers._collect_call_graph` (which always
+passes `narrowed=False`, since that out-of-band path never scopes). Any one
+failing TU disqualifies the *whole* pass from claiming confirmed coverage,
+even if most TUs succeeded — consistent with this ADR's running theme:
+under-call (fall back to the pre-existing edge-presence inference) rather
+than risk a false positive on an evidence-poor side.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

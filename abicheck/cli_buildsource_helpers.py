@@ -1201,8 +1201,14 @@ def _collect_call_graph(
     # Recorded regardless of `added` — a pass that ran and found zero edges is
     # still "covered" (ADR-041 P0 slice 2 follow-up, mirrors
     # inline._fold_call_graph): edge presence alone cannot tell a version diff
-    # "ran, zero output" from "never ran".
-    graph.extractor_passes["call_graph"] = True
+    # "ran, zero output" from "never ran". extractor_pass_fully_covered also
+    # requires units to examine and no per-TU parse failures (seventh Codex
+    # review) — this path never narrows (always runs over the whole `merged`
+    # build), so it always passes narrowed=False.
+    from .buildsource.call_graph import extractor_pass_fully_covered
+
+    if extractor_pass_fully_covered(merged, extractor, narrowed=False):
+        graph.extractor_passes["call_graph"] = True
     graph.finalize()
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")

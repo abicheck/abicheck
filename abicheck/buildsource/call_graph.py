@@ -347,6 +347,39 @@ def project_source_files(build: BuildEvidence) -> frozenset[str]:
     return frozenset(files)
 
 
+def extractor_pass_fully_covered(
+    target: BuildEvidence, extractor: Any, narrowed: bool = False
+) -> bool:
+    """Whether a call/type-graph extraction run may claim confirmed pass coverage.
+
+    Shared by ``inline._fold_call_graph``/``_fold_type_graph`` (the inline
+    ``dump --sources`` path) and ``cli_buildsource_helpers._collect_call_graph``
+    (the out-of-band ``collect --call-graph`` path) so both stamp
+    ``SourceGraphSummary.extractor_passes`` under the identical rule
+    (ADR-041 P0 slice 2/3 coverage-honesty chain). Three conditions, all
+    required:
+
+    - Not *narrowed*: the run examined the whole compile DB, not a
+      changed-path/headers-only-scoped subset (sixth Codex review) — a scoped
+      run's "found nothing" only covers the TUs it actually parsed. The
+      out-of-band collect path never narrows, so it always passes ``False``.
+    - At least one compile unit to examine: an empty target trivially "finds
+      nothing" without having looked at anything at all.
+    - No per-TU diagnostics recorded on *extractor* (seventh Codex review):
+      ``extract_from_build`` degrades a failing TU (clang crash/timeout/
+      degenerate AST) to zero edges *silently* — the returned edge list alone
+      cannot distinguish "every TU parsed cleanly, zero found" from "some TU
+      never actually got parsed." Diagnostics are the only signal a partial
+      failure happened; any of them disqualifies the whole pass from claiming
+      confirmed coverage, even if most TUs did succeed.
+    """
+    if narrowed:
+        return False
+    if not any(cu.source for cu in target.compile_units):
+        return False
+    return not extractor.diagnostics
+
+
 def augment_graph_with_calls(
     graph: SourceGraphSummary,
     edges: list[CallEdge],

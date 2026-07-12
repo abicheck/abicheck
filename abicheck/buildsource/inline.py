@@ -1709,20 +1709,18 @@ def _fold_call_graph(
     # can flag a public→impl-helper dependency the built-in call graph produced
     # without L4 ``SOURCE_DECLARES`` evidence, while still excluding third-party
     # header-inline callees (ADR-035 D4 / Codex review).
-    from .call_graph import project_source_files
+    from .call_graph import extractor_pass_fully_covered, project_source_files
 
     project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
     # Recorded regardless of `added` — a pass that ran and found zero edges is
     # still "covered" (ADR-041 P0 slice 2 follow-up): edge presence alone
-    # cannot tell a version diff "ran, zero output" from "never ran". But
-    # *only* when the pass ran over the whole compile DB (not `narrowed`) —
-    # a changed-path/headers-only-scoped run only examined a subset of TUs, so
-    # "found nothing" there says nothing about the rest of the codebase; a
-    # comparison against a fuller run must still fall back to edge-presence
-    # inference rather than claim confirmed, comparable coverage (sixth Codex
-    # review).
-    if not narrowed:
+    # cannot tell a version diff "ran, zero output" from "never ran". But only
+    # when extractor_pass_fully_covered() confirms the run examined the
+    # whole compile DB (not narrowed), had units to examine, and hit no
+    # per-TU parse failures (sixth/seventh Codex review) — otherwise fall back
+    # to edge-presence inference rather than claim confirmed coverage.
+    if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["call_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
@@ -1797,15 +1795,14 @@ def _fold_type_graph(
         scoped_note = " (headers-only scope, matching L4)"
         narrowed = True
     edges = extractor.extract_from_build(target)
-    from .call_graph import project_source_files
+    from .call_graph import extractor_pass_fully_covered, project_source_files
 
     project_files = project_source_files(merged)
     added = augment_graph_with_types(graph, edges, project_files or None)
     # Recorded regardless of `added` — see the matching note in
-    # _fold_call_graph. Also gated on `not narrowed` for the same reason
-    # (sixth Codex review): a changed-path/headers-only-scoped run only
-    # examined a subset of TUs, so it cannot confirm coverage for the rest.
-    if not narrowed:
+    # _fold_call_graph (extractor_pass_fully_covered gates on not narrowed,
+    # having units to examine, and no per-TU parse failures).
+    if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["type_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"type_graph: {diag}")

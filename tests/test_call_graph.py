@@ -687,7 +687,10 @@ def test_collect_call_graph_folds_edges_and_refinalizes(monkeypatch) -> None:
     )
     graph = build_source_graph(BuildEvidence())
     records: list[ExtractorRecord] = []
-    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
+    merged = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
+    )
+    _collect_call_graph(graph, merged, records, clang_bin="clang")
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
     # coverage was re-finalized so the call-edge count is reflected.
     assert graph.coverage["call_edges"]["count"] == 1
@@ -709,9 +712,48 @@ def test_collect_call_graph_records_pass_ran_even_with_zero_edges(monkeypatch) -
     _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[]))
     graph = build_source_graph(BuildEvidence())
     records: list[ExtractorRecord] = []
-    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
+    merged = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
+    )
+    _collect_call_graph(graph, merged, records, clang_bin="clang")
     assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
     assert graph.extractor_passes["call_graph"] is True
+
+
+def test_collect_call_graph_empty_build_records_no_pass_coverage(monkeypatch) -> None:
+    # Seventh Codex review: an empty build (no compile units at all) trivially
+    # "finds nothing" without having looked at anything — it must not claim
+    # confirmed pass coverage.
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.source_graph import build_source_graph
+    from abicheck.cli_buildsource import _collect_call_graph
+
+    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[]))
+    graph = build_source_graph(BuildEvidence())
+    records: list[ExtractorRecord] = []
+    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
+    assert "call_graph" not in graph.extractor_passes
+
+
+def test_collect_call_graph_partial_failure_records_no_pass_coverage(monkeypatch) -> None:
+    # Seventh Codex review: extract_from_build degrades a per-TU parse failure
+    # (clang crash/timeout/degenerate AST) to zero edges silently, recording it
+    # only via `diagnostics` — that must disqualify confirmed pass coverage
+    # even though the extractor otherwise ran and the build had real units.
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.source_graph import build_source_graph
+    from abicheck.cli_buildsource import _collect_call_graph
+
+    fake = _FakeExtractor(available=True, edges=[])
+    fake.diagnostics.append("clang produced no AST (stderr: ...)")
+    _patch_extractor(monkeypatch, fake)
+    graph = build_source_graph(BuildEvidence())
+    records: list[ExtractorRecord] = []
+    merged = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
+    )
+    _collect_call_graph(graph, merged, records, clang_bin="clang")
+    assert "call_graph" not in graph.extractor_passes
 
 
 def test_collect_call_graph_missing_clang_records_failure(monkeypatch) -> None:

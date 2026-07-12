@@ -117,7 +117,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   public or private, gets a `header` node) — otherwise a private type could
   be treated as a dependency-closure entry and a private type gaining its own
   new private field/base could wrongly emit `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
-  with no public API involved.
+  with no public API involved. A seventh review found one more gap in the same
+  vein: even an unscoped run can fail to observe anything meaningful — a
+  per-TU clang crash/timeout/degenerate AST degrades that TU to zero edges
+  *silently* (only a `diagnostics` entry records it), and an entirely empty
+  build target trivially "finds nothing" without having looked at anything.
+  New shared `call_graph.extractor_pass_fully_covered()` predicate (not
+  narrowed, has compile units, no diagnostics recorded) now gates every
+  `extractor_passes[...]` stamp across all three call sites
+  (`inline._fold_call_graph`/`_fold_type_graph`,
+  `cli_buildsource_helpers._collect_call_graph`) — one failing TU disqualifies
+  the whole pass from claiming confirmed coverage.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
