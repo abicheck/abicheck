@@ -110,6 +110,15 @@ _VECTOR_ABI_FLAGS_RE = re.compile(
     r"-mveclibabi=\S+|-fveclib=\S+|-vecabi=\S+"
 )
 
+# wchar_t data-model flag in DW_AT_producer. GCC/Clang document that objects
+# built with and without -fshort-wchar are not binary compatible: the flag
+# switches wchar_t between the platform default (commonly 4-byte signed on
+# Linux/macOS) and a 2-byte unsigned type. Kept in its own field (like the
+# vector-ABI flags) rather than folded into _ABI_FLAGS_RE's generic
+# toolchain_flag_drift bucket, since it gets its own named, higher-signal
+# ChangeKind (WCHAR_MODEL_CHANGED).
+_WCHAR_ABI_FLAGS_RE = re.compile(r"-fshort-wchar|-fno-short-wchar")
+
 # Natural alignment (bytes) by type size on most LP64 platforms
 _NATURAL_ALIGN: dict[int, int] = {1: 1, 2: 2, 4: 4, 8: 8, 16: 16}
 
@@ -129,6 +138,7 @@ class ToolchainInfo:
     version: str = ""               # e.g. "13.2.1"
     abi_flags: set[str] = field(default_factory=set)  # extracted ABI-affecting flags
     vector_abi_flags: set[str] = field(default_factory=set)  # vector-function (SIMD clone) ABI flags
+    wchar_flags: set[str] = field(default_factory=set)  # -fshort-wchar / -fno-short-wchar
 
 
 @dataclass
@@ -231,6 +241,7 @@ def _process_cu(CU: Any, meta: AdvancedDwarfMetadata) -> None:
         else:
             meta.toolchain.abi_flags |= parsed.abi_flags
             meta.toolchain.vector_abi_flags |= parsed.vector_abi_flags
+            meta.toolchain.wchar_flags |= parsed.wchar_flags
 
     _walk_cu(top, meta, CU)
 
@@ -958,6 +969,9 @@ def _parse_producer(producer: str) -> ToolchainInfo:
     for m in _VECTOR_ABI_FLAGS_RE.finditer(producer):
         info.vector_abi_flags.add(m.group(0))
 
+    for m in _WCHAR_ABI_FLAGS_RE.finditer(producer):
+        info.wchar_flags.add(m.group(0))
+
     return info
 
 
@@ -1204,6 +1218,34 @@ def _diff_vector_abi_flags(
     return results
 
 
+def _diff_wchar_flags(
+    old_meta: AdvancedDwarfMetadata,
+    new_meta: AdvancedDwarfMetadata,
+) -> list[tuple[str, str, str, str | None, str | None]]:
+    """Diff the -fshort-wchar / default wchar_t data-model flag.
+
+    GCC/Clang document that objects built with and without -fshort-wchar are
+    not binary compatible: the flag switches wchar_t between the platform
+    default (commonly 4-byte signed on Linux/macOS) and a 2-byte unsigned
+    type. Any public function or struct field carrying wchar_t changes size
+    and signedness with no symbol-level signal, so this flags the compiler-
+    flag cause for review.
+    """
+    old_short = "-fshort-wchar" in old_meta.toolchain.wchar_flags
+    new_short = "-fshort-wchar" in new_meta.toolchain.wchar_flags
+    if old_short == new_short:
+        return []
+    old_label = "short (2-byte unsigned, -fshort-wchar)" if old_short else "default wchar_t"
+    new_label = "short (2-byte unsigned, -fshort-wchar)" if new_short else "default wchar_t"
+    return [(
+        "wchar_model_changed", "<wchar_t>",
+        f"wchar_t model changed: {old_label} → {new_label}. Objects built with "
+        "and without -fshort-wchar are not binary compatible for any public "
+        "wchar_t parameter, field, or return value.",
+        old_label, new_label,
+    )]
+
+
 def _diff_frame_registers(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -1241,10 +1283,11 @@ def diff_advanced_dwarf(
     pack_results = _diff_struct_packing(old_meta, new_meta)
     flag_results = _diff_toolchain_flags(old_meta, new_meta)
     vec_results = _diff_vector_abi_flags(old_meta, new_meta)
+    wchar_results = _diff_wchar_flags(old_meta, new_meta)
     frame_results = _diff_frame_registers(old_meta, new_meta)
 
     return (cc_results + csr_results + trait_results + pack_results
-            + flag_results + vec_results + frame_results)
+            + flag_results + vec_results + wchar_results + frame_results)
 
 
 # ---------------------------------------------------------------------------

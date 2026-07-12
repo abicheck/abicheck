@@ -152,6 +152,21 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "rpath_type_changed": "L0",
     "hash_style_removed": "L0",
     "time64_abi_changed": "L1",
+    # Composition compatibility (Wave A). Runtime-binding rebound and ordered
+    # DT_NEEDED/DF_SYMBOLIC/DF_TEXTREL facts are all read from the dynamic
+    # section / symbol tables of the (possibly multiple) resolved DSOs alone.
+    "runtime_symbol_provider_changed": "L0",
+    "runtime_weak_resolution_changed": "L0",
+    "needed_order_changed": "L0",
+    "symbolic_binding_mode_changed": "L0",
+    "text_relocation_introduced": "L0",
+    "text_relocation_removed": "L0",
+    # PE ordinal/import-table facts — read from the export/import directories
+    # alone, no debug info or headers needed.
+    "pe_ordinal_retargeted": "L0",
+    "pe_import_load_mode_changed": "L0",
+    # wchar_t model drift is read from DW_AT_producer, like toolchain_flag_drift.
+    "wchar_model_changed": "L1",
     # Python-level API of an extension module (G23): recovered from a `.pyi`
     # type stub — a declared-API surface analogous to public headers, and like
     # headers invisible in the binary/debug info. The `.so` export table shows

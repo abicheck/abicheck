@@ -172,6 +172,21 @@ def stack_to_html(result: StackCheckResult) -> str:
   </table>
 </div>"""
 
+    # Runtime binding-provider changes
+    binding_changes_html = ""
+    if result.binding_changes:
+        bc_rows = "\n".join(
+            f"<tr><td><code>{h(bc.kind.value)}</code></td><td>{h(bc.description)}</td></tr>"
+            for bc in result.binding_changes
+        )
+        binding_changes_html = f"""<div class='section section-changed'>
+  <h3>Runtime Binding Changes ({len(result.binding_changes)})</h3>
+  <table class='changes'>
+    <thead><tr><th>Kind</th><th>Description</th></tr></thead>
+    <tbody>{bc_rows}</tbody>
+  </table>
+</div>"""
+
     body = f"""
 <div class="header">
   <h1>Stack Dependency Report</h1>
@@ -204,6 +219,7 @@ def stack_to_html(result: StackCheckResult) -> str:
 {unresolved_html}
 {missing_html}
 {stack_changes_html}
+{binding_changes_html}
 
 {render_footer("Stack Dependency Report")}
 """

@@ -801,6 +801,17 @@ class ChangeKind(str, Enum):
     VAR_ALIGNMENT_CHANGED = "var_alignment_changed"  # exported variable's declared alignment changed → BREAKING
     FUNC_EXCEPTION_SPEC_CHANGED = "func_exception_spec_changed"  # dynamic exception specification (throw(...)) changed in a way not covered by the noexcept kinds → RISK
 
+    # ── Composition compatibility (Wave A: runtime binding / loader / PE / wchar) ──
+    RUNTIME_SYMBOL_PROVIDER_CHANGED = "runtime_symbol_provider_changed"  # a consumer's symbol reference resolves to a different provider DSO across environments → RISK
+    RUNTIME_WEAK_RESOLUTION_CHANGED = "runtime_weak_resolution_changed"  # a weak symbol reference flipped between resolved and unresolved across environments → RISK
+    NEEDED_ORDER_CHANGED = "needed_order_changed"  # DT_NEEDED entries reordered with the dependency set unchanged — can silently change which DSO wins a non-versioned lookup → RISK
+    SYMBOLIC_BINDING_MODE_CHANGED = "symbolic_binding_mode_changed"  # DT_SYMBOLIC/DF_SYMBOLIC toggled — self-references resolve to own definitions before global scope → RISK
+    TEXT_RELOCATION_INTRODUCED = "text_relocation_introduced"  # DF_TEXTREL/DT_TEXTREL gained — loader must write into the text segment, defeating W^X/text-segment sharing → RISK
+    TEXT_RELOCATION_REMOVED = "text_relocation_removed"  # DF_TEXTREL/DT_TEXTREL dropped — text segment stays read-only/shared again → COMPATIBLE (quality)
+    PE_ORDINAL_RETARGETED = "pe_ordinal_retargeted"  # a consumer's ordinal-only PE import now resolves to a different exported function → BREAKING
+    PE_IMPORT_LOAD_MODE_CHANGED = "pe_import_load_mode_changed"  # an imported DLL function moved between eager (IAT) and delay-loaded → RISK
+    WCHAR_MODEL_CHANGED = "wchar_model_changed"  # -fshort-wchar drift changes wchar_t size/signedness with no symbol-level signal → RISK
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

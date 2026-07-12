@@ -162,6 +162,13 @@ class ElfMetadata:
     has_fortify_source: bool = False
     # W^X violation: a loadable segment is simultaneously writable + executable.
     has_writable_executable_segment: bool = False
+    # DT_SYMBOLIC/DF_SYMBOLIC: the object resolves its own references against
+    # its own definitions before the global scope (lookup-precedence change).
+    is_symbolic: bool = False
+    # DF_TEXTREL (DT_FLAGS) or the legacy DT_TEXTREL tag: the loader must write
+    # into the text segment to apply relocations, defeating W^X / text-segment
+    # sharing. Non-PIC code is the common cause.
+    has_textrel: bool = False
 
     # Target pointer width in bytes (4 for ELFCLASS32, 8 for ELFCLASS64).
     # Used by diff_elf_layout.py to turn `_ZTV`/`_ZTI` object sizes into vtable
@@ -782,6 +789,8 @@ def _postprocess_metadata(
 # Dynamic-flag bit constants (elf.h).
 _DT_RELR = 36             # DT_RELR (packed relative relocations)
 _DF_ORIGIN = 0x1          # DT_FLAGS
+_DF_SYMBOLIC = 0x2        # DT_FLAGS
+_DF_TEXTREL = 0x4         # DT_FLAGS
 _DF_BIND_NOW = 0x8        # DT_FLAGS
 _DF_STATIC_TLS = 0x10     # DT_FLAGS
 _DF_1_NOW = 0x1           # DT_FLAGS_1
@@ -817,6 +826,9 @@ def _apply_simple_dynamic_tag(
         meta.runpath = tag.runpath
     elif d_tag == "DT_BIND_NOW":
         meta.bind_now = True
+    elif d_tag == "DT_TEXTREL":
+        # Legacy standalone tag; DF_TEXTREL (DT_FLAGS) is the modern spelling.
+        meta.has_textrel = True
     elif d_tag in ("DT_RELR", _DT_RELR):
         # Packed relative relocations. pyelftools spells known tags as
         # strings; an older release may pass the raw numeric through.
@@ -834,6 +846,10 @@ def _apply_dt_flags(d_val: int, meta: ElfMetadata, dyn_flags: set[str]) -> None:
         meta.has_static_tls = True
     if d_val & _DF_ORIGIN:
         dyn_flags.add("ORIGIN")
+    if d_val & _DF_SYMBOLIC:
+        meta.is_symbolic = True
+    if d_val & _DF_TEXTREL:
+        meta.has_textrel = True
 
 
 def _apply_dt_flags_1(d_val: int, meta: ElfMetadata, dyn_flags: set[str]) -> None:

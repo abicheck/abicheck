@@ -262,6 +262,16 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.RPATH_TYPE_CHANGED,
     ChangeKind.HASH_STYLE_REMOVED,
     ChangeKind.TIME64_ABI_CHANGED,
+    # Composition compatibility, Wave A (tests/test_composition_compat.py)
+    ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
+    ChangeKind.RUNTIME_WEAK_RESOLUTION_CHANGED,
+    ChangeKind.NEEDED_ORDER_CHANGED,
+    ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
+    ChangeKind.TEXT_RELOCATION_INTRODUCED,
+    ChangeKind.TEXT_RELOCATION_REMOVED,
+    ChangeKind.PE_ORDINAL_RETARGETED,
+    ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
+    ChangeKind.WCHAR_MODEL_CHANGED,
     # G23 Phase A — Linux ELF artifact facts (tests/test_g23_elf_facts.py)
     ChangeKind.STATIC_TLS_INTRODUCED,
     ChangeKind.STATIC_TLS_REMOVED,

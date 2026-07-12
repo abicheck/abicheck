@@ -38,6 +38,7 @@ def _stack_result(
     risk_score: str = "low",
     missing_symbols: list | None = None,
     stack_changes: list | None = None,
+    binding_changes: list | None = None,
 ) -> StackCheckResult:
     return StackCheckResult(
         root_binary="/bin/myapp",
@@ -53,6 +54,7 @@ def _stack_result(
         ],
         missing_symbols=missing_symbols or [],
         stack_changes=stack_changes or [],
+        binding_changes=binding_changes or [],
         risk_score=risk_score,
     )
 
@@ -66,6 +68,25 @@ def test_html_is_valid_document() -> None:
 def test_html_contains_root_binary() -> None:
     out = stack_to_html(_stack_result())
     assert "/bin/myapp" in out
+
+
+def test_html_renders_binding_changes() -> None:
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.checker_types import Change
+
+    change = Change(
+        kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
+        symbol="process", description="moved from liba.so.1 to libb.so.1",
+    )
+    out = stack_to_html(_stack_result(binding_changes=[change]))
+    assert "Runtime Binding Changes" in out
+    assert "runtime_symbol_provider_changed" in out
+    assert "moved from liba.so.1 to libb.so.1" in out
+
+
+def test_html_no_binding_changes_section_when_empty() -> None:
+    out = stack_to_html(_stack_result())
+    assert "Runtime Binding Changes" not in out
 
 
 def test_html_shows_pass_verdict() -> None:

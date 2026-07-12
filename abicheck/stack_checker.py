@@ -30,7 +30,10 @@ from pathlib import Path
 
 from .binder import BindingStatus, SymbolBinding, compute_bindings
 from .checker import DiffResult, compare
+from .checker_policy import BREAKING_KINDS
+from .checker_types import Change
 from .resolver import DependencyGraph, resolve_dependencies
+from .stack_binding_diff import diff_runtime_bindings
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +67,11 @@ class StackCheckResult:
     bindings_candidate: list[SymbolBinding] = field(default_factory=list)
     missing_symbols: list[SymbolBinding] = field(default_factory=list)
     stack_changes: list[StackChange] = field(default_factory=list)
+    # Symbols whose effective runtime provider or weak-resolution status
+    # changed between the baseline and candidate environments even though no
+    # single DSO's own export table changed (dependency reordering, a
+    # sibling library gaining/losing the export, interposition drift).
+    binding_changes: list[Change] = field(default_factory=list)
     risk_score: str = "low"                    # "high", "medium", "low"
 
 
@@ -82,8 +90,11 @@ def _compute_loadability(
     return StackVerdict.PASS
 
 
-def _compute_abi_risk(stack_changes: list[StackChange]) -> StackVerdict:
-    """Determine ABI risk verdict from stack changes."""
+def _compute_abi_risk(
+    stack_changes: list[StackChange],
+    binding_changes: list[Change] | None = None,
+) -> StackVerdict:
+    """Determine ABI risk verdict from stack changes and binding changes."""
     has_breaking = False
     has_risk = False
 
@@ -102,6 +113,12 @@ def _compute_abi_risk(stack_changes: list[StackChange]) -> StackVerdict:
         elif change.abi_diff is not None and not change.impacted_imports:
             if change.abi_diff.verdict.value == "BREAKING":
                 has_risk = True
+
+    for bchange in binding_changes or []:
+        if bchange.kind in BREAKING_KINDS:
+            has_breaking = True
+        else:
+            has_risk = True
 
     if has_breaking:
         return StackVerdict.FAIL
@@ -164,7 +181,10 @@ def check_stack(
 
     loadability = _compute_loadability(candidate_graph, missing, version_mismatches)
     stack_changes = _diff_stacks(baseline_graph, candidate_graph, candidate_bindings)
-    abi_risk = _compute_abi_risk(stack_changes)
+    binding_changes = diff_runtime_bindings(
+        baseline_graph, candidate_graph, baseline_bindings, candidate_bindings
+    )
+    abi_risk = _compute_abi_risk(stack_changes, binding_changes)
     risk_score = _compute_risk_score(loadability, abi_risk)
 
     return StackCheckResult(
@@ -179,6 +199,7 @@ def check_stack(
         bindings_candidate=candidate_bindings,
         missing_symbols=missing,
         stack_changes=stack_changes,
+        binding_changes=binding_changes,
         risk_score=risk_score,
     )
 

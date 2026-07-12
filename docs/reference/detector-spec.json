@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 343,
+  "count": 352,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1434,6 +1434,15 @@
       "examples": "case138_needed_added"
     },
     {
+      "kind": "needed_order_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "needed_order_changed",
+      "examples": ""
+    },
+    {
       "kind": "needed_removed",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
@@ -1587,12 +1596,30 @@
       "examples": ""
     },
     {
+      "kind": "pe_import_load_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "pe_import_load_mode_changed",
+      "examples": ""
+    },
+    {
       "kind": "pe_machine_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "pe_machine_changed",
+      "examples": ""
+    },
+    {
+      "kind": "pe_ordinal_retargeted",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "pe_ordinal_retargeted",
       "examples": ""
     },
     {
@@ -1999,6 +2026,24 @@
       "min_evidence": "L0",
       "doc_slug": "runtime_floor_raised",
       "examples": "case170_env_runtime_floor_raised"
+    },
+    {
+      "kind": "runtime_symbol_provider_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "runtime_symbol_provider_changed",
+      "examples": ""
+    },
+    {
+      "kind": "runtime_weak_resolution_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "runtime_weak_resolution_changed",
+      "examples": ""
     },
     {
       "kind": "sanitizer_mode_changed",
@@ -2496,6 +2541,15 @@
       "examples": ""
     },
     {
+      "kind": "symbolic_binding_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbolic_binding_mode_changed",
+      "examples": ""
+    },
+    {
       "kind": "tag_type_renamed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -2547,6 +2601,24 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "template_return_type_changed",
+      "examples": ""
+    },
+    {
+      "kind": "text_relocation_introduced",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "text_relocation_introduced",
+      "examples": ""
+    },
+    {
+      "kind": "text_relocation_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "text_relocation_removed",
       "examples": ""
     },
     {
@@ -3060,6 +3132,15 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtt_slot_count_changed",
+      "examples": ""
+    },
+    {
+      "kind": "wchar_model_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "wchar_model_changed",
       "examples": ""
     },
     {
