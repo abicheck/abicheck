@@ -37,6 +37,7 @@
     "by_target": {}
   },
   "narrowed_passes": {},
+  "narrowed_scope": {},
   "nodes": [
     {
       "attrs": {},

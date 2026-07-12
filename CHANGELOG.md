@@ -193,6 +193,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   positive. Fixed by dropping the narrowing guard from `new_present` entirely
   (unconditional `kind in new_kinds`), leaving `old_present`'s guard as the
   sole asymmetry check — the only side whose absence this closure leans on.
+  A fourteenth review found that guard itself trusted "both narrowed" too
+  readily: `narrowed_passes` is only a boolean, so an old run narrowed to
+  `src/a.cpp` and a new run narrowed to a disjoint `src/b.cpp` are each
+  individually narrow but examine different code, yet "both narrowed" alone
+  let one credit the other's edge as coverage. New
+  `SourceGraphSummary.narrowed_scope: dict[str, frozenset[str]]` field
+  (additive, same round-trip pattern) records the actual scope a narrowed
+  pass examined (`changed_paths`, or the `scoped_units` source paths);
+  `_common_dependency_edge_kinds` now only trusts a narrowed side's edge
+  against a new side narrowed to an *identical*, non-empty scope. The
+  duplicated scoping decision in `_fold_call_graph`/`_fold_type_graph` was
+  factored into one shared `_scope_narrowed_target()` helper to make room for
+  the new field within `inline.py`'s line-count cap.
 
 - **Correlate a public entry's own body/type-hash change with a new internal
   dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,

@@ -658,6 +658,18 @@ def test_narrowed_passes_round_trips() -> None:
     assert restored.extractor_passes == {}
 
 
+def test_narrowed_scope_round_trips() -> None:
+    # Fourteenth Codex review: narrowed_scope must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell "narrowed to the same
+    # TUs" from "narrowed but to different, disjoint code".
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.narrowed_passes["type_graph"] = True
+    g.narrowed_scope["type_graph"] = frozenset({"src/a.cpp", "src/b.cpp"})
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.narrowed_scope == {"type_graph": frozenset({"src/a.cpp", "src/b.cpp"})}
+
+
 def test_graph_id_order_independent() -> None:
     a = SourceGraphSummary()
     a.add_node(GraphNode(id="x", kind="target"))

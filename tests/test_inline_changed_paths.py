@@ -243,6 +243,10 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     # confirmed full pass on the other side can discount this run's edges as
     # non-representative coverage (eleventh Codex review).
     assert graph.narrowed_passes["call_graph"] is True
+    # And the *actual* scope (not just the boolean) is recorded, so two
+    # narrowed runs are only trusted against each other when identically
+    # scoped (fourteenth Codex review).
+    assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
 
 
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
@@ -348,6 +352,7 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     assert graph is not None
     assert "call_graph" not in graph.extractor_passes
     assert graph.narrowed_passes["call_graph"] is True
+    assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
 
 
 def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
@@ -565,3 +570,4 @@ def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
     assert graph is not None
     assert "type_graph" not in graph.extractor_passes
     assert graph.narrowed_passes["type_graph"] is True
+    assert graph.narrowed_scope["type_graph"] == frozenset({"src/a.cpp"})

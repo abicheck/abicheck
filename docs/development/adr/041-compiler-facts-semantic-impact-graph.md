@@ -622,6 +622,29 @@ in new_kinds`, unconditional) while leaving `old_present`'s eleventh/twelfth-
 round guard exactly as before — the asymmetry-detection logic now applies
 only to the side whose *absence* the closure actually leans on.
 
+A fourteenth Codex review found that `old_present`'s guard itself trusted
+"both narrowed" too readily: `narrowed_passes` is only a boolean, so two
+narrowed sides being "both narrowed" does not mean narrowed to the *same*
+compile units — an old run scoped to `changed_paths=("src/a.cpp",)` and a new
+run scoped to `changed_paths=("src/b.cpp",)` are each individually narrow but
+examine disjoint code, yet the eleventh/twelfth/thirteenth-round formula
+(`not (old_narrowed and not new_narrowed)`) treated any "both narrowed" pair
+as safely comparable, letting `old`'s edge in the region it examined be
+credited as coverage for a kind `new`'s edge (from a wholly different region)
+also happens to have. Fixed by tracking the actual scope, not just the
+boolean: new `SourceGraphSummary.narrowed_scope: dict[str, frozenset[str]]`
+(additive, same round-trip pattern as `narrowed_passes`) records the
+`changed_paths` themselves, or the examined `scoped_units`' source paths for
+an unseeded run — the concrete scope identifier a narrowed pass was
+restricted to. `_common_dependency_edge_kinds` now computes `scope_matches =
+bool(old_scope) and old_scope == new_scope` and only trusts `old`'s narrowed
+edge when `new_narrowed and scope_matches` — an *identical*, non-empty scope
+on both sides, not merely "both happen to be narrowed." The shared scoping
+decision in `_fold_call_graph`/`_fold_type_graph` (previously duplicated
+between the two, now factored into one `_scope_narrowed_target()` helper to
+keep `inline.py` under its line-count cap while adding this field) stamps
+`narrowed_scope` alongside `narrowed_passes` whenever `narrowed` is `True`.
+
 ## Decision — P0 slice 4 (this change)
 
 Roadmap item 2's remaining half, "semantic graph diff — same public decl,

@@ -778,23 +778,48 @@ def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_confirm
 def test_common_dependency_edge_kinds_both_narrowed_unaffected() -> None:
     # Contrast case: the common, intended PR-diff workflow scopes *both* sides
     # identically (e.g. comparing two narrowed runs over the same changed
-    # TUs). Neither side has a *confirmed full* pass to disqualify the
-    # other's edges, so ``narrowed_passes`` being set on both is a no-op here
-    # — behavior is identical to the pre-eleventh-round per-kind fallback
-    # (only the exact kind both sides have an edge of is common; a kind only
-    # the new side has an edge of is excluded from comparison, not flagged).
+    # TUs — the same ``narrowed_scope``, per the fourteenth Codex review).
+    # Neither side has a *confirmed full* pass to disqualify the other's
+    # edges, so this is a no-op here — behavior is identical to the
+    # pre-eleventh-round per-kind fallback (only the exact kind both sides
+    # have an edge of is common; a kind only the new side has an edge of is
+    # excluded from comparison, not flagged).
     old = SourceGraphSummary(
         nodes=[_N("a", "source_decl"), _N("b", "record_type")],
         edges=[_E("a", "b", "DECL_HAS_TYPE")],
         narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
     )
     new = SourceGraphSummary(
         nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
         edges=[_E("a", "b", "DECL_HAS_TYPE"), _E("b", "c", "TYPE_HAS_FIELD_TYPE")],
         narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
     )
     common = _common_dependency_edge_kinds(old, new)
     assert common == frozenset({"DECL_HAS_TYPE"})
+
+
+def test_common_dependency_edge_kinds_narrowed_same_boolean_different_scope() -> None:
+    # Fourteenth Codex review: narrowed_passes alone is just a boolean — "both
+    # narrowed" does not mean "narrowed to the same TUs". An old run scoped to
+    # src/a.cpp and a new run scoped to a disjoint src/b.cpp are each
+    # individually narrow but examine different code; old's edge must not be
+    # credited as coverage for a kind new happens to also have an edge of.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
+        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/b.cpp"})},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
 
 
 def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarked_pack() -> None:
@@ -853,6 +878,44 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate
         nodes=nodes,
         edges=[*shared_edges, _E("pub2", "other_priv", "TYPE_HAS_FIELD_TYPE")],
         # No extractor_passes, no narrowed_passes: unmarked candidate.
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrowed_candidate() -> None:
+    # End-to-end version of the fourteenth-round fix: both packs are narrowed
+    # (narrowed_passes=True on each), but to different, disjoint scopes — the
+    # baseline only ever examined pub's TU, the candidate only pub2's. The
+    # candidate's real dependency in pub2's TU must not be trusted as proof the
+    # baseline's coverage extends there too, just because both are "narrowed".
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("pub2", "source_decl", "pub2()"),
+        _N("sym2", "binary_symbol", "pub2"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
+    ]
+    shared_edges2 = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub2", "sym2", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub2", "SOURCE_DECLARES"),
+        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=list(shared_edges2),
+        narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/pub.cpp"})},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[*shared_edges2, _E("pub2", "other_priv", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+        narrowed_scope={"type_graph": frozenset({"src/pub2.cpp"})},
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds

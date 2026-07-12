@@ -232,6 +232,19 @@ class SourceGraphSummary:
     #: place of) ``extractor_passes`` by ``inline._fold_call_graph``/
     #: ``_fold_type_graph`` when the local ``narrowed`` flag is ``True``.
     narrowed_passes: dict[str, bool] = field(default_factory=dict)
+    #: The actual scope a narrowed pass was restricted to — the ``changed_paths``
+    #: tuple, or the examined compile units' source paths for an unseeded
+    #: ``scoped_units`` run (fourteenth Codex review). ``narrowed_passes`` alone
+    #: is just a boolean: two narrowed sides being "both narrowed" does not mean
+    #: narrowed to the *same* subset — an old run scoped to ``src/a.cpp`` and a
+    #: new run scoped to ``src/b.cpp`` are each individually narrow but examine
+    #: disjoint code, so trusting either one's absence of an edge kind as
+    #: coverage for the other's territory is exactly the same false-positive
+    #: risk narrowed-vs-full already guards against. ``_common_dependency_edge_kinds``
+    #: only trusts a narrowed side's edge as coverage when the other side is
+    #: narrowed to this *identical* (non-empty) scope; set alongside
+    #: ``narrowed_passes`` by ``inline._fold_call_graph``/``_fold_type_graph``.
+    narrowed_scope: dict[str, frozenset[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
@@ -367,6 +380,9 @@ class SourceGraphSummary:
             "external_graph_refs": [dict(r) for r in self.external_graph_refs],
             "extractor_passes": dict(self.extractor_passes),
             "narrowed_passes": dict(self.narrowed_passes),
+            "narrowed_scope": {
+                k: sorted(v) for k, v in self.narrowed_scope.items()
+            },
         }
 
     @classmethod
@@ -389,6 +405,10 @@ class SourceGraphSummary:
             },
             narrowed_passes={
                 str(k): bool(v) for k, v in dict(d.get("narrowed_passes", {})).items()
+            },
+            narrowed_scope={
+                str(k): frozenset(str(p) for p in v)
+                for k, v in dict(d.get("narrowed_scope", {})).items()
             },
         )
 
@@ -1242,17 +1262,23 @@ def _common_dependency_edge_kinds(
     is one-directional: it lives entirely in whether **``old``'s absence** of a
     kind is trustworthy evidence the dependency truly did not exist before, not
     in ``new``'s own scope. A narrowed **old** side's edge of a given kind must
-    not count as coverage for that kind unless ``new`` is narrowed the same way
-    (eleventh/twelfth Codex review): a baseline scoped to a few changed TUs
-    having one ``TYPE_HAS_FIELD_TYPE`` edge from that subset says nothing about
-    dependencies elsewhere in the project — whether the other side is a
-    confirmed *full* pass that saw the rest of the project (eleventh review),
-    or simply carries no pass marker at all, e.g. a pre-slice-2/externally-
-    ingested pack whose true scope is unknown (twelfth review: "the other side
-    lacks a full-pass bit" is not evidence it was equally narrow). Only
-    symmetric narrowing — both sides scoped the same way, e.g. the common
-    PR-diff workflow comparing two runs narrowed to the same changed TUs — is
-    trusted to leave the pre-existing per-kind comparison unaffected.
+    not count as coverage for that kind unless ``new`` is narrowed to the exact
+    *same* scope (eleventh/twelfth/fourteenth Codex review): a baseline scoped
+    to a few changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge from that
+    subset says nothing about dependencies elsewhere in the project — whether
+    the other side is a confirmed *full* pass that saw the rest of the project
+    (eleventh review), simply carries no pass marker at all, e.g. a
+    pre-slice-2/externally-ingested pack whose true scope is unknown (twelfth
+    review), or is *itself* narrowed but to a different, disjoint subset —
+    ``narrowed_passes`` is only a boolean, so "both narrowed" does not mean
+    "narrowed to the same TUs": an old run scoped to ``src/a.cpp`` and a new
+    run scoped to ``src/b.cpp`` are each narrow but examine disjoint code
+    (fourteenth review). ``narrowed_scope`` (the actual scope identifier —
+    ``changed_paths``, or the examined compile units' source paths for an
+    unseeded ``scoped_units`` run) settles this: only an *identical, non-empty*
+    scope on both sides — the common PR-diff workflow, comparing two runs
+    narrowed to the same changed TUs — is trusted to leave the pre-existing
+    per-kind comparison unaffected.
 
     A narrowed **new** side's edge needs no such guard (thirteenth Codex
     review): whatever ``new`` observed in the TUs it did walk is real evidence
@@ -1274,12 +1300,20 @@ def _common_dependency_edge_kinds(
             continue
         old_narrowed = old.narrowed_passes.get(pass_name, False)
         new_narrowed = new.narrowed_passes.get(pass_name, False)
+        old_scope = old.narrowed_scope.get(pass_name, frozenset())
+        new_scope = new.narrowed_scope.get(pass_name, frozenset())
+        # A narrowed old side is only trusted against a new side narrowed to
+        # the *identical*, non-empty scope — "both narrowed" alone does not
+        # establish they examined the same code (fourteenth Codex review).
+        scope_matches = bool(old_scope) and old_scope == new_scope
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:
             # Only OLD's negative evidence needs the narrowing guard — see the
             # docstring's one-directional-risk note (thirteenth Codex review).
-            old_present = (kind in old_kinds) and not (old_narrowed and not new_narrowed)
+            old_present = (kind in old_kinds) and (
+                not old_narrowed or (new_narrowed and scope_matches)
+            )
             new_present = kind in new_kinds
             old_has = old_present or old_pass
             new_has = new_present or new_pass

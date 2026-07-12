@@ -48,7 +48,7 @@ import subprocess
 import time
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -1629,6 +1629,33 @@ def _cu_matches_changed(cu: Any, changed: tuple[str, ...]) -> bool:
     return False
 
 
+def _scope_narrowed_target(
+    merged: BuildEvidence,
+    changed_paths: tuple[str, ...],
+    scoped_units: list[Any] | None,
+) -> tuple[BuildEvidence, str, bool, frozenset[str]]:
+    """Shared scoping decision for :func:`_fold_call_graph`/``_fold_type_graph``.
+
+    Returns ``(target, scoped_note, narrowed, scope_key)`` — ``scope_key`` is
+    the actual scope a narrowed run examined (``changed_paths``, or the
+    ``scoped_units`` source paths), letting a comparison tell "narrowed to the
+    same TUs" from "narrowed but disjoint" (fourteenth Codex review).
+    """
+    if changed_paths and not any(_is_header_path(p) for p in changed_paths):
+        scoped = [
+            cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
+        ]
+        target = replace(merged, compile_units=scoped)
+        return target, " (changed-scoped)", True, frozenset(changed_paths)
+    if changed_paths:
+        return merged, " (header change → all TUs)", False, frozenset()
+    if scoped_units is not None:
+        target = replace(merged, compile_units=list(scoped_units))
+        scope = frozenset(cu.source for cu in scoped_units if cu.source)
+        return target, " (headers-only scope, matching L4)", True, scope
+    return merged, "", False, frozenset()
+
+
 def _fold_call_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -1660,8 +1687,6 @@ def _fold_call_graph(
       seedless ``--depth source`` cost blow-up.
     - neither → the broad pass over all TUs (the ``full``/``s6`` contract).
     """
-    from dataclasses import replace
-
     from .call_graph import ClangCallGraphExtractor, augment_graph_with_calls
 
     rows = extractors if extractors is not None else []
@@ -1685,24 +1710,9 @@ def _fold_call_graph(
     # it affects, so restricting to ``cu.source`` matches would drop every unit and
     # silently skip header-only API changes (Codex review). Source-only changes
     # stay narrowed to the matching TUs.
-    target = merged
-    scoped_note = ""
-    narrowed = False
-    if changed_paths and not any(_is_header_path(p) for p in changed_paths):
-        scoped = [
-            cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
-        ]
-        target = replace(merged, compile_units=scoped)
-        scoped_note = " (changed-scoped)"
-        narrowed = True
-    elif changed_paths:
-        scoped_note = " (header change → all TUs)"
-    elif scoped_units is not None:
-        # Unseeded: match the L4 replay's scope (headers-only) instead of fanning
-        # out to the whole compile DB (Gap-1 fix).
-        target = replace(merged, compile_units=list(scoped_units))
-        scoped_note = " (headers-only scope, matching L4)"
-        narrowed = True
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
     edges = extractor.extract_from_build(target)
     # The project's own compile-unit sources — used to mark call-graph decls
     # ``defined_in_project`` from source-location provenance, so the cross-checks
@@ -1724,10 +1734,11 @@ def _fold_call_graph(
         graph.extractor_passes["call_graph"] = True
     elif narrowed:
         # A narrowed pass never confirms full-project coverage, but its edges
-        # are real for the subset it walked — record that so a comparison
-        # against a confirmed full pass on the other side doesn't credit
-        # those edges as whole-family coverage (eleventh Codex review).
+        # are real for the subset it walked — record that (plus the actual
+        # scope) so a comparison doesn't credit them as coverage elsewhere
+        # (eleventh/fourteenth Codex review; see narrowed_scope's docstring).
         graph.narrowed_passes["call_graph"] = True
+        graph.narrowed_scope["call_graph"] = scope_key
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
     timing = (
@@ -1767,8 +1778,6 @@ def _fold_type_graph(
     the two passes share one scoping decision and one clang-availability
     diagnostic story.
     """
-    from dataclasses import replace
-
     from .type_graph import ClangTypeGraphExtractor, augment_graph_with_types
 
     rows = extractors if extractors is not None else []
@@ -1784,22 +1793,9 @@ def _fold_type_graph(
             )
         )
         return
-    target = merged
-    scoped_note = ""
-    narrowed = False
-    if changed_paths and not any(_is_header_path(p) for p in changed_paths):
-        scoped = [
-            cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
-        ]
-        target = replace(merged, compile_units=scoped)
-        scoped_note = " (changed-scoped)"
-        narrowed = True
-    elif changed_paths:
-        scoped_note = " (header change → all TUs)"
-    elif scoped_units is not None:
-        target = replace(merged, compile_units=list(scoped_units))
-        scoped_note = " (headers-only scope, matching L4)"
-        narrowed = True
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
     edges = extractor.extract_from_build(target)
     from .call_graph import extractor_pass_fully_covered, project_source_files
 
@@ -1807,11 +1803,13 @@ def _fold_type_graph(
     added = augment_graph_with_types(graph, edges, project_files or None)
     # Recorded regardless of `added` — see the matching note in
     # _fold_call_graph (extractor_pass_fully_covered gates on not narrowed,
-    # having units to examine, and no per-TU parse failures).
+    # having units to examine, and no per-TU parse failures). The scope key
+    # mirrors _fold_call_graph too (fourteenth Codex review).
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["type_graph"] = True
     elif narrowed:
         graph.narrowed_passes["type_graph"] = True
+        graph.narrowed_scope["type_graph"] = scope_key
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"type_graph: {diag}")
     timing = (
