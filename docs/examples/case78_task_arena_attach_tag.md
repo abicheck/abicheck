@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `func_removed`, `type_removed`, `enum_member_removed` |
+| **Detected `ChangeKind`s** | `func_removed`, `type_removed` |
 | **Source files** | `examples/case78_task_arena_attach_tag/` |
 
 **Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING

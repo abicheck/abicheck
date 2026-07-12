@@ -549,7 +549,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "enum_member_removed",
-      "examples": "case19_enum_member_removed,case78_task_arena_attach_tag"
+      "examples": "case19_enum_member_removed"
     },
     {
       "kind": "enum_member_renamed",

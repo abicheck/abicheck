@@ -217,14 +217,19 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "MyType* get_obj(void);",
         "cpp", "NO_CHANGE", "NO_CHANGE", "parity",
     ),
-    # ── Issue #100 — = delete not detected ───────────────────────────────────
-    # Both abicheck and ABICC miss the = delete change through castxml/header path.
-    # castxml does not emit deleted functions/methods at all, so neither tool can
-    # detect the = delete annotation. This is a known gap in both tools for this
-    # class of change. Both tools return NO_CHANGE (parity — but incorrectly so).
-    # The "correct" behavior would be BREAKING, but neither tool achieves it here.
+    # ── Issue #100 — = delete now detected by abicheck ────────────────────────
+    # Both abicheck and ABICC used to miss the = delete change through the
+    # castxml/header path: castxml does not emit a mangled name for a
+    # user-declared constructor overload (case78/case111's gap), so the
+    # non-deleted copy ctor in v1 had no ELF symbol to match either — and
+    # castxml drops a `= delete`d member from its XML entirely, so v2 has no
+    # element for it at all. abicheck now recovers a constructor overload's
+    # visibility from source access when castxml gives no mangled name to
+    # check (see dumper_castxml._constructor_visibility), so the v1 copy ctor
+    # is correctly seen as public, has no counterpart in v2, and FUNC_REMOVED
+    # fires — BREAKING, matching reality. ABICC still misses it (unaffected,
+    # separate tool), so this is now an abicheck-correct divergence, not parity.
     # See: https://github.com/lvc/abi-compliance-checker/issues/100
-    # Future: detect = delete via a different mechanism (e.g. DWARF or ELF mangled names)
     (
         "func_deleted_marker",
         "class Foo { public: Foo(); Foo(const Foo&); };\n"
@@ -235,7 +240,7 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Foo* make_foo(int x);",
         "class Foo { public: Foo(); Foo(const Foo&) = delete; };\n"
         "Foo* make_foo(int x);",
-        "cpp", "NO_CHANGE", "NO_CHANGE", "parity",
+        "cpp", "BREAKING", "NO_CHANGE", "correct",
     ),
     # ── Issue #96 — Incomplete type → complete type (type became opaque) ─────
     # When a struct goes from complete definition to forward-declaration only,

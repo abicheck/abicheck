@@ -2642,10 +2642,8 @@
    "expected": "BREAKING",
    "expected_kinds": [
     "func_removed",
-    "type_removed",
-    "enum_member_removed"
+    "type_removed"
    ],
-   "known_gap": "Two detector gaps stack on this case in the castxml-driven pipeline: (1) castxml does not emit mangled names for user-declared constructors (same gap as case106), so the v1 ctor `task_arena(attach_mode_t)` collapses with all other ctors under mangled='task_arena' and FUNC_REMOVED never fires; (2) abicheck's enum diff defers wholly-removed enums to TYPE_REMOVED, but TYPE_REMOVED only iterates `snap.types`, never `snap.enums`, so `attach_mode_t` removal goes silently undetected. End-to-end the verdict comes out COMPATIBLE (only the new nested `attach` struct is observed as TYPE_ADDED). The case is preserved as a regression fixture for whenever either gap is closed.",
    "min_evidence": "L1",
    "platforms": [
     "linux",
