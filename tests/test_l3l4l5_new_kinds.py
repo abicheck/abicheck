@@ -33,6 +33,8 @@ from abicheck.buildsource.source_graph import (
     GraphEdge,
     GraphNode,
     SourceGraphSummary,
+    _dependency_reachability,
+    _public_entry_internal_reach,
     diff_source_graph_findings,
 )
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind
@@ -421,6 +423,72 @@ def test_l5_internal_type_dep_skipped_without_baseline_coverage() -> None:
     ])
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
+    # Codex review: the baseline only ever ran the call graph (DECL_CALLS_DECL);
+    # the new side additionally ran the ADR-041 type-graph pass for the first
+    # time, so it carries TYPE_HAS_FIELD_TYPE edges the baseline could never
+    # have collected. That must read as a coverage improvement, not a new
+    # dependency — flagging it would fire on every pack collected before the
+    # type-graph pass existed, purely from re-scanning unchanged source.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),  # only the call-graph pass ran
+    ])
+    new = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "pub", "DECL_CALLS_DECL"),
+        _E("pub", "priv_type", "DECL_HAS_TYPE"),  # type-graph pass, new on this side
+    ])
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_dependency_reachability_empty_edge_kinds_returns_empty() -> None:
+    # Direct unit test of the defensive early-return: an empty edge_kinds set
+    # (e.g. _common_dependency_edge_kinds finding no overlap) must short-circuit
+    # rather than walk a graph that does carry dependency edges of other kinds.
+    g = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")],
+        edges=[_E("a", "b", "DECL_CALLS_DECL")],
+    )
+    assert _dependency_reachability(g, frozenset()) == {}
+
+
+def test_public_entry_internal_reach_no_reach_returns_empty() -> None:
+    # Direct unit test: empty edge_kinds means _dependency_reachability returns
+    # {}, so _public_entry_internal_reach must short-circuit before ever
+    # touching the public-closure computation.
+    nodes = [_N("pub", "source_decl"), _N("sym", "binary_symbol"), _N("intn", "source_decl")]
+    g = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("pub", "intn", "DECL_CALLS_DECL"),
+    ])
+    assert _public_entry_internal_reach(g, frozenset()) == set()
+
+
+def test_public_entry_internal_reach_no_public_closure_returns_empty() -> None:
+    # Direct unit test: reach is non-empty but the graph has no public closure
+    # at all (no SOURCE_DECLARES edges), so there is nothing to subtract over.
+    nodes = [
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("intn", "source_decl", "intn()"),
+    ]
+    g = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("pub", "intn", "DECL_CALLS_DECL"),
+    ])
+    assert _public_entry_internal_reach(g, frozenset({"DECL_CALLS_DECL"})) == set()
 
 
 def test_l5_owner_changed_reads_header_declaring_nodes() -> None:

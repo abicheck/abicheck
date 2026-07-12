@@ -260,6 +260,24 @@ Fixed by generalizing the closure computation:
   or no public closure) makes the check skip rather than flag every
   pre-existing dependency as newly added.
 
+A review pass (Codex) caught one more instance of the same coverage-honesty
+class of bug: gating on *any* dependency edge kind being present on both sides
+is too coarse once the closure spans five kinds instead of one. A baseline
+that only ever ran the call graph (`DECL_CALLS_DECL`) while the new side
+additionally ran the type-graph pass for the first time still passes that
+gate — it has *a* dependency edge on both sides — but the closure itself then
+walks `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`/`DECL_HAS_TYPE`/
+`DECL_REFERENCES_DECL` edges the baseline could never have collected, so every
+target reachable only through one of those kinds reads as newly internal —
+purely from re-scanning unchanged source with better tooling, not a code
+change. Fixed with `_common_dependency_edge_kinds()`: the closure is
+restricted, per version-diff comparison, to the intersection of dependency
+edge kinds actually collected on *both* sides; `_dependency_reachability()`
+and `_public_entry_internal_reach()` take that kind set as an explicit
+parameter (rather than always closing over the full
+`DEPENDENCY_EDGE_KINDS`) so a collector-coverage improvement on one side can
+never manufacture a finding on its own.
+
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 broadening its recall exactly as slice 1 broadened `public_to_internal_dependency`'s
 — the type/reference edges the P0 slice 1 extractor started producing were

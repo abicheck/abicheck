@@ -57,7 +57,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `public_to_internal_dependency` check already covered all five edge kinds;
   both checks now share one `source_graph.DEPENDENCY_EDGE_KINDS` constant so
   they cannot drift apart again. No new `ChangeKind` — this only broadens the
-  recall of the existing `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding.
+  recall of the existing `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding. The
+  closure is restricted to dependency edge kinds actually collected on *both*
+  graphs (`_common_dependency_edge_kinds`), so a collector improvement — e.g.
+  the type-graph pass running for the first time on one side — cannot make a
+  pre-existing, unchanged dependency look newly added.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
