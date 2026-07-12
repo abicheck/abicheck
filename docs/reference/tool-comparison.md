@@ -421,8 +421,11 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 abicheck L2's 10 misses (170 − 160): `case20`, `case78`, `case97`
 (enum-as-literal-constant / hidden-friend-adjacent gaps sharing one root
 cause, see `docs/development/goals.md`), `case105`, `case111` (documented
-detector gaps), and `case130`-`case133` (build-mode flips that structurally
-need `-p build/` L3 context, which the L2-only lane doesn't pass).
+detector gaps), `case130`-`case133` (build-mode flips that structurally
+need `-p build/` L3 context, which the L2-only lane doesn't pass), and
+`case165_polymorphic_nonvirtual_dtor` (returned `COMPATIBLE` instead of
+`COMPATIBLE_WITH_RISK` — a deployment-risk classification gap, not a missed
+break).
 
 ---
 
