@@ -42,11 +42,17 @@ Architecture mirrors ``call_graph.py`` deliberately:
   :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
 
 Every edge is best-effort and approximate — type names are matched by their
-*textual* base spelling (cv/pointer/reference/array stripped), not resolved
-through clang's type-identity graph, so two same-named types in different
-scopes can collide onto one node (the same accepted tradeoff
-``SourceEntity.identity()`` documents for unmangled declarations). This is a
-second, independent ``clang -ast-dump=json`` pass over each translation unit
+*textual* base spelling (cv/pointer/reference/array stripped). clang's
+``qualType`` prints a type *as written*, not fully qualified, so a first AST
+pass (:func:`_index_declared_entities`) indexes every record's qualified name
+and declaring file and the second pass resolves an unqualified spelling
+against the nearest enclosing scope (:func:`_resolve_type_name`) —
+approximate unqualified-name lookup, not real semantic resolution, so two
+same-named types in different scopes can still collide, and an edge whose
+target could not be resolved is kept at reduced confidence rather than
+dropped (the same accepted tradeoff ``SourceEntity.identity()`` documents for
+unmangled declarations). This is a second, independent
+``clang -ast-dump=json`` pass over each translation unit
 (alongside the call graph's own pass) — a real compiler-facts source (a
 build-integrated plugin emitting both edge families from one frontend pass)
 is future work; see ADR-041 P0/P1.
@@ -60,7 +66,7 @@ import subprocess  # noqa: S404 - type-graph extraction shells out to clang (nev
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from .source_graph import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
@@ -186,6 +192,31 @@ def _decl_identity(node: dict[str, Any]) -> str:
     return str(node.get("mangledName") or node.get("name") or "")
 
 
+def _node_file(node: dict[str, Any]) -> str:
+    """The source file a node names, if any (clang emits ``file`` only when it
+    *changes* — sticky — so the caller tracks the last-seen value; mirrors
+    ``call_graph._node_file``)."""
+    loc = node.get("loc")
+    if isinstance(loc, dict) and loc.get("file"):
+        return str(loc["file"])
+    rng = node.get("range")
+    if isinstance(rng, dict):
+        beg = rng.get("begin")
+        if isinstance(beg, dict) and beg.get("file"):
+            return str(beg["file"])
+    return ""
+
+
+def _looks_like_record_definition(node: dict[str, Any]) -> bool:
+    """Whether a CXXRecordDecl-like node carries a real definition (has members),
+    as opposed to a bare forward declaration."""
+    return any(
+        isinstance(c, dict)
+        and c.get("kind") in ("FieldDecl", "CXXMethodDecl", "CXXConstructorDecl")
+        for c in node.get("inner", []) or []
+    )
+
+
 @dataclass(frozen=True)
 class TypeEdge:
     """One type/reference edge extracted from a clang AST (ADR-041 P0)."""
@@ -196,10 +227,112 @@ class TypeEdge:
     confidence: str = CONF_HIGH
     #: "base" | "field" | "param" | "ref" — the role of *dst* relative to *src*.
     role: str = ""
+    #: The file *dst* is declared in, when resolvable within this TU's AST —
+    #: used to mark an AST-only dependency node ``defined_in_project`` (Codex
+    #: review: without this, a private-header dst node carries no visibility
+    #: and ``public_to_internal_dependency`` never fires on it).
+    dst_file: str = ""
+
+
+def _index_declared_entities(
+    node: Any,
+    scope: list[str],
+    cur_file: str,
+    name_index: dict[str, list[str]],
+    decl_file: dict[str, str],
+) -> None:
+    """First pass: record every record's qualified name (+declaring file) and
+    every var/enum-constant's identity (+declaring file) seen anywhere in the
+    TU, so the second pass can resolve an unqualified type spelling against
+    the nearest enclosing scope (Codex review: clang's ``qualType`` is
+    *written*, not fully qualified — a field typed ``Base`` inside
+    ``namespace ns`` prints as ``"Base"``, not ``"ns::Base"``) and mark
+    AST-only dependency nodes with their declaring file for
+    ``defined_in_project`` provenance.
+    """
+    if not isinstance(node, dict):
+        return
+    f = _node_file(node)
+    if f:
+        cur_file = f
+    kind = str(node.get("kind", ""))
+    name = str(node.get("name") or "")
+
+    if kind in _RECORD_DECL_KINDS and name:
+        qname = "::".join([*scope, name])
+        name_index.setdefault(name, [])
+        if qname not in name_index[name]:
+            name_index[name].append(qname)
+        if cur_file and (qname not in decl_file or _looks_like_record_definition(node)):
+            decl_file[qname] = cur_file
+        child_scope = [*scope, name]
+        for child in node.get("inner", []) or []:
+            _index_declared_entities(
+                child, child_scope, cur_file, name_index, decl_file
+            )
+        return
+
+    if kind == "NamespaceDecl" and name:
+        child_scope = [*scope, name]
+        for child in node.get("inner", []) or []:
+            _index_declared_entities(
+                child, child_scope, cur_file, name_index, decl_file
+            )
+        return
+
+    if kind in _REFERENCE_DECL_KINDS:
+        ident = _decl_identity(node)
+        if ident and cur_file:
+            decl_file.setdefault(ident, cur_file)
+
+    for child in node.get("inner", []) or []:
+        _index_declared_entities(child, scope, cur_file, name_index, decl_file)
+
+
+def _resolve_type_name(
+    raw: str, scope: list[str], name_index: dict[str, list[str]]
+) -> str:
+    """Resolve an unqualified type spelling to a fully qualified name.
+
+    clang's ``qualType`` prints a type *as written*, not fully qualified — a
+    field typed ``Base`` inside ``namespace ns { struct Widget { ... }; }``
+    prints as ``"Base"`` even when ``Base`` is ``ns::Base`` (Codex review).
+    Approximates C++ unqualified name lookup: try the nearest enclosing scope
+    first, then each enclosing scope outward, then fall back to a unique
+    single candidate. An already-qualified spelling (contains ``::``) or a
+    name with no candidate in *name_index* is returned unchanged — best
+    effort, not a real semantic lookup.
+    """
+    if not raw or "::" in raw:
+        return raw
+    candidates = name_index.get(raw)
+    if not candidates:
+        return raw
+    for k in range(len(scope), -1, -1):
+        prefix = "::".join(scope[:k])
+        target = f"{prefix}::{raw}" if prefix else raw
+        if target in candidates:
+            return target
+    if len(candidates) == 1:
+        return candidates[0]
+    return raw
+
+
+def _type_confidence(raw: str, resolved: str) -> str:
+    """``CONF_HIGH`` when the name was already qualified or successfully
+    resolved against a known declaration; ``CONF_REDUCED`` for a bare name
+    that could not be disambiguated (matches an unresolved/ambiguous/external
+    type)."""
+    return CONF_HIGH if resolved != raw or "::" in raw else CONF_REDUCED
 
 
 def _walk_types(
-    node: Any, scope: list[str], enclosing_func: str, edges: list[TypeEdge]
+    node: Any,
+    scope: list[str],
+    enclosing_func: str,
+    edges: list[TypeEdge],
+    name_index: dict[str, list[str]],
+    decl_file: dict[str, str],
 ) -> None:
     """Recursive AST walk tracking the qualified-name scope and enclosing function."""
     if not isinstance(node, dict):
@@ -213,37 +346,51 @@ def _walk_types(
             if not isinstance(base, dict):
                 continue
             base_type = base.get("type")
-            base_name = _base_type_name(
+            raw_base = _base_type_name(
                 str(base_type.get("qualType", ""))
                 if isinstance(base_type, dict)
                 else ""
             )
+            base_name = _resolve_type_name(raw_base, scope, name_index)
             if base_name and not _is_excluded_type(base_name):
                 edges.append(
-                    TypeEdge(qname, base_name, EDGE_TYPE_INHERITS, CONF_HIGH, "base")
+                    TypeEdge(
+                        qname,
+                        base_name,
+                        EDGE_TYPE_INHERITS,
+                        _type_confidence(raw_base, base_name),
+                        "base",
+                        decl_file.get(base_name, ""),
+                    )
                 )
         for child in node.get("inner", []) or []:
             if isinstance(child, dict) and child.get("kind") == "FieldDecl":
-                field_name = _decl_type_name(child)
+                raw_field = _decl_type_name(child)
+                field_name = _resolve_type_name(raw_field, scope, name_index)
                 if field_name and not _is_excluded_type(field_name):
                     edges.append(
                         TypeEdge(
                             qname,
                             field_name,
                             EDGE_TYPE_HAS_FIELD_TYPE,
-                            CONF_HIGH,
+                            _type_confidence(raw_field, field_name),
                             "field",
+                            decl_file.get(field_name, ""),
                         )
                     )
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _walk_types(child, child_scope, enclosing_func, edges)
+            _walk_types(
+                child, child_scope, enclosing_func, edges, name_index, decl_file
+            )
         return
 
     if kind == "NamespaceDecl" and name:
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _walk_types(child, child_scope, enclosing_func, edges)
+            _walk_types(
+                child, child_scope, enclosing_func, edges, name_index, decl_file
+            )
         return
 
     if kind in _FUNCTION_DECL_KINDS:
@@ -251,22 +398,24 @@ def _walk_types(
         if ident:
             for child in node.get("inner", []) or []:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
-                    param_name = _decl_type_name(child)
+                    raw_param = _decl_type_name(child)
+                    param_name = _resolve_type_name(raw_param, scope, name_index)
                     if param_name and not _is_excluded_type(param_name):
                         edges.append(
                             TypeEdge(
                                 ident,
                                 param_name,
                                 EDGE_DECL_HAS_TYPE,
-                                CONF_HIGH,
+                                _type_confidence(raw_param, param_name),
                                 "param",
+                                decl_file.get(param_name, ""),
                             )
                         )
         next_func = ident or enclosing_func
         for child in node.get("inner", []) or []:
             if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                 continue
-            _walk_types(child, scope, next_func, edges)
+            _walk_types(child, scope, next_func, edges, name_index, decl_file)
         return
 
     if kind == "DeclRefExpr" and enclosing_func:
@@ -281,11 +430,12 @@ def _walk_types(
                         EDGE_DECL_REFERENCES_DECL,
                         CONF_REDUCED,
                         "ref",
+                        decl_file.get(ref_ident, ""),
                     )
                 )
 
     for child in node.get("inner", []) or []:
-        _walk_types(child, scope, enclosing_func, edges)
+        _walk_types(child, scope, enclosing_func, edges, name_index, decl_file)
 
 
 def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
@@ -299,20 +449,47 @@ def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     return out
 
 
+def _fill_missing_dst_files(
+    edges: list[TypeEdge], decl_file: dict[str, str]
+) -> list[TypeEdge]:
+    """Backfill ``dst_file`` for edges resolved before their target's own
+    declaration was indexed (mirrors ``call_graph._fill_callee_files``)."""
+    if not decl_file:
+        return edges
+    return [
+        replace(e, dst_file=decl_file[e.dst])
+        if not e.dst_file and e.dst in decl_file
+        else e
+        for e in edges
+    ]
+
+
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     """Extract type/reference edges from a ``clang -ast-dump=json`` tree (pure).
 
-    Walks the AST tracking the enclosing namespace/record scope (for
-    qualified type names) and the nearest enclosing function (for parameter
-    types and non-call body references). Edges are de-duplicated by
-    ``(src, dst, kind)``.
+    A first pass indexes every record's qualified name and every
+    record/var/enum-constant's declaring file across the whole TU, so an
+    unqualified type spelling (clang's ``qualType`` is written, not fully
+    qualified) can be resolved against the nearest enclosing scope and an
+    AST-only dependency node can carry its declaring file regardless of
+    declaration order. The second pass walks the AST tracking the enclosing
+    namespace/record scope (for qualified type names) and the nearest
+    enclosing function (for parameter types and non-call body references).
+    Edges are de-duplicated by ``(src, dst, kind)``.
     """
+    name_index: dict[str, list[str]] = {}
+    decl_file: dict[str, str] = {}
+    _index_declared_entities(ast, [], "", name_index, decl_file)
     edges: list[TypeEdge] = []
-    _walk_types(ast, [], "", edges)
-    return _dedupe_edges(edges)
+    _walk_types(ast, [], "", edges, name_index, decl_file)
+    return _dedupe_edges(_fill_missing_dst_files(edges, decl_file))
 
 
-def augment_graph_with_types(graph: SourceGraphSummary, edges: list[TypeEdge]) -> int:
+def augment_graph_with_types(
+    graph: SourceGraphSummary,
+    edges: list[TypeEdge],
+    project_files: frozenset[str] | None = None,
+) -> int:
     """Fold type/reference edges into *graph* (ADR-041 P0).
 
     Declaration endpoints map onto ``source_decl`` nodes (``decl://...``, the
@@ -322,8 +499,19 @@ def augment_graph_with_types(graph: SourceGraphSummary, edges: list[TypeEdge]) -
     reference cannot distinguish record/enum/typedef without the L4 surface.
     A node already present (e.g. folded from L4 with the correct kind and
     visibility) is left untouched — first-writer-wins (``add_node``).
+
+    When *project_files* (the project's compile-unit sources + private
+    headers, see ``call_graph.project_source_files``) is supplied, a **new**
+    ``dst`` node whose ``dst_file`` is one of them is marked
+    ``defined_in_project`` — the exact case this module exists for (a public
+    decl/type reaching a private-header type/variable) would otherwise create
+    an unannotated node that ``crosscheck.public_to_internal_dependency``
+    cannot classify as internal (Codex review). A node already present (e.g.
+    from L4, or already marked by the call graph) is left untouched.
+
     Returns the number of edges added.
     """
+    from .call_graph import _file_in_project
     from .source_graph import _decl_node_id, _type_node_id
 
     added = 0
@@ -337,11 +525,19 @@ def augment_graph_with_types(graph: SourceGraphSummary, edges: list[TypeEdge]) -
         else:  # DECL_REFERENCES_DECL
             src_id, dst_id = _decl_node_id(e.src), _decl_node_id(e.dst)
             src_kind, dst_kind = "source_decl", "source_decl"
-        for node_id, node_kind, ident in (
-            (src_id, src_kind, e.src),
-            (dst_id, dst_kind, e.dst),
+        dst_in_project = bool(
+            project_files and e.dst_file and _file_in_project(e.dst_file, project_files)
+        )
+        for node_id, node_kind, ident, is_dst in (
+            (src_id, src_kind, e.src, False),
+            (dst_id, dst_kind, e.dst, True),
         ):
             if not graph.has_node(node_id):
+                attrs = (
+                    {"defined_in_project": True, "def_file": e.dst_file}
+                    if is_dst and dst_in_project
+                    else {}
+                )
                 graph.add_node(
                     GraphNode(
                         id=node_id,
@@ -349,6 +545,7 @@ def augment_graph_with_types(graph: SourceGraphSummary, edges: list[TypeEdge]) -
                         label=ident,
                         provenance="type_graph",
                         confidence=e.confidence,
+                        attrs=attrs,
                     )
                 )
         before = len(graph.edges)

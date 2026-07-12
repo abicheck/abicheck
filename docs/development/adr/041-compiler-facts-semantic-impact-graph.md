@@ -98,7 +98,36 @@ flag — a graph can have call edges but no type edges (e.g. an older pack, or
 a build where the second clang pass failed), and the report must say so
 rather than reading falsely clean.
 
-**Known limitation, accepted for this slice**: this is a **second**,
+Two follow-up fixes landed in the same slice after review (both correctness,
+not scope, changes):
+
+- **Unqualified type-name resolution.** clang's `qualType` prints a type *as
+  written* in the source, not fully qualified — a field typed `Base` inside
+  `namespace ns { struct Widget { Base *p; }; }` prints as `"Base"`, not
+  `"ns::Base"`. A naive textual match would create a disconnected
+  `type://Base` node instead of joining the L4-derived `type://ns::Base`
+  node. `parse_clang_ast_types` now runs a first pass
+  (`_index_declared_entities`) over the whole AST to index every record's
+  qualified name, then resolves an unqualified spelling against the nearest
+  enclosing scope (`_resolve_type_name`) — approximate unqualified-name
+  lookup, not real semantic resolution. An edge whose target could not be
+  resolved is kept (best effort) at `CONF_REDUCED` rather than silently
+  claiming a confident match it doesn't have.
+- **Provenance on AST-only destination nodes.** The primary case this module
+  exists for — a public decl/type reaching a *private*-header type/variable —
+  is exactly the case where the destination is **not** already in the L4
+  surface (L4 only captures the public-reachable surface), so the new node
+  `augment_graph_with_types` creates for it previously carried no
+  `visibility`/`defined_in_project` marker and `public_to_internal_dependency`
+  could not classify it as internal — the feature would silently produce no
+  finding on its own headline scenario. The same first pass also indexes each
+  declaration's file; `augment_graph_with_types` now takes the same
+  `project_files` set `augment_graph_with_calls` already computes
+  (`call_graph.project_source_files`) and marks a new destination node
+  `defined_in_project` when its file is one of the project's own sources/
+  private headers, mirroring the call graph's existing convention exactly.
+
+**Known limitation, accepted for this slice**: this is still a **second**,
 independent `clang -ast-dump=json` pass per translation unit, alongside the
 call graph's own pass — the exact "AST replay is expensive, run it once"
 concern the wider plan below raises. Unifying the two into one parse (or

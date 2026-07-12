@@ -109,6 +109,72 @@ def test_base_class_edge() -> None:
     ]
 
 
+def test_unqualified_base_and_field_types_resolve_to_enclosing_namespace() -> None:
+    # clang's qualType is the *written* spelling, not fully qualified: a field
+    # typed `Base` inside `namespace ns { struct Widget { Base *p; }; }` prints
+    # as "Base", not "ns::Base" — resolve it against the enclosing scope so the
+    # edge joins the L4-derived `type://ns::Base` node instead of creating a
+    # disconnected `type://Base` (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                _record("Base"),
+                _record(
+                    "Widget",
+                    bases=[_base("Base")],
+                    inner=[_field("p", "Base *")],
+                ),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    inherits = [e for e in edges if e.kind == "TYPE_INHERITS"]
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert inherits[0].dst == "ns::Base"
+    assert inherits[0].confidence == CONF_HIGH
+    assert fields[0].dst == "ns::Base"
+    assert fields[0].confidence == CONF_HIGH
+
+
+def test_unresolvable_unqualified_type_stays_bare_with_reduced_confidence() -> None:
+    # No declaration for "Unknown" anywhere in the TU -> cannot be resolved;
+    # the edge is kept (best-effort) but flagged lower-confidence rather than
+    # silently claiming a full qualification it doesn't have.
+    ast = _tu(_record("Widget", inner=[_field("p", "Unknown *")]))
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Widget", "Unknown", "TYPE_HAS_FIELD_TYPE", CONF_REDUCED, "field")
+    ]
+
+
+def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
+    # The private type's own CXXRecordDecl appears *after* the field that
+    # references it in this TU — the two-pass design (index first, then walk)
+    # must still resolve dst_file via the post-pass backfill.
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                _record("Widget", inner=[_field("p", "Impl *")]),
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Impl",
+                    "loc": {"file": "src/detail/impl.h"},
+                    "inner": [_field("x", "int")],
+                },
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields[0].dst == "ns::Impl"
+    assert fields[0].dst_file == "src/detail/impl.h"
+
+
 def test_field_type_edge_excludes_builtins() -> None:
     ast = _tu(
         _record(
@@ -270,6 +336,48 @@ def test_augment_graph_with_types_adds_nodes_and_edges() -> None:
     assert node_kinds["type://detail::Impl"] == "record_type"
     assert node_kinds["decl://_ZN2ns6Widget3barEi"] == "source_decl"
     assert node_kinds["decl://_ZN2ns10g_counterE"] == "source_decl"
+
+
+def test_augment_graph_marks_dst_defined_in_project() -> None:
+    # The main case this module exists for: a public type field/base/reference
+    # reaching a *private* entity that L4 never surfaced (L4 only captures the
+    # public-reachable surface). Without a defined_in_project marker the new
+    # node is unannotated and public_to_internal_dependency cannot classify it
+    # as internal (Codex review).
+    graph = SourceGraphSummary()
+    edges = [
+        TypeEdge(
+            "ns::Widget",
+            "ns::detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="src/detail/impl.h",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+    node = next(n for n in graph.nodes if n.id == "type://ns::detail::Impl")
+    assert node.attrs.get("defined_in_project") is True
+    assert node.attrs.get("def_file") == "src/detail/impl.h"
+
+
+def test_augment_graph_does_not_mark_non_project_dst() -> None:
+    graph = SourceGraphSummary()
+    edges = [
+        TypeEdge(
+            "ns::Widget",
+            "std::vector",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="/usr/include/c++/vector",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+    node = next(n for n in graph.nodes if n.id == "type://std::vector")
+    assert "defined_in_project" not in node.attrs
 
 
 def test_augment_graph_with_types_dedupes_by_key() -> None:

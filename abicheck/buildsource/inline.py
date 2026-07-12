@@ -226,9 +226,7 @@ class BuildConfig:
                 "nostdinc",
             }
         ),
-        "debug": frozenset(
-            {"format", "dwarf_only", "debuginfod", "debuginfod_url"}
-        ),
+        "debug": frozenset({"format", "dwarf_only", "debuginfod", "debuginfod_url"}),
     }
 
     @classmethod
@@ -748,7 +746,11 @@ def collect_inline_pack(
             # extractor) — NOT "scope to zero" — so a build-info-only deep scan must
             # keep the broad call-graph pass over ``merged`` rather than silently
             # collecting zero call edges (Codex review).
-            if replay_scope == "headers-only" and not changed_paths and l4_selected_units:
+            if (
+                replay_scope == "headers-only"
+                and not changed_paths
+                and l4_selected_units
+            ):
                 call_graph_units = l4_selected_units
         # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
         # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
@@ -1778,7 +1780,10 @@ def _fold_type_graph(
         target = replace(merged, compile_units=list(scoped_units))
         scoped_note = " (headers-only scope, matching L4)"
     edges = extractor.extract_from_build(target)
-    added = augment_graph_with_types(graph, edges)
+    from .call_graph import project_source_files
+
+    project_files = project_source_files(merged)
+    added = augment_graph_with_types(graph, edges, project_files or None)
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"type_graph: {diag}")
     timing = (
