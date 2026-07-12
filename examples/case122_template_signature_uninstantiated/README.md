@@ -57,10 +57,13 @@ g++ -shared -fPIC -g v2.cpp -o libtpl_v2.so
 abicheck compare libtpl_v1.so libtpl_v2.so \
     --header old=v1.h --header new=v2.h   # → NO_CHANGE
 
-# With source-ABI replay (L4) — the template signature change surfaces as RISK:
+# With source-ABI replay (L4) — the template signature change surfaces as RISK.
+# --depth source (or --max) is required: compare's default depth collects no
+# source evidence, so a raw --sources tree is otherwise ignored with a warning.
 abicheck compare libtpl_v1.so libtpl_v2.so \
     --header old=v1.h --header new=v2.h \
-    --sources old=<v1-source-tree> --sources new=<v2-source-tree>
+    --sources old=<v1-source-tree> --sources new=<v2-source-tree> \
+    --depth source
     # → COMPATIBLE_WITH_RISK, template_body_changed on clamp
 ```
 
