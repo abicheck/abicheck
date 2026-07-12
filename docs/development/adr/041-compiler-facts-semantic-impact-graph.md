@@ -278,6 +278,21 @@ parameter (rather than always closing over the full
 `DEPENDENCY_EDGE_KINDS`) so a collector-coverage improvement on one side can
 never manufacture a finding on its own.
 
+A second Codex pass on that fix caught the opposite failure mode: intersecting
+per *exact* edge kind is too strict. `type_graph.augment_graph_with_types`
+folds `DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/
+`TYPE_INHERITS` from a single AST pass — so a baseline that already has (say)
+a `DECL_HAS_TYPE` edge but happens to have zero `TYPE_HAS_FIELD_TYPE` edges ran
+the *same* pass as a new side that has both; a first-ever `TYPE_HAS_FIELD_TYPE`
+edge there is a real new dependency, not a collector-coverage gap, and the
+per-exact-kind intersection dropped it regardless. Fixed by judging coverage
+at extractor-pass granularity: `_DEPENDENCY_EDGE_FAMILIES` groups the five
+kinds into the two passes that actually emit them together (`call_graph`'s
+`{DECL_CALLS_DECL}`, `type_graph`'s other four as one family); a family counts
+as common when *any* of its kinds is present on both sides, and then every
+kind in that family — including one with zero prior edges — is eligible for
+the closure.
+
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 broadening its recall exactly as slice 1 broadened `public_to_internal_dependency`'s
 — the type/reference edges the P0 slice 1 extractor started producing were

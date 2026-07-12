@@ -61,7 +61,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   closure is restricted to dependency edge kinds actually collected on *both*
   graphs (`_common_dependency_edge_kinds`), so a collector improvement — e.g.
   the type-graph pass running for the first time on one side — cannot make a
-  pre-existing, unchanged dependency look newly added.
+  pre-existing, unchanged dependency look newly added. Coverage is judged per
+  extractor-pass family (`_DEPENDENCY_EDGE_FAMILIES`: `call_graph.py`'s single
+  kind vs. `type_graph.py`'s four, folded together by one AST pass), not per
+  exact edge kind — otherwise a genuinely new dependency of a kind with no
+  prior edges (but whose sibling kind from the same pass already exists on
+  both sides) would be dropped too.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

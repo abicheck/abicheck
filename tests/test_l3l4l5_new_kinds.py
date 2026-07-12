@@ -33,6 +33,7 @@ from abicheck.buildsource.source_graph import (
     GraphEdge,
     GraphNode,
     SourceGraphSummary,
+    _common_dependency_edge_kinds,
     _dependency_reachability,
     _public_entry_internal_reach,
     diff_source_graph_findings,
@@ -451,6 +452,55 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
     ])
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
+    # Second Codex review: the type-graph pass already ran on both sides (an
+    # unrelated DECL_HAS_TYPE edge exists on both), so a *first-ever*
+    # TYPE_HAS_FIELD_TYPE edge on the new side is a real new dependency, not a
+    # collector-coverage gap — it must not be dropped just because that exact
+    # edge kind happens to be new. Coverage is judged per extractor-pass family
+    # (type_graph.py emits all four type/reference kinds from one pass), not
+    # per exact kind.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("pub_other", "source_decl", "other()"),
+        _N("known_type", "record_type", "Known"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        # Unrelated to "pub": establishes the type-graph pass ran on both sides.
+        _E("pub_other", "known_type", "DECL_HAS_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_common_dependency_edge_kinds_family_level() -> None:
+    # Direct unit test of the family-grouping helper: an old graph with only a
+    # DECL_HAS_TYPE edge and a new graph adding TYPE_HAS_FIELD_TYPE both belong
+    # to the type-graph family, so the whole family (all four kinds) is common
+    # even though DECL_CALLS_DECL (a different family, absent on both) is not.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE")],
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE"), _E("b", "c", "TYPE_HAS_FIELD_TYPE")],
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({
+        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    })
 
 
 def test_dependency_reachability_empty_edge_kinds_returns_empty() -> None:

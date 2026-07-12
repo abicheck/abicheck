@@ -912,24 +912,52 @@ def _dependency_reachability(
     return out
 
 
+#: Dependency edge kinds grouped by the single extractor pass that emits them
+#: together (``inline._fold_call_graph`` / ``inline._fold_type_graph``, each one
+#: AST walk). Coverage must be judged at this pass granularity, not per exact
+#: edge kind (second Codex review): ``type_graph.augment_graph_with_types``
+#: folds all four type/reference kinds from one pass, so a baseline that
+#: already has (say) a ``DECL_HAS_TYPE`` edge but never happened to have a
+#: ``TYPE_HAS_FIELD_TYPE`` one ran the *same* pass as a new side that has both —
+#: the first ``TYPE_HAS_FIELD_TYPE`` edge there is a real new dependency, not a
+#: collector-coverage artifact, and must not be dropped just because that exact
+#: kind is new.
+_DEPENDENCY_EDGE_FAMILIES: tuple[frozenset[str], ...] = (
+    frozenset({"DECL_CALLS_DECL"}),
+    frozenset({
+        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    }),
+)
+
+
 def _common_dependency_edge_kinds(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> frozenset[str]:
-    """Dependency edge kinds actually collected on *both* sides (Codex review).
+    """Dependency edge kinds whose *extractor pass* ran on both sides (Codex review).
 
     A collector improvement — e.g. the ADR-041 P0 type-graph pass running for
     the first time on the *new* side while the baseline only ever ran the call
-    graph — must not read as a newly-added dependency: restricting to a single
-    "any dependency edge present" gate (as the call-only closure could get away
-    with) lets every target reachable *only* through a kind absent from the
-    other side look newly internal, when it is really a coverage artifact, not
-    a code change. Intersecting per-kind keeps the "skip rather than flag noise
-    on an evidence-poor side" rule (ADR-035 D4) at the granularity the
-    multi-kind closure needs.
+    graph — must not read as a newly-added dependency: a single "any dependency
+    edge present" gate (as the call-only closure could get away with) lets
+    every target reachable *only* through a kind absent from the other side
+    look newly internal, when it is really a coverage artifact, not a code
+    change. But gating per *exact* edge kind is too strict in the other
+    direction: it would also drop a real first-ever edge of a kind whose
+    sibling pass output (any other kind from the same extractor pass,
+    :data:`_DEPENDENCY_EDGE_FAMILIES`) is already present on both sides. Whole
+    families of dependency edges are folded together by one pass
+    (``call_graph``/``type_graph``), so a family counts as covered on both
+    sides when *any* of its kinds appears on each side — then every kind in
+    that family is eligible for the closure, including one with no prior
+    edges at all.
     """
     old_kinds = {e.kind for e in old.edges if e.kind in DEPENDENCY_EDGE_KINDS}
     new_kinds = {e.kind for e in new.edges if e.kind in DEPENDENCY_EDGE_KINDS}
-    return frozenset(old_kinds & new_kinds)
+    common: set[str] = set()
+    for family in _DEPENDENCY_EDGE_FAMILIES:
+        if (old_kinds & family) and (new_kinds & family):
+            common |= family
+    return frozenset(common)
 
 
 def _public_headers_in_include_graph(graph: SourceGraphSummary) -> set[str]:
