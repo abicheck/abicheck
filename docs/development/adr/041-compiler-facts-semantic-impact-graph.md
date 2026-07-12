@@ -127,6 +127,39 @@ not scope, changes):
   `defined_in_project` when its file is one of the project's own sources/
   private headers, mirroring the call graph's existing convention exactly.
 
+A second review pass caught two more instances of the same class of bug —
+both fixed the same way, by widening what the first indexing pass covers:
+
+- **Enum/typedef/type-alias targets weren't indexed.** The scope-resolution
+  and provenance fixes above only indexed `_RECORD_DECL_KINDS`, so a private
+  `enum`/`typedef`/`using` used as a field or parameter type fell through
+  unqualified and un-provenanced exactly like an un-indexed record did before
+  the first fix. `_index_declared_entities` now indexes `EnumDecl`/
+  `TypedefDecl`/`TypeAliasDecl` the same way as records — `_resolve_type_name`
+  and the `decl_file` lookups in `_walk_types` needed no changes, since they
+  were already generic over whatever `name_index`/`decl_file` contain.
+- **An incomplete `DeclRefExpr.referencedDecl` stub broke the headline
+  scenario.** clang commonly represents a variable reference as
+  `{"kind": "VarDecl", "name": "k"}` with no `mangledName`/`loc`, even when
+  the full `VarDecl` elsewhere in the same TU carries both. Keying the edge
+  off that stub's bare-name identity meant `inline int f() { return
+  detail::k; }` — the PR's own motivating example — created a
+  `DECL_REFERENCES_DECL` edge to `decl://k` with no `dst_file`, so the
+  private constant it names could never be marked `defined_in_project`. The
+  index pass now also builds a bare-name → full-identity map for
+  `VarDecl`/`EnumConstantDecl` declarations; `_resolve_ref_identity` prefers
+  the stub's own identity when it already resolves, and otherwise falls back
+  to the unique full declaration sharing its bare name — an ambiguous bare
+  name (two different variables named `k` in different scopes) is left
+  unresolved rather than guessed.
+
+`_fill_missing_dst_files` (a post-pass edge backfill inherited from an
+earlier single-pass draft) was removed as dead code once the two-pass design
+made it provably a no-op: `decl_file` is fully built by
+`_index_declared_entities` *before* `_walk_types` creates any edge, so every
+`decl_file.get(...)` lookup inside the walk already sees the complete index
+regardless of declaration order.
+
 **Known limitation, accepted for this slice**: this is still a **second**,
 independent `clang -ast-dump=json` pass per translation unit, alongside the
 call graph's own pass — the exact "AST replay is expensive, run it once"

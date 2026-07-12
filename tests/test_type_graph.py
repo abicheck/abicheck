@@ -20,6 +20,7 @@ no compiler is required; the live subprocess path is integration-only."""
 
 from __future__ import annotations
 
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.type_graph import (
     CONF_HIGH,
@@ -27,6 +28,7 @@ from abicheck.buildsource.type_graph import (
     ClangTypeGraphExtractor,
     TypeEdge,
     _base_type_name,
+    _merge_type_edges,
     augment_graph_with_types,
     parse_clang_ast_types,
 )
@@ -150,10 +152,43 @@ def test_unresolvable_unqualified_type_stays_bare_with_reduced_confidence() -> N
     ]
 
 
+def test_global_scope_match_stays_high_confidence() -> None:
+    # `_resolve_type_name("Base", [], ...)` resolves to "Base" unchanged
+    # because Base is declared at global scope — the resolved spelling
+    # equals the raw spelling not because resolution failed, but because
+    # there was no namespace to add. A naive string-equality confidence
+    # check would misread this as "unresolved" (Codex review).
+    ast = _tu(_record("Base"), _record("Widget", bases=[_base("Base")]))
+    edges = parse_clang_ast_types(ast)
+    inherits = [e for e in edges if e.kind == "TYPE_INHERITS"]
+    assert inherits == [TypeEdge("Widget", "Base", "TYPE_INHERITS", CONF_HIGH, "base")]
+
+
+def test_field_type_resolves_against_own_record_scope() -> None:
+    # A field naming a type nested in the *same* record (Outer::Inner
+    # referenced as bare "Inner" from inside Outer) must resolve against the
+    # record's own scope, not just the enclosing one (Codex review).
+    ast = _tu(
+        _record(
+            "Outer",
+            inner=[
+                _record("Inner"),
+                _field("x", "Inner"),
+            ],
+        )
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Outer", "Outer::Inner", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+    ]
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
-    # references it in this TU — the two-pass design (index first, then walk)
-    # must still resolve dst_file via the post-pass backfill.
+    # references it in this TU — the two-pass design (a full indexing pass
+    # runs before any edge is built) must still resolve dst_file regardless
+    # of declaration order.
     ast = _tu(
         {
             "kind": "NamespaceDecl",
@@ -173,6 +208,165 @@ def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
     assert fields[0].dst == "ns::Impl"
     assert fields[0].dst_file == "src/detail/impl.h"
+
+
+def test_private_enum_field_type_is_indexed_and_qualified() -> None:
+    # A field/param typed with a private *enum* (not a record) previously fell
+    # through un-indexed: qualType prints the bare "Mode", and nothing tracked
+    # its declaring file, so the edge carried no provenance (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [
+                {
+                    "kind": "EnumDecl",
+                    "name": "Mode",
+                    "loc": {"file": "src/detail/mode.h"},
+                    "inner": [],
+                },
+                _record("Widget", inner=[_field("m", "Mode")]),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge(
+            "detail::Widget",
+            "detail::Mode",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            "src/detail/mode.h",
+        )
+    ]
+
+
+def test_private_typedef_param_type_is_indexed_and_qualified() -> None:
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "name": "Handle",
+                    "loc": {"file": "src/detail/handle.h"},
+                    "inner": [],
+                },
+                _record(
+                    "Widget",
+                    inner=[_method("bar", "_ZN6Widget3barE", [_param("h", "Handle")])],
+                ),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE"]
+    assert params == [
+        TypeEdge(
+            "_ZN6Widget3barE",
+            "detail::Handle",
+            "DECL_HAS_TYPE",
+            CONF_HIGH,
+            "param",
+            "src/detail/handle.h",
+        )
+    ]
+
+
+def test_incomplete_declrefexpr_stub_resolves_to_full_declaration() -> None:
+    # The PR's own headline scenario: `inline int f() { return detail::k; }`.
+    # clang commonly emits an *incomplete* referencedDecl stub — no
+    # mangledName/loc — even though the full VarDecl elsewhere in the TU
+    # carries both. Keying the edge off the stub's bare identity ("k") means
+    # it never matches the indexed declaration, so dst_file/defined_in_project
+    # provenance was silently lost (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "mangledName": "_ZN6detail1kE",
+                    "loc": {"file": "src/detail/constants.h"},
+                    "inner": [],
+                }
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [_ref_expr("VarDecl", "k")],  # incomplete stub
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge(
+            "_Z1fv",
+            "_ZN6detail1kE",
+            "DECL_REFERENCES_DECL",
+            CONF_REDUCED,
+            "ref",
+            "src/detail/constants.h",
+        )
+    ]
+
+
+def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
+    # Two different variables share the bare name "k" in different scopes;
+    # an incomplete stub referencing one of them cannot be disambiguated by
+    # bare name alone, so the resolver must not guess — it keeps the stub's
+    # own (unresolved) identity rather than picking either candidate.
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "a",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "mangledName": "_ZN1a1kE",
+                    "loc": {"file": "src/a.h"},
+                    "inner": [],
+                }
+            ],
+        },
+        {
+            "kind": "NamespaceDecl",
+            "name": "b",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "mangledName": "_ZN1b1kE",
+                    "loc": {"file": "src/b.h"},
+                    "inner": [],
+                }
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [{"kind": "CompoundStmt", "inner": [_ref_expr("VarDecl", "k")]}],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge("_Z1fv", "k", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref", "")
+    ]
 
 
 def test_field_type_edge_excludes_builtins() -> None:
@@ -425,6 +619,82 @@ def test_source_graph_coverage_honest_when_no_type_edges() -> None:
     graph.finalize()
     assert graph.coverage["type_edges"]["collected"] is False
     assert graph.coverage["reference_edges"]["collected"] is False
+
+
+# ── _merge_type_edges ─────────────────────────────────────────────────────────
+
+
+def test_merge_type_edges_prefers_stronger_confidence() -> None:
+    weak = TypeEdge(
+        "Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_REDUCED, "field"
+    )
+    strong = TypeEdge(
+        "Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field"
+    )
+    assert _merge_type_edges(weak, strong).confidence == CONF_HIGH
+    assert _merge_type_edges(strong, weak).confidence == CONF_HIGH
+
+
+def test_merge_type_edges_fills_missing_dst_file() -> None:
+    # One TU doesn't include the header declaring the private dst (no
+    # dst_file); another TU does. The richer provenance must survive the
+    # merge regardless of which TU is seen first (Codex review).
+    no_file = TypeEdge(
+        "Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field", ""
+    )
+    with_file = TypeEdge(
+        "Widget",
+        "detail::Impl",
+        "TYPE_HAS_FIELD_TYPE",
+        CONF_HIGH,
+        "field",
+        "src/detail/impl.h",
+    )
+    assert _merge_type_edges(no_file, with_file).dst_file == "src/detail/impl.h"
+    assert _merge_type_edges(with_file, no_file).dst_file == "src/detail/impl.h"
+
+
+def test_extract_from_build_merges_richer_edge_across_compile_units(
+    monkeypatch,
+) -> None:
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_extract(cu: CompileUnit) -> list[TypeEdge]:
+        if cu.source == "src/a.cpp":
+            # This TU doesn't see detail::Impl's declaration.
+            return [
+                TypeEdge(
+                    "Widget",
+                    "detail::Impl",
+                    "TYPE_HAS_FIELD_TYPE",
+                    CONF_HIGH,
+                    "field",
+                    "",
+                )
+            ]
+        # This TU includes the private header and resolves the file.
+        return [
+            TypeEdge(
+                "Widget",
+                "detail::Impl",
+                "TYPE_HAS_FIELD_TYPE",
+                CONF_HIGH,
+                "field",
+                "src/detail/impl.h",
+            )
+        ]
+
+    monkeypatch.setattr(extractor, "_extract_from_compile_unit", _fake_extract)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    edges = extractor.extract_from_build(build)
+    assert len(edges) == 1
+    assert edges[0].dst_file == "src/detail/impl.h"
 
 
 # ── ClangTypeGraphExtractor: graceful degrade ────────────────────────────────
