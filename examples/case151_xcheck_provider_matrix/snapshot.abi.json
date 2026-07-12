@@ -19,8 +19,10 @@
     },
     "source_graph": {
       "coverage": {},
+      "degraded_passes": {},
       "edges": [],
       "external_graph_refs": [],
+      "extractor_passes": {},
       "graph_id": "sha256:4c6004183768c52af9180b110fceb92f0be9efee1c26027d01ce27591d907c49",
       "indexes": {
         "by_binary_symbol": {},
@@ -28,6 +30,8 @@
         "by_source_decl": {},
         "by_target": {}
       },
+      "narrowed_passes": {},
+      "narrowed_scope": {},
       "nodes": [
         {
           "attrs": {

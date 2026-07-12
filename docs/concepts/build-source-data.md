@@ -67,6 +67,129 @@ pipeline, and `graph explain` localizes a single finding through the graph.
 > artifact-backed tiers (L0–L2) remain fully authoritative — the comparison is
 > never aborted.
 
+## What the data actually looks like
+
+The tables above name the *findings* each layer produces. This section shows the
+normalized *facts* each layer stores before any diff runs — the records
+`build_diff.py`/`source_diff.py`/`source_graph.py` actually compare. All three
+are plain JSON (or JSON Lines) under the pack's `raw`/normalized split
+described in [Schema & storage](#schema-storage); field names below are the
+real `to_dict()` output of each layer's dataclass, not illustrative pseudo-JSON.
+
+### L3 — one compile action, and the option record the diff actually reads
+
+Each translation unit the build compiled becomes one `CompileUnit` record.
+`abi_relevant_flags` is carried for provenance/localization, but it is **not**
+what `build_diff.py` compares:
+
+```json
+{
+  "id": "cu://src/money.cpp#cfg:9f3a2e",
+  "source": "src/money.cpp",
+  "compiler": "toolchain://gcc-14-cxx",
+  "language": "CXX",
+  "standard": "c++20",
+  "defines": {"_GLIBCXX_USE_CXX11_ABI": "1", "NDEBUG": "1"},
+  "include_paths": ["include/", "build/generated/"],
+  "target_triple": "x86_64-linux-gnu",
+  "abi_relevant_flags": ["-fvisibility=hidden", "-D_GLIBCXX_USE_CXX11_ABI=1"]
+}
+```
+
+The actual L3 diff input is `BuildEvidence.build_options[]` — a separate,
+flatter `BuildOption` record per canonical option key, which the adapters
+*project* from `compile_units[].abi_relevant_flags` (and other sources):
+
+```json
+{
+  "key": "define:_GLIBCXX_USE_CXX11_ABI",
+  "value": "1",
+  "abi_relevant": true,
+  "scope": "global"
+}
+```
+
+Comparing this record between old and new is exactly the "L3 build-flag delta"
+table you see in a report: change `value` from `"1"` to `"0"` here and
+`_diff_options()` emits `abi_relevant_build_flag_changed` — nothing about the
+source itself needs to change for that finding to fire. **This is the record a
+third-party/build-emitted producer must populate** (see
+[Build-emitted facts](#build-emitted-facts-the-abicheck_inputs-protocol-flow-2)
+below): shipping only `compile_units[].abi_relevant_flags` without the
+corresponding `build_options[]` entries silently drops L3 flag-drift detection,
+because only the built-in adapters (CMake/Ninja/Bazel/Make) perform that
+projection automatically.
+
+### L4 — one source declaration (`SourceAbiTu.macros[] / .functions[] / …`)
+
+Per-TU source replay produces one `SourceEntity` per declaration, grouped by
+kind (`declarations`, `types`, `functions`, `variables`, `macros`, `templates`,
+`inline_bodies`, `constexpr_values`). The fields that matter for diffing are
+`signature_hash` (stable across a *value*-only edit), `body_hash` (inline/
+template bodies), and `value` (the normalized macro/`constexpr`/default-arg
+string):
+
+```json
+{
+  "id": "src://cart.h#CART_MAX_ITEMS",
+  "kind": "macro",
+  "qualified_name": "CART_MAX_ITEMS",
+  "value": "64",
+  "visibility": "public_header",
+  "api_relevant": true,
+  "confidence": "high"
+}
+```
+
+A later TU dump with `"value": "128"` on the same `qualified_name` is exactly
+what `diff_source_abi()` turns into `public_macro_value_changed` — the macro
+never becomes a symbol, so this record is the *only* place that fact exists.
+The same shape carries a function's default-argument value (`value`) separately
+from its `signature_hash`, which is what lets abicheck tell "the default
+changed" (`API_BREAK`) apart from "the parameter type changed" (a different
+symbol, an add+remove).
+
+### L5 — one graph edge (`SourceGraphSummary.edges[]`)
+
+The graph is nodes (`GraphNode`: `id`, `kind` — `target`/`source`/`header`/
+`source_decl`/`binary_symbol`/…) linked by typed, directed `GraphEdge`s. This is
+the record `graph explain` walks to answer "what does this declaration reach":
+
+```json
+{
+  "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+  "src": "decl://_ZNK4cart4Cart5totalEb",
+  "dst": "binary_symbol://_ZNK4cart4Cart5totalEb",
+  "provenance": "source_abi_link",
+  "confidence": "high"
+}
+```
+
+A `decl://` node id is `SourceEntity.identity()` — the **mangled** name when
+one exists, not the qualified source name — precisely so overloads
+(`total(bool)` vs. a hypothetical `total()`) get distinct source-decl nodes
+instead of colliding on one `Cart::total`. For a C++ method this makes the
+`decl://` and `binary_symbol://` ids look identical modulo prefix; that's
+expected — the edge still records *two separate nodes* (a source declaration
+and an exported binary symbol) so a rename on one side without the other shows
+up as the edge moving to a different `dst`.
+
+`diff_source_graph_findings()` compares the *edge set*, not individual nodes:
+if this exact `(src, dst, kind)` triple disappears and a *different* `dst`
+appears for the same `src`, that is `source_to_binary_mapping_changed` — the
+declaration now compiles down to a different exported symbol, a fact neither
+the binary diff nor the source diff alone would name.
+
+### Why this matters in practice
+
+None of L3/L4/L5's records are byte offsets or machine code — they are
+normalized *facts about intent* (a flag, a macro value, a reachability edge),
+which is exactly why the [authority rule](#the-authority-rule-the-one-rule-that-matters)
+caps them at `API_BREAK`/`risk`: they describe what the source or build says
+should happen, not what the compiler actually emitted. Only L0/L1 — the
+`AbiSnapshot` derived straight from the binary and its DWARF/PDB — records what
+*did* happen, which is why it alone can prove `BREAKING`.
+
 ## How the data flows
 
 Two independent producers feed one decision engine. The **artifact pipeline**

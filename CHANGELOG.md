@@ -29,6 +29,237 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **L5 source graph now populates type/reference dependency edges
+  (ADR-041 P0).** New `abicheck/buildsource/type_graph.py` folds
+  `TYPE_INHERITS` (base classes), `TYPE_HAS_FIELD_TYPE` (field types),
+  `DECL_HAS_TYPE` (parameter types), and `DECL_REFERENCES_DECL` (non-call
+  variable/enum references) into the L5 graph alongside the existing call
+  graph, whenever a semantic source mode runs with `clang++` available
+  (`--depth source`+). These edge kinds were reserved in the schema since
+  ADR-031 and already read by `public_to_internal_dependency`
+  (`crosscheck.py`), but nothing populated them — so that check now catches
+  cases the call graph alone misses, e.g. a public struct with a private
+  field type or a public class inheriting an internal base. New
+  `coverage.type_edges` / `coverage.reference_edges` counters on the L5
+  graph report collection honestly.
+
+- **Version-over-version internal-dependency finding now spans the full
+  dependency-edge family, not calls alone (ADR-041 P0 slice 2).** The L5
+  semantic graph diff's `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` check
+  (`diff_source_graph_findings`) previously only walked `DECL_CALLS_DECL`
+  edges to find a public entry newly reaching an internal declaration —
+  missing the `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`/`DECL_HAS_TYPE`/
+  `DECL_REFERENCES_DECL` edges the P0 slice-1 type graph started producing.
+  A public struct that gains a private field type or base class, or a public
+  function that gains a private parameter type or a reference to an internal
+  constant, is now caught between two versions exactly like a newly-added
+  internal call already was. `crosscheck.py`'s intra-version
+  `public_to_internal_dependency` check already covered all five edge kinds;
+  both checks now share one `source_graph.DEPENDENCY_EDGE_KINDS` constant so
+  they cannot drift apart again. No new `ChangeKind` — this only broadens the
+  recall of the existing `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding. The
+  closure is restricted to dependency edge kinds actually collected on *both*
+  graphs (`_common_dependency_edge_kinds`), so a collector improvement — e.g.
+  the type-graph pass running for the first time on one side — cannot make a
+  pre-existing, unchanged dependency look newly added. Coverage is judged per
+  extractor-pass family (`_DEPENDENCY_EDGE_FAMILIES`: `call_graph.py`'s single
+  kind vs. `type_graph.py`'s four, folded together by one AST pass), not per
+  exact edge kind — otherwise a genuinely new dependency of a kind with no
+  prior edges (but whose sibling kind from the same pass already exists on
+  both sides) would be dropped too. New `SourceGraphSummary.extractor_passes`
+  field (additive, no schema version bump) records that a pass ran to
+  completion independent of edge count — closing the residual gap where a
+  pass genuinely finds zero edges of its whole family on one side (e.g. no
+  struct anywhere yet had a private field), which edge presence alone cannot
+  distinguish from "the pass never ran". Falls back to edge-presence inference
+  when the flag is absent (older packs, hand-built graphs). Internal-target
+  classification now requires *positive* internal provenance (explicit
+  `private_header`/`source` visibility, or project-file provenance plus a
+  non-system-looking name) instead of merely "not declared by a public
+  header" — the latter also matched a third-party/stdlib type used as a new
+  field/parameter type, which is not declared by any project header either but
+  is not internal. `DECL_NODE_KINDS`/`PUBLIC_VISIBILITIES`/
+  `INTERNAL_VISIBILITIES`/`UNANNOTATED_VISIBILITIES`/`looks_like_system_name`/
+  `is_public_dependency_node`/`is_internal_dependency_node` now live in
+  `source_graph.py` as the shared source of truth; `crosscheck.py`'s
+  matching definitions are now aliases onto them instead of an independent
+  copy. The out-of-band `abicheck collect --call-graph` path
+  (`cli_buildsource_helpers._collect_call_graph`) now also records
+  `extractor_passes["call_graph"]`, matching the inline `dump --sources` path
+  fixed above — a version diff over two *collected* packs benefits from the
+  zero-edge coverage fix too, not just inline dumps.
+
+- **`graph explain` proof paths for the two dependency-reachability findings
+  (ADR-041 P0 slice 3).** `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and
+  `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED` previously asserted a fact
+  ("public entry X now reaches internal Y", "N → M known static callees")
+  with no concrete edge chain proving it. New `source_graph._dependency_path`
+  (BFS witness-path reconstruction) + `_format_dependency_path` thread a
+  human-readable chain — e.g. `pub() --[DECL_CALLS_DECL]--> helper()
+  --[DECL_HAS_TYPE]--> detail::Impl` — into each finding's description; the
+  intra-version `PUBLIC_TO_INTERNAL_DEPENDENCY` cross-check (already a single
+  edge) now also names the connecting edge kind. Appended to the existing
+  `description` text, not a new `Change` field. Also fixes a regression the
+  prior slice's family-widening had reintroduced: widening credit from one
+  present edge kind to its whole family is now conditional on **both** sides
+  *confirming* `extractor_passes[pass_name]`, not merely inferred from edge
+  presence — a Kythe-ingested pack (`graph_backends.ingest_kythe_entries`)
+  only ever produces `DECL_REFERENCES_DECL`, never the Clang type graph's
+  other three kinds, so a lone Kythe ref edge was wrongly granting blanket
+  coverage credit to base-class/field-type/parameter-type checks it never ran.
+  Two more fixes from a sixth review: (1) `extractor_passes` is no longer
+  stamped for a *narrowed* run (a changed-path/`--since` scan or an unseeded
+  run scoped to L4's `headers-only` selection) — only a pass that examined
+  the whole compile DB may claim confirmed coverage, since a scoped pass's
+  "found nothing" says nothing about the rest of the codebase; (2)
+  `_public_types()` now requires the type's own `visibility` attr to be
+  public, not just "declared by a `header`-kind node" (every declaring file,
+  public or private, gets a `header` node) — otherwise a private type could
+  be treated as a dependency-closure entry and a private type gaining its own
+  new private field/base could wrongly emit `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  with no public API involved. A seventh review found one more gap in the same
+  vein: even an unscoped run can fail to observe anything meaningful — a
+  per-TU clang crash/timeout/degenerate AST degrades that TU to zero edges
+  *silently* (only a `diagnostics` entry records it), and an entirely empty
+  build target trivially "finds nothing" without having looked at anything.
+  New shared `call_graph.extractor_pass_fully_covered()` predicate (not
+  narrowed, has compile units, no diagnostics recorded) now gates every
+  `extractor_passes[...]` stamp across all three call sites
+  (`inline._fold_call_graph`/`_fold_type_graph`,
+  `cli_buildsource_helpers._collect_call_graph`) — one failing TU disqualifies
+  the whole pass from claiming confirmed coverage. An eighth review found a
+  related false positive from *node*-level (not edge-level) evidence
+  improving between versions: a Kythe-ingested or older-pack target with no
+  classifying provenance is silently dropped from the old side's
+  internal-reach set even though the dependency edge already existed there —
+  so if the new side later gains real provenance for that same, unchanged
+  target, it looked like a newly-added dependency. Fixed by checking raw
+  reachability (ignoring classification) against the old graph and excluding
+  any pair whose target was already reachable there, regardless of whether
+  either side could classify it as internal. A ninth review found two more:
+  (1) clang can exit non-zero (real compile errors in the replayed,
+  necessarily approximate flags) while still printing a partial,
+  error-recovered AST dump, leaving `diagnostics` empty and wrongly letting
+  `extractor_pass_fully_covered` mark the pass fully covered — both
+  extractors now record a diagnostic whenever `proc.returncode != 0`,
+  regardless of whether they still salvage edges from that AST; (2) the
+  per-kind fallback in `_common_dependency_edge_kinds` required an edge on
+  *both* sides, so an old pack that confirmed the type-graph pass ran with
+  zero type edges couldn't be compared against a pre-slice-2/Kythe-only new
+  pack with no pass marker but a first real edge — a confirmed pass on
+  *either* side now makes its own presence-or-absence of that exact kind
+  trustworthy (never widened to sibling kinds neither side has an edge of). A
+  tenth review found the closure's entry seeding itself too narrow: a public
+  inline/template/constexpr function or public variable commonly has no
+  exported binary symbol of its own, so it was never a valid dependency-
+  closure entry — missing the ADR's own headline example
+  (`inline int f() { return detail::SECRET; }`) whenever `f` isn't separately
+  exported. Entries are now seeded from `is_public_dependency_node` over every
+  graph node (exported-symbol-backed *or* public-header-visibility decl/type),
+  matching `crosscheck.py`'s intra-version definition of "public" exactly. An
+  eleventh review found a scope-comparability gap: a narrowed (PR/`--since`-
+  scoped) run never sets `extractor_passes` for the family it narrowed, but
+  still serializes whatever edges it collected from the subset of TUs it
+  walked — and the per-kind fallback treated those edges as ordinary coverage
+  evidence, letting dependencies in TUs the narrowed baseline never inspected
+  pass the gate and be reported as `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` when
+  compared against a candidate that ran a confirmed *full* pass. New
+  `SourceGraphSummary.narrowed_passes: dict[str, bool]` field (additive, same
+  round-trip pattern as `extractor_passes`), stamped whenever
+  `_fold_call_graph`/`_fold_type_graph`'s local `narrowed` flag is `True`.
+  `_common_dependency_edge_kinds` now discounts a narrowed side's edge of a
+  given kind specifically when the other side confirms a full pass for that
+  family — the common, both-sides-narrowed PR-diff workflow is unaffected
+  since neither side then has a confirmed full pass to disqualify the other's
+  edges. A twelfth review found that fix itself too narrow: it only excluded
+  a narrowed side's edge when the other side *confirmed* a full pass, but a
+  side with no pass marker at all (a pre-slice-2 pack, or one built from an
+  externally-ingested Kythe/CodeQL backend) is not evidence it was equally
+  narrow either — its true scope is simply unknown, and this unmarked shape
+  is arguably the *more* common one for an old/legacy pack. Generalized the
+  exclusion from "narrowed vs. confirmed full pass" to "narrowed vs. anything
+  not narrowed the same way": a side's edge now counts as coverage for a kind
+  only when the other side is narrowed identically, or itself carries no
+  narrowing to be asymmetric against — symmetric cases (both narrowed, or
+  neither) are bit-for-bit unaffected. A thirteenth review found that
+  generalization itself over-corrected: the closure only ever computes
+  *additions* (new reach minus old's), so the false-positive risk is
+  one-directional, living entirely in whether old's absence of a kind is
+  trustworthy — never in new's own scope. Gating new's presence on its own
+  narrowing dropped a genuine finding whenever a confirmed-full-pass baseline
+  had proven a kind absent everywhere and a narrowed candidate then observed
+  a real, newly-added edge of it: new being narrower than old can only ever
+  miss an addition outside the TUs it examined, never manufacture a false
+  positive. Fixed by dropping the narrowing guard from `new_present` entirely
+  (unconditional `kind in new_kinds`), leaving `old_present`'s guard as the
+  sole asymmetry check — the only side whose absence this closure leans on.
+  A fourteenth review found that guard itself trusted "both narrowed" too
+  readily: `narrowed_passes` is only a boolean, so an old run narrowed to
+  `src/a.cpp` and a new run narrowed to a disjoint `src/b.cpp` are each
+  individually narrow but examine different code, yet "both narrowed" alone
+  let one credit the other's edge as coverage. New
+  `SourceGraphSummary.narrowed_scope: dict[str, frozenset[str]]` field
+  (additive, same round-trip pattern) records the actual scope a narrowed
+  pass examined (`changed_paths`, or the `scoped_units` source paths);
+  `_common_dependency_edge_kinds` now only trusts a narrowed side's edge
+  against a new side narrowed to an *identical*, non-empty scope. The
+  duplicated scoping decision in `_fold_call_graph`/`_fold_type_graph` was
+  factored into one shared `_scope_narrowed_target()` helper to make room for
+  the new field within `inline.py`'s line-count cap. A fifteenth review found
+  that fix one-sided: it only used a matched `narrowed_scope` to *exclude* a
+  mismatched comparison, never to *credit* a matched one, so a same-scope PR
+  scan whose narrowed baseline genuinely found zero edges of a family
+  couldn't have that zero trusted, dropping a real first-ever dependency the
+  candidate found in the same shared TU. Fixed in three parts:
+  `_common_dependency_edge_kinds` now widens to the whole family when both
+  sides are narrowed to an identical scope, exactly like the confirmed-full-
+  pass branch already does; `_dependency_kinds_covered` now also accepts
+  `narrowed_passes` as "a pass ran" (safe on its own, since the fine-grained
+  per-kind trust decision still lives in `_common_dependency_edge_kinds`);
+  and new `call_graph.narrowed_pass_confirmed()` (sharing its "at least one
+  TU, no diagnostics" check with `extractor_pass_fully_covered`) means
+  `narrowed_passes` is only stamped when the narrowed run itself hit no
+  per-TU diagnostics — trusting a narrowed zero-edge family as real evidence
+  raises the stakes on the run having succeeded cleanly. A sixteenth review
+  found a parallel gap for the *unnarrowed* case: a full pass with per-TU
+  diagnostics correctly never sets `extractor_passes`, but still folds edges
+  from the TUs that did parse, and nothing recorded this — those surviving
+  edges fell into the per-kind fallback's weak "bare edge presence" trust
+  tier, letting a degraded baseline's edge be compared against a clean
+  candidate's edge in a wholly different, never-successfully-parsed TU. New
+  `SourceGraphSummary.degraded_passes: dict[str, bool]` field (additive, same
+  round-trip pattern) is set whenever a pass examined units but
+  `extractor.diagnostics` was non-empty; `_common_dependency_edge_kinds`'s
+  `old_present` guard now also requires `not old_degraded`. Stamped by
+  `inline._fold_call_graph`/`_fold_type_graph` and
+  `cli_buildsource_helpers._collect_call_graph`. This round also split
+  `_scope_narrowed_target`/`_fold_call_graph`/`_fold_type_graph` out of
+  `inline.py` (sitting at its 2000-line hard cap) into a new sibling module,
+  `inline_graph_fold.py`, to give future rounds headroom instead of
+  re-shaving comment lines each time.
+
+- **Correlate a public entry's own body/type-hash change with a new internal
+  dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,
+  a public entry whose own implementation changed this version
+  (`source_diff.diff_source_abi`'s `INLINE_BODY_CHANGED`/
+  `TEMPLATE_BODY_CHANGED`/`PUBLIC_TYPEDEF_TARGET_CHANGED` — the three of the
+  nine L4 findings keyed on a `body_hash`/`type_hash` delta) that *also*
+  gained a new internal dependency this version
+  (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`) produced two entirely disjoint
+  findings with nothing connecting them. `diff_source_graph_findings(old,
+  new, source_diff_changes=...)` now takes the caller's already-computed L4
+  surface diff and threads it to `_internal_dependency_findings`; new
+  `_public_decl_source_changes()` maps each public entry's `symbol`
+  (qualified name) to its own body/type-hash `Change`, and when a
+  newly-internal-dependency entry has one, the description gains a sentence
+  naming it ("This entry's own implementation also changed this version
+  (`<kind>`: `<old>` → `<new>`) — likely the source of the new dependency.").
+  `cli_buildsource_helpers.diff_embedded_build_source` (the only production
+  caller with both diffs available) passes its L4 findings through;
+  `graph compare` (bare `SourceGraphSummary` files, no build-source facts)
+  keeps the default `None` and is unaffected. No new `ChangeKind` — same
+  convention as slice 3's proof paths, riding in `Change.description`.
+
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
   (`--depth headers --scope-public-headers --format review --exit-code-scheme

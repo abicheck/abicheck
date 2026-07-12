@@ -188,6 +188,7 @@ def diff_embedded_build_source(
     # into the verdict pipeline — never sole authority for a BREAKING verdict.
     old_surface = old_pack.source_abi if old_pack else None
     new_surface = new_pack.source_abi if new_pack else None
+    _src: list[Change] = []
     if old_surface is not None and new_surface is not None:
         from .buildsource.source_diff import diff_source_abi
 
@@ -204,7 +205,10 @@ def diff_embedded_build_source(
     if old_graph is not None and new_graph is not None:
         from .buildsource.source_graph import diff_source_graph_findings
 
-        _gr = diff_source_graph_findings(old_graph, new_graph)
+        # ``_src`` (the L4 surface diff, if both sides had one) lets the graph
+        # diff correlate a public entry's own body/type_hash change with it
+        # newly reaching an internal dependency (ADR-041 P0 roadmap item 2).
+        _gr = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=_src)
         tag_evidence_category(_gr, "source_only")
         apply_evidence_policy(_gr, "graph_risk", policy_file)
         changes.extend(_gr)
@@ -1198,6 +1202,21 @@ def _collect_call_graph(
 
     project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
+    # Recorded regardless of `added` — a pass that ran and found zero edges is
+    # still "covered" (ADR-041 P0 slice 2 follow-up, mirrors
+    # inline._fold_call_graph): edge presence alone cannot tell a version diff
+    # "ran, zero output" from "never ran". extractor_pass_fully_covered also
+    # requires units to examine and no per-TU parse failures (seventh Codex
+    # review) — this path never narrows (always runs over the whole `merged`
+    # build), so it always passes narrowed=False.
+    from .buildsource.call_graph import extractor_pass_fully_covered
+
+    if extractor_pass_fully_covered(merged, extractor, narrowed=False):
+        graph.extractor_passes["call_graph"] = True
+    elif extractor.diagnostics:
+        # Ran but some TU failed — its surviving edges must not vouch for
+        # project-wide coverage (sixteenth Codex review).
+        graph.degraded_passes["call_graph"] = True
     graph.finalize()
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")

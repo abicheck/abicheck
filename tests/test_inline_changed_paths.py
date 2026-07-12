@@ -166,6 +166,9 @@ def test_inline_graph_folds_call_edges_for_l4_l5_mode(monkeypatch):
     )
     assert graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    # Unscoped (whole compile DB) run: confirmed pass coverage is recorded
+    # (ADR-041 P0 slice 2/3; sixth Codex review — only an unscoped run may).
+    assert graph.extractor_passes["call_graph"] is True
 
 
 def test_inline_graph_no_call_edges_when_clang_absent(monkeypatch):
@@ -221,7 +224,7 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -231,6 +234,105 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     )
     # Only the changed TU was parsed for call edges.
     assert seen_sources == ["src/a.cpp"]
+    # Narrowed (changed-path-scoped) run: does NOT claim confirmed pass
+    # coverage — it only examined a subset of TUs, so "found nothing" there
+    # says nothing about the rest of the codebase (sixth Codex review).
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
+    # But the narrowed run's own scope is recorded, so a comparison against a
+    # confirmed full pass on the other side can discount this run's edges as
+    # non-representative coverage (eleventh Codex review).
+    assert graph.narrowed_passes["call_graph"] is True
+    # And the *actual* scope (not just the boolean) is recorded, so two
+    # narrowed runs are only trusted against each other when identically
+    # scoped (fourteenth Codex review).
+    assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
+
+
+def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pass(monkeypatch):
+    # Fifteenth Codex review: narrowed_passes now doubles as "this narrowed
+    # scope's zero-edge family is trustworthy" (not just "discount this run's
+    # edges elsewhere"), so a narrowed run that hit a per-TU diagnostic (a
+    # clang crash/timeout/degenerate AST inside the scope) must NOT claim
+    # narrowed_passes — the scope was not examined cleanly, mirroring the
+    # seventh review's rationale for the full-pass case.
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FlakyCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = ["clang timed out on src/a.cpp"]
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FlakyCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
+    assert "call_graph" not in graph.narrowed_passes
+    assert "call_graph" not in graph.narrowed_scope
+    # A narrowed run with diagnostics is even less trustworthy than a clean
+    # narrowed one, so it also lands in degraded_passes (sixteenth Codex
+    # review) — its surviving edges must not vouch for coverage either.
+    assert graph.degraded_passes["call_graph"] is True
+
+
+def test_inline_call_graph_scoped_no_diagnostics_does_not_mark_degraded(monkeypatch):
+    # Contrast case: a clean narrowed run (no diagnostics) must NOT be marked
+    # degraded — only narrowed_passes/narrowed_scope, per the fourteenth/
+    # fifteenth review.
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert graph is not None
+    assert graph.narrowed_passes["call_graph"] is True
+    assert "call_graph" not in graph.degraded_passes
 
 
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
@@ -263,7 +365,7 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -273,6 +375,11 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     )
     # Header change → all TUs parsed for call edges.
     assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+    # Not narrowed (fanned out to the whole compile DB despite changed_paths
+    # being set) — confirmed pass coverage is still recorded.
+    assert graph is not None
+    assert graph.extractor_passes["call_graph"] is True
+    assert "call_graph" not in graph.narrowed_passes
 
 
 def _fake_call_extractor(monkeypatch, seen_sources: list[str]):
@@ -313,7 +420,7 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     # The L4 replay selected only a.cpp (the headers-only representative subset).
     l4_units = [CompileUnit(id="cu://src/a.cpp", source="src/a.cpp")]
     rows: list = []
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -327,6 +434,11 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     row = next(r for r in rows if r.name == "call_graph:clang")
     assert "headers-only scope" in row.detail
     assert "from 1 compile unit" in row.detail
+    # Narrowed (headers-only scope, matching L4): no confirmed pass coverage.
+    assert graph is not None
+    assert "call_graph" not in graph.extractor_passes
+    assert graph.narrowed_passes["call_graph"] is True
+    assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
 
 
 def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
@@ -342,7 +454,7 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -352,6 +464,10 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
         call_graph_units=None,
     )
     assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+    # Fully unscoped: confirmed pass coverage is recorded.
+    assert graph is not None
+    assert graph.extractor_passes["call_graph"] is True
+    assert "call_graph" not in graph.narrowed_passes
 
 
 def test_run_inline_source_abi_no_sources_returns_empty_selection():
@@ -419,3 +535,125 @@ def test_run_inline_source_abi_extractor_unavailable_returns_empty_selection(
     )
     assert surface is not None  # empty SourceAbiSurface, not None
     assert units == []
+
+
+# ── ADR-041 P0: type-graph folding alongside the call graph ─────────────────
+
+
+def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
+    from abicheck.buildsource import call_graph, type_graph
+    from abicheck.buildsource.type_graph import TypeEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    merged = _build_with_one_unit()
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert any(e.kind == "TYPE_INHERITS" for e in graph.edges)
+
+
+def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):
+    # Best-effort: a missing clang++ records a failed extractor row and leaves the
+    # graph without type edges — never raises.
+    from abicheck.buildsource import call_graph, type_graph
+
+    class _Unavailable:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return False
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _Unavailable)
+    merged = _build_with_one_unit()
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=rows
+    )
+    assert graph is not None
+    assert not any(e.kind == "TYPE_INHERITS" for e in graph.edges)
+    assert any(r.name == "type_graph:clang" and r.status == "failed" for r in rows)
+
+
+def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
+    # Mirrors the call-graph scoping: a PR/--since scan narrows the type-graph
+    # pass to the changed compile units, not the whole compile DB.
+    from abicheck.buildsource import call_graph, type_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    seen_sources: list[str] = []
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            seen_sources.extend(cu.source for cu in build.compile_units)
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert seen_sources == ["src/a.cpp"]
+    assert graph is not None
+    assert "type_graph" not in graph.extractor_passes
+    assert graph.narrowed_passes["type_graph"] is True
+    assert graph.narrowed_scope["type_graph"] == frozenset({"src/a.cpp"})

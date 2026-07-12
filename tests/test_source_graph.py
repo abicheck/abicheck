@@ -796,6 +796,54 @@ def test_round_trip_preserves_graph_id() -> None:
     assert len(restored.edges) == len(g.edges)
 
 
+def test_extractor_passes_round_trips() -> None:
+    # ADR-041 P0 slice 2 follow-up: extractor_passes must survive to_dict/
+    # from_dict so a version diff loaded from a pack can still tell "the pass
+    # ran, zero edges" from "the pass never ran".
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.extractor_passes["type_graph"] = True
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.extractor_passes == {"type_graph": True}
+
+
+def test_narrowed_passes_round_trips() -> None:
+    # Eleventh Codex review: narrowed_passes must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell a narrowed (PR/--since
+    # -scoped) pass's edges from a confirmed full pass's.
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.narrowed_passes["type_graph"] = True
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.narrowed_passes == {"type_graph": True}
+    assert restored.extractor_passes == {}
+
+
+def test_narrowed_scope_round_trips() -> None:
+    # Fourteenth Codex review: narrowed_scope must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell "narrowed to the same
+    # TUs" from "narrowed but to different, disjoint code".
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.narrowed_passes["type_graph"] = True
+    g.narrowed_scope["type_graph"] = frozenset({"src/a.cpp", "src/b.cpp"})
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.narrowed_scope == {"type_graph": frozenset({"src/a.cpp", "src/b.cpp"})}
+
+
+def test_degraded_passes_round_trips() -> None:
+    # Sixteenth Codex review: degraded_passes must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell "ran unnarrowed but hit
+    # per-TU diagnostics" from a clean confirmed pass.
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.degraded_passes["type_graph"] = True
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.degraded_passes == {"type_graph": True}
+    assert restored.extractor_passes == {}
+    assert restored.narrowed_passes == {}
+
+
 def test_graph_id_order_independent() -> None:
     a = SourceGraphSummary()
     a.add_node(GraphNode(id="x", kind="target"))

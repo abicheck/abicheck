@@ -112,8 +112,8 @@ def _graph(nodes: list[GraphNode], edges: list[GraphEdge]) -> dict[str, Any]:
     return SourceGraphSummary(nodes=nodes, edges=edges).to_dict()
 
 
-def _N(nid: str, kind: str, label: str) -> GraphNode:
-    return GraphNode(id=nid, kind=kind, label=label)
+def _N(nid: str, kind: str, label: str, attrs: dict[str, Any] | None = None) -> GraphNode:
+    return GraphNode(id=nid, kind=kind, label=label, attrs=dict(attrs or {}))
 
 
 def _E(src: str, dst: str, kind: str) -> GraphEdge:
@@ -176,7 +176,10 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # case160: a public entry newly calls an internal (non-public) helper.
     l5_nodes = [
         _N("decl:demo::parse", "source_decl", "demo::parse()"),
-        _N("decl:detail::validate", "source_decl", "detail::validate()"),
+        _N(
+            "decl:detail::validate", "source_decl", "detail::validate()",
+            attrs={"visibility": "private_header"},
+        ),
         _N("sym:_ZN4demo5parseEv", "binary_symbol", "demo::parse"),
         _N("hdr:include/demo/api.h", "header", "demo/api.h"),
     ]

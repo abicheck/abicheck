@@ -1,5 +1,6 @@
 {
   "coverage": {},
+  "degraded_passes": {},
   "edges": [
     {
       "attrs": {},
@@ -11,6 +12,7 @@
     }
   ],
   "external_graph_refs": [],
+  "extractor_passes": {},
   "graph_id": "sha256:cdb69f9708017235e37634434e59d9d2341ea1f98cd946c520c28ae4db085713",
   "indexes": {
     "by_binary_symbol": {},
@@ -22,6 +24,8 @@
       ]
     }
   },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
   "nodes": [
     {
       "attrs": {},
