@@ -611,7 +611,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template, but undetectable by abicheck in any mode \u2014 documented limitation demonstrating that some C++-only changes leave nothing in the objects to compare.",
+   "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template. Invisible to the default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay (--sources) walks the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright.",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "func_params_changed",
@@ -619,7 +619,7 @@
     "func_removed"
    ],
    "expected_kinds": [],
-   "known_gap": "The library ships the function template header-only and instantiates nothing, so no symbol is emitted and the v1/v2 binaries are byte-identical. castxml also does not emit uninstantiated template declarations into its AST output, so the parameter-type change (int -> long) is invisible in BOTH object/DWARF mode and header/castxml mode. This is the fundamental boundary of comparing built artifacts: code that never becomes a symbol leaves no trace a binary or castxml comparison can observe. A pure source-AST (header-diff) tool can see it; the approaches are complementary.",
+   "known_gap": "By default (object/DWARF mode, and header/castxml mode) the change is invisible: the library ships the function template header-only and instantiates nothing, so no symbol is emitted and the v1/v2 binaries are byte-identical, and castxml does not emit uninstantiated template declarations into its AST output either. This is the boundary of comparing built artifacts: code that never becomes a symbol leaves no trace a binary or castxml comparison can observe \u2014 the tool returns NO_CHANGE and this case's ground truth reflects that default-mode behavior. It is not a permanent blind spot, though: L4 source-ABI replay (--sources, ADR-030) parses the real clang AST, which does emit uninstantiated FunctionTemplateDecl nodes, and abicheck/buildsource/source_diff.py reports the parameter-type change as ChangeKind.TEMPLATE_BODY_CHANGED (RISK) when that opt-in evidence is supplied. min_evidence is L4 for that reason; this entry's expected/expected_kinds describe the tool's default (non---sources) behavior, which is what examples/validate_examples.py exercises for this case.",
    "min_evidence": "L4",
    "platforms": [
     "linux",
