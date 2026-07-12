@@ -1102,6 +1102,15 @@ def parse_args() -> argparse.Namespace:
                         "source discovers, instead of the cross-tool comparison. "
                         "Slow path: builds each case once, then runs the full "
                         "dump+compare pipeline up to 4x per case.")
+    p.add_argument("--freeze", nargs="+", metavar="TOOL",
+                   help=f"After this run, persist the named tools' per-case results to "
+                        f"{FROZEN_COMPETITOR_PATH.relative_to(REPO_DIR)} (committed reference "
+                        "data). Use for abidiff/ABICC once, then iterate on abicheck-only "
+                        "runs without re-paying their 30-50min cost — frozen columns are "
+                        "merged into every subsequent run's summary automatically.")
+    p.add_argument("--no-frozen", action="store_true",
+                   help="Don't merge in previously-frozen competitor data (default: merge "
+                        "it in for any tool not actively selected this run).")
     return p.parse_args()
 
 
@@ -1200,6 +1209,47 @@ def _total_ms(results: list[dict], ms_key: str) -> float:
     return sum(r.get(ms_key, 0) for r in results)
 
 
+# Ordinal severity so a mismatch can be classified as an over-call (false
+# positive: reported worse than reality) or an under-call (false negative:
+# reported better than reality, including SKIP/ERROR/TIMEOUT/incapacity —
+# a tool that cannot tell you about a real break failed to warn just as
+# surely as one that said COMPATIBLE). MATCH/MISS are the G20 audit lane's
+# pseudo-verdicts (there is no BREAKING/COMPATIBLE concept for a
+# single-artifact crosscheck), mapped onto the same 0/4 poles so they fold
+# into the same count.
+_VERDICT_SEVERITY_RANK: dict[str, int] = {
+    "NO_CHANGE": 0,
+    "MATCH": 0,
+    "COMPATIBLE": 1,
+    "COMPATIBLE_WITH_RISK": 2,
+    "API_BREAK": 3,
+    "BREAKING": 4,
+    "MISS": 4,
+}
+
+
+def _fp_fn_counts(
+    results: list[dict], key: str, expected_key: str = "expected",
+) -> tuple[int, int]:
+    """Count false positives (over-called) and false negatives (under-called
+    or simply incapable of scanning the case), scored over the full catalog —
+    same denominator philosophy as :func:`_coverage_accuracy`.
+    """
+    fp = fn = 0
+    for r in results:
+        exp_rank = _VERDICT_SEVERITY_RANK.get(r.get(expected_key, "?"))
+        if exp_rank is None:
+            continue
+        got_rank = _VERDICT_SEVERITY_RANK.get(r[key], -1)
+        if got_rank == exp_rank:
+            continue
+        if got_rank > exp_rank:
+            fp += 1
+        else:
+            fn += 1
+    return fp, fn
+
+
 def _tool_version(cmd: list[str]) -> str | None:
     """Best-effort one-line version string for an external tool, or None."""
     if shutil.which(cmd[0]) is None:
@@ -1221,6 +1271,76 @@ def _git_commit() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+# ── Frozen competitor data ────────────────────────────────────────────────────
+# ABICC/abidiff results don't depend on anything abicheck-side: nothing in
+# these tools' verdicts changes when abicheck itself is fixed, and ABICC in
+# particular takes 30-50 minutes per full-catalog run. Freeze their results
+# once into a committed JSON file and reuse it on every subsequent run instead
+# of re-running the slow tools just to re-confirm abicheck's own iteration.
+FROZEN_COMPETITOR_PATH = REPO_DIR / "scripts" / "frozen_competitor_results.json"
+
+
+def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) -> None:
+    """Persist *tool_names*' per-case verdict + timing to a committed JSON file."""
+    frozen: dict[str, Any] = {
+        "schema": "abicheck-frozen-competitor/1.0",
+        "frozen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_commit": _git_commit(),
+        "ground_truth_sha256": _ground_truth_digest(),
+        "tool_versions": {
+            "abidiff": _tool_version(["abidiff", "--version"]),
+            "abi-compliance-checker": _tool_version(["abi-compliance-checker", "-dumpversion"]),
+        },
+        "tools": tool_names,
+        "results_by_case": {},
+    }
+    for r in results:
+        entry = {
+            k: r[k]
+            for name in tool_names
+            for k in (name, f"{name}_ms")
+            if k in r
+        }
+        if entry:
+            frozen["results_by_case"][r["case"]] = entry
+    out_path.write_text(json.dumps(frozen, indent=2, sort_keys=True) + "\n")
+
+
+def _load_frozen(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def _merge_frozen_into_results(
+    results: list[dict], frozen: dict[str, Any], skip_tools: set[str],
+) -> list[str]:
+    """Merge frozen per-case tool columns into *results* in place.
+
+    *skip_tools* are tools actively run this session — frozen data must never
+    overwrite a fresh result. Returns the tool names actually merged in, so
+    the caller can fold them into the accuracy summary.
+    """
+    tools = [t for t in frozen.get("tools", []) if t not in skip_tools]
+    if not tools:
+        return []
+    by_case = frozen.get("results_by_case", {})
+    for r in results:
+        entry = by_case.get(r["case"])
+        if not entry:
+            continue
+        for name in tools:
+            if name in entry:
+                r[name] = entry[name]
+            ms_key = f"{name}_ms"
+            if ms_key in entry:
+                r[ms_key] = entry[ms_key]
+    return tools
 
 
 def _ground_truth_digest() -> str | None:
@@ -1258,11 +1378,14 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "total_ms": round(_total_ms(results, t.ms_key)),
         }
         cov_correct, cov_total = _coverage_accuracy(results, t.name, t.expected_key)
+        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
         coverage_accuracy[t.name] = {
             "label": t.label,
             "correct": cov_correct,
             "total": cov_total,
             "pct": round(100 * cov_correct / cov_total, 1) if cov_total else None,
+            "false_positives": fp,
+            "false_negatives": fn,
         }
 
     return {
@@ -1461,7 +1584,8 @@ def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> N
         c, total = _coverage_accuracy(results, t.name, t.expected_key)
         pct = 100 * c // total if total else 0
         bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-        print(f"    {t.label}: {c:>3}/{total} ({pct:3}%) {bar}")
+        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
+        print(f"    {t.label}: {c:>3}/{total} ({pct:3}%) {bar}  FP={fp:<3} FN={fn:<3}")
 
 
 def _print_abicheck_divergences(results: list[dict]) -> None:
@@ -2377,6 +2501,22 @@ def main() -> None:
 
     for case_dir in all_cases:
         _process_case(case_dir, active_tools, case_prefixes, results, args)
+
+    if args.freeze:
+        _freeze_tools(results, args.freeze, FROZEN_COMPETITOR_PATH)
+        print(f"\n  Froze {', '.join(args.freeze)} results to {FROZEN_COMPETITOR_PATH}\n")
+
+    if not args.no_frozen:
+        frozen = _load_frozen(FROZEN_COMPETITOR_PATH)
+        if frozen:
+            merged_tools = _merge_frozen_into_results(results, frozen, selected_tools)
+            if merged_tools:
+                active_tools = active_tools + [
+                    t for t in TOOL_REGISTRY if t.name in merged_tools
+                ]
+                print(f"  Merged frozen results for: {', '.join(merged_tools)} "
+                      f"(frozen at {frozen.get('frozen_at', '?')}, "
+                      f"commit {frozen.get('git_commit', '?')[:12]})\n")
 
     # ── Accuracy summary ──────────────────────────────────────────────────────
     _print_accuracy_summary(results, active_tools, selected_tools)
