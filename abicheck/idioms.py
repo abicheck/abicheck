@@ -446,11 +446,20 @@ _MSVC_DTOR_RE = re.compile(r"\?\?1|deleting destructor")
 def _skip_source_name(entry: str, i: int) -> int:
     """Skip a length-prefixed ``<source-name>`` starting at ``entry[i]``; return the next index."""
     # <source-name> ::= <decimal length> <identifier> — skip whole.
+    # Vtable entries can originate from untrusted snapshots or DWARF linkage
+    # names.  Accumulate the length incrementally instead of calling int() on
+    # the complete digit run, because Python rejects very long decimal strings
+    # once the integer-string conversion guard is exceeded.  Any declared name
+    # length beyond the remaining mangling consumes the rest of the entry.
     n = len(entry)
     j = i
+    name_len = 0
     while j < n and entry[j].isdigit():
+        name_len = name_len * 10 + (ord(entry[j]) - ord("0"))
         j += 1
-    return j + int(entry[i:j])
+        if name_len >= n - j:
+            return n
+    return min(n, j + name_len)
 
 
 def _skip_substitution(entry: str, i: int) -> int:
