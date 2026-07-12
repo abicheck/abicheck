@@ -367,7 +367,71 @@ Two directions matter, not just one:
 
 ---
 
+## Full-catalog benchmark (2026-07-12, all 170 cases)
+
+Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
+misses** — a tool that hung, crashed, or simply has no mode for a case shape
+scores exactly like a wrong verdict. This is a stricter (and more honest)
+denominator than "accuracy over cases the tool managed to complete," so read
+it as the answer to *"if I pointed this tool at the whole catalog blind, how
+often would it tell me the truth?"*
+
+```bash
+python3 scripts/benchmark_comparison.py \
+  --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
+  --skip-compat --freeze abidiff abidiff_headers abicc_dumper abicc_xml
+```
+
+| Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
+|------|:---:|:---:|:---:|:---:|:---:|
+| **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
+| **abicheck (L3-L5, +sources)** | 104 | 61.2% | 17 | 49 | 3977s (~66 min) |
+| libabigail (`abidiff`) | 52 | 30.6% | 3 | 115 | **~1s** |
+| libabigail + headers | 52 | 30.6% | 3 | 115 | **~2-5s** |
+| ABICC (abi-dumper) | 73 | 42.9% | 2 | 90 | 2534s (**~42 min**) |
+| ABICC (xml/legacy) | 80 | 47.1% | 1 | 84 | 2143s (**~36 min**) |
+
+**ABICC is roughly 500-2500× slower than libabigail** for the identical
+170-case catalog (2143-2534s vs ~1-5s) while scoring *lower* on accuracy than
+abicheck's L2 lane. This is why ABICC/libabigail results are frozen
+(`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
+reference file merged into every subsequent run automatically — rather than
+re-run on every abicheck iteration; nothing in a competitor's own verdict
+changes when abicheck itself is patched.
+
+**Reading the false-positive/false-negative split:** a false positive is a
+tool *over-calling* severity (reporting a worse verdict than the true one —
+crying wolf); a false negative is *under-calling* it (silence on a real
+break, including every SKIP/ERROR/TIMEOUT, since a tool that cannot tell you
+about a break failed to warn just as surely as one that said COMPATIBLE).
+
+- **libabigail's misses are overwhelmingly false negatives** (115/170,
+  DWARF has no view into noexcept/static/const/layout-invisible changes) —
+  it rarely cries wolf (FP=3), it mostly stays silent.
+- **ABICC's misses skew false-negative too** (84-90/170) but for a different
+  reason: a large share are `SKIP`/`ERROR`/`TIMEOUT` outright rather than a
+  wrong-but-confident verdict — see the slowest-case tables the benchmark
+  prints (`case85`, `case09`, `case105`, `case109`... routinely hit the 90s
+  timeout on both ABICC modes in this environment).
+- **abicheck L3-L5's 17 false positives** are the one lane here with a real
+  over-calling problem — the source-replay/build-context path is
+  intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
+  doesn't attempt), and this is tracked as a known gap, not hidden.
+
+abicheck L2's 10 misses (170 − 160): `case20`, `case78`, `case97`
+(enum-as-literal-constant / hidden-friend-adjacent gaps sharing one root
+cause, see `docs/development/goals.md`), `case105`, `case111` (documented
+detector gaps), and `case130`-`case133` (build-mode flips that structurally
+need `-p build/` L3 context, which the L2-only lane doesn't pass).
+
+---
+
 ## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
+
+> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
+> above, which covers all 170 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
+> count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
+> release-pinned methodology and historical numbers.
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
 74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
