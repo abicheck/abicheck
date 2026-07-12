@@ -1205,6 +1205,10 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
+    # request.{old,new}.headers double as the public-header set for provenance
+    # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
+    # CompareRequest has no lower-level "parse only, don't classify" mode, so a
+    # header supplied to compare is by definition the public contract.
     old = resolve_input(
         request.old.path,
         list(request.old.headers),
@@ -1216,6 +1220,7 @@ def run_compare_request(
         debug_roots=list(request.old.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
         header_backend=header_backend,
+        public_headers=list(request.old.headers),
     )
     new = resolve_input(
         request.new.path,
@@ -1228,6 +1233,7 @@ def run_compare_request(
         debug_roots=list(request.new.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
         header_backend=header_backend,
+        public_headers=list(request.new.headers),
     )
 
     suppression, pf = load_suppression_and_policy(
