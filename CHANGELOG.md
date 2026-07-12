@@ -29,6 +29,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **L5 source graph now populates type/reference dependency edges
+  (ADR-041 P0).** New `abicheck/buildsource/type_graph.py` folds
+  `TYPE_INHERITS` (base classes), `TYPE_HAS_FIELD_TYPE` (field types),
+  `DECL_HAS_TYPE` (parameter types), and `DECL_REFERENCES_DECL` (non-call
+  variable/enum references) into the L5 graph alongside the existing call
+  graph, whenever a semantic source mode runs with `clang++` available
+  (`--depth source`+). These edge kinds were reserved in the schema since
+  ADR-031 and already read by `public_to_internal_dependency`
+  (`crosscheck.py`), but nothing populated them — so that check now catches
+  cases the call graph alone misses, e.g. a public struct with a private
+  field type or a public class inheriting an internal base. New
+  `coverage.type_edges` / `coverage.reference_edges` counters on the L5
+  graph report collection honestly.
+
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
   (`--depth headers --scope-public-headers --format review --exit-code-scheme

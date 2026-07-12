@@ -799,7 +799,13 @@ def _check_odr_type_variant(
 #: structural-only graph carries none of them — the check then skips with a soft
 #: advisory rather than reading clean (ADR-035 D4 coverage honesty).
 _DEPENDENCY_EDGE_KINDS = frozenset(
-    {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL", "DECL_HAS_TYPE"}
+    {
+        "DECL_CALLS_DECL",
+        "DECL_REFERENCES_DECL",
+        "DECL_HAS_TYPE",
+        "TYPE_HAS_FIELD_TYPE",
+        "TYPE_INHERITS",
+    }
 )
 
 #: Graph node kinds that carry a declaration/type visibility we can classify.
@@ -1002,7 +1008,9 @@ def _check_public_to_internal_dependency(
     """A public/exported decl that reaches an internal entity via the L5 graph, RISK.
 
     Reads the source graph's decl-dependency edges (``DECL_CALLS_DECL`` /
-    ``DECL_REFERENCES_DECL`` / ``DECL_HAS_TYPE``): when a *public* declaration
+    ``DECL_REFERENCES_DECL`` / ``DECL_HAS_TYPE`` / ``TYPE_HAS_FIELD_TYPE`` /
+    ``TYPE_INHERITS``, the last two folded by ``type_graph.py``, ADR-041 P0):
+    when a *public* declaration or type
     (public-header visibility, or one mapped to an exported binary symbol) points
     at an *internal* declaration/type (private-header or source-file visibility;
     ``generated`` is a public generated header and excluded), the public surface
