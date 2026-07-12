@@ -67,7 +67,17 @@ def _unnamed_kind(mangled: str) -> str | None:
             j = i
             while j < n and mangled[j].isdigit():
                 j += 1
-            length = int(mangled[i:j])
+            # Symbol names are untrusted input from ELF files/snapshots.
+            # Avoid feeding an unbounded digit run to int(): Python's
+            # integer-string guard can raise ValueError (and, if disabled, a
+            # huge conversion would waste CPU/memory). A source-name length
+            # larger than the whole mangled string cannot be valid anyway.
+            if j - i > len(str(n)):
+                return None
+            try:
+                length = int(mangled[i:j])
+            except ValueError:
+                return None
             i = j + length
             continue
         # Substitution / template-param / array productions embed a seq-id or

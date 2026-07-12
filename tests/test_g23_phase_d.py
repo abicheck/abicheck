@@ -127,6 +127,19 @@ class TestUnnamedTypeLeak:
 
         assert _exported_symbol_names(AbiSnapshot(library="x", version="1")) == set()
 
+
+    def test_malformed_huge_source_name_length_not_flagged(self):
+        # Attacker-controlled ELF/snapshot symbol names must not be able to
+        # crash the token walker via Python's int-string conversion limit.
+        from abicheck.diff_unnamed_types import _unnamed_kind
+
+        assert _unnamed_kind("_Z" + "9" * 5000) is None
+
+    def test_malformed_huge_source_name_length_not_flagged_end_to_end(self):
+        old = _elf_snap()
+        new = _elf_snap("_Z" + "9" * 5000)
+        assert ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI not in _kinds(compare(old, new))
+
     def test_captured_empty_baseline_flags_new_lambda(self):
         # Old side captured ELF and genuinely exported nothing: a lambda in the
         # new binary IS newly introduced against that proven-empty surface.
