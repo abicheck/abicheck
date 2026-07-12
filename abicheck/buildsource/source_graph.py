@@ -1211,6 +1211,54 @@ def _target_dependency_findings(
     return findings
 
 
+def _path_segments(path: str) -> tuple[str, ...]:
+    """Path components in posix order, dropping anchors/'.' parts.
+
+    Backslashes are normalized to forward slashes so Windows-style build
+    paths segment the same way as posix ones (mirrors provenance._segments).
+    """
+    from pathlib import PurePosixPath  # noqa: PLC0415
+
+    posix = path.replace("\\", "/")
+    return tuple(p for p in PurePosixPath(posix).parts if p not in ("/", ".", ""))
+
+
+def _common_prefix_len(node_ids: list[str]) -> int:
+    """Length (in path segments) of the longest common leading prefix shared
+    by every node id's path (after its ``scheme://`` prefix).
+
+    Two independent checkouts of the *same* source tree (e.g. old/new
+    directories in a benchmark harness, or two CI job workspaces) share no
+    absolute root, so comparing raw absolute paths would treat every file as
+    "moved" even when nothing changed relative to its own tree. Stripping
+    each side's own common root before comparing (see
+    :func:`_root_relative_key`) lets an unmoved file be recognised as
+    unmoved regardless of where its tree happened to be checked out.
+    """
+    seg_lists = [
+        _path_segments(nid.split("://", 1)[1]) for nid in node_ids if "://" in nid
+    ]
+    if len(seg_lists) < 2:
+        return 0
+    shortest = min(len(s) for s in seg_lists)
+    n = 0
+    for i in range(shortest):
+        if len({s[i] for s in seg_lists}) == 1:
+            n += 1
+        else:
+            break
+    return n
+
+
+def _root_relative_key(node_id: str, prefix_len: int) -> str:
+    """Strip a node id's scheme and the first *prefix_len* path segments."""
+    if "://" not in node_id or prefix_len <= 0:
+        return node_id
+    scheme, path = node_id.split("://", 1)
+    segs = _path_segments(path)
+    return f"{scheme}://{'/'.join(segs[prefix_len:])}"
+
+
 def _symbol_owner_findings(
     old: SourceGraphSummary,
     new: SourceGraphSummary,
@@ -1231,8 +1279,16 @@ def _symbol_owner_findings(
     # the call-graph augmentation, so its def_file attr is dropped (Codex
     # review).
     old_owner, new_owner = _symbol_owner_source(old), _symbol_owner_source(new)
+    # Compare each side's declaring-file path relative to its own common
+    # root, not the raw absolute path — two independently-rooted checkouts
+    # of the same tree must not look like every file moved (see
+    # _common_prefix_len).
+    old_prefix_len = _common_prefix_len(list(old_owner.values()))
+    new_prefix_len = _common_prefix_len(list(new_owner.values()))
     for symbol in sorted(set(old_owner) & set(new_owner)):
-        if old_owner[symbol] != new_owner[symbol]:
+        old_key = _root_relative_key(old_owner[symbol], old_prefix_len)
+        new_key = _root_relative_key(new_owner[symbol], new_prefix_len)
+        if old_key != new_key:
             label = new_labels.get(symbol, symbol)
             findings.append(Change(
                 kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,

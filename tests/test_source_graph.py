@@ -370,6 +370,55 @@ def test_findings_generated_header_reaches_public_api() -> None:
     assert "gen/config.h" in gen[0].symbol
 
 
+def test_owner_unchanged_across_different_absolute_checkout_roots() -> None:
+    # Two independent checkouts of the *same* tree (e.g. a benchmark's old/
+    # new directories, or two separate CI job workspaces) share no absolute
+    # root. The declaring file's path relative to its own tree is identical
+    # ("inc/foo.h"/"inc/bar.h" in both), so this must NOT look like every
+    # file moved just because the checkout root differs (regression for the
+    # false positive this produced across most of examples/, since the
+    # catalog's own v1/v2 fixture convention is exactly this shape).
+    old = build_source_graph(
+        _build_with_public_header(headers=("/old_root/inc/foo.h", "/old_root/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/old_root/inc/foo.h"), ("foo::c", "/old_root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/new_root/inc/foo.h", "/new_root/inc/bar.h")),
+        source_abi=_surface_with(
+            [("foo::a", "/new_root/inc/foo.h"), ("foo::c", "/new_root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
+
+
+def test_owner_changed_when_relative_path_actually_moves() -> None:
+    # A genuine relocation *within* the same tree (same root, different
+    # relative path) must still fire — only the checkout-root difference is
+    # meant to be ignored, not a real declaration move.
+    b = _build_with_public_header(
+        headers=("/root/inc/foo.h", "/root/inc/bar.h", "/root/inc/baz.h"),
+    )
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/bar.h")],
+        {"foo::a": "_Za", "foo::c": "_Zc"},
+    ))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/baz.h")],
+        {"foo::a": "_Za", "foo::c": "_Zc"},
+    ))
+    findings = diff_source_graph_findings(old, new)
+    owner = [c for c in findings if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED]
+    assert len(owner) == 1
+    assert owner[0].symbol == "_Zc"
+
+
 def test_findings_identical_graphs_yield_nothing() -> None:
     b = _build_with_public_header()
     g = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
