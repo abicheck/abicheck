@@ -32,7 +32,7 @@ from unittest.mock import patch
 
 from abicheck.appcompat import AppRequirements, _check_pe_ordinal_imports
 from abicheck.binder import BindingStatus, SymbolBinding
-from abicheck.checker import ChangeKind, compare
+from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot
@@ -106,14 +106,17 @@ class TestSymbolicAndTextrel:
         r = compare(_elf_snap(old), _elf_snap(new))
         assert ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED not in _kinds(r)
 
-    def test_textrel_introduced_is_breaking(self):
-        from abicheck.checker_policy import BREAKING_KINDS
+    def test_textrel_introduced_is_risk(self):
+        # Matches the codebase's hardening-regression convention (relro_weakened,
+        # writable_executable_segment, stack_canary_removed): COMPATIBLE_WITH_RISK
+        # by default, gated to BREAKING only via --policy-file security.
+        from abicheck.checker_policy import RISK_KINDS
 
         old = _elf(has_textrel=False)
         new = _elf(has_textrel=True)
         r = compare(_elf_snap(old), _elf_snap(new))
         assert ChangeKind.TEXT_RELOCATION_INTRODUCED in _kinds(r)
-        assert ChangeKind.TEXT_RELOCATION_INTRODUCED in BREAKING_KINDS
+        assert ChangeKind.TEXT_RELOCATION_INTRODUCED in RISK_KINDS
 
     def test_textrel_removed_is_improvement(self):
         old = _elf(has_textrel=True)
@@ -227,11 +230,12 @@ class TestPeOrdinalRetargeted:
                 _FakePeMeta([PeExport(name="Bar", ordinal=17)]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
 
         assert resolved == {"ordinal:17"}
         assert len(retargeted) == 1
         assert retargeted[0].kind == ChangeKind.PE_ORDINAL_RETARGETED
+        assert names == {"Foo", "Bar"}
 
     def test_ordinal_unchanged_resolved_no_retarget(self):
         with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
@@ -241,10 +245,11 @@ class TestPeOrdinalRetargeted:
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
 
         assert resolved == {"ordinal:17"}
         assert retargeted == []
+        assert names == {"Foo"}
 
     def test_ordinal_dropped_stays_unresolved(self):
         with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
@@ -254,16 +259,50 @@ class TestPeOrdinalRetargeted:
                 _FakePeMeta([]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
 
         assert resolved == set()
         assert retargeted == []
+        assert names == set()
 
     def test_no_ordinal_requirements_short_circuits(self):
         reqs = AppRequirements(undefined_symbols={"NamedFunc"})
-        resolved, retargeted = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+        resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
         assert resolved == set()
         assert retargeted == []
+        assert names == set()
+
+    def test_resolved_ordinal_content_change_is_relevant(self):
+        """Codex review (PR #537): an ABI break on the export an ordinal-only
+        import resolves to must surface via check_appcompat, not read as
+        irrelevant_for_app just because the app never named the export.
+        """
+        from abicheck.appcompat import check_appcompat
+
+        with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
+             patch("abicheck.appcompat.parse_app_requirements") as mock_parse_app, \
+             patch("abicheck.appcompat._get_lib_soname", return_value="foo.dll"), \
+             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
+             patch("abicheck.appcompat._missing_app_versions", return_value=[]), \
+             patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe, \
+             patch("abicheck.dumper.dump") as mock_dump, \
+             patch("abicheck.service.compare_snapshots") as mock_compare:
+            mock_parse_app.return_value = AppRequirements(undefined_symbols={"ordinal:17"})
+            mock_parse_pe.side_effect = [
+                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
+                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
+            ]
+            mock_dump.side_effect = [object(), object()]
+            change = Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="Foo", description="params changed")
+            mock_compare.return_value = DiffResult(
+                old_version="old", new_version="new", library="foo.dll",
+                changes=[change], verdict=Verdict.BREAKING,
+            )
+
+            result = check_appcompat(Path("app.exe"), Path("old.dll"), Path("new.dll"))
+
+        assert change in result.breaking_for_app
+        assert change not in result.irrelevant_for_app
 
 
 # ── Runtime symbol-binding rebound ───────────────────────────────────────────

@@ -661,7 +661,7 @@ def _missing_app_versions(new_lib_path: Path, app_reqs: AppRequirements) -> list
 
 def _check_pe_ordinal_imports(
     old_lib_path: Path, new_lib_path: Path, app_reqs: AppRequirements,
-) -> tuple[set[str], list[Change]]:
+) -> tuple[set[str], list[Change], set[str]]:
     """Resolve the app's ordinal-only PE imports against old/new export tables.
 
     A PE consumer that imports by ordinal (``import_by_ordinal``) never names
@@ -681,11 +681,18 @@ def _check_pe_ordinal_imports(
     * ordinal did not exist in the OLD library either → not attributable to
       this version change; left alone.
 
-    Returns (resolved_requirement_strings, retargeted_changes).
+    Returns (resolved_requirement_strings, retargeted_changes,
+    resolved_export_names). ``resolved_export_names`` carries the old/new
+    export name(s) behind each resolved ordinal so the caller can fold them
+    into the relevance check: an ordinal-only consumer has no name of its own
+    in ``app_reqs.undefined_symbols`` to match against, so a library diff
+    finding for the *named* export it silently resolves to (e.g. a signature
+    change to the export the ordinal has always pointed at) would otherwise
+    be misclassified as ``irrelevant_for_app``.
     """
     ordinal_reqs = {s for s in app_reqs.undefined_symbols if s.startswith("ordinal:")}
     if not ordinal_reqs or _detect_app_format(old_lib_path) != "pe":
-        return set(), []
+        return set(), [], set()
 
     from .pe_metadata import parse_pe_metadata
 
@@ -694,10 +701,11 @@ def _check_pe_ordinal_imports(
         new_by_ordinal = {e.ordinal: e.name for e in parse_pe_metadata(new_lib_path).exports}
     except Exception as exc:  # noqa: BLE001
         log.debug("Failed to resolve PE ordinal exports for appcompat: %s", exc)
-        return set(), []
+        return set(), [], set()
 
     resolved: set[str] = set()
     retargeted: list[Change] = []
+    export_names: set[str] = set()
     for req in sorted(ordinal_reqs):
         try:
             ordinal = int(req.split(":", 1)[1])
@@ -708,6 +716,10 @@ def _check_pe_ordinal_imports(
             continue
         new_name = new_by_ordinal[ordinal]
         resolved.add(req)
+        if old_name:
+            export_names.add(old_name)
+        if new_name:
+            export_names.add(new_name)
         if new_name != old_name:
             retargeted.append(
                 make_change(
@@ -718,7 +730,7 @@ def _check_pe_ordinal_imports(
                     new=new_name or "(unnamed)",
                 )
             )
-    return resolved, retargeted
+    return resolved, retargeted, export_names
 
 
 def _partition_app_changes(
@@ -818,7 +830,7 @@ def check_appcompat(
     # against both DLLs' export directories so they aren't reported as
     # generically "missing" when the ordinal still (possibly differently)
     # resolves.
-    resolved_ordinals, ordinal_retargets = _check_pe_ordinal_imports(
+    resolved_ordinals, ordinal_retargets, resolved_export_names = _check_pe_ordinal_imports(
         old_lib_path, new_lib_path, app_reqs
     )
     missing_symbols = sorted(
@@ -829,8 +841,19 @@ def check_appcompat(
     # Check version availability
     missing_versions = _missing_app_versions(new_lib_path, app_reqs)
 
-    # 4. Filter diff by app usage
-    breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, app_reqs)
+    # 4. Filter diff by app usage. An ordinal-only import carries no name of
+    # its own in app_reqs.undefined_symbols, so a diff finding for the named
+    # export the ordinal resolves to would otherwise read as irrelevant; layer
+    # the resolved name(s) into a relevance-only view without perturbing
+    # app_reqs (used above for missing/coverage and below in the result).
+    relevance_reqs = app_reqs
+    if resolved_export_names:
+        relevance_reqs = AppRequirements(
+            needed_libs=app_reqs.needed_libs,
+            undefined_symbols=app_reqs.undefined_symbols | resolved_export_names,
+            required_versions=app_reqs.required_versions,
+        )
+    breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, relevance_reqs)
     breaking_for_app = breaking_for_app + ordinal_retargets
 
     # 5. Compute app-specific verdict

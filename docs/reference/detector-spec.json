@@ -2605,9 +2605,9 @@
     },
     {
       "kind": "text_relocation_introduced",
-      "category": "breaking",
-      "default_verdict": "BREAKING",
-      "severity": "error",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "text_relocation_introduced",
       "examples": ""

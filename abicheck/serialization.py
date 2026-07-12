@@ -247,6 +247,8 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_stack_canary=e.get("has_stack_canary", False),
         has_fortify_source=e.get("has_fortify_source", False),
         has_writable_executable_segment=e.get("has_writable_executable_segment", False),
+        is_symbolic=e.get("is_symbolic", False),
+        has_textrel=e.get("has_textrel", False),
         pointer_size=e.get("pointer_size", 8),
         machine=e.get("machine", ""),
         # Legacy snapshots (written before elf_class existed) carry no class

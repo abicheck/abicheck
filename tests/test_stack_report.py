@@ -47,6 +47,7 @@ def _make_result(
     bindings: list[SymbolBinding] | None = None,
     baseline_env: str = "/base",
     candidate_env: str = "/cand",
+    binding_changes: list | None = None,
 ) -> StackCheckResult:
     graph = _graph_with_nodes(**{"/app": "app", "/lib/libfoo.so": "libfoo.so"})
     graph.edges = [("/app", "/lib/libfoo.so")]
@@ -64,6 +65,7 @@ def _make_result(
         bindings_candidate=bindings or [_binding(BindingStatus.RESOLVED_OK)],
         missing_symbols=missing or [],
         stack_changes=stack_changes or [],
+        binding_changes=binding_changes or [],
         risk_score="low",
     )
 
@@ -104,6 +106,25 @@ class TestStackToJson:
         assert "bindings_summary" in data
         assert data["bindings_summary"]["resolved_ok"] == 1
 
+    def test_binding_changes_in_json(self):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        change = Change(
+            kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
+            symbol="process", description="moved provider",
+            old_value="liba.so.1", new_value="libb.so.1",
+        )
+        result = _make_result(binding_changes=[change])
+        data = json.loads(stack_to_json(result))
+        assert "binding_changes" in data
+        assert data["binding_changes"][0]["kind"] == "runtime_symbol_provider_changed"
+        assert data["binding_changes"][0]["old_value"] == "liba.so.1"
+
+    def test_no_binding_changes_key_when_empty(self):
+        data = json.loads(stack_to_json(_make_result()))
+        assert "binding_changes" not in data
+
 
 class TestStackToMarkdown:
     def test_basic_markdown_structure(self):
@@ -121,6 +142,23 @@ class TestStackToMarkdown:
     def test_environments_hidden_when_same(self):
         md = stack_to_markdown(_make_result(baseline_env="/same", candidate_env="/same"))
         assert "## Environments" not in md
+
+    def test_binding_changes_section(self):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        change = Change(
+            kind=ChangeKind.RUNTIME_WEAK_RESOLUTION_CHANGED,
+            symbol="opt_feature", description="weak reference now resolves",
+        )
+        md = stack_to_markdown(_make_result(binding_changes=[change]))
+        assert "## Runtime Binding Changes" in md
+        assert "runtime_weak_resolution_changed" in md
+        assert "weak reference now resolves" in md
+
+    def test_no_binding_changes_section_when_empty(self):
+        md = stack_to_markdown(_make_result())
+        assert "Runtime Binding Changes" not in md
 
     def test_unresolved_section(self):
         md = stack_to_markdown(_make_result(unresolved=[("/app", "libmissing.so")]))

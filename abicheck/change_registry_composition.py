@@ -76,7 +76,7 @@ COMPOSITION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "library's intended interposition of a symbol this object also "
               "defines.",
        description_template="Symbolic binding mode changed: {old} → {new}"),
-    _E("text_relocation_introduced", _B,
+    _E("text_relocation_introduced", _R,
        impact="DF_TEXTREL/DT_TEXTREL was gained: the dynamic loader must write "
               "into the (nominally read-only, shared) text segment to apply "
               "relocations. This defeats W^X and page-level text-segment "

@@ -295,7 +295,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
-| `text_relocation_introduced` | breaking | `BREAKING` | `error` | L0 | `text_relocation_introduced` | — |
+| `text_relocation_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `text_relocation_introduced` | — |
 | `text_relocation_removed` | quality | `COMPATIBLE` | `warning` | L0 | `text_relocation_removed` | — |
 | `threadsafe_statics_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `threadsafe_statics_mode_changed` | [case132](../examples/case132_threadsafe_statics_flip.md) |
 | `time64_abi_changed` | breaking | `BREAKING` | `error` | L1 | `time64_abi_changed` | — |
