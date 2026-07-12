@@ -1176,6 +1176,21 @@ def _accuracy(results: list[dict], key: str, expected_key: str = "expected") -> 
     return correct, len(scored)
 
 
+def _coverage_accuracy(results: list[dict], key: str, expected_key: str = "expected") -> tuple[int, int]:
+    """Accuracy over the full catalog denominator (every row in *results*).
+
+    Unlike :func:`_accuracy`, a SKIP/ERROR/TIMEOUT is *not* excluded from the
+    denominator — it counts as a miss, same as a wrong verdict: whether a tool
+    got the wrong answer, hung, crashed, or simply cannot scan the case at all
+    is immaterial to "did it produce the right answer for this catalog entry".
+    """
+    correct = sum(
+        1 for r in results
+        if r.get(expected_key, "?") != "?" and r[key] == r[expected_key]
+    )
+    return correct, len(results)
+
+
 def _total_ms(results: list[dict], ms_key: str) -> float:
     return sum(r.get(ms_key, 0) for r in results)
 
@@ -1227,6 +1242,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
         abicheck_version = "unknown"
 
     accuracy: dict[str, dict[str, Any]] = {}
+    coverage_accuracy: dict[str, dict[str, Any]] = {}
     for t in active_tools:
         correct, total = _accuracy(results, t.name, t.expected_key)
         accuracy[t.name] = {
@@ -1235,6 +1251,13 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "scored": total,
             "pct": round(100 * correct / total, 1) if total else None,
             "total_ms": round(_total_ms(results, t.ms_key)),
+        }
+        cov_correct, cov_total = _coverage_accuracy(results, t.name, t.expected_key)
+        coverage_accuracy[t.name] = {
+            "label": t.label,
+            "correct": cov_correct,
+            "total": cov_total,
+            "pct": round(100 * cov_correct / cov_total, 1) if cov_total else None,
         }
 
     return {
@@ -1252,6 +1275,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "castxml": _tool_version(["castxml", "--version"]),
         },
         "accuracy": accuracy,
+        "coverage_accuracy": coverage_accuracy,
         "results": results,
     }
 
@@ -1402,7 +1426,7 @@ def _build_case_artifacts(
 
 def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> None:
     """Print per-tool accuracy bars with timing totals."""
-    print("  Accuracy vs expected verdicts:")
+    print("  Accuracy vs expected verdicts (scored cases only — SKIP/ERROR/TIMEOUT excluded):")
     for t in active_tools:
         c, total = _accuracy(results, t.name, t.expected_key)
         if total > 0:
@@ -1410,6 +1434,14 @@ def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> N
             bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
             tot_s = _total_ms(results, t.ms_key) / 1000
             print(f"    {t.label}: {c:>2}/{total} ({pct:3}%) {bar}  [{tot_s:6.1f}s total]")
+
+    print(f"\n  Accuracy vs full catalog ({len(results)} cases — SKIP/ERROR/TIMEOUT/"
+          "incapacity all count as misses, not exclusions):")
+    for t in active_tools:
+        c, total = _coverage_accuracy(results, t.name, t.expected_key)
+        pct = 100 * c // total if total else 0
+        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+        print(f"    {t.label}: {c:>3}/{total} ({pct:3}%) {bar}")
 
 
 def _print_abicheck_divergences(results: list[dict]) -> None:
@@ -1861,6 +1893,65 @@ def _run_stub_pair_case(case_dir: Path, entry: dict[str, Any]) -> ToolResult:
     return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
 
 
+def _run_btf_case(case_dir: Path) -> ToolResult:
+    """Compare committed v1.btf/v2.btf blobs in-process (no kernel toolchain).
+
+    The CLI's `dump` command has no path for a raw BTF blob (it requires an
+    ELF/PE/Mach-O binary), but abicheck's own BTF parser + compare() do handle
+    it — mirrors tests/test_workflow_kernel_accel.py::
+    test_committed_btf_example_matches_ground_truth exactly.
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+    try:
+        from abicheck.btf_metadata import parse_btf_from_bytes  # noqa: PLC0415
+        from abicheck.checker import compare  # noqa: PLC0415
+        from abicheck.model import AbiSnapshot  # noqa: PLC0415
+
+        def snap(blob: str) -> Any:
+            meta = parse_btf_from_bytes((case_dir / blob).read_bytes())
+            return AbiSnapshot(library="vmlinux", version=blob, dwarf=meta.to_dwarf_metadata())
+
+        result = compare(snap("v1.btf"), snap("v2.btf"))
+        verdict = result.verdict.value.upper()
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
+def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
+    """Run the single-artifact audit/cross-source check and score it pass/fail.
+
+    G20 cases (143-151) assert on a different surface than a BREAKING/
+    COMPATIBLE verdict — the cross-check findings a single committed
+    ``snapshot.abi.json`` produces (no old-vs-new pair at all). There is no
+    verdict to compare, so this reduces to a boolean: did abicheck's
+    run_crosschecks recover every kind ``expected_crosscheck_kinds``
+    declares? Reported as the pseudo-verdict "MATCH"/"MISS" so it folds into
+    the same accuracy accounting as every other row (paired with
+    expected="MATCH" by the caller) — mirrors tests/test_g20_catalog.py.
+    """
+    if not _HAS_ABICHECK:
+        return ToolResult(verdict="SKIP")
+    started = time.monotonic()
+    try:
+        from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: PLC0415
+        from abicheck.serialization import load_snapshot  # noqa: PLC0415
+
+        snap_path = EXAMPLES_DIR / name / str((entry.get("fixtures") or ["snapshot.abi.json"])[0])
+        snapshot = load_snapshot(snap_path)
+        res = run_crosschecks(snapshot)
+        emitted = {c.kind.value for c in res.findings}
+        expected_kinds = set(entry.get("expected_crosscheck_kinds") or [])
+        verdict = "MATCH" if expected_kinds <= emitted else "MISS"
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return ToolResult(verdict="ERROR", raw_output=str(exc),
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+    return ToolResult(verdict=verdict, elapsed_ms=(time.monotonic() - started) * 1000)
+
+
 def _try_special_case(
     case_dir: Path, name: str, expected: str, entry: dict[str, Any],
     results: list[dict], args: Any,
@@ -1875,16 +1966,23 @@ def _try_special_case(
     rdir.mkdir(exist_ok=True)
 
     if entry.get("mode") == "audit":
-        note = ("single-artifact audit/cross-source check, no old-vs-new verdict "
-                "to compare — validated separately by tests/test_g20_catalog.py; "
-                "no tool in this matrix (abicheck included) has a verdict-shaped "
-                "equivalent for this mode")
-        _record_special_case_row(name, expected, results, note, {})
+        tr = _run_g20_audit_case(name, entry)
+        note = ("single-artifact audit/cross-source check (no old-vs-new verdict "
+                "concept) scored MATCH/MISS against expected_crosscheck_kinds, "
+                "mirroring tests/test_g20_catalog.py — abidiff/ABICC have no mode "
+                "for this at all")
+        _record_special_case_row(name, "MATCH", results, note, {"abicheck": tr})
         return True
 
     if entry.get("skip"):
+        # Currently only case121 (kernel BTF): ground_truth.json marks it
+        # skip=true because the CLI's dump command has no path for a raw BTF
+        # blob, but abicheck's own BTF parser + compare() handle it directly
+        # (mirrors tests/test_workflow_kernel_accel.py) — abidiff/ABICC have no
+        # BTF support at all.
+        tr = _run_btf_case(case_dir)
         note = str(entry.get("reason", "excluded by ground_truth.json (skip=true)"))
-        _record_special_case_row(name, expected, results, note, {})
+        _record_special_case_row(name, expected, results, note, {"abicheck": tr})
         return True
 
     if entry.get("bundle") is True or entry.get("category") == "bundle":
