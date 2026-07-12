@@ -29,10 +29,8 @@ from abicheck.buildsource.build_diff import diff_build_evidence
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_diff import diff_source_abi
-from abicheck.buildsource.source_graph import (
-    GraphEdge,
-    GraphNode,
-    SourceGraphSummary,
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
+from abicheck.buildsource.source_graph_findings import (
     _common_dependency_edge_kinds,
     _dependency_kinds_covered,
     _dependency_path,
