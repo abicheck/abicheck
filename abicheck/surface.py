@@ -88,6 +88,15 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "constant_changed",
         "constant_removed",
         "constant_added",
+        # A hidden friend (an in-class `friend` operator with no namespace-
+        # scope declaration, found only via ADL) can never produce an
+        # exported symbol by construction — it is compiled inline into every
+        # caller. Requiring ELF-export presence for this kind is therefore
+        # never satisfiable, so the reachability classifier would demote
+        # every hidden-friend finding as "not-exported" regardless of how
+        # genuinely public the operator is (examples/case96_hidden_friend_removed).
+        "hidden_friend_removed",
+        "hidden_friend_added",
     }
 )
 
