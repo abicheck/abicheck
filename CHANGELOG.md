@@ -112,6 +112,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **SARIF and JUnit output could disagree with the JSON report and gate on a
+  `PolicyFile` verdict override.** Both renderers fell back to a finding's
+  *kind*'s default policy severity when no A4 per-finding override was set,
+  which ignored a `PolicyFile.overrides` entry that had moved the kind's
+  *effective* verdict — so a demoted `BREAKING` kind could still show SARIF
+  `"error"` / a JUnit `<failure>` even though the JSON report and exit code
+  correctly read it as compatible (and vice versa for an escalation). Both now
+  route through `DiffResult._effective_verdict_for_change`, the same canonical
+  per-finding verdict the JSON report and severity-aware exit code already use,
+  so a `PolicyFile` override, A4 pattern-aware demotion, and frozen-namespace
+  escalation guard all propagate identically to every native output channel.
+
+- **`snapshot_to_dict`/`snapshot_to_json` mutated the caller's `AbiSnapshot`.**
+  Serializing a snapshot reset its lazy lookup-index caches
+  (`_func_by_mangled`/`_var_by_mangled`/`_type_by_name`) to `None` on the
+  actual object passed in, not a copy — so calling `dump`/`to_json` after
+  building an index (e.g. via `.index()`) silently invalidated it out from
+  under the caller. Serialization now saves and restores those fields, making
+  the call observably pure.
+
 - **`scan`/`dump --sources` now seeds L2 header includes from the build.** A
   zero-config source scan whose public headers `#include` a dependency's headers
   (e.g. EPICS pvxs headers pulling in `<epicsTime.h>`) hard-failed the L2 parse
@@ -199,6 +219,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   vtable/typeinfo orphans 85 → 14.
 
 ### Changed
+
+- **`scan` engine core split out of the CLI into `scan_engine.py` (internal
+  only).** `service_scan.run_scan` (the typed Python/MCP scan API) previously
+  imported its shared orchestration core (`run_scan_core`,
+  `_BudgetOverflow`, `_EvidenceContractError`) from `cli_scan.py`, a Click
+  command module — the reverse of the intended frontend → service → engine
+  dependency direction. That core now lives in `scan_engine.py`, which has no
+  Click dependency; `cli_scan.py` (the CLI) and `service_scan.py` (the typed
+  service API) both depend on it independently instead of the service
+  reaching into a front-end module. No CLI, API, or output change.
+
+- **Post-processing pipeline now enforces its `ctx.kept` aliasing contract
+  explicitly (internal only).** `FilterRedundant` establishes `ctx.kept` as a
+  reference to the same list object later steps mutate in place; a future step
+  that instead rebinds the list without resyncing `ctx.kept` would have
+  silently dropped its suppression/demotion from the verdict.
+  `PostProcessingPipeline.run` now raises immediately if a step breaks that
+  invariant, instead of failing silently. No behaviour change for the current
+  pipeline (all existing steps already honour the contract).
 
 - **`merge` / `dump --inputs`: fold identical facts once (perf).** A per-TU Flow-2
   pack re-emits each public-header decl once per compile — a ~20× blow-up on
