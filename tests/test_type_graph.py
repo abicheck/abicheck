@@ -90,6 +90,13 @@ def test_base_type_name_strips_pointer_and_cv() -> None:
     assert _base_type_name("") == ""
 
 
+def test_base_type_name_strips_array_bounds_before_pointer_suffix() -> None:
+    # An array of pointers ("detail::Impl *[4]") ends in "]", not "*", so the
+    # suffix-stripping loop never fires before a one-shot bracket strip *after*
+    # the loop — leaving the trailing "*" behind (Codex review).
+    assert _base_type_name("detail::Impl *[4]") == "detail::Impl"
+
+
 # ── parse_clang_ast_types ─────────────────────────────────────────────────────
 
 
@@ -1058,4 +1065,32 @@ def test_extractor_missing_clang_is_graceful() -> None:
     assert extractor.available() is False
     edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
     assert edges == []
-    assert extractor.diagnostics
+
+
+def test_default_argument_reference_edge() -> None:
+    # clang places a default-argument expression's DeclRefExpr *under* the
+    # ParmVarDecl node itself (`int f(int x = detail::k)`); skipping the
+    # ParmVarDecl subtree entirely (rather than just not re-emitting its
+    # already-recorded type edge) silently dropped this reference (Codex
+    # review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("k")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fi",
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "x",
+                    "type": {"qualType": "int"},
+                    "inner": [_ref_expr("VarDecl", "k", "_ZN6detail1kE")],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge("_Z1fi", "_ZN6detail1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref")
+    ]

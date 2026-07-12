@@ -169,6 +169,15 @@ def _base_type_name(qual_type: str) -> str:
     changed = True
     while changed:
         changed = False
+        # Array bounds must be stripped inside the loop, not only once at the
+        # end — an array of pointers ("detail::Impl *[4]") ends in "]", so
+        # the suffix-stripping checks below never fire before this runs, and
+        # a one-shot strip *after* the loop leaves the trailing "*" behind
+        # (Codex review).
+        bracket = s.find("[")
+        if bracket != -1:
+            s = s[:bracket].strip()
+            changed = True
         for suf in ("&&", "&", "*"):
             if s.endswith(suf):
                 s = s[: -len(suf)].strip()
@@ -181,9 +190,6 @@ def _base_type_name(qual_type: str) -> str:
             if s.startswith(pre):
                 s = s[len(pre) :]
                 changed = True
-    bracket = s.find("[")
-    if bracket != -1:
-        s = s[:bracket].strip()
     return s.strip()
 
 
@@ -618,9 +624,16 @@ def _walk_types(
                             )
                         )
         next_func = ident or enclosing_func
+        # Recurse into every child, including a ParmVarDecl — its type was
+        # already recorded as a "param" edge above, but a default-argument
+        # expression (e.g. `int f(int x = detail::k)`) lives *under* the
+        # ParmVarDecl node itself, so skipping it entirely (rather than just
+        # not re-emitting its type edge) silently dropped any
+        # DECL_REFERENCES_DECL edge for a private constant read only in a
+        # default argument (Codex review). ParmVarDecl isn't a case this
+        # walk special-cases, so recursing into it just walks its children
+        # with the enclosing function scope — the same as every other node.
         for child in node.get("inner", []) or []:
-            if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
-                continue
             _walk_types(
                 child,
                 scope,
