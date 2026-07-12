@@ -355,10 +355,15 @@ def _try_v1v2_layout(case_dir: Path) -> _SourceResult:
         v1 = case_dir / f"v1{ext}"
         v2 = case_dir / f"v2{ext}"
         if v1.exists() and v2.exists():
-            hext = _header_ext(ext)
-            v1h = case_dir / f"v1{hext}"
-            v2h = case_dir / f"v2{hext}"
-            return v1, v2, v1h if v1h.exists() else None, v2h if v2h.exists() else None
+            # A .cpp source's header may still be named .h (a common C++
+            # convention) — try the language-typical extension first, but
+            # fall back to the other rather than silently resolving to no
+            # header at all (which drops the case to ELF/DWARF-only mode
+            # and hides any header-only-visible finding, e.g. case123's
+            # default-argument removal, case125's `final` specifier).
+            v1h = _find_header(case_dir, "v1")
+            v2h = _find_header(case_dir, "v2")
+            return v1, v2, v1h, v2h
     return _NO_SOURCES
 
 
