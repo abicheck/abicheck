@@ -479,6 +479,236 @@ follow-up (unifying the stdlib-/runtime-RTTI skip sets) a natural home.
 
 ---
 
+### C11 — Decompose `AbiSnapshot` / `Change` / `DiffResult`
+
+> **Provenance.** Flagged by the static architecture review that produced PR
+> #536 (SARIF/JUnit verdict-routing fixes, `snapshot_to_dict` purity,
+> `ctx.kept` aliasing hardening, `service_scan`→`cli_scan` dependency-inversion
+> fix). The review named this "the full `AbiSnapshot`/`Change`/`DiffResult`
+> decomposition" and explicitly deferred it as multi-week, broad-blast-radius
+> work rather than an urgent bug. This candidate is the concrete plan for that
+> deferred item, added to this catalogue on request.
+
+**Problem.** Neither this document nor an existing ADR has previously proposed
+splitting these three types — **C10 addresses `model.py`'s *other* mixed
+concern** (name/type-string heuristics) and explicitly leaves `AbiSnapshot`'s
+own field/index shape untouched; **C2/ADR-036 ratified `DiffResult`
+`_effective_verdict_for_change` as the canonical verdict source**, which this
+candidate must reconcile with, not silently override. Each of the three types
+mixes responsibilities that today are only separable by convention:
+
+- **`AbiSnapshot`** (`model.py:339-576`, 576-line file, 38 fields) mixes (a)
+  raw parsed data, (b) ADR-015 schema-versioning/provenance fields bolted on
+  over time (`git_commit`, `build_mode`, `scope_fallback`,
+  `parsed_with_build_context`, …), and (c) **three mutable lazy index caches**
+  (`_func_by_mangled`, `_var_by_mangled`, `_type_by_name`) living as
+  `compare=False`/`repr=False` dataclass fields, populated by `index()` with
+  duplicate-detection side effects. The dataclass constructor is order-
+  sensitive/kw-only-patched in several places specifically to avoid breaking
+  positional callers as new fields were added (`model.py:364-372, 428, 436,
+  454, 459, 479, 489`) — a direct symptom of one type absorbing every new
+  cross-cutting concern. This same mutable-cache shape is exactly what PR
+  #536 fixed one symptom of: `serialization.snapshot_to_dict` used to reset
+  these caches on the caller's live object before `asdict()`.
+- **`Change`** (`checker_types.py:47-95`, 17 fields) is mostly a clean data
+  record, but **7 of its 17 fields exist only to carry policy/verdict-
+  modulation metadata** (`effective_verdict`, `modulation_reason`,
+  `modulation_rule`, `confidence`, `evidence_category`,
+  `frozen_namespace_violation`, `surface_exclusion_reason` — ADR-025/027 A4
+  pattern modulation, ADR-033 D9 evidence bucket) rather than facts about the
+  ABI change itself.
+- **`DiffResult`** (`checker_types.py:118-276`, 31 fields, 2 methods, 4
+  properties) owns the raw findings (`changes` + 4 sibling filtered lists)
+  **and** the policy that classifies them (`policy`, `policy_file`,
+  `_effective_kind_sets`) **and** the per-change verdict engine
+  (`_effective_verdict_for_change`) **and** display-ready buckets (`breaking`/
+  `source_breaks`/`compatible`/`risk` properties — each an **uncached O(n)
+  re-walk that recomputes `_effective_verdict_for_change` for every change on
+  every access**) **and** audit/observability trails (`pattern_modulations`,
+  `layer_coverage`, `evidence_metrics`). `_effective_kind_sets`/
+  `_effective_verdict_for_change`, though named as private methods, are called
+  directly from **~8 downstream modules** (`cli.py`, `reporter.py`,
+  `reporter_markdown.py`, `junit_report.py`, `sarif.py`, `annotations.py`,
+  `cli_appcompat.py`, `cli_compare_release_helpers.py`) plus `report_model.py`
+  — treated as public API without being designed as one. PR #536's SARIF fix
+  (`sarif.py::_severity`) is a direct symptom: it re-implemented its own
+  narrower "is this overridden" check instead of always deferring to the one
+  real verdict computation, and drifted out of sync with it.
+
+**Goal.** Increase depth at this seam — concentrate the verdict-computation
+and index-caching *behaviour* behind small interfaces instead of letting ~8
+call sites each know how to invoke `DiffResult`'s internals, while keeping
+`AbiSnapshot`'s ADR-015 canonical-interchange-model *contract* (the same
+importable, schema-versioned shape from `serialization.py`) unchanged from the
+outside.
+
+**Approach.** Three independent, separately-landable sub-efforts — mirroring
+how C2/C6/C10 were each staged — ordered by risk, not by dependency (only C
+depends on prior work):
+
+1. **Sub-effort A — Extract `AbiSnapshot`'s index caches into a
+   `SnapshotIndex` value object (composition).** `_func_by_mangled`/
+   `_var_by_mangled`/`_type_by_name` and the `index()` method move to a
+   dedicated helper; `AbiSnapshot.function_map`/`.variable_map`/
+   `.type_by_name()` become thin properties delegating to a
+   (lazily-constructed, not dataclass-field) `SnapshotIndex` instance stored
+   outside `__dict__`'s comparison/repr surface entirely, rather than via
+   `compare=False`/`repr=False` field tricks. `serialization.snapshot_to_dict`
+   is unaffected — the index was never part of the serialized shape. Self-
+   contained, mechanical, low risk; directly shrinks the shared-mutable-state
+   surface that produced the PR #536 serialization-purity bug.
+2. **Sub-effort B — Extract `DiffResult`'s verdict computation into a
+   standalone `verdict_service.py`.** `_effective_kind_sets`/
+   `_effective_verdict_for_change` become module-level functions taking
+   `(changes, policy, policy_file)` rather than methods reaching into `self`;
+   `DiffResult` keeps thin delegating methods for the ~8 existing call sites
+   (same re-export pattern C10 used for `model.py`). While extracting, fix the
+   uncached `breaking`/`source_breaks`/`compatible`/`risk` properties (e.g.
+   `functools.cached_property`, invalidated on `policy`/`policy_file`
+   reassignment — see risks). **This sub-effort requires an explicit decision
+   to supersede ADR-036 Decision #2** ("canonical report severity = each
+   finding's `result._effective_verdict_for_change(c)`," i.e. a `DiffResult`
+   method) with an ADR-036 addendum or new ADR recording that *relocating* the
+   one implementation is compatible with — not a reversal of — the "single
+   source of truth" goal ADR-036 was protecting against (multiple *disagreeing*
+   implementations), since the function itself doesn't change, only where it
+   lives. This is the load-bearing decision in this candidate and needs
+   sign-off before code starts, not after.
+3. **Sub-effort C — Split `Change`'s policy/verdict-modulation fields into a
+   nested `Change.modulation: PatternModulation | None`.** Lowest priority,
+   highest call-site risk (`Change(` appears at 48 sites in `abicheck/` across
+   12 modules outside the already-centralised `diff_*` family, and 724 sites
+   repo-wide including tests). **Sequence after C6 fully lands** — C6's
+   `make_change()` factory already shields most `diff_*` call sites from
+   `Change`'s exact field shape; splitting fields is far cheaper once
+   construction is centralised than while 12+ modules construct `Change`
+   directly.
+
+**Edge cases / risks.**
+- **ADR-015 tension.** ADR-015 Decision #1 fixes `AbiSnapshot` as *the*
+  canonical, schema-versioned interchange model. Sub-effort A must change only
+  internal storage, not `serialization.py`'s externally-visible schema —
+  verify with the existing serialization round-trip tests plus a byte-diff of
+  `snapshot_to_dict` output before/after.
+- **ADR-036 supersession (sub-effort B).** Silent drift here is exactly the
+  failure mode ADR-036 exists to prevent — do not relocate
+  `_effective_verdict_for_change` without a written decision record first.
+- **Cache invalidation correctness (sub-effort B).** PR #536's own regression
+  tests (`test_policy_file_override_propagates_across_channels`) construct a
+  `DiffResult` and then *mutate* `result.policy_file` after the fact to
+  exercise override behaviour — any caching of `_effective_kind_sets`/the
+  bucket properties must invalidate on `policy`/`policy_file` reassignment,
+  not just on first access, or that exact test pattern (and any caller relying
+  on it) silently breaks.
+- **Call-site fan-out is the real cost driver.** ~950 `AbiSnapshot(` and 724
+  `Change(` construction sites repo-wide (tests included), ~17 call/reference
+  sites for the two verdict methods. This is why the review called it multi-
+  week — this plan's answer is to slice it into the three sub-efforts above
+  rather than one PR, each independently shippable and gated the same way as
+  every other candidate (fast lane, mypy, ruff, ai-readiness, golden where
+  output can change).
+- Prefer additive/back-compat re-exports over removal at every step (the C10
+  pattern) — hundreds of test fixtures construct these types directly and
+  should not need to change in the same PR as the internal refactor.
+
+**Risk:** A low; B medium-high (blocked on an explicit ADR-036 supersession
+decision plus cache-correctness verification); C high call-site count, blocked
+on C6 completing first.
+
+---
+
+### C12 — `LayerProvider` keep-vs-delete decision
+
+> **Provenance.** The second item the architecture review that produced PR
+> #536 named and deferred: "the `LayerProvider` keep-vs-delete decision."
+> Unlike C11, this is not a decomposition — it is a binary call this document
+> lays out evidence for but does not make unilaterally.
+
+**Problem.** `abicheck/buildsource/providers.py` (127 lines) defines the
+ADR-035 D10 `LayerProvider` `Protocol` (`capabilities()`/`estimate()`/`run()`)
+plus its supporting value types (`ProviderCapabilities`,
+`ProviderCostEstimate`, `ScanContext`, `LayerFacts`), modeled explicitly on
+ADR-032's `DataExtractor` plugin protocol and intended to let every scan-
+ladder level (D2 pre-scan, L3 build, L4 replay, L5 graph, D4 cross-checks) be
+driven through one uniform, cost-estimable interface. In the current code:
+
+- **Zero production implementers.** The only other reference anywhere in the
+  repo is `tests/test_providers.py`'s single `_FakeProvider` fixture, which
+  exists purely to assert the `Protocol`'s structural typing works in
+  isolation — it is not exercised by any real scan path.
+- **The real orchestrator bypasses it.** `scan_engine.run_scan_core()` (the
+  shared engine core PR #536 extracted from `cli_scan.py`) imports and calls
+  the concrete collector functions directly —
+  `buildsource.crosscheck.run_crosschecks`, `buildsource.pattern_scan.
+  scan_files`, `buildsource.preprocessor_scan.run_preprocessor_scan`, etc.
+  (`scan_engine.py:53-57`) — never touching `providers.py`.
+- **The typed half of the same ADR section shipped, the protocol half
+  didn't.** `service_scan.py`'s `ScanRequest`/`ScanResult`/`run_scan()`/
+  `run_audit()` (ADR-035 D10's *other* deliverable) are real and wired up, but
+  never import `providers.py` either.
+- **Documentation has drifted from code.** `abicheck/buildsource/CLAUDE.md`'s
+  module map still describes `providers.py` as live and "driven by
+  `service.run_scan`" (ADR-035 D10, G19.7) — `service.run_scan` does not
+  exist; the real entry point (`service_scan.run_scan`) never touches this
+  module. ADR-035 D10 itself is still marked "Accepted — implemented" with no
+  note that this half diverged.
+
+This is the textbook shape of orphaned/partial-migration scaffolding: a typed
+contract with no implementers, no real callers, bypassed by the very
+orchestrator built to fulfill the ADR describing it, and misdocumented as
+load-bearing in the module map a contributor would read first.
+
+**Goal.** Close the gap between what ADR-035 D10 says and what
+`scan_engine.py`/`service_scan.py` actually do, and stop
+`buildsource/CLAUDE.md` asserting a wiring that isn't real — via whichever of
+the two paths below the maintainer picks.
+
+**Approach — this is a decision, not a mechanical refactor:**
+
+- **Option 1: Delete** `providers.py` + `tests/test_providers.py`; add an
+  ADR-035 addendum (or short new ADR) recording that D10's "Provider
+  protocol" sub-design was superseded by `scan_engine.run_scan_core()`'s
+  direct-call orchestration plus `service_scan`'s typed API, and why: every
+  level added so far (L3/L4/L5) has needed enough level-specific wiring in
+  `run_scan_core` that a shared 3-method `Protocol` wouldn't have saved
+  orchestration code, only added an indirection with no implementers. Correct
+  `buildsource/CLAUDE.md`'s module map in the same change. Lowest risk —
+  deletes code nothing depends on; the fast lane + ai-readiness gate confirm
+  no fallout.
+- **Option 2: Retrofit** — refactor `scan_engine.run_scan_core()`'s direct
+  collector calls into real `LayerProvider` implementations, registered and
+  dispatched uniformly, realizing ADR-035 D10's original design. Only
+  justified by a concrete near-term need for pluggable/external providers
+  (e.g. an ADR-032 manifest-driven external extractor reaching this level on
+  the actual roadmap) — otherwise this is speculative generality against this
+  repo's own stated convention ("Don't add features... beyond what the task
+  requires... Don't design for hypothetical future requirements," `/CLAUDE.md`).
+  Higher effort: touches the already-large `scan_engine.py` plus every D2/L3/
+  L4/L5 collector call site, and needs behaviour-preserving verification
+  across the scan pipeline (`Scan: --estimate dry run`, `Scan: baseline
+  comparison detects breaking change` CI jobs and friends).
+
+**Recommendation (non-binding).** Option 1, unless there is a known concrete
+near-future consumer needing the pluggable-provider indirection — the
+evidence (zero implementers after one full ADR cycle, a parallel path that
+already solved the same orchestration goal a different way) points at
+superseded scaffolding rather than a paused-but-needed migration. Cheap to
+redesign later with real requirements in hand if that changes; expensive to
+carry speculative unused abstraction now.
+
+**Edge cases / risks.**
+- Whichever option is chosen, `buildsource/CLAUDE.md`'s module map must be
+  corrected in the same PR — the current mismatch is itself a standing risk
+  (a contributor reading it will look for wiring that isn't there).
+- If deleted and a real need appears later, redesigning is cheap; this is a
+  low-regret decision either way for the code itself.
+
+**Risk:** low either way — isolated module, no real dependents. The only risk
+is in documentation/ADR correctness, not code breakage, so this candidate can
+land quickly once the maintainer picks an option.
+
+---
+
 ### N-A — One HTML page seam for the three native renderers *(implemented)*
 
 **Problem.** There was no HTML-page abstraction. `appcompat_html.py` and
@@ -551,6 +781,8 @@ C10 split model.py                 ◐ stage-2 done (name predicates + type-name
 C8  ABICC compat adapter           (parity-sensitive)
 C5  synthetic detectors → registry ⛔ deferred (entangled; net-negative)
 C6  Change factory                 ◐ inc 1 done (factory + 167 templates; all ~200 diff_* sites route via make_change)
+C12 LayerProvider keep-vs-delete   proposed (decision, not a refactor — low code risk, needs maintainer sign-off)
+C11 decompose Snapshot/Change/Diff proposed (sub-effort A low risk; B needs ADR-036 supersession; C blocked on C6)
 ```
 
 Rationale: C4 and C9 are mechanical and reversible — do them to build
@@ -558,6 +790,10 @@ confidence. C1 (done) unblocks C2 and C10. C2 is the largest locality payoff but
 carries visible-output risk, so it lands behind golden review before the
 churn-heavy C6. C8 is sequenced last among the structural items because ABICC
 parity is contractual and benefits from a stabilised shared layer underneath it.
+C12 is sequenced ahead of C11 despite the higher number: it's a pure decision
+with low code risk and no dependents, so it can resolve independently and
+quickly, whereas C11 is intentionally the last, biggest-blast-radius item —
+its sub-effort C is explicitly blocked on C6 completing first.
 
 ## Tracking
 
@@ -577,3 +813,5 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | #407 |
 | N-D | Unify stdlib/runtime RTTI prefix tables into one canonical `STDLIB_RTTI_PREFIXES` (verified: identical parity-corpus failure set; only effective delta is suppressing std::__cxx11 RTTI in L0 layout, which is toolchain-owned) | Done | #407 |
 | N-E | Structured `Change` value fields | Not needed — already satisfied: `make_change` routes `old=`/`new=` into `old_value`/`new_value` (offsets included) and reporters read those fields; zero prose-scraping found | — |
+| C11 | Decompose `AbiSnapshot`/`Change`/`DiffResult` (sub-effort A: `SnapshotIndex` extraction; B: `verdict_service.py` extraction, needs ADR-036 supersession; C: `Change.modulation` split, blocked on C6) | Proposed | — |
+| C12 | `LayerProvider` keep-vs-delete decision (`buildsource/providers.py` — zero implementers, bypassed by `scan_engine.run_scan_core`; delete-vs-retrofit call for the maintainer) | Proposed | — |
