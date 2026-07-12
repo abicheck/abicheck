@@ -385,7 +385,7 @@ python3 scripts/benchmark_comparison.py \
 | Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
 | **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
-| **abicheck (L3-L5, +sources)** | 144 | 84.7% | 17 | 9 | 694s (~12 min) |
+| **abicheck (L3-L5, +sources)** | 153 | 90.0% | 7 | 10 | 719s (~12 min) |
 | libabigail (`abidiff`) | 52 | 30.6% | 3 | 115 | **~1s** |
 | libabigail + headers | 52 | 30.6% | 3 | 115 | **~2-5s** |
 | ABICC (abi-dumper) | 73 | 42.9% | 2 | 90 | 2534s (**~42 min**) |
@@ -413,7 +413,7 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
   wrong-but-confident verdict — see the slowest-case tables the benchmark
   prints (`case85`, `case09`, `case105`, `case109`... routinely hit the 90s
   timeout on both ABICC modes in this environment).
-- **abicheck L3-L5's 17 false positives** are the one lane here with a real
+- **abicheck L3-L5's 7 false positives** are the one lane here with a real
   over-calling problem — the source-replay/build-context path is
   intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
   doesn't attempt), and this is tracked as a known gap, not hidden.
@@ -450,28 +450,56 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 >    `V{version}_FORCE_INCLUDE` to produce any plugin facts at all — added
 >    it, converting an `ERROR` into a real verdict.
 >
-> Recovered 28 more cases: 116/170 (68.2%) → **144/170 (84.7%)**.
+> Recovered 28 more cases: 116/170 (68.2%) → 144/170 (84.7%).
+>
+> 4. `PUBLIC_REACHABILITY_CHANGED` was firing for declarations entering the
+>    public-reachability closure even when they were *brand new* (didn't
+>    exist in the old version at all) or fully removed — duplicating the
+>    already-correct `var_added`/`func_added`/`var_removed`/`func_removed`
+>    finding at an inflated severity. Narrowed to only fire for a
+>    declaration present in *both* graphs (a real "persisting decl crosses
+>    the public boundary" signal, not a same-turn addition/removal) —
+>    a deliberate product-policy change, not a benchmark-harness fix, since
+>    it replaces the behavior an existing test previously locked in.
+> 5. 14 example cases (`case03`, `case05`, `case13`, `case16`, `case47`,
+>    `case49`, `case52`, `case54`, `case61`, `case62`, `case99`, `case136`-
+>    `138`) named their per-version source files inconsistently (`v1.c`/
+>    `v2.c`, `bad.c`/`good.c` — a different basename per version) instead of
+>    the `old/lib.<ext>`+`new/lib.<ext>` convention already used by
+>    `case19` onward. For a case with only one declaring file per side,
+>    `_common_prefix_len()` had no sibling file to structurally compare
+>    against, so it fell back to comparing the full absolute path —
+>    `old/lib.c` vs `new/lib.c` still differ there, so
+>    `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED` false-fired on every one of
+>    them. Renamed all 14 to the shared-basename convention and gave
+>    `_common_prefix_len()` a single-declaring-file fallback (reserve just
+>    the filename, matching the "unmoved" outcome multi-file sides already
+>    reach structurally) so a lone declaring file can't be mistaken for a
+>    real cross-version move.
+>
+> Recovered 9 more cases and cut the false-positive count more than half:
+> 144/170 (84.7%, FP=17) → **153/170 (90.0%, FP=7)**.
 
-**What's structurally left for the L3-L5 lane** (26 remaining misses):
+**What's structurally left for the L3-L5 lane** (17 remaining misses):
 
-- **15 are the systematic false positives** driving FP=17: a plain compatible
-  addition (`case03`, `case05`, `case13`, `case16`, `case29`, `case47`,
-  `case49`, `case52`, `case54`, `case61`, `case62`, `case99`, `case136`-`138`)
-  scores `COMPATIBLE_WITH_RISK` instead of `COMPATIBLE`. Root cause:
-  `PUBLIC_REACHABILITY_CHANGED` fires whenever a declaration enters the
-  public-reachability closure — including a declaration that's *brand new*
-  (didn't exist in the old version at all), which duplicates the
-  already-correct `var_added`/`func_added` finding at an inflated severity.
-  A fix was drafted (only fire for a decl present in *both* graphs) but
-  reverted: it directly conflicts with an existing, deliberately-authored
-  test (`test_findings_reachability_entered_and_left`), so narrowing this is
-  a product-policy call, not a benchmark fix — pending a decision.
-- **5 are documented detector gaps shared with the L2 lane** (`case20`,
-  `case78`, `case97`, `case105`, `case111`) — not new, not L3-L5-specific.
 - **3 (`case118`-`120`) have no `CMakeLists.txt` at all** — the plugin-build
   lane can only compile CMake targets, so these are structurally unreachable
   without a direct-compile-with-plugin-flags fallback (mirroring the L2
-  lane's `compile_so()`), not yet implemented.
+  lane's `compile_so()`), not yet implemented. They `ERROR` rather than score.
+- **6 are documented detector gaps shared with the L2 lane** (`case20`,
+  `case78`, `case97`, `case105`, `case111`, `case165`) — not new, not
+  L3-L5-specific; see the L2 miss list below for the root cause of each.
+- **5 are a residual, smaller-scale version of the reachability over-call**
+  (`case16`, `case47`, `case54`, `case62`, `case99`): each is a genuinely
+  compatible change whose declaration crosses the public-reachability
+  boundary in a way that isn't a same-turn add/remove (e.g. an
+  already-existing-but-newly-reachable inline definition), so the narrowed
+  `PUBLIC_REACHABILITY_CHANGED` still fires — correctly, by its own logic —
+  at `COMPATIBLE_WITH_RISK`/`API_BREAK` instead of the expected
+  `COMPATIBLE`. This is the same over-sensitivity tradeoff as before, just
+  scoped down from 15 cases to 5 by the fix above; further narrowing is
+  again a product-policy call (how much cross-boundary movement should
+  read as risk vs. noise), not a mechanical bug.
 - **3 remaining are one-off** (`case83`, `case103`, `case122`) needing
   individual triage.
 
