@@ -148,7 +148,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   zero type edges couldn't be compared against a pre-slice-2/Kythe-only new
   pack with no pass marker but a first real edge — a confirmed pass on
   *either* side now makes its own presence-or-absence of that exact kind
-  trustworthy (never widened to sibling kinds neither side has an edge of).
+  trustworthy (never widened to sibling kinds neither side has an edge of). A
+  tenth review found the closure's entry seeding itself too narrow: a public
+  inline/template/constexpr function or public variable commonly has no
+  exported binary symbol of its own, so it was never a valid dependency-
+  closure entry — missing the ADR's own headline example
+  (`inline int f() { return detail::SECRET; }`) whenever `f` isn't separately
+  exported. Entries are now seeded from `is_public_dependency_node` over every
+  graph node (exported-symbol-backed *or* public-header-visibility decl/type),
+  matching `crosscheck.py`'s intra-version definition of "public" exactly.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

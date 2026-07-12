@@ -529,6 +529,25 @@ extraction pipeline:
   neither side has an edge of (that full-family widening still requires
   *both* sides confirmed, per the third/fifth reviews).
 
+A tenth Codex review found the closure's *entry* seeding was itself too
+narrow, echoing the sixth review's type-entry fix but for decls this time.
+`_dependency_reachability`'s entries were `SOURCE_DECL_MAPS_TO_SYMBOL`-backed
+decls union public types — but a public inline/template/constexpr function or
+a public variable declared in a public header commonly has **no** exported
+binary symbol of its own (it's inlined at every call site, or never emitted
+standalone), so it was never a valid entry — missing exactly the ADR's own
+headline example, `inline int f() { return detail::SECRET; }`, whenever `f`
+isn't separately exported. `crosscheck.py`'s intra-version check already
+treats a `visibility="public_header"` decl as public via
+`is_public_dependency_node` (shared since the fourth review); the version
+diff's closure had its own narrower, inconsistent notion of "entry." Fixed by
+seeding entries from `is_public_dependency_node` over every graph node
+directly — any exported-symbol-backed decl *or* any decl/type with
+public-header visibility — which subsumes the old `SOURCE_DECL_MAPS_TO_SYMBOL`
+∪ `_public_types()` union and, as a side effect, makes a public type no
+longer a special case in this function (public-header visibility already
+covered it uniformly).
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

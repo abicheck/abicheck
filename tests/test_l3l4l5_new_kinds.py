@@ -350,6 +350,32 @@ def test_l5_public_type_gains_private_field_type() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
+def test_l5_public_inline_fn_with_no_exported_symbol_gains_private_dependency() -> None:
+    # Tenth Codex review: the ADR's own headline example
+    # (`inline int f() { return detail::SECRET; }`) commonly has no exported
+    # binary symbol at all — an inline/template/constexpr function is inlined
+    # at every call site rather than separately emitted. A public entry must
+    # be seeded from public-header *visibility* alone (matching
+    # crosscheck.py's is_public_dependency_node), not only from
+    # SOURCE_DECL_MAPS_TO_SYMBOL, or this exact scenario is never flagged.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "f()", visibility="public_header"),
+        _N("priv_const", "source_decl", "detail::SECRET", visibility="private_header"),
+    ]
+    base = [
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        # No SOURCE_DECL_MAPS_TO_SYMBOL edge at all — "pub" is never exported.
+        _E("pub", "pub", "DECL_REFERENCES_DECL"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "priv_const", "DECL_REFERENCES_DECL")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_l5_public_type_gains_thirdparty_field_type_not_flagged() -> None:
     # Fourth Codex review: "not declared by a public header" alone is not
     # internal. A third-party/stdlib type used as a new field type carries no

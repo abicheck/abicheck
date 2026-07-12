@@ -1032,10 +1032,21 @@ def _dependency_reachability(
     private constant (``DECL_REFERENCES_DECL``) are exactly the "not a call at
     all" risks ADR-041 opens with — a call-only closure never sees them.
 
-    Entries are ``source_decl`` nodes backing an exported symbol
-    (``SOURCE_DECL_MAPS_TO_SYMBOL``, as before) *union* public types
-    (:func:`_public_types`) — a public type is a dependency-closure starting
-    point in its own right even though it rarely has its own exported symbol.
+    Entries are every node :func:`is_public_dependency_node` accepts: a decl
+    backing an exported symbol (``SOURCE_DECL_MAPS_TO_SYMBOL``), *or* any
+    decl/type node with public-header visibility — not exported-symbol-backed
+    decls alone (tenth Codex review). A public inline/template/constexpr
+    function or a public variable declared in a public header commonly has no
+    exported binary symbol of its own (inlined at every call site, or never
+    emitted standalone), so restricting entries to
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` missed exactly the ADR's own headline
+    example — ``inline int f() { return detail::SECRET; }`` — whenever ``f``
+    isn't separately exported. ``crosscheck.py``'s intra-version check already
+    treats a ``visibility="public_header"`` decl as public
+    (``is_public_dependency_node``, shared since the fourth review); this
+    closure now uses the identical rule, so a public type is no longer a
+    special case (:func:`_public_types` is unused here now — public-header
+    visibility already covers it).
     Returns ``{}`` when *edge_kinds* is empty or the graph carries none of them,
     so callers can skip the comparison entirely.
     """
@@ -1045,9 +1056,14 @@ def _dependency_reachability(
             adjacency.setdefault(e.src, []).append(e.dst)
     if not adjacency:
         return {}
-    entries = {
+    exported_decls = {
         e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
-    } | _public_types(graph)
+    }
+    node_by_id = {n.id: n for n in graph.nodes}
+    entries = {
+        n.id for n in graph.nodes
+        if is_public_dependency_node(n.id, node_by_id, exported_decls)
+    }
     out: dict[str, frozenset[str]] = {}
     for entry in entries:
         seen: set[str] = set()
