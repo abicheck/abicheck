@@ -219,6 +219,14 @@ class _CastxmlParser:
             base = self._type_name(el.get("type", ""), depth + 1)
             const = "const " if el.get("const") == "1" else ""
             return f"{const}{base}"
+        if tag == "ElaboratedType":
+            # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
+            # Foo`, `enum Foo` used directly rather than via a typedef) in an
+            # ElaboratedType node with no `name` attribute of its own — resolve
+            # through to the real underlying type instead of falling through to
+            # the `tag` fallback below (which would literally return
+            # "ElaboratedType").
+            return self._type_name(el.get("type", ""), depth + 1)
         if tag in ("Struct", "Class", "Union"):
             return el.get("name", "?")
         if tag == "Typedef":
