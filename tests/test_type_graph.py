@@ -164,6 +164,31 @@ def test_global_scope_match_stays_high_confidence() -> None:
     assert inherits == [TypeEdge("Widget", "Base", "TYPE_INHERITS", CONF_HIGH, "base")]
 
 
+def test_template_specialization_field_not_attributed_to_primary_template() -> None:
+    # A ClassTemplateSpecializationDecl's "name" is the *primary* template's
+    # bare name (clang doesn't fold template args into it), so a naive walk
+    # would emit a TYPE_HAS_FIELD_TYPE edge from the shared "Holder" node for
+    # an internal-only specialization's field, misattributing that one
+    # instantiation's private-type dependency to the public generic template
+    # itself (Codex review). No edge should name "detail::Impl" as reached
+    # from "Holder".
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [_record("Impl")],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Holder",
+            "inner": [_field("value", "detail::Impl")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    assert not any(e.dst == "detail::Impl" for e in edges)
+    assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in edges)
+
+
 def test_field_type_resolves_against_own_record_scope() -> None:
     # A field naming a type nested in the *same* record (Outer::Inner
     # referenced as bare "Inner" from inside Outer) must resolve against the

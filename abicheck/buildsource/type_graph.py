@@ -477,44 +477,55 @@ def _walk_types(
         # shorter prefix down to the enclosing scopes, so this is a strict
         # superset of the previous (enclosing-scope-only) lookup.
         child_scope = [*scope, name]
-        for base in node.get("bases", []) or []:
-            if not isinstance(base, dict):
-                continue
-            base_type = base.get("type")
-            raw_base = _base_type_name(
-                str(base_type.get("qualType", ""))
-                if isinstance(base_type, dict)
-                else ""
-            )
-            base_name, matched = _resolve_type_name(raw_base, child_scope, name_index)
-            if base_name and not _is_excluded_type(base_name):
-                edges.append(
-                    TypeEdge(
-                        qname,
-                        base_name,
-                        EDGE_TYPE_INHERITS,
-                        CONF_HIGH if matched else CONF_REDUCED,
-                        "base",
-                        decl_file.get(base_name, ""),
-                    )
+        # A ClassTemplateSpecializationDecl's own "name" is the *primary*
+        # template's bare name (clang does not fold template arguments into
+        # it), so qname here collides with the generic template's node id.
+        # Emitting base/field edges from a specific *internal* instantiation
+        # (e.g. Holder<detail::Impl>) would misattribute that one
+        # instantiation's dependency to the public generic template itself
+        # (Codex review) — skip edge emission for specializations, but still
+        # recurse into their children below (nested decls still resolve).
+        if kind != "ClassTemplateSpecializationDecl":
+            for base in node.get("bases", []) or []:
+                if not isinstance(base, dict):
+                    continue
+                base_type = base.get("type")
+                raw_base = _base_type_name(
+                    str(base_type.get("qualType", ""))
+                    if isinstance(base_type, dict)
+                    else ""
                 )
-        for child in node.get("inner", []) or []:
-            if isinstance(child, dict) and child.get("kind") == "FieldDecl":
-                raw_field = _decl_type_name(child)
-                field_name, matched = _resolve_type_name(
-                    raw_field, child_scope, name_index
+                base_name, matched = _resolve_type_name(
+                    raw_base, child_scope, name_index
                 )
-                if field_name and not _is_excluded_type(field_name):
+                if base_name and not _is_excluded_type(base_name):
                     edges.append(
                         TypeEdge(
                             qname,
-                            field_name,
-                            EDGE_TYPE_HAS_FIELD_TYPE,
+                            base_name,
+                            EDGE_TYPE_INHERITS,
                             CONF_HIGH if matched else CONF_REDUCED,
-                            "field",
-                            decl_file.get(field_name, ""),
+                            "base",
+                            decl_file.get(base_name, ""),
                         )
                     )
+            for child in node.get("inner", []) or []:
+                if isinstance(child, dict) and child.get("kind") == "FieldDecl":
+                    raw_field = _decl_type_name(child)
+                    field_name, matched = _resolve_type_name(
+                        raw_field, child_scope, name_index
+                    )
+                    if field_name and not _is_excluded_type(field_name):
+                        edges.append(
+                            TypeEdge(
+                                qname,
+                                field_name,
+                                EDGE_TYPE_HAS_FIELD_TYPE,
+                                CONF_HIGH if matched else CONF_REDUCED,
+                                "field",
+                                decl_file.get(field_name, ""),
+                            )
+                        )
         for child in node.get("inner", []) or []:
             _walk_types(
                 child,
