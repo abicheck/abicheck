@@ -498,6 +498,37 @@ but-unclassified in the old graph is still "the edge already existed," so it
 must not count as newly added regardless of what classification evidence
 either side happens to carry.
 
+A ninth Codex review found two more instances of the same "confirmed evidence
+is more precise than mere presence" principle, one on each side of the
+extraction pipeline:
+
+- **A clang error exit didn't disqualify pass coverage.**
+  `ClangCallGraphExtractor`/`ClangTypeGraphExtractor`'s `_extract_from_safe_args`
+  invokes clang with `check=False` and proceeds to parse stdout whenever it is
+  non-empty — but `-fsyntax-only -Xclang -ast-dump=json` can exit non-zero on
+  real compile errors in the necessarily-approximate replayed flag subset
+  while still printing a partial, error-recovered AST (clang's `-ast-dump`
+  walks whatever it managed to build). That left `extractor.diagnostics`
+  empty, so `extractor_pass_fully_covered` (seventh review) would still mark
+  the pass fully covered even though one or more TUs genuinely failed. Fixed
+  by recording a diagnostic whenever `proc.returncode != 0`, in both
+  extractors — edges are still salvaged from the best-effort AST (unchanged
+  best-effort philosophy), but the diagnostic now correctly disqualifies
+  confirmed pass coverage for that TU.
+- **A one-sided confirmed pass couldn't cover a mixed-format comparison.**
+  `_common_dependency_edge_kinds`'s per-kind fallback only counted a kind as
+  common when both sides had a concrete *edge* of it — so an old pack that
+  ran the type-graph pass and confirmed zero type edges, compared against a
+  pre-slice-2 (or Kythe-only) new pack with **no** pass marker at all but a
+  first `TYPE_HAS_FIELD_TYPE` edge, yielded an empty intersection for that
+  kind and the dependency was skipped — even though the old side's confirmed
+  pass already proved its own zero was real. Fixed by evaluating each exact
+  kind as "present as an edge, **or** that side's family pass is confirmed" —
+  a confirmed pass on *either* side is enough to make its own absence-or-
+  presence of that kind trustworthy, without widening to sibling kinds
+  neither side has an edge of (that full-family widening still requires
+  *both* sides confirmed, per the third/fifth reviews).
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

@@ -621,6 +621,53 @@ def test_common_dependency_edge_kinds_family_widened_with_confirmed_passes() -> 
     })
 
 
+def test_common_dependency_edge_kinds_one_sided_pass_covers_exact_kind_only() -> None:
+    # Ninth Codex review: a mixed-format comparison must not require *both*
+    # sides to confirm the pass. An old pack that ran the type-graph pass and
+    # confirmed zero type edges, compared against a pre-slice-2 (or
+    # Kythe-only) new pack with no pass marker at all but a first-ever
+    # TYPE_HAS_FIELD_TYPE edge, must still treat that exact kind as common —
+    # old's confirmed pass makes its own absence of the kind a real,
+    # verified zero. But it must NOT widen to sibling kinds (e.g.
+    # TYPE_INHERITS) that neither side has an edge of.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl")],
+        edges=[],  # confirmed pass, zero type edges
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],  # no extractor_passes at all
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({"TYPE_HAS_FIELD_TYPE"})
+
+
+def test_l5_internal_dep_flagged_with_one_sided_confirmed_pass() -> None:
+    # End-to-end version of the above through diff_source_graph_findings.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ])  # no extractor_passes on the new side
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_l5_internal_dep_skipped_for_kythe_only_baseline_type_edge() -> None:
     # Fifth Codex review, end-to-end: the baseline was collected via
     # `collect --kythe-entries` (a lone DECL_REFERENCES_DECL edge, no

@@ -1274,6 +1274,17 @@ class ClangTypeGraphExtractor:
                 f"clang produced no AST (stderr: {proc.stderr[:200]})"
             )
             return []
+        # A non-zero exit (real compile errors in the replayed, necessarily
+        # approximate flag subset) does not stop clang's AST dump from still
+        # printing a partial, error-recovered tree. Still salvage any edges
+        # from that best-effort AST, but record a diagnostic regardless so
+        # extractor_pass_fully_covered (ADR-041 P0 slice 3, ninth Codex
+        # review) never treats this TU as cleanly, fully parsed — mirrors
+        # call_graph.ClangCallGraphExtractor._extract_from_safe_args.
+        if proc.returncode != 0:
+            self.diagnostics.append(
+                f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
+            )
         try:
             return parse_clang_ast_types(json.loads(proc.stdout))
         except (ValueError, RecursionError) as exc:

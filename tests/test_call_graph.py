@@ -385,9 +385,10 @@ def test_extractor_missing_clang_returns_empty() -> None:
 
 
 class _FakeProc:
-    def __init__(self, stdout: str, stderr: str = "") -> None:
+    def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
         self.stdout = stdout
         self.stderr = stderr
+        self.returncode = returncode
 
 
 def _patch_clang(
@@ -516,6 +517,45 @@ def test_extract_from_args_empty_stdout(monkeypatch) -> None:
     ext = ClangCallGraphExtractor()
     assert ext.extract_from_args(["x.cpp"]) == []
     assert any("no AST" in d for d in ext.diagnostics)
+
+
+def test_extract_from_args_nonzero_exit_records_diagnostic_but_salvages_edges(
+    monkeypatch,
+) -> None:
+    # Ninth Codex review: clang can exit non-zero (real compile errors in the
+    # necessarily-approximate replayed flags) while still printing a partial,
+    # error-recovered AST dump. Edges are still salvaged (best effort), but a
+    # diagnostic must be recorded regardless — extractor_pass_fully_covered
+    # relies on `diagnostics` being non-empty to disqualify confirmed pass
+    # coverage for this TU.
+    import json as _json
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "c", "_Zc", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]
+            ),
+        ],
+    }
+    _patch_clang(
+        monkeypatch,
+        proc=_FakeProc(_json.dumps(ast), stderr="error: bad thing", returncode=1),
+    )
+    ext = ClangCallGraphExtractor()
+    edges = ext.extract_from_args(["x.cpp"])
+    assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
+    assert any("exited 1" in d for d in ext.diagnostics)
+
+
+def test_extract_from_args_zero_exit_records_no_diagnostic(monkeypatch) -> None:
+    import json as _json
+
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast), returncode=0))
+    ext = ClangCallGraphExtractor()
+    assert ext.extract_from_args(["x.cpp"]) == []
+    assert ext.diagnostics == []
 
 
 def test_extract_from_args_bad_json(monkeypatch) -> None:

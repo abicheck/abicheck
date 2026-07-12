@@ -136,7 +136,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   target, it looked like a newly-added dependency. Fixed by checking raw
   reachability (ignoring classification) against the old graph and excluding
   any pair whose target was already reachable there, regardless of whether
-  either side could classify it as internal.
+  either side could classify it as internal. A ninth review found two more:
+  (1) clang can exit non-zero (real compile errors in the replayed,
+  necessarily approximate flags) while still printing a partial,
+  error-recovered AST dump, leaving `diagnostics` empty and wrongly letting
+  `extractor_pass_fully_covered` mark the pass fully covered — both
+  extractors now record a diagnostic whenever `proc.returncode != 0`,
+  regardless of whether they still salvage edges from that AST; (2) the
+  per-kind fallback in `_common_dependency_edge_kinds` required an edge on
+  *both* sides, so an old pack that confirmed the type-graph pass ran with
+  zero type edges couldn't be compared against a pre-slice-2/Kythe-only new
+  pack with no pass marker but a first real edge — a confirmed pass on
+  *either* side now makes its own presence-or-absence of that exact kind
+  trustworthy (never widened to sibling kinds neither side has an edge of).
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

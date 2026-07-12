@@ -1435,6 +1435,52 @@ def test_extractor_missing_clang_is_graceful() -> None:
     assert edges == []
 
 
+class _FakeProc:
+    def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def _patch_clang(monkeypatch, *, proc: _FakeProc) -> None:
+    import abicheck.buildsource.type_graph as tg
+
+    monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(tg.subprocess, "run", lambda *_a, **_k: proc)
+
+
+def test_extract_from_safe_args_nonzero_exit_records_diagnostic_but_salvages_edges(
+    monkeypatch,
+) -> None:
+    # Ninth Codex review: clang can exit non-zero (real compile errors in the
+    # necessarily-approximate replayed flags) while still printing a partial,
+    # error-recovered AST dump. Edges are still salvaged (best effort), but a
+    # diagnostic must be recorded regardless — extractor_pass_fully_covered
+    # relies on `diagnostics` being non-empty to disqualify confirmed pass
+    # coverage for this TU. Mirrors call_graph's identical fix.
+    import json as _json
+
+    ast = _tu(_record("Widget", inner=[_field("x", "int")]))
+    _patch_clang(
+        monkeypatch,
+        proc=_FakeProc(_json.dumps(ast), stderr="error: bad thing", returncode=1),
+    )
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []  # a bare int field emits no type edge
+    assert any("exited 1" in d for d in extractor.diagnostics)
+
+
+def test_extract_from_safe_args_zero_exit_records_no_diagnostic(monkeypatch) -> None:
+    import json as _json
+
+    ast = _tu(_record("Widget"))
+    _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast), returncode=0))
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert extractor.diagnostics == []
+
+
 def test_default_argument_reference_edge() -> None:
     # clang places a default-argument expression's DeclRefExpr *under* the
     # ParmVarDecl node itself (`int f(int x = detail::k)`); skipping the

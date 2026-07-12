@@ -1185,20 +1185,32 @@ def _common_dependency_edge_kinds(
     (``graph_backends.py``) only ever produces `DECL_REFERENCES_DECL` for a
     non-call ref, never the Clang type graph's other three kinds, so a single
     such edge is not evidence that a base-class or field-type check ever ran.
-    Falls back to exact per-kind edge-presence intersection in that case —
-    only a kind with an edge on *both* sides earns comparison, never a sibling
-    kind riding along on the family.
+
+    Falls back to a *per-kind* check in that case — but a confirmed pass on
+    only *one* side still counts as evidence for that side, for the exact
+    kinds the other side has edges of (ninth Codex review): a mixed-format
+    comparison — e.g. an old pack that ran the type-graph pass and confirmed
+    zero type edges, against a pre-slice-2 new pack with no pass marker but a
+    first `TYPE_HAS_FIELD_TYPE` edge — must not skip just because *both*
+    markers aren't present. A kind is common when each side either has an
+    edge of that exact kind, or has confirmed its family's pass ran (a
+    confirmed pass's *absence* of a kind is a real, verified zero) — never
+    widened to a *sibling* kind neither side actually exhibits an edge of.
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        if old.extractor_passes.get(pass_name, False) and new.extractor_passes.get(
-            pass_name, False
-        ):
+        old_pass = old.extractor_passes.get(pass_name, False)
+        new_pass = new.extractor_passes.get(pass_name, False)
+        if old_pass and new_pass:
             common |= family
             continue
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
-        common |= old_kinds & new_kinds
+        for kind in family:
+            old_has = kind in old_kinds or old_pass
+            new_has = kind in new_kinds or new_pass
+            if old_has and new_has:
+                common.add(kind)
     return frozenset(common)
 
 
