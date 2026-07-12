@@ -412,6 +412,90 @@ def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
     ]
 
 
+def test_compact_const_pointer_suffix_is_stripped() -> None:
+    # clang glues a top-level cv-qualified pointer directly to the star
+    # ("detail::Impl *const", not "detail::Impl * const") — Codex review.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record("Widget", inner=[_field("p", "detail::Impl *const")]),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+    ]
+
+
+def test_compact_volatile_pointer_suffix_is_stripped() -> None:
+    ast = _tu(_record("Widget", inner=[_field("p", "Widget *volatile")]))
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Widget", "Widget", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+    ]
+
+
+def test_declrefexpr_stub_disambiguated_by_clang_id() -> None:
+    # a::k and b::k share the bare name "k" and neither has a mangled name
+    # (e.g. internal-linkage constants), so identity resolution alone cannot
+    # tell them apart. clang's referencedDecl stub still carries the node's
+    # own "id" though, shared with the full declaration elsewhere in the
+    # same TU — use it to pick the *referenced* declaration's file, not
+    # whichever same-named one was indexed first (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "a",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "id": "0x1",
+                    "loc": {"file": "src/a.h"},
+                    "inner": [],
+                }
+            ],
+        },
+        {
+            "kind": "NamespaceDecl",
+            "name": "b",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "id": "0x2",
+                    "loc": {"file": "src/b.h"},
+                    "inner": [],
+                }
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            "referencedDecl": {
+                                "kind": "VarDecl",
+                                "name": "k",
+                                "id": "0x2",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert len(refs) == 1
+    assert refs[0].dst_file == "src/b.h"
+
+
 def test_field_type_edge_excludes_builtins() -> None:
     # detail::Impl is declared elsewhere in the same TU (as any real clang AST
     # would have it, at least forward-declared) so it resolves confidently;

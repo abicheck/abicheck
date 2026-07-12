@@ -161,6 +161,11 @@ def _base_type_name(qual_type: str) -> str:
     s = (qual_type or "").strip()
     if not s:
         return ""
+    # clang glues a top-level cv-qualified pointer directly to the star with
+    # no separating space (``"detail::Impl *const"``, not ``"* const"`` —
+    # Codex review); normalize so the loop below strips it like the spaced
+    # form it already handles.
+    s = s.replace("*const", "* const").replace("*volatile", "* volatile")
     changed = True
     while changed:
         changed = False
@@ -247,13 +252,14 @@ def _index_declared_entities(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
+    id_index: dict[str, str],
 ) -> str:
     """First pass: record every type declaration's qualified name (+declaring
     file) and every var/enum-constant's identity (+declaring file, +bare-name
-    index) seen anywhere in the TU, so the second pass can resolve an
-    unqualified type spelling against the nearest enclosing scope (Codex
-    review: clang's ``qualType`` is *written*, not fully qualified — a field
-    typed ``Base`` inside ``namespace ns`` prints as ``"Base"``, not
+    index, +clang node id) seen anywhere in the TU, so the second pass can
+    resolve an unqualified type spelling against the nearest enclosing scope
+    (Codex review: clang's ``qualType`` is *written*, not fully qualified — a
+    field typed ``Base`` inside ``namespace ns`` prints as ``"Base"``, not
     ``"ns::Base"``) and mark AST-only dependency nodes with their declaring
     file for ``defined_in_project`` provenance. Records, enums, and
     typedef/type-alias declarations are all indexed as resolvable type
@@ -285,7 +291,13 @@ def _index_declared_entities(
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
             cur_file = _index_declared_entities(
-                child, child_scope, cur_file, name_index, decl_file, ref_name_index
+                child,
+                child_scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
             )
         return cur_file
 
@@ -301,7 +313,7 @@ def _index_declared_entities(
         # its enumerators' spelling in clang's AST dump.
         for child in node.get("inner", []) or []:
             cur_file = _index_declared_entities(
-                child, scope, cur_file, name_index, decl_file, ref_name_index
+                child, scope, cur_file, name_index, decl_file, ref_name_index, id_index
             )
         return cur_file
 
@@ -309,7 +321,13 @@ def _index_declared_entities(
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
             cur_file = _index_declared_entities(
-                child, child_scope, cur_file, name_index, decl_file, ref_name_index
+                child,
+                child_scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
             )
         return cur_file
 
@@ -321,10 +339,18 @@ def _index_declared_entities(
             candidates = ref_name_index.setdefault(name, [])
             if ident not in candidates:
                 candidates.append(ident)
+        node_id = str(node.get("id") or "")
+        # Keyed by clang's own per-node id (unique, unlike the bare-name
+        # identity two same-named declarations in different scopes both
+        # collapse to) and mapped straight to *file*, not identity — routing
+        # through the shared identity->file `decl_file` dict would still pick
+        # whichever same-named declaration was indexed first (Codex review).
+        if node_id and cur_file:
+            id_index.setdefault(node_id, cur_file)
 
     for child in node.get("inner", []) or []:
         cur_file = _index_declared_entities(
-            child, scope, cur_file, name_index, decl_file, ref_name_index
+            child, scope, cur_file, name_index, decl_file, ref_name_index, id_index
         )
     return cur_file
 
@@ -379,9 +405,12 @@ def _resolve_type_name(
 
 
 def _resolve_ref_identity(
-    ref: dict[str, Any], decl_file: dict[str, str], ref_name_index: dict[str, list[str]]
-) -> str:
-    """Resolve a ``DeclRefExpr``'s ``referencedDecl`` to its full identity.
+    ref: dict[str, Any],
+    decl_file: dict[str, str],
+    ref_name_index: dict[str, list[str]],
+    id_index: dict[str, str],
+) -> tuple[str, str]:
+    """Resolve a ``DeclRefExpr``'s ``referencedDecl`` to its full identity and file.
 
     clang commonly emits an *incomplete* stub for ``referencedDecl`` — e.g.
     ``{"kind": "VarDecl", "name": "k"}`` with no ``mangledName``/``loc`` even
@@ -390,20 +419,35 @@ def _resolve_ref_identity(
     matches ``decl_file`` (indexed by the *full* declaration's identity), so
     the dependency's ``dst_file``/``defined_in_project`` provenance is lost —
     the exact scenario this module exists to catch
-    (``inline int f() { return detail::k; }``). Prefer the stub's own
-    identity when it already resolves (i.e. it *was* complete); otherwise
-    fall back to the unique full declaration sharing its bare name.
+    (``inline int f() { return detail::k; }``).
+
+    *Identity* resolution order: the stub's own mangled-or-bare identity when
+    it already resolves (i.e. it *was* complete); else the unique full
+    declaration sharing its bare name, when unambiguous — same bare-name
+    conflation two same-named declarations in different scopes are subject to
+    everywhere else in this module (a known, documented limitation; a real
+    fix needs a stable scope-qualified identity, tracked in ADR-041 P1).
+
+    *File* resolution prefers the stub's own ``id`` — clang's internal
+    per-node identifier, present even on an otherwise-incomplete stub and
+    shared with the node's full declaration elsewhere in the same TU — looked
+    up in *id_index* (keyed by id, not by the ambiguous bare-name identity).
+    This disambiguates the file for *this specific reference* even when two
+    declarations share a bare name, e.g. ``a::k`` vs ``b::k`` (Codex review):
+    routing the file lookup through the shared identity would still pick
+    whichever same-named declaration happened to be indexed first. Falls back
+    to ``decl_file`` keyed by the resolved identity when no id match exists.
     """
     ident = _decl_identity(ref)
-    if ident in decl_file:
-        return ident
-    name = str(ref.get("name") or "")
-    if not name:
-        return ident
-    candidates = ref_name_index.get(name)
-    if candidates and len(candidates) == 1:
-        return candidates[0]
-    return ident
+    if ident not in decl_file:
+        name = str(ref.get("name") or "")
+        if name:
+            candidates = ref_name_index.get(name)
+            if candidates and len(candidates) == 1:
+                ident = candidates[0]
+    node_id = str(ref.get("id") or "")
+    file = id_index.get(node_id) or decl_file.get(ident, "")
+    return ident, file
 
 
 def _walk_types(
@@ -414,6 +458,7 @@ def _walk_types(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
+    id_index: dict[str, str],
 ) -> None:
     """Recursive AST walk tracking the qualified-name scope and enclosing function."""
     if not isinstance(node, dict):
@@ -479,6 +524,7 @@ def _walk_types(
                 name_index,
                 decl_file,
                 ref_name_index,
+                id_index,
             )
         return
 
@@ -493,6 +539,7 @@ def _walk_types(
                 name_index,
                 decl_file,
                 ref_name_index,
+                id_index,
             )
         return
 
@@ -521,14 +568,23 @@ def _walk_types(
             if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                 continue
             _walk_types(
-                child, scope, next_func, edges, name_index, decl_file, ref_name_index
+                child,
+                scope,
+                next_func,
+                edges,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
             )
         return
 
     if kind == "DeclRefExpr" and enclosing_func:
         ref = node.get("referencedDecl")
         if isinstance(ref, dict) and ref.get("kind") in _REFERENCE_DECL_KINDS:
-            ref_ident = _resolve_ref_identity(ref, decl_file, ref_name_index)
+            ref_ident, ref_file = _resolve_ref_identity(
+                ref, decl_file, ref_name_index, id_index
+            )
             if ref_ident and ref_ident != enclosing_func:
                 edges.append(
                     TypeEdge(
@@ -537,13 +593,20 @@ def _walk_types(
                         EDGE_DECL_REFERENCES_DECL,
                         CONF_REDUCED,
                         "ref",
-                        decl_file.get(ref_ident, ""),
+                        ref_file,
                     )
                 )
 
     for child in node.get("inner", []) or []:
         _walk_types(
-            child, scope, enclosing_func, edges, name_index, decl_file, ref_name_index
+            child,
+            scope,
+            enclosing_func,
+            edges,
+            name_index,
+            decl_file,
+            ref_name_index,
+            id_index,
         )
 
 
@@ -563,24 +626,29 @@ def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
 
     A first pass (:func:`_index_declared_entities`) indexes every type
     declaration's (record/enum/typedef/type-alias) qualified name, every
-    var/enum-constant's declaring file, and a bare-name index of
-    var/enum-constant declarations — all across the *whole* TU before any
-    edge is built — so an unqualified type spelling (clang's ``qualType`` is
-    written, not fully qualified) can be resolved against the nearest
-    enclosing scope, an incomplete ``DeclRefExpr`` reference stub can be
-    resolved to its full declaration, and an AST-only dependency node can
-    carry its declaring file regardless of declaration order. The second pass
-    (:func:`_walk_types`) then walks the AST tracking the enclosing
-    namespace/record scope (for qualified type names) and the nearest
-    enclosing function (for parameter types and non-call body references).
-    Edges are de-duplicated by ``(src, dst, kind)``.
+    var/enum-constant's declaring file, a bare-name index of var/enum-constant
+    declarations, and a clang-node-id index of var/enum-constant declarations
+    — all across the *whole* TU before any edge is built — so an unqualified
+    type spelling (clang's ``qualType`` is written, not fully qualified) can
+    be resolved against the nearest enclosing scope, an incomplete
+    ``DeclRefExpr`` reference stub can be resolved to its full declaration
+    (by node id first, disambiguating two declarations that share a bare
+    name), and an AST-only dependency node can carry its declaring file
+    regardless of declaration order. The second pass (:func:`_walk_types`)
+    then walks the AST tracking the enclosing namespace/record scope (for
+    qualified type names) and the nearest enclosing function (for parameter
+    types and non-call body references). Edges are de-duplicated by
+    ``(src, dst, kind)``.
     """
     name_index: dict[str, list[str]] = {}
     decl_file: dict[str, str] = {}
     ref_name_index: dict[str, list[str]] = {}
-    _index_declared_entities(ast, [], "", name_index, decl_file, ref_name_index)
+    id_index: dict[str, str] = {}
+    _index_declared_entities(
+        ast, [], "", name_index, decl_file, ref_name_index, id_index
+    )
     edges: list[TypeEdge] = []
-    _walk_types(ast, [], "", edges, name_index, decl_file, ref_name_index)
+    _walk_types(ast, [], "", edges, name_index, decl_file, ref_name_index, id_index)
     return _dedupe_edges(edges)
 
 
