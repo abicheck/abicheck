@@ -34,7 +34,9 @@ from abicheck.buildsource.source_graph import (
     GraphNode,
     SourceGraphSummary,
     _common_dependency_edge_kinds,
+    _dependency_path,
     _dependency_reachability,
+    _format_dependency_path,
     _public_entry_internal_reach,
     diff_source_graph_findings,
 )
@@ -502,40 +504,45 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
 
 
 def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
-    # Second Codex review: the type-graph pass already ran on both sides (an
-    # unrelated DECL_HAS_TYPE edge exists on both), so a *first-ever*
-    # TYPE_HAS_FIELD_TYPE edge on the new side is a real new dependency, not a
-    # collector-coverage gap — it must not be dropped just because that exact
-    # edge kind happens to be new. Coverage is judged per extractor-pass family
-    # (type_graph.py emits all four type/reference kinds from one pass), not
-    # per exact kind.
+    # Second Codex review: the type-graph pass already ran on both sides
+    # (recorded via extractor_passes, mirroring what inline.py/
+    # cli_buildsource_helpers.py always stamp when the pass genuinely runs),
+    # so a *first-ever* TYPE_HAS_FIELD_TYPE edge on the new side is a real new
+    # dependency, not a collector-coverage gap — it must not be dropped just
+    # because that exact edge kind happens to be new. Coverage is judged per
+    # extractor-pass family (type_graph.py emits all four type/reference kinds
+    # from one pass), not per exact kind — but (fifth Codex review) *only* when
+    # the pass is actually confirmed to have run, not merely inferred from an
+    # unrelated sibling edge's presence.
     nodes = [
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("pub_other", "source_decl", "other()"),
-        _N("known_type", "record_type", "Known"),
         _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
         _E("hdr", "pub", "SOURCE_DECLARES"),
-        # Unrelated to "pub": establishes the type-graph pass ran on both sides.
-        _E("pub_other", "known_type", "DECL_HAS_TYPE"),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=base)
+    old = SourceGraphSummary(nodes=nodes, edges=base, extractor_passes={"type_graph": True})
     new = SourceGraphSummary(
-        nodes=nodes, edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE")]
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
-def test_common_dependency_edge_kinds_family_level() -> None:
-    # Direct unit test of the family-grouping helper: an old graph with only a
-    # DECL_HAS_TYPE edge and a new graph adding TYPE_HAS_FIELD_TYPE both belong
-    # to the type-graph family, so the whole family (all four kinds) is common
-    # even though DECL_CALLS_DECL (a different family, absent on both) is not.
+def test_common_dependency_edge_kinds_falls_back_to_exact_kind_without_pass_confirmation() -> None:
+    # Fifth Codex review: without a *confirmed* extractor_passes record on
+    # both sides, mere sibling-edge presence must not widen coverage to the
+    # whole family — a Kythe-ingested pack only ever produces
+    # DECL_REFERENCES_DECL (never the other three type-graph kinds), so a
+    # single such edge is not evidence that a base-class/field-type check ever
+    # ran. Falls back to exact per-kind presence intersection: only
+    # DECL_HAS_TYPE (present on both) is common, not TYPE_HAS_FIELD_TYPE
+    # (present on new only) or the other untouched kinds.
     old = SourceGraphSummary(
         nodes=[_N("a", "source_decl"), _N("b", "record_type")],
         edges=[_E("a", "b", "DECL_HAS_TYPE")],
@@ -545,9 +552,61 @@ def test_common_dependency_edge_kinds_family_level() -> None:
         edges=[_E("a", "b", "DECL_HAS_TYPE"), _E("b", "c", "TYPE_HAS_FIELD_TYPE")],
     )
     common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({"DECL_HAS_TYPE"})
+
+
+def test_common_dependency_edge_kinds_family_widened_with_confirmed_passes() -> None:
+    # The positive counterpart: once both sides *confirm* the type-graph pass
+    # ran (extractor_passes), the whole family is common regardless of which
+    # specific kinds happen to have edges.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE"), _E("b", "c", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
     assert common == frozenset({
         "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
     })
+
+
+def test_l5_internal_dep_skipped_for_kythe_only_baseline_type_edge() -> None:
+    # Fifth Codex review, end-to-end: the baseline was collected via
+    # `collect --kythe-entries` (a lone DECL_REFERENCES_DECL edge, no
+    # extractor_passes — graph_backends.ingest_kythe_entries never sets it).
+    # The new pack ran the real Clang type-graph pass and found a first-ever
+    # private field type. The lone Kythe ref must not be read as "the
+    # type-graph pass ran on the baseline too" — the finding must skip.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("other", "source_decl", "other()"),
+        _N("ref_target", "source_decl", "k"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("other", "ref_target", "DECL_REFERENCES_DECL"),  # from Kythe ingestion
+    ])  # no extractor_passes: Kythe ingestion never stamps it
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("other", "ref_target", "DECL_REFERENCES_DECL"),
+            _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
 def test_common_dependency_edge_kinds_uses_extractor_passes_over_zero_edges() -> None:
@@ -630,6 +689,45 @@ def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_dependency_path_same_node_returns_empty_list() -> None:
+    g = SourceGraphSummary(
+        nodes=[_N("a", "source_decl")], edges=[_E("a", "a", "DECL_CALLS_DECL")]
+    )
+    assert _dependency_path(g, frozenset({"DECL_CALLS_DECL"}), "a", "a") == []
+
+
+def test_dependency_path_returns_none_when_unreachable() -> None:
+    # "b" exists but has no incoming edge from "a" within the given edge kinds.
+    g = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")], edges=[]
+    )
+    assert _dependency_path(g, frozenset({"DECL_CALLS_DECL"}), "a", "b") is None
+
+
+def test_dependency_path_reconstructs_multi_hop_chain() -> None:
+    g = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl"), _N("c", "record_type")],
+        edges=[
+            _E("a", "b", "DECL_CALLS_DECL"),
+            _E("b", "c", "DECL_HAS_TYPE"),
+        ],
+    )
+    path = _dependency_path(g, frozenset({"DECL_CALLS_DECL", "DECL_HAS_TYPE"}), "a", "c")
+    assert path is not None
+    assert [(e.src, e.kind, e.dst) for e in path] == [
+        ("a", "DECL_CALLS_DECL", "b"),
+        ("b", "DECL_HAS_TYPE", "c"),
+    ]
+    assert _format_dependency_path(g, path) == (
+        "a --[DECL_CALLS_DECL]--> b --[DECL_HAS_TYPE]--> c"
+    )
+
+
+def test_format_dependency_path_empty_list_returns_empty_string() -> None:
+    g = SourceGraphSummary(nodes=[_N("a", "source_decl")], edges=[])
+    assert _format_dependency_path(g, []) == ""
 
 
 def test_dependency_reachability_empty_edge_kinds_returns_empty() -> None:

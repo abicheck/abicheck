@@ -915,9 +915,15 @@ def _internal_decl_file(
 
 
 def _public_to_internal_change(
-    pub: str, internal: str, changed_file: str, is_changed: bool
+    pub: str, internal: str, changed_file: str, is_changed: bool, edge_kind: str
 ) -> Change:
-    """Build the PUBLIC_TO_INTERNAL_DEPENDENCY finding for one public→internal edge."""
+    """Build the PUBLIC_TO_INTERNAL_DEPENDENCY finding for one public→internal edge.
+
+    Names *edge_kind* — the concrete graph edge proving the dependency (a
+    call, a non-call reference, or a field/base/parameter type) — in the
+    description (ADR-041 P0 roadmap item 3, "graph explain proof path"), so
+    the finding shows *how* the dependency was proved, not just that it was.
+    """
     note = (
         f" — {internal!r} is declared in changed file {changed_file!r}, so the "
         "API's behavior may have shifted this revision"
@@ -929,8 +935,9 @@ def _public_to_internal_change(
         pub,
         f"Public API {pub!r} depends on internal entity {internal!r} "
         "(declared in a private header / source file, not the public "
-        f"surface){note}. Consumers cannot see it, so a change to it is an "
-        "undeclared behavioral risk. Make the dependency public or sever it.",
+        f"surface) via a {edge_kind} edge{note}. Consumers cannot see it, so a "
+        "change to it is an undeclared behavioral risk. Make the dependency "
+        "public or sever it.",
         new_value=internal,
         confidence=Confidence.HIGH if is_changed else Confidence.MEDIUM,
         # Only stamp source_location when the internal entity was actually
@@ -1009,7 +1016,7 @@ def _check_public_to_internal_dependency(
         changed_file = _internal_decl_file(e.dst, node_by_id, decl_to_file)
         is_changed = _path_matches(changed_file, cfg.changed_paths)
         findings.append(
-            _public_to_internal_change(pub, internal, changed_file, is_changed)
+            _public_to_internal_change(pub, internal, changed_file, is_changed, e.kind)
         )
     findings.sort(key=lambda c: (c.symbol, c.new_value or ""))
     detail = (

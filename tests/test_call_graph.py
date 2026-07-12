@@ -326,6 +326,38 @@ def test_call_reachability_change_emits_quality_finding() -> None:
     assert ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED in COMPATIBLE_KINDS
 
 
+def test_call_reachability_change_shrinks_with_no_example_path() -> None:
+    # A call removed (reachability shrinks, nothing added): the "graph explain
+    # proof path" (ADR-041 P0 item 3) only has an example to show for a newly
+    # *added* callee, so the description carries no "Example newly-reachable
+    # path" suffix when the change is a pure removal.
+    old = _graph_with_calls("_Zentry", [("entry", "_Zimpl1"), ("_Zimpl1", "_Zimpl2")])
+    new = _graph_with_calls("_Zentry", [("entry", "_Zimpl1")])
+    findings = diff_source_graph_findings(old, new)
+    cg = [
+        c
+        for c in findings
+        if c.kind == ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED
+    ]
+    assert len(cg) == 1
+    assert "Example newly-reachable path" not in cg[0].description
+
+
+def test_call_reachability_change_names_example_path() -> None:
+    # The positive case: a newly-added callee's description names the concrete
+    # call chain proving it, not just the before/after counts.
+    old = _graph_with_calls("_Zentry", [("entry", "_Zimpl1")])
+    new = _graph_with_calls("_Zentry", [("entry", "_Zimpl1"), ("_Zimpl1", "_Zimpl2")])
+    findings = diff_source_graph_findings(old, new)
+    cg = [
+        c
+        for c in findings
+        if c.kind == ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED
+    ]
+    assert len(cg) == 1
+    assert "Example newly-reachable path: entry --[DECL_CALLS_DECL]--> _Zimpl1 --[DECL_CALLS_DECL]--> _Zimpl2." in cg[0].description
+
+
 def test_no_call_edges_means_no_call_finding() -> None:
     # Graphs without DECL_CALLS_DECL edges must not emit the call finding.
     g = SourceGraphSummary()

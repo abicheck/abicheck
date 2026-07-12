@@ -1,9 +1,10 @@
 # ADR-041: Compiler-Facts Semantic Impact Graph — Roadmap and P0 Slice
 
 **Date:** 2026-07-12
-**Status:** Accepted — P0 slice 1 (`type_graph.py`) and P0 slice 2 (semantic
-graph diff over the full dependency-edge family) implemented; the rest of
-this ADR is a roadmap, not a commitment to ship on any timeline.
+**Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
+graph diff over the full dependency-edge family), and P0 slice 3 (`graph
+explain` proof paths) implemented; the rest of this ADR is a roadmap, not a
+commitment to ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -361,7 +362,55 @@ already the only missing ingredient.
 
 The remaining half of P0 item 2 — combining a `body_hash`/`type_hash` change
 (`source_diff.py`'s nine findings) with a new/changed graph edge into one
-finding — is still open, along with item 3 (`graph explain` proof paths).
+finding — is still open.
+
+## Decision — P0 slice 3 (this change)
+
+Roadmap item 3, "`graph explain` proof path per finding": the two dependency-
+reachability findings asserted a fact ("public entry X now reaches internal Y",
+"N → M known static callees") without showing *how* — no concrete edge chain,
+just endpoints and counts. Fixed:
+
+- `source_graph._dependency_path(graph, edge_kinds, entry, target)` — BFS over
+  the same *edge_kinds* adjacency `_dependency_reachability` already builds,
+  tracking one predecessor edge per node so a shortest witness chain can be
+  reconstructed once `target` is reached. One witness path is enough to
+  explain a finding; this is not an exhaustive-paths enumeration.
+  `_format_dependency_path()` renders it human-readably, e.g. `pub()
+  --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl`.
+- `_internal_dependency_findings` (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`)
+  appends a `Proof path(s): ...` clause naming the concrete chain for every
+  newly-internal target, not just the target list.
+- `_call_reachability_findings` (`CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED`)
+  appends an `Example newly-reachable path: ...` clause for one newly-added
+  callee (no example when the change is a pure removal — nothing new to show).
+- `crosscheck.py`'s intra-version `PUBLIC_TO_INTERNAL_DEPENDENCY` is already a
+  single edge (not a transitive closure), so its "chain" is one hop; it now
+  names the connecting edge kind (`_public_to_internal_change` takes `edge_kind`)
+  instead of only the two endpoint labels.
+
+Both proof-path sites are appended to `Change.description` (no new field on
+`Change` — the existing text-evidence convention every other graph finding in
+this module already uses) rather than a new structured field, keeping this
+additive and low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all
+already carry `description` verbatim).
+
+A fifth Codex review, on this slice, caught a regression the P0 slice 2 family-
+widening fix (third round) had reintroduced in a new guise: widening credit
+from one present kind to its whole family (`_DEPENDENCY_EDGE_FAMILIES`) is only
+sound when the *same* extractor pass produced the family — confirmed via
+`extractor_passes`. Without that confirmation, `_common_dependency_edge_kinds`
+was still widening from bare edge *presence*, and `graph_backends.
+ingest_kythe_entries()` only ever emits `DECL_REFERENCES_DECL` for a non-call
+Kythe ref (never `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`/`DECL_HAS_TYPE`) — so a
+Kythe-only baseline's lone ref edge was granting blanket credit to the three
+Clang-only type-graph kinds it never touched, exactly reproducing the original
+false-positive risk one layer down. Fixed by making family-widening
+conditional on **both** sides confirming `extractor_passes[pass_name]`;
+without that, `_common_dependency_edge_kinds` falls back to exact per-kind
+edge-presence intersection (no widening at all) — the same conservative
+behavior the very first fix in this slice used, now correctly scoped to
+exactly the case it's sound for.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
@@ -378,12 +427,13 @@ finding — is still open, along with item 3 (`graph explain` proof paths).
    nine findings) *combined with* a new/changed graph edge, so a report can
    say "X now reaches internal Y, defined in changed file Z" instead of two
    disjoint findings.
-3. **`graph explain` proof path per finding.** `localize_symbol` already walks
-   symbol → target → source decls → headers → build options → static callees
-   (ADR-031 D7). Thread a path (not just an endpoint list) into
-   `PUBLIC_TO_INTERNAL_DEPENDENCY` / `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED`
-   findings' evidence, so a report shows the concrete edge chain, not just
-   "tool says risk."
+3. ~~`graph explain` proof path per finding~~ — **done, ADR-041 P0 slice 3**
+   (`_dependency_path`/`_format_dependency_path`, threaded into
+   `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` / `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED`
+   / `PUBLIC_TO_INTERNAL_DEPENDENCY`). `localize_symbol`'s own symbol → target →
+   decl → header/build-option/callee walk (ADR-031 D7) is unchanged — this slice
+   only threaded a path into the two dependency-reachability findings the
+   roadmap named, not into `localize_symbol` itself.
 4. ~~Coverage counters per edge family~~ — **done, this ADR** (`type_edges`/
    `reference_edges`); extend further per P1 item 4 below when object/link
    provenance lands.

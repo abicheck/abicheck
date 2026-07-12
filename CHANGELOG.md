@@ -89,6 +89,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   fixed above — a version diff over two *collected* packs benefits from the
   zero-edge coverage fix too, not just inline dumps.
 
+- **`graph explain` proof paths for the two dependency-reachability findings
+  (ADR-041 P0 slice 3).** `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and
+  `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED` previously asserted a fact
+  ("public entry X now reaches internal Y", "N → M known static callees")
+  with no concrete edge chain proving it. New `source_graph._dependency_path`
+  (BFS witness-path reconstruction) + `_format_dependency_path` thread a
+  human-readable chain — e.g. `pub() --[DECL_CALLS_DECL]--> helper()
+  --[DECL_HAS_TYPE]--> detail::Impl` — into each finding's description; the
+  intra-version `PUBLIC_TO_INTERNAL_DEPENDENCY` cross-check (already a single
+  edge) now also names the connecting edge kind. Appended to the existing
+  `description` text, not a new `Change` field. Also fixes a regression the
+  prior slice's family-widening had reintroduced: widening credit from one
+  present edge kind to its whole family is now conditional on **both** sides
+  *confirming* `extractor_passes[pass_name]`, not merely inferred from edge
+  presence — a Kythe-ingested pack (`graph_backends.ingest_kythe_entries`)
+  only ever produces `DECL_REFERENCES_DECL`, never the Clang type graph's
+  other three kinds, so a lone Kythe ref edge was wrongly granting blanket
+  coverage credit to base-class/field-type/parameter-type checks it never ran.
+
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
   (`--depth headers --scope-public-headers --format review --exit-code-scheme

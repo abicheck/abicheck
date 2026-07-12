@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -1051,6 +1052,68 @@ def _dependency_reachability(
     return out
 
 
+def _dependency_path(
+    graph: SourceGraphSummary, edge_kinds: frozenset[str], entry: str, target: str
+) -> list[GraphEdge] | None:
+    """One concrete shortest edge chain from *entry* to *target* over *edge_kinds*.
+
+    ADR-041 P0 roadmap item 3 ("graph explain proof path"): a reachability
+    fact (:func:`_dependency_reachability` already proved *target* is
+    reachable from *entry*) is a bare assertion until a reader can see *how* —
+    the actual edge-by-edge chain, not just an endpoint list. BFS over the
+    same *edge_kinds* adjacency, tracking one predecessor edge per node so the
+    chain can be reconstructed once *target* is reached (shortest, not every
+    path — one witness is enough to explain a finding). Returns ``[]`` when
+    *entry* == *target*, or ``None`` if no such path exists (defensive; should
+    not happen for a (entry, target) pair sourced from
+    :func:`_dependency_reachability`'s own output).
+    """
+    if entry == target:
+        return []
+    adjacency: dict[str, list[GraphEdge]] = {}
+    for e in graph.edges:
+        if e.kind in edge_kinds:
+            adjacency.setdefault(e.src, []).append(e)
+    visited = {entry}
+    queue: deque[str] = deque([entry])
+    came_from: dict[str, GraphEdge] = {}
+    while queue:
+        node = queue.popleft()
+        if node == target:
+            break
+        for e in adjacency.get(node, []):
+            if e.dst in visited:
+                continue
+            visited.add(e.dst)
+            came_from[e.dst] = e
+            queue.append(e.dst)
+    if target not in came_from:
+        return None
+    path: list[GraphEdge] = []
+    cur = target
+    while cur != entry:
+        e = came_from[cur]
+        path.append(e)
+        cur = e.src
+    path.reverse()
+    return path
+
+
+def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
+    """Render a :func:`_dependency_path` result as a human-readable chain.
+
+    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
+    Returns ``""`` for an empty path (entry == target).
+    """
+    if not path:
+        return ""
+    labels = _label_map(graph)
+    parts = [labels.get(path[0].src, path[0].src)]
+    for e in path:
+        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
+    return " ".join(parts)
+
+
 #: Dependency edge kinds grouped by the single extractor pass that emits them
 #: together, keyed by the same pass name ``inline._fold_call_graph`` /
 #: ``inline._fold_type_graph`` stamp onto ``SourceGraphSummary.extractor_passes``
@@ -1101,18 +1164,31 @@ def _common_dependency_edge_kinds(
     edge present" gate (as the call-only closure could get away with) lets
     every target reachable *only* through a kind absent from the other side
     look newly internal, when it is really a coverage artifact, not a code
-    change. But gating per *exact* edge kind is too strict in the other
-    direction: it would also drop a real first-ever edge of a kind whose
-    sibling pass output (any other kind from the same extractor pass,
-    :data:`_DEPENDENCY_EDGE_FAMILIES`) is already present — or whose pass ran
-    with zero output — on both sides (:func:`_dependency_kinds_covered`). A
-    family common to both sides makes every kind in it — including one with no
-    prior edges at all — eligible for the closure.
+    change.
+
+    Widening credit from one kind to its whole family (:data:`_DEPENDENCY_EDGE_FAMILIES`)
+    is only sound when both sides *confirm* the same uniform extractor pass ran
+    (``extractor_passes``) — that pass always examines every kind in its
+    family together, so one kind's absence there really is "found nothing," not
+    missing coverage. Without that confirmation, widening from mere edge
+    *presence* is unsound (fifth Codex review): a Kythe/CodeQL-ingested pack
+    (``graph_backends.py``) only ever produces `DECL_REFERENCES_DECL` for a
+    non-call ref, never the Clang type graph's other three kinds, so a single
+    such edge is not evidence that a base-class or field-type check ever ran.
+    Falls back to exact per-kind edge-presence intersection in that case —
+    only a kind with an edge on *both* sides earns comparison, never a sibling
+    kind riding along on the family.
     """
     common: set[str] = set()
-    for family in _DEPENDENCY_EDGE_FAMILIES.values():
-        if _dependency_kinds_covered(old, family) and _dependency_kinds_covered(new, family):
+    for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
+        if old.extractor_passes.get(pass_name, False) and new.extractor_passes.get(
+            pass_name, False
+        ):
             common |= family
+            continue
+        old_kinds = {e.kind for e in old.edges if e.kind in family}
+        new_kinds = {e.kind for e in new.edges if e.kind in family}
+        common |= old_kinds & new_kinds
     return frozenset(common)
 
 
@@ -1338,7 +1414,13 @@ def _call_reachability_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """Implementation reachable from an exported entry changed (phase 6)."""
+    """Implementation reachable from an exported entry changed (phase 6).
+
+    Per ADR-041 P0 roadmap item 3 ("graph explain proof path"), the
+    description names one concrete example call chain (:func:`_dependency_path`
+    restricted to ``DECL_CALLS_DECL``) into a newly-reachable (or, if none was
+    added, a newly-unreachable) callee, not just the before/after counts.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -1347,10 +1429,18 @@ def _call_reachability_findings(
     # present in both graphs whose approximate call-reachable set differs.
     old_reach = _public_entry_call_reachability(old)
     new_reach = _public_entry_call_reachability(new)
+    call_kinds = frozenset({"DECL_CALLS_DECL"})
     for entry in sorted(old_reach.keys() & new_reach.keys()):
         if old_reach[entry] != new_reach[entry]:
             label = new_labels.get(entry, entry)
             old_n, new_n = len(old_reach[entry]), len(new_reach[entry])
+            added = sorted(new_reach[entry] - old_reach[entry])
+            example = ""
+            for target in added:
+                path = _dependency_path(new, call_kinds, entry, target)
+                if path:
+                    example = f" Example newly-reachable path: {_format_dependency_path(new, path)}."
+                    break
             findings.append(Change(
                 kind=ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
                 symbol=label,
@@ -1358,7 +1448,7 @@ def _call_reachability_findings(
                     f"Implementation statically reachable from exported entry "
                     f"{label!r} changed ({old_n} → {new_n} known static callees, "
                     "approximate). Source-graph quality signal: the code behind a "
-                    "stable public symbol moved; not an ABI break."
+                    "stable public symbol moved; not an ABI break." + example
                 ),
                 old_value=f"{old_n} reachable",
                 new_value=f"{new_n} reachable",
@@ -1461,7 +1551,9 @@ def _internal_dependency_findings(
     (:data:`DEPENDENCY_EDGE_KINDS`): a call, a non-call reference to a
     global/constant, or a field/base/parameter type — a public struct that
     gained a private field type is caught here exactly like a function that
-    gained a call into internal code.
+    gained a call into internal code. Per ADR-041 P0 roadmap item 3 ("graph
+    explain proof path"), the description names the concrete edge chain
+    (:func:`_dependency_path`) proving each dependency, not just the endpoints.
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
@@ -1491,17 +1583,24 @@ def _internal_dependency_findings(
         reached_by_entry.setdefault(entry, []).append(target)
     for entry in sorted(reached_by_entry):
         label = new_labels.get(entry, entry)
-        targets = sorted(new_labels.get(t, t) for t in reached_by_entry[entry])
+        raw_targets = sorted(reached_by_entry[entry])
+        targets = [new_labels.get(t, t) for t in raw_targets]
+        proof_paths = [
+            _format_dependency_path(new, path)
+            for t in raw_targets
+            if (path := _dependency_path(new, common_kinds, entry, t))
+        ]
+        proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""
         findings.append(Change(
             kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             symbol=label,
             description=(
                 f"Public entry {label!r} now reaches internal (non-public) "
-                f"declaration(s)/type(s) {', '.join(targets)} that it did not "
+                f"declaration(s)/type(s) {', '.join(sorted(targets))} that it did not "
                 "before (via a call, reference, or field/base/parameter type). "
                 "The public surface has taken on an undeclared dependency; a "
                 "change to that internal entity becomes a hidden risk. "
-                "Source-graph evidence to review."
+                "Source-graph evidence to review." + proof
             ),
             old_value="no internal dependency",
             new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
