@@ -925,6 +925,55 @@ def test_body_reference_edge_for_variable() -> None:
     ]
 
 
+def test_block_scope_local_reference_carries_no_project_provenance() -> None:
+    # A block-scope local (`int api() { int x; return x; }`) is a private
+    # implementation detail that can never be reached from outside the
+    # function — indexing it the same way a namespace-scope global is
+    # indexed would let it be marked defined_in_project and reported by
+    # public_to_internal_dependency as a hidden internal dependency of every
+    # public function that happens to declare a local variable (Codex
+    # review's exact example).
+    ast = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "mangledName": "_Z3apiv",
+            "loc": {"file": "src/api.cpp"},
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclStmt",
+                            "inner": [
+                                {
+                                    "kind": "VarDecl",
+                                    "name": "x",
+                                    "id": "0x1",
+                                    "type": {"qualType": "int"},
+                                }
+                            ],
+                        },
+                        {
+                            "kind": "ReturnStmt",
+                            "inner": [_ref_expr("VarDecl", "x")],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    ref_edges = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert len(ref_edges) == 1
+    assert ref_edges[0].dst_file == ""
+
+    graph = SourceGraphSummary()
+    augment_graph_with_types(graph, ref_edges, frozenset({"src/api.cpp"}))
+    node = next(n for n in graph.nodes if n.id == "decl://x")
+    assert not node.attrs.get("defined_in_project")
+
+
 def test_body_reference_ignores_function_call_targets() -> None:
     # A DeclRefExpr referencing a FunctionDecl is the call graph's job
     # (DECL_CALLS_DECL), not this module's — must not double-emit as a reference.

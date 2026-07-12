@@ -527,6 +527,7 @@ def _index_declared_entities(
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
     id_index: dict[str, tuple[str, str]],
+    in_body: bool = False,
 ) -> str:
     """First pass: record every type declaration's qualified name (+declaring
     file) and every var/enum-constant's identity (+declaring file, +bare-name
@@ -572,6 +573,7 @@ def _index_declared_entities(
                 decl_file,
                 ref_name_index,
                 id_index,
+                in_body,
             )
         return cur_file
 
@@ -587,7 +589,14 @@ def _index_declared_entities(
         # its enumerators' spelling in clang's AST dump.
         for child in node.get("inner", []) or []:
             cur_file = _index_declared_entities(
-                child, scope, cur_file, name_index, decl_file, ref_name_index, id_index
+                child,
+                scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
+                in_body,
             )
         return cur_file
 
@@ -602,10 +611,34 @@ def _index_declared_entities(
                 decl_file,
                 ref_name_index,
                 id_index,
+                in_body,
             )
         return cur_file
 
-    if kind in _REFERENCE_DECL_KINDS:
+    if kind in _FUNCTION_DECL_KINDS:
+        # Everything declared inside a function/method body — including a
+        # plain block-scope local (``int api() { int x; return x; }``) — is
+        # a private implementation detail, not a meaningful dependency
+        # target: it can never be reached from outside the function, so
+        # indexing it as a resolvable reference the same way a namespace-
+        # scope global is indexed would let a public function's *ordinary
+        # local variables* get marked ``defined_in_project`` and reported by
+        # ``public_to_internal_dependency`` as a hidden internal dependency
+        # (Codex review).
+        for child in node.get("inner", []) or []:
+            cur_file = _index_declared_entities(
+                child,
+                scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
+                True,
+            )
+        return cur_file
+
+    if kind in _REFERENCE_DECL_KINDS and not in_body:
         ident = _decl_identity(node)
         if ident and cur_file:
             decl_file.setdefault(ident, cur_file)
@@ -628,7 +661,14 @@ def _index_declared_entities(
 
     for child in node.get("inner", []) or []:
         cur_file = _index_declared_entities(
-            child, scope, cur_file, name_index, decl_file, ref_name_index, id_index
+            child,
+            scope,
+            cur_file,
+            name_index,
+            decl_file,
+            ref_name_index,
+            id_index,
+            in_body,
         )
     return cur_file
 
