@@ -477,7 +477,11 @@ def _cmake_declared_source(case_dir: Path, version: str) -> Path | None:
     cmakelists = case_dir / "CMakeLists.txt"
     if not cmakelists.is_file():
         return None
-    m = re.search(rf"{version.upper()}_SOURCES\s+([^\s)]+)", cmakelists.read_text())
+    try:
+        text = cmakelists.read_text()
+    except OSError:
+        return None
+    m = re.search(rf"{version.upper()}_SOURCES\s+([^\s)]+)", text)
     if not m:
         return None
     candidate = case_dir / m.group(1)
