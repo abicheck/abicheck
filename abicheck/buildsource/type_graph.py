@@ -230,9 +230,73 @@ def _is_excluded_type(name: str) -> bool:
     return name in _BUILTIN_TYPES
 
 
+def _split_top_level_commas(s: str) -> list[str]:
+    """Split *s* on commas at depth 0 (relative to both ``<...>`` and
+    ``(...)``) — shared by a template-argument list and a callback-shaped
+    parameter list, which use the identical splitting rule."""
+    parts: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for c in s:
+        if c in "<(":
+            depth += 1
+        elif c in ">)":
+            depth -= 1
+        if c == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    if cur:
+        parts.append("".join(cur))
+    return parts
+
+
+def _matching_close_paren(s: str, open_idx: int) -> int:
+    """Index of the ``)`` matching the ``(`` at *open_idx*, or -1."""
+    depth = 0
+    for i in range(open_idx, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _resolve_nested_type_names(raw: str) -> list[str]:
+    """Every type name reachable from one (possibly callback-shaped)
+    template-argument spelling: its own base name, its own template
+    arguments (recursively), and — for a callback-shaped spelling like
+    ``"void (detail::Impl)"`` (``std::function<void(detail::Impl)>``'s
+    single argument) — each of its written parameter types too.
+
+    Truncating a callback-shaped argument at its first top-level ``(`` (the
+    same split ``_base_type_name`` applies to a *non-nested* callback type)
+    would discard the parameter list entirely, so a private type appearing
+    only as a callback *parameter* — not the whole instantiation, not the
+    return type — produced no edge at all (Codex review).
+    """
+    paren = _top_level_paren_index(raw)
+    ret_raw = raw[:paren] if paren != -1 else raw
+    names: list[str] = []
+    base = _base_type_name(ret_raw)
+    if base:
+        names.append(base)
+        names.extend(_template_arg_types(base))
+    if paren != -1:
+        close = _matching_close_paren(raw, paren)
+        params = raw[paren + 1 : close] if close != -1 else raw[paren + 1 :]
+        for p in _split_top_level_commas(params):
+            if p.strip():
+                names.extend(_resolve_nested_type_names(p))
+    return names
+
+
 def _template_arg_types(base_type: str) -> list[str]:
-    """This type's template argument spellings (recursively), each normalized
-    like a standalone type.
+    """This type's template argument spellings (recursively), each resolved
+    via :func:`_resolve_nested_type_names`.
 
     A field typed ``std::unique_ptr<detail::Impl>`` — the common PImpl/
     container pattern this module exists to catch — resolves the *whole*
@@ -262,27 +326,9 @@ def _template_arg_types(base_type: str) -> list[str]:
     if end == -1:
         return []
     inner = base_type[start + 1 : end]
-    raw_args: list[str] = []
-    depth = 0
-    cur: list[str] = []
-    for c in inner:
-        if c in "<(":
-            depth += 1
-        elif c in ">)":
-            depth -= 1
-        if c == "," and depth == 0:
-            raw_args.append("".join(cur))
-            cur = []
-        else:
-            cur.append(c)
-    if cur:
-        raw_args.append("".join(cur))
     args: list[str] = []
-    for raw in raw_args:
-        base = _base_type_name(raw)
-        if base:
-            args.append(base)
-            args.extend(_template_arg_types(base))
+    for raw in _split_top_level_commas(inner):
+        args.extend(_resolve_nested_type_names(raw))
     return args
 
 
@@ -300,17 +346,23 @@ def _decl_return_type_name(node: dict[str, Any]) -> str:
     (``"detail::Impl *(int)"``, return type immediately followed by the
     parenthesized parameter list — Codex review: this was never read at all,
     so a public factory function returning a private type produced no
-    ``DECL_HAS_TYPE`` edge). Best-effort split on the first ``(``: correct
-    for the overwhelmingly common case, but not real declarator parsing, so
-    a return type that is itself a function pointer (parens before the outer
-    parameter list) is not handled precisely — the same approximate-textual
-    tradeoff the rest of this module accepts.
+    ``DECL_HAS_TYPE`` edge). Best-effort split on the first *top-level*
+    ``(`` (not nested inside a ``<...>`` template-angle group — Codex
+    review: a return type like ``std::function<detail::Impl ()>`` prints the
+    whole function's own type as ``"std::function<detail::Impl ()> ()"``,
+    and a naive ``find("(")`` stops at the callback's *inner* parameter
+    list, truncating mid-template instead of at the function's own outer
+    parameter list): correct for the overwhelmingly common case, but not
+    real declarator parsing, so a return type that is itself a function
+    pointer (parens before the outer parameter list) is not handled
+    precisely — the same approximate-textual tradeoff the rest of this
+    module accepts.
     """
     type_obj = node.get("type")
     if not isinstance(type_obj, dict):
         return ""
     qual_type = str(type_obj.get("qualType", ""))
-    paren = qual_type.find("(")
+    paren = _top_level_paren_index(qual_type)
     if paren == -1:
         return ""
     return _base_type_name(qual_type[:paren])

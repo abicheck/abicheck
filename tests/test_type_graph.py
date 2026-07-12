@@ -312,6 +312,61 @@ def test_param_type_resolves_callback_template_argument_to_private_type() -> Non
     assert any(e.dst == "std::function<detail::Impl ()>" for e in params)
 
 
+def test_param_type_resolves_callback_parameter_type_to_private_type() -> None:
+    # A private type appearing as a *parameter* of a callback-shaped
+    # template argument (std::function<void(detail::Impl)>) — not the whole
+    # instantiation, not the return type — must still produce a direct edge.
+    # Truncating "void (detail::Impl)" at its first top-level "(" would
+    # discard the parameter list entirely and only ever see "void" (Codex
+    # review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record(
+            "Widget",
+            inner=[
+                _method(
+                    "setCb",
+                    "_ZN6Widget5setCbE",
+                    [_param("cb", "std::function<void (detail::Impl)>")],
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.role == "param"]
+    assert (
+        TypeEdge(
+            "_ZN6Widget5setCbE", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "param"
+        )
+        in params
+    )
+
+
+def test_return_type_resolves_when_return_is_callback_template() -> None:
+    # A public function returning a callback-shaped template
+    # (std::function<detail::Impl ()>) has its own function type spelled as
+    # "std::function<detail::Impl ()> ()" — a naive find("(") stops at the
+    # callback's *inner* parameter list instead of the outer function's own,
+    # truncating mid-template (Codex review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "make_cb",
+            "mangledName": "_Z7make_cbv",
+            "type": {"qualType": "std::function<detail::Impl ()> ()"},
+            "inner": [],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    returns = [e for e in edges if e.role == "return"]
+    assert (
+        TypeEdge("_Z7make_cbv", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "return")
+        in returns
+    )
+    assert any(e.dst == "std::function<detail::Impl ()>" for e in returns)
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
     # references it in this TU — the two-pass design (a full indexing pass
