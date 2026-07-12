@@ -20,6 +20,7 @@ Each test drives the relevant diff over hand-built evidence models (no compiler
 / castxml) and asserts the exact new ChangeKind plus its partition, so the fast
 lane covers them end-to-end.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -62,7 +63,11 @@ def _kinds(changes) -> list[str]:
         (["-fshort-enums"], [], ChangeKind.ENUM_SIZE_FLAG_CHANGED),
         # GNU packing default is known (natural), so a one-sided flip fires.
         ([], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
-        (["-fpack-struct=8"], ["-fpack-struct=1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
+        (
+            ["-fpack-struct=8"],
+            ["-fpack-struct=1"],
+            ChangeKind.STRUCT_PACKING_MODE_CHANGED,
+        ),
         # MSVC packing default is target-dependent, so it needs both sides.
         (["/Zp8"], ["/Zp1"], ChangeKind.STRUCT_PACKING_MODE_CHANGED),
         ([], ["-flto"], ChangeKind.LTO_MODE_CHANGED),
@@ -82,10 +87,15 @@ def test_l3_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
         # Target-dependent defaults: an omitted side is unknown, so a one-sided
         # flag must NOT read as a flip (avoids MSVC-default / ARM-default FPs).
         (ChangeKind.CHAR_SIGNEDNESS_CHANGED, "-funsigned-char"),
-        (ChangeKind.STRUCT_PACKING_MODE_CHANGED, "/Zp8"),  # MSVC only; GNU one-sided does fire
+        (
+            ChangeKind.STRUCT_PACKING_MODE_CHANGED,
+            "/Zp8",
+        ),  # MSVC only; GNU one-sided does fire
     ],
 )
-def test_l3_target_dependent_flags_need_both_sides_explicit(kind, one_sided_flag) -> None:
+def test_l3_target_dependent_flags_need_both_sides_explicit(
+    kind, one_sided_flag
+) -> None:
     changes = diff_build_evidence(_ev([]), _ev([one_sided_flag]))
     assert kind.value not in _kinds(changes)
 
@@ -93,14 +103,16 @@ def test_l3_target_dependent_flags_need_both_sides_explicit(kind, one_sided_flag
 @pytest.mark.parametrize(
     "msvc_flag,should_fire",
     [
-        ("/Zp1", True),   # never the MSVC default → one-sided flip is real
+        ("/Zp1", True),  # never the MSVC default → one-sided flip is real
         ("/Zp2", True),
         ("/Zp4", True),
         ("/Zp8", False),  # platform default → one-sided flip suppressed
         ("/Zp16", False),
     ],
 )
-def test_l3_msvc_packing_one_sided_reports_only_non_default_widths(msvc_flag, should_fire) -> None:
+def test_l3_msvc_packing_one_sided_reports_only_non_default_widths(
+    msvc_flag, should_fire
+) -> None:
     kinds = _kinds(diff_build_evidence(_ev([]), _ev([msvc_flag])))
     assert (ChangeKind.STRUCT_PACKING_MODE_CHANGED.value in kinds) is should_fire
 
@@ -118,8 +130,13 @@ def test_l3_identical_flags_emit_nothing() -> None:
 
 def _evf(argv: list[str]) -> BuildEvidence:
     from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
-    cu = CompileUnit(id="t", source="a.cpp", language="CXX",
-                     abi_relevant_flags=extract_abi_relevant_flags(argv))
+
+    cu = CompileUnit(
+        id="t",
+        source="a.cpp",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(argv),
+    )
     return BuildEvidence(build_options=derive_build_options([cu]))
 
 
@@ -127,12 +144,24 @@ def _evf(argv: list[str]) -> BuildEvidence:
     "old_flags,new_flags,expected",
     [
         # Known-default flips fire one-sided; float-abi (target-dependent) needs both.
-        ([], ["-fwhole-program-vtables"], ChangeKind.WHOLE_PROGRAM_VTABLES_MODE_CHANGED),
+        (
+            [],
+            ["-fwhole-program-vtables"],
+            ChangeKind.WHOLE_PROGRAM_VTABLES_MODE_CHANGED,
+        ),
         ([], ["-fsanitize=address"], ChangeKind.SANITIZER_MODE_CHANGED),
-        (["-fsanitize=address"], ["-fsanitize=address,undefined"], ChangeKind.SANITIZER_MODE_CHANGED),
+        (
+            ["-fsanitize=address"],
+            ["-fsanitize=address,undefined"],
+            ChangeKind.SANITIZER_MODE_CHANGED,
+        ),
         (["-mfloat-abi=soft"], ["-mfloat-abi=hard"], ChangeKind.FLOAT_ABI_CHANGED),
         ([], ["-D_GLIBCXX_DEBUG"], ChangeKind.STDLIB_DEBUG_MODE_CHANGED),
-        (["-D_ITERATOR_DEBUG_LEVEL=0"], ["-D_ITERATOR_DEBUG_LEVEL=2"], ChangeKind.STDLIB_DEBUG_MODE_CHANGED),
+        (
+            ["-D_ITERATOR_DEBUG_LEVEL=0"],
+            ["-D_ITERATOR_DEBUG_LEVEL=2"],
+            ChangeKind.STDLIB_DEBUG_MODE_CHANGED,
+        ),
     ],
 )
 def test_l3_extra_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
@@ -141,7 +170,9 @@ def test_l3_extra_flag_flip_emits_kind(old_flags, new_flags, expected) -> None:
     assert expected in RISK_KINDS
 
 
-@pytest.mark.parametrize("argv", [["-fno-sanitize=address"], ["-fsanitize=address", "-fno-sanitize=address"]])
+@pytest.mark.parametrize(
+    "argv", [["-fno-sanitize=address"], ["-fsanitize=address", "-fno-sanitize=address"]]
+)
 def test_l3_sanitizer_disabling_flag_is_the_default(argv) -> None:
     # -fno-sanitize= on its own just spells the default (no sanitizer), and it
     # cancels an earlier -fsanitize= for the same set — neither must report.
@@ -165,7 +196,9 @@ def test_l3_lto_tuning_flags_are_not_abi_relevant(tuning_flag) -> None:
 
     def evf(argv):
         cu = CompileUnit(
-            id="t", source="a.cpp", language="CXX",
+            id="t",
+            source="a.cpp",
+            language="CXX",
             abi_relevant_flags=extract_abi_relevant_flags(argv),
         )
         return BuildEvidence(build_options=derive_build_options([cu]))
@@ -187,13 +220,20 @@ def _ent(kind: str, name: str, **kw) -> SourceEntity:
 #: A persisting public *source* declaration so a removal is unambiguous — an
 #: empty (or only relinked-export) new surface reads as failed L4 extraction.
 def _keeper() -> SourceEntity:
-    return SourceEntity(id="keep", kind="function", qualified_name="keep",
-                        mangled_name="_Z4keepv", visibility="public_header")
+    return SourceEntity(
+        id="keep",
+        kind="function",
+        qualified_name="keep",
+        mangled_name="_Z4keepv",
+        visibility="public_header",
+    )
 
 
 def test_l4_public_macro_removed() -> None:
-    old = _surf(reachable_macros=[_ent("macro", "FOO_MAX", value="64")],
-                reachable_declarations=[_keeper()])
+    old = _surf(
+        reachable_macros=[_ent("macro", "FOO_MAX", value="64")],
+        reachable_declarations=[_keeper()],
+    )
     new = _surf(reachable_declarations=[_keeper()])
     changes = diff_source_abi(old, new)
     assert ChangeKind.PUBLIC_MACRO_REMOVED.value in _kinds(changes)
@@ -201,22 +241,53 @@ def test_l4_public_macro_removed() -> None:
 
 
 def test_l4_inline_function_removed() -> None:
-    old = _surf(reachable_inline_bodies=[_ent("inline", "clamp", body_hash="h1")],
-                reachable_declarations=[_keeper()])
+    old = _surf(
+        reachable_inline_bodies=[_ent("inline", "clamp", body_hash="h1")],
+        reachable_declarations=[_keeper()],
+    )
     new = _surf(reachable_declarations=[_keeper()])
     changes = diff_source_abi(old, new)
     assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(changes)
     assert ChangeKind.INLINE_FUNCTION_REMOVED in API_BREAK_KINDS
 
 
+def test_l4_removed_export_backed_body_is_not_an_inline_removal() -> None:
+    # case83 regression: a source extractor may register an "inline" entity
+    # for any function with a body in its defining TU, not only a genuinely
+    # inline-qualified one with no linkage of its own. An ordinary exported
+    # free function's removal is already the artifact diff's job
+    # (func_removed / cpu_dispatch_isa_dropped); reporting it again here
+    # would be redundant and factually wrong ("no exported binary symbol").
+    old = _surf(
+        reachable_inline_bodies=[
+            _ent(
+                "inline",
+                "kmeans_compute_avx512",
+                mangled_name="_Z21kmeans_compute_avx512i",
+                body_hash="h1",
+            )
+        ],
+        reachable_declarations=[_keeper()],
+        roots={"exported_symbols": ["_Z21kmeans_compute_avx512i"]},
+    )
+    new = _surf(reachable_declarations=[_keeper()])
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value not in _kinds(
+        diff_source_abi(old, new)
+    )
+
+
 def test_l4_inline_to_out_of_line_is_not_a_removal() -> None:
     # A header inline turned into an out-of-line exported function leaves the
     # inline bucket but stays a callable declaration — not a source break.
     old = _surf(reachable_inline_bodies=[_ent("inline", "demo::f", body_hash="h1")])
-    new = _surf(reachable_declarations=[
-        SourceEntity(id="demo::f", kind="function", qualified_name="demo::f")
-    ])
-    assert ChangeKind.INLINE_FUNCTION_REMOVED.value not in _kinds(diff_source_abi(old, new))
+    new = _surf(
+        reachable_declarations=[
+            SourceEntity(id="demo::f", kind="function", qualified_name="demo::f")
+        ]
+    )
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value not in _kinds(
+        diff_source_abi(old, new)
+    )
 
 
 def test_l4_public_typedef_removed() -> None:
@@ -280,7 +351,9 @@ def test_l5_public_api_internal_dependency_added() -> None:
         _E("pub", "pub", "DECL_CALLS_DECL"),
     ]
     old = SourceGraphSummary(nodes=nodes, edges=base)
-    new = SourceGraphSummary(nodes=nodes, edges=base + [_E("pub", "intn", "DECL_CALLS_DECL")])
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "intn", "DECL_CALLS_DECL")]
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED in RISK_KINDS
@@ -295,15 +368,21 @@ def test_l5_internal_dep_skipped_without_baseline_call_coverage() -> None:
         _N("sym", "binary_symbol", "pub"),
         _N("hdr", "header", "api.h"),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-    ])  # no DECL_CALLS_DECL edges at all
-    new = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "intn", "DECL_CALLS_DECL"),
-    ])
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+    )  # no DECL_CALLS_DECL edges at all
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "intn", "DECL_CALLS_DECL"),
+        ],
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
@@ -312,17 +391,29 @@ def test_l5_internal_dep_skipped_without_baseline_public_closure() -> None:
     # Baseline has call edges but no SOURCE_DECLARES public closure (evidence-poor
     # older graph): its internal-reach set is empty for lack of a closure, so the
     # new graph's pre-existing internal calls must NOT look newly added.
-    nodes = [_N("pub", "source_decl"), _N("intn", "source_decl", visibility="private_header"), _N("sym", "binary_symbol")]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),  # call edges present, but no SOURCE_DECLARES
-    ])
-    new = SourceGraphSummary(nodes=nodes + [_N("hdr", "header")], edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),
-        _E("pub", "intn", "DECL_CALLS_DECL"),
-    ])
+    nodes = [
+        _N("pub", "source_decl"),
+        _N("intn", "source_decl", visibility="private_header"),
+        _N("sym", "binary_symbol"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E(
+                "pub", "pub", "DECL_CALLS_DECL"
+            ),  # call edges present, but no SOURCE_DECLARES
+        ],
+    )
+    new = SourceGraphSummary(
+        nodes=nodes + [_N("hdr", "header")],
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "pub", "DECL_CALLS_DECL"),
+            _E("pub", "intn", "DECL_CALLS_DECL"),
+        ],
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
@@ -335,7 +426,12 @@ def test_l5_public_type_gains_private_field_type() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public", visibility="public_header"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     base = [
         _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
@@ -385,7 +481,9 @@ def test_l5_public_type_gains_thirdparty_field_type_not_flagged() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public", visibility="public_header"),
-        _N("ext_type", "record_type", "std::vector<int>"),  # no visibility/provenance at all
+        _N(
+            "ext_type", "record_type", "std::vector<int>"
+        ),  # no visibility/provenance at all
     ]
     base = [
         _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
@@ -434,7 +532,12 @@ def test_l5_private_type_gaining_own_dependency_not_flagged() -> None:
     nodes = [
         _N("priv_hdr", "header", "detail/impl.h"),
         _N("priv_type", "record_type", "detail::Impl", visibility="private_header"),
-        _N("priv_field_type", "record_type", "detail::Helper", visibility="private_header"),
+        _N(
+            "priv_field_type",
+            "record_type",
+            "detail::Helper",
+            visibility="private_header",
+        ),
     ]
     base = [
         _E("priv_hdr", "priv_type", "SOURCE_DECLARES"),
@@ -442,7 +545,8 @@ def test_l5_private_type_gaining_own_dependency_not_flagged() -> None:
     ]
     old = SourceGraphSummary(nodes=nodes, edges=base)
     new = SourceGraphSummary(
-        nodes=nodes, edges=base + [_E("priv_type", "priv_field_type", "TYPE_HAS_FIELD_TYPE")]
+        nodes=nodes,
+        edges=base + [_E("priv_type", "priv_field_type", "TYPE_HAS_FIELD_TYPE")],
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
@@ -459,11 +563,14 @@ def test_public_types_requires_own_visibility_not_just_declaring_header() -> Non
         _N("priv", "record_type", "Private", visibility="private_header"),
         _N("unannotated", "record_type", "Unannotated"),
     ]
-    g = SourceGraphSummary(nodes=nodes, edges=[
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("hdr", "priv", "SOURCE_DECLARES"),
-        _E("hdr", "unannotated", "SOURCE_DECLARES"),
-    ])
+    g = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("hdr", "priv", "SOURCE_DECLARES"),
+            _E("hdr", "unannotated", "SOURCE_DECLARES"),
+        ],
+    )
     assert _public_types(g) == {"pub"}
 
 
@@ -490,7 +597,12 @@ def test_l5_public_fn_gains_private_parameter_type() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -533,15 +645,23 @@ def test_l5_internal_type_dep_skipped_without_baseline_coverage() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public", visibility="public_header"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     old = SourceGraphSummary(
         nodes=nodes, edges=[_E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE")]
     )  # no SOURCE_DECLARES at all on the baseline
-    new = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
-        _E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE"),
-    ])
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+            _E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
@@ -557,19 +677,32 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),  # only the call-graph pass ran
-    ])
-    new = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),
-        _E("pub", "priv_type", "DECL_HAS_TYPE"),  # type-graph pass, new on this side
-    ])
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "pub", "DECL_CALLS_DECL"),  # only the call-graph pass ran
+        ],
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "pub", "DECL_CALLS_DECL"),
+            _E(
+                "pub", "priv_type", "DECL_HAS_TYPE"
+            ),  # type-graph pass, new on this side
+        ],
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
@@ -589,13 +722,20 @@ def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
         _E("hdr", "pub", "SOURCE_DECLARES"),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=base, extractor_passes={"type_graph": True})
+    old = SourceGraphSummary(
+        nodes=nodes, edges=base, extractor_passes={"type_graph": True}
+    )
     new = SourceGraphSummary(
         nodes=nodes,
         edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE")],
@@ -605,7 +745,9 @@ def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
-def test_common_dependency_edge_kinds_falls_back_to_exact_kind_without_pass_confirmation() -> None:
+def test_common_dependency_edge_kinds_falls_back_to_exact_kind_without_pass_confirmation() -> (
+    None
+):
     # Fifth Codex review: without a *confirmed* extractor_passes record on
     # both sides, mere sibling-edge presence must not widen coverage to the
     # whole family — a Kythe-ingested pack only ever produces
@@ -641,9 +783,14 @@ def test_common_dependency_edge_kinds_family_widened_with_confirmed_passes() -> 
         extractor_passes={"type_graph": True},
     )
     common = _common_dependency_edge_kinds(old, new)
-    assert common == frozenset({
-        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
-    })
+    assert common == frozenset(
+        {
+            "DECL_REFERENCES_DECL",
+            "DECL_HAS_TYPE",
+            "TYPE_HAS_FIELD_TYPE",
+            "TYPE_INHERITS",
+        }
+    )
 
 
 def test_common_dependency_edge_kinds_one_sided_pass_covers_exact_kind_only() -> None:
@@ -674,7 +821,12 @@ def test_l5_internal_dep_flagged_with_one_sided_confirmed_pass() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     old = SourceGraphSummary(
         nodes=nodes,
@@ -684,11 +836,14 @@ def test_l5_internal_dep_flagged_with_one_sided_confirmed_pass() -> None:
         ],
         extractor_passes={"type_graph": True},
     )
-    new = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
-    ])  # no extractor_passes on the new side
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+    )  # no extractor_passes on the new side
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
@@ -706,13 +861,21 @@ def test_l5_internal_dep_skipped_for_kythe_only_baseline_type_edge() -> None:
         _N("sym", "binary_symbol", "pub"),
         _N("other", "source_decl", "other()"),
         _N("ref_target", "source_decl", "k"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("other", "ref_target", "DECL_REFERENCES_DECL"),  # from Kythe ingestion
-    ])  # no extractor_passes: Kythe ingestion never stamps it
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("other", "ref_target", "DECL_REFERENCES_DECL"),  # from Kythe ingestion
+        ],
+    )  # no extractor_passes: Kythe ingestion never stamps it
     new = SourceGraphSummary(
         nodes=nodes,
         edges=[
@@ -745,12 +908,19 @@ def test_common_dependency_edge_kinds_uses_extractor_passes_over_zero_edges() ->
         extractor_passes={"type_graph": True},
     )
     common = _common_dependency_edge_kinds(old, new)
-    assert common == frozenset({
-        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
-    })
+    assert common == frozenset(
+        {
+            "DECL_REFERENCES_DECL",
+            "DECL_HAS_TYPE",
+            "TYPE_HAS_FIELD_TYPE",
+            "TYPE_INHERITS",
+        }
+    )
 
 
-def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_confirmed_full_pass() -> None:
+def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_confirmed_full_pass() -> (
+    None
+):
     # Eleventh Codex review: a baseline collected from a *narrowed* (PR/
     # --since-scoped) inline run never sets extractor_passes for that name, but
     # it still serializes whatever edges it happened to collect from the
@@ -796,9 +966,14 @@ def test_common_dependency_edge_kinds_matched_narrowed_scope_widens_to_family() 
         narrowed_scope={"type_graph": frozenset({"src/a.cpp"})},
     )
     common = _common_dependency_edge_kinds(old, new)
-    assert common == frozenset({
-        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
-    })
+    assert common == frozenset(
+        {
+            "DECL_REFERENCES_DECL",
+            "DECL_HAS_TYPE",
+            "TYPE_HAS_FIELD_TYPE",
+            "TYPE_INHERITS",
+        }
+    )
 
 
 def test_common_dependency_edge_kinds_narrowed_same_boolean_different_scope() -> None:
@@ -823,7 +998,9 @@ def test_common_dependency_edge_kinds_narrowed_same_boolean_different_scope() ->
     assert common == frozenset()
 
 
-def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarked_pack() -> None:
+def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarked_pack() -> (
+    None
+):
     # Twelfth Codex review: the eleventh-round fix only excluded a narrowed
     # side's edge when the *other* side confirmed a full pass — but an
     # unmarked pack (no extractor_passes, no narrowed_passes at all, e.g. a
@@ -848,7 +1025,9 @@ def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarke
     assert common == frozenset()
 
 
-def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate() -> None:
+def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate() -> (
+    None
+):
     # End-to-end version of the twelfth-round fix: the narrowed baseline's
     # pre-existing dependency is unrelated to the new public entry the
     # unmarked candidate reveals a private dependency for — the unmarked
@@ -860,7 +1039,12 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate
         _N("sym", "binary_symbol", "pub"),
         _N("pub2", "source_decl", "pub2()"),
         _N("sym2", "binary_symbol", "pub2"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
         _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
     ]
     shared_edges = [
@@ -884,7 +1068,9 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
-def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrowed_candidate() -> None:
+def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrowed_candidate() -> (
+    None
+):
     # End-to-end version of the fourteenth-round fix: both packs are narrowed
     # (narrowed_passes=True on each), but to different, disjoint scopes — the
     # baseline only ever examined pub's TU, the candidate only pub2's. The
@@ -896,7 +1082,12 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrow
         _N("sym", "binary_symbol", "pub"),
         _N("pub2", "source_decl", "pub2()"),
         _N("sym2", "binary_symbol", "pub2"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
         _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
     ]
     shared_edges2 = [
@@ -922,7 +1113,9 @@ def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_differently_narrow
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
-def test_l5_internal_dep_flagged_for_matched_narrowed_scope_zero_edge_baseline() -> None:
+def test_l5_internal_dep_flagged_for_matched_narrowed_scope_zero_edge_baseline() -> (
+    None
+):
     # End-to-end version of the fifteenth-round fix: both packs are narrowed
     # to the *identical* scope, and the baseline's narrowed pass genuinely
     # found zero type-graph edges within it — a real, verified zero, since
@@ -933,7 +1126,12 @@ def test_l5_internal_dep_flagged_for_matched_narrowed_scope_zero_edge_baseline()
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     shared_scope = {"type_graph": frozenset({"src/pub.cpp"})}
     old = SourceGraphSummary(
@@ -975,7 +1173,9 @@ def test_dependency_kinds_covered_accepts_narrowed_pass_with_zero_edges() -> Non
     assert _dependency_kinds_covered(g, frozenset({"DECL_HAS_TYPE"})) is True
 
 
-def test_common_dependency_edge_kinds_degraded_pass_edge_not_credited_as_coverage() -> None:
+def test_common_dependency_edge_kinds_degraded_pass_edge_not_credited_as_coverage() -> (
+    None
+):
     # Sixteenth Codex review: a pass that ran unnarrowed but hit per-TU
     # diagnostics still folds edges from the TUs that parsed cleanly — those
     # edges must not vouch for "this kind was examined project-wide" any more
@@ -996,7 +1196,9 @@ def test_common_dependency_edge_kinds_degraded_pass_edge_not_credited_as_coverag
     assert common == frozenset()
 
 
-def test_l5_internal_dep_not_flagged_for_degraded_baseline_vs_confirmed_full_candidate() -> None:
+def test_l5_internal_dep_not_flagged_for_degraded_baseline_vs_confirmed_full_candidate() -> (
+    None
+):
     # End-to-end version of the sixteenth-round fix: the baseline's type-graph
     # pass hit a diagnostic on some TU (degraded) but still folded a private
     # field-type edge from a TU that parsed. A second public entry, pub2, was
@@ -1010,7 +1212,12 @@ def test_l5_internal_dep_not_flagged_for_degraded_baseline_vs_confirmed_full_can
         _N("sym", "binary_symbol", "pub"),
         _N("pub2", "source_decl", "pub2()"),
         _N("sym2", "binary_symbol", "pub2"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
         _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
     ]
     shared_edges3 = [
@@ -1034,7 +1241,9 @@ def test_l5_internal_dep_not_flagged_for_degraded_baseline_vs_confirmed_full_can
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
-def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confirmed_full_old() -> None:
+def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confirmed_full_old() -> (
+    None
+):
     # Thirteenth Codex review: the twelfth-round fix over-corrected by gating
     # NEW's own presence on its narrowing too, symmetrically with OLD. But this
     # closure only ever detects *additions* (new vs old's reach) — the
@@ -1059,7 +1268,9 @@ def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confir
     assert common == frozenset({"TYPE_HAS_FIELD_TYPE"})
 
 
-def test_l5_internal_dep_flagged_for_narrowed_candidate_against_confirmed_full_baseline() -> None:
+def test_l5_internal_dep_flagged_for_narrowed_candidate_against_confirmed_full_baseline() -> (
+    None
+):
     # End-to-end version of the thirteenth-round fix: a confirmed-full-pass
     # baseline that genuinely has zero dependency edges of this family proves
     # the dependency did not exist anywhere in the old version. A narrowed
@@ -1070,7 +1281,12 @@ def test_l5_internal_dep_flagged_for_narrowed_candidate_against_confirmed_full_b
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     old = SourceGraphSummary(
         nodes=nodes,
@@ -1093,7 +1309,9 @@ def test_l5_internal_dep_flagged_for_narrowed_candidate_against_confirmed_full_b
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
-def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_scope() -> None:
+def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_scope() -> (
+    None
+):
     # End-to-end version of Codex's exact scenario: the baseline was collected
     # by a narrowed (PR/--since-scoped) inline run that only ever examined
     # ``pub``'s TU, where it found (and still has, unchanged) a
@@ -1111,7 +1329,12 @@ def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_sc
         _N("sym", "binary_symbol", "pub"),
         _N("pub2", "source_decl", "pub2()"),
         _N("sym2", "binary_symbol", "pub2"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
         _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
     ]
     shared_edges = [
@@ -1143,7 +1366,12 @@ def test_l5_internal_dep_flags_first_ever_family_edge_via_extractor_passes() -> 
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     old = SourceGraphSummary(
         nodes=nodes,
@@ -1175,12 +1403,20 @@ def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-    ])  # no extractor_passes recorded, no type edges either
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+    )  # no extractor_passes recorded, no type edges either
     new = SourceGraphSummary(
         nodes=nodes,
         edges=[
@@ -1194,7 +1430,9 @@ def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
-def test_l5_internal_dep_not_flagged_when_edge_unchanged_but_provenance_improves() -> None:
+def test_l5_internal_dep_not_flagged_when_edge_unchanged_but_provenance_improves() -> (
+    None
+):
     # Eighth Codex review: the pub -> target edge already existed in the old
     # graph (a Kythe/older-pack callee with no SOURCE_DECLARES/
     # defined_in_project provenance, so old could not classify it internal),
@@ -1211,25 +1449,37 @@ def test_l5_internal_dep_not_flagged_when_edge_unchanged_but_provenance_improves
         # node — unclassifiable, exactly like a Kythe-ingested callee.
         _N("target", "source_decl", "detail::helper()"),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "target", "DECL_CALLS_DECL"),
-    ], extractor_passes={"call_graph": True})
-    new = SourceGraphSummary(nodes=[
-        *nodes[:-1],
-        _N("target", "source_decl", "detail::helper()", visibility="private_header"),
-    ], edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("priv_hdr", "target", "SOURCE_DECLARES"),
-        _E("pub", "target", "DECL_CALLS_DECL"),
-    ], extractor_passes={"call_graph": True})
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "target", "DECL_CALLS_DECL"),
+        ],
+        extractor_passes={"call_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[
+            *nodes[:-1],
+            _N(
+                "target", "source_decl", "detail::helper()", visibility="private_header"
+            ),
+        ],
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("priv_hdr", "target", "SOURCE_DECLARES"),
+            _E("pub", "target", "DECL_CALLS_DECL"),
+        ],
+        extractor_passes={"call_graph": True},
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
-def test_l5_internal_dep_flagged_when_edge_is_genuinely_new_even_with_provenance_gain() -> None:
+def test_l5_internal_dep_flagged_when_edge_is_genuinely_new_even_with_provenance_gain() -> (
+    None
+):
     # Contrast case: the pub -> target edge is genuinely NEW in this version
     # (unreachable at all in the old graph) and the target also happens to be
     # classifiable as internal in the new graph — this must still fire, since
@@ -1239,22 +1489,32 @@ def test_l5_internal_dep_flagged_when_edge_is_genuinely_new_even_with_provenance
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
     ]
-    old = SourceGraphSummary(nodes=nodes_old, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),
-    ], extractor_passes={"call_graph": True})
-    new = SourceGraphSummary(nodes=[
-        *nodes_old,
-        _N("priv_hdr", "header", "detail/impl.h"),
-        _N("target", "source_decl", "detail::helper()", visibility="private_header"),
-    ], edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("hdr", "pub", "SOURCE_DECLARES"),
-        _E("pub", "pub", "DECL_CALLS_DECL"),
-        _E("priv_hdr", "target", "SOURCE_DECLARES"),
-        _E("pub", "target", "DECL_CALLS_DECL"),
-    ], extractor_passes={"call_graph": True})
+    old = SourceGraphSummary(
+        nodes=nodes_old,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "pub", "DECL_CALLS_DECL"),
+        ],
+        extractor_passes={"call_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[
+            *nodes_old,
+            _N("priv_hdr", "header", "detail/impl.h"),
+            _N(
+                "target", "source_decl", "detail::helper()", visibility="private_header"
+            ),
+        ],
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "pub", "DECL_CALLS_DECL"),
+            _E("priv_hdr", "target", "SOURCE_DECLARES"),
+            _E("pub", "target", "DECL_CALLS_DECL"),
+        ],
+        extractor_passes={"call_graph": True},
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
@@ -1282,7 +1542,9 @@ def test_dependency_path_reconstructs_multi_hop_chain() -> None:
             _E("b", "c", "DECL_HAS_TYPE"),
         ],
     )
-    path = _dependency_path(g, frozenset({"DECL_CALLS_DECL", "DECL_HAS_TYPE"}), "a", "c")
+    path = _dependency_path(
+        g, frozenset({"DECL_CALLS_DECL", "DECL_HAS_TYPE"}), "a", "c"
+    )
     assert path is not None
     assert [(e.src, e.kind, e.dst) for e in path] == [
         ("a", "DECL_CALLS_DECL", "b"),
@@ -1313,11 +1575,18 @@ def test_public_entry_internal_reach_no_reach_returns_empty() -> None:
     # Direct unit test: empty edge_kinds means _dependency_reachability returns
     # {}, so _public_entry_internal_reach must short-circuit before ever
     # touching the public-closure computation.
-    nodes = [_N("pub", "source_decl"), _N("sym", "binary_symbol"), _N("intn", "source_decl", visibility="private_header")]
-    g = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("pub", "intn", "DECL_CALLS_DECL"),
-    ])
+    nodes = [
+        _N("pub", "source_decl"),
+        _N("sym", "binary_symbol"),
+        _N("intn", "source_decl", visibility="private_header"),
+    ]
+    g = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("pub", "intn", "DECL_CALLS_DECL"),
+        ],
+    )
     assert _public_entry_internal_reach(g, frozenset()) == set()
 
 
@@ -1329,10 +1598,13 @@ def test_public_entry_internal_reach_no_public_closure_returns_empty() -> None:
         _N("sym", "binary_symbol", "pub"),
         _N("intn", "source_decl", "intn()", visibility="private_header"),
     ]
-    g = SourceGraphSummary(nodes=nodes, edges=[
-        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
-        _E("pub", "intn", "DECL_CALLS_DECL"),
-    ])
+    g = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("pub", "intn", "DECL_CALLS_DECL"),
+        ],
+    )
     assert _public_entry_internal_reach(g, frozenset({"DECL_CALLS_DECL"})) == set()
 
 
@@ -1345,19 +1617,31 @@ def test_l5_owner_changed_reads_header_declaring_nodes() -> None:
         _N("hdr:a.h", "header", "a.h"),
         _N("hdr:b.h", "header", "b.h"),
     ]
-    old = SourceGraphSummary(nodes=nodes, edges=[
-        _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("hdr:a.h", "d", "SOURCE_DECLARES"),
-    ])
-    new = SourceGraphSummary(nodes=nodes, edges=[
-        _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("hdr:b.h", "d", "SOURCE_DECLARES"),
-    ])
-    assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value in _graph_kinds(old, new)
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr:a.h", "d", "SOURCE_DECLARES"),
+        ],
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr:b.h", "d", "SOURCE_DECLARES"),
+        ],
+    )
+    assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value in _graph_kinds(
+        old, new
+    )
 
 
 def test_l5_target_dependency_added() -> None:
     nodes = [_N("t:libA", "target", "libA"), _N("t:libB", "target", "libB")]
     old = SourceGraphSummary(nodes=nodes, edges=[])
-    new = SourceGraphSummary(nodes=nodes, edges=[_E("t:libA", "t:libB", "TARGET_DEPENDS_ON")])
+    new = SourceGraphSummary(
+        nodes=nodes, edges=[_E("t:libA", "t:libB", "TARGET_DEPENDS_ON")]
+    )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.TARGET_DEPENDENCY_ADDED.value in kinds
     assert ChangeKind.TARGET_DEPENDENCY_ADDED in RISK_KINDS
@@ -1372,11 +1656,17 @@ def test_l5_exported_symbol_source_owner_changed() -> None:
     ]
     old = SourceGraphSummary(
         nodes=nodes,
-        edges=[_E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("src:a", "d", "SOURCE_DECLARES")],
+        edges=[
+            _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("src:a", "d", "SOURCE_DECLARES"),
+        ],
     )
     new = SourceGraphSummary(
         nodes=nodes,
-        edges=[_E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"), _E("src:b", "d", "SOURCE_DECLARES")],
+        edges=[
+            _E("d", "s", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("src:b", "d", "SOURCE_DECLARES"),
+        ],
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED.value in kinds
@@ -1385,7 +1675,9 @@ def test_l5_exported_symbol_source_owner_changed() -> None:
 
 def test_l5_identical_graph_emits_nothing() -> None:
     nodes = [_N("t:libA", "target", "libA"), _N("t:libB", "target", "libB")]
-    g = SourceGraphSummary(nodes=nodes, edges=[_E("t:libA", "t:libB", "TARGET_DEPENDS_ON")])
+    g = SourceGraphSummary(
+        nodes=nodes, edges=[_E("t:libA", "t:libB", "TARGET_DEPENDS_ON")]
+    )
     assert diff_source_graph_findings(g, g) == []
 
 
@@ -1394,7 +1686,12 @@ def _internal_dep_scenario() -> tuple[SourceGraphSummary, SourceGraphSummary]:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -1402,7 +1699,9 @@ def _internal_dep_scenario() -> tuple[SourceGraphSummary, SourceGraphSummary]:
         _E("pub", "pub", "DECL_HAS_TYPE"),
     ]
     old = SourceGraphSummary(nodes=nodes, edges=base)
-    new = SourceGraphSummary(nodes=nodes, edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")])
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")]
+    )
     return old, new
 
 
@@ -1420,7 +1719,9 @@ def test_l5_internal_dependency_correlates_with_own_body_hash_change() -> None:
     src_changes = diff_source_abi(old_surface, new_surface)
     assert ChangeKind.INLINE_BODY_CHANGED.value in _kinds(src_changes)
 
-    findings = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=src_changes)
+    findings = diff_source_graph_findings(
+        old_graph, new_graph, source_diff_changes=src_changes
+    )
     dep_finding = next(
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )
@@ -1447,12 +1748,18 @@ def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> 
     # in the source_diff result set — an unrelated decl's body change must not
     # be attached to this entry's finding.
     old_graph, new_graph = _internal_dep_scenario()
-    old_surface = _surf(reachable_inline_bodies=[_ent("inline", "other", body_hash="h1")])
-    new_surface = _surf(reachable_inline_bodies=[_ent("inline", "other", body_hash="h2")])
+    old_surface = _surf(
+        reachable_inline_bodies=[_ent("inline", "other", body_hash="h1")]
+    )
+    new_surface = _surf(
+        reachable_inline_bodies=[_ent("inline", "other", body_hash="h2")]
+    )
     src_changes = diff_source_abi(old_surface, new_surface)
     assert ChangeKind.INLINE_BODY_CHANGED.value in _kinds(src_changes)
 
-    findings = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=src_changes)
+    findings = diff_source_graph_findings(
+        old_graph, new_graph, source_diff_changes=src_changes
+    )
     dep_finding = next(
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )

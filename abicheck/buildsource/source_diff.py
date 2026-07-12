@@ -105,6 +105,7 @@ def _richer(candidate: SourceEntity, current: SourceEntity) -> bool:
     value/body/type fingerprint the diff compares, rather than keeping the last
     one seen.
     """
+
     def _score(e: SourceEntity) -> int:
         return sum(bool(v) for v in (e.value, e.body_hash, e.type_hash))
 
@@ -424,7 +425,6 @@ def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
 # -- declarations: default args, constexpr, generated headers ----------------
 
 
-
 def _concept_constraint(entity: SourceEntity) -> str:
     """Comparable normalized constraint fingerprint/value for a concept entity."""
     return entity.value or entity.body_hash or entity.signature_hash or entity.type_hash
@@ -466,6 +466,7 @@ def _diff_concepts(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
                 )
             )
     return changes
+
 
 def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     old_d = _by_identity(old.reachable_declarations)
@@ -567,10 +568,22 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     # consumer source can still call it, so it is NOT a removal (Codex review).
     new_decl_ids = {e.identity() for e in new.reachable_declarations if e.identity()}
     new_exports = set(new.roots.get("exported_symbols", []))
+    # A source extractor may register an "inline" entity for any function with a
+    # body in its defining TU, not only a genuinely `inline`-qualified one with no
+    # linkage of its own (case83: ordinary exported free functions removed
+    # wholesale were double-counted this way — a correct artifact-level
+    # func_removed/cpu_dispatch_isa_dropped finding PLUS a spurious, factually
+    # wrong "it had no exported binary symbol" claim). If the OLD side's entity
+    # actually had a real exported symbol, its removal is already the artifact
+    # diff's job to report (ADR-028 D3 authority rule: L3-L5 never duplicates an
+    # artifact-proven break) — skip it here.
+    old_exports = set(old.roots.get("exported_symbols", []))
     inline_removals = sorted(set(old_i) - set(new_i)) if _surface_has_facts(new) else []
     for key in inline_removals:
         ov = old_i[key]
         if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
+            continue
+        if ov.mangled_name and ov.mangled_name in old_exports:
             continue
         name = ov.qualified_name
         changes.append(
@@ -668,7 +681,11 @@ def _diff_mappings(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
     # (declared, not exported) — and no other new decl picked the symbol up.
     for name in sorted(set(old_map) & set(new_map)):
         old_sym = str(old_map.get(name) or "")
-        if old_sym and not bool(new_map.get(name)) and old_sym not in new_mapped_symbols:
+        if (
+            old_sym
+            and not bool(new_map.get(name))
+            and old_sym not in new_mapped_symbols
+        ):
             _emit(name, old_sym)
 
     # Declaration's identity gone from the new surface while its symbol is still
