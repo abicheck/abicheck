@@ -794,6 +794,9 @@ def test_collect_call_graph_partial_failure_records_no_pass_coverage(monkeypatch
     )
     _collect_call_graph(graph, merged, records, clang_bin="clang")
     assert "call_graph" not in graph.extractor_passes
+    # A degraded pass's surviving edges must not vouch for project-wide
+    # coverage either (sixteenth Codex review).
+    assert graph.degraded_passes["call_graph"] is True
 
 
 def test_collect_call_graph_missing_clang_records_failure(monkeypatch) -> None:

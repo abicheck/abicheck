@@ -680,6 +680,38 @@ in three parts:
   full-pass case: a silently-degraded TU inside the narrow scope must not
   read as "the scope was cleanly examined, zero found."
 
+A sixteenth Codex review found a parallel gap for the *unnarrowed* case: a full
+pass that hit per-TU diagnostics correctly never sets `extractor_passes` (the
+seventh review's rule), but it still folds edges from the TUs that *did*
+parse. Nothing recorded that this happened, so those surviving edges fell
+straight into the per-kind fallback — which, per the original (fifth/ninth
+review) design, trusts bare edge presence as weak "this kind is comparable"
+evidence. A degraded baseline's edge of a kind could therefore be compared
+against a clean candidate's edge of the same kind in a wholly different,
+never-successfully-parsed TU, reporting a spurious
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`. Fixed with a third coverage-honesty
+field, `SourceGraphSummary.degraded_passes: dict[str, bool]` (additive, same
+round-trip pattern as the other two) — set whenever a pass examined units but
+`extractor.diagnostics` was non-empty (a narrowed run with diagnostics lands
+here too, on top of never confirming `narrowed_passes`, since it is even less
+trustworthy than either alone). `_common_dependency_edge_kinds`'s `old_present`
+guard now also requires `not old_degraded`, extending exactly the same
+exclusion logic the narrowed case already uses to this third source of
+untrustworthy "coverage." Stamped by `inline._fold_call_graph`/
+`_fold_type_graph` and `cli_buildsource_helpers._collect_call_graph` — the
+three producers that fold real Clang extraction (`graph_backends.py`'s Kythe/
+CodeQL ingestion never runs a pass with diagnostics to report, so it is
+unaffected).
+
+This slice also split `_scope_narrowed_target`/`_fold_call_graph`/
+`_fold_type_graph` out of `inline.py` into a new sibling module,
+`inline_graph_fold.py` (`fold_call_graph`/`fold_type_graph`) — `inline.py` was
+sitting at its 2000-line hard cap and every one of the last several rounds'
+fixes needed a few more lines there; per the root `CLAUDE.md`'s guidance to
+extend a split-out module rather than keep growing the parent toward the cap,
+this creates headroom for future rounds instead of re-litigating the same
+line-shaving exercise each time.
+
 ## Decision — P0 slice 4 (this change)
 
 Roadmap item 2's remaining half, "semantic graph diff — same public decl,

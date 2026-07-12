@@ -220,7 +220,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   TU, no diagnostics" check with `extractor_pass_fully_covered`) means
   `narrowed_passes` is only stamped when the narrowed run itself hit no
   per-TU diagnostics — trusting a narrowed zero-edge family as real evidence
-  raises the stakes on the run having succeeded cleanly.
+  raises the stakes on the run having succeeded cleanly. A sixteenth review
+  found a parallel gap for the *unnarrowed* case: a full pass with per-TU
+  diagnostics correctly never sets `extractor_passes`, but still folds edges
+  from the TUs that did parse, and nothing recorded this — those surviving
+  edges fell into the per-kind fallback's weak "bare edge presence" trust
+  tier, letting a degraded baseline's edge be compared against a clean
+  candidate's edge in a wholly different, never-successfully-parsed TU. New
+  `SourceGraphSummary.degraded_passes: dict[str, bool]` field (additive, same
+  round-trip pattern) is set whenever a pass examined units but
+  `extractor.diagnostics` was non-empty; `_common_dependency_edge_kinds`'s
+  `old_present` guard now also requires `not old_degraded`. Stamped by
+  `inline._fold_call_graph`/`_fold_type_graph` and
+  `cli_buildsource_helpers._collect_call_graph`. This round also split
+  `_scope_narrowed_target`/`_fold_call_graph`/`_fold_type_graph` out of
+  `inline.py` (sitting at its 2000-line hard cap) into a new sibling module,
+  `inline_graph_fold.py`, to give future rounds headroom instead of
+  re-shaving comment lines each time.
 
 - **Correlate a public entry's own body/type-hash change with a new internal
   dependency (ADR-041 P0 slice 4).** Completes roadmap item 2: before this,

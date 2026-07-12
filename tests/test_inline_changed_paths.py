@@ -290,6 +290,49 @@ def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pas
     assert "call_graph" not in graph.extractor_passes
     assert "call_graph" not in graph.narrowed_passes
     assert "call_graph" not in graph.narrowed_scope
+    # A narrowed run with diagnostics is even less trustworthy than a clean
+    # narrowed one, so it also lands in degraded_passes (sixteenth Codex
+    # review) — its surviving edges must not vouch for coverage either.
+    assert graph.degraded_passes["call_graph"] is True
+
+
+def test_inline_call_graph_scoped_no_diagnostics_does_not_mark_degraded(monkeypatch):
+    # Contrast case: a clean narrowed run (no diagnostics) must NOT be marked
+    # degraded — only narrowed_passes/narrowed_scope, per the fourteenth/
+    # fifteenth review.
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert graph is not None
+    assert graph.narrowed_passes["call_graph"] is True
+    assert "call_graph" not in graph.degraded_passes
 
 
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):

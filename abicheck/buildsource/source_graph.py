@@ -245,6 +245,20 @@ class SourceGraphSummary:
     #: narrowed to this *identical* (non-empty) scope; set alongside
     #: ``narrowed_passes`` by ``inline._fold_call_graph``/``_fold_type_graph``.
     narrowed_scope: dict[str, frozenset[str]] = field(default_factory=dict)
+    #: Which named extractor passes hit per-TU diagnostics — a clang crash/
+    #: timeout/degenerate AST on some subset (sixteenth Codex review). Such a
+    #: run (narrowed or not) still folds edges from the TUs that *did* parse,
+    #: but those edges must not vouch for "this kind was examined" over
+    #: whatever scope the pass claims: the failed TUs are an unknown,
+    #: untracked gap (unlike ``narrowed_scope``, which knows exactly which TUs
+    #: a deliberately-scoped run examined). Set by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph``/``cli_buildsource_helpers._collect_call_graph``
+    #: whenever the pass examined units but ``extractor.diagnostics`` was
+    #: non-empty (mutually exclusive with ``extractor_passes``/``narrowed_passes``,
+    #: which both require zero diagnostics — so a narrowed run with
+    #: diagnostics lands here too, on top of never confirming
+    #: ``narrowed_passes``, since it is even less trustworthy than either).
+    degraded_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
@@ -383,6 +397,7 @@ class SourceGraphSummary:
             "narrowed_scope": {
                 k: sorted(v) for k, v in self.narrowed_scope.items()
             },
+            "degraded_passes": dict(self.degraded_passes),
         }
 
     @classmethod
@@ -409,6 +424,9 @@ class SourceGraphSummary:
             narrowed_scope={
                 str(k): frozenset(str(p) for p in v)
                 for k, v in dict(d.get("narrowed_scope", {})).items()
+            },
+            degraded_passes={
+                str(k): bool(v) for k, v in dict(d.get("degraded_passes", {})).items()
             },
         )
 
@@ -1314,6 +1332,16 @@ def _common_dependency_edge_kinds(
     whose narrowed baseline genuinely found zero edges of a family couldn't
     credit that as coverage, and a first-ever edge the candidate finds in that
     exact shared TU would be silently dropped instead of reported.
+
+    A pass that ran *unnarrowed* but recorded per-TU diagnostics
+    (``degraded_passes``, e.g. a clang crash/timeout on some subset) still
+    folds edges from the TUs that parsed cleanly — those edges get exactly
+    the same narrowed-side treatment as ``old_present``'s guard above
+    (sixteenth Codex review): a partial pass's edge cannot vouch for "this
+    kind was examined project-wide" any more than a narrowed pass's can,
+    since the failed TUs are an unknown, untracked gap (unlike
+    ``narrowed_scope``, which knows exactly which TUs a *deliberately*
+    scoped run examined).
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
@@ -1337,13 +1365,22 @@ def _common_dependency_edge_kinds(
         if (old_pass and new_pass) or narrowed_confirmed:
             common |= family
             continue
+        # A pass that ran unnarrowed but hit per-TU diagnostics still folds
+        # edges from the TUs that parsed — those edges must not vouch for
+        # "this kind was examined project-wide" any more than a narrowed
+        # side's edges may (sixteenth Codex review): the failed TUs are an
+        # unknown, untracked gap.
+        old_degraded = old.degraded_passes.get(pass_name, False)
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:
-            # Only OLD's negative evidence needs the narrowing guard — see the
-            # docstring's one-directional-risk note (thirteenth Codex review).
-            old_present = (kind in old_kinds) and (
-                not old_narrowed or (new_narrowed and scope_matches)
+            # Only OLD's negative evidence needs the narrowing/degraded guard
+            # — see the docstring's one-directional-risk note (thirteenth
+            # Codex review).
+            old_present = (
+                (kind in old_kinds)
+                and not old_degraded
+                and (not old_narrowed or (new_narrowed and scope_matches))
             )
             new_present = kind in new_kinds
             old_has = old_present or old_pass

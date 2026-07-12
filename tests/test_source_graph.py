@@ -670,6 +670,19 @@ def test_narrowed_scope_round_trips() -> None:
     assert restored.narrowed_scope == {"type_graph": frozenset({"src/a.cpp", "src/b.cpp"})}
 
 
+def test_degraded_passes_round_trips() -> None:
+    # Sixteenth Codex review: degraded_passes must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell "ran unnarrowed but hit
+    # per-TU diagnostics" from a clean confirmed pass.
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.degraded_passes["type_graph"] = True
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.degraded_passes == {"type_graph": True}
+    assert restored.extractor_passes == {}
+    assert restored.narrowed_passes == {}
+
+
 def test_graph_id_order_independent() -> None:
     a = SourceGraphSummary()
     a.add_node(GraphNode(id="x", kind="target"))

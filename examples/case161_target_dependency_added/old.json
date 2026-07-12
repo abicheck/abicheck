@@ -1,5 +1,6 @@
 {
   "coverage": {},
+  "degraded_passes": {},
   "edges": [],
   "external_graph_refs": [],
   "extractor_passes": {},

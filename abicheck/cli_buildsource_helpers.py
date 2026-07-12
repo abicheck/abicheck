@@ -1213,6 +1213,10 @@ def _collect_call_graph(
 
     if extractor_pass_fully_covered(merged, extractor, narrowed=False):
         graph.extractor_passes["call_graph"] = True
+    elif extractor.diagnostics:
+        # Ran but some TU failed — its surviving edges must not vouch for
+        # project-wide coverage (sixteenth Codex review).
+        graph.degraded_passes["call_graph"] = True
     graph.finalize()
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")

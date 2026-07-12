@@ -977,6 +977,65 @@ def test_dependency_kinds_covered_accepts_narrowed_pass_with_zero_edges() -> Non
     assert _dependency_kinds_covered(g, frozenset({"DECL_HAS_TYPE"})) is True
 
 
+def test_common_dependency_edge_kinds_degraded_pass_edge_not_credited_as_coverage() -> None:
+    # Sixteenth Codex review: a pass that ran unnarrowed but hit per-TU
+    # diagnostics still folds edges from the TUs that parsed cleanly — those
+    # edges must not vouch for "this kind was examined project-wide" any more
+    # than a narrowed pass's edges may. A degraded old side's TYPE_HAS_FIELD_TYPE
+    # edge (from a surviving TU) must not make that kind common against a
+    # confirmed-full-pass new side's edge of the same kind elsewhere.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        degraded_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
+        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
+
+
+def test_l5_internal_dep_not_flagged_for_degraded_baseline_vs_confirmed_full_candidate() -> None:
+    # End-to-end version of the sixteenth-round fix: the baseline's type-graph
+    # pass hit a diagnostic on some TU (degraded) but still folded a private
+    # field-type edge from a TU that parsed. A second public entry, pub2, was
+    # never examined by the baseline's degraded pass (its TU is the one that
+    # failed). The candidate ran a confirmed full pass and found pub2 also
+    # depends on a private type — that must not be trusted as newly added,
+    # since the degraded baseline never had a chance to prove it wasn't there.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("pub2", "source_decl", "pub2()"),
+        _N("sym2", "binary_symbol", "pub2"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
+    ]
+    shared_edges3 = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub2", "sym2", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub2", "SOURCE_DECLARES"),
+        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=list(shared_edges3),
+        degraded_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[*shared_edges3, _E("pub2", "other_priv", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
 def test_common_dependency_edge_kinds_narrowed_new_still_credited_against_confirmed_full_old() -> None:
     # Thirteenth Codex review: the twelfth-round fix over-corrected by gating
     # NEW's own presence on its narrowing too, symmetrically with OLD. But this
