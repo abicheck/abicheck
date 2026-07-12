@@ -728,7 +728,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
     The single engine entry point behind the ``scan`` CLI and the MCP scan tool:
     it resolves the deterministic level from *req* (the same way
     :func:`estimate_scan` does), drives the shared orchestration core
-    (``cli_scan.run_scan_core`` — classify → always-on tier → pinned level →
+    (``scan_engine.run_scan_core`` — classify → always-on tier → pinned level →
     optional baseline compare), and folds the projected ``estimate_scan`` cost in
     so a caller can compare projected vs. actual. ``--budget`` overflow surfaces as
     ``exit_code`` 5 (the failure-guard contract; never shrinks scope).
@@ -744,12 +744,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
         parse_user_depth,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan import (
+    from .cli_scan_baseline import _public_provenance_set
+    from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
         run_scan_core,
     )
-    from .cli_scan_baseline import _public_provenance_set
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")

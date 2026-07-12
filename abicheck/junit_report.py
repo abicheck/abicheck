@@ -44,13 +44,13 @@ import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, Verdict, policy_for
+from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .reporter import apply_show_only
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
-    from .severity import SeverityConfig
+    from .severity import KindSets, SeverityConfig
 
 
 # ---------------------------------------------------------------------------
@@ -83,79 +83,74 @@ def _classname_for(change: Change) -> str:
 # ---------------------------------------------------------------------------
 
 
+_VERDICT_TO_JUNIT_TYPE: dict[Verdict, str] = {
+    Verdict.BREAKING: "BREAKING",
+    Verdict.API_BREAK: "API_BREAK",
+    Verdict.COMPATIBLE_WITH_RISK: "COMPATIBLE_WITH_RISK",
+}
+
+
 def _is_failure(
     change: Change,
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
 ) -> bool:
     """Return True if the change should be a JUnit ``<failure>``.
 
-    BREAKING and API_BREAK changes always fail.  COMPATIBLE_WITH_RISK
-    changes fail only when their per-kind severity is ``"error"``
-    (currently all RISK_KINDS default to ``"warning"``, so they pass).
+    Routes through ``DiffResult._effective_verdict_for_change`` — the single
+    canonical per-finding verdict, which honours PolicyFile overrides, the
+    A4 per-finding ``effective_verdict`` (ADR-027), and frozen-namespace
+    escalation guards — so the JUnit file can never disagree with the JSON
+    report or the severity-aware exit code.
 
-    When *severity_config* is provided (from ``--severity-preset`` or
-    ``--severity-*`` overrides), its level takes precedence so that
-    the JUnit output honours user-configured severity escalations.
+    BREAKING and API_BREAK verdicts always fail. COMPATIBLE_WITH_RISK fails
+    only when its per-kind severity is ``"error"`` (currently all RISK_KINDS
+    default to ``"warning"``, so they pass), unless *severity_config* (from
+    ``--severity-preset`` or ``--severity-*`` overrides) escalates the
+    finding's effective category to error — which also applies to a plain
+    COMPATIBLE verdict (e.g. under ``--severity-preset strict``).
     """
-    # Honour an A4 per-finding effective_verdict (ADR-027): a demoted opaque/
-    # PIMPL layout change reads compatible and must not be a JUnit failure.
-    eff = getattr(change, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        if eff in (Verdict.BREAKING, Verdict.API_BREAK):
-            return True
-        # COMPATIBLE_WITH_RISK / COMPATIBLE / NO_CHANGE are not hard breaks, so a
-        # JUnit failure here happens only when the user's severity preset
-        # escalates the finding's EFFECTIVE category to error. Route through the
-        # same classifier the severity-aware exit code uses
-        # (``classify_change_object``, which honours ``effective_verdict``) so the
-        # JUnit file never disagrees with the exit status — e.g. a
-        # ``--pattern-verdicts`` demotion to compatible, or the A3 bundle
-        # reachability demotion to risk, still fails under
-        # ``--severity-preset strict`` (ADR-027 review).
-        if severity_config is not None:
-            from .severity import SeverityLevel, classify_change_object
-
-            return (
-                severity_config.level_for(classify_change_object(change))
-                == SeverityLevel.ERROR
-            )
-        return False
-    if change.kind in breaking_set or change.kind in api_break_set:
+    verdict = result._effective_verdict_for_change(change)
+    if verdict in (Verdict.BREAKING, Verdict.API_BREAK):
         return True
     if severity_config is not None:
-        return severity_config.level_for_kind(change.kind).value == "error"
-    if change.kind in risk_set:
-        return policy_for(change.kind).severity == "error"
-    # Kinds not in any explicit set (e.g. newly added ChangeKinds): consult
-    # policy_for() which defaults to BREAKING/severity="error" for unknown
-    # kinds, ensuring fail-closed behaviour.
-    return policy_for(change.kind).severity == "error"
+        from .severity import SeverityLevel, classify_effective_change
+
+        cat = classify_effective_change(
+            change,
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+        )
+        return severity_config.level_for(cat) == SeverityLevel.ERROR
+    # COMPATIBLE_WITH_RISK never fails without a severity_config: all
+    # RISK_KINDS default to severity "warning" in the policy registry. This
+    # must NOT consult policy_for(change.kind) directly — for a demoted
+    # finding (A4 override or PolicyFile override) the *kind*'s own default
+    # severity can be "error" (e.g. a BREAKING kind demoted to risk), which
+    # would wrongly resurrect the pre-override severity.
+    return False
 
 
-def _failure_type(
-    change: Change,
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
-) -> str:
-    """Return the ``type`` attribute for a ``<failure>`` element."""
-    eff = getattr(change, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        return {
-            Verdict.BREAKING: "BREAKING",
-            Verdict.API_BREAK: "API_BREAK",
-            Verdict.COMPATIBLE_WITH_RISK: "COMPATIBLE_WITH_RISK",
-        }.get(eff, "COMPATIBLE")
-    if change.kind in breaking_set:
-        return "BREAKING"
-    if change.kind in api_break_set:
-        return "API_BREAK"
-    if change.kind in risk_set:
-        return "COMPATIBLE_WITH_RISK"
-    return "COMPATIBLE"
+def _failure_type(change: Change, result: DiffResult, kind_sets: KindSets) -> str:
+    """Return the ``type`` attribute for a ``<failure>`` element.
+
+    Uses the same canonical per-finding verdict as ``_is_failure`` so the
+    reported type always matches why the finding failed. Takes the caller's
+    precomputed *kind_sets* rather than recomputing them (``_build_testsuite``
+    already builds them once per report; ``DiffResult._effective_verdict_for_change``
+    would otherwise rebuild them per finding).
+    """
+    from .severity import effective_verdict_for_change
+
+    verdict = effective_verdict_for_change(
+        change,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
+    )
+    return _VERDICT_TO_JUNIT_TYPE.get(verdict, "COMPATIBLE")
 
 
 # ---------------------------------------------------------------------------
@@ -212,15 +207,14 @@ def _collect_all_symbols(
 
 def _count_failures(
     changes: list[Change],
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
     severity_config: SeverityConfig | None,
 ) -> int:
     """Count distinct symbols that have at least one failing change."""
     symbols_with_failure: set[str] = set()
     for c in changes:
-        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
+        if _is_failure(c, result, kind_sets, severity_config):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
 
@@ -229,9 +223,8 @@ def _emit_testcases(
     ts: ET.Element,
     all_symbols: dict[str, str],
     change_by_symbol: dict[str, Change],
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
     severity_config: SeverityConfig | None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
@@ -248,9 +241,8 @@ def _emit_testcases(
                 _maybe_add_failure(
                     tc,
                     change_by_symbol[sym],
-                    breaking_set,
-                    api_break_set,
-                    risk_set,
+                    result,
+                    kind_sets,
                     severity_config,
                 )
     else:
@@ -262,9 +254,8 @@ def _emit_testcases(
             _maybe_add_failure(
                 tc,
                 c,
-                breaking_set,
-                api_break_set,
-                risk_set,
+                result,
+                kind_sets,
                 severity_config,
             )
 
@@ -272,9 +263,8 @@ def _emit_testcases(
 def _append_extra_failures(
     ts: ET.Element,
     extra_changes: list[Change],
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
     severity_config: SeverityConfig | None,
 ) -> None:
     """Append extra ``<failure>`` children to already-existing testcases.
@@ -284,10 +274,10 @@ def _append_extra_failures(
     ``<testcase>`` with the matching name and attach a new ``<failure>``.
     """
     for c in extra_changes:
-        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
+        if _is_failure(c, result, kind_sets, severity_config):
             for tc in ts:
                 if tc.get("name") == c.symbol:
-                    _add_failure(tc, c, breaking_set, api_break_set, risk_set)
+                    _add_failure(tc, c, result, kind_sets)
                     break
 
 
@@ -307,7 +297,7 @@ def _build_testsuite(
     When *show_only* is active, only the filtered changes are emitted
     (no unchanged snapshot symbols) so the test count matches the filter.
     """
-    breaking_set, api_break_set, _, risk_set = result._effective_kind_sets()
+    kind_sets = result._effective_kind_sets()
 
     changes = list(result.changes)
     if show_only:
@@ -315,9 +305,7 @@ def _build_testsuite(
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
-    failure_count = _count_failures(
-        changes, breaking_set, api_break_set, risk_set, severity_config
-    )
+    failure_count = _count_failures(changes, result, kind_sets, severity_config)
 
     total = len(all_symbols) if all_symbols else len(change_by_symbol)
 
@@ -331,14 +319,11 @@ def _build_testsuite(
         ts,
         all_symbols,
         change_by_symbol,
-        breaking_set,
-        api_break_set,
-        risk_set,
+        result,
+        kind_sets,
         severity_config,
     )
-    _append_extra_failures(
-        ts, extra_changes, breaking_set, api_break_set, risk_set, severity_config
-    )
+    _append_extra_failures(ts, extra_changes, result, kind_sets, severity_config)
 
     return ts
 
@@ -346,25 +331,23 @@ def _build_testsuite(
 def _maybe_add_failure(
     tc: ET.Element,
     change: Change,
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure."""
-    if _is_failure(change, breaking_set, api_break_set, risk_set, severity_config):
-        _add_failure(tc, change, breaking_set, api_break_set, risk_set)
+    if _is_failure(change, result, kind_sets, severity_config):
+        _add_failure(tc, change, result, kind_sets)
 
 
 def _add_failure(
     tc: ET.Element,
     change: Change,
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
+    result: DiffResult,
+    kind_sets: KindSets,
 ) -> None:
     """Append a ``<failure>`` element to testcase *tc*."""
-    ftype = _failure_type(change, breaking_set, api_break_set, risk_set)
+    ftype = _failure_type(change, result, kind_sets)
     description = change.description or change.kind.value.replace("_", " ")
     message = f"{change.kind.value}: {description}"
 

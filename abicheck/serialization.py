@@ -74,11 +74,20 @@ def _sets_to_lists(obj: Any) -> Any:
 
 
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
-    # Reset cache fields to None before asdict() to prevent double-serialization.
-    snap._func_by_mangled = None
-    snap._var_by_mangled = None
-    snap._type_by_name = None
-    d = asdict(snap)
+    # asdict() would recursively copy the lazy lookup caches too (wasted work,
+    # and they're dropped below anyway). Clear them for the duration of the
+    # call and restore afterward so this function stays pure from the
+    # caller's perspective — snapshot_to_dict(snap) must not mutate `snap`,
+    # or invalidate an index a caller built and is still holding a reference
+    # to via the object it passed in.
+    saved_caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    try:
+        snap._func_by_mangled = None
+        snap._var_by_mangled = None
+        snap._type_by_name = None
+        d = asdict(snap)
+    finally:
+        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = saved_caches
     d.pop("_func_by_mangled", None)
     d.pop("_var_by_mangled", None)
     d.pop("_type_by_name", None)

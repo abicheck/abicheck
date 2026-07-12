@@ -248,14 +248,14 @@ class TestCompatibleWithRisk:
         tc = ts.find("testcase")
         assert tc.find("failure") is None
 
-    def test_risk_change_with_error_severity_fails(self) -> None:
-        """COMPATIBLE_WITH_RISK changes with overridden severity 'error' should fail.
-
-        We use a policy_file override to promote a RISK kind to severity 'error'.
+    def test_risk_change_with_severity_preset_escalation_fails(self) -> None:
+        """COMPATIBLE_WITH_RISK changes fail when a severity preset escalates
+        ``potential_breaking`` to 'error' — the real, supported mechanism.
+        RISK_KINDS have no per-kind severity in the policy registry (they are
+        all "warning" by construction); only a SeverityConfig can escalate
+        them to a JUnit failure without changing the finding's verdict.
         """
-        from unittest.mock import patch
-
-        from abicheck.checker_policy import PolicyEntry
+        from abicheck.severity import SeverityConfig, SeverityLevel
 
         changes = [
             Change(
@@ -265,20 +265,45 @@ class TestCompatibleWithRisk:
             ),
         ]
         result = _make_result(changes, verdict=Verdict.COMPATIBLE_WITH_RISK)
-        # Patch policy_for to return severity="error" for this kind
-        original_entry = PolicyEntry(
-            Verdict.COMPATIBLE_WITH_RISK,
-            "error",
-            "symbol_version_required_added",
-        )
-        with patch("abicheck.junit_report.policy_for", return_value=original_entry):
-            xml = to_junit_xml(result)
+        severity_config = SeverityConfig(potential_breaking=SeverityLevel.ERROR)
+        xml = to_junit_xml(result, severity_config=severity_config)
         root = _parse(xml)
         ts = root.find("testsuite")
         assert ts.get("failures") == "1"
         fail = root.find(".//failure")
         assert fail is not None
         assert fail.get("type") == "COMPATIBLE_WITH_RISK"
+
+    def test_risk_change_escalated_via_policy_file_fails(self) -> None:
+        """A PolicyFile override that promotes a RISK-kind's *verdict* to
+        BREAKING must fail in JUnit — even with no severity_config.
+
+        Regression test: JUnit's failure classification used to fall back to
+        ``policy_for(change.kind).severity`` for a kind not in the (override-
+        adjusted) breaking/api_break/risk sets, which silently ignored a
+        PolicyFile override that had moved the kind's *effective verdict*
+        without also being reflected in that per-kind severity lookup.
+        """
+        from abicheck.policy_file import PolicyFile
+
+        changes = [
+            Change(
+                kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+                symbol="libc.so.6",
+                description="New GLIBC_2.34 version requirement added",
+            ),
+        ]
+        result = _make_result(changes, verdict=Verdict.COMPATIBLE_WITH_RISK)
+        result.policy_file = PolicyFile(
+            overrides={ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED: Verdict.BREAKING}
+        )
+        xml = to_junit_xml(result)
+        root = _parse(xml)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        fail = root.find(".//failure")
+        assert fail is not None
+        assert fail.get("type") == "BREAKING"
 
 
 # ---------------------------------------------------------------------------

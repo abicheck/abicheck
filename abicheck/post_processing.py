@@ -1235,8 +1235,33 @@ class PostProcessingPipeline:
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
         )
+        # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
+        # not a snapshot: every step from that point on is required to either
+        # leave ``changes`` untouched, mutate it in place (``changes[:] = ...``),
+        # or explicitly resync ``ctx.kept`` to whatever new list it returns (see
+        # ``DetectVersionedSymbolScheme``). If a future step instead rebinds
+        # ``changes = [c for c in changes if ...]`` without updating ``ctx.kept``,
+        # ``ctx.kept`` silently keeps pointing at the stale pre-filter list and
+        # any suppression/demotion recorded downstream is lost from the verdict
+        # with no visible error (this happened once already — see
+        # ``DetectCppPatterns``/``DemoteUnreachableInternalChurn``'s in-place
+        # comments). Enforce the invariant here instead of trusting every future
+        # step author to remember it.
+        kept_tracking_active = False
         for step in self.steps:
             changes = step.run(changes, ctx)
+            if step.name == FilterRedundant.name:
+                kept_tracking_active = True
+            elif kept_tracking_active and ctx.kept is not changes:
+                raise RuntimeError(
+                    f"post-processing step {step.name!r} broke the ctx.kept "
+                    "aliasing contract established by FilterRedundant: it "
+                    "returned a `changes` list that is not the same object as "
+                    "`ctx.kept`, which silently discards any suppression or "
+                    "demotion tracked via ctx.kept from the verdict. Fix the "
+                    "step to mutate `changes[:] = ...` in place, or to "
+                    "explicitly resync `ctx.kept = changes` before returning."
+                )
         # Ensure ctx.kept is set even if FilterRedundant didn't run
         if not ctx.kept and changes:
             ctx.kept = changes

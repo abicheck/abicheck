@@ -56,6 +56,24 @@ class TestSerialization:
         assert "_func_by_mangled" not in d
         assert "_var_by_mangled" not in d
 
+    def test_snapshot_to_dict_does_not_mutate_caller_snapshot(self):
+        """snapshot_to_dict must be pure: it used to reset the lazy lookup
+        caches on the caller's actual snapshot object (not a copy) as a side
+        effect, so calling it after the caller had built an index would
+        silently invalidate that index out from under them."""
+        snap = _sample_snap()
+        snap.index()
+        assert snap._func_by_mangled is not None
+        assert snap._var_by_mangled is not None
+        assert snap._type_by_name is not None
+
+        snapshot_to_dict(snap)
+
+        assert snap._func_by_mangled is not None
+        assert snap._var_by_mangled is not None
+        assert snap._type_by_name is not None
+        assert snap._func_by_mangled["_Z11sample_initv"].name == "sample_init"
+
     def test_is_inline_roundtrip(self):
         """is_inline=True must survive snapshot_to_dict → snapshot_from_dict roundtrip."""
         snap = AbiSnapshot(

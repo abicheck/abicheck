@@ -49,7 +49,13 @@ from abicheck.sarif import _severity as sarif_severity
 
 
 def _fn(name: str, ret: str = "void") -> Function:
-    return Function(name=name, mangled=name, return_type=ret, params=[], visibility=Visibility.PUBLIC)
+    return Function(
+        name=name,
+        mangled=name,
+        return_type=ret,
+        params=[],
+        visibility=Visibility.PUBLIC,
+    )
 
 
 def _result():
@@ -70,7 +76,15 @@ def _result():
 # ── Canonical maps are total over the reportable verdicts ────────────────────
 
 
-@pytest.mark.parametrize("verdict", [Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK, Verdict.COMPATIBLE])
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
+        Verdict.COMPATIBLE_WITH_RISK,
+        Verdict.COMPATIBLE,
+    ],
+)
 def test_canonical_maps_cover_every_reportable_verdict(verdict: Verdict) -> None:
     assert verdict in VERDICT_TO_SEVERITY_LABEL
     assert verdict in VERDICT_TO_SARIF_LEVEL
@@ -93,8 +107,12 @@ def test_presentation_table_is_exactly_the_reportable_verdicts() -> None:
 def test_single_table_is_the_source_of_truth() -> None:
     # The back-compat projections must be derived from VERDICT_PRESENTATION, not
     # a second hand-maintained copy.
-    assert VERDICT_TO_SEVERITY_LABEL == {v: p.severity_label for v, p in VERDICT_PRESENTATION.items()}
-    assert VERDICT_TO_SARIF_LEVEL == {v: p.sarif_level for v, p in VERDICT_PRESENTATION.items()}
+    assert VERDICT_TO_SEVERITY_LABEL == {
+        v: p.severity_label for v, p in VERDICT_PRESENTATION.items()
+    }
+    assert VERDICT_TO_SARIF_LEVEL == {
+        v: p.sarif_level for v, p in VERDICT_PRESENTATION.items()
+    }
 
 
 def test_presentation_internally_consistent() -> None:
@@ -102,7 +120,9 @@ def test_presentation_internally_consistent() -> None:
     # the one table — no row can say "breaking" on one axis and "compatible" on
     # another.
     for pres in VERDICT_PRESENTATION.values():
-        assert pres.breaking_boundary == (pres.severity_label in ("breaking", "api_break"))
+        assert pres.breaking_boundary == (
+            pres.severity_label in ("breaking", "api_break")
+        )
         assert pres.breaking_boundary == (pres.sarif_level == "error")
 
 
@@ -128,7 +148,7 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
     model = ReportModel.from_result(result)
     assert model.changes, "expected at least one change to classify"
 
-    breaking_set, api_break_set, risk_set, _ = result._effective_kind_sets()
+    kind_sets = result._effective_kind_sets()
 
     for ch in model.changes:
         breaking = model.is_breaking_boundary(ch)
@@ -137,10 +157,10 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
         assert (model.severity_label(ch) in ("breaking", "api_break")) == breaking
 
         # SARIF "error" iff breaking; non-breaking must not be "error".
-        assert (sarif_severity(ch) == "error") == breaking
+        assert (sarif_severity(ch, result) == "error") == breaking
 
         # JUnit failure iff breaking (no severity-config gate here).
-        assert _is_failure(ch, breaking_set, api_break_set, risk_set) == breaking
+        assert _is_failure(ch, result, kind_sets) == breaking
 
 
 def test_json_severity_matches_canonical_label() -> None:
@@ -148,7 +168,9 @@ def test_json_severity_matches_canonical_label() -> None:
 
     result = _result()
     model = ReportModel.from_result(result)
-    by_symbol = {(c.kind.value, c.symbol): model.severity_label(c) for c in model.changes}
+    by_symbol = {
+        (c.kind.value, c.symbol): model.severity_label(c) for c in model.changes
+    }
 
     payload = json.loads(to_json(result))
     rendered = payload.get("changes", [])
@@ -167,7 +189,14 @@ def test_a4_override_propagates_across_channels() -> None:
     # COMPATIBLE must read as compatible in every native channel — this is the
     # exact divergence the unification prevents.
     result = _result()
-    breaking = next((c for c in result.changes if result._effective_verdict_for_change(c) == Verdict.BREAKING), None)
+    breaking = next(
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.BREAKING
+        ),
+        None,
+    )
     assert breaking is not None, "fixture must produce a breaking change"
 
     demoted = Change(
@@ -181,6 +210,84 @@ def test_a4_override_propagates_across_channels() -> None:
     assert model.severity_label(demoted) == "compatible"
     assert model.is_breaking_boundary(demoted) is False
     # Override propagates to every native channel: not error, not failure.
-    assert sarif_severity(demoted) == "note"
-    breaking_set, api_break_set, risk_set, _ = result._effective_kind_sets()
-    assert _is_failure(demoted, breaking_set, api_break_set, risk_set) is False
+    assert sarif_severity(demoted, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(demoted, result, kind_sets) is False
+
+
+def test_policy_file_override_propagates_across_channels() -> None:
+    """A PolicyFile override demoting a BREAKING kind to COMPATIBLE must read as
+    compatible in every native channel — SARIF and JUnit must not fall back to
+    the kind's default (pre-override) severity (regression test: SARIF's
+    ``_severity`` and JUnit's ``_is_failure`` used to consult only the A4
+    per-finding ``effective_verdict`` field and the kind's default policy
+    severity, silently ignoring a ``PolicyFile.overrides`` demotion/escalation).
+    """
+    from abicheck.policy_file import PolicyFile
+
+    result = _result()
+    breaking = next(
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.BREAKING
+        ),
+        None,
+    )
+    assert breaking is not None, "fixture must produce a breaking change"
+
+    # Capture the genuinely compatible change before any override is applied —
+    # once `breaking.kind` is demoted below, a lookup by Verdict.COMPATIBLE
+    # would risk matching the just-demoted change instead (they'd share a
+    # verdict at that point), weakening the escalation case below.
+    compatible = next(
+        (
+            c
+            for c in result.changes
+            if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE
+        ),
+        None,
+    )
+    assert compatible is not None, "fixture must produce a compatible change"
+    assert compatible.kind != breaking.kind
+
+    # Demote: a kind normally BREAKING is overridden to COMPATIBLE.
+    result.policy_file = PolicyFile(overrides={breaking.kind: Verdict.COMPATIBLE})
+    model = ReportModel.from_result(result)
+    assert model.verdict_of(breaking) == Verdict.COMPATIBLE
+    assert model.is_breaking_boundary(breaking) is False
+    assert sarif_severity(breaking, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(breaking, result, kind_sets) is False
+
+    # Escalate: a compatible finding overridden up to BREAKING.
+    result.policy_file = PolicyFile(overrides={compatible.kind: Verdict.BREAKING})
+    model = ReportModel.from_result(result)
+    assert model.verdict_of(compatible) == Verdict.BREAKING
+    assert model.is_breaking_boundary(compatible) is True
+    assert sarif_severity(compatible, result) == "error"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(compatible, result, kind_sets) is True
+
+
+def test_named_base_policy_downgrade_propagates_to_sarif() -> None:
+    """A named base policy (``plugin_abi``) that downgrades a kind away from
+    its strict_abi default must read as compatible in SARIF too — not just in
+    JSON/JUnit (regression test: SARIF's ``_severity`` only checked for an A4
+    ``effective_verdict`` or a ``PolicyFile.overrides`` entry, silently
+    ignoring the ``result.policy`` base-policy mechanism entirely, so a kind
+    downgraded by ``plugin_abi``/``sdk_vendor`` still showed SARIF ``"error"``
+    even though the JSON report and exit code correctly read it as compatible).
+    """
+    from abicheck.checker_policy import PLUGIN_ABI_DOWNGRADED_KINDS
+
+    kind = next(iter(PLUGIN_ABI_DOWNGRADED_KINDS))
+    change = Change(kind=kind, symbol="foo", description="calling convention changed")
+    result = _result()
+    result.policy = "plugin_abi"
+    result.changes = [change]
+
+    assert result._effective_verdict_for_change(change) == Verdict.COMPATIBLE
+    assert sarif_severity(change, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(change, result, kind_sets) is False

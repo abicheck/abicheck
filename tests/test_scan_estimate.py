@@ -644,7 +644,8 @@ def test_replay_seed_empty_without_diff_seed(
     # No --since/--changed-path → broad scope. Pattern-trigger POIs must NOT
     # narrow the replay seed (would skip source-only checks in other TUs) — the
     # seed stays empty so collect_inline_pack keeps the broad fallback (Codex).
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
 
     captured: dict[str, object] = {}
     original = cs._build_new_snapshot
@@ -677,7 +678,8 @@ def test_replay_seed_used_when_changed_path_given(
 ) -> None:
     # An explicit --changed-path is a real diff seed → the POI floor feeds the
     # replay scope.
-    import abicheck.cli_scan as cs
+    # _build_new_snapshot lives in scan_engine.py (called from run_scan_core).
+    import abicheck.scan_engine as cs
 
     captured: dict[str, object] = {}
     original = cs._build_new_snapshot
@@ -839,7 +841,9 @@ def test_run_scan_binary_depth_suppresses_headers(
     # Codex P2: a programmatic ScanRequest(depth="binary", headers=[...]) must not
     # parse the L2 header AST — the service mirrors the CLI's `--depth binary`
     # header suppression so the collected evidence matches the reported depth.
-    import abicheck.cli_scan as cs
+    # run_scan_core lives in scan_engine.py; service_scan.run_scan imports it
+    # from there, not from cli_scan.
+    import abicheck.scan_engine as cs
     from abicheck.service import run_scan
 
     captured: dict[str, object] = {}
@@ -869,7 +873,9 @@ def test_run_scan_source_method_overrides_binary_keeps_headers(
     # Service parity with the CLI (Codex review): --source-method wins over --depth,
     # so source_method="s5" + depth="binary" resolves to a SOURCE scan that keeps
     # the header AST — suppression keys on the *resolved* depth, not the raw one.
-    import abicheck.cli_scan as cs
+    # run_scan_core lives in scan_engine.py; service_scan.run_scan imports it
+    # from there, not from cli_scan.
+    import abicheck.scan_engine as cs
     from abicheck.service import run_scan
 
     captured: dict[str, object] = {}

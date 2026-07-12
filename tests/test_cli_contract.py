@@ -211,8 +211,11 @@ def test_gate_flags_missing_decorator(
     gate.check_cli_contract(findings)
     msgs = [m for c, m in findings.errors if c == "cli-contract"]
     # severity/scope/output are missing → three coverage errors naming `compare`.
-    missing = {fam for fam in ("severity_options", "scope_options", "output_options")
-               if any(fam in m and "compare" in m for m in msgs)}
+    missing = {
+        fam
+        for fam in ("severity_options", "scope_options", "output_options")
+        if any(fam in m and "compare" in m for m in msgs)
+    }
     assert missing == {"severity_options", "scope_options", "output_options"}, msgs
 
 
@@ -260,7 +263,9 @@ def test_intentional_subset_decorator_is_not_flagged(
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "_VERDICT_CMD_MODULES", {"cli_synth.py": "synth"})
     monkeypatch.setattr(
-        gate, "_INTENTIONAL_SUBSET_DECORATORS", frozenset({("synth", "severity_options")})
+        gate,
+        "_INTENTIONAL_SUBSET_DECORATORS",
+        frozenset({("synth", "severity_options")}),
     )
 
     findings = gate.Findings()
@@ -413,9 +418,7 @@ def test_gate_flags_unmapped_mcp_param(
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
-    (pkg / "cli_options.py").write_text(
-        "MCP_CLI_NAME_MAP = {'old_input': '--old'}\n"
-    )
+    (pkg / "cli_options.py").write_text("MCP_CLI_NAME_MAP = {'old_input': '--old'}\n")
     (pkg / "mcp_server.py").write_text(
         "def abi_compare(old_input, new_input, mystery_param='x'):\n    return ''\n"
     )
@@ -497,7 +500,9 @@ def test_ast_frontend_threads_to_l4_extractor(
     src = tmp_path / "src"
     src.mkdir()
     snap = AbiSnapshot(library="l", version="1")
-    cb.embed_build_source(snap, None, src, collect_mode="source-target", extractor="clang")
+    cb.embed_build_source(
+        snap, None, src, collect_mode="source-target", extractor="clang"
+    )
     assert captured.get("extractor") == "clang"
 
 
@@ -518,34 +523,123 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate", "--annotate-additions", "--ast-frontend", "--btf", "--bundle-cohort", "--bundle-system-providers",
-        "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format",
-        "--debug-root", "--debuginfod", "--debuginfod-url",
-        "--build-info", "--debug-info", "--demangle", "--depth", "--devel-pkg", "--dso-only", "--dwarf",
-        "--dwarf-only", "--env-matrix", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
-        "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--include",
-        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path", "--manifest",
-        "--max", "--new-ast-frontend",
-        "--no-bundle-analysis", "--no-debuginfod", "--no-demangle", "--no-dwarf-only",
-        "--no-fail-on-removed-library", "--no-nostdinc",
-        "--no-pattern-verdicts", "--no-scope-public-headers", "--no-show-redundant",
-        "--nostdinc", "--old-ast-frontend",
-        "--output", "--output-dir",
-        "--pattern-verdicts", "--pdb-path", "--policy", "--policy-file", "--post-manifest", "--probe-matrix", "--profile",
-        "--public-symbol", "--public-symbols-list", "--recommend", "--reconcile-build-context", "--report-mode", "--require-justification", "--scope-public-headers",
-        "--search-path", "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
-        "--show-filtered", "--show-impact", "--show-only", "--show-redundant", "--sources", "--stat", "--strict-suppressions",
-        "--suppress", "--surface-metrics", "--sysroot", "--verbose", "--version", "-H", "-I",
-        "-j", "-o", "-v",
+        "--annotate",
+        "--annotate-additions",
+        "--ast-frontend",
+        "--btf",
+        "--bundle-cohort",
+        "--bundle-system-providers",
+        "--collapse-versioned-symbols",
+        "--config",
+        "--ctf",
+        "--debug-format",
+        "--debug-root",
+        "--debuginfod",
+        "--debuginfod-url",
+        "--build-info",
+        "--debug-info",
+        "--demangle",
+        "--depth",
+        "--devel-pkg",
+        "--dso-only",
+        "--dwarf",
+        "--dwarf-only",
+        "--env-matrix",
+        "--exit-code-scheme",
+        "--explain-patterns",
+        "--fail-on-removed-library",
+        "--follow-deps",
+        "--format",
+        "--gcc-option",
+        "--gcc-options",
+        "--gcc-path",
+        "--gcc-prefix",
+        "--header",
+        "--include",
+        "--include-private-dso",
+        "--jobs",
+        "--keep-extracted",
+        "--lang",
+        "--ld-library-path",
+        "--manifest",
+        "--max",
+        "--new-ast-frontend",
+        "--no-bundle-analysis",
+        "--no-debuginfod",
+        "--no-demangle",
+        "--no-dwarf-only",
+        "--no-fail-on-removed-library",
+        "--no-nostdinc",
+        "--no-pattern-verdicts",
+        "--no-scope-public-headers",
+        "--no-show-redundant",
+        "--nostdinc",
+        "--old-ast-frontend",
+        "--output",
+        "--output-dir",
+        "--pattern-verdicts",
+        "--pdb-path",
+        "--policy",
+        "--policy-file",
+        "--post-manifest",
+        "--probe-matrix",
+        "--profile",
+        "--public-symbol",
+        "--public-symbols-list",
+        "--recommend",
+        "--reconcile-build-context",
+        "--report-mode",
+        "--require-justification",
+        "--scope-public-headers",
+        "--search-path",
+        "--severity-abi-breaking",
+        "--severity-addition",
+        "--severity-potential-breaking",
+        "--severity-preset",
+        "--severity-quality-issues",
+        "--show-filtered",
+        "--show-impact",
+        "--show-only",
+        "--show-redundant",
+        "--sources",
+        "--stat",
+        "--strict-suppressions",
+        "--suppress",
+        "--surface-metrics",
+        "--sysroot",
+        "--verbose",
+        "--version",
+        "-H",
+        "-I",
+        "-j",
+        "-o",
+        "-v",
     ),
     "appcompat": (
-        "--check-against", "--format", "--header", "--include", "--lang",
+        "--check-against",
+        "--format",
+        "--header",
+        "--include",
+        "--lang",
         "--list-required-symbols",
-        "--no-scope-public-headers", "--version",
-        "--output", "--policy", "--policy-file", "--scope-public-headers",
-        "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking",
-        "--severity-preset", "--severity-quality-issues", "--show-irrelevant", "--suppress",
-        "--verbose", "-H", "-I", "-o", "-v",
+        "--no-scope-public-headers",
+        "--version",
+        "--output",
+        "--policy",
+        "--policy-file",
+        "--scope-public-headers",
+        "--severity-abi-breaking",
+        "--severity-addition",
+        "--severity-potential-breaking",
+        "--severity-preset",
+        "--severity-quality-issues",
+        "--show-irrelevant",
+        "--suppress",
+        "--verbose",
+        "-H",
+        "-I",
+        "-o",
+        "-v",
     ),
 }
 
@@ -729,9 +823,65 @@ def test_run_compare_request_normalizes_lang(
 
     monkeypatch.setattr(service, "resolve_input", _spy_resolve_input)
 
-    req = CompareRequest(
-        old=InputSpec.of(old_p), new=InputSpec.of(new_p), lang="C"
-    )
+    req = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p), lang="C")
     service.run_compare_request(req)
 
     assert seen_langs == ["c", "c"]
+
+
+# ── D1: service_scan must not depend on the CLI frontend ────────────────────
+#
+# service_scan.run_scan historically imported its shared scan-engine core
+# (run_scan_core / _BudgetOverflow / _EvidenceContractError) from cli_scan.py —
+# a Click command module — the reverse of the intended frontend → service →
+# engine dependency direction (ADR-037 D1). That engine core now lives in
+# scan_engine.py (no @click.option decorators, not registered as a command);
+# cli_scan.py (the CLI) and service_scan.py (the typed service API) both
+# import from it instead of service_scan reaching into the CLI module.
+
+
+def _imported_modules(path: Path) -> set[str]:
+    """Return every module name imported anywhere in *path* (module-level,
+    function-local, or under ``TYPE_CHECKING`` — all are real coupling, just
+    with different init-time consequences)."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module:
+                out.add(module)
+            for alias in node.names:
+                out.add(f"{module}.{alias.name}" if module else alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                out.add(alias.name)
+    return out
+
+
+def test_service_scan_does_not_import_cli_scan() -> None:
+    """service_scan.py must never import from cli_scan.py (the Click ``scan``
+    command module) — the shared engine core lives in scan_engine.py, which
+    both cli_scan.py and service_scan.py depend on independently."""
+    import abicheck.service_scan as service_scan_mod
+
+    path = Path(service_scan_mod.__file__)
+    imported = _imported_modules(path)
+    assert not {"cli_scan", "abicheck.cli_scan"} & imported, (
+        "service_scan.py imports from cli_scan.py — this reintroduces the "
+        "service→CLI dependency inversion ADR-037 D1 / the scan_engine split "
+        "fixed. Import the needed symbols from abicheck.scan_engine instead."
+    )
+
+
+def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
+    """cli_scan.py's re-exported run_scan_core (etc.) are the *same objects*
+    as scan_engine's, not divergent copies — the CLI and the typed service API
+    both call one engine (ADR-037 D1)."""
+    from abicheck import cli_scan, scan_engine
+
+    assert cli_scan.run_scan_core is scan_engine.run_scan_core
+    assert cli_scan._BudgetOverflow is scan_engine._BudgetOverflow
+    assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
