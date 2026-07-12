@@ -347,6 +347,66 @@ def project_source_files(build: BuildEvidence) -> frozenset[str]:
     return frozenset(files)
 
 
+def extractor_pass_fully_covered(
+    target: BuildEvidence, extractor: Any, narrowed: bool = False
+) -> bool:
+    """Whether a call/type-graph extraction run may claim confirmed pass coverage.
+
+    Shared by ``inline._fold_call_graph``/``_fold_type_graph`` (the inline
+    ``dump --sources`` path) and ``cli_buildsource_helpers._collect_call_graph``
+    (the out-of-band ``collect --call-graph`` path) so both stamp
+    ``SourceGraphSummary.extractor_passes`` under the identical rule
+    (ADR-041 P0 slice 2/3 coverage-honesty chain). Three conditions, all
+    required:
+
+    - Not *narrowed*: the run examined the whole compile DB, not a
+      changed-path/headers-only-scoped subset (sixth Codex review) — a scoped
+      run's "found nothing" only covers the TUs it actually parsed. The
+      out-of-band collect path never narrows, so it always passes ``False``.
+    - At least one compile unit to examine: an empty target trivially "finds
+      nothing" without having looked at anything at all.
+    - No per-TU diagnostics recorded on *extractor* (seventh Codex review):
+      ``extract_from_build`` degrades a failing TU (clang crash/timeout/
+      degenerate AST) to zero edges *silently* — the returned edge list alone
+      cannot distinguish "every TU parsed cleanly, zero found" from "some TU
+      never actually got parsed." Diagnostics are the only signal a partial
+      failure happened; any of them disqualifies the whole pass from claiming
+      confirmed coverage, even if most TUs did succeed.
+    """
+    if narrowed:
+        return False
+    return _pass_ran_cleanly(target, extractor)
+
+
+def _pass_ran_cleanly(target: BuildEvidence, extractor: Any) -> bool:
+    """Whether *extractor* examined at least one TU in *target* with no diagnostics.
+
+    The scope-independent half of :func:`extractor_pass_fully_covered`'s
+    checks, shared with :func:`narrowed_pass_confirmed` — narrowing changes
+    only whether the examined scope may be trusted as *whole-project*
+    coverage, not whether the run itself succeeded cleanly.
+    """
+    if not any(cu.source for cu in target.compile_units):
+        return False
+    return not extractor.diagnostics
+
+
+def narrowed_pass_confirmed(target: BuildEvidence, extractor: Any) -> bool:
+    """Whether a *narrowed* call/type-graph run may claim ``narrowed_passes`` coverage.
+
+    Same rigor as :func:`extractor_pass_fully_covered` minus the "not
+    narrowed" requirement (the caller already knows the run was narrowed) —
+    at least one compile unit examined, and no per-TU diagnostics (seventh
+    Codex review's rationale applies identically to a narrowed run: a
+    silently-degraded TU inside the narrow scope must not read as "the scope
+    was cleanly examined, zero found," fifteenth Codex review). Only once
+    this holds does a narrowed run's zero-edge family become trustworthy
+    enough for :func:`source_graph._common_dependency_edge_kinds` to widen a
+    matched-scope comparison to the whole family.
+    """
+    return _pass_ran_cleanly(target, extractor)
+
+
 def augment_graph_with_calls(
     graph: SourceGraphSummary,
     edges: list[CallEdge],
@@ -619,6 +679,19 @@ class ClangCallGraphExtractor:
                 f"clang produced no AST (stderr: {proc.stderr[:200]})"
             )
             return []
+        # A non-zero exit (real compile errors in the replayed, necessarily
+        # approximate flag subset) does not stop clang's AST dump from still
+        # printing a partial, error-recovered tree — `-ast-dump` walks
+        # whatever it built. Still salvage any edges from that best-effort
+        # AST (unchanged from before), but record a diagnostic regardless so
+        # `extractor_pass_fully_covered` (ADR-041 P0 slice 3, ninth Codex
+        # review) never treats this TU as cleanly, fully parsed — a bad exit
+        # must disqualify confirmed pass coverage even though `diagnostics`
+        # would otherwise stay empty.
+        if proc.returncode != 0:
+            self.diagnostics.append(
+                f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
+            )
         try:
             # Both json.loads and the recursive AST walk can hit Python's
             # recursion limit on a pathologically deep TU; guard so a degenerate

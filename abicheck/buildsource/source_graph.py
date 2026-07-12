@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -88,6 +89,18 @@ EDGE_KINDS: frozenset[str] = frozenset({
 CONF_HIGH = "high"
 CONF_REDUCED = "reduced"
 CONF_UNKNOWN = "unknown"
+
+#: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
+#: non-call reference to a global/constant, a parameter/field type, or a base
+#: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
+#: check and this module's version-over-version internal-dependency diff both
+#: read exactly this set, so the two stay in lockstep on what "a public entity
+#: reaches an internal one" means — a struct's private field type or base
+#: class is exactly the "not a call at all" risk ADR-041 opens with.
+DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset({
+    "DECL_CALLS_DECL", "DECL_REFERENCES_DECL", "DECL_HAS_TYPE",
+    "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+})
 
 
 def _conf_from_build(conf: Confidence) -> str:
@@ -192,6 +205,60 @@ class SourceGraphSummary:
     edges: list[GraphEdge] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
     external_graph_refs: list[dict[str, Any]] = field(default_factory=list)
+    #: Which named extractor passes ran to completion (``"call_graph"`` /
+    #: ``"type_graph"``), independent of how many edges they produced (ADR-041
+    #: P0 slice 2 follow-up, second Codex review). Edge *presence* alone cannot
+    #: distinguish "the pass ran and found nothing" from "the pass never ran" —
+    #: a project where no public struct happens to have a private field would
+    #: look identical to one whose type-graph pass never executed, even though
+    #: only the second is actually missing evidence. Set by
+    #: ``inline._fold_call_graph``/``_fold_type_graph`` right after a
+    #: successful extraction (regardless of edge count); absent/``False`` means
+    #: "unknown whether it ran" (e.g. a hand-built or pre-slice-2 graph), so
+    #: readers fall back to edge-presence inference for those.
+    extractor_passes: dict[str, bool] = field(default_factory=dict)
+    #: Which named extractor passes ran, but only over a *narrowed* scope
+    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/
+    #: ``_fold_type_graph`` to a subset of compile units — eleventh Codex
+    #: review). A narrowed pass never sets ``extractor_passes`` for that name
+    #: (it did not examine the whole project), but it still serializes
+    #: whatever edges it *did* collect from the subset it saw. Those edges
+    #: must not be treated as full-family coverage when compared against a
+    #: side that ran a confirmed *full* pass — a baseline scoped to a few
+    #: changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge says nothing about
+    #: whether the rest of the project's dependencies were ever inspected, so
+    #: comparing it as if that kind were fully covered lets unrelated,
+    #: never-examined dependencies read as "newly added". Set alongside (in
+    #: place of) ``extractor_passes`` by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph`` when the local ``narrowed`` flag is ``True``.
+    narrowed_passes: dict[str, bool] = field(default_factory=dict)
+    #: The actual scope a narrowed pass was restricted to — the ``changed_paths``
+    #: tuple, or the examined compile units' source paths for an unseeded
+    #: ``scoped_units`` run (fourteenth Codex review). ``narrowed_passes`` alone
+    #: is just a boolean: two narrowed sides being "both narrowed" does not mean
+    #: narrowed to the *same* subset — an old run scoped to ``src/a.cpp`` and a
+    #: new run scoped to ``src/b.cpp`` are each individually narrow but examine
+    #: disjoint code, so trusting either one's absence of an edge kind as
+    #: coverage for the other's territory is exactly the same false-positive
+    #: risk narrowed-vs-full already guards against. ``_common_dependency_edge_kinds``
+    #: only trusts a narrowed side's edge as coverage when the other side is
+    #: narrowed to this *identical* (non-empty) scope; set alongside
+    #: ``narrowed_passes`` by ``inline._fold_call_graph``/``_fold_type_graph``.
+    narrowed_scope: dict[str, frozenset[str]] = field(default_factory=dict)
+    #: Which named extractor passes hit per-TU diagnostics — a clang crash/
+    #: timeout/degenerate AST on some subset (sixteenth Codex review). Such a
+    #: run (narrowed or not) still folds edges from the TUs that *did* parse,
+    #: but those edges must not vouch for "this kind was examined" over
+    #: whatever scope the pass claims: the failed TUs are an unknown,
+    #: untracked gap (unlike ``narrowed_scope``, which knows exactly which TUs
+    #: a deliberately-scoped run examined). Set by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph``/``cli_buildsource_helpers._collect_call_graph``
+    #: whenever the pass examined units but ``extractor.diagnostics`` was
+    #: non-empty (mutually exclusive with ``extractor_passes``/``narrowed_passes``,
+    #: which both require zero diagnostics — so a narrowed run with
+    #: diagnostics lands here too, on top of never confirming
+    #: ``narrowed_passes``, since it is even less trustworthy than either).
+    degraded_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
@@ -274,7 +341,14 @@ class SourceGraphSummary:
         edge_kinds: dict[str, int] = {}
         for e in self.edges:
             edge_kinds[e.kind] = edge_kinds.get(e.kind, 0) + 1
-        has_calls = any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
+        # A pass that ran but found zero edges is still "collected" (ADR-041 P0
+        # slice 2 follow-up): edge presence alone reads identically to "the
+        # pass never ran", which is the exact coverage-honesty gap
+        # ``extractor_passes`` closes. Fall back to edge presence alone when
+        # the flag is absent (a hand-built or pre-slice-2 graph).
+        call_pass_ran = self.extractor_passes.get("call_graph", False)
+        type_pass_ran = self.extractor_passes.get("type_graph", False)
+        has_calls = call_pass_ran or any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
         has_includes = any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
         #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe
         #: type-level dependencies; DECL_REFERENCES_DECL a non-call decl reference.
@@ -283,8 +357,10 @@ class SourceGraphSummary:
         #: separately from the call graph — a graph can have calls but no type
         #: edges (e.g. an older pack) and coverage must say so honestly.
         type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
-        has_type_edges = any(e.kind in type_edge_kinds for e in self.edges)
-        has_reference_edges = any(e.kind == "DECL_REFERENCES_DECL" for e in self.edges)
+        has_type_edges = type_pass_ran or any(e.kind in type_edge_kinds for e in self.edges)
+        has_reference_edges = type_pass_ran or any(
+            e.kind == "DECL_REFERENCES_DECL" for e in self.edges
+        )
         self.coverage = {
             "targets": kinds.get("target", 0),
             "compile_units": kinds.get("compile_unit", 0),
@@ -316,6 +392,12 @@ class SourceGraphSummary:
             "edges": [e.to_dict() for e in self.edges],
             "indexes": self.indexes(),
             "external_graph_refs": [dict(r) for r in self.external_graph_refs],
+            "extractor_passes": dict(self.extractor_passes),
+            "narrowed_passes": dict(self.narrowed_passes),
+            "narrowed_scope": {
+                k: sorted(v) for k, v in self.narrowed_scope.items()
+            },
+            "degraded_passes": dict(self.degraded_passes),
         }
 
     @classmethod
@@ -323,6 +405,9 @@ class SourceGraphSummary:
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
         # a load (evidence/CLAUDE.md forward-compat rule). ``indexes`` are derived
         # and intentionally not read back — they are recomputed from nodes/edges.
+        # ``extractor_passes`` defaults to {} for a pre-slice-2 pack (additive
+        # field, no schema_version bump needed — same "unknown edge kinds/
+        # fields are ignored/defaulted" forward-compat rule as ADR-041 P0 slice 1).
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
@@ -330,6 +415,19 @@ class SourceGraphSummary:
             edges=[GraphEdge.from_dict(e) for e in d.get("edges", [])],
             coverage=dict(d.get("coverage", {})),
             external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
+            extractor_passes={
+                str(k): bool(v) for k, v in dict(d.get("extractor_passes", {})).items()
+            },
+            narrowed_passes={
+                str(k): bool(v) for k, v in dict(d.get("narrowed_passes", {})).items()
+            },
+            narrowed_scope={
+                str(k): frozenset(str(p) for p in v)
+                for k, v in dict(d.get("narrowed_scope", {})).items()
+            },
+            degraded_passes={
+                str(k): bool(v) for k, v in dict(d.get("degraded_passes", {})).items()
+            },
         )
 
 
@@ -380,6 +478,123 @@ _TYPE_NODE_KINDS: dict[str, str] = {"enum": "enum_type", "typedef": "typedef"}
 
 def _type_node_kind(decl_kind: str) -> str:
     return _TYPE_NODE_KINDS.get(decl_kind, "record_type")
+
+
+#: Graph node kinds a type entity (as opposed to a function/variable
+#: ``source_decl``) can carry. Mirrors ``crosscheck._DECL_NODE_KINDS`` minus
+#: ``source_decl``.
+_TYPE_ENTITY_KINDS: frozenset[str] = frozenset({"record_type", "enum_type", "typedef"})
+
+#: Graph node kinds that carry a declaration/type visibility we can classify as
+#: public or internal. Shared with ``crosscheck.py``'s intra-version
+#: ``public_to_internal_dependency`` check (ADR-041 P0 slice 2, fourth Codex
+#: review) so the two never classify a node differently.
+DECL_NODE_KINDS: frozenset[str] = frozenset({"source_decl"}) | _TYPE_ENTITY_KINDS
+
+#: Node visibilities that put an entity *on* the public source surface. Mirrors
+#: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is
+#: derived from): ``generated`` means a generated header **under the public
+#: roots** — a public, consumer-visible entity — so it is NOT an internal
+#: dependency.
+PUBLIC_VISIBILITIES: frozenset[str] = frozenset({"public_header", "generated"})
+
+#: Node visibilities that make an entity *internal* (not public surface): a
+#: project-private header or an implementation ("source") file. System headers
+#: are third-party (excluded), and ``generated`` is public (above).
+INTERNAL_VISIBILITIES: frozenset[str] = frozenset({"private_header", "source"})
+
+#: Visibilities that carry no provenance. The built-in call/type-graph
+#: extractors create dependency-target nodes with **no** ``visibility`` attr
+#: when the target isn't part of the linked L4 surface. Such a node is
+#: internal *only when the project also declares it* (``decl_to_file``) or the
+#: extractor marked it ``defined_in_project`` — caller/reference presence
+#: alone is unsound (a third-party header-inline symbol whose body is reached
+#: also appears as a dependency target), so a bare node with no project
+#: provenance is treated as a third-party/system target and not flagged.
+UNANNOTATED_VISIBILITIES: frozenset[str] = frozenset({"", "unknown"})
+
+#: Mangled-name prefixes / substrings that mark a standard-library or
+#: compiler-internal decl. The call/type graphs resolve targets into ``std::``/
+#: ``__gnu_cxx``/cxxabi helpers, which carry no visibility either; without this
+#: an unannotated stdlib target would be mis-read as a project-internal
+#: dependency and a public API merely using ``std::`` would light up. Mirrors
+#: the stdlib/compiler filtering the dumper already applies to exported
+#: symbols.
+_SYSTEM_NAME_PREFIXES = (
+    "_ZSt", "_ZNSt", "_ZNKSt", "_ZNSa", "_ZN9__gnu_cxx", "_ZNK9__gnu_cxx",
+    "_ZN6__cxxabiv", "_Znw", "_Zna", "_Zdl", "_Zda", "__",
+)
+_SYSTEM_NAME_SUBSTRINGS = ("std::", "__gnu_cxx::", "__cxxabiv")
+
+
+def looks_like_system_name(name: str) -> bool:
+    """Whether *name* is a standard-library / compiler-internal decl spelling."""
+    if name.startswith(_SYSTEM_NAME_PREFIXES):
+        return True
+    return any(sub in name for sub in _SYSTEM_NAME_SUBSTRINGS)
+
+
+def decl_declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
+    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges."""
+    node_by_id = {n.id: n for n in graph.nodes}
+    decl_to_file: dict[str, str] = {}
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        header = node_by_id.get(e.src)
+        if header is not None and header.label:
+            decl_to_file.setdefault(e.dst, header.label)
+    return decl_to_file
+
+
+def is_public_dependency_node(
+    node_id: str, node_by_id: dict[str, GraphNode], exported_decls: set[str]
+) -> bool:
+    """Whether *node_id* is public: exported-symbol-mapped or public-header visible.
+
+    Shared with ``crosscheck.py``'s ``_is_public_decl`` (ADR-041 P0 slice 2).
+    """
+    if node_id in exported_decls:
+        return True
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in DECL_NODE_KINDS:
+        return False
+    return str(node.attrs.get("visibility", "")) in PUBLIC_VISIBILITIES
+
+
+def is_internal_dependency_node(
+    node_id: str,
+    node_by_id: dict[str, GraphNode],
+    exported_decls: set[str],
+    decl_to_file: dict[str, str],
+) -> bool:
+    """Whether *node_id* is a project-internal decl/type consumers cannot see.
+
+    "Not declared by a public header" alone is not internal — a third-party or
+    standard-library type used as a field/parameter type is *also* not
+    declared by any project header, and must not be conflated with a genuinely
+    private project entity (ADR-041 P0 slice 2, fourth Codex review). Requires
+    positive evidence instead: an explicit ``private_header``/``source``
+    visibility, or — for an unannotated node — project-file provenance
+    (``decl_to_file``/``defined_in_project``) plus a non-system-looking name.
+    Shared with ``crosscheck.py``'s ``_is_internal_decl`` (same algorithm, same
+    source of truth) so the intra-version and inter-version checks classify a
+    node identically.
+    """
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in DECL_NODE_KINDS:
+        return False
+    if node_id in exported_decls:
+        return False
+    vis = str(node.attrs.get("visibility", ""))
+    if vis in INTERNAL_VISIBILITIES:
+        return True
+    if vis in UNANNOTATED_VISIBILITIES:
+        has_provenance = node_id in decl_to_file or bool(node.attrs.get("defined_in_project"))
+        if not has_provenance:
+            return False
+        return not looks_like_system_name(node.label or "")
+    return False
 
 
 # ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
@@ -783,6 +998,34 @@ def _public_decls(graph: SourceGraphSummary) -> set[str]:
     }
 
 
+def _public_types(graph: SourceGraphSummary) -> set[str]:
+    """Type (``record_type``/``enum_type``/``typedef``) ids that are genuinely public.
+
+    The type-level analogue of :func:`_public_decls` — but "declared by a
+    ``header``-kind node" alone is not enough (sixth Codex review):
+    ``_augment_with_source_abi``'s ``header_declares`` creates a ``header``
+    node for *every* declaring file regardless of whether it is a public or a
+    private-project header — privacy lives on the type's own ``visibility``
+    attr (from ``ent.visibility``), not the node kind. Without the visibility
+    check, a private type is treated as a dependency-closure *entry*
+    (:func:`_dependency_reachability`), so a private type that gains a private
+    field/base of its own could wrongly emit ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+    even though no public API is involved.
+    """
+    kinds = _kind_map(graph)
+    node_by_id = {n.id: n for n in graph.nodes}
+    out: set[str] = set()
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        if kinds.get(e.src) != "header" or kinds.get(e.dst) not in _TYPE_ENTITY_KINDS:
+            continue
+        node = node_by_id.get(e.dst)
+        if node is not None and str(node.attrs.get("visibility", "")) in PUBLIC_VISIBILITIES:
+            out.add(e.dst)
+    return out
+
+
 def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:
     """``generated_file`` ids that are exposed as a target's public header.
 
@@ -832,6 +1075,321 @@ def _public_entry_call_reachability(graph: SourceGraphSummary) -> dict[str, froz
     return out
 
 
+def _dependency_reachability(
+    graph: SourceGraphSummary, edge_kinds: frozenset[str]
+) -> dict[str, frozenset[str]]:
+    """For each public entry (exported decl or public type), what it reaches.
+
+    Generalizes :func:`_public_entry_call_reachability` from ``DECL_CALLS_DECL``
+    alone to *edge_kinds* (normally :data:`DEPENDENCY_EDGE_KINDS`, or the
+    old/new-common subset a version diff must restrict to — see
+    :func:`_common_dependency_edge_kinds`): a public struct's private base class
+    (``TYPE_INHERITS``) or private field type (``TYPE_HAS_FIELD_TYPE``), a
+    function's private parameter type (``DECL_HAS_TYPE``), and a body reading a
+    private constant (``DECL_REFERENCES_DECL``) are exactly the "not a call at
+    all" risks ADR-041 opens with — a call-only closure never sees them.
+
+    Entries are every node :func:`is_public_dependency_node` accepts: a decl
+    backing an exported symbol (``SOURCE_DECL_MAPS_TO_SYMBOL``), *or* any
+    decl/type node with public-header visibility — not exported-symbol-backed
+    decls alone (tenth Codex review). A public inline/template/constexpr
+    function or a public variable declared in a public header commonly has no
+    exported binary symbol of its own (inlined at every call site, or never
+    emitted standalone), so restricting entries to
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` missed exactly the ADR's own headline
+    example — ``inline int f() { return detail::SECRET; }`` — whenever ``f``
+    isn't separately exported. ``crosscheck.py``'s intra-version check already
+    treats a ``visibility="public_header"`` decl as public
+    (``is_public_dependency_node``, shared since the fourth review); this
+    closure now uses the identical rule, so a public type is no longer a
+    special case (:func:`_public_types` is unused here now — public-header
+    visibility already covers it).
+    Returns ``{}`` when *edge_kinds* is empty or the graph carries none of them,
+    so callers can skip the comparison entirely.
+    """
+    adjacency: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind in edge_kinds:
+            adjacency.setdefault(e.src, []).append(e.dst)
+    if not adjacency:
+        return {}
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    node_by_id = {n.id: n for n in graph.nodes}
+    entries = {
+        n.id for n in graph.nodes
+        if is_public_dependency_node(n.id, node_by_id, exported_decls)
+    }
+    out: dict[str, frozenset[str]] = {}
+    for entry in entries:
+        seen: set[str] = set()
+        stack = list(adjacency.get(entry, []))
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(adjacency.get(node, []))
+        out[entry] = frozenset(seen)
+    return out
+
+
+def _dependency_path(
+    graph: SourceGraphSummary, edge_kinds: frozenset[str], entry: str, target: str
+) -> list[GraphEdge] | None:
+    """One concrete shortest edge chain from *entry* to *target* over *edge_kinds*.
+
+    ADR-041 P0 roadmap item 3 ("graph explain proof path"): a reachability
+    fact (:func:`_dependency_reachability` already proved *target* is
+    reachable from *entry*) is a bare assertion until a reader can see *how* —
+    the actual edge-by-edge chain, not just an endpoint list. BFS over the
+    same *edge_kinds* adjacency, tracking one predecessor edge per node so the
+    chain can be reconstructed once *target* is reached (shortest, not every
+    path — one witness is enough to explain a finding). Returns ``[]`` when
+    *entry* == *target*, or ``None`` if no such path exists (defensive; should
+    not happen for a (entry, target) pair sourced from
+    :func:`_dependency_reachability`'s own output).
+    """
+    if entry == target:
+        return []
+    adjacency: dict[str, list[GraphEdge]] = {}
+    for e in graph.edges:
+        if e.kind in edge_kinds:
+            adjacency.setdefault(e.src, []).append(e)
+    visited = {entry}
+    queue: deque[str] = deque([entry])
+    came_from: dict[str, GraphEdge] = {}
+    while queue:
+        node = queue.popleft()
+        if node == target:
+            break
+        for e in adjacency.get(node, []):
+            if e.dst in visited:
+                continue
+            visited.add(e.dst)
+            came_from[e.dst] = e
+            queue.append(e.dst)
+    if target not in came_from:
+        return None
+    path: list[GraphEdge] = []
+    cur = target
+    while cur != entry:
+        e = came_from[cur]
+        path.append(e)
+        cur = e.src
+    path.reverse()
+    return path
+
+
+def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
+    """Render a :func:`_dependency_path` result as a human-readable chain.
+
+    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
+    Returns ``""`` for an empty path (entry == target).
+    """
+    if not path:
+        return ""
+    labels = _label_map(graph)
+    parts = [labels.get(path[0].src, path[0].src)]
+    for e in path:
+        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
+    return " ".join(parts)
+
+
+#: Dependency edge kinds grouped by the single extractor pass that emits them
+#: together, keyed by the same pass name ``inline._fold_call_graph`` /
+#: ``inline._fold_type_graph`` stamp onto ``SourceGraphSummary.extractor_passes``
+#: (each is one AST walk). Coverage must be judged at this pass granularity,
+#: not per exact edge kind (second Codex review): ``type_graph.
+#: augment_graph_with_types`` folds all four type/reference kinds from one
+#: pass, so a baseline that already has (say) a ``DECL_HAS_TYPE`` edge but
+#: never happened to have a ``TYPE_HAS_FIELD_TYPE`` one ran the *same* pass as
+#: a new side that has both — the first ``TYPE_HAS_FIELD_TYPE`` edge there is
+#: a real new dependency, not a collector-coverage artifact, and must not be
+#: dropped just because that exact kind is new.
+_DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
+    "call_graph": frozenset({"DECL_CALLS_DECL"}),
+    "type_graph": frozenset({
+        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    }),
+}
+
+
+def _dependency_kinds_covered(graph: SourceGraphSummary, edge_kinds: frozenset[str]) -> bool:
+    """Whether *graph* has evidence for any kind in *edge_kinds*: an edge, or its
+    extractor pass recorded as having run (:data:`_DEPENDENCY_EDGE_FAMILIES`).
+
+    A pass can run to completion and still emit zero edges of its family (e.g.
+    no public struct anywhere had a private field yet), which reads identically
+    to "the pass never ran" if edge presence is the only signal (third Codex
+    review). ``SourceGraphSummary.extractor_passes`` (set by
+    ``inline._fold_call_graph``/``_fold_type_graph`` right after a successful
+    extraction, regardless of edge count) breaks that tie; absent that record
+    (a hand-built or pre-slice-2 graph) this falls back to edge presence alone.
+
+    ``narrowed_passes`` also counts as "a pass ran" here (fifteenth Codex
+    review) — this is a coarse, single-graph "is there *any* reason to trust
+    this graph enough to attempt a closure" gate, not the fine-grained
+    per-kind trust decision (that's :func:`_common_dependency_edge_kinds`,
+    which already knows whether a narrowed graph's zero-edge family is safe to
+    compare — matched scope against an identically-narrowed other side, or
+    excluded otherwise). A narrowed pass unambiguously is *not* "no semantic
+    pass at all"; relaxing this coarse gate to admit it is safe because
+    ``common_kinds`` remains the sole per-kind trust source downstream — a
+    kind excluded there restricts the closure to zero edges of that kind
+    regardless of whether this gate passed.
+    """
+    if any(e.kind in edge_kinds for e in graph.edges):
+        return True
+    return any(
+        (graph.extractor_passes.get(pass_name, False) or graph.narrowed_passes.get(pass_name, False))
+        and (family & edge_kinds)
+        for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items()
+    )
+
+
+def _common_dependency_edge_kinds(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> frozenset[str]:
+    """Dependency edge kinds whose *extractor pass* ran on both sides (Codex review).
+
+    A collector improvement — e.g. the ADR-041 P0 type-graph pass running for
+    the first time on the *new* side while the baseline only ever ran the call
+    graph — must not read as a newly-added dependency: a single "any dependency
+    edge present" gate (as the call-only closure could get away with) lets
+    every target reachable *only* through a kind absent from the other side
+    look newly internal, when it is really a coverage artifact, not a code
+    change.
+
+    Widening credit from one kind to its whole family (:data:`_DEPENDENCY_EDGE_FAMILIES`)
+    is only sound when both sides *confirm* the same uniform extractor pass ran
+    (``extractor_passes``) — that pass always examines every kind in its
+    family together, so one kind's absence there really is "found nothing," not
+    missing coverage. Without that confirmation, widening from mere edge
+    *presence* is unsound (fifth Codex review): a Kythe/CodeQL-ingested pack
+    (``graph_backends.py``) only ever produces `DECL_REFERENCES_DECL` for a
+    non-call ref, never the Clang type graph's other three kinds, so a single
+    such edge is not evidence that a base-class or field-type check ever ran.
+
+    Falls back to a *per-kind* check in that case — but a confirmed pass on
+    only *one* side still counts as evidence for that side, for the exact
+    kinds the other side has edges of (ninth Codex review): a mixed-format
+    comparison — e.g. an old pack that ran the type-graph pass and confirmed
+    zero type edges, against a pre-slice-2 new pack with no pass marker but a
+    first `TYPE_HAS_FIELD_TYPE` edge — must not skip just because *both*
+    markers aren't present. A kind is common when each side either has an
+    edge of that exact kind, or has confirmed its family's pass ran (a
+    confirmed pass's *absence* of a kind is a real, verified zero) — never
+    widened to a *sibling* kind neither side actually exhibits an edge of.
+
+    A side whose pass ran *narrowed* (``narrowed_passes``, e.g. a PR/``--since``
+    scan folding only the changed compile units) never sets ``extractor_passes``
+    for that name, so it always falls to the per-kind branch above — but its
+    edges are only representative of the narrow subset it actually walked, not
+    the whole project. This function only ever feeds an *additions* closure
+    (:func:`_internal_dependency_findings` computes newly-reachable targets in
+    ``new`` that were absent from ``old``'s reach), so the false-positive risk
+    is one-directional: it lives entirely in whether **``old``'s absence** of a
+    kind is trustworthy evidence the dependency truly did not exist before, not
+    in ``new``'s own scope. A narrowed **old** side's edge of a given kind must
+    not count as coverage for that kind unless ``new`` is narrowed to the exact
+    *same* scope (eleventh/twelfth/fourteenth Codex review): a baseline scoped
+    to a few changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge from that
+    subset says nothing about dependencies elsewhere in the project — whether
+    the other side is a confirmed *full* pass that saw the rest of the project
+    (eleventh review), simply carries no pass marker at all, e.g. a
+    pre-slice-2/externally-ingested pack whose true scope is unknown (twelfth
+    review), or is *itself* narrowed but to a different, disjoint subset —
+    ``narrowed_passes`` is only a boolean, so "both narrowed" does not mean
+    "narrowed to the same TUs": an old run scoped to ``src/a.cpp`` and a new
+    run scoped to ``src/b.cpp`` are each narrow but examine disjoint code
+    (fourteenth review). ``narrowed_scope`` (the actual scope identifier —
+    ``changed_paths``, or the examined compile units' source paths for an
+    unseeded ``scoped_units`` run) settles this: only an *identical, non-empty*
+    scope on both sides — the common PR-diff workflow, comparing two runs
+    narrowed to the same changed TUs — is trusted to leave the pre-existing
+    per-kind comparison unaffected.
+
+    A narrowed **new** side's edge needs no such guard (thirteenth Codex
+    review): whatever ``new`` observed in the TUs it did walk is real evidence
+    of a genuinely new dependency there whenever ``old``'s own evidence for
+    that kind is trustworthy (a confirmed full pass, or a matching narrow
+    scope) — ``new`` being narrower than ``old`` can only ever cause a *missed*
+    addition (an accepted false negative outside the TUs it examined), never a
+    false positive, so gating ``new``'s presence on its own narrowing (as an
+    earlier revision of this fix did, symmetrically with ``old``) wrongly
+    dropped real additions a fully-covered ``old`` baseline had already proven
+    absent everywhere.
+
+    An *identical*, non-empty ``narrowed_scope`` on both sides is trusted
+    enough to widen to the whole family too (fifteenth Codex review), the same
+    way a confirmed full pass on both sides already does: two sides narrowed
+    to the same compile units ran the *same* single AST walk, just restricted
+    to that shared region, so one kind's absence there is a real, verified
+    zero *within that scope* — not merely "found an edge of this exact kind
+    somewhere" (the per-kind fallback). Without this, a same-scope PR scan
+    whose narrowed baseline genuinely found zero edges of a family couldn't
+    credit that as coverage, and a first-ever edge the candidate finds in that
+    exact shared TU would be silently dropped instead of reported.
+
+    A pass that ran *unnarrowed* but recorded per-TU diagnostics
+    (``degraded_passes``, e.g. a clang crash/timeout on some subset) still
+    folds edges from the TUs that parsed cleanly — those edges get exactly
+    the same narrowed-side treatment as ``old_present``'s guard above
+    (sixteenth Codex review): a partial pass's edge cannot vouch for "this
+    kind was examined project-wide" any more than a narrowed pass's can,
+    since the failed TUs are an unknown, untracked gap (unlike
+    ``narrowed_scope``, which knows exactly which TUs a *deliberately*
+    scoped run examined).
+    """
+    common: set[str] = set()
+    for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
+        old_pass = old.extractor_passes.get(pass_name, False)
+        new_pass = new.extractor_passes.get(pass_name, False)
+        old_narrowed = old.narrowed_passes.get(pass_name, False)
+        new_narrowed = new.narrowed_passes.get(pass_name, False)
+        old_scope = old.narrowed_scope.get(pass_name, frozenset())
+        new_scope = new.narrowed_scope.get(pass_name, frozenset())
+        # A narrowed old side is only trusted against a new side narrowed to
+        # the *identical*, non-empty scope — "both narrowed" alone does not
+        # establish they examined the same code (fourteenth Codex review).
+        scope_matches = bool(old_scope) and old_scope == new_scope
+        # Two sides narrowed to that identical scope examined the *same*
+        # single AST walk, restricted — exactly the confirmed-full-pass
+        # rationale below, just scoped to the shared region instead of the
+        # whole project (fifteenth Codex review): a kind's absence there is a
+        # real, verified zero *within that scope*, safe to widen to the whole
+        # family, not merely a per-kind fallback.
+        narrowed_confirmed = old_narrowed and new_narrowed and scope_matches
+        if (old_pass and new_pass) or narrowed_confirmed:
+            common |= family
+            continue
+        # A pass that ran unnarrowed but hit per-TU diagnostics still folds
+        # edges from the TUs that parsed — those edges must not vouch for
+        # "this kind was examined project-wide" any more than a narrowed
+        # side's edges may (sixteenth Codex review): the failed TUs are an
+        # unknown, untracked gap.
+        old_degraded = old.degraded_passes.get(pass_name, False)
+        old_kinds = {e.kind for e in old.edges if e.kind in family}
+        new_kinds = {e.kind for e in new.edges if e.kind in family}
+        for kind in family:
+            # Only OLD's negative evidence needs the narrowing/degraded guard
+            # — see the docstring's one-directional-risk note (thirteenth
+            # Codex review).
+            old_present = (
+                (kind in old_kinds)
+                and not old_degraded
+                and (not old_narrowed or (new_narrowed and scope_matches))
+            )
+            new_present = kind in new_kinds
+            old_has = old_present or old_pass
+            new_has = new_present or new_pass
+            if old_has and new_has:
+                common.add(kind)
+    return frozenset(common)
+
+
 def _public_headers_in_include_graph(graph: SourceGraphSummary) -> set[str]:
     """Public-header node ids that actually appear in the compiled include graph.
 
@@ -855,26 +1413,39 @@ def _option_symbol_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
     }
 
 
-def _public_entry_internal_reach(graph: SourceGraphSummary) -> set[tuple[str, str]]:
-    """``(public_entry_decl, internal_decl)`` pairs the entry reaches by calls.
+def _public_entry_internal_reach(
+    graph: SourceGraphSummary, edge_kinds: frozenset[str]
+) -> set[tuple[str, str]]:
+    """``(public_entry, internal_target)`` pairs the entry reaches via a dependency edge.
 
-    An *internal* decl is a ``source_decl`` reachable from an exported entry via
-    the ``DECL_CALLS_DECL`` closure that is **not** in the public-header
-    reachability set (:func:`_public_decls`). Returns ``set()`` when the graph
-    carries no call edges or no public closure, so the version diff skips rather
-    than flagging noise on an evidence-poor side.
+    An *internal* target is a decl/type node reachable from a public entry
+    (exported decl or public type) via the *edge_kinds* closure
+    (:func:`_dependency_reachability` — the version diff passes
+    :func:`_common_dependency_edge_kinds` here, not the full
+    :data:`DEPENDENCY_EDGE_KINDS`) with positive internal provenance
+    (:func:`is_internal_dependency_node`) — "not declared by a public header"
+    alone is not internal, or a third-party/stdlib type used as a field/
+    parameter type would wrongly light up (ADR-041 P0 slice 2, fourth Codex
+    review). This covers calls, non-call references, and the field/base/
+    parameter type edges ADR-041 P0 added, not calls alone. Returns ``set()``
+    when *edge_kinds* is empty, the graph carries none of them, or there is no
+    public closure at all, so the version diff skips rather than flagging
+    noise on an evidence-poor side.
     """
-    reach = _public_entry_call_reachability(graph)
+    reach = _dependency_reachability(graph, edge_kinds)
     if not reach:
         return set()
-    public = _public_decls(graph)
-    if not public:
+    if not (_public_decls(graph) or _public_types(graph)):
         return set()
-    kinds = _kind_map(graph)
+    node_by_id = {n.id: n for n in graph.nodes}
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    decl_to_file = decl_declaring_files(graph)
     out: set[tuple[str, str]] = set()
     for entry, reachable in reach.items():
         for target in reachable:
-            if kinds.get(target) == "source_decl" and target not in public:
+            if is_internal_dependency_node(target, node_by_id, exported_decls, decl_to_file):
                 out.add((entry, target))
     return out
 
@@ -1041,7 +1612,13 @@ def _call_reachability_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """Implementation reachable from an exported entry changed (phase 6)."""
+    """Implementation reachable from an exported entry changed (phase 6).
+
+    Per ADR-041 P0 roadmap item 3 ("graph explain proof path"), the
+    description names one concrete example call chain (:func:`_dependency_path`
+    restricted to ``DECL_CALLS_DECL``) into a newly-reachable (or, if none was
+    added, a newly-unreachable) callee, not just the before/after counts.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -1050,10 +1627,18 @@ def _call_reachability_findings(
     # present in both graphs whose approximate call-reachable set differs.
     old_reach = _public_entry_call_reachability(old)
     new_reach = _public_entry_call_reachability(new)
+    call_kinds = frozenset({"DECL_CALLS_DECL"})
     for entry in sorted(old_reach.keys() & new_reach.keys()):
         if old_reach[entry] != new_reach[entry]:
             label = new_labels.get(entry, entry)
             old_n, new_n = len(old_reach[entry]), len(new_reach[entry])
+            added = sorted(new_reach[entry] - old_reach[entry])
+            example = ""
+            for target in added:
+                path = _dependency_path(new, call_kinds, entry, target)
+                if path:
+                    example = f" Example newly-reachable path: {_format_dependency_path(new, path)}."
+                    break
             findings.append(Change(
                 kind=ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
                 symbol=label,
@@ -1061,7 +1646,7 @@ def _call_reachability_findings(
                     f"Implementation statically reachable from exported entry "
                     f"{label!r} changed ({old_n} → {new_n} known static callees, "
                     "approximate). Source-graph quality signal: the code behind a "
-                    "stable public symbol moved; not an ABI break."
+                    "stable public symbol moved; not an ABI break." + example
                 ),
                 old_value=f"{old_n} reachable",
                 new_value=f"{new_n} reachable",
@@ -1146,9 +1731,35 @@ def _build_option_reach_findings(
     return findings
 
 
-def _has_internal_reach_coverage(g: SourceGraphSummary) -> bool:
-    """Whether a graph carries both call edges and a public-header closure."""
-    return any(e.kind == "DECL_CALLS_DECL" for e in g.edges) and bool(_public_decls(g))
+def _has_internal_reach_coverage(g: SourceGraphSummary, edge_kinds: frozenset[str]) -> bool:
+    """Whether a graph carries evidence for *edge_kinds* (:func:`_dependency_kinds_covered`)
+    and a public closure."""
+    return _dependency_kinds_covered(g, edge_kinds) and bool(_public_decls(g) or _public_types(g))
+
+
+#: source_diff.py findings whose old/new value is literally a body_hash or
+#: type_hash (ADR-041 P0 roadmap item 2) — the narrow subset of the nine
+#: source-replay findings that prove a *public* decl's own implementation
+#: changed, as opposed to e.g. a default-argument or macro-value change.
+_BODY_OR_TYPE_HASH_CHANGE_KINDS = frozenset({
+    "inline_body_changed", "template_body_changed", "public_typedef_target_changed",
+})
+
+
+def _public_decl_source_changes(
+    source_diff_changes: list[Change] | None,
+) -> dict[str, Change]:
+    """Map a public decl's ``symbol`` (qualified name) to its own body/type-hash
+    change (:data:`_BODY_OR_TYPE_HASH_CHANGE_KINDS`), from ``source_diff.diff_source_abi``'s
+    output — the L4 half of ADR-041 P0 roadmap item 2's correlation.
+    """
+    if not source_diff_changes:
+        return {}
+    return {
+        c.symbol: c
+        for c in source_diff_changes
+        if c.symbol and c.kind.value in _BODY_OR_TYPE_HASH_CHANGE_KINDS
+    }
 
 
 def _internal_dependency_findings(
@@ -1156,41 +1767,97 @@ def _internal_dependency_findings(
     new: SourceGraphSummary,
     new_labels: dict[str, str],
     boundary: str,
+    source_diff_changes: list[Change] | None = None,
 ) -> list[Change]:
-    """A public entry that newly reaches an internal declaration via calls."""
+    """A public entry that newly reaches an internal declaration/type.
+
+    "Reaches" spans the ADR-041 P0 dependency-edge family
+    (:data:`DEPENDENCY_EDGE_KINDS`): a call, a non-call reference to a
+    global/constant, or a field/base/parameter type — a public struct that
+    gained a private field type is caught here exactly like a function that
+    gained a call into internal code. Per ADR-041 P0 roadmap item 3 ("graph
+    explain proof path"), the description names the concrete edge chain
+    (:func:`_dependency_path`) proving each dependency, not just the endpoints.
+
+    Per ADR-041 P0 roadmap item 2, when ``source_diff_changes`` is supplied
+    (the L4 ``source_diff.diff_source_abi`` findings for the same version
+    pair) and the same public entry *also* has its own body/type_hash changed
+    this version (:func:`_public_decl_source_changes`), the description notes
+    it — correlating "X's own implementation changed" with "X now reaches
+    internal Y" into one finding instead of two disjoint ones a reader has to
+    connect manually.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
+    own_changes = _public_decl_source_changes(source_diff_changes)
     findings: list[Change] = []
     # The version-over-version analogue of the intra-version
-    # public-to-internal cross-check. Gate on *both* graphs carrying the two
-    # evidence kinds this diff subtracts over — call edges (DECL_CALLS_DECL)
-    # AND a public-header closure (SOURCE_DECLARES) — so an evidence-poor
-    # baseline (call edges but no public closure, or no call pass) cannot make
-    # every pre-existing internal callee look newly added (Codex review).
-    newly_internal = (
-        _public_entry_internal_reach(new) - _public_entry_internal_reach(old)
-        if _has_internal_reach_coverage(old) and _has_internal_reach_coverage(new)
-        else set()
-    )
+    # public-to-internal cross-check. Restrict the closure to edge kinds
+    # collected on *both* sides (_common_dependency_edge_kinds) — otherwise a
+    # collector improvement (e.g. the type-graph pass running for the first
+    # time on the new side) would make every target newly reachable only
+    # through that new kind look like a newly-added dependency, when it is
+    # really a coverage artifact (Codex review). Then gate on *both* graphs
+    # carrying at least one common-kind edge AND a public closure
+    # (SOURCE_DECLARES), so an evidence-poor baseline (dependency edges but no
+    # public closure, or no semantic pass at all) cannot make every
+    # pre-existing internal dependency look newly added (earlier Codex review).
+    common_kinds = _common_dependency_edge_kinds(old, new)
+    if _has_internal_reach_coverage(old, common_kinds) and _has_internal_reach_coverage(
+        new, common_kinds
+    ):
+        new_internal = _public_entry_internal_reach(new, common_kinds)
+        # Exclude a pair whose *edge* already existed in the old graph, even if
+        # the old side never classified its target as internal (eighth Codex
+        # review): a Kythe/older-pack target with no SOURCE_DECLARES/
+        # defined_in_project provenance is unclassifiable there, so
+        # _public_entry_internal_reach(old, ...) silently drops it — but the
+        # dependency itself is not new, only the classification evidence
+        # improved. Raw reachability (ignoring classification) is the
+        # authority on whether the edge is new.
+        old_reach = _dependency_reachability(old, common_kinds)
+        newly_internal = {
+            (entry, target)
+            for entry, target in new_internal
+            if target not in old_reach.get(entry, frozenset())
+        }
+    else:
+        newly_internal = set()
     reached_by_entry: dict[str, list[str]] = {}
     for entry, target in newly_internal:
         reached_by_entry.setdefault(entry, []).append(target)
     for entry in sorted(reached_by_entry):
         label = new_labels.get(entry, entry)
-        targets = sorted(new_labels.get(t, t) for t in reached_by_entry[entry])
+        raw_targets = sorted(reached_by_entry[entry])
+        targets = [new_labels.get(t, t) for t in raw_targets]
+        proof_paths = [
+            _format_dependency_path(new, path)
+            for t in raw_targets
+            if (path := _dependency_path(new, common_kinds, entry, t))
+        ]
+        proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""
+        own_change = own_changes.get(label)
+        correlation = (
+            f" This entry's own implementation also changed this version "
+            f"({own_change.kind.value}: {own_change.old_value!r} → "
+            f"{own_change.new_value!r}) — likely the source of the new dependency."
+            if own_change is not None
+            else ""
+        )
         findings.append(Change(
             kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             symbol=label,
             description=(
                 f"Public entry {label!r} now reaches internal (non-public) "
-                f"declaration(s) {', '.join(targets)} that it did not before. The "
-                "public surface has taken on an undeclared dependency; a change to "
-                "that internal entity becomes a hidden risk. Source-graph evidence "
-                "to review."
+                f"declaration(s)/type(s) {', '.join(sorted(targets))} that it did not "
+                "before (via a call, reference, or field/base/parameter type). "
+                "The public surface has taken on an undeclared dependency; a "
+                "change to that internal entity becomes a hidden risk. "
+                "Source-graph evidence to review." + proof + correlation
             ),
             old_value="no internal dependency",
-            new_value=f"reaches {len(targets)} internal decl(s)",
+            new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
             source_location=boundary,
         ))
     return findings
@@ -1270,7 +1937,9 @@ def _symbol_owner_findings(
 
 
 def diff_source_graph_findings(
-    old: SourceGraphSummary, new: SourceGraphSummary
+    old: SourceGraphSummary,
+    new: SourceGraphSummary,
+    source_diff_changes: list[Change] | None = None,
 ) -> list[Change]:
     """Map the graph delta onto ADR-031 D6 secondary risk findings.
 
@@ -1297,6 +1966,14 @@ def diff_source_graph_findings(
     Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
     them into the verdict pipeline as ordinary RISK changes that never override
     an artifact-proven break.
+
+    ``source_diff_changes`` is the optional L4 ``source_diff.diff_source_abi``
+    finding list for the same version pair (ADR-041 P0 roadmap item 2) — when
+    supplied, ``_internal_dependency_findings`` correlates a public entry's own
+    body/type_hash change with it newly reaching an internal dependency,
+    instead of leaving a reader to connect the two disjoint findings.
+    Omitted (``None``) by callers with no L4 surface diff (e.g. `graph diff`),
+    which get the uncorrelated description exactly as before.
     """
     boundary = f"[{EVIDENCE_TIER_L5}]"
     old_labels, new_labels = _label_map(old), _label_map(new)
@@ -1308,7 +1985,9 @@ def diff_source_graph_findings(
     findings += _call_reachability_findings(old, new, new_labels, boundary)
     findings += _include_graph_drift_findings(old, new, old_labels, new_labels, boundary)
     findings += _build_option_reach_findings(old, new, new_labels, boundary)
-    findings += _internal_dependency_findings(old, new, new_labels, boundary)
+    findings += _internal_dependency_findings(
+        old, new, new_labels, boundary, source_diff_changes
+    )
     findings += _target_dependency_findings(old, new, new_labels, boundary)
     findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
     return findings
