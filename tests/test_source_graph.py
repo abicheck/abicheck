@@ -646,6 +646,18 @@ def test_extractor_passes_round_trips() -> None:
     assert restored.extractor_passes == {"type_graph": True}
 
 
+def test_narrowed_passes_round_trips() -> None:
+    # Eleventh Codex review: narrowed_passes must survive to_dict/from_dict so
+    # a version diff loaded from a pack can still tell a narrowed (PR/--since
+    # -scoped) pass's edges from a confirmed full pass's.
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="x", kind="target"))
+    g.narrowed_passes["type_graph"] = True
+    restored = SourceGraphSummary.from_dict(g.to_dict())
+    assert restored.narrowed_passes == {"type_graph": True}
+    assert restored.extractor_passes == {}
+
+
 def test_graph_id_order_independent() -> None:
     a = SourceGraphSummary()
     a.add_node(GraphNode(id="x", kind="target"))

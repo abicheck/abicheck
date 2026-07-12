@@ -239,6 +239,10 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     # says nothing about the rest of the codebase (sixth Codex review).
     assert graph is not None
     assert "call_graph" not in graph.extractor_passes
+    # But the narrowed run's own scope is recorded, so a comparison against a
+    # confirmed full pass on the other side can discount this run's edges as
+    # non-representative coverage (eleventh Codex review).
+    assert graph.narrowed_passes["call_graph"] is True
 
 
 def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
@@ -285,6 +289,7 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     # being set) — confirmed pass coverage is still recorded.
     assert graph is not None
     assert graph.extractor_passes["call_graph"] is True
+    assert "call_graph" not in graph.narrowed_passes
 
 
 def _fake_call_extractor(monkeypatch, seen_sources: list[str]):
@@ -342,6 +347,7 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     # Narrowed (headers-only scope, matching L4): no confirmed pass coverage.
     assert graph is not None
     assert "call_graph" not in graph.extractor_passes
+    assert graph.narrowed_passes["call_graph"] is True
 
 
 def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
@@ -370,6 +376,7 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
     # Fully unscoped: confirmed pass coverage is recorded.
     assert graph is not None
     assert graph.extractor_passes["call_graph"] is True
+    assert "call_graph" not in graph.narrowed_passes
 
 
 def test_run_inline_source_abi_no_sources_returns_empty_selection():
@@ -546,7 +553,7 @@ def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
             CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
         ]
     )
-    inline._build_inline_graph(
+    graph = inline._build_inline_graph(
         merged,
         surface=None,
         with_call_graph=True,
@@ -555,3 +562,6 @@ def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
         changed_paths=("src/a.cpp",),
     )
     assert seen_sources == ["src/a.cpp"]
+    assert graph is not None
+    assert "type_graph" not in graph.extractor_passes
+    assert graph.narrowed_passes["type_graph"] is True

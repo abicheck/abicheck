@@ -1722,6 +1722,12 @@ def _fold_call_graph(
     # to edge-presence inference rather than claim confirmed coverage.
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["call_graph"] = True
+    elif narrowed:
+        # A narrowed pass never confirms full-project coverage, but its edges
+        # are real for the subset it walked — record that so a comparison
+        # against a confirmed full pass on the other side doesn't credit
+        # those edges as whole-family coverage (eleventh Codex review).
+        graph.narrowed_passes["call_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")
     timing = (
@@ -1804,6 +1810,8 @@ def _fold_type_graph(
     # having units to examine, and no per-TU parse failures).
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["type_graph"] = True
+    elif narrowed:
+        graph.narrowed_passes["type_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"type_graph: {diag}")
     timing = (

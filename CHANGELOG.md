@@ -156,7 +156,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (`inline int f() { return detail::SECRET; }`) whenever `f` isn't separately
   exported. Entries are now seeded from `is_public_dependency_node` over every
   graph node (exported-symbol-backed *or* public-header-visibility decl/type),
-  matching `crosscheck.py`'s intra-version definition of "public" exactly.
+  matching `crosscheck.py`'s intra-version definition of "public" exactly. An
+  eleventh review found a scope-comparability gap: a narrowed (PR/`--since`-
+  scoped) run never sets `extractor_passes` for the family it narrowed, but
+  still serializes whatever edges it collected from the subset of TUs it
+  walked — and the per-kind fallback treated those edges as ordinary coverage
+  evidence, letting dependencies in TUs the narrowed baseline never inspected
+  pass the gate and be reported as `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` when
+  compared against a candidate that ran a confirmed *full* pass. New
+  `SourceGraphSummary.narrowed_passes: dict[str, bool]` field (additive, same
+  round-trip pattern as `extractor_passes`), stamped whenever
+  `_fold_call_graph`/`_fold_type_graph`'s local `narrowed` flag is `True`.
+  `_common_dependency_edge_kinds` now discounts a narrowed side's edge of a
+  given kind specifically when the other side confirms a full pass for that
+  family — the common, both-sides-narrowed PR-diff workflow is unaffected
+  since neither side then has a confirmed full pass to disqualify the other's
+  edges.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

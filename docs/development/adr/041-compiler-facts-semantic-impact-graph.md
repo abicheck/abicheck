@@ -548,6 +548,35 @@ public-header visibility — which subsumes the old `SOURCE_DECL_MAPS_TO_SYMBOL`
 longer a special case in this function (public-header visibility already
 covered it uniformly).
 
+An eleventh Codex review found a different scope-comparability gap: a
+narrowed (PR/`--since`-scoped) inline run never sets `extractor_passes` for
+the family it narrowed — `_fold_call_graph`/`_fold_type_graph`'s local
+`narrowed` flag correctly withholds the "confirmed full pass" stamp — but it
+still serializes whatever edges it happened to collect from the subset of
+compile units it actually walked. `_common_dependency_edge_kinds`'s per-kind
+fallback treated any such edge as ordinary evidence of that exact kind's
+coverage, with no way to tell "this side's family pass ran over the whole
+project and found nothing else" from "this side only ever looked at a few
+TUs and this is the one dependency edge it happened to see there." Comparing
+a narrowly-scoped baseline against a candidate that ran a confirmed *full*
+pass let dependencies in TUs the baseline never inspected — because the
+narrowed baseline had *some* unrelated edge of the same kind, from the
+subset it did see — pass the coverage gate and be reported as
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`, even though nothing about that
+specific TU changed; the baseline simply never had the evidence to know
+either way. Fixed by adding a `SourceGraphSummary.narrowed_passes: dict[str,
+bool]` field (additive, same round-trip pattern as `extractor_passes`),
+stamped by `_fold_call_graph`/`_fold_type_graph` whenever their local
+`narrowed` flag is `True`. `_common_dependency_edge_kinds`'s per-kind
+fallback now discounts a narrowed side's edge of a given kind specifically
+when the *other* side has a confirmed full pass for that family — the
+narrowed side's partial view cannot vouch for territory only the full pass
+has actually walked. This exclusion is one-directional and scoped tightly:
+the common, intended PR-diff workflow of comparing two runs narrowed
+identically to the same changed TUs is unaffected, since in that case
+neither side has a confirmed full pass to disqualify the other's edges, so
+the pre-existing per-kind comparison behavior is preserved exactly.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

@@ -217,6 +217,21 @@ class SourceGraphSummary:
     #: "unknown whether it ran" (e.g. a hand-built or pre-slice-2 graph), so
     #: readers fall back to edge-presence inference for those.
     extractor_passes: dict[str, bool] = field(default_factory=dict)
+    #: Which named extractor passes ran, but only over a *narrowed* scope
+    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/
+    #: ``_fold_type_graph`` to a subset of compile units — eleventh Codex
+    #: review). A narrowed pass never sets ``extractor_passes`` for that name
+    #: (it did not examine the whole project), but it still serializes
+    #: whatever edges it *did* collect from the subset it saw. Those edges
+    #: must not be treated as full-family coverage when compared against a
+    #: side that ran a confirmed *full* pass — a baseline scoped to a few
+    #: changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge says nothing about
+    #: whether the rest of the project's dependencies were ever inspected, so
+    #: comparing it as if that kind were fully covered lets unrelated,
+    #: never-examined dependencies read as "newly added". Set alongside (in
+    #: place of) ``extractor_passes`` by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph`` when the local ``narrowed`` flag is ``True``.
+    narrowed_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
@@ -351,6 +366,7 @@ class SourceGraphSummary:
             "indexes": self.indexes(),
             "external_graph_refs": [dict(r) for r in self.external_graph_refs],
             "extractor_passes": dict(self.extractor_passes),
+            "narrowed_passes": dict(self.narrowed_passes),
         }
 
     @classmethod
@@ -370,6 +386,9 @@ class SourceGraphSummary:
             external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
             extractor_passes={
                 str(k): bool(v) for k, v in dict(d.get("extractor_passes", {})).items()
+            },
+            narrowed_passes={
+                str(k): bool(v) for k, v in dict(d.get("narrowed_passes", {})).items()
             },
         )
 
@@ -1212,6 +1231,21 @@ def _common_dependency_edge_kinds(
     edge of that exact kind, or has confirmed its family's pass ran (a
     confirmed pass's *absence* of a kind is a real, verified zero) — never
     widened to a *sibling* kind neither side actually exhibits an edge of.
+
+    A side whose pass ran *narrowed* (``narrowed_passes``, e.g. a PR/``--since``
+    scan folding only the changed compile units) never sets ``extractor_passes``
+    for that name, so it always falls to the per-kind branch above — but its
+    edges are only representative of the narrow subset it actually walked, not
+    the whole project. If the *other* side confirms a full, unnarrowed pass for
+    that family, the narrowed side's edge of the same exact kind must not count
+    as coverage either (eleventh Codex review): a baseline scoped to a few
+    changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge from that subset says
+    nothing about dependencies elsewhere in the project a full-pass candidate
+    can see, so treating it as comparable coverage lets never-examined
+    dependencies read as newly added. This exclusion only applies against a
+    confirmed *full* pass on the other side — the common, intended case of both
+    sides scoped identically to the same PR diff is unaffected (neither side has
+    a confirmed full pass to disqualify the other's edges).
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
@@ -1220,11 +1254,19 @@ def _common_dependency_edge_kinds(
         if old_pass and new_pass:
             common |= family
             continue
+        old_narrowed = old.narrowed_passes.get(pass_name, False)
+        new_narrowed = new.narrowed_passes.get(pass_name, False)
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:
-            old_has = kind in old_kinds or old_pass
-            new_has = kind in new_kinds or new_pass
+            # A narrowed side's edge only counts against an other side that
+            # has *not* confirmed a full pass for this family — a confirmed
+            # full pass has seen the whole project and the narrowed side's
+            # partial view cannot vouch for it.
+            old_present = (kind in old_kinds) and not (old_narrowed and new_pass)
+            new_present = (kind in new_kinds) and not (new_narrowed and old_pass)
+            old_has = old_present or old_pass
+            new_has = new_present or new_pass
             if old_has and new_has:
                 common.add(kind)
     return frozenset(common)

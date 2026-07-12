@@ -751,6 +751,94 @@ def test_common_dependency_edge_kinds_uses_extractor_passes_over_zero_edges() ->
     })
 
 
+def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_confirmed_full_pass() -> None:
+    # Eleventh Codex review: a baseline collected from a *narrowed* (PR/
+    # --since-scoped) inline run never sets extractor_passes for that name, but
+    # it still serializes whatever edges it happened to collect from the
+    # subset it walked. If the old side's TYPE_HAS_FIELD_TYPE edge came from a
+    # narrowed pass, and the new side confirms a full, unnarrowed type-graph
+    # pass, the old side's edge must not count as evidence that kind was
+    # covered — the narrowed pass never examined the rest of the project the
+    # full pass now sees, so treating it as comparable coverage would let
+    # genuinely-new dependencies elsewhere in the project pass the gate.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[],
+        extractor_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
+
+
+def test_common_dependency_edge_kinds_both_narrowed_unaffected() -> None:
+    # Contrast case: the common, intended PR-diff workflow scopes *both* sides
+    # identically (e.g. comparing two narrowed runs over the same changed
+    # TUs). Neither side has a *confirmed full* pass to disqualify the
+    # other's edges, so ``narrowed_passes`` being set on both is a no-op here
+    # — behavior is identical to the pre-eleventh-round per-kind fallback
+    # (only the exact kind both sides have an edge of is common; a kind only
+    # the new side has an edge of is excluded from comparison, not flagged).
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
+        edges=[_E("a", "b", "DECL_HAS_TYPE"), _E("b", "c", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({"DECL_HAS_TYPE"})
+
+
+def test_l5_internal_dep_not_flagged_for_dependency_outside_narrowed_baseline_scope() -> None:
+    # End-to-end version of Codex's exact scenario: the baseline was collected
+    # by a narrowed (PR/--since-scoped) inline run that only ever examined
+    # ``pub``'s TU, where it found (and still has, unchanged) a
+    # TYPE_HAS_FIELD_TYPE dependency on `priv_type`. A second public entry,
+    # `pub2`, lives in a TU the narrowed baseline never inspected. The
+    # candidate ran a confirmed full pass and found `pub2` also depends on a
+    # private type there. Before the eleventh-round fix, the baseline's
+    # unrelated `priv_type` edge would have made TYPE_HAS_FIELD_TYPE read as
+    # "common" coverage, letting `pub2`'s dependency — from a TU the baseline
+    # never saw — be reported as newly added. It must not be: the baseline
+    # cannot vouch for a TU it never examined.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("pub2", "source_decl", "pub2()"),
+        _N("sym2", "binary_symbol", "pub2"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
+        _N("other_priv", "record_type", "detail::Other", visibility="private_header"),
+    ]
+    shared_edges = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+        _E("pub2", "sym2", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub2", "SOURCE_DECLARES"),
+        _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=list(shared_edges),
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[*shared_edges, _E("pub2", "other_priv", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
 def test_l5_internal_dep_flags_first_ever_family_edge_via_extractor_passes() -> None:
     # End-to-end version of the above through diff_source_graph_findings: the
     # baseline genuinely has zero type-graph edges (pass ran, nothing to find

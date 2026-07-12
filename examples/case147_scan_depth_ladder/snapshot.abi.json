@@ -29,6 +29,7 @@
         "by_source_decl": {},
         "by_target": {}
       },
+      "narrowed_passes": {},
       "nodes": [
         {
           "attrs": {

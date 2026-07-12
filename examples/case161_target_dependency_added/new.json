@@ -23,6 +23,7 @@
       ]
     }
   },
+  "narrowed_passes": {},
   "nodes": [
     {
       "attrs": {},
