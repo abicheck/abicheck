@@ -503,6 +503,88 @@ def test_common_dependency_edge_kinds_family_level() -> None:
     })
 
 
+def test_common_dependency_edge_kinds_uses_extractor_passes_over_zero_edges() -> None:
+    # Third Codex review: the type-graph pass ran to completion on *both* sides
+    # (recorded via extractor_passes) but genuinely found zero type/reference
+    # edges on the old side — e.g. no public struct anywhere had a private
+    # field yet. Edge presence alone would read that identically to "the pass
+    # never ran"; extractor_passes must break the tie so the whole family is
+    # still common.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl")],
+        edges=[],  # zero type/reference edges, despite the pass having run
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset({
+        "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    })
+
+
+def test_l5_internal_dep_flags_first_ever_family_edge_via_extractor_passes() -> None:
+    # End-to-end version of the above through diff_source_graph_findings: the
+    # baseline genuinely has zero type-graph edges (pass ran, nothing to find
+    # yet), so only extractor_passes tells the diff the coverage is comparable.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
+    # Contrast case: extractor_passes absent on the old side (a pre-slice-2
+    # pack, or a pass that genuinely never ran) with zero type edges must still
+    # skip — only a *recorded* pass run justifies treating zero edges as
+    # comparable coverage.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("priv_type", "record_type", "detail::PrivateType"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=[
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ])  # no extractor_passes recorded, no type edges either
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+            _E("hdr", "pub", "SOURCE_DECLARES"),
+            _E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE"),
+        ],
+        extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
 def test_dependency_reachability_empty_edge_kinds_returns_empty() -> None:
     # Direct unit test of the defensive early-return: an empty edge_kinds set
     # (e.g. _common_dependency_edge_kinds finding no overlap) must short-circuit

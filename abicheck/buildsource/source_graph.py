@@ -204,6 +204,18 @@ class SourceGraphSummary:
     edges: list[GraphEdge] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
     external_graph_refs: list[dict[str, Any]] = field(default_factory=list)
+    #: Which named extractor passes ran to completion (``"call_graph"`` /
+    #: ``"type_graph"``), independent of how many edges they produced (ADR-041
+    #: P0 slice 2 follow-up, second Codex review). Edge *presence* alone cannot
+    #: distinguish "the pass ran and found nothing" from "the pass never ran" —
+    #: a project where no public struct happens to have a private field would
+    #: look identical to one whose type-graph pass never executed, even though
+    #: only the second is actually missing evidence. Set by
+    #: ``inline._fold_call_graph``/``_fold_type_graph`` right after a
+    #: successful extraction (regardless of edge count); absent/``False`` means
+    #: "unknown whether it ran" (e.g. a hand-built or pre-slice-2 graph), so
+    #: readers fall back to edge-presence inference for those.
+    extractor_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
@@ -286,7 +298,14 @@ class SourceGraphSummary:
         edge_kinds: dict[str, int] = {}
         for e in self.edges:
             edge_kinds[e.kind] = edge_kinds.get(e.kind, 0) + 1
-        has_calls = any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
+        # A pass that ran but found zero edges is still "collected" (ADR-041 P0
+        # slice 2 follow-up): edge presence alone reads identically to "the
+        # pass never ran", which is the exact coverage-honesty gap
+        # ``extractor_passes`` closes. Fall back to edge presence alone when
+        # the flag is absent (a hand-built or pre-slice-2 graph).
+        call_pass_ran = self.extractor_passes.get("call_graph", False)
+        type_pass_ran = self.extractor_passes.get("type_graph", False)
+        has_calls = call_pass_ran or any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
         has_includes = any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
         #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe
         #: type-level dependencies; DECL_REFERENCES_DECL a non-call decl reference.
@@ -295,8 +314,10 @@ class SourceGraphSummary:
         #: separately from the call graph — a graph can have calls but no type
         #: edges (e.g. an older pack) and coverage must say so honestly.
         type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
-        has_type_edges = any(e.kind in type_edge_kinds for e in self.edges)
-        has_reference_edges = any(e.kind == "DECL_REFERENCES_DECL" for e in self.edges)
+        has_type_edges = type_pass_ran or any(e.kind in type_edge_kinds for e in self.edges)
+        has_reference_edges = type_pass_ran or any(
+            e.kind == "DECL_REFERENCES_DECL" for e in self.edges
+        )
         self.coverage = {
             "targets": kinds.get("target", 0),
             "compile_units": kinds.get("compile_unit", 0),
@@ -328,6 +349,7 @@ class SourceGraphSummary:
             "edges": [e.to_dict() for e in self.edges],
             "indexes": self.indexes(),
             "external_graph_refs": [dict(r) for r in self.external_graph_refs],
+            "extractor_passes": dict(self.extractor_passes),
         }
 
     @classmethod
@@ -335,6 +357,9 @@ class SourceGraphSummary:
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
         # a load (evidence/CLAUDE.md forward-compat rule). ``indexes`` are derived
         # and intentionally not read back — they are recomputed from nodes/edges.
+        # ``extractor_passes`` defaults to {} for a pre-slice-2 pack (additive
+        # field, no schema_version bump needed — same "unknown edge kinds/
+        # fields are ignored/defaulted" forward-compat rule as ADR-041 P0 slice 1).
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
@@ -342,6 +367,9 @@ class SourceGraphSummary:
             edges=[GraphEdge.from_dict(e) for e in d.get("edges", [])],
             coverage=dict(d.get("coverage", {})),
             external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
+            extractor_passes={
+                str(k): bool(v) for k, v in dict(d.get("extractor_passes", {})).items()
+            },
         )
 
 
@@ -913,21 +941,42 @@ def _dependency_reachability(
 
 
 #: Dependency edge kinds grouped by the single extractor pass that emits them
-#: together (``inline._fold_call_graph`` / ``inline._fold_type_graph``, each one
-#: AST walk). Coverage must be judged at this pass granularity, not per exact
-#: edge kind (second Codex review): ``type_graph.augment_graph_with_types``
-#: folds all four type/reference kinds from one pass, so a baseline that
-#: already has (say) a ``DECL_HAS_TYPE`` edge but never happened to have a
-#: ``TYPE_HAS_FIELD_TYPE`` one ran the *same* pass as a new side that has both —
-#: the first ``TYPE_HAS_FIELD_TYPE`` edge there is a real new dependency, not a
-#: collector-coverage artifact, and must not be dropped just because that exact
-#: kind is new.
-_DEPENDENCY_EDGE_FAMILIES: tuple[frozenset[str], ...] = (
-    frozenset({"DECL_CALLS_DECL"}),
-    frozenset({
+#: together, keyed by the same pass name ``inline._fold_call_graph`` /
+#: ``inline._fold_type_graph`` stamp onto ``SourceGraphSummary.extractor_passes``
+#: (each is one AST walk). Coverage must be judged at this pass granularity,
+#: not per exact edge kind (second Codex review): ``type_graph.
+#: augment_graph_with_types`` folds all four type/reference kinds from one
+#: pass, so a baseline that already has (say) a ``DECL_HAS_TYPE`` edge but
+#: never happened to have a ``TYPE_HAS_FIELD_TYPE`` one ran the *same* pass as
+#: a new side that has both — the first ``TYPE_HAS_FIELD_TYPE`` edge there is
+#: a real new dependency, not a collector-coverage artifact, and must not be
+#: dropped just because that exact kind is new.
+_DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
+    "call_graph": frozenset({"DECL_CALLS_DECL"}),
+    "type_graph": frozenset({
         "DECL_REFERENCES_DECL", "DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
     }),
-)
+}
+
+
+def _dependency_kinds_covered(graph: SourceGraphSummary, edge_kinds: frozenset[str]) -> bool:
+    """Whether *graph* has evidence for any kind in *edge_kinds*: an edge, or its
+    extractor pass recorded as having run (:data:`_DEPENDENCY_EDGE_FAMILIES`).
+
+    A pass can run to completion and still emit zero edges of its family (e.g.
+    no public struct anywhere had a private field yet), which reads identically
+    to "the pass never ran" if edge presence is the only signal (third Codex
+    review). ``SourceGraphSummary.extractor_passes`` (set by
+    ``inline._fold_call_graph``/``_fold_type_graph`` right after a successful
+    extraction, regardless of edge count) breaks that tie; absent that record
+    (a hand-built or pre-slice-2 graph) this falls back to edge presence alone.
+    """
+    if any(e.kind in edge_kinds for e in graph.edges):
+        return True
+    return any(
+        graph.extractor_passes.get(pass_name, False) and (family & edge_kinds)
+        for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items()
+    )
 
 
 def _common_dependency_edge_kinds(
@@ -944,18 +993,14 @@ def _common_dependency_edge_kinds(
     change. But gating per *exact* edge kind is too strict in the other
     direction: it would also drop a real first-ever edge of a kind whose
     sibling pass output (any other kind from the same extractor pass,
-    :data:`_DEPENDENCY_EDGE_FAMILIES`) is already present on both sides. Whole
-    families of dependency edges are folded together by one pass
-    (``call_graph``/``type_graph``), so a family counts as covered on both
-    sides when *any* of its kinds appears on each side — then every kind in
-    that family is eligible for the closure, including one with no prior
-    edges at all.
+    :data:`_DEPENDENCY_EDGE_FAMILIES`) is already present — or whose pass ran
+    with zero output — on both sides (:func:`_dependency_kinds_covered`). A
+    family common to both sides makes every kind in it — including one with no
+    prior edges at all — eligible for the closure.
     """
-    old_kinds = {e.kind for e in old.edges if e.kind in DEPENDENCY_EDGE_KINDS}
-    new_kinds = {e.kind for e in new.edges if e.kind in DEPENDENCY_EDGE_KINDS}
     common: set[str] = set()
-    for family in _DEPENDENCY_EDGE_FAMILIES:
-        if (old_kinds & family) and (new_kinds & family):
+    for family in _DEPENDENCY_EDGE_FAMILIES.values():
+        if _dependency_kinds_covered(old, family) and _dependency_kinds_covered(new, family):
             common |= family
     return frozenset(common)
 
@@ -1283,9 +1328,9 @@ def _build_option_reach_findings(
 
 
 def _has_internal_reach_coverage(g: SourceGraphSummary, edge_kinds: frozenset[str]) -> bool:
-    """Whether a graph carries a dependency edge from *edge_kinds* and a public closure."""
-    has_dependency_edges = any(e.kind in edge_kinds for e in g.edges)
-    return has_dependency_edges and bool(_public_decls(g) or _public_types(g))
+    """Whether a graph carries evidence for *edge_kinds* (:func:`_dependency_kinds_covered`)
+    and a public closure."""
+    return _dependency_kinds_covered(g, edge_kinds) and bool(_public_decls(g) or _public_types(g))
 
 
 def _internal_dependency_findings(

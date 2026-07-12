@@ -66,7 +66,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   kind vs. `type_graph.py`'s four, folded together by one AST pass), not per
   exact edge kind — otherwise a genuinely new dependency of a kind with no
   prior edges (but whose sibling kind from the same pass already exists on
-  both sides) would be dropped too.
+  both sides) would be dropped too. New `SourceGraphSummary.extractor_passes`
+  field (additive, no schema version bump) records that a pass ran to
+  completion independent of edge count — closing the residual gap where a
+  pass genuinely finds zero edges of its whole family on one side (e.g. no
+  struct anywhere yet had a private field), which edge presence alone cannot
+  distinguish from "the pass never ran". Falls back to edge-presence inference
+  when the flag is absent (older packs, hand-built graphs).
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`

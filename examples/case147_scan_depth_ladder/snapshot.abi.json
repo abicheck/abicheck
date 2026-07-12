@@ -21,6 +21,7 @@
       "coverage": {},
       "edges": [],
       "external_graph_refs": [],
+      "extractor_passes": {},
       "graph_id": "sha256:09dc3a044653ebeae24c62591613a972d7081df8f75eafcc186530696ce41658",
       "indexes": {
         "by_binary_symbol": {},

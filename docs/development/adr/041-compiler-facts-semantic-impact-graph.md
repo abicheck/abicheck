@@ -293,6 +293,28 @@ as common when *any* of its kinds is present on both sides, and then every
 kind in that family — including one with zero prior edges — is eligible for
 the closure.
 
+A third Codex pass found the residual gap in *that* fix: per-family edge
+*presence* is still an indirect proxy for "the pass ran" — a pass can run to
+completion and legitimately find zero edges of its whole family on one side
+(e.g. no public struct anywhere had a private field yet), which reads
+identically to "the pass never ran" if presence is the only signal available.
+Until this fix, `SourceGraphSummary` had no field for "ran, zero output"
+distinct from "never ran" — not even the `coverage.type_edges.collected` flag
+from P0 slice 1, which is *also* edge-presence-derived. Fixed by adding real
+pass-level provenance: `SourceGraphSummary.extractor_passes: dict[str, bool]`
+(a new additive field, round-tripped through `to_dict`/`from_dict` with
+defensive `.get()` parsing — no `SOURCE_GRAPH_VERSION` bump needed, same
+forward-compat rule as the reserved-then-populated edge kinds). `inline.
+_fold_call_graph`/`_fold_type_graph` stamp `extractor_passes["call_graph"]` /
+`["type_graph"]` to `True` right after a successful extraction, regardless of
+how many edges it added. `_dependency_kinds_covered()` (shared by
+`_common_dependency_edge_kinds()` and `_has_internal_reach_coverage()`) now
+checks the recorded flag first and only falls back to edge presence when it is
+absent — a hand-built test graph or a pack from before this fix. `finalize()`'s
+`coverage.call_edges`/`type_edges`/`reference_edges.collected` flags gained the
+same fix, so the human-readable coverage report is honest about this too, not
+just the internal helper.
+
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 broadening its recall exactly as slice 1 broadened `public_to_internal_dependency`'s
 — the type/reference edges the P0 slice 1 extractor started producing were

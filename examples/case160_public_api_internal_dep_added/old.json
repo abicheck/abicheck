@@ -27,6 +27,7 @@
     }
   ],
   "external_graph_refs": [],
+  "extractor_passes": {},
   "graph_id": "sha256:4e69e5f0640548214614870c0ac12d47ebf649966b7e5aadf8c209767a3e6f12",
   "indexes": {
     "by_binary_symbol": {
