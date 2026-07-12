@@ -151,6 +151,24 @@ _BUILTIN_TYPES = frozenset(
 _LEADING_TYPE_QUALS = ("const ", "volatile ", "struct ", "class ", "enum ", "union ")
 
 
+def _top_level_paren_index(s: str) -> int:
+    """Index of the first ``(`` not nested inside a ``<...>`` template-angle
+    group, or -1. Distinguishes the outer parameter-list paren of a
+    callback-shaped spelling (``"detail::Impl ()"``) from one nested inside
+    an enclosing template instantiation (``"std::function<detail::Impl
+    ()>"`` — the first "(" there belongs to the *argument*, not the outer
+    type, and must not be treated as ending the outer spelling)."""
+    depth = 0
+    for i, c in enumerate(s):
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+        elif c == "(" and depth == 0:
+            return i
+    return -1
+
+
 def _base_type_name(qual_type: str) -> str:
     """Strip cv/pointer/reference/array decoration down to a base type spelling.
 
@@ -177,6 +195,21 @@ def _base_type_name(qual_type: str) -> str:
         bracket = s.find("[")
         if bracket != -1:
             s = s[:bracket].strip()
+            changed = True
+        # A callback-shaped template argument (``std::function<detail::Impl
+        # ()>``'s single argument spells as ``"detail::Impl ()"``, the
+        # written function-signature form) carries a parameter-list suffix
+        # this loop's other checks don't recognize, so "Impl ()" was looked
+        # up as a type literally named that instead of "Impl" (Codex
+        # review). Same fix as the array-bracket case above: strip up to the
+        # first *top-level* "(" (depth 0 relative to any enclosing "<...>",
+        # since e.g. "std::function<detail::Impl ()>" itself must NOT be cut
+        # at the nested paren — that would butcher the outer template's own
+        # closing ">") and keep looping so the leftover pointer/cv decoration
+        # on the return-type spelling still gets stripped too.
+        paren = _top_level_paren_index(s)
+        if paren != -1:
+            s = s[:paren].strip()
             changed = True
         for suf in ("&&", "&", "*"):
             if s.endswith(suf):

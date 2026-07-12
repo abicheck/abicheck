@@ -274,6 +274,44 @@ def test_param_type_resolves_template_argument_to_private_type() -> None:
     )
 
 
+def test_base_type_name_strips_callback_signature_argument() -> None:
+    # std::function<detail::Impl ()>'s single template argument spells as
+    # the written function-signature form "detail::Impl ()", not a plain
+    # type name — the "()" parameter-list suffix wasn't recognized by any
+    # existing stripping rule, so "Impl ()" was looked up as a type literally
+    # named that (Codex review).
+    assert _base_type_name("detail::Impl ()") == "detail::Impl"
+
+
+def test_param_type_resolves_callback_template_argument_to_private_type() -> None:
+    # A callback-shaped parameter (std::function<detail::Impl ()>) must
+    # still resolve a direct edge to the private return type it wraps, and
+    # the outer instantiation's own edge must not be corrupted by treating
+    # the argument's nested "(" as ending the *outer* type spelling.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record(
+            "Widget",
+            inner=[
+                _method(
+                    "setCb",
+                    "_ZN6Widget5setCbE",
+                    [_param("cb", "std::function<detail::Impl ()>")],
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.role == "param"]
+    assert (
+        TypeEdge(
+            "_ZN6Widget5setCbE", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "param"
+        )
+        in params
+    )
+    assert any(e.dst == "std::function<detail::Impl ()>" for e in params)
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
     # references it in this TU — the two-pass design (a full indexing pass
