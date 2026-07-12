@@ -268,3 +268,26 @@ def test_policy_file_override_propagates_across_channels() -> None:
     assert sarif_severity(compatible, result) == "error"
     kind_sets = result._effective_kind_sets()
     assert _is_failure(compatible, result, kind_sets) is True
+
+
+def test_named_base_policy_downgrade_propagates_to_sarif() -> None:
+    """A named base policy (``plugin_abi``) that downgrades a kind away from
+    its strict_abi default must read as compatible in SARIF too — not just in
+    JSON/JUnit (regression test: SARIF's ``_severity`` only checked for an A4
+    ``effective_verdict`` or a ``PolicyFile.overrides`` entry, silently
+    ignoring the ``result.policy`` base-policy mechanism entirely, so a kind
+    downgraded by ``plugin_abi``/``sdk_vendor`` still showed SARIF ``"error"``
+    even though the JSON report and exit code correctly read it as compatible).
+    """
+    from abicheck.checker_policy import PLUGIN_ABI_DOWNGRADED_KINDS
+
+    kind = next(iter(PLUGIN_ABI_DOWNGRADED_KINDS))
+    change = Change(kind=kind, symbol="foo", description="calling convention changed")
+    result = _result()
+    result.policy = "plugin_abi"
+    result.changes = [change]
+
+    assert result._effective_verdict_for_change(change) == Verdict.COMPATIBLE
+    assert sarif_severity(change, result) == "note"
+    kind_sets = result._effective_kind_sets()
+    assert _is_failure(change, result, kind_sets) is False

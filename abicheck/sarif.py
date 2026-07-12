@@ -59,22 +59,25 @@ def _tool_version() -> str:
 def _severity(change: Change, result: DiffResult) -> str:
     """Return the SARIF ``level`` for *change*.
 
-    On the override path — an A4 per-finding ``effective_verdict`` (ADR-027)
-    or a PolicyFile verdict override for this change's kind — the canonical
-    verdict→SARIF-level table (ADR-036) applies, routed through
-    ``result._effective_verdict_for_change`` so SARIF can never disagree
-    with the JSON report or the gate/exit code. Non-overridden findings keep
-    the coarser per-kind default severity from the policy registry.
+    Whenever the canonical per-finding verdict (``result._effective_verdict_for_change``
+    — A4 per-finding ``effective_verdict`` (ADR-027), a PolicyFile verdict
+    override, *or* a named base policy like ``plugin_abi``/``sdk_vendor``
+    reclassifying this change's kind) differs from the kind's inherent default
+    verdict, the canonical verdict→SARIF-level table (ADR-036) applies, so
+    SARIF can never disagree with the JSON report or the gate/exit code.
+    Comparing against the *kind's own* default verdict (rather than checking
+    for specific override mechanisms) catches every reclassification path
+    uniformly — a hand-maintained ``has_override`` allowlist previously missed
+    base-policy downgrades entirely. Findings still at their kind's default
+    verdict keep the coarser per-kind default severity from the policy
+    registry, which is intentionally finer-grained than the 4-way verdict
+    table (e.g. distinguishing "warning" additions from "note"-worthy ones).
     """
-    has_override = isinstance(
-        getattr(change, "effective_verdict", None), Verdict
-    ) or (
-        result.policy_file is not None and change.kind in result.policy_file.overrides
-    )
-    if has_override:
-        verdict = result._effective_verdict_for_change(change)
-        return _VERDICT_TO_SARIF_LEVEL.get(verdict, policy_for(change.kind).severity)
-    return policy_for(change.kind).severity
+    entry = policy_for(change.kind)
+    verdict = result._effective_verdict_for_change(change)
+    if verdict != entry.default_verdict:
+        return _VERDICT_TO_SARIF_LEVEL.get(verdict, entry.severity)
+    return entry.severity
 
 
 def _rule_for(kind: ChangeKind) -> dict[str, Any]:
@@ -84,7 +87,9 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     doc_slug = policy_for(kind).doc_slug
     help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/abi_breaking_cases_catalog.md#{doc_slug}"
     impact = impact_for(kind)
-    full_desc = impact if impact else f"ABI change detected: {rule_id.replace('_', ' ')}"
+    full_desc = (
+        impact if impact else f"ABI change detected: {rule_id.replace('_', ' ')}"
+    )
     return {
         "id": rule_id,
         "name": "".join(w.capitalize() for w in rule_id.split("_")),
@@ -98,7 +103,11 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
 
 def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
     """Produce a SARIF result object for a Change."""
-    library, old_version, new_version = result.library, result.old_version, result.new_version
+    library, old_version, new_version = (
+        result.library,
+        result.old_version,
+        result.new_version,
+    )
     msg_parts = [change.description]
     if change.old_value or change.new_value:
         msg_parts.append(f"({change.old_value or '?'} → {change.new_value or '?'})")
@@ -232,14 +241,51 @@ def to_sarif(
                     "library": result.library,
                     "changeCount": len(changes),
                     "suppressedCount": result.suppressed_count,
-                    **({"redundantCount": result.redundant_count} if result.redundant_count > 0 else {}),
-                    **({"oldFile": {"path": result.old_metadata.path, "sha256": result.old_metadata.sha256, "sizeBytes": result.old_metadata.size_bytes}} if result.old_metadata is not None else {}),
-                    **({"newFile": {"path": result.new_metadata.path, "sha256": result.new_metadata.sha256, "sizeBytes": result.new_metadata.size_bytes}} if result.new_metadata is not None else {}),
+                    **(
+                        {"redundantCount": result.redundant_count}
+                        if result.redundant_count > 0
+                        else {}
+                    ),
+                    **(
+                        {
+                            "oldFile": {
+                                "path": result.old_metadata.path,
+                                "sha256": result.old_metadata.sha256,
+                                "sizeBytes": result.old_metadata.size_bytes,
+                            }
+                        }
+                        if result.old_metadata is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "newFile": {
+                                "path": result.new_metadata.path,
+                                "sha256": result.new_metadata.sha256,
+                                "sizeBytes": result.new_metadata.size_bytes,
+                            }
+                        }
+                        if result.new_metadata is not None
+                        else {}
+                    ),
                     "confidence": result.confidence.value,
                     "evidenceTiers": list(result.evidence_tiers),
-                    **({"coverageWarnings": list(result.coverage_warnings)} if result.coverage_warnings else {}),
+                    **(
+                        {"coverageWarnings": list(result.coverage_warnings)}
+                        if result.coverage_warnings
+                        else {}
+                    ),
                     "policy": result.policy or "strict_abi",
-                    **({"policyOverrides": {k.value: v.value for k, v in result.policy_file.overrides.items()}} if result.policy_file and result.policy_file.overrides else {}),
+                    **(
+                        {
+                            "policyOverrides": {
+                                k.value: v.value
+                                for k, v in result.policy_file.overrides.items()
+                            }
+                        }
+                        if result.policy_file and result.policy_file.overrides
+                        else {}
+                    ),
                     # ADR-024 §D4/D5: header-scope ledger. Out-of-surface
                     # findings are disclosed here for auditability (never
                     # silently dropped) when --scope-public-headers is active.
@@ -255,8 +301,16 @@ def to_sarif(
                                         "kind": c.kind.value,
                                         "symbol": c.symbol,
                                         "description": c.description,
-                                        **({"sourceLocation": c.source_location} if c.source_location else {}),
-                                        **({"reason": c.surface_exclusion_reason} if c.surface_exclusion_reason else {}),
+                                        **(
+                                            {"sourceLocation": c.source_location}
+                                            if c.source_location
+                                            else {}
+                                        ),
+                                        **(
+                                            {"reason": c.surface_exclusion_reason}
+                                            if c.surface_exclusion_reason
+                                            else {}
+                                        ),
                                     }
                                     for c in result.out_of_surface_changes
                                 ],
@@ -277,8 +331,16 @@ def to_sarif(
                                         "kind": c.kind.value,
                                         "symbol": c.symbol,
                                         "description": c.description,
-                                        **({"sourceLocation": c.source_location} if c.source_location else {}),
-                                        **({"reason": c.surface_exclusion_reason} if c.surface_exclusion_reason else {}),
+                                        **(
+                                            {"sourceLocation": c.source_location}
+                                            if c.source_location
+                                            else {}
+                                        ),
+                                        **(
+                                            {"reason": c.surface_exclusion_reason}
+                                            if c.surface_exclusion_reason
+                                            else {}
+                                        ),
                                     }
                                     for c in result.reconciled_changes
                                 ],
