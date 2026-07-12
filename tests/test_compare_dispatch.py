@@ -35,6 +35,47 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
 
+class TestCompareHeaderMarksProvenance:
+    """compare's --header is documented as "Public header file or directory"
+
+    (unlike dump's split -H/--public-header) — it must also be threaded
+    through as the public-header set for provenance tagging, not just as
+    castxml AST input. Regression: this was silently dropped, leaving every
+    compare-on-native-binaries run in reduced-confidence "no-provenance" mode
+    even though the given header genuinely was the public one.
+    """
+
+    def test_resolve_compare_snapshots_passes_header_as_public_header(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from abicheck import cli_resolve
+
+        calls: list[dict] = []
+
+        def fake_resolve_input(path, headers, includes, version, lang, **kwargs):
+            calls.append({"path": path, "headers": headers, "version": version, **kwargs})
+            return _snap(version=version)
+
+        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+
+        old_h = [tmp_path / "old.h"]
+        new_h = [tmp_path / "new.h"]
+        cli_resolve._resolve_compare_snapshots(
+            tmp_path / "old.so", tmp_path / "new.so",
+            "elf", "elf",
+            old_h, new_h,
+            [], [],
+            "old", "new",
+            "c++",
+            None, None, None,
+            False, None, False, (), "",
+        )
+        assert len(calls) == 2
+        old_call, new_call = calls
+        assert old_call["public_headers"] == old_h
+        assert new_call["public_headers"] == new_h
+
+
 def _snap(version: str = "1.0", funcs: list[Function] | None = None,
           library: str = "libfoo.so") -> AbiSnapshot:
     if funcs is None:
