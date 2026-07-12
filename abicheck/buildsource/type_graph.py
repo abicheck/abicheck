@@ -197,6 +197,62 @@ def _is_excluded_type(name: str) -> bool:
     return name in _BUILTIN_TYPES
 
 
+def _template_arg_types(base_type: str) -> list[str]:
+    """This type's template argument spellings (recursively), each normalized
+    like a standalone type.
+
+    A field typed ``std::unique_ptr<detail::Impl>`` — the common PImpl/
+    container pattern this module exists to catch — resolves the *whole*
+    instantiation spelling as one endpoint (``std::unique_ptr<detail::Impl>``,
+    which never matches an indexed declaration and stays unprovenanced), so
+    the actual private-type dependency on ``detail::Impl`` was invisible
+    (Codex review's exact example). Best-effort bracket/depth matching over
+    the textual spelling, not real template-argument parsing: extracts each
+    top-level comma-separated argument inside the outermost ``<...>``, then
+    recurses so a nested instantiation (``std::vector<std::unique_ptr<X>>``)
+    still reaches ``X``.
+    """
+    start = base_type.find("<")
+    if start == -1:
+        return []
+    depth = 0
+    end = -1
+    for i in range(start, len(base_type)):
+        c = base_type[i]
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end == -1:
+        return []
+    inner = base_type[start + 1 : end]
+    raw_args: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for c in inner:
+        if c in "<(":
+            depth += 1
+        elif c in ">)":
+            depth -= 1
+        if c == "," and depth == 0:
+            raw_args.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    if cur:
+        raw_args.append("".join(cur))
+    args: list[str] = []
+    for raw in raw_args:
+        base = _base_type_name(raw)
+        if base:
+            args.append(base)
+            args.extend(_template_arg_types(base))
+    return args
+
+
 def _decl_type_name(node: dict[str, Any]) -> str:
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
@@ -439,6 +495,45 @@ def _resolve_type_name(
     return raw, False
 
 
+def _emit_type_edges(
+    edges: list[TypeEdge],
+    src: str,
+    raw: str,
+    kind: str,
+    role: str,
+    scope: list[str],
+    name_index: dict[str, list[str]],
+    decl_file: dict[str, str],
+) -> None:
+    """Resolve *raw* and, when it's a template instantiation, each of its
+    (recursive) template arguments too, appending a :class:`TypeEdge` for
+    each resolved, non-excluded name.
+
+    A field typed ``std::unique_ptr<detail::Impl>`` — the common PImpl/
+    container pattern — would otherwise only produce an edge to the whole,
+    never-resolvable instantiation spelling, hiding the actual private-type
+    dependency on ``detail::Impl`` (Codex review). Duplicate names (e.g. the
+    same private type appearing as two template arguments) are only emitted
+    once per call site.
+    """
+    seen: set[str] = set()
+    for candidate in (raw, *_template_arg_types(raw)):
+        name, matched = _resolve_type_name(candidate, scope, name_index)
+        if not name or _is_excluded_type(name) or name in seen:
+            continue
+        seen.add(name)
+        edges.append(
+            TypeEdge(
+                src,
+                name,
+                kind,
+                CONF_HIGH if matched else CONF_REDUCED,
+                role,
+                decl_file.get(name, ""),
+            )
+        )
+
+
 def _resolve_ref_identity(
     ref: dict[str, Any],
     decl_file: dict[str, str],
@@ -530,37 +625,29 @@ def _walk_types(
                     if isinstance(base_type, dict)
                     else ""
                 )
-                base_name, matched = _resolve_type_name(
-                    raw_base, child_scope, name_index
+                _emit_type_edges(
+                    edges,
+                    qname,
+                    raw_base,
+                    EDGE_TYPE_INHERITS,
+                    "base",
+                    child_scope,
+                    name_index,
+                    decl_file,
                 )
-                if base_name and not _is_excluded_type(base_name):
-                    edges.append(
-                        TypeEdge(
-                            qname,
-                            base_name,
-                            EDGE_TYPE_INHERITS,
-                            CONF_HIGH if matched else CONF_REDUCED,
-                            "base",
-                            decl_file.get(base_name, ""),
-                        )
-                    )
             for child in node.get("inner", []) or []:
                 if isinstance(child, dict) and child.get("kind") == "FieldDecl":
                     raw_field = _decl_type_name(child)
-                    field_name, matched = _resolve_type_name(
-                        raw_field, child_scope, name_index
+                    _emit_type_edges(
+                        edges,
+                        qname,
+                        raw_field,
+                        EDGE_TYPE_HAS_FIELD_TYPE,
+                        "field",
+                        child_scope,
+                        name_index,
+                        decl_file,
                     )
-                    if field_name and not _is_excluded_type(field_name):
-                        edges.append(
-                            TypeEdge(
-                                qname,
-                                field_name,
-                                EDGE_TYPE_HAS_FIELD_TYPE,
-                                CONF_HIGH if matched else CONF_REDUCED,
-                                "field",
-                                decl_file.get(field_name, ""),
-                            )
-                        )
         for child in node.get("inner", []) or []:
             _walk_types(
                 child,
@@ -594,35 +681,29 @@ def _walk_types(
         if ident:
             raw_return = _decl_return_type_name(node)
             if raw_return:
-                return_name, matched = _resolve_type_name(raw_return, scope, name_index)
-                if return_name and not _is_excluded_type(return_name):
-                    edges.append(
-                        TypeEdge(
-                            ident,
-                            return_name,
-                            EDGE_DECL_HAS_TYPE,
-                            CONF_HIGH if matched else CONF_REDUCED,
-                            "return",
-                            decl_file.get(return_name, ""),
-                        )
-                    )
+                _emit_type_edges(
+                    edges,
+                    ident,
+                    raw_return,
+                    EDGE_DECL_HAS_TYPE,
+                    "return",
+                    scope,
+                    name_index,
+                    decl_file,
+                )
             for child in node.get("inner", []) or []:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                     raw_param = _decl_type_name(child)
-                    param_name, matched = _resolve_type_name(
-                        raw_param, scope, name_index
+                    _emit_type_edges(
+                        edges,
+                        ident,
+                        raw_param,
+                        EDGE_DECL_HAS_TYPE,
+                        "param",
+                        scope,
+                        name_index,
+                        decl_file,
                     )
-                    if param_name and not _is_excluded_type(param_name):
-                        edges.append(
-                            TypeEdge(
-                                ident,
-                                param_name,
-                                EDGE_DECL_HAS_TYPE,
-                                CONF_HIGH if matched else CONF_REDUCED,
-                                "param",
-                                decl_file.get(param_name, ""),
-                            )
-                        )
         next_func = ident or enclosing_func
         # Recurse into every child, including a ParmVarDecl — its type was
         # already recorded as a "param" edge above, but a default-argument

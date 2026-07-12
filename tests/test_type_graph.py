@@ -216,6 +216,64 @@ def test_field_type_resolves_against_own_record_scope() -> None:
     ]
 
 
+def test_field_type_resolves_template_argument_to_private_type() -> None:
+    # The common PImpl/container pattern: a field typed
+    # `std::unique_ptr<detail::Impl>` only resolving the *whole* instantiation
+    # spelling as one endpoint hides the actual dependency on the private
+    # `detail::Impl` — resolving template arguments too must additionally
+    # produce a direct, resolved edge to it (Codex review's exact example).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record("Widget", inner=[_field("p", "std::unique_ptr<detail::Impl>")]),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert (
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+        in fields
+    )
+    assert any(e.dst == "std::unique_ptr<detail::Impl>" for e in fields)
+
+
+def test_field_type_resolves_nested_template_argument_to_private_type() -> None:
+    # A nested instantiation (`std::vector<std::unique_ptr<detail::Impl>>`)
+    # must still reach the innermost private type.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record(
+            "Widget", inner=[_field("v", "std::vector<std::unique_ptr<detail::Impl>>")]
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert (
+        TypeEdge("Widget", "detail::Impl", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+        in fields
+    )
+
+
+def test_param_type_resolves_template_argument_to_private_type() -> None:
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        _record(
+            "Widget",
+            inner=[
+                _method(
+                    "bar",
+                    "_ZN6Widget3barE",
+                    [_param("p", "std::shared_ptr<detail::Impl>")],
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.role == "param"]
+    assert (
+        TypeEdge("_ZN6Widget3barE", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "param")
+        in params
+    )
+
+
 def test_dst_file_resolved_even_when_type_declared_after_use() -> None:
     # The private type's own CXXRecordDecl appears *after* the field that
     # references it in this TU — the two-pass design (a full indexing pass
