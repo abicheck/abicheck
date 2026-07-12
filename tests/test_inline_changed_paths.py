@@ -419,3 +419,121 @@ def test_run_inline_source_abi_extractor_unavailable_returns_empty_selection(
     )
     assert surface is not None  # empty SourceAbiSurface, not None
     assert units == []
+
+
+# ── ADR-041 P0: type-graph folding alongside the call graph ─────────────────
+
+
+def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
+    from abicheck.buildsource import call_graph, type_graph
+    from abicheck.buildsource.type_graph import TypeEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    merged = _build_with_one_unit()
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert any(e.kind == "TYPE_INHERITS" for e in graph.edges)
+
+
+def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):
+    # Best-effort: a missing clang++ records a failed extractor row and leaves the
+    # graph without type edges — never raises.
+    from abicheck.buildsource import call_graph, type_graph
+
+    class _Unavailable:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return False
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _Unavailable)
+    merged = _build_with_one_unit()
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=rows
+    )
+    assert graph is not None
+    assert not any(e.kind == "TYPE_INHERITS" for e in graph.edges)
+    assert any(r.name == "type_graph:clang" and r.status == "failed" for r in rows)
+
+
+def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
+    # Mirrors the call-graph scoping: a PR/--since scan narrows the type-graph
+    # pass to the changed compile units, not the whole compile DB.
+    from abicheck.buildsource import call_graph, type_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    seen_sources: list[str] = []
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            seen_sources.extend(cu.source for cu in build.compile_units)
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert seen_sources == ["src/a.cpp"]

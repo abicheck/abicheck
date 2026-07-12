@@ -276,6 +276,15 @@ class SourceGraphSummary:
             edge_kinds[e.kind] = edge_kinds.get(e.kind, 0) + 1
         has_calls = any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
         has_includes = any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
+        #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe
+        #: type-level dependencies; DECL_REFERENCES_DECL a non-call decl reference.
+        #: Both come from ``type_graph.py`` (folded alongside the call graph) or an
+        #: external backend (``graph_backends.py``), so "collected" is tracked
+        #: separately from the call graph — a graph can have calls but no type
+        #: edges (e.g. an older pack) and coverage must say so honestly.
+        type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
+        has_type_edges = any(e.kind in type_edge_kinds for e in self.edges)
+        has_reference_edges = any(e.kind == "DECL_REFERENCES_DECL" for e in self.edges)
         self.coverage = {
             "targets": kinds.get("target", 0),
             "compile_units": kinds.get("compile_unit", 0),
@@ -283,6 +292,14 @@ class SourceGraphSummary:
             "binary_symbol_mappings": edge_kinds.get("SOURCE_DECL_MAPS_TO_SYMBOL", 0),
             "include_edges": {"collected": has_includes, "count": edge_kinds.get("COMPILE_UNIT_INCLUDES_FILE", 0)},
             "call_edges": {"collected": has_calls, "count": edge_kinds.get("DECL_CALLS_DECL", 0)},
+            "type_edges": {
+                "collected": has_type_edges,
+                "count": sum(edge_kinds.get(k, 0) for k in type_edge_kinds),
+            },
+            "reference_edges": {
+                "collected": has_reference_edges,
+                "count": edge_kinds.get("DECL_REFERENCES_DECL", 0),
+            },
             "node_kinds": dict(sorted(kinds.items())),
             "edge_kinds": dict(sorted(edge_kinds.items())),
         }

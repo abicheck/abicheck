@@ -1583,6 +1583,14 @@ def _build_inline_graph(
             changed_paths,
             scoped_units=call_graph_units,
         )
+        _fold_type_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=call_graph_units,
+        )
     graph.finalize()
     return graph
 
@@ -1713,6 +1721,77 @@ def _fold_call_graph(
             status="ok" if added else "partial",
             detail=(
                 f"{added} call edges from {len(target.compile_units)} compile "
+                f"unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
+def _fold_type_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang type/reference-graph augmentation of *graph* (ADR-041 P0).
+
+    Mirrors :func:`_fold_call_graph` exactly (same scoping precedence, same
+    graceful degradation on a missing ``clang++``) but folds
+    ``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/``DECL_HAS_TYPE``/
+    ``DECL_REFERENCES_DECL`` edges instead of ``DECL_CALLS_DECL`` — the
+    dependency kinds ``crosscheck.py``'s ``public_to_internal_dependency``
+    already reads but that, before this module, no extractor populated. Run
+    only when the caller also runs the call graph (``with_call_graph``), so
+    the two passes share one scoping decision and one clang-availability
+    diagnostic story.
+    """
+    from dataclasses import replace
+
+    from .type_graph import ClangTypeGraphExtractor, augment_graph_with_types
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangTypeGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="type_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no type edges",
+            )
+        )
+        return
+    target = merged
+    scoped_note = ""
+    if changed_paths and not any(_is_header_path(p) for p in changed_paths):
+        scoped = [
+            cu for cu in merged.compile_units if _cu_matches_changed(cu, changed_paths)
+        ]
+        target = replace(merged, compile_units=scoped)
+        scoped_note = " (changed-scoped)"
+    elif changed_paths:
+        scoped_note = " (header change → all TUs)"
+    elif scoped_units is not None:
+        target = replace(merged, compile_units=list(scoped_units))
+        scoped_note = " (headers-only scope, matching L4)"
+    edges = extractor.extract_from_build(target)
+    added = augment_graph_with_types(graph, edges)
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"type_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="type_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{added} type edges from {len(target.compile_units)} compile "
                 f"unit(s){scoped_note}{timing}"
             ),
         )
