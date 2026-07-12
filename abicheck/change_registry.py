@@ -28,6 +28,7 @@ Architecture review: Problem A — eliminates scattered metadata across 5+ locat
 """
 from __future__ import annotations
 
+from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
@@ -1960,4 +1961,8 @@ REGISTRY = ChangeKindRegistry([
     # contracts) live in change_registry_coverage.py to keep this file under
     # the 2000-line cap; they are part of this same single registry.
     *COVERAGE_EXTENSION_ENTRIES,
+    # Composition-compatibility kinds (runtime binding, ordered loader
+    # contract, consumer-aware PE, wchar_t model) live in
+    # change_registry_composition.py for the same reason.
+    *COMPOSITION_EXTENSION_ENTRIES,
 ])

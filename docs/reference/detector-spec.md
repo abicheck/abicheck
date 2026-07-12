@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -165,6 +165,7 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `mandatory_template_param_added` | api_break | `API_BREAK` | `warning` | unspecified | `mandatory_template_param_added` | — |
 | `method_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `method_access_changed` | — |
 | `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` | [case138](../examples/case138_needed_added.md) |
+| `needed_order_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `needed_order_changed` | — |
 | `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |
 | `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` | — |
 | `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | — |
@@ -182,7 +183,9 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `pe_forwarder_changed` | breaking | `BREAKING` | `error` | L0 | `pe_forwarder_changed` | — |
 | `pe_hardening_improved` | quality | `COMPATIBLE` | `warning` | L0 | `pe_hardening_improved` | — |
 | `pe_hardening_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `pe_hardening_weakened` | — |
+| `pe_import_load_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `pe_import_load_mode_changed` | — |
 | `pe_machine_changed` | breaking | `BREAKING` | `error` | L0 | `pe_machine_changed` | — |
+| `pe_ordinal_retargeted` | breaking | `BREAKING` | `error` | L0 | `pe_ordinal_retargeted` | — |
 | `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` | — |
 | `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `polymorphic_type_non_virtual_dtor` | [case165](../examples/case165_polymorphic_nonvirtual_dtor.md) |
 | `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | — |
@@ -228,6 +231,8 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](../examples/case131_rtti_mode_flip.md) |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](../examples/case137_runpath_changed.md) |
 | `runtime_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_floor_raised` | [case170](../examples/case170_env_runtime_floor_raised.md) |
+| `runtime_symbol_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_symbol_provider_changed` | — |
+| `runtime_weak_resolution_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_weak_resolution_changed` | — |
 | `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |
 | `secondary_vtable_group_changed` | breaking | `BREAKING` | `error` | L1 | `secondary_vtable_group_changed` | — |
 | `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` | [case81](../examples/case81_serialization_tag_reassigned.md) |
@@ -283,12 +288,15 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `symbol_version_required_added` | [case170](../examples/case170_env_runtime_floor_raised.md) |
 | `symbol_version_required_added_compat` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_added_compat` | — |
 | `symbol_version_required_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_removed` | — |
+| `symbolic_binding_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `symbolic_binding_mode_changed` | — |
 | `tag_type_renamed` | breaking | `BREAKING` | `error` | L0 | `tag_type_renamed` | [case86](../examples/case86_tag_struct_renamed.md) |
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](../examples/case161_target_dependency_added.md) |
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
+| `text_relocation_introduced` | breaking | `BREAKING` | `error` | L0 | `text_relocation_introduced` | — |
+| `text_relocation_removed` | quality | `COMPATIBLE` | `warning` | L0 | `text_relocation_removed` | — |
 | `threadsafe_statics_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `threadsafe_statics_mode_changed` | [case132](../examples/case132_threadsafe_statics_flip.md) |
 | `time64_abi_changed` | breaking | `BREAKING` | `error` | L1 | `time64_abi_changed` | — |
 | `tls_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `tls_model_changed` | [case133](../examples/case133_tls_model_flip.md) |
@@ -346,6 +354,7 @@ One row per `ChangeKind` (343 total). Columns fuse the verdict partition (`check
 | `vtable_thunk_offset_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_offset_changed` | — |
 | `vtable_thunk_set_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_set_changed` | — |
 | `vtt_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_slot_count_changed` | — |
+| `wchar_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `wchar_model_changed` | — |
 | `whole_program_vtables_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `whole_program_vtables_mode_changed` | — |
 | `writable_executable_segment` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `writable_executable_segment` | — |
 | `x86_isa_baseline_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `x86_isa_baseline_raised` | — |

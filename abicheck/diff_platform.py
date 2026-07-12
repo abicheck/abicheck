@@ -234,6 +234,7 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
 
     changes.extend(_diff_pe_delay_imports(o, n))
+    changes.extend(_diff_pe_import_load_mode(o, n))
     changes.extend(_diff_pe_import_functions(o, n))
     changes.extend(_diff_pe_hardening(o, n))
     changes.extend(_diff_pe_versions(o, n))
@@ -321,6 +322,58 @@ def _diff_pe_delay_imports(o: Any, n: Any) -> list[Change]:
                 description=f"new delay-load import dependency: {dep}",
             )
         )
+    return changes
+
+
+def _diff_pe_import_load_mode(o: Any, n: Any) -> list[Change]:
+    """Detect an imported DLL function moving between eager and delay-loaded.
+
+    A DLL!Function pair that is eager-imported (IMAGE_DIRECTORY_ENTRY_IMPORT,
+    resolved at process load) in one version and delay-imported
+    (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT, resolved on first call) in the other
+    has a different failure-timing contract even though the DLL and symbol
+    both still exist: an eager import that fails aborts the process at load,
+    a delay import that fails surfaces only when the consumer first calls it.
+    Tri-state on delay_imports: None means the snapshot predates delay-import
+    capture, so a legacy baseline never fabricates a finding.
+    """
+    old_delay = getattr(o, "delay_imports", None)
+    new_delay = getattr(n, "delay_imports", None)
+    if old_delay is None or new_delay is None:
+        return []
+    old_eager_imports: dict[str, list[str]] = getattr(o, "imports", None) or {}
+    new_eager_imports: dict[str, list[str]] = getattr(n, "imports", None) or {}
+
+    changes: list[Change] = []
+    dlls = set(old_eager_imports) | set(old_delay) | set(new_eager_imports) | set(new_delay)
+    for dll in sorted(dlls):
+        old_eager = set(old_eager_imports.get(dll, []))
+        old_lazy = set(old_delay.get(dll, []))
+        new_eager = set(new_eager_imports.get(dll, []))
+        new_lazy = set(new_delay.get(dll, []))
+
+        for func in sorted(old_eager & new_lazy):
+            label = f"{dll}!{func}"
+            changes.append(
+                make_change(
+                    ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
+                    symbol=label,
+                    name=label,
+                    old="eager",
+                    new="delay-loaded",
+                )
+            )
+        for func in sorted(old_lazy & new_eager):
+            label = f"{dll}!{func}"
+            changes.append(
+                make_change(
+                    ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
+                    symbol=label,
+                    name=label,
+                    old="delay-loaded",
+                    new="eager",
+                )
+            )
     return changes
 
 

@@ -188,6 +188,7 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
     changes.extend(_diff_needed_libraries(old_elf.needed, new_elf.needed))
+    changes.extend(_diff_needed_order(old_elf.needed, new_elf.needed))
 
     # DT_RPATH ↔ DT_RUNPATH type flip (ld --enable-new-dtags default drift).
     # The two tags carry different lookup semantics (subtree vs direct deps,
@@ -268,6 +269,7 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     changes.extend(_diff_security_hardening(old_elf, new_elf))
     changes.extend(_diff_elf_identity(old_elf, new_elf))
     changes.extend(_diff_static_tls(old_elf, new_elf))
+    changes.extend(_diff_symbolic_and_textrel(old_elf, new_elf))
     changes.extend(_diff_gnu_property(old_elf, new_elf))
     changes.extend(_diff_dt_relr(old_elf, new_elf))
     changes.extend(_diff_hash_styles(old_elf, new_elf))
@@ -890,4 +892,82 @@ def _diff_needed_libraries(
                 old_value=lib,
             )
         )
+    return changes
+
+
+def _diff_needed_order(old_needed: list[str], new_needed: list[str]) -> list[Change]:
+    """Detect a DT_NEEDED reorder with the dependency set unchanged.
+
+    The System V gABI dynamic linker searches dependencies breadth-first in
+    DT_NEEDED order, so a pure reorder can silently change which DSO wins the
+    lookup for a non-versioned symbol defined in more than one dependency.
+    Only fires when the *set* is identical — an add/remove is already
+    reported by ``_diff_needed_libraries`` and reordering on top of that
+    would just be noise describing the same underlying change twice.
+    """
+    if old_needed == new_needed or set(old_needed) != set(new_needed):
+        return []
+    return [
+        make_change(
+            ChangeKind.NEEDED_ORDER_CHANGED,
+            symbol="DT_NEEDED",
+            old=", ".join(old_needed),
+            new=", ".join(new_needed),
+            old_value=", ".join(old_needed),
+            new_value=", ".join(new_needed),
+        )
+    ]
+
+
+def _diff_symbolic_and_textrel(old_elf: Any, new_elf: Any) -> list[Change]:
+    """Detect DT_SYMBOLIC/DF_SYMBOLIC and DF_TEXTREL/DT_TEXTREL drift.
+
+    DF_SYMBOLIC makes the object resolve its own references against its own
+    definitions first, before the global scope — a lookup-precedence change
+    that can silently stop honoring an LD_PRELOAD or another library's
+    intended interposition. DF_TEXTREL means the loader must write into the
+    (nominally read-only, shared) text segment to apply relocations — a
+    security-hardening regression, so only the "gained" direction reports;
+    dropping it is an improvement. Gated on both sides having captured ELF
+    identity so a legacy baseline never fabricates a finding.
+    """
+    if not _both_captured_elf_identity(old_elf, new_elf):
+        return []
+    changes: list[Change] = []
+
+    old_sym = getattr(old_elf, "is_symbolic", False)
+    new_sym = getattr(new_elf, "is_symbolic", False)
+    if old_sym != new_sym:
+        changes.append(
+            make_change(
+                ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
+                symbol="DT_SYMBOLIC",
+                old="symbolic" if old_sym else "direct",
+                new="symbolic" if new_sym else "direct",
+                old_value="DF_SYMBOLIC set" if old_sym else "(unset)",
+                new_value="DF_SYMBOLIC set" if new_sym else "(unset)",
+            )
+        )
+
+    old_tr = getattr(old_elf, "has_textrel", False)
+    new_tr = getattr(new_elf, "has_textrel", False)
+    if new_tr and not old_tr:
+        changes.append(
+            make_change(
+                ChangeKind.TEXT_RELOCATION_INTRODUCED,
+                symbol="DF_TEXTREL",
+                old_value="(none)",
+                new_value="DF_TEXTREL set",
+            )
+        )
+    elif old_tr and not new_tr:
+        changes.append(
+            make_change(
+                ChangeKind.TEXT_RELOCATION_REMOVED,
+                symbol="DF_TEXTREL",
+                old_value="DF_TEXTREL set",
+                new_value="(none)",
+            )
+        )
+
     return changes

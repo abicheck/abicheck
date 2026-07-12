@@ -521,6 +521,24 @@ Aggregate roll-up signals computed from the [API surface metrics](../user-guide/
 | `allocator_replacement_added` / `allocator_replacement_removed` | The library started/stopped exporting a global `operator new`/`operator delete` replacement, interposing allocation for the whole process (`COMPATIBLE_WITH_RISK`). |
 | `exported_object_alignment_reduced` | An exported data object's address alignment dropped — a copy-relocation / aligned-access hazard (`COMPATIBLE_WITH_RISK`). |
 
+### Composition Compatibility
+
+Failures that only appear when independently-valid artifacts are combined at
+runtime — a symbol resolving to a different provider DSO, a reordered
+dependency list, or a Windows consumer's ordinal-only import silently
+retargeted — rather than a single library's own declaration diff.
+
+| Kind | Description |
+|------|-------------|
+| `runtime_symbol_provider_changed` | A consumer's reference to a symbol resolves to a different provider DSO across two resolved environments (baseline vs candidate), even though neither DSO's own export table changed — caused by dependency reordering, a sibling library gaining/losing the export, or interposition drift. Computed by `abicheck deps compare` from the per-environment symbol bindings (`COMPATIBLE_WITH_RISK`). |
+| `runtime_weak_resolution_changed` | A weak symbol reference's resolution status flipped between two resolved environments — a reference that used to resolve is now unresolved, or vice versa (`COMPATIBLE_WITH_RISK`). |
+| `needed_order_changed` | The `DT_NEEDED` dependency list was reordered while the dependency *set* stayed the same. The dynamic linker searches dependencies breadth-first in `DT_NEEDED` order, so a pure reorder can silently change which DSO wins the lookup for a non-versioned symbol defined in more than one dependency (`COMPATIBLE_WITH_RISK`). |
+| `symbolic_binding_mode_changed` | `DT_SYMBOLIC`/`DF_SYMBOLIC` was toggled. When set, the object resolves its own references against its own definitions first, before the global symbol scope — can silently stop honoring an `LD_PRELOAD` or another library's intended interposition (`COMPATIBLE_WITH_RISK`). |
+| `text_relocation_introduced` | `DF_TEXTREL`/`DT_TEXTREL` was gained: the loader must write into the (nominally read-only, shared) text segment to apply relocations, defeating W^X and text-segment sharing; hardened systems may refuse to load the object (`BREAKING`). The improvement direction is `text_relocation_removed` (`COMPATIBLE`). |
+| `pe_ordinal_retargeted` | A consumer imports a DLL function purely by ordinal number (no name in its import table). The DLL still exports that ordinal, but it now names a **different** function — PE ordinals are commonly auto-assigned and reused when the export table shifts, so an ordinal-only consumer silently calls the wrong function with no link or load error. Detected by `abicheck appcompat` by cross-referencing the app's ordinal imports against both DLLs' export directories (`BREAKING`). |
+| `pe_import_load_mode_changed` | An imported DLL function moved between the eager import table (resolved at process load) and the delay-load table (resolved on first call). The two have different failure-timing contracts even though the DLL and symbol both still exist (`COMPATIBLE_WITH_RISK`). |
+| `wchar_model_changed` | The `-fshort-wchar` compiler flag drifted between builds (from `DW_AT_producer`). GCC/Clang document that objects built with and without `-fshort-wchar` are not binary compatible: it switches `wchar_t` between the platform default and a 2-byte unsigned type, changing the size/signedness of any public `wchar_t` parameter, field, or return value with no symbol-level signal (`COMPATIBLE_WITH_RISK`). |
+
 ### Platform Identity and Deployment Floors
 
 | Kind | Description |

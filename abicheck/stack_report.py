@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 from .binder import SymbolBinding
+from .checker_types import Change
 from .resolver import DependencyGraph
 from .stack_checker import StackChange, StackCheckResult, StackVerdict
 
@@ -110,6 +111,19 @@ def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
             sc_list.append(sc_dict)
         d["stack_changes"] = sc_list
 
+    # Runtime binding-provider changes (cross-environment rebound).
+    if result.binding_changes:
+        d["binding_changes"] = [
+            {
+                "kind": bc.kind.value,
+                "symbol": bc.symbol,
+                "description": bc.description,
+                "old_value": bc.old_value,
+                "new_value": bc.new_value,
+            }
+            for bc in result.binding_changes
+        ]
+
     return json.dumps(d, indent=indent, default=str)
 
 
@@ -165,6 +179,16 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
     lines.append("")
 
 
+def _render_binding_changes_section(lines: list[str], binding_changes: list[Change]) -> None:
+    """Append runtime binding-provider changes section if any."""
+    if not binding_changes:
+        return
+    lines += ["## Runtime Binding Changes", ""]
+    for bc in binding_changes:
+        lines.append(f"- `{bc.kind.value}`: {bc.description}")
+    lines.append("")
+
+
 def stack_to_markdown(result: StackCheckResult) -> str:
     """Render a StackCheckResult as Markdown."""
     lines: list[str] = []
@@ -213,6 +237,7 @@ def stack_to_markdown(result: StackCheckResult) -> str:
     lines.append("")
 
     _render_stack_changes_section(lines, result.stack_changes)
+    _render_binding_changes_section(lines, result.binding_changes)
 
     lines += [
         "---",

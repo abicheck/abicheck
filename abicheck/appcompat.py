@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from .checker import Change, DiffResult
 from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .diff_helpers import make_change
 from .model import AbiSnapshot, Visibility
 
 if TYPE_CHECKING:
@@ -658,6 +659,68 @@ def _missing_app_versions(new_lib_path: Path, app_reqs: AppRequirements) -> list
     ]
 
 
+def _check_pe_ordinal_imports(
+    old_lib_path: Path, new_lib_path: Path, app_reqs: AppRequirements,
+) -> tuple[set[str], list[Change]]:
+    """Resolve the app's ordinal-only PE imports against old/new export tables.
+
+    A PE consumer that imports by ordinal (``import_by_ordinal``) never names
+    its target function — ``parse_app_requirements`` records it as
+    ``"ordinal:N"``. ``_get_new_lib_exports`` returns names only, so such a
+    requirement always reads as "missing" from the generic check even when
+    the ordinal still resolves. This cross-references the ordinal against
+    both DLLs' export directories:
+
+    * ordinal still exists and names the SAME function → satisfied; excluded
+      from the generic missing-symbols check.
+    * ordinal still exists but now names a DIFFERENT function → the app
+      silently calls the wrong function with no link/load error — reported
+      as PE_ORDINAL_RETARGETED rather than a generic missing symbol.
+    * ordinal no longer exists at all → left in the generic missing-symbols
+      set (genuinely dropped).
+    * ordinal did not exist in the OLD library either → not attributable to
+      this version change; left alone.
+
+    Returns (resolved_requirement_strings, retargeted_changes).
+    """
+    ordinal_reqs = {s for s in app_reqs.undefined_symbols if s.startswith("ordinal:")}
+    if not ordinal_reqs or _detect_app_format(old_lib_path) != "pe":
+        return set(), []
+
+    from .pe_metadata import parse_pe_metadata
+
+    try:
+        old_by_ordinal = {e.ordinal: e.name for e in parse_pe_metadata(old_lib_path).exports}
+        new_by_ordinal = {e.ordinal: e.name for e in parse_pe_metadata(new_lib_path).exports}
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Failed to resolve PE ordinal exports for appcompat: %s", exc)
+        return set(), []
+
+    resolved: set[str] = set()
+    retargeted: list[Change] = []
+    for req in sorted(ordinal_reqs):
+        try:
+            ordinal = int(req.split(":", 1)[1])
+        except ValueError:
+            continue
+        old_name = old_by_ordinal.get(ordinal)
+        if old_name is None or ordinal not in new_by_ordinal:
+            continue
+        new_name = new_by_ordinal[ordinal]
+        resolved.add(req)
+        if new_name != old_name:
+            retargeted.append(
+                make_change(
+                    ChangeKind.PE_ORDINAL_RETARGETED,
+                    symbol=req,
+                    name=f"ordinal {ordinal}",
+                    old=old_name or "(unnamed)",
+                    new=new_name or "(unnamed)",
+                )
+            )
+    return resolved, retargeted
+
+
 def _partition_app_changes(
     diff: DiffResult, app_reqs: AppRequirements,
 ) -> tuple[list[Change], list[Change]]:
@@ -751,9 +814,16 @@ def check_appcompat(
 
     # 3. Check symbol availability in new library
     new_exports = _get_new_lib_exports(new_lib_path)
+    # Ordinal-only PE imports never match a name in new_exports; resolve them
+    # against both DLLs' export directories so they aren't reported as
+    # generically "missing" when the ordinal still (possibly differently)
+    # resolves.
+    resolved_ordinals, ordinal_retargets = _check_pe_ordinal_imports(
+        old_lib_path, new_lib_path, app_reqs
+    )
     missing_symbols = sorted(
         sym for sym in app_reqs.undefined_symbols
-        if sym not in new_exports
+        if sym not in new_exports and sym not in resolved_ordinals
     )
 
     # Check version availability
@@ -761,6 +831,7 @@ def check_appcompat(
 
     # 4. Filter diff by app usage
     breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, app_reqs)
+    breaking_for_app = breaking_for_app + ordinal_retargets
 
     # 5. Compute app-specific verdict
     required_count = len(app_reqs.undefined_symbols)
