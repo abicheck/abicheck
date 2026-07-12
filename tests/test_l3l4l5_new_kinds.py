@@ -251,8 +251,8 @@ def test_l4_unchanged_surface_emits_nothing() -> None:
 # ---------------------------------------------------------------------------
 # L5 — source-graph deltas (source_graph)
 # ---------------------------------------------------------------------------
-def _N(nid: str, kind: str, label: str = "") -> GraphNode:
-    return GraphNode(id=nid, kind=kind, label=label or nid)
+def _N(nid: str, kind: str, label: str = "", **attrs: object) -> GraphNode:
+    return GraphNode(id=nid, kind=kind, label=label or nid, attrs=dict(attrs))
 
 
 def _E(src: str, dst: str, kind: str) -> GraphEdge:
@@ -266,7 +266,7 @@ def _graph_kinds(old, new) -> list[str]:
 def test_l5_public_api_internal_dependency_added() -> None:
     nodes = [
         _N("pub", "source_decl", "pub()"),
-        _N("intn", "source_decl", "intn()"),
+        _N("intn", "source_decl", "intn()", visibility="private_header"),
         _N("sym", "binary_symbol", "pub"),
         _N("hdr", "header", "api.h"),
     ]
@@ -289,7 +289,7 @@ def test_l5_internal_dep_skipped_without_baseline_call_coverage() -> None:
     # edges — every internal callee would look newly-added. The check must skip.
     nodes = [
         _N("pub", "source_decl", "pub()"),
-        _N("intn", "source_decl", "intn()"),
+        _N("intn", "source_decl", "intn()", visibility="private_header"),
         _N("sym", "binary_symbol", "pub"),
         _N("hdr", "header", "api.h"),
     ]
@@ -310,7 +310,7 @@ def test_l5_internal_dep_skipped_without_baseline_public_closure() -> None:
     # Baseline has call edges but no SOURCE_DECLARES public closure (evidence-poor
     # older graph): its internal-reach set is empty for lack of a closure, so the
     # new graph's pre-existing internal calls must NOT look newly added.
-    nodes = [_N("pub", "source_decl"), _N("intn", "source_decl"), _N("sym", "binary_symbol")]
+    nodes = [_N("pub", "source_decl"), _N("intn", "source_decl", visibility="private_header"), _N("sym", "binary_symbol")]
     old = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
         _E("pub", "pub", "DECL_CALLS_DECL"),  # call edges present, but no SOURCE_DECLARES
@@ -333,7 +333,7 @@ def test_l5_public_type_gains_private_field_type() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     base = [
         _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
@@ -347,11 +347,58 @@ def test_l5_public_type_gains_private_field_type() -> None:
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
+def test_l5_public_type_gains_thirdparty_field_type_not_flagged() -> None:
+    # Fourth Codex review: "not declared by a public header" alone is not
+    # internal. A third-party/stdlib type used as a new field type carries no
+    # visibility and no project provenance (augment_graph_with_types only
+    # marks defined_in_project when the type's dst_file is one of the
+    # project's own files) — it must not be conflated with a genuinely
+    # private project entity just because it also isn't public.
+    nodes = [
+        _N("pub_hdr", "header", "api.h"),
+        _N("pub_type", "record_type", "Public"),
+        _N("ext_type", "record_type", "std::vector<int>"),  # no visibility/provenance at all
+    ]
+    base = [
+        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+        _E("pub_type", "pub_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub_type", "ext_type", "TYPE_HAS_FIELD_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_public_type_gains_unannotated_project_field_type_flagged() -> None:
+    # The positive counterpart: an unannotated type (no SOURCE_DECLARES from a
+    # header, so no `visibility` attr) but marked `defined_in_project` by the
+    # type-graph extractor (its dst_file is a project source/private header)
+    # IS internal — project-source-location provenance is exactly the signal
+    # crosscheck.py's `_is_internal_decl` already accepts for this case.
+    nodes = [
+        _N("pub_hdr", "header", "api.h"),
+        _N("pub_type", "record_type", "Public"),
+        _N("impl_type", "record_type", "detail::Impl", defined_in_project=True),
+    ]
+    base = [
+        _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
+        _E("pub_type", "pub_type", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes, edges=base + [_E("pub_type", "impl_type", "TYPE_HAS_FIELD_TYPE")]
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_l5_public_type_gains_private_base_class() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public"),
-        _N("priv_type", "record_type", "detail::Base"),
+        _N("priv_type", "record_type", "detail::Base", visibility="private_header"),
     ]
     base = [
         _E("pub_hdr", "pub_type", "SOURCE_DECLARES"),
@@ -370,7 +417,7 @@ def test_l5_public_fn_gains_private_parameter_type() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -391,7 +438,7 @@ def test_l5_public_fn_gains_private_constant_reference() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "f()"),
         _N("sym", "binary_symbol", "f"),
-        _N("priv_const", "source_decl", "detail::k"),
+        _N("priv_const", "source_decl", "detail::k", visibility="private_header"),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -413,7 +460,7 @@ def test_l5_internal_type_dep_skipped_without_baseline_coverage() -> None:
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     old = SourceGraphSummary(
         nodes=nodes, edges=[_E("pub_type", "priv_type", "TYPE_HAS_FIELD_TYPE")]
@@ -437,7 +484,7 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     old = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -468,7 +515,7 @@ def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
         _N("sym", "binary_symbol", "pub"),
         _N("pub_other", "source_decl", "other()"),
         _N("known_type", "record_type", "Known"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     base = [
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -534,7 +581,7 @@ def test_l5_internal_dep_flags_first_ever_family_edge_via_extractor_passes() -> 
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     old = SourceGraphSummary(
         nodes=nodes,
@@ -566,7 +613,7 @@ def test_l5_internal_dep_skipped_when_pass_never_ran_on_baseline() -> None:
         _N("hdr", "header", "api.h"),
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("priv_type", "record_type", "detail::PrivateType"),
+        _N("priv_type", "record_type", "detail::PrivateType", visibility="private_header"),
     ]
     old = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
@@ -600,7 +647,7 @@ def test_public_entry_internal_reach_no_reach_returns_empty() -> None:
     # Direct unit test: empty edge_kinds means _dependency_reachability returns
     # {}, so _public_entry_internal_reach must short-circuit before ever
     # touching the public-closure computation.
-    nodes = [_N("pub", "source_decl"), _N("sym", "binary_symbol"), _N("intn", "source_decl")]
+    nodes = [_N("pub", "source_decl"), _N("sym", "binary_symbol"), _N("intn", "source_decl", visibility="private_header")]
     g = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
         _E("pub", "intn", "DECL_CALLS_DECL"),
@@ -614,7 +661,7 @@ def test_public_entry_internal_reach_no_public_closure_returns_empty() -> None:
     nodes = [
         _N("pub", "source_decl", "pub()"),
         _N("sym", "binary_symbol", "pub"),
-        _N("intn", "source_decl", "intn()"),
+        _N("intn", "source_decl", "intn()", visibility="private_header"),
     ]
     g = SourceGraphSummary(nodes=nodes, edges=[
         _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),

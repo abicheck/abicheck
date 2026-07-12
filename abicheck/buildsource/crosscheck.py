@@ -90,7 +90,19 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
-from .source_graph import DEPENDENCY_EDGE_KINDS, GraphNode, SourceGraphSummary
+from .source_graph import (
+    DECL_NODE_KINDS,
+    DEPENDENCY_EDGE_KINDS,
+    INTERNAL_VISIBILITIES,
+    PUBLIC_VISIBILITIES,
+    UNANNOTATED_VISIBILITIES,
+    GraphNode,
+    SourceGraphSummary,
+    decl_declaring_files,
+    is_internal_dependency_node,
+    is_public_dependency_node,
+    looks_like_system_name,
+)
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -804,57 +816,29 @@ def _check_odr_type_variant(
 _DEPENDENCY_EDGE_KINDS = DEPENDENCY_EDGE_KINDS
 
 #: Graph node kinds that carry a declaration/type visibility we can classify.
-_DECL_NODE_KINDS = frozenset({"source_decl", "record_type", "enum_type", "typedef"})
+#: Sourced from ``source_graph.DECL_NODE_KINDS`` (ADR-041 P0 slice 2, fourth
+#: Codex review) — see the note on ``_DEPENDENCY_EDGE_KINDS`` above.
+_DECL_NODE_KINDS = DECL_NODE_KINDS
 
 #: Node visibilities that put an entity *on* the public source surface. Mirrors
-#: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is derived
-#: from): ``generated`` means a generated header **under the public roots** — a
-#: public, consumer-visible entity — so it is NOT an internal dependency (Codex
-#: review).
-_PUBLIC_VISIBILITIES = frozenset({"public_header", "generated"})
+#: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is
+#: derived from): ``generated`` means a generated header **under the public
+#: roots** — a public, consumer-visible entity — so it is NOT an internal
+#: dependency. Sourced from ``source_graph.PUBLIC_VISIBILITIES``.
+_PUBLIC_VISIBILITIES = PUBLIC_VISIBILITIES
 
-#: Node visibilities that make an entity *internal* (not public surface): a
-#: project-private header or an implementation ("source") file. System headers
-#: are third-party (excluded), and ``generated`` is public (above).
-_INTERNAL_VISIBILITIES = frozenset({"private_header", "source"})
+#: Node visibilities that make an entity *internal* (not public surface).
+#: Sourced from ``source_graph.INTERNAL_VISIBILITIES``.
+_INTERNAL_VISIBILITIES = INTERNAL_VISIBILITIES
 
-#: Visibilities that carry no provenance. The built-in call-graph extractor
-#: (``augment_graph_with_calls``) creates callee ``source_decl`` nodes with **no**
-#: ``visibility`` attr. Such a node is internal *only when the project also
-#: declares it* via a ``SOURCE_DECLARES`` edge — caller-presence alone is unsound
-#: (an inline third-party header function whose body calls something also appears
-#: as a caller), so a bare call-graph node with no project provenance is treated
-#: as a third-party/system call target and not flagged (Codex review).
-_UNANNOTATED_VISIBILITIES = frozenset({"", "unknown"})
+#: Visibilities that carry no provenance. Sourced from
+#: ``source_graph.UNANNOTATED_VISIBILITIES``.
+_UNANNOTATED_VISIBILITIES = UNANNOTATED_VISIBILITIES
 
-#: Mangled-name prefixes / substrings that mark a standard-library or
-#: compiler-internal decl. The call graph resolves callees into ``std::`` /
-#: ``__gnu_cxx`` / cxxabi helpers, which carry no visibility too; without this an
-#: unannotated stdlib callee would be mis-read as a project-internal dependency
-#: and a public API calling ``std::`` would light up (Codex review). Mirrors the
-#: stdlib/compiler filtering the dumper already applies to exported symbols.
-_SYSTEM_NAME_PREFIXES = (
-    "_ZSt",
-    "_ZNSt",
-    "_ZNKSt",
-    "_ZNSa",
-    "_ZN9__gnu_cxx",
-    "_ZNK9__gnu_cxx",
-    "_ZN6__cxxabiv",
-    "_Znw",
-    "_Zna",
-    "_Zdl",
-    "_Zda",
-    "__",
-)
-_SYSTEM_NAME_SUBSTRINGS = ("std::", "__gnu_cxx::", "__cxxabiv")
-
-
-def _looks_system(name: str) -> bool:
-    """Whether *name* is a standard-library / compiler-internal decl spelling."""
-    if name.startswith(_SYSTEM_NAME_PREFIXES):
-        return True
-    return any(sub in name for sub in _SYSTEM_NAME_SUBSTRINGS)
+#: Whether *name* is a standard-library / compiler-internal decl spelling.
+#: Sourced from ``source_graph.looks_like_system_name`` so the intra-version
+#: and inter-version checks agree on what "looks like stdlib/system" means.
+_looks_system = looks_like_system_name
 
 
 def _norm_path(path: str) -> str:
@@ -888,65 +872,25 @@ def _path_matches(candidate: str, changed: frozenset[str]) -> bool:
 def _decl_declaring_files(
     graph: SourceGraphSummary, node_by_id: dict[str, GraphNode]
 ) -> dict[str, str]:
-    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges."""
-    # Reverse the SOURCE_DECLARES edge (header → decl/type) to learn each
-    # entity's declaring file, so changed-path elevation can fire.
-    decl_to_file: dict[str, str] = {}
-    for e in graph.edges:
-        if e.kind != "SOURCE_DECLARES":
-            continue
-        header = node_by_id.get(e.src)
-        if header is not None and header.label:
-            decl_to_file.setdefault(e.dst, header.label)
-    return decl_to_file
+    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges.
+
+    Delegates to ``source_graph.decl_declaring_files`` (ADR-041 P0 slice 2);
+    *node_by_id* is accepted for call-site compatibility but no longer needed —
+    the shared implementation derives it from *graph*.
+    """
+    return decl_declaring_files(graph)
 
 
-def _is_public_decl(
-    node_id: str, node_by_id: dict[str, GraphNode], exported_decls: set[str]
-) -> bool:
-    """Whether the decl is public: exported-symbol-mapped or public-header visible."""
-    # A decl is definitively public when it maps to an exported binary symbol.
-    if node_id in exported_decls:
-        return True
-    node = node_by_id.get(node_id)
-    if node is None or node.kind not in _DECL_NODE_KINDS:
-        return False
-    return str(node.attrs.get("visibility", "")) in _PUBLIC_VISIBILITIES
+#: Whether the decl is public: exported-symbol-mapped or public-header
+#: visible. Sourced from ``source_graph.is_public_dependency_node`` (ADR-041
+#: P0 slice 2, fourth Codex review) so this and the version-over-version diff
+#: classify a node identically.
+_is_public_decl = is_public_dependency_node
 
-
-def _is_internal_decl(
-    node_id: str,
-    node_by_id: dict[str, GraphNode],
-    exported_decls: set[str],
-    decl_to_file: dict[str, str],
-) -> bool:
-    """Whether the decl is an internal entity consumers cannot see."""
-    node = node_by_id.get(node_id)
-    if node is None or node.kind not in _DECL_NODE_KINDS:
-        return False
-    if node_id in exported_decls:
-        return False
-    vis = str(node.attrs.get("visibility", ""))
-    if vis in _INTERNAL_VISIBILITIES:
-        return True
-    # An unannotated (call-graph-only) decl is internal only with explicit
-    # *project provenance*: either a SOURCE_DECLARES edge from one of the
-    # project's own files (``decl_to_file``), or the call-graph extractor's
-    # ``defined_in_project`` marker (the decl's body lives in a project
-    # compile-unit source — sound source-location provenance, not mere
-    # caller-presence). This catches a public→impl-helper dependency the
-    # built-in call graph produced without L4 SOURCE_DECLARES evidence, while
-    # a third-party header-inline or extern/system call target (no project
-    # source-file body) still has neither marker and is not flagged (Codex
-    # review).
-    if vis in _UNANNOTATED_VISIBILITIES:
-        has_provenance = node_id in decl_to_file or bool(
-            node.attrs.get("defined_in_project")
-        )
-        if not has_provenance:
-            return False
-        return not _looks_system(node.label or "")
-    return False
+#: Whether the decl is an internal entity consumers cannot see. Sourced from
+#: ``source_graph.is_internal_dependency_node`` (ADR-041 P0 slice 2, fourth
+#: Codex review).
+_is_internal_decl = is_internal_dependency_node
 
 
 def _decl_label(node_id: str, node_by_id: dict[str, GraphNode]) -> str:

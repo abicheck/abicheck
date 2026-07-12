@@ -315,6 +315,45 @@ absent — a hand-built test graph or a pack from before this fix. `finalize()`'
 same fix, so the human-readable coverage report is honest about this too, not
 just the internal helper.
 
+A fourth Codex pass found two more instances, both about *how* a candidate
+target gets classified internal rather than *whether* the diff runs at all:
+
+- **"Not public" was treated as "internal."** The closure's internal-target
+  test was `kinds.get(target) in {source_decl, type-kinds} and target not in
+  public` — but "not declared by a public header" is not the same as
+  "internal": a third-party or standard-library type used as a new field/
+  parameter type (`augment_graph_with_types` creates such a node with no
+  `visibility`/`defined_in_project` marker, since its `dst_file` isn't a
+  project file) is *also* not declared by any project header, so it looked
+  identical to a genuinely private project entity. `crosscheck.py`'s
+  `_is_internal_decl` already solved this correctly — positive evidence
+  required (explicit `private_header`/`source` visibility, or project-file
+  provenance plus a non-system-looking name) — but the version diff had its
+  own, weaker approximation. Fixed by promoting the shared vocabulary itself:
+  `DECL_NODE_KINDS`/`PUBLIC_VISIBILITIES`/`INTERNAL_VISIBILITIES`/
+  `UNANNOTATED_VISIBILITIES`/`looks_like_system_name`/
+  `is_public_dependency_node`/`is_internal_dependency_node` now live in
+  `source_graph.py` as the single source of truth; `crosscheck.py`'s
+  `_DECL_NODE_KINDS`/`_PUBLIC_VISIBILITIES`/`_INTERNAL_VISIBILITIES`/
+  `_UNANNOTATED_VISIBILITIES`/`_looks_system`/`_is_public_decl`/
+  `_is_internal_decl` are now aliases onto them (not independent copies), so
+  the intra-version and inter-version checks classify every node identically
+  by construction, not by two authors remembering to keep two definitions in
+  sync — the failure mode all four preceding fixes in this slice trace back to.
+- **The out-of-band `collect --call-graph` path never recorded pass coverage.**
+  The zero-edge coverage fix (third pass, above) only patched
+  `inline._fold_call_graph` — the source-tree-centric `dump --sources` path.
+  `cli_buildsource_helpers._collect_call_graph` (the `abicheck collect
+  --call-graph` path, out-of-band pack collection) still called
+  `augment_graph_with_calls()`/`finalize()` without stamping
+  `extractor_passes["call_graph"]`, so a version diff over two *collected*
+  packs — not two inline dumps — still couldn't tell "ran, zero calls" from
+  "never ran." Fixed with the same one-line stamp, mirroring
+  `inline._fold_call_graph` exactly. `type_graph.py` has no equivalent
+  out-of-band collection path yet (P1 item 1 — moving extraction into Flow C —
+  is the eventual fix for needing two call sites at all), so nothing else
+  needed the same patch.
+
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 broadening its recall exactly as slice 1 broadened `public_to_internal_dependency`'s
 — the type/reference edges the P0 slice 1 extractor started producing were

@@ -1198,6 +1198,11 @@ def _collect_call_graph(
 
     project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
+    # Recorded regardless of `added` — a pass that ran and found zero edges is
+    # still "covered" (ADR-041 P0 slice 2 follow-up, mirrors
+    # inline._fold_call_graph): edge presence alone cannot tell a version diff
+    # "ran, zero output" from "never ran".
+    graph.extractor_passes["call_graph"] = True
     graph.finalize()
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")

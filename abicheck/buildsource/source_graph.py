@@ -427,6 +427,117 @@ def _type_node_kind(decl_kind: str) -> str:
 #: ``source_decl``.
 _TYPE_ENTITY_KINDS: frozenset[str] = frozenset({"record_type", "enum_type", "typedef"})
 
+#: Graph node kinds that carry a declaration/type visibility we can classify as
+#: public or internal. Shared with ``crosscheck.py``'s intra-version
+#: ``public_to_internal_dependency`` check (ADR-041 P0 slice 2, fourth Codex
+#: review) so the two never classify a node differently.
+DECL_NODE_KINDS: frozenset[str] = frozenset({"source_decl"}) | _TYPE_ENTITY_KINDS
+
+#: Node visibilities that put an entity *on* the public source surface. Mirrors
+#: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is
+#: derived from): ``generated`` means a generated header **under the public
+#: roots** — a public, consumer-visible entity — so it is NOT an internal
+#: dependency.
+PUBLIC_VISIBILITIES: frozenset[str] = frozenset({"public_header", "generated"})
+
+#: Node visibilities that make an entity *internal* (not public surface): a
+#: project-private header or an implementation ("source") file. System headers
+#: are third-party (excluded), and ``generated`` is public (above).
+INTERNAL_VISIBILITIES: frozenset[str] = frozenset({"private_header", "source"})
+
+#: Visibilities that carry no provenance. The built-in call/type-graph
+#: extractors create dependency-target nodes with **no** ``visibility`` attr
+#: when the target isn't part of the linked L4 surface. Such a node is
+#: internal *only when the project also declares it* (``decl_to_file``) or the
+#: extractor marked it ``defined_in_project`` — caller/reference presence
+#: alone is unsound (a third-party header-inline symbol whose body is reached
+#: also appears as a dependency target), so a bare node with no project
+#: provenance is treated as a third-party/system target and not flagged.
+UNANNOTATED_VISIBILITIES: frozenset[str] = frozenset({"", "unknown"})
+
+#: Mangled-name prefixes / substrings that mark a standard-library or
+#: compiler-internal decl. The call/type graphs resolve targets into ``std::``/
+#: ``__gnu_cxx``/cxxabi helpers, which carry no visibility either; without this
+#: an unannotated stdlib target would be mis-read as a project-internal
+#: dependency and a public API merely using ``std::`` would light up. Mirrors
+#: the stdlib/compiler filtering the dumper already applies to exported
+#: symbols.
+_SYSTEM_NAME_PREFIXES = (
+    "_ZSt", "_ZNSt", "_ZNKSt", "_ZNSa", "_ZN9__gnu_cxx", "_ZNK9__gnu_cxx",
+    "_ZN6__cxxabiv", "_Znw", "_Zna", "_Zdl", "_Zda", "__",
+)
+_SYSTEM_NAME_SUBSTRINGS = ("std::", "__gnu_cxx::", "__cxxabiv")
+
+
+def looks_like_system_name(name: str) -> bool:
+    """Whether *name* is a standard-library / compiler-internal decl spelling."""
+    if name.startswith(_SYSTEM_NAME_PREFIXES):
+        return True
+    return any(sub in name for sub in _SYSTEM_NAME_SUBSTRINGS)
+
+
+def decl_declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
+    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges."""
+    node_by_id = {n.id: n for n in graph.nodes}
+    decl_to_file: dict[str, str] = {}
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        header = node_by_id.get(e.src)
+        if header is not None and header.label:
+            decl_to_file.setdefault(e.dst, header.label)
+    return decl_to_file
+
+
+def is_public_dependency_node(
+    node_id: str, node_by_id: dict[str, GraphNode], exported_decls: set[str]
+) -> bool:
+    """Whether *node_id* is public: exported-symbol-mapped or public-header visible.
+
+    Shared with ``crosscheck.py``'s ``_is_public_decl`` (ADR-041 P0 slice 2).
+    """
+    if node_id in exported_decls:
+        return True
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in DECL_NODE_KINDS:
+        return False
+    return str(node.attrs.get("visibility", "")) in PUBLIC_VISIBILITIES
+
+
+def is_internal_dependency_node(
+    node_id: str,
+    node_by_id: dict[str, GraphNode],
+    exported_decls: set[str],
+    decl_to_file: dict[str, str],
+) -> bool:
+    """Whether *node_id* is a project-internal decl/type consumers cannot see.
+
+    "Not declared by a public header" alone is not internal — a third-party or
+    standard-library type used as a field/parameter type is *also* not
+    declared by any project header, and must not be conflated with a genuinely
+    private project entity (ADR-041 P0 slice 2, fourth Codex review). Requires
+    positive evidence instead: an explicit ``private_header``/``source``
+    visibility, or — for an unannotated node — project-file provenance
+    (``decl_to_file``/``defined_in_project``) plus a non-system-looking name.
+    Shared with ``crosscheck.py``'s ``_is_internal_decl`` (same algorithm, same
+    source of truth) so the intra-version and inter-version checks classify a
+    node identically.
+    """
+    node = node_by_id.get(node_id)
+    if node is None or node.kind not in DECL_NODE_KINDS:
+        return False
+    if node_id in exported_decls:
+        return False
+    vis = str(node.attrs.get("visibility", ""))
+    if vis in INTERNAL_VISIBILITIES:
+        return True
+    if vis in UNANNOTATED_VISIBILITIES:
+        has_provenance = node_id in decl_to_file or bool(node.attrs.get("defined_in_project"))
+        if not has_provenance:
+            return False
+        return not looks_like_system_name(node.label or "")
+    return False
+
 
 # ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
 
@@ -1033,29 +1144,34 @@ def _public_entry_internal_reach(
 ) -> set[tuple[str, str]]:
     """``(public_entry, internal_target)`` pairs the entry reaches via a dependency edge.
 
-    An *internal* target is a ``source_decl``/type node reachable from a public
-    entry (exported decl or public type) via the *edge_kinds* closure
+    An *internal* target is a decl/type node reachable from a public entry
+    (exported decl or public type) via the *edge_kinds* closure
     (:func:`_dependency_reachability` — the version diff passes
     :func:`_common_dependency_edge_kinds` here, not the full
-    :data:`DEPENDENCY_EDGE_KINDS`) that is **not** itself public
-    (:func:`_public_decls` / :func:`_public_types`) — this covers calls,
-    non-call references, and the field/base/parameter type edges ADR-041 P0
-    added, not calls alone. Returns ``set()`` when *edge_kinds* is empty, the
-    graph carries none of them, or there is no public closure, so the version
-    diff skips rather than flagging noise on an evidence-poor side.
+    :data:`DEPENDENCY_EDGE_KINDS`) with positive internal provenance
+    (:func:`is_internal_dependency_node`) — "not declared by a public header"
+    alone is not internal, or a third-party/stdlib type used as a field/
+    parameter type would wrongly light up (ADR-041 P0 slice 2, fourth Codex
+    review). This covers calls, non-call references, and the field/base/
+    parameter type edges ADR-041 P0 added, not calls alone. Returns ``set()``
+    when *edge_kinds* is empty, the graph carries none of them, or there is no
+    public closure at all, so the version diff skips rather than flagging
+    noise on an evidence-poor side.
     """
     reach = _dependency_reachability(graph, edge_kinds)
     if not reach:
         return set()
-    public = _public_decls(graph) | _public_types(graph)
-    if not public:
+    if not (_public_decls(graph) or _public_types(graph)):
         return set()
-    kinds = _kind_map(graph)
-    internal_target_kinds = {"source_decl"} | _TYPE_ENTITY_KINDS
+    node_by_id = {n.id: n for n in graph.nodes}
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    decl_to_file = decl_declaring_files(graph)
     out: set[tuple[str, str]] = set()
     for entry, reachable in reach.items():
         for target in reachable:
-            if kinds.get(target) in internal_target_kinds and target not in public:
+            if is_internal_dependency_node(target, node_by_id, exported_decls, decl_to_file):
                 out.add((entry, target))
     return out
 

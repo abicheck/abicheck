@@ -660,6 +660,26 @@ def test_collect_call_graph_folds_edges_and_refinalizes(monkeypatch) -> None:
     # coverage was re-finalized so the call-edge count is reflected.
     assert graph.coverage["call_edges"]["count"] == 1
     assert records[-1].name == "call_graph:clang" and records[-1].status == "ok"
+    # ADR-041 P0 slice 2 (fifth Codex review): the `collect --call-graph` path
+    # must record pass-ran provenance exactly like the inline `dump --sources`
+    # path (inline._fold_call_graph) does, or a version diff over two
+    # collected packs can never benefit from the zero-edge coverage fix.
+    assert graph.extractor_passes["call_graph"] is True
+
+
+def test_collect_call_graph_records_pass_ran_even_with_zero_edges(monkeypatch) -> None:
+    # The exact scenario the coverage fix targets: the pass runs to completion
+    # but the build genuinely has no calls to report yet.
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.source_graph import build_source_graph
+    from abicheck.cli_buildsource import _collect_call_graph
+
+    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[]))
+    graph = build_source_graph(BuildEvidence())
+    records: list[ExtractorRecord] = []
+    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
+    assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    assert graph.extractor_passes["call_graph"] is True
 
 
 def test_collect_call_graph_missing_clang_records_failure(monkeypatch) -> None:
@@ -673,6 +693,8 @@ def test_collect_call_graph_missing_clang_records_failure(monkeypatch) -> None:
     _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
     assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
     assert records[-1].status == "failed"
+    # An unavailable extractor never ran — must not claim pass coverage.
+    assert "call_graph" not in graph.extractor_passes
 
 
 def test_collect_evidence_call_graph_flag_end_to_end(monkeypatch, tmp_path) -> None:

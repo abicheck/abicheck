@@ -72,7 +72,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   pass genuinely finds zero edges of its whole family on one side (e.g. no
   struct anywhere yet had a private field), which edge presence alone cannot
   distinguish from "the pass never ran". Falls back to edge-presence inference
-  when the flag is absent (older packs, hand-built graphs).
+  when the flag is absent (older packs, hand-built graphs). Internal-target
+  classification now requires *positive* internal provenance (explicit
+  `private_header`/`source` visibility, or project-file provenance plus a
+  non-system-looking name) instead of merely "not declared by a public
+  header" — the latter also matched a third-party/stdlib type used as a new
+  field/parameter type, which is not declared by any project header either but
+  is not internal. `DECL_NODE_KINDS`/`PUBLIC_VISIBILITIES`/
+  `INTERNAL_VISIBILITIES`/`UNANNOTATED_VISIBILITIES`/`looks_like_system_name`/
+  `is_public_dependency_node`/`is_internal_dependency_node` now live in
+  `source_graph.py` as the shared source of truth; `crosscheck.py`'s
+  matching definitions are now aliases onto them instead of an independent
+  copy. The out-of-band `abicheck collect --call-graph` path
+  (`cli_buildsource_helpers._collect_call_graph`) now also records
+  `extractor_passes["call_graph"]`, matching the inline `dump --sources` path
+  fixed above — a version diff over two *collected* packs benefits from the
+  zero-edge coverage fix too, not just inline dumps.
 
 - **`compare --profile` run profiles (ADR-040 Lever 3).** A single `--profile`
   flag bundles common workflow defaults so you don't retype them: `ci-gate`
