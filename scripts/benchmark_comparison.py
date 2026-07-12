@@ -1420,6 +1420,21 @@ def _build_case_artifacts(
             shutil.rmtree(str(cmake_build))
         cmake_build.mkdir(parents=True)
         cmake_env = _configure_cmake_env(force_case64_compile, preferred_family)
+        if name == "case115_bit_int_width_changed":
+            # Needs C23 _BitInt(N); the default system gcc may predate GCC 14
+            # (which added _BitInt support). Prefer the newest gcc-1N on PATH
+            # over the bare "gcc" alias rather than reporting a build error —
+            # this is a toolchain-availability question, not a product gap.
+            newer_gcc = _first_available_tool(
+                "gcc-15", "gcc-14", "gcc-13", "gcc-12",
+            )
+            newer_gxx = _first_available_tool(
+                "g++-15", "g++-14", "g++-13", "g++-12",
+            )
+            if newer_gcc:
+                cmake_env = {**cmake_env, "CC": newer_gcc}
+            if newer_gxx:
+                cmake_env = {**cmake_env, "CXX": newer_gxx}
         cr = _run_cmake_configure_and_build(case_dir, cmake_build, name, cmake_env)
         return _resolve_cmake_libs(
             name, expected, cmake_build, cr, v1_so, v2_so,
