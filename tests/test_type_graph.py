@@ -717,6 +717,22 @@ def test_compact_volatile_pointer_suffix_is_stripped() -> None:
     ]
 
 
+def test_compact_restrict_pointer_suffix_is_stripped() -> None:
+    # A C API's `struct Impl * restrict p` spells as clang's compact
+    # "struct Impl *restrict" (no space before "restrict", same glued-pointer
+    # spelling as *const/*volatile) — only const/volatile were normalized,
+    # so "restrict"/"__restrict"/"__restrict__" left a dangling suffix that
+    # never matched the indexed declaration (Codex review).
+    ast = _tu(_record("Widget", inner=[_field("p", "struct Widget *restrict")]))
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert fields == [
+        TypeEdge("Widget", "Widget", "TYPE_HAS_FIELD_TYPE", CONF_HIGH, "field")
+    ]
+    assert _base_type_name("detail::Impl *__restrict__") == "detail::Impl"
+    assert _base_type_name("detail::Impl *__restrict") == "detail::Impl"
+
+
 def test_declrefexpr_stub_disambiguated_by_clang_id() -> None:
     # a::k and b::k share the bare name "k" and neither has a mangled name
     # (e.g. internal-linkage constants), so identity resolution alone cannot
@@ -776,6 +792,59 @@ def test_declrefexpr_stub_disambiguated_by_clang_id() -> None:
     refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
     assert len(refs) == 1
     assert refs[0].dst_file == "src/b.h"
+
+
+def test_declrefexpr_stub_id_disambiguates_identity_not_only_file() -> None:
+    # a::k and b::k share the bare name "k" but *do* each have a distinct
+    # mangled name (the common case for extern-linkage globals) — the id
+    # lookup was only used to resolve dst_file, so an ambiguous-by-bare-name
+    # stub still fell back to "k" (unresolved) as its *identity* even though
+    # the same id lookup already pinned down exactly which declaration was
+    # referenced (Codex review).
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "a",
+            "inner": [
+                {"kind": "VarDecl", "name": "k", "mangledName": "_ZN1a1kE", "id": "0x1"}
+            ],
+        },
+        {
+            "kind": "NamespaceDecl",
+            "name": "b",
+            "inner": [
+                {"kind": "VarDecl", "name": "k", "mangledName": "_ZN1b1kE", "id": "0x2"}
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            # Incomplete stub: only the bare name and id, no
+                            # mangledName — clang's common shape for a
+                            # DeclRefExpr's referencedDecl.
+                            "referencedDecl": {
+                                "kind": "VarDecl",
+                                "name": "k",
+                                "id": "0x2",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref")
+    ]
 
 
 def test_field_type_edge_excludes_builtins() -> None:
@@ -1343,4 +1412,34 @@ def test_default_argument_reference_edge() -> None:
     refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
     assert refs == [
         TypeEdge("_Z1fi", "_ZN6detail1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref")
+    ]
+
+
+def test_field_default_member_initializer_reference_edge() -> None:
+    # A default member initializer (`int x = detail::k;`) lives *under* the
+    # FieldDecl node itself, not inside a function body. Recursing into a
+    # FieldDecl with whatever enclosing_func the record itself had (empty
+    # for a top-level record) meant the DeclRefExpr guard never saw a truthy
+    # enclosing_func, so a reference in a default member initializer
+    # produced no edge at all (CodeRabbit review).
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("k")]},
+        _record(
+            "Widget",
+            inner=[
+                {
+                    "kind": "FieldDecl",
+                    "name": "x",
+                    "type": {"qualType": "int"},
+                    "inner": [_ref_expr("VarDecl", "k", "_ZN6detail1kE")],
+                }
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge(
+            "Widget::x", "_ZN6detail1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref"
+        )
     ]

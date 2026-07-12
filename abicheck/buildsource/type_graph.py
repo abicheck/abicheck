@@ -180,11 +180,18 @@ def _base_type_name(qual_type: str) -> str:
     s = (qual_type or "").strip()
     if not s:
         return ""
-    # clang glues a top-level cv-qualified pointer directly to the star with
-    # no separating space (``"detail::Impl *const"``, not ``"* const"`` —
-    # Codex review); normalize so the loop below strips it like the spaced
-    # form it already handles.
-    s = s.replace("*const", "* const").replace("*volatile", "* volatile")
+    # clang glues a top-level cv/restrict-qualified pointer directly to the
+    # star with no separating space (``"detail::Impl *const"``, not
+    # ``"* const"`` — Codex review; likewise ``"*restrict"`` for a C API's
+    # `T * restrict` parameter); normalize so the loop below strips it like
+    # the spaced form it already handles.
+    s = (
+        s.replace("*const", "* const")
+        .replace("*volatile", "* volatile")
+        .replace("*restrict", "* restrict")
+        .replace("*__restrict__", "* __restrict__")
+        .replace("*__restrict", "* __restrict")
+    )
     changed = True
     while changed:
         changed = False
@@ -216,7 +223,7 @@ def _base_type_name(qual_type: str) -> str:
             if s.endswith(suf):
                 s = s[: -len(suf)].strip()
                 changed = True
-        for suf in (" const", " volatile"):
+        for suf in (" const", " volatile", " __restrict__", " __restrict", " restrict"):
             if s.endswith(suf):
                 s = s[: -len(suf)].strip()
                 changed = True
@@ -519,7 +526,7 @@ def _index_declared_entities(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
-    id_index: dict[str, str],
+    id_index: dict[str, tuple[str, str]],
 ) -> str:
     """First pass: record every type declaration's qualified name (+declaring
     file) and every var/enum-constant's identity (+declaring file, +bare-name
@@ -609,11 +616,15 @@ def _index_declared_entities(
         node_id = str(node.get("id") or "")
         # Keyed by clang's own per-node id (unique, unlike the bare-name
         # identity two same-named declarations in different scopes both
-        # collapse to) and mapped straight to *file*, not identity — routing
-        # through the shared identity->file `decl_file` dict would still pick
-        # whichever same-named declaration was indexed first (Codex review).
-        if node_id and cur_file:
-            id_index.setdefault(node_id, cur_file)
+        # collapse to) and mapped to *both* the full identity and the file —
+        # routing either through the shared identity->file `decl_file` dict,
+        # or through the ambiguous bare-name `ref_name_index`, would still
+        # pick whichever same-named declaration was indexed first (Codex
+        # review). A stub that only carries an ``id`` (no ``mangledName``)
+        # can then resolve its *identity* precisely too, not just its file —
+        # e.g. disambiguating a reference to ``a::k`` from one to ``b::k``.
+        if node_id and ident:
+            id_index.setdefault(node_id, (ident, cur_file))
 
     for child in node.get("inner", []) or []:
         cur_file = _index_declared_entities(
@@ -720,7 +731,7 @@ def _resolve_ref_identity(
     ref: dict[str, Any],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
-    id_index: dict[str, str],
+    id_index: dict[str, tuple[str, str]],
 ) -> tuple[str, str]:
     """Resolve a ``DeclRefExpr``'s ``referencedDecl`` to its full identity and file.
 
@@ -734,31 +745,40 @@ def _resolve_ref_identity(
     (``inline int f() { return detail::k; }``).
 
     *Identity* resolution order: the stub's own mangled-or-bare identity when
-    it already resolves (i.e. it *was* complete); else the unique full
-    declaration sharing its bare name, when unambiguous — same bare-name
-    conflation two same-named declarations in different scopes are subject to
-    everywhere else in this module (a known, documented limitation; a real
-    fix needs a stable scope-qualified identity, tracked in ADR-041 P1).
+    it already resolves (i.e. it *was* complete); else — before falling back
+    to the ambiguous bare-name candidate list — the stub's own ``id`` looked
+    up in *id_index*, which (like the file lookup below) is keyed by clang's
+    per-node id rather than the shared bare name two same-named declarations
+    in different scopes both collapse to (Codex review: this disambiguates
+    ``a::k`` from ``b::k`` for *identity*, not only for ``dst_file`` as the
+    id lookup previously did — a stub with no ``mangledName`` used to stay
+    ambiguous even though the id already pinned down exactly which
+    declaration it was). Only when neither resolves does this fall back to
+    the unique full declaration sharing the bare name, when unambiguous —
+    genuinely ambiguous bare names (no id match, more than one same-named
+    candidate) are left unresolved rather than guessed, a known, documented
+    limitation; a fully general fix needs a stable scope-qualified identity
+    for every declaration, not just ones an ``id`` happens to disambiguate,
+    tracked in ADR-041 P1.
 
-    *File* resolution prefers the stub's own ``id`` — clang's internal
-    per-node identifier, present even on an otherwise-incomplete stub and
-    shared with the node's full declaration elsewhere in the same TU — looked
-    up in *id_index* (keyed by id, not by the ambiguous bare-name identity).
-    This disambiguates the file for *this specific reference* even when two
-    declarations share a bare name, e.g. ``a::k`` vs ``b::k`` (Codex review):
-    routing the file lookup through the shared identity would still pick
-    whichever same-named declaration happened to be indexed first. Falls back
-    to ``decl_file`` keyed by the resolved identity when no id match exists.
+    *File* resolution prefers the same *id_index* lookup — present even on
+    an otherwise-incomplete stub and shared with the node's full declaration
+    elsewhere in the same TU. Falls back to ``decl_file`` keyed by the
+    resolved identity when no id match exists.
     """
     ident = _decl_identity(ref)
-    if ident not in decl_file:
-        name = str(ref.get("name") or "")
-        if name:
-            candidates = ref_name_index.get(name)
-            if candidates and len(candidates) == 1:
-                ident = candidates[0]
     node_id = str(ref.get("id") or "")
-    file = id_index.get(node_id) or decl_file.get(ident, "")
+    id_hit = id_index.get(node_id)
+    if ident not in decl_file:
+        if id_hit and id_hit[0]:
+            ident = id_hit[0]
+        else:
+            name = str(ref.get("name") or "")
+            if name:
+                candidates = ref_name_index.get(name)
+                if candidates and len(candidates) == 1:
+                    ident = candidates[0]
+    file = (id_hit[1] if id_hit else "") or decl_file.get(ident, "")
     return ident, file
 
 
@@ -770,7 +790,7 @@ def _walk_types(
     name_index: dict[str, list[str]],
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
-    id_index: dict[str, str],
+    id_index: dict[str, tuple[str, str]],
 ) -> None:
     """Recursive AST walk tracking the qualified-name scope and enclosing function."""
     if not isinstance(node, dict):
@@ -909,6 +929,29 @@ def _walk_types(
             )
         return
 
+    if kind == "FieldDecl" and name:
+        # A default member initializer (``int x = detail::k;``) lives under
+        # the FieldDecl node itself, not inside a function body — without a
+        # truthy enclosing_func of its own, this recursed with whatever the
+        # *record's* enclosing_func was (empty for a top-level record), so
+        # the DeclRefExpr guard below never fired and a reference in a
+        # default member initializer produced no edge at all (CodeRabbit
+        # review). Give it a scope-qualified identity, mirroring how a
+        # function's own identity becomes the enclosing_func for its body.
+        field_ident = "::".join([*scope, name])
+        for child in node.get("inner", []) or []:
+            _walk_types(
+                child,
+                scope,
+                field_ident or enclosing_func,
+                edges,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
+            )
+        return
+
     if kind == "DeclRefExpr" and enclosing_func:
         ref = node.get("referencedDecl")
         if isinstance(ref, dict) and ref.get("kind") in _REFERENCE_DECL_KINDS:
@@ -973,7 +1016,7 @@ def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     name_index: dict[str, list[str]] = {}
     decl_file: dict[str, str] = {}
     ref_name_index: dict[str, list[str]] = {}
-    id_index: dict[str, str] = {}
+    id_index: dict[str, tuple[str, str]] = {}
     _index_declared_entities(
         ast, [], "", name_index, decl_file, ref_name_index, id_index
     )
