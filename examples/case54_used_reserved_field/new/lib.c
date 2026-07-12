@@ -1,5 +1,5 @@
 /* good.c — v2: reserved fields now have real functionality. */
-#include "good.h"
+#include "lib.h"
 #include <stdlib.h>
 
 Config* config_create(void) {

@@ -70,7 +70,5 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

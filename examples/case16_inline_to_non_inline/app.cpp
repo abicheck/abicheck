@@ -1,4 +1,4 @@
-#include "v1.hpp"   /* MUST use v1.hpp: fast_hash is inline here */
+#include "old/lib.hpp"   /* MUST use v1's header: fast_hash is inline here */
 #include <cstdio>
 
 /* DEMO EXPLANATION:

@@ -43,9 +43,5 @@ additive.
 
 - `CMakeLists.txt`
 - `app.cpp`
-- `v1.cpp`
-- `v1.h`
-- `v2.cpp`
-- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

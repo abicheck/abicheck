@@ -66,7 +66,5 @@ stack. abicheck reports the change as compatible, distinguishing a hardening
 
 - `CMakeLists.txt`
 - `app.c`
-- `v1.c`
-- `v2.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

@@ -105,9 +105,5 @@ Implementation note: v1 keeps reserved private storage in the opaque `Session` o
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `bad.h`
-- `good.c`
-- `good.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

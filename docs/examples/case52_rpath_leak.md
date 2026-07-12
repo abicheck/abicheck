@@ -125,7 +125,5 @@ as a warning for the same reason.
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

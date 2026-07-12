@@ -503,6 +503,34 @@ def test_owner_unchanged_when_one_side_single_file_other_multi_file() -> None:
     )
 
 
+def test_owner_unchanged_when_only_one_persisting_symbol_declares() -> None:
+    # A side with exactly ONE declaring file has no sibling entry to compute
+    # a shared directory prefix against, so the "reserve the filename" rule
+    # (case04-style) never engaged and the raw absolute path was compared —
+    # "case03/old/lib.h" vs "case03/new/lib.h" looked like a real move for
+    # any case whose only persisting exported symbol shares its header with
+    # no other symbol (a single-symbol library, or a brand-new symbol added
+    # alongside the one persisting symbol). Must fall back to basename-only
+    # identity, same as the multi-symbol cases below it.
+    old = build_source_graph(
+        _build_with_public_header(headers=("/root/old/lib.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/old/lib.h")], {"foo::a": "_Za"},
+        ),
+    )
+    new = build_source_graph(
+        _build_with_public_header(headers=("/root/new/lib.h",)),
+        source_abi=_surface_with(
+            [("foo::a", "/root/new/lib.h"), ("foo::b", "/root/new/lib.h")],
+            {"foo::a": "_Za", "foo::b": "_Zb"},
+        ),
+    )
+    findings = diff_source_graph_findings(old, new)
+    assert not any(
+        c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED for c in findings
+    )
+
+
 def test_findings_identical_graphs_yield_nothing() -> None:
     b = _build_with_public_header()
     g = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))

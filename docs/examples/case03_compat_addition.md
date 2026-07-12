@@ -79,9 +79,5 @@ releases without bumping the SONAME, relying on this compatible-addition guarant
 
 - `CMakeLists.txt`
 - `app.c`
-- `v1.c`
-- `v1.h`
-- `v2.c`
-- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

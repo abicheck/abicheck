@@ -1254,8 +1254,16 @@ def _common_prefix_len(node_ids: list[str]) -> int:
     seg_lists = [
         _path_segments(nid.split("://", 1)[1]) for nid in node_ids if "://" in nid
     ]
-    if len(seg_lists) < 2:
+    if not seg_lists:
         return 0
+    if len(seg_lists) == 1:
+        # A side with exactly one declaring file has no sibling to compare
+        # directory structure against — there is no way to tell "checkout
+        # root" apart from "real subdirectory" with a sample of one, so fall
+        # back to basename-only identity (reserve just the filename). This is
+        # the same "unmoved" outcome multi-file sides reach structurally
+        # (below), just via the only signal a single sample can offer.
+        return max(0, len(seg_lists[0]) - 1)
     # Cap below the shortest path's final segment (the filename) so an
     # all-symbols-in-one-file side never strips down to an empty key — that
     # would hide a same-side rename and, asymmetrically, false-positive a

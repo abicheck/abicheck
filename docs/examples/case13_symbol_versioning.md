@@ -163,8 +163,6 @@ entry with size=0), but correctly captures `LIBFOO_1.0` as a **version definitio
 
 - `CMakeLists.txt`
 - `app.c`
-- `bad.c`
-- `good.c`
 - `libfoo.map`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

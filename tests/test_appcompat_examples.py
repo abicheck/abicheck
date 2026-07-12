@@ -63,7 +63,11 @@ def _build_case(
     case_dir = EXAMPLES / case
     lib_v1 = tmp_path / "libcase.so.1"
     lib_v2 = tmp_path / "libcase.so.2"
-    for src, out in ((case_dir / "v1.c", lib_v1), (case_dir / "v2.c", lib_v2)):
+    # Most cases use the flat v1.c/v2.c convention; some use the old/+new/
+    # subdirectory convention with a shared basename (case19+).
+    v1_src = case_dir / "v1.c" if (case_dir / "v1.c").exists() else case_dir / "old" / "lib.c"
+    v2_src = case_dir / "v2.c" if (case_dir / "v2.c").exists() else case_dir / "new" / "lib.c"
+    for src, out in ((v1_src, lib_v1), (v2_src, lib_v2)):
         res = subprocess.run(
             [cc, "-shared", "-fPIC", "-g", str(src), "-o", str(out),
              "-Wl,-soname,libcase.so.1"],
