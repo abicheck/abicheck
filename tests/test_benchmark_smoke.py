@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 
 
@@ -89,18 +91,15 @@ def test_parse_args_abicc_mode_xml():
     assert args.abicc_mode == "xml"
 
 
-def test_parse_args_skip_compat():
+def test_parse_args_rejects_removed_compat_strict_tools(capsys):
+    """abicheck_compat/abicheck_strict were retired from the harness — only
+    the two evidence-depth lanes (abicheck/abicheck_full) remain benchmarked."""
     mod = _load_benchmark()
-    with patch("sys.argv", ["benchmark_comparison.py", "--skip-compat"]):
-        args = mod.parse_args()
-    assert args.skip_compat is True
-
-
-def test_parse_args_skip_compat_default_false():
-    mod = _load_benchmark()
-    with patch("sys.argv", ["benchmark_comparison.py"]):
-        args = mod.parse_args()
-    assert args.skip_compat is False
+    with patch("sys.argv", ["benchmark_comparison.py", "--tools", "abicheck_compat"]):
+        with pytest.raises(SystemExit) as exc:
+            mod.parse_args()
+    assert exc.value.code != 0
+    capsys.readouterr()  # silence argparse's usage/error message in test output
 
 
 def test_parse_args_pinned_suite():
