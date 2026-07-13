@@ -21,6 +21,7 @@ Usage:
     python scripts/gen_detector_spec.py            # write the files
     python scripts/gen_detector_spec.py --check     # verify in sync (CI)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,7 +70,11 @@ def _category_of(kind, policy) -> str:
 
 def _examples_by_kind() -> dict[str, list[str]]:
     """Reverse-map each ChangeKind value to the example case(s) that demonstrate
-    it, sourced from examples/ground_truth.json['verdicts'][*]['expected_kinds'].
+    it, sourced from examples/ground_truth.json['verdicts'][*]['expected_kinds']
+    and (for the G20 audit/cross-source corpus) ['expected_crosscheck_kinds'] —
+    the eight D4/D8 cross-check kinds (e.g. exported_not_public,
+    public_to_internal_dependency) never appear in expected_kinds at all, so a
+    reverse-map reading only that field can never link their example case.
 
     Only cases with a generated docs page (docs/examples/<case>.md) are included,
     so the rendered links can't dangle under `mkdocs build --strict` (bundle
@@ -82,7 +87,10 @@ def _examples_by_kind() -> dict[str, list[str]]:
     for case_name, meta in sorted(gt.items()):
         if not (EXAMPLES_DOC_DIR / f"{case_name}.md").exists():
             continue
-        for kind in meta.get("expected_kinds", []):
+        for kind in (
+            *meta.get("expected_kinds", []),
+            *meta.get("expected_crosscheck_kinds", []),
+        ):
             out.setdefault(kind, []).append(case_name)
     return out
 
@@ -102,15 +110,17 @@ def build_spec() -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for kind in sorted(ChangeKind, key=lambda k: k.value):
         entry = policy_for(kind)
-        rows.append({
-            "kind": kind.value,
-            "category": _category_of(kind, policy),
-            "default_verdict": entry.default_verdict.value,
-            "severity": entry.severity,
-            "min_evidence": EVIDENCE_TIER_BY_KIND.get(kind.value, UNSPECIFIED_TIER),
-            "doc_slug": entry.doc_slug,
-            "examples": ",".join(examples.get(kind.value, [])),
-        })
+        rows.append(
+            {
+                "kind": kind.value,
+                "category": _category_of(kind, policy),
+                "default_verdict": entry.default_verdict.value,
+                "severity": entry.severity,
+                "min_evidence": EVIDENCE_TIER_BY_KIND.get(kind.value, UNSPECIFIED_TIER),
+                "doc_slug": entry.doc_slug,
+                "examples": ",".join(examples.get(kind.value, [])),
+            }
+        )
     return rows
 
 
@@ -134,9 +144,7 @@ def render_markdown(rows: list[dict[str, str]]) -> str:
     for r in rows:
         cases = [c for c in r["examples"].split(",") if c]
         shown = cases[:_MAX_EXAMPLE_LINKS]
-        links = ", ".join(
-            f"[{c.split('_')[0]}](../examples/{c}.md)" for c in shown
-        )
+        links = ", ".join(f"[{c.split('_')[0]}](../examples/{c}.md)" for c in shown)
         if len(cases) > _MAX_EXAMPLE_LINKS:
             links += f", +{len(cases) - _MAX_EXAMPLE_LINKS}"
         lines.append(
@@ -148,18 +156,28 @@ def render_markdown(rows: list[dict[str, str]]) -> str:
 
 
 def render_json(rows: list[dict[str, str]]) -> str:
-    return json.dumps(
-        {"description": "Formal detector specification matrix (generated).",
-         "count": len(rows), "detectors": rows},
-        indent=2,
-    ) + "\n"
+    return (
+        json.dumps(
+            {
+                "description": "Formal detector specification matrix (generated).",
+                "count": len(rows),
+                "detectors": rows,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--check", action="store_true",
-                    help="Verify the generated files are in sync; do not write.")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify the generated files are in sync; do not write.",
+    )
     args = ap.parse_args(argv)
 
     rows = build_spec()
@@ -185,9 +203,11 @@ def main(argv: list[str] | None = None) -> int:
     MD_PATH.write_text(md, encoding="utf-8")
     JSON_PATH.write_text(js, encoding="utf-8")
     unspecified = sum(1 for r in rows if r["min_evidence"] == UNSPECIFIED_TIER)
-    print(f"wrote {MD_PATH.relative_to(REPO_DIR)} and "
-          f"{JSON_PATH.relative_to(REPO_DIR)} ({len(rows)} kinds, "
-          f"{unspecified} with no declared evidence tier)")
+    print(
+        f"wrote {MD_PATH.relative_to(REPO_DIR)} and "
+        f"{JSON_PATH.relative_to(REPO_DIR)} ({len(rows)} kinds, "
+        f"{unspecified} with no declared evidence tier)"
+    )
     return 0
 
 

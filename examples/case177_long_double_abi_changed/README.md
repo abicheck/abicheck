@@ -5,7 +5,7 @@
 ## What this case is about
 
 ```cpp
-// v1.h                                  // v2.h
+// v1.hpp                                  // v2.hpp
 long double compute(long double x);      __float128 compute(__float128 x);
 ```
 

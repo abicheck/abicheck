@@ -1721,6 +1721,9 @@
   "case177_long_double_abi_changed": {
    "abi_break": true,
    "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
    "bad_practice": false,
    "category": "breaking",
    "description": "compute()'s name and purpose are unchanged, but v2's library is rebuilt to use IEEE 754 quad precision (__float128, via libquadmath) instead of the platform's native 80-bit long double -- the same kind of representation swap real toolchains perform for long double on ppc64 (IBM double-double <-> IEEE binary128). Itanium mangles long double as 'e' and __float128 as 'g', so the exported symbol changes (_Z7computee -> _Z7computeg) even though nothing in the C++ declaration text needed to change spelling. abicheck re-pairs the removed/added symbols by their demangled signature into one long_double_abi_changed finding rather than an unrelated-looking remove+add (L0); an old consumer linked against _Z7computee fails to load with an undefined-symbol error.",
@@ -1751,6 +1754,9 @@
   "case179_cet_protection_weakened": {
    "abi_break": false,
    "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
    "bad_practice": true,
    "category": "risk",
    "description": "Identical source; v1 is built with -fcf-protection=full and v2 with -fcf-protection=none. The .note.gnu.property x86 feature bits drop both IBT (indirect branch tracking) and SHSTK (shadow stack), silently regressing Intel CET hardening for dispatch() 's indirect function-pointer call even though the library behaves identically for legitimate input. Read directly from the ELF property note (L0); analysis-only under the default policy, escalatable to a hard gate under a security-focused profile.",
@@ -1797,6 +1803,10 @@
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
     "symbol_binding_lost_unique"
+   ],
+   "known_gap": "clang never emits STB_GNU_UNIQUE for vague-linkage template statics (a GCC ELF extension; clang always uses ordinary weak/guarded linkage), so no symbol_binding_lost_unique signal exists to detect under this toolchain",
+   "known_gap_toolchains": [
+    "clang"
    ],
    "min_evidence": "L0",
    "platforms": [

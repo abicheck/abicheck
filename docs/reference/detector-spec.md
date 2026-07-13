@@ -77,7 +77,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `executable_stack_removed` | quality | `COMPATIBLE` | `warning` | L0 | `executable_stack_removed` | [case136](../examples/case136_executable_stack_removed.md) |
 | `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L0 | `experimental_graduated` | [case99](../examples/case99_experimental_graduated.md) |
 | `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L0 | `experimental_removed_without_replacement` | [case100](../examples/case100_experimental_removed_without_replacement.md) |
-| `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` | — |
+| `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` | [case143](../examples/case143_audit_accidental_export.md), [case150](../examples/case150_xcheck_export_public_pair.md) |
 | `exported_object_alignment_reduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `exported_object_alignment_reduced` | — |
 | `exported_symbol_source_owner_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `exported_symbol_source_owner_changed` | [case162](../examples/case162_symbol_source_owner_changed.md) |
 | `field_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `field_access_changed` | — |
@@ -127,7 +127,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` | [case104](../examples/case104_glibcxx_dual_abi_flip.md) |
 | `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` | — |
 | `hash_style_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `hash_style_removed` | — |
-| `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` | — |
+| `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` | [case148](../examples/case148_xcheck_header_build_mismatch.md) |
 | `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` | — |
 | `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` | — |
 | `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` | [case96](../examples/case96_hidden_friend_removed.md) |
@@ -168,7 +168,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `needed_order_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `needed_order_changed` | — |
 | `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |
 | `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` | — |
-| `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | — |
+| `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | [case149](../examples/case149_xcheck_odr_variant.md) |
 | `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` | — |
 | `os_deployment_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `os_deployment_floor_raised` | — |
 | `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `overload_added` | [case169](../examples/case169_overload_added.md) |
@@ -188,17 +188,17 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `pe_ordinal_retargeted` | breaking | `BREAKING` | `error` | L0 | `pe_ordinal_retargeted` | — |
 | `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` | — |
 | `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `polymorphic_type_non_virtual_dtor` | [case165](../examples/case165_polymorphic_nonvirtual_dtor.md) |
-| `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | — |
+| `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | [case144](../examples/case144_audit_private_header_leak.md), [case147](../examples/case147_scan_depth_ladder.md), [case151](../examples/case151_xcheck_provider_matrix.md) |
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |
 | `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](../examples/case160_public_api_internal_dep_added.md) |
 | `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` | [case156](../examples/case156_public_macro_removed.md) |
 | `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` | — |
-| `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | — |
+| `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | [case150](../examples/case150_xcheck_export_public_pair.md) |
 | `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` | — |
 | `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
 | `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
-| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | — |
+| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | [case181](../examples/case181_xcheck_public_to_internal_dependency.md) |
 | `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` | [case158](../examples/case158_public_typedef_removed.md) |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |
 | `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` | — |
@@ -226,7 +226,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `return_pointer_level_changed` | breaking | `BREAKING` | `error` | unspecified | `return_pointer_level_changed` | — |
 | `rpath_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `rpath_changed` | — |
 | `rpath_type_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `rpath_type_changed` | — |
-| `rtti_for_internal_type` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `rtti_for_internal_type` | — |
+| `rtti_for_internal_type` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `rtti_for_internal_type` | [case146](../examples/case146_audit_rtti_for_internal.md) |
 | `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` | — |
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](../examples/case131_rtti_mode_flip.md) |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](../examples/case137_runpath_changed.md) |
@@ -330,7 +330,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `union_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `union_field_type_changed` | — |
 | `unnamed_type_in_public_abi` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unnamed_type_in_public_abi` | [case178](../examples/case178_unnamed_type_in_public_abi.md) |
 | `unspecified_return_now_named` | api_break | `API_BREAK` | `warning` | unspecified | `unspecified_return_now_named` | — |
-| `unversioned_exported_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unversioned_exported_symbol` | — |
+| `unversioned_exported_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unversioned_exported_symbol` | [case145](../examples/case145_audit_unversioned_export.md) |
 | `used_reserved_field` | quality | `COMPATIBLE` | `warning` | L1 | `used_reserved_field` | [case54](../examples/case54_used_reserved_field.md) |
 | `value_abi_trait_changed` | breaking | `BREAKING` | `error` | L1 | `value_abi_trait_changed` | [case69](../examples/case69_trivial_to_nontrivial.md) |
 | `var_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `var_access_changed` | — |

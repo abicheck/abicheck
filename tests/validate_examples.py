@@ -942,6 +942,14 @@ def _check_case_preconditions(
                           "L3/L4/L5 build/source-only case — validated by "
                           "tests/test_l3l4l5_examples.py")
 
+    # kABI (Linux kernel Module.symvers) cases ship a v1.symvers/v2.symvers
+    # manifest pair instead of a compilable v1/v2 source pair — no kernel build,
+    # no compiler. Validated compiler-free by tests/test_kabi_examples.py.
+    if set(entry.get("fixtures") or []) == {"v1.symvers", "v2.symvers"}:
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "kABI Module.symvers fixture pair — validated by "
+                          "tests/test_kabi_examples.py")
+
     # Environment-drift cases ship a committed AbiSnapshot pair
     # (old.abi.json/new.abi.json) — producing e.g. a glibc verneed-floor raise
     # for real would need two different sysroots, not two sources. Validated

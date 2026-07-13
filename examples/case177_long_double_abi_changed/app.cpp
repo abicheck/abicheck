@@ -1,5 +1,5 @@
 #include <cstdio>
-#include "v1.h"
+#include "v1.hpp"
 
 // Compiled once against v1's `compute(long double)`, which the linker
 // resolves against the mangled symbol `_Z7computee`.

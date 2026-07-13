@@ -15,7 +15,7 @@
 ## What this case is about
 
 ```cpp
-// v1.h                                  // v2.h
+// v1.hpp                                  // v2.hpp
 long double compute(long double x);      __float128 compute(__float128 x);
 ```
 
@@ -116,8 +116,8 @@ names differ: the load fails cleanly rather than corrupting data.
 - `CMakeLists.txt`
 - `app.cpp`
 - `v1.cpp`
-- `v1.h`
+- `v1.hpp`
 - `v2.cpp`
-- `v2.h`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
