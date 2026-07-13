@@ -304,6 +304,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "inline_function_removed": "L4",
     "public_typedef_removed": "L4",
     "concept_tightened": "L4",
+    # An uninstantiated function template's body/signature change (ADR-026):
+    # no symbol is ever emitted and castxml doesn't parse the body, so only
+    # L4 source-ABI replay observes it (see case122's known_gap).
+    "template_body_changed": "L4",
     # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
     # cleanly when no call-graph pass populated the graph), so its minimum
     # evidence is the graph tier, not the L4 replay surface that carries it. ──
