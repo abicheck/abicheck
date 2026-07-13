@@ -219,6 +219,24 @@ def test_fold_l0_hard_removals_one_sided_source_path_is_noop(monkeypatch, tmp_pa
     assert result == []
 
 
+def test_fold_l0_hard_removals_stat_failure_after_recorded_mtime_is_noop(
+    monkeypatch, tmp_path
+):
+    """The binary existed at snapshot-dump time (source_mtime recorded) but
+    is gone by compare time (deleted, moved) — the re-stat itself raises,
+    which must be swallowed the same as any other unresolvable probe."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    (tmp_path / "old.so").unlink()
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
 def test_fold_l0_hard_removals_mtime_mismatch_is_noop(monkeypatch, tmp_path):
     """The binary at source_path was modified since the snapshot was dumped
     (rebuilt in place) — folding in a probe of *that* binary would make a

@@ -91,6 +91,20 @@ def _side_code(spec: SourceSmokeSpec, side: SourceSmokeSide, case_dir: Path) -> 
     return code
 
 
+def _process_error_detail(proc: subprocess.CompletedProcess[str]) -> list[str]:
+    """Extract diagnostic lines from a finished compile/link/run process.
+
+    ``stderr or stdout`` (picking exactly one stream) can silently drop the
+    real error: cl.exe often puts its banner on stdout and the actual
+    diagnostic on stderr, or vice versa depending on the failure stage, and a
+    4-line cap can cut off the message before the useful part (CMake's own
+    "not able to compile a simple test program" continues well past that).
+    Combine both streams and keep more lines.
+    """
+    combined = "\n".join(s for s in (proc.stderr, proc.stdout) if s).strip()
+    return combined.splitlines()[:20]
+
+
 def run_source_smoke(
     spec: SourceSmokeSpec,
     *,
@@ -154,11 +168,11 @@ def run_source_smoke(
                 cmd, capture_output=True, text=True, timeout=timeout, cwd=str(work_dir),
             )
             compiled = proc.returncode == 0
-            detail = (proc.stderr or proc.stdout or "").strip().splitlines()[:4]
+            detail = _process_error_detail(proc)
             if compiled and mode == "run":
                 run_proc = subprocess.run([str(exe)], capture_output=True, text=True, timeout=timeout)
                 compiled = run_proc.returncode == 0
-                detail = (run_proc.stderr or run_proc.stdout or "").strip().splitlines()[:4]
+                detail = _process_error_detail(run_proc)
         except subprocess.TimeoutExpired as exc:
             compiled = False
             detail = [f"timed out after {exc.timeout}s"]

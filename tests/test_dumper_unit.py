@@ -22,6 +22,7 @@ from abicheck.dumper import (
     _parse_vtable_index,
     _pyelftools_exported_symbols,
     _resolve_debug_metadata,
+    _safe_mtime,
     _vt_sort_key,
 )
 from abicheck.model import Visibility
@@ -36,6 +37,18 @@ class TestCastxmlAvailable:
     def test_returns_false_when_castxml_missing(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda _: None)
         assert _castxml_available() is False
+
+
+# ── _safe_mtime ──────────────────────────────────────────────────────────
+
+class TestSafeMtime:
+    def test_returns_mtime_for_existing_file(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        assert _safe_mtime(p) == p.stat().st_mtime
+
+    def test_returns_none_when_path_missing(self, tmp_path):
+        assert _safe_mtime(tmp_path / "does_not_exist.so") is None
 
 
 # ── _parse_vtable_index ─────────────────────────────────────────────────

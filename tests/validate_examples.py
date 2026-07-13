@@ -344,6 +344,20 @@ def _find_built_lib(directory: Path, name: str) -> Path | None:
     return None
 
 
+def _cmake_error_detail(r: subprocess.CompletedProcess[str]) -> str:
+    """Extract a useful diagnostic from a failed cmake invocation.
+
+    MSBuild (CMake's default Windows generator) reports compiler errors on
+    *stdout*, not stderr — a stderr-only capture silently drops the actual
+    diagnostic (observed as an empty "cmake build failed: " message). Include
+    both, generously truncated: a short cap was hiding the real error text
+    (e.g. CMake's own "is not able to compile a simple test program" message
+    continues well past 300 chars into the actual compiler output).
+    """
+    detail = "\n".join(s for s in (r.stderr, r.stdout) if s).strip()
+    return detail[:4000]
+
+
 def _build_with_cmake(
     case_dir: Path,
     build_dir: Path,
@@ -366,7 +380,7 @@ def _build_with_cmake(
         capture_output=True, text=True, timeout=60,
     )
     if r.returncode != 0:
-        return None, None, f"cmake configure failed: {r.stderr[:300]}"
+        return None, None, f"cmake configure failed: {_cmake_error_detail(r)}"
 
     v1_target = f"{case_name}_v1"
     v2_target = f"{case_name}_v2"
@@ -376,7 +390,7 @@ def _build_with_cmake(
         capture_output=True, text=True, timeout=120,
     )
     if r.returncode != 0:
-        return None, None, f"cmake build failed: {r.stderr[:300]}"
+        return None, None, f"cmake build failed: {_cmake_error_detail(r)}"
 
     v1_lib = _find_built_lib(case_out, "v1")
     v2_lib = _find_built_lib(case_out, "v2")
