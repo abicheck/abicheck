@@ -58,14 +58,12 @@ def _parse_dotted_numeric_version(text: str) -> tuple[int, ...] | None:
     for part in parts:
         if (
             not part
+            or not part.isascii()
             or not part.isdigit()
             or len(part) > _MAX_VERSION_COMPONENT_DIGITS
         ):
             return None
-        try:
-            parsed.append(int(part))
-        except ValueError:
-            return None
+        parsed.append(int(part))
     return tuple(parsed) if parsed else None
 
 

@@ -33,7 +33,10 @@ from abicheck.diff_platform_elf_dynamic import (
 )
 from abicheck.diff_platform_elf_symbols import _diff_elf_symbol_versioning
 from abicheck.diff_time64 import _diff_time64_abi
-from abicheck.diff_versioning import apply_runtime_floor_contract
+from abicheck.diff_versioning import (
+    _parse_dotted_numeric_version,
+    apply_runtime_floor_contract,
+)
 from abicheck.elf_metadata import ElfImport, ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.model import AbiSnapshot
@@ -59,6 +62,26 @@ def _snap(elf: ElfMetadata, **kwargs) -> AbiSnapshot:
 
 def _kinds(changes) -> set[ChangeKind]:
     return {c.kind for c in changes}
+
+
+class TestDottedNumericVersionParser:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [("2", (2,)), ("2.34", (2, 34)), ("3.4.123456789", (3, 4, 123456789))],
+    )
+    def test_valid_versions(self, text: str, expected: tuple[int, ...]) -> None:
+        assert _parse_dotted_numeric_version(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        ["", ".", "2.", ".2", "2..34", "2.x", "2.34-1", "²", "١"],
+    )
+    def test_invalid_versions(self, text: str) -> None:
+        assert _parse_dotted_numeric_version(text) is None
+
+    def test_component_digit_bound(self) -> None:
+        assert _parse_dotted_numeric_version("9" * 9) == (999999999,)
+        assert _parse_dotted_numeric_version("9" * 10) is None
 
 
 # ── RUNTIME_FLOOR_RAISED synthesis ───────────────────────────────────────────
@@ -198,6 +221,18 @@ class TestRuntimeFloorContract:
                      if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
         assert floor.effective_verdict is Verdict.COMPATIBLE
         assert floor.modulation_rule == "runtime_floor_contract"
+
+    def test_valid_direct_floor_is_applied(self) -> None:
+        old, new = self._pair()
+        result = compare(
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.34"}),
+        )
+        floor = next(
+            c for c in result.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED
+        )
+        assert floor.effective_verdict is Verdict.COMPATIBLE
 
     def test_requirement_above_floor_is_breaking(self) -> None:
         old, new = self._pair()
