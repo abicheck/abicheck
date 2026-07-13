@@ -42,7 +42,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` | [case155](../examples/case155_char_signedness_flip.md) |
 | `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` | — |
 | `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` | — |
-| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | — |
+| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | [case105](../examples/case105_concept_tightening.md) |
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` | — |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` | [case124](../examples/case124_header_constant_value_changed.md) |
 | `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` | — |
@@ -292,7 +292,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `tag_type_renamed` | breaking | `BREAKING` | `error` | L0 | `tag_type_renamed` | [case86](../examples/case86_tag_struct_renamed.md) |
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](../examples/case161_target_dependency_added.md) |
-| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` | — |
+| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `template_body_changed` | [case122](../examples/case122_template_signature_uninstantiated.md) |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
 | `text_relocation_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `text_relocation_introduced` | — |

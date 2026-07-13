@@ -70,12 +70,21 @@ def _category_of(kind, policy) -> str:
 
 def _examples_by_kind() -> dict[str, list[str]]:
     """Reverse-map each ChangeKind value to the example case(s) that demonstrate
-    it, sourced from examples/ground_truth.json['verdicts'][*]['expected_kinds']
-    and (for the G20 audit/cross-source corpus) ['expected_crosscheck_kinds'] —
-    the eight D4/D8 cross-check kinds (e.g. exported_not_public,
-    public_to_internal_dependency) never appear in expected_kinds at all, so a
-    reverse-map reading only that field can never link their example case.
-
+    it, sourced from examples/ground_truth.json['verdicts'][*]['expected_kinds'],
+    ['l4_kinds'], and (for the G20 audit/cross-source corpus)
+    ['expected_crosscheck_kinds'] — three disjoint reasons a kind can't rely on
+    expected_kinds alone:
+      - The eight D4/D8 cross-check kinds (e.g. exported_not_public,
+        public_to_internal_dependency) never appear in expected_kinds at all.
+      - A case whose *default-mode* (no --sources) verdict is a clean
+        NO_CHANGE with expected_kinds: [] — case105/case122's concept/template
+        changes are genuinely invisible without L4 source-ABI replay, so
+        expected_kinds correctly stays empty (what validate_examples.py's
+        default-mode run actually observes and the FP-rate gate checks
+        against) — but that leaves concept_tightened/template_body_changed
+        with zero catalog examples in the generated spec (Codex review). Such
+        a case declares its L4-only kind(s) in l4_kinds instead: read here for
+        doc-example linking only, never consulted for verdict validation.
     Only cases with a generated docs page (docs/examples/<case>.md) are included,
     so the rendered links can't dangle under `mkdocs build --strict` (bundle
     cases have no single-library doc page)."""
@@ -89,6 +98,7 @@ def _examples_by_kind() -> dict[str, list[str]]:
             continue
         for kind in (
             *meta.get("expected_kinds", []),
+            *meta.get("l4_kinds", []),
             *meta.get("expected_crosscheck_kinds", []),
         ):
             out.setdefault(kind, []).append(case_name)
