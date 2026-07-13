@@ -113,6 +113,18 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
         assert d["report_schema_version"] == "2.2"
 
+    def test_leaf_mode_root_type_change_carries_evidence_status(self):
+        # Regression (Codex review): --report-mode leaf serializes root type
+        # changes via a separate _leaf_entry() path, not _change_to_dict() —
+        # evidence_status must be populated there too.
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["evidence_status"] == "artifact_proven"
+        # And the top-level `changes` union (leaf_changes + non_type_changes,
+        # kept for backward-compat consumers) carries it too.
+        assert d["changes"][0]["evidence_status"] == "artifact_proven"
+
 
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):

@@ -248,6 +248,9 @@ def _to_json_leaf(
             "old_value": getattr(c, "old_value", None),
             "new_value": getattr(c, "new_value", None),
         }
+        evidence_status = evidence_status_for_change(cast(HasKind, c))
+        if evidence_status is not None:
+            entry["evidence_status"] = evidence_status.value
         # ADR-027 A4: keep the modulation audit trail in leaf mode too, so a
         # demoted root type change still explains *why* it reads compatible.
         mod_reason = getattr(c, "modulation_reason", None)
