@@ -551,7 +551,14 @@ def _two_elf(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _compare_capturing_dump(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra_args: list[str]
 ) -> list[dict[str, object]]:
-    """Invoke ``compare`` on two fake ELFs with ``dumper.dump`` captured per side."""
+    """Invoke ``compare`` on two fake ELFs with ``dumper.dump`` captured per side.
+
+    A header-scoped compare also fires the L0 hard-removal fold-in
+    (``fold_l0_hard_removals``, case97 fix), which re-resolves both sides
+    symbols-only (``headers=[]``) to recover an ELF-exported function the
+    header AST can't see. Only the two *header-bearing* calls are the real
+    per-side dumps this helper's callers care about.
+    """
     import abicheck.dumper as dumper_mod
     from abicheck.model import AbiSnapshot
 
@@ -568,8 +575,9 @@ def _compare_capturing_dump(
         ["compare", str(old_so), str(new_so), "-H", str(header), *extra_args],
     )
     assert result.exit_code == 0, result.output
-    assert len(calls) == 2
-    return calls
+    header_calls = [c for c in calls if c.get("headers")]
+    assert len(header_calls) == 2
+    return header_calls
 
 
 def test_compare_threads_compile_context_to_both_sides(
@@ -771,9 +779,13 @@ def test_compare_config_include_dirs_survive_per_side_include(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert len(calls) == 2
-    old_inc = list(calls[0]["extra_includes"])  # type: ignore[arg-type]
-    new_inc = list(calls[1]["extra_includes"])  # type: ignore[arg-type]
+    # A header-scoped compare also fires the L0 hard-removal fold-in (case97
+    # fix), which re-resolves both sides symbols-only (headers=[]); only the
+    # two header-bearing calls are this test's real per-side dumps.
+    header_calls = [c for c in calls if c.get("headers")]
+    assert len(header_calls) == 2
+    old_inc = list(header_calls[0]["extra_includes"])  # type: ignore[arg-type]
+    new_inc = list(header_calls[1]["extra_includes"])  # type: ignore[arg-type]
     # Old side: its per-side override AND the config dir (config not dropped).
     assert old_only in old_inc
     assert cfg_inc in old_inc

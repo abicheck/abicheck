@@ -135,8 +135,12 @@ class TestCompareLang:
             "compare", str(old_so), str(new_so), "-H", str(header), "--lang", "c",
         ])
         assert result.exit_code == 0
-        # Both old and new sides should have lang="c" forwarded
-        assert len(captured_calls) == 2
+        # Both old and new sides should have lang="c" forwarded. A header-scoped
+        # compare also fires the L0 hard-removal fold-in (case97 fix), which
+        # re-resolves both sides symbols-only (headers=[]) — also with lang
+        # forwarded, so the per-call assertion below still holds over every call.
+        header_calls = [c for c in captured_calls if c.get("headers")]
+        assert len(header_calls) == 2
         for call in captured_calls:
             assert call.get("lang") == "c"
             assert call.get("compiler") == "cc"
@@ -178,6 +182,9 @@ class TestPerSideHeaderBackend:
             "--old-ast-frontend", "castxml", "--new-ast-frontend", "clang",
         ])
         assert result.exit_code == 0
+        # The L0 hard-removal fold-in (case97 fix) would add two more calls,
+        # but only when the resolved snapshot has a real source_path to
+        # re-probe — the fake snapshot here has none, so it no-ops.
         assert len(calls) == 2
         # _resolve_compare_snapshots dumps old first, then new.
         assert calls[0].get("header_backend") == "castxml"
@@ -198,8 +205,12 @@ class TestPerSideHeaderBackend:
             "--ast-frontend", "clang",
         ])
         assert result.exit_code == 0
-        assert len(calls) == 2
-        assert all(c.get("header_backend") == "clang" for c in calls)
+        # A header-scoped compare also fires the L0 hard-removal fold-in
+        # (case97 fix), which re-resolves both sides symbols-only (no
+        # header_backend of interest) — restrict to the real per-side calls.
+        header_calls = [c for c in calls if c.get("headers")]
+        assert len(header_calls) == 2
+        assert all(c.get("header_backend") == "clang" for c in header_calls)
 
     def test_one_side_override_other_inherits(self, tmp_path, monkeypatch):
         """A single per-side flag overrides only that side; the other inherits."""

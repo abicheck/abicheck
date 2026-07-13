@@ -54,6 +54,7 @@ from .cli_helpers_compare import (
     _collect_force_public_symbols,
     _resolve_per_side_options,
     _warn_ignored_flags,
+    fold_l0_hard_removals,
 )
 from .cli_options import resolve_compile_context
 from .cli_params import _load_suppression_and_policy
@@ -710,6 +711,17 @@ def run_compare(
     _warn_force_public_ignored(force_public, scope_public_headers)
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
+
+    # A header-scoped compare can silently drop a function that's genuinely
+    # exported but macro-gated out of the header AST on both sides (case97);
+    # fold back any hard ELF-only removal the header pass can't see. Gated on
+    # the *resolved* snapshots' own from_headers (not the raw -H CLI flags):
+    # a dump-then-compare-JSON-snapshots workflow has no -H of its own to see
+    # here, but the snapshot it loaded still remembers it was header-scoped.
+    # A headerless (DWARF/symbols) compare already sees ELF-only removals
+    # directly, so it's not worth the extra symbols-only re-resolve.
+    if getattr(old, "from_headers", False) or getattr(new, "from_headers", False):
+        extra_changes = fold_l0_hard_removals(old, new, lang, extra_changes)
 
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.

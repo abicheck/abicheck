@@ -347,11 +347,12 @@ class TestCompareSoSo:
         old_snap = _make_snapshot("old")
         new_snap = _make_snapshot("new")
 
-        call_count = [0]
+        header_call_count = [0]
 
         def mock_dump(so_path, headers, extra_includes=None, version="unknown",
                       lang="c++", **kw):
-            call_count[0] += 1
+            if headers:
+                header_call_count[0] += 1
             if "v1" in str(so_path):
                 return old_snap
             return new_snap
@@ -363,7 +364,10 @@ class TestCompareSoSo:
             "compare", str(old_elf), str(new_elf), "-H", str(hdr),
         ])
         assert result.exit_code == 0, result.output
-        assert call_count[0] == 2  # dump called for both sides
+        # dump called for both sides. (A header-scoped compare also fires the
+        # L0 hard-removal fold-in — case97 fix — which re-resolves both sides
+        # symbols-only; those calls have headers=[] and are excluded here.)
+        assert header_call_count[0] == 2
 
     def test_so_vs_so_with_per_side_headers(self, tmp_path, monkeypatch):
         """Compare two .so files with --header old= / --header new=."""
@@ -390,10 +394,13 @@ class TestCompareSoSo:
             "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
-        assert len(recorded_headers) == 2
+        # The L0 hard-removal fold-in (case97 fix) also re-resolves both
+        # sides symbols-only (headers=[]) — filter those out.
+        real_headers = [h for h in recorded_headers if h]
+        assert len(real_headers) == 2
         # old side got old_hdr, new side got new_hdr
-        assert recorded_headers[0] == [old_hdr]
-        assert recorded_headers[1] == [new_hdr]
+        assert real_headers[0] == [old_hdr]
+        assert real_headers[1] == [new_hdr]
 
     def test_so_without_headers_falls_back_to_symbols_only(self, tmp_path, monkeypatch):
         """Passing .so files without -H falls back to symbols-only with warning."""
@@ -422,7 +429,8 @@ class TestCompareSoSo:
 
         def mock_dump(so_path, headers, extra_includes=None, version="unknown",
                       lang="c++", **kw):
-            recorded_versions.append(version)
+            if headers:
+                recorded_versions.append(version)
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
@@ -433,6 +441,8 @@ class TestCompareSoSo:
             "--version", "old=1.0", "--version", "new=2.0",
         ])
         assert result.exit_code == 0, result.output
+        # The L0 hard-removal fold-in (case97 fix) also re-resolves both sides
+        # symbols-only (headers=[], version="") — excluded above.
         assert recorded_versions == ["1.0", "2.0"]
 
     def test_so_vs_so_with_includes(self, tmp_path, monkeypatch):
@@ -448,7 +458,8 @@ class TestCompareSoSo:
 
         def mock_dump(so_path, headers, extra_includes=None, version="unknown",
                       lang="c++", **kw):
-            recorded_includes.append(list(extra_includes or []))
+            if headers:
+                recorded_includes.append(list(extra_includes or []))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
@@ -459,6 +470,8 @@ class TestCompareSoSo:
             "-H", str(hdr), "-I", str(inc_dir),
         ])
         assert result.exit_code == 0, result.output
+        # The L0 hard-removal fold-in (case97 fix) also re-resolves both sides
+        # symbols-only (headers=[]) — excluded above.
         assert len(recorded_includes) == 2
         # The user's -I is passed and takes precedence (listed first); the -H
         # header's own directory is then auto-added so its relative includes
@@ -553,9 +566,13 @@ class TestCompareMixed:
             "--header", "new=" + str(new_hdr),
         ])
         assert result.exit_code == 0, result.output
-        # dump should only be called for the .so side (new)
-        assert len(recorded_headers) == 1
-        assert recorded_headers[0] == [new_hdr]
+        # dump should only be called for the .so side (new). The L0
+        # hard-removal fold-in (case97 fix) also re-resolves the .so side
+        # symbols-only (headers=[]) — the JSON side never calls dump() at
+        # all, so that fold-in call is the only extra entry here.
+        real_headers = [h for h in recorded_headers if h]
+        assert len(real_headers) == 1
+        assert real_headers[0] == [new_hdr]
 
 
 # ── compare with output formats (using .so inputs) ──────────────────────
@@ -684,10 +701,13 @@ class TestHeaderDirectoryInput:
             "compare", str(old_elf), str(new_elf), "-H", str(hdr_dir)
         ])
         assert result.exit_code == 0, result.output
-        assert len(captured) == 2  # old + new side
+        # old + new side. (The L0 hard-removal fold-in — case97 fix — also
+        # re-resolves both sides symbols-only, appended after as headers=[].)
+        real_captured = [h for h in captured if h]
+        assert len(real_captured) == 2
         expected = sorted([h1, h2, h3], key=lambda p: str(p))
-        assert captured[0] == expected
-        assert captured[1] == expected
+        assert real_captured[0] == expected
+        assert real_captured[1] == expected
 
     def test_old_new_header_directories(self, tmp_path, monkeypatch):
         """--header old=/--header new= accept directories and expand recursively."""
@@ -717,9 +737,12 @@ class TestHeaderDirectoryInput:
             "--header", "new=" + str(new_dir),
         ])
         assert result.exit_code == 0, result.output
-        assert len(captured) == 2
-        assert captured[0] == [old_h]
-        assert captured[1] == [new_h]
+        # The L0 hard-removal fold-in (case97 fix) also re-resolves both
+        # sides symbols-only, appended after as headers=[].
+        real_captured = [h for h in captured if h]
+        assert len(real_captured) == 2
+        assert real_captured[0] == [old_h]
+        assert real_captured[1] == [new_h]
 
     def test_mixed_header_file_and_directory(self, tmp_path, monkeypatch):
         """Mixing file and directory inputs in -H should work and deduplicate."""

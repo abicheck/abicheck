@@ -35,7 +35,8 @@ import click
 
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
-    from .checker_types import DiffResult
+    from .checker_types import Change, DiffResult
+    from .model import AbiSnapshot
     from .severity import SeverityConfig
 
 
@@ -496,3 +497,80 @@ def _merge_redundant_changes(result: DiffResult) -> None:
     result.changes = result.changes + result.redundant_changes
     result.redundant_changes = []
     result.redundant_count = 0
+
+
+def fold_l0_hard_removals(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    lang: str,
+    extra_changes: list[Change] | None,
+) -> list[Change] | None:
+    """Preserve hard ELF-only removals a header-scoped compare could hide.
+
+    A function present in the ELF/DWARF exports can be entirely absent from
+    the header AST — most commonly because it is declared behind a
+    consumer-controlled macro the header pass parses without knowing the
+    real build's `-D` set (``examples/case97_api_depends_on_consumer_env``:
+    the header AST is parsed once per compare, with no signal for which
+    macro state the *binary* was actually built under, so a macro-gated
+    declaration silently drops out on both sides). When that happens the
+    function never enters the header-scoped model on either side, so the
+    diff has nothing to compare it against and a real ``BREAKING`` removal
+    is missed.
+
+    Mirrors the fold-in in ``cli_scan_baseline._run_baseline_compare``
+    (PR #494, locked in by ``tests/test_pr494_scan_regressions.py``):
+    re-resolve both inputs symbols-only (bypassing the header AST
+    entirely) and diff them unscoped, then fold only the hard
+    ``func_removed_elf_only`` fact back into *extra_changes* — never a
+    full advisory dump. Per ADR-028 D3 (artifact-backed evidence stays
+    authoritative), this only restores a fact the ELF layer already
+    asserts; it cannot manufacture a break that isn't really there.
+
+    Re-resolves from each snapshot's own ``source_path`` — the binary it was
+    actually dumped from — rather than the compare CLI's raw input paths, so
+    this also covers the ``dump`` (with `-H`) *then* ``compare snap1.json
+    snap2.json`` two-step workflow, not just a direct ``compare a.so b.so
+    -H``: a pre-dumped JSON snapshot carries no `-H` flag of its own for
+    ``compare`` to see, but it does remember the binary it came from.
+
+    Best-effort: a raw binary input to re-resolve may not be available
+    (e.g. a hand-authored JSON snapshot with no real ``source_path``, or one
+    dumped on a different machine where that path no longer exists) —
+    resolution failures are swallowed and *extra_changes* is returned
+    unchanged.
+    """
+    from .errors import AbicheckError
+    from .service import compare_snapshots, resolve_input
+
+    old_path = getattr(old, "source_path", None)
+    new_path = getattr(new, "source_path", None)
+    if not old_path or not new_path:
+        return extra_changes
+
+    # This deliberately re-resolves both sides with no headers — the point is
+    # to see what ELF/DWARF alone exports — so the "no headers provided" note
+    # `resolve_input` would otherwise log is expected, not a real input
+    # problem; swallow it rather than confuse the user with a warning about
+    # an internal probe they didn't ask for.
+    try:
+        l0_old = resolve_input(
+            Path(old_path), [], [], version="", lang=lang, symbols_only=True,
+            notify=lambda _msg: None,
+        )
+        l0_new = resolve_input(
+            Path(new_path), [], [], version="", lang=lang, symbols_only=True,
+            notify=lambda _msg: None,
+        )
+    except AbicheckError:
+        return extra_changes
+    l0_diff = compare_snapshots(
+        l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
+    )
+    l0_hard_removals = [
+        change
+        for change in getattr(l0_diff, "breaking", ())
+        if getattr(getattr(change, "kind", None), "value", None)
+        == "func_removed_elf_only"
+    ]
+    return [*(extra_changes or []), *l0_hard_removals]
