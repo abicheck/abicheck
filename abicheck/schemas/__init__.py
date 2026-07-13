@@ -50,9 +50,10 @@ from typing import Any
 #:       evidence-collection timing + finding split. Additive optional key.
 #: 2.2 — added the optional per-finding ``evidence_status`` key (one of
 #:       "artifact_proven"/"source_contract"/"contextual_risk"/
-#:       "consumer_proven"/"not_checkable"): the epistemic status implied by
-#:       the finding's verdict, or set explicitly for appcompat/plugin-check
-#:       consumer-proven findings. Additive optional key.
+#:       "consumer_proven"/"not_checkable"): the finding's policy-independent
+#:       epistemic status (derived from its kind's intrinsic category, not
+#:       the policy-resolved verdict), or set explicitly for appcompat/
+#:       plugin-check consumer-proven findings. Additive optional key.
 REPORT_SCHEMA_VERSION = "2.2"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

@@ -269,20 +269,31 @@ an `evidence_status` (JSON) / `evidenceStatus` (SARIF) label — *how* that
 specific finding was proven, distinct from its `kind`/`severity` (*what* it
 is):
 
-| Value | Set when the finding's verdict is | Means |
-|-------|-----------------------------------|-------|
-| `artifact_proven` | `BREAKING` | L0/L1/L2 artifact evidence (or an explicit policy override) confirms a shipped ABI break. |
-| `source_contract` | `API_BREAK` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
-| `contextual_risk` | `COMPATIBLE_WITH_RISK` | Build/source/deployment context suggests risk without proving a break. |
-| `consumer_proven` | *(set explicitly, not derived from verdict)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
+| Value | Set when | Means |
+|-------|----------|-------|
+| `artifact_proven` | the finding's kind is intrinsically a `BREAKING_KINDS` member (or a per-finding `effective_verdict` override raises it there) | L0/L1/L2 artifact evidence confirms a shipped ABI break. |
+| `source_contract` | intrinsically `API_BREAK_KINDS` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
+| `contextual_risk` | intrinsically `RISK_KINDS` (`COMPATIBLE_WITH_RISK` under the default policy) | Build/source/deployment context suggests risk without proving a break. |
+| `consumer_proven` | *(set explicitly, not derived from the finding's own classification)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
 | `not_checkable` | *(the finding itself)* | The finding **is** the missing-evidence signal (`evidence_required_missing`, ADR-033 D7), not a break — the coverage gap is explicit rather than a silent gap in the report. |
 
 `COMPATIBLE`/`NO_CHANGE` findings (additions, clean comparisons) carry no
-`evidence_status` — there is no epistemic strength to qualify. The mapping
-from verdict to status is mechanical (it reuses the same `effective_category`
-classification the verdict itself comes from), so `evidence_status` can never
-disagree with `severity`/the gate/exit code — it is a relabeling for
-automated triage, not a second opinion.
+`evidence_status` — there is no epistemic strength to qualify.
+
+**`evidence_status` is deliberately policy-independent** — unlike
+`severity`/the gate/exit code, it is *not* derived from the active `--policy`.
+A named policy (`plugin_abi` folds every `COMPATIBLE_WITH_RISK` kind into its
+breaking set; `sdk_vendor` downgrades source-level kinds) or a `PolicyFile`
+kind-set override changes what *fails the build*, not what evidence actually
+proved — so a plugin-ABI-escalated calling-convention risk still reads
+`contextual_risk`, even though its `severity` reads `breaking` under that
+policy. The two fields *can* disagree for exactly this reason: `severity`
+answers "does this fail the build under the active policy?"; `evidence_status`
+answers "what kind of evidence backs this finding, regardless of policy?". A
+per-finding `effective_verdict` override (ADR-027 A4 pattern-aware modulation,
+frozen-namespace escalation) is the one exception — because it is a decision
+about *this specific finding* rather than a policy-wide sweep, both fields
+follow it together.
 
 ```json
 {

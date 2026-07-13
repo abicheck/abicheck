@@ -84,60 +84,59 @@ def test_compute_verdict_empty_is_no_change() -> None:
 
 
 # ---------------------------------------------------------------------------
-# evidence_status_for_change (the epistemic-status label, derived from verdict)
+# evidence_status_for_change (the epistemic-status label — policy-independent,
+# anchored to the kind's own strict_abi-intrinsic category, NOT the
+# policy-resolved verdict)
 # ---------------------------------------------------------------------------
 
 
-def test_evidence_status_breaking_is_artifact_proven() -> None:
+def test_evidence_status_breaking_kind_is_artifact_proven() -> None:
     c = _change(ChangeKind.FUNC_REMOVED)
-    assert (
-        evidence_status_for_change(c, Verdict.BREAKING)
-        is EvidenceStatus.ARTIFACT_PROVEN
-    )
+    assert evidence_status_for_change(c) is EvidenceStatus.ARTIFACT_PROVEN
 
 
-def test_evidence_status_api_break_is_source_contract() -> None:
+def test_evidence_status_api_break_kind_is_source_contract() -> None:
     c = _change(ChangeKind.FIELD_RENAMED)
-    assert (
-        evidence_status_for_change(c, Verdict.API_BREAK)
-        is EvidenceStatus.SOURCE_CONTRACT
-    )
+    assert evidence_status_for_change(c) is EvidenceStatus.SOURCE_CONTRACT
 
 
-def test_evidence_status_risk_is_contextual_risk() -> None:
-    c = _change(ChangeKind.TYPE_SIZE_CHANGED)
-    assert (
-        evidence_status_for_change(c, Verdict.COMPATIBLE_WITH_RISK)
-        is EvidenceStatus.CONTEXTUAL_RISK
-    )
+def test_evidence_status_risk_kind_is_contextual_risk() -> None:
+    c = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    assert evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
 
 
-def test_evidence_status_none_for_compatible_and_no_change() -> None:
+def test_evidence_status_none_for_compatible_kind() -> None:
     c = _change(ChangeKind.FUNC_ADDED)
-    assert evidence_status_for_change(c, Verdict.COMPATIBLE) is None
-    assert evidence_status_for_change(c, Verdict.NO_CHANGE) is None
+    assert evidence_status_for_change(c) is None
 
 
-def test_evidence_status_missing_evidence_kind_is_not_checkable_regardless_of_verdict() -> (
-    None
-):
+def test_evidence_status_missing_evidence_kind_is_always_not_checkable() -> None:
     c = _change(ChangeKind.EVIDENCE_REQUIRED_MISSING)
-    # A missing-evidence finding always reads not_checkable, whatever verdict
-    # its category resolves to (it is the "we don't know" signal, not a break).
-    assert (
-        evidence_status_for_change(c, Verdict.API_BREAK) is EvidenceStatus.NOT_CHECKABLE
-    )
-    assert (
-        evidence_status_for_change(c, Verdict.BREAKING) is EvidenceStatus.NOT_CHECKABLE
-    )
+    assert evidence_status_for_change(c) is EvidenceStatus.NOT_CHECKABLE
 
 
 def test_evidence_status_follows_effective_verdict_override() -> None:
-    # A demoted finding's evidence_status follows its *resolved* verdict, not
-    # its kind's default — consistent with effective_category by construction.
-    demoted = _change(
-        ChangeKind.TYPE_SIZE_CHANGED, effective_verdict=Verdict.COMPATIBLE
-    )
-    sets = policy_kind_sets("strict_abi")
-    resolved = effective_category(demoted, *sets)
-    assert evidence_status_for_change(demoted, resolved) is None
+    # A per-finding effective_verdict override (ADR-027 A4 pattern modulation,
+    # frozen-namespace escalation) IS a decision about this specific finding,
+    # so evidence_status follows it — same precedence effective_category uses.
+    demoted = _change(ChangeKind.FUNC_REMOVED, effective_verdict=Verdict.COMPATIBLE)
+    assert evidence_status_for_change(demoted) is None
+
+    promoted = _change(ChangeKind.FUNC_ADDED, effective_verdict=Verdict.BREAKING)
+    assert evidence_status_for_change(promoted) is EvidenceStatus.ARTIFACT_PROVEN
+
+
+def test_evidence_status_ignores_named_policy_kind_set_reassignment() -> None:
+    # Regression (Codex review): plugin_abi folds every RISK_KINDS member into
+    # its *breaking* set for gating purposes — effective_category resolves
+    # this finding to BREAKING under that policy. evidence_status must NOT
+    # follow that policy-driven reclassification: it stays contextual_risk,
+    # because no new evidence proved a shipped ABI break — only the active
+    # policy decided this class of risk should fail the build.
+    c = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    sets = policy_kind_sets("plugin_abi")
+    resolved = effective_category(c, *sets)
+    assert resolved == Verdict.BREAKING  # policy-resolved verdict escalates...
+    assert (
+        evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
+    )  # ...but evidence_status doesn't follow it

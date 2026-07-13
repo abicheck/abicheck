@@ -586,12 +586,12 @@ def _change_to_dict(
     """Convert a Change to a JSON-serializable dict with impact and metadata.
 
     ``evidence_status_override`` lets a caller assert a stronger epistemic
-    status than the verdict alone implies — e.g. ``appcompat_to_json`` marks
-    every finding it already proved a specific consumer depends on as
-    ``EvidenceStatus.CONSUMER_PROVEN``, regardless of the finding's own kind.
+    status than the finding's own classification implies — e.g.
+    ``appcompat_to_json`` marks every finding it already proved a specific
+    consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
+    the finding's own kind.
     """
     kind = getattr(c, "kind", None)
-    verdict: Verdict | None = None
     if isinstance(kind, ChangeKind) and kind_sets:
         from .severity import effective_verdict_for_change
 
@@ -607,8 +607,8 @@ def _change_to_dict(
     else:
         severity = "unknown"
     evidence_status = evidence_status_override
-    if evidence_status is None and verdict is not None:
-        evidence_status = evidence_status_for_change(cast(HasKind, c), verdict)
+    if evidence_status is None and isinstance(kind, ChangeKind):
+        evidence_status = evidence_status_for_change(cast(HasKind, c))
     d: dict[str, object] = {
         "kind": kind.value if kind else "",
         "symbol": getattr(c, "symbol", ""),

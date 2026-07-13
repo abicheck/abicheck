@@ -150,9 +150,7 @@ def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
         properties["causedByType"] = change.caused_by_type
     if change.caused_count > 0:
         properties["causedCount"] = change.caused_count
-    evidence_status = evidence_status_for_change(
-        change, result._effective_verdict_for_change(change)
-    )
+    evidence_status = evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
 
