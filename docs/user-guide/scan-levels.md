@@ -43,7 +43,7 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
 
 | `--depth` | Reaches | Needs |
 |-----------|---------|-------|
-| `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* + always-on pattern scan | just the artifact(s) |
+| `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* (no deep DWARF type walk, no L2 AST) + always-on pattern scan | just the artifact(s) |
 | `headers` | + **L2** header AST (the public/internal boundary) | a public-header directory + a C/C++ frontend |
 | `build` | + **L3** build context (flag/toolchain drift) | a compile DB / build dir |
 | `source` | + **L4** source-ABI replay of changed TUs + the **L5** graph | sources **and** `clang` (+ a diff seed to scope it) |

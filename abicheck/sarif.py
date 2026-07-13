@@ -33,7 +33,11 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.checker_policy import impact_for, policy_for
+from abicheck.checker_policy import (
+    evidence_status_for_change,
+    impact_for,
+    policy_for,
+)
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import apply_show_only
 
@@ -146,6 +150,9 @@ def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
         properties["causedByType"] = change.caused_by_type
     if change.caused_count > 0:
         properties["causedCount"] = change.caused_count
+    evidence_status = evidence_status_for_change(change)
+    if evidence_status is not None:
+        properties["evidenceStatus"] = evidence_status.value
 
     return {
         "ruleId": change.kind.value,

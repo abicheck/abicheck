@@ -26,6 +26,7 @@ from click.testing import CliRunner
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot
+from abicheck.schemas import REPORT_SCHEMA_VERSION
 from abicheck.serialization import load_snapshot, save_snapshot
 
 
@@ -293,7 +294,7 @@ def test_compare_json_carries_layer_coverage_block(tmp_path):
     ])
     assert result.exit_code in (0, 2, 4), result.output
     payload = json.loads(result.stdout)
-    assert payload["report_schema_version"] == "2.1"
+    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
     cov = {row["layer"]: row for row in payload["layer_coverage"]}
     assert set(cov) >= {"L0", "L1", "L2", "L3_build", "L4_source_abi", "L5_source_graph"}
     assert cov["L3_build"]["status"] == "present"

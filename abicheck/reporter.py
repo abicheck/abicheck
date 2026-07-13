@@ -29,7 +29,9 @@ from .checker import (
 )
 from .checker_policy import (
     ChangeKind,
+    EvidenceStatus,
     HasKind,
+    evidence_status_for_change,
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
@@ -246,6 +248,9 @@ def _to_json_leaf(
             "old_value": getattr(c, "old_value", None),
             "new_value": getattr(c, "new_value", None),
         }
+        evidence_status = evidence_status_for_change(cast(HasKind, c))
+        if evidence_status is not None:
+            entry["evidence_status"] = evidence_status.value
         # ADR-027 A4: keep the modulation audit trail in leaf mode too, so a
         # demoted root type change still explains *why* it reads compatible.
         mod_reason = getattr(c, "modulation_reason", None)
@@ -579,8 +584,16 @@ def _change_to_dict(
     ]
     | None = None,
     policy_file: object | None = None,
+    evidence_status_override: EvidenceStatus | None = None,
 ) -> dict[str, object]:
-    """Convert a Change to a JSON-serializable dict with impact and metadata."""
+    """Convert a Change to a JSON-serializable dict with impact and metadata.
+
+    ``evidence_status_override`` lets a caller assert a stronger epistemic
+    status than the finding's own classification implies — e.g.
+    ``appcompat_to_json`` marks every finding it already proved a specific
+    consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
+    the finding's own kind.
+    """
     kind = getattr(c, "kind", None)
     if isinstance(kind, ChangeKind) and kind_sets:
         from .severity import effective_verdict_for_change
@@ -596,6 +609,9 @@ def _change_to_dict(
         severity = _kind_to_severity(kind, policy)
     else:
         severity = "unknown"
+    evidence_status = evidence_status_override
+    if evidence_status is None and isinstance(kind, ChangeKind):
+        evidence_status = evidence_status_for_change(cast(HasKind, c))
     d: dict[str, object] = {
         "kind": kind.value if kind else "",
         "symbol": getattr(c, "symbol", ""),
@@ -604,6 +620,8 @@ def _change_to_dict(
         "new_value": getattr(c, "new_value", None),
         "severity": severity,
     }
+    if evidence_status is not None:
+        d["evidence_status"] = evidence_status.value
     # Impact explanation
     if kind:
         impact = impact_for(kind)
@@ -747,7 +765,12 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
         or "strict_abi"
     )
     d["relevant_changes"] = [
-        _change_to_dict(c, policy=appcompat_policy) for c in breaking
+        _change_to_dict(
+            c,
+            policy=appcompat_policy,
+            evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+        )
+        for c in breaking
     ]
     d["relevant_change_count"] = len(breaking)
 

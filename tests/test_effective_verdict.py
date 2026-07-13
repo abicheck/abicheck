@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from abicheck.checker_policy import (
     ChangeKind,
+    EvidenceStatus,
     Verdict,
     compute_verdict,
     effective_category,
+    evidence_status_for_change,
     policy_kind_sets,
 )
 from abicheck.checker_types import Change, DiffResult
@@ -79,3 +81,88 @@ def test_diffresult_properties_honor_override() -> None:
 
 def test_compute_verdict_empty_is_no_change() -> None:
     assert compute_verdict([]) == Verdict.NO_CHANGE
+
+
+# ---------------------------------------------------------------------------
+# evidence_status_for_change (the epistemic-status label — policy-independent,
+# anchored to the kind's own strict_abi-intrinsic category, NOT the
+# policy-resolved verdict)
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_status_breaking_kind_is_artifact_proven() -> None:
+    c = _change(ChangeKind.FUNC_REMOVED)
+    assert evidence_status_for_change(c) is EvidenceStatus.ARTIFACT_PROVEN
+
+
+def test_evidence_status_api_break_kind_is_source_contract() -> None:
+    c = _change(ChangeKind.FIELD_RENAMED)
+    assert evidence_status_for_change(c) is EvidenceStatus.SOURCE_CONTRACT
+
+
+def test_evidence_status_risk_kind_is_contextual_risk() -> None:
+    c = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    assert evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
+
+
+def test_evidence_status_none_for_compatible_kind() -> None:
+    c = _change(ChangeKind.FUNC_ADDED)
+    assert evidence_status_for_change(c) is None
+
+
+def test_evidence_status_missing_evidence_kind_is_always_not_checkable() -> None:
+    c = _change(ChangeKind.EVIDENCE_REQUIRED_MISSING)
+    assert evidence_status_for_change(c) is EvidenceStatus.NOT_CHECKABLE
+
+
+def test_evidence_status_ignores_effective_verdict_override() -> None:
+    # A per-finding effective_verdict override does NOT move evidence_status,
+    # unlike severity/effective_category. This field is set by more than one
+    # mechanism (ADR-027 A4 pattern modulation, but also ADR-033 D7's
+    # evidence-policy ceiling — see the regression test below) and there is
+    # no way to tell which one set it, so none of them are trusted.
+    demoted = _change(ChangeKind.FUNC_REMOVED, effective_verdict=Verdict.COMPATIBLE)
+    assert evidence_status_for_change(demoted) is EvidenceStatus.ARTIFACT_PROVEN
+
+    promoted = _change(ChangeKind.FUNC_ADDED, effective_verdict=Verdict.BREAKING)
+    assert evidence_status_for_change(promoted) is None
+
+
+def test_evidence_status_ignores_named_policy_kind_set_reassignment() -> None:
+    # Regression (Codex review): plugin_abi folds every RISK_KINDS member into
+    # its *breaking* set for gating purposes — effective_category resolves
+    # this finding to BREAKING under that policy. evidence_status must NOT
+    # follow that policy-driven reclassification: it stays contextual_risk,
+    # because no new evidence proved a shipped ABI break — only the active
+    # policy decided this class of risk should fail the build.
+    c = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    sets = policy_kind_sets("plugin_abi")
+    resolved = effective_category(c, *sets)
+    assert resolved == Verdict.BREAKING  # policy-resolved verdict escalates...
+    assert (
+        evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
+    )  # ...but evidence_status doesn't follow it
+
+
+def test_evidence_status_ignores_evidence_policy_ceiling() -> None:
+    # Regression (Codex review): buildsource.evidence_policy.apply_evidence_policy
+    # also drives Change.effective_verdict — sweeping a whole category of
+    # build-context/source-only findings to a uniform verdict per a
+    # PolicyFile evidence_policy knob (build_context_drift/source_only_findings/
+    # graph_risk_findings, ADR-033 D7). That's the same kind of blanket gating
+    # sweep as plugin_abi's kind-set reassignment, just via a different field,
+    # so evidence_status must not follow it either.
+    from abicheck.buildsource.evidence_policy import apply_evidence_policy
+
+    findings = [_change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)]
+
+    class _FakePolicyFile:
+        def evidence_verdict(self, category, *, abi_relevant):
+            return Verdict.BREAKING  # ceiling escalates the whole bucket
+
+    apply_evidence_policy(findings, "build_context", _FakePolicyFile())
+    c = findings[0]
+    assert c.effective_verdict == Verdict.BREAKING  # the ceiling took effect...
+    assert (
+        evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
+    )  # ...but evidence_status still reflects the kind's own evidence tier

@@ -32,6 +32,7 @@ from pathlib import Path
 import click
 
 from .checker import Verdict
+from .checker_policy import EvidenceStatus
 from .cli import (
     _resolve_input,
     _safe_write_output,
@@ -97,7 +98,11 @@ def _render_plugin_result_json(result: object) -> str:
             "required_entrypoints": sorted(result.required_entrypoints),
             "missing_entrypoints": result.missing_entrypoints,
             "breaking_for_host": [
-                {"symbol": c.symbol, "kind": c.kind.value}
+                {
+                    "symbol": c.symbol,
+                    "kind": c.kind.value,
+                    "evidence_status": EvidenceStatus.CONSUMER_PROVEN.value,
+                }
                 for c in result.breaking_for_host
             ],
             "coverage": result.coverage,

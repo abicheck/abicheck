@@ -357,6 +357,19 @@ class TestAppCompatReporters:
         assert data["relevant_change_count"] == 1
         assert data["relevant_changes"][0]["symbol"] == "foo_init"
 
+    def test_json_relevant_changes_are_consumer_proven(self):
+        # A finding surfaced via appcompat is runtime-demonstrated — this app
+        # actually depends on the changed symbol — so it reads consumer_proven
+        # regardless of what its kind's own verdict would otherwise imply.
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo_init",
+            description="Function removed",
+        )
+        result = self._make_result(breaking=[change])
+        data = json.loads(appcompat_to_json(result))
+        assert data["relevant_changes"][0]["evidence_status"] == "consumer_proven"
+
     def test_markdown_weak_mode(self):
         result = AppCompatResult(
             app_path="/usr/bin/myapp",

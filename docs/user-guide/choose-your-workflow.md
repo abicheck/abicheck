@@ -193,6 +193,27 @@ changes under their root cause. Full reference:
 
 ---
 
+## 5.5) How deep, how often — a three-tier cadence
+
+§2's accuracy ladder and §3's failure policy are *what* to check; this is
+*when* to spend on which depth. The L4/L5 cost cliff (see [Cost guide](scan-levels.md#cost-guide-rules-of-thumb))
+means "always run the deepest check on every push" is rarely the right
+default — match the depth to how often the job runs:
+
+| Tier | When it runs | Depth | Why |
+|---|---|---|---|
+| **PR gate** | Every push/PR | `abicheck scan --depth source --since origin/main` (or omit `--depth` for risk-driven `auto` — see [`scan` § Let risk pick the depth](scan-levels.md#let-risk-pick-the-depth--auto-localdev-only)) | Diff-seeded `source` seeded by `--since`/`--changed-path` scopes the expensive L4 replay to just the touched TUs — an order of magnitude cheaper than `full` for the same verdict on a real PR diff. `auto`'s risk scoring (`risk.py`) already encodes "escalate on public-header/export-map/ABI-flag touches, de-escalate on docs/tests" as the built-in ordering — you don't need to hand-write that policy. |
+| **Nightly / scheduled** | Once a day, off the critical path | `abicheck scan --depth full` (or `--depth source` unseeded, which is equivalent cost) | No diff seed to scope by, so this is the one place the L4 cost cliff is worth paying unconditionally — whole-library replay, compiler-matrix and stdlib-variant smoke, appcompat against key downstream consumers. Catches what a scoped PR gate structurally can't: breaks in files the PR didn't touch but whose *transitive* callers did. |
+| **Release** | Once per release, amortized | `abicheck dump … --sources . -o release-baseline.abi.json`, then `full`-depth `scan`/`compare` against it | Produce once, reuse for every PR gate until the next release (see [Baseline Management](baseline-management.md)) — the amortized cost of a `full` scan is much lower spread across a release cycle than paid on every PR. |
+
+Every tier's report ends with a coverage block stating what actually ran
+(see [Reading the coverage block](scan-levels.md#reading-the-coverage-block))
+and, per finding, an [`evidence_status`](output-formats.md#per-finding-epistemic-status-evidence_status)
+label — so a cheap PR-gate run is never mistaken for a release-grade
+guarantee: it states what it checked, not just what it found.
+
+---
+
 ## Next steps by persona
 
 - **Library maintainer** → [Getting Started](../getting-started.md),

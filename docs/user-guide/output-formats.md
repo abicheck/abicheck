@@ -261,6 +261,51 @@ full L0–L4 model.
 }
 ```
 
+### Per-finding epistemic status (`evidence_status`)
+
+The three fields above describe the comparison as a whole. Each individual
+finding in `changes[]` (JSON) or SARIF `results[].properties` can also carry
+an `evidence_status` (JSON) / `evidenceStatus` (SARIF) label — *how* that
+specific finding was proven, distinct from its `kind`/`severity` (*what* it
+is):
+
+| Value | Set when | Means |
+|-------|----------|-------|
+| `artifact_proven` | the finding's kind is intrinsically a `BREAKING_KINDS` member | L0/L1/L2 artifact evidence confirms a shipped ABI break. |
+| `source_contract` | intrinsically `API_BREAK_KINDS` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
+| `contextual_risk` | intrinsically `RISK_KINDS` (`COMPATIBLE_WITH_RISK` under the default policy) | Build/source/deployment context suggests risk without proving a break. |
+| `consumer_proven` | *(set explicitly, not derived from the finding's own classification)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
+| `not_checkable` | *(the finding itself)* | The finding **is** the missing-evidence signal (`evidence_required_missing`, ADR-033 D7), not a break — the coverage gap is explicit rather than a silent gap in the report. |
+
+`COMPATIBLE`/`NO_CHANGE` findings (additions, clean comparisons) carry no
+`evidence_status` — there is no epistemic strength to qualify.
+
+**`evidence_status` is a pure function of the finding's `kind`** — unlike
+`severity`/the gate/exit code, it follows *no* verdict-modulation mechanism at
+all: not the active `--policy` (a named policy like `plugin_abi` folds every
+`COMPATIBLE_WITH_RISK` kind into its breaking set for gating; `sdk_vendor`
+downgrades source-level kinds), not a `PolicyFile` kind-set override, not a
+`PolicyFile` `evidence_policy` ceiling (the `build_context_drift`/
+`source_only_findings`/`graph_risk_findings` knobs, ADR-033 D7), and not a
+per-finding `effective_verdict` (ADR-027 A4 pattern modulation, frozen-
+namespace escalation). All of those change what *fails the build*, not what
+evidence actually proved — and since more than one of them share the same
+`effective_verdict` field, there is no reliable way to tell "a detector
+individually re-examined this one finding" apart from "an operator's
+evidence-tier ceiling swept a whole bucket," so none are trusted. `severity`
+answers "does this fail the build under the active policy?";
+`evidence_status` answers "what kind of evidence backs this finding, full
+stop?" — the two fields *can* disagree, and that's by design.
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "severity": "breaking",
+  "evidence_status": "artifact_proven"
+}
+```
+
 ---
 
 ## JSON schema and stability guarantees

@@ -879,6 +879,46 @@ _EVIDENCE_TIER_RANK: dict[EvidenceTier, int] = {
 }
 
 
+class EvidenceStatus(str, Enum):
+    """The epistemic status of a single finding — *how* it was proven, not just
+    *what* it is (its ``Verdict``/severity already say that).
+
+    A per-report-format overlay (JSON ``evidence_status`` / SARIF
+    ``evidenceStatus``). Deliberately a **pure function of the finding's
+    ``kind``** — never the policy-resolved ``Verdict``/severity and never a
+    per-finding ``effective_verdict`` override, since *every* mechanism that
+    sets one (a named policy's kind-set reassignment, a ``PolicyFile``
+    override, ADR-033 D7's evidence-tier ceiling, ADR-027 A4 pattern
+    modulation) is a gating decision about what fails the build, not new
+    evidence about the finding — see :func:`evidence_status_for_change` for
+    why none of them are trusted. Per the ADR-028 D3 authority rule (artifact
+    evidence is authoritative; build/source evidence corroborates):
+
+    - ``ARTIFACT_PROVEN`` — intrinsically a ``BREAKING_KINDS`` member:
+      L0/L1/L2 artifact evidence confirms a shipped ABI break.
+    - ``SOURCE_CONTRACT`` — intrinsically ``API_BREAK_KINDS``: a source-level
+      break that needs a recompile or a policy decision, not necessarily a
+      shipped ABI break.
+    - ``CONTEXTUAL_RISK`` — intrinsically ``RISK_KINDS``: build/source/
+      deployment context suggests risk without proving a break.
+    - ``CONSUMER_PROVEN`` — not derivable from the finding's own
+      classification at all: set explicitly when runtime/``appcompat``
+      evidence demonstrates a *specific* consumer actually depends on what
+      changed (see ``reporter.appcompat_to_json``).
+    - ``NOT_CHECKABLE`` — the finding **is** the "missing evidence" signal
+      (``ChangeKind.EVIDENCE_REQUIRED_MISSING``, ADR-033 D7), not a break.
+
+    ``COMPATIBLE``/``NO_CHANGE`` findings (additions, clean comparisons) carry
+    no status — nothing to explain the epistemic strength of.
+    """
+
+    ARTIFACT_PROVEN = "artifact_proven"
+    SOURCE_CONTRACT = "source_contract"
+    CONTEXTUAL_RISK = "contextual_risk"
+    CONSUMER_PROVEN = "consumer_proven"
+    NOT_CHECKABLE = "not_checkable"
+
+
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
 # ---------------------------------------------------------------------------
@@ -1161,6 +1201,51 @@ def effective_category(
     if kind in compatible:
         return Verdict.COMPATIBLE
     return Verdict.BREAKING  # unclassified → fail-safe
+
+
+def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
+    """The :class:`EvidenceStatus` label for *change* — a **pure function of
+    its ``kind``**, deliberately independent of every verdict-modulation
+    mechanism (unlike ``severity``/the exit code).
+
+    Earlier revisions honoured a per-finding ``Change.effective_verdict``
+    override, reasoning that (unlike a blanket named-policy kind-set swap) it
+    represented a decision about *this specific finding*. That reasoning
+    doesn't hold: ``effective_verdict`` is *also* the mechanism
+    ``buildsource.evidence_policy.apply_evidence_policy`` uses to sweep an
+    entire category of findings (build-context / source-only) to a uniform
+    verdict per a ``PolicyFile`` ``evidence_policy`` knob (``build_context_drift``
+    / ``source_only_findings`` / ``graph_risk_findings``, ADR-033 D7) — the
+    same kind of blanket gating sweep as a named policy's kind-set
+    reassignment, just implemented through a different field. There is no
+    field-level way to tell "a detector individually re-examined this one
+    finding" apart from "an operator's evidence-tier ceiling swept a whole
+    bucket" — so, to stay honest, **no** verdict-modulation mechanism moves
+    this. This always classifies against the kind's own
+    **strict_abi-intrinsic** category (:data:`BREAKING_KINDS` /
+    :data:`API_BREAK_KINDS` / :data:`RISK_KINDS`), the same partition every
+    kind is registered under regardless of the active policy, PolicyFile
+    overrides, or any per-finding ``effective_verdict``.
+
+    ``EVIDENCE_REQUIRED_MISSING`` (ADR-033 D7) is the one kind-level
+    exception: it **is** the "missing evidence" signal, not a break, so it
+    always reads ``NOT_CHECKABLE``.
+
+    ``CONSUMER_PROVEN`` (appcompat/runtime-demonstrated) is never returned
+    here: it isn't derivable from a finding's own classification at all, so
+    callers that reclassify a finding via consumer evidence
+    (``reporter.appcompat_to_json``) set it explicitly instead.
+    """
+    kind = getattr(change, "kind", None)
+    if kind == ChangeKind.EVIDENCE_REQUIRED_MISSING:
+        return EvidenceStatus.NOT_CHECKABLE
+    if kind in BREAKING_KINDS:
+        return EvidenceStatus.ARTIFACT_PROVEN
+    if kind in API_BREAK_KINDS:
+        return EvidenceStatus.SOURCE_CONTRACT
+    if kind in RISK_KINDS:
+        return EvidenceStatus.CONTEXTUAL_RISK
+    return None
 
 
 def compute_verdict(

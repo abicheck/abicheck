@@ -164,6 +164,16 @@ class TestResultContent:
         assert props["oldVersion"] == "1.0"
         assert props["newVersion"] == "2.0"
 
+    def test_result_evidence_status_breaking(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()], verdict=Verdict.BREAKING))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["evidenceStatus"] == "artifact_proven"
+
+    def test_result_evidence_status_absent_for_compatible(self) -> None:
+        doc = to_sarif(_make_result([_compatible_change()], verdict=Verdict.COMPATIBLE))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert "evidenceStatus" not in props
+
 
 # ---------------------------------------------------------------------------
 # Invocation / automation details

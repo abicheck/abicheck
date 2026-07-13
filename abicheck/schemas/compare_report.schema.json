@@ -236,6 +236,11 @@
           "type": "string",
           "enum": ["breaking", "api_break", "risk", "compatible", "unknown"]
         },
+        "evidence_status": {
+          "type": "string",
+          "description": "The epistemic status of this finding, deliberately policy-independent (unlike severity, it is NOT derived from the active --policy): artifact_proven = the finding's kind is intrinsically a BREAKING_KINDS member, so L0/L1/L2 artifact evidence confirms a shipped ABI break; source_contract = intrinsically API_BREAK_KINDS, a source-level break needing a recompile/policy decision; contextual_risk = intrinsically RISK_KINDS, build/source/deployment context suggests risk without proving a break (may still read 'severity':'breaking' under a policy like plugin_abi that escalates risk kinds for gating); consumer_proven = set explicitly for appcompat/plugin-check findings where runtime evidence demonstrated a specific consumer depends on this change; not_checkable = this finding IS the missing-evidence signal (evidence_required_missing), not a break. Absent for COMPATIBLE/NO_CHANGE findings, which need no epistemic status.",
+          "enum": ["artifact_proven", "source_contract", "contextual_risk", "consumer_proven", "not_checkable"]
+        },
         "impact": { "type": "string" },
         "source_location": { "type": "string" },
         "affected_symbols": {

@@ -224,7 +224,10 @@ and "tier" or "level" would imply the wrong ones:
 
 So "evidence" + the authority rule is the mental model that lets abicheck keep
 *adding* sources for more accuracy without ever letting a weaker source override
-a proven break.
+a proven break. This four-way authority split (artifact-proven / corroborating
+source-level / corroborating risk / consumer-demonstrated) is exactly what each
+finding's `evidence_status` field spells out in machine-readable form — see
+[Output Formats § Per-finding epistemic status](../user-guide/output-formats.md#per-finding-epistemic-status-evidence_status).
 
 ---
 
