@@ -228,6 +228,8 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
     parsed = _read_decimal_length(rest, 0)
     if parsed is not None:
         length, name_start = parsed
+        if length > len(rest) - name_start:
+            return None
         name = rest[name_start : name_start + length]
         if name and re.match(r"[A-Za-z_]\w*", name):
             return name
@@ -408,6 +410,8 @@ def _nested_component(symbol: str, index: int) -> str | None:
                 i += 1
                 continue
             length, j = parsed
+            if length > len(rest) - j:
+                return None
             name = rest[j : j + length]
             i = j + length
             if depth == 0:
@@ -642,6 +646,8 @@ def _entity_owner_is_internal(symbol: str) -> bool:
                 i += 1
                 continue
             length, j = parsed
+            if length > len(rest) - j:
+                return False
             i = j + length
             if depth == 0:
                 components.append(rest[j : j + length])
@@ -691,6 +697,8 @@ def _has_template_args(symbol: str) -> bool:
                     i += 1
                     continue
                 length, j = parsed
+                if length > len(rest) - j:
+                    return False
                 i = j + length  # skip the source-name characters
             else:
                 i += 1
@@ -701,5 +709,7 @@ def _has_template_args(symbol: str) -> bool:
     if parsed is None:
         return False
     length, name_start = parsed
+    if length > len(rest) - name_start:
+        return False
     end = name_start + length
     return end < len(rest) and rest[end] == "I"
