@@ -365,6 +365,65 @@ def test_fold_l0_hard_removals_size_mismatch_still_noop_with_dump_time_epoch(
     assert result is extra
 
 
+def test_fold_l0_hard_removals_mixed_epoch_still_checks_non_epoch_side(
+    monkeypatch, tmp_path
+):
+    """A mixed CI/local compare — one snapshot dumped under SOURCE_DATE_EPOCH,
+    the other dumped normally — must not let the epoch-dumped side's flag
+    disable the mtime check globally. The non-epoch side's real mtime is
+    still a meaningful identity signal and must still be enforced (Codex
+    review, third round: the two-flag OR conflated both sides into one
+    global gate)."""
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    # old was dumped under SOURCE_DATE_EPOCH — its mtime is a substituted
+    # epoch and legitimately won't match the live file's real mtime.
+    old_snap.source_mtime = 1609459200.0
+    old_snap.source_mtime_epoch = True
+    # new was dumped normally — its real mtime was recorded, but the file
+    # has since been rebuilt in place (same size, real mtime moved on).
+    new_snap.source_mtime -= 1000
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_mixed_epoch_folds_when_non_epoch_side_matches(
+    monkeypatch, tmp_path
+):
+    """Complement to the mixed-epoch regression test: when the non-epoch
+    side's real mtime genuinely matches, the mixed compare should still
+    proceed — the per-side gating isn't overly strict either."""
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    old_snap.source_mtime = 1609459200.0
+    old_snap.source_mtime_epoch = True
+    # new_snap's real mtime is untouched — still matches the file on disk.
+    removal = Change(
+        kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        symbol="_ZN3lib8extendedEv",
+        description="ELF-only function removed",
+    )
+    diff = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="lib.so",
+        changes=[removal],
+        verdict=Verdict.BREAKING,
+    )
+    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result == extra + [removal]
+
+
 def test_fold_l0_hard_removals_mtime_mismatch_still_noop_without_epoch_flag(
     monkeypatch, tmp_path
 ):

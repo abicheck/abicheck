@@ -553,22 +553,21 @@ def fold_l0_hard_removals(
     Codex review), but a proportionate check for a best-effort enrichment
     that's already documented to swallow anything short of a clean match.
 
-    The mtime side of that check is skipped for a snapshot whose
-    ``source_mtime_epoch`` flag is set: ``dumper._safe_mtime`` recorded the
-    fixed ``SOURCE_DATE_EPOCH`` value rather than the binary's real mtime at
-    *dump* time (reproducible-builds spec), so a live re-probe's real mtime
-    almost never equals it. This is checked per-snapshot rather than via the
-    *compare*-time environment — a snapshot dumped under a pinned epoch (a CI
-    step) can easily be compared later with no ``SOURCE_DATE_EPOCH`` set at
-    all (an interactive run), and gating on compare-time ``os.environ`` alone
-    would then wrongly re-enable a check that can never pass for that
-    snapshot's permanently-substituted mtime (Codex review, two rounds: the
-    first carve-out covered only same-process direct compares). Without this,
-    a dump-time epoch would either silently and permanently disable the
-    fold-in (checked at compare time) or reintroduce that same silent
-    disabling when the compare-time environment differs from the dump-time
-    one. Size still applies unconditionally — it isn't epoch-gated and
-    remains a real (if imperfect) identity signal.
+    The mtime side of that check is skipped independently for each side whose
+    own ``source_mtime_epoch`` flag is set: ``dumper._safe_mtime`` recorded
+    the fixed ``SOURCE_DATE_EPOCH`` value rather than that binary's real
+    mtime at *dump* time (reproducible-builds spec), so a live re-probe's
+    real mtime almost never equals it. Each side's flag is checked
+    independently (not OR'd together) so a mixed CI/local compare — one
+    snapshot dumped under a pinned epoch, the other dumped normally — still
+    enforces the real mtime on the non-epoch side rather than letting one
+    epoch-dumped side disable the check for both (Codex review, three
+    rounds: same-process direct compares, then a dump/compare environment
+    mismatch, then this per-side mix). The flag is checked per-snapshot
+    rather than via the *compare*-time environment for the same reason as
+    round two — a dump-time epoch must stay recognized regardless of what's
+    set later. Size still applies unconditionally to both sides — it isn't
+    epoch-gated and remains a real (if imperfect) identity signal.
     """
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
@@ -594,17 +593,16 @@ def fold_l0_hard_removals(
         new_now_stat = Path(new_path).stat()
     except OSError:
         return extra_changes
-    mtime_gated = getattr(old, "source_mtime_epoch", False) or getattr(
-        new, "source_mtime_epoch", False
+    old_mtime_ok = getattr(old, "source_mtime_epoch", False) or (
+        old_now_stat.st_mtime == old_snapshot_mtime
+    )
+    new_mtime_ok = getattr(new, "source_mtime_epoch", False) or (
+        new_now_stat.st_mtime == new_snapshot_mtime
     )
     if (
-        not mtime_gated
-        and (
-            old_now_stat.st_mtime != old_snapshot_mtime
-            or new_now_stat.st_mtime != new_snapshot_mtime
-        )
-    ) or (
-        old_now_stat.st_size != old_snapshot_size
+        not old_mtime_ok
+        or not new_mtime_ok
+        or old_now_stat.st_size != old_snapshot_size
         or new_now_stat.st_size != new_snapshot_size
     ):
         return extra_changes
