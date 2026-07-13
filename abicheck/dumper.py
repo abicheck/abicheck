@@ -100,7 +100,26 @@ log = logging.getLogger(__name__)
 
 
 def _safe_mtime(path: Path) -> float | None:
-    """Return path's mtime, or None if it can't be stat'd right now."""
+    """Return path's mtime, or None if it can't be stat'd right now.
+
+    Honours ``SOURCE_DATE_EPOCH`` (reproducible-builds spec) when set and
+    valid, the same way ``created_at`` does via
+    ``cli_helpers_compare._provenance_timestamp`` — two dumps of identical
+    binary content must stay byte-identical for content-addressable caching
+    and reproducible-build verification (Codex review); the real, varying
+    filesystem mtime would otherwise leak into the snapshot and break that
+    guarantee. A build running under ``SOURCE_DATE_EPOCH`` will then see
+    ``fold_l0_hard_removals``'s later identity re-check (a live
+    ``Path.stat()``, deliberately not gated the same way) mismatch this
+    fixed value and decline to fold — best-effort enrichment quietly stepping
+    aside rather than fighting the reproducibility guarantee.
+    """
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch:
+        try:
+            return float(int(source_date_epoch.strip()))
+        except (ValueError, OverflowError):
+            pass
     try:
         return path.stat().st_mtime
     except OSError:

@@ -50,6 +50,22 @@ class TestSafeMtime:
     def test_returns_none_when_path_missing(self, tmp_path):
         assert _safe_mtime(tmp_path / "does_not_exist.so") is None
 
+    def test_honours_source_date_epoch_over_real_mtime(self, tmp_path, monkeypatch):
+        # Two dumps of identical binary content must stay byte-identical
+        # under SOURCE_DATE_EPOCH (reproducible-builds spec) — the real,
+        # varying filesystem mtime must not leak into the snapshot.
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000000000")
+        assert _safe_mtime(p) == 1000000000.0
+        assert _safe_mtime(p) != p.stat().st_mtime
+
+    def test_invalid_source_date_epoch_falls_back_to_real_mtime(self, tmp_path, monkeypatch):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
+        assert _safe_mtime(p) == p.stat().st_mtime
+
 
 # ── _parse_vtable_index ─────────────────────────────────────────────────
 

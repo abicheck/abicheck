@@ -432,6 +432,8 @@ class AbiSnapshot:
     # — e.g. rebuilt in place after this snapshot was dumped to JSON — and
     # decline to trust it, keeping a pre-dumped-snapshot compare reproducible.
     # None for snapshots predating this field, or when source_path is None.
+    # Honours SOURCE_DATE_EPOCH the same way created_at does (dumper._safe_mtime)
+    # so two dumps of identical binary content stay byte-identical.
     source_mtime: float | None = field(default=None, kw_only=True)
 
     # ADR-028 (schema v7) — optional reference to an out-of-band BuildSourcePack
