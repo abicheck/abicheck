@@ -347,6 +347,16 @@ and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare
 > (the "found nothing" defaults) would be miscredited. Active `BREAKING`/`API_BREAK`
 > verdicts are genuine findings, so a verdict match suffices there (and avoids
 > penalising tier-appropriate variant kinds such as L0's `func_removed_elf_only`).
+>
+> **Not the same number as the full-catalog benchmark below.** This staircase
+> is a discoverability *floor* (the weakest source that reaches the correct
+> verdict per case, credited from `ground_truth.json` labels — L4/L5 rows are
+> not yet re-run empirically, see the caveat above); it does not penalize a
+> tier for *over-calling* elsewhere in the catalog. The
+> [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
+> below is the stricter, empirically-measured number — it scores all 170 cases
+> including false positives, which is why `L3-L5` reads 90.0% there rather
+> than the 100% this table's `L5` row shows.
 
 Two directions matter, not just one:
 

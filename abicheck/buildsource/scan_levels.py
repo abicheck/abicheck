@@ -15,15 +15,21 @@
 
 """Deterministic level resolution for the ``scan`` orchestrator (ADR-035, G19.3).
 
-Two orthogonal, user-selectable axes (ADR-035 D1):
+Two internal axes drive resolution (ADR-035 D1), but only one is public:
 
-- **S = source-analysis method** (:class:`SourceMethod`, ``s0..s6`` + ``auto``):
-  the *how* — six cost-ordered techniques that produce L3-L5 evidence, and the
-  granularity coverage is reported at.
 - **L = evidence depth** (:class:`EvidenceDepth`, the coarse ``--depth`` knob):
-  the *what* + authority. The S→L map is **lossy** (``build``→S1 not S2, and S3
-  has no ``--depth`` form), so ``--source-method`` is the precise knob and wins
-  if both are given.
+  the *what* + authority. This is the **only** axis exposed on the CLI
+  (ADR-037 D5) — ``binary``/``headers``/``build``/``source``/``full``.
+- **S = source-analysis method** (:class:`SourceMethod`, ``s0..s6`` + ``auto``):
+  the *how* — six cost-ordered techniques that produce L3-L5 evidence, used
+  internally to resolve a depth into a concrete collection mode. The old
+  ``--source-method``/``--mode`` CLI flags that let a caller pin an S-method or
+  preset directly are **deprecated, hidden aliases for one release**
+  (:func:`abicheck.cli_scan._warn_deprecated_scan_aliases`); they still parse
+  and, for backward compatibility, still resolve through this module's
+  precedence — the S→L map is **lossy** (``build``→S1 not S2, and S3 has no
+  ``--depth`` form), so an explicitly-passed ``--source-method`` is the more
+  precise knob and wins if both are given. New code should use ``--depth``.
 
 A ``--mode`` (:class:`ScanMode`) is a **fixed preset** of (S, L) — not
 risk-varying — so a CI gate that pins a mode produces the same scan for the same
@@ -94,7 +100,6 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 DEPRECATED_DEPTHS: dict[str, EvidenceDepth] = {
     "symbols": EvidenceDepth.BINARY,
 }
-
 
 
 #: Fixed per-mode preset of (source_method, depth) — ADR-035 D9. ``PR`` pins the
@@ -214,11 +219,15 @@ def resolve_source_method(
 ) -> SourceMethod:
     """Resolve the explicit, deterministic S-method for a scan (ADR-035 D1/D3).
 
-    Precedence (highest first):
+    ``--depth`` is the only S/L-selecting flag on the public CLI (ADR-037 D5);
+    ``--source-method``/``--mode`` are deprecated, hidden aliases kept for one
+    release of backward compatibility. Precedence when more than one is given
+    (highest first):
 
-    1. an explicit ``--source-method`` (the precise knob; wins over ``--depth``);
+    1. an explicit ``--source-method`` (deprecated; the more precise knob, so it
+       wins over ``--depth`` if both are passed);
     2. an explicit ``--depth`` (coarse, lossy → representative S);
-    3. the ``--mode`` preset (the default).
+    3. the ``--mode`` preset (deprecated; the default when neither is given).
 
     ``AUTO`` is resolved with ``auto_method`` — the risk-driven S-method from
     :func:`risk.recommend_source_method` — which the caller computes only when the
