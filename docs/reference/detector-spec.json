@@ -333,7 +333,7 @@
       "severity": "warning",
       "min_evidence": "L4",
       "doc_slug": "concept_tightened",
-      "examples": "case105_concept_tightening"
+      "examples": ""
     },
     {
       "kind": "constant_added",

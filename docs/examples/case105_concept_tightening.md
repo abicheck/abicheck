@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟠 **API_BREAK** |
-| **Category** | API Break |
+| **Verdict** | ✅ **NO_CHANGE** |
+| **Category** | No Change |
 | **Platforms** | Linux, macOS |
-| **Flags** | API break |
-| **Detected `ChangeKind`s** | `concept_tightened` |
+| **Flags** | — |
+| **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case105_concept_tightening/` |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟢 NO_CHANGE by
@@ -125,4 +125,4 @@ g++ -std=c++20 -I. app.cpp -L. -lv2 -o app
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._

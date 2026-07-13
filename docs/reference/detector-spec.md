@@ -42,7 +42,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` | [case155](../examples/case155_char_signedness_flip.md) |
 | `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` | — |
 | `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` | — |
-| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | [case105](../examples/case105_concept_tightening.md) |
+| `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | — |
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` | — |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` | [case124](../examples/case124_header_constant_value_changed.md) |
 | `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` | — |
