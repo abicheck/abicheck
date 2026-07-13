@@ -67,6 +67,17 @@ class TestSafeMtime:
         assert mtime != p.stat().st_mtime
         assert is_epoch is True
 
+    def test_zero_source_date_epoch_is_honoured(self, tmp_path, monkeypatch):
+        # "0" is a valid (if unusual) SOURCE_DATE_EPOCH — a non-empty string
+        # is truthy regardless of the numeric value it parses to, so this
+        # must not fall through to the real mtime (CodeRabbit review).
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "0")
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == 0.0
+        assert is_epoch is True
+
     def test_invalid_source_date_epoch_falls_back_to_real_mtime(self, tmp_path, monkeypatch):
         p = tmp_path / "lib.so"
         p.write_bytes(b"")
