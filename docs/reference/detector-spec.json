@@ -288,7 +288,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "cet_protection_weakened",
-      "examples": ""
+      "examples": "case179_cet_protection_weakened"
     },
     {
       "kind": "char8t_migration",
@@ -648,7 +648,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "exported_not_public",
-      "examples": ""
+      "examples": "case143_audit_accidental_export,case150_xcheck_export_public_pair"
     },
     {
       "kind": "exported_object_alignment_reduced",
@@ -1098,7 +1098,7 @@
       "severity": "warning",
       "min_evidence": "L3",
       "doc_slug": "header_build_context_mismatch",
-      "examples": ""
+      "examples": "case148_xcheck_header_build_mismatch"
     },
     {
       "kind": "header_parse_context_drift",
@@ -1269,7 +1269,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "kabi_crc_changed",
-      "examples": ""
+      "examples": "case175_kabi_crc_changed"
     },
     {
       "kind": "kabi_export_type_changed",
@@ -1296,7 +1296,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "kabi_symbol_namespace_changed",
-      "examples": ""
+      "examples": "case176_kabi_symbol_namespace_changed"
     },
     {
       "kind": "kabi_symbol_removed",
@@ -1359,7 +1359,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "long_double_abi_changed",
-      "examples": ""
+      "examples": "case177_long_double_abi_changed"
     },
     {
       "kind": "lto_mode_changed",
@@ -1467,7 +1467,7 @@
       "severity": "warning",
       "min_evidence": "L4",
       "doc_slug": "odr_type_variant",
-      "examples": ""
+      "examples": "case149_xcheck_odr_variant"
     },
     {
       "kind": "opaque_invariant_broken",
@@ -1647,7 +1647,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "private_header_leak",
-      "examples": ""
+      "examples": "case144_audit_private_header_leak,case147_scan_depth_ladder,case151_xcheck_provider_matrix"
     },
     {
       "kind": "protected_visibility_changed",
@@ -1701,7 +1701,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "public_not_exported",
-      "examples": ""
+      "examples": "case150_xcheck_export_public_pair"
     },
     {
       "kind": "public_reachability_changed",
@@ -1737,7 +1737,7 @@
       "severity": "warning",
       "min_evidence": "L5",
       "doc_slug": "public_to_internal_dependency",
-      "examples": ""
+      "examples": "case181_xcheck_public_to_internal_dependency"
     },
     {
       "kind": "public_typedef_removed",
@@ -1989,7 +1989,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "rtti_for_internal_type",
-      "examples": ""
+      "examples": "case146_audit_rtti_for_internal"
     },
     {
       "kind": "rtti_inheritance_changed",
@@ -2061,7 +2061,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "secondary_vtable_group_changed",
-      "examples": ""
+      "examples": "case174_secondary_vtable_group_changed"
     },
     {
       "kind": "serialization_tag_changed",
@@ -2169,7 +2169,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "static_tls_introduced",
-      "examples": ""
+      "examples": "case171_static_tls_introduced"
     },
     {
       "kind": "static_tls_removed",
@@ -2394,7 +2394,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "symbol_binding_lost_unique",
-      "examples": ""
+      "examples": "case180_symbol_binding_lost_unique"
     },
     {
       "kind": "symbol_binding_strengthened",
@@ -2907,7 +2907,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "unnamed_type_in_public_abi",
-      "examples": ""
+      "examples": "case178_unnamed_type_in_public_abi"
     },
     {
       "kind": "unspecified_return_now_named",
@@ -2925,7 +2925,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "unversioned_exported_symbol",
-      "examples": ""
+      "examples": "case145_audit_unversioned_export"
     },
     {
       "kind": "used_reserved_field",
@@ -3114,7 +3114,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtable_thunk_offset_changed",
-      "examples": ""
+      "examples": "case172_vtable_thunk_offset_changed"
     },
     {
       "kind": "vtable_thunk_set_changed",
@@ -3132,7 +3132,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtt_slot_count_changed",
-      "examples": ""
+      "examples": "case173_vtt_slot_count_changed"
     },
     {
       "kind": "wchar_model_changed",

@@ -296,6 +296,7 @@ jobs:
             tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
             tests/test_diff_reconcile.py::test_case164_fixtures_reconcile \
             "tests/test_environment_drift.py::TestCase170Example" \
+            tests/test_kabi_examples.py \
             -q
 
       - name: Validate bundle examples
@@ -316,6 +317,7 @@ jobs:
             --proof-python-api \
             --proof-reconcile \
             --proof-snapshot-pair \
+            --proof-kabi \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix

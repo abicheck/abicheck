@@ -1,0 +1,60 @@
+# case181 — Public API reaches an internal declaration
+
+**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-checks:**
+`public_to_internal_dependency` · **Mode:** single-release audit ·
+**Evidence tier:** L5
+
+## What it demonstrates
+
+`json_parse` is declared in a public header — consumers can see and call it.
+Its implementation calls straight into `validate_utf8`, a helper declared
+only in `src/json_internal.cc` — a private implementation file with no
+public declaration anywhere. Nothing about `json_parse`'s own signature says
+this; the dependency is only visible by walking the **L5 source graph**'s
+`DECL_CALLS_DECL` edge from the public declaration to the internal one.
+
+This is the intra-version counterpart to the `exported_not_public` /
+`public_not_exported` pair in `case150`: those catch a mismatch between
+*what's exported* and *what's declared*; this one catches a mismatch
+**inside** a single public entry point — its behavior depends on an entity
+consumers cannot see, version, or reason about independently. If
+`validate_utf8` changes behavior next release, `json_parse`'s contract
+silently shifts with it, with no signal in the public header diff at all.
+
+When the internal declaration's own file is among the revision's changed
+paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
+`Confidence.HIGH` instead of `MEDIUM` — "this call reaches a file that
+changed this revision" is a stronger signal than "this call reaches
+*something* internal," and `abicheck scan --since` wires the changed-path
+set through automatically.
+
+## Reproduce
+
+```bash
+python3 -m abicheck.mcp_server  # or:
+python3 - <<'EOF'
+import json
+from abicheck.serialization import snapshot_from_dict
+from abicheck.buildsource.crosscheck import run_crosschecks
+
+snap = snapshot_from_dict(json.load(open("snapshot.abi.json")))
+res = run_crosschecks(snap)
+for c in res.findings:
+    print(c.kind.value, c.symbol, "->", c.new_value)
+EOF
+# → public_to_internal_dependency json_parse -> validate_utf8
+```
+
+In a real project, produce the L5 graph with `abicheck dump --sources <tree>`
+(or `scan --depth source`) using clang for the call-graph pass — the
+dependency edges this check reads only exist after an S4/S5 semantic pass; a
+structural-only graph has no call edges to walk, and the check reports
+`skipped`, never a false clean.
+
+## Fix
+
+- Make the dependency public: move `validate_utf8` (or a stable wrapper
+  around it) into a public header, so consumers can see and version it.
+- Or sever it: keep `json_parse`'s behavior independent of any internal
+  helper's own evolution, so a private-file change can never silently alter
+  a documented public contract.

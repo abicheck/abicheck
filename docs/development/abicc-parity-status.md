@@ -185,6 +185,118 @@ abicheck workflow:         abidiff workflow:
 
 ---
 
+## Cases 171–181: modern-detector coverage vs ABICC/abidiff
+
+The original 55-scenario matrix above predates a set of newer detector
+families added by the G23 work (loader/runtime, kernel kABI, deep C++
+multiple-inheritance layout, security hardening, source-graph cross-checks).
+Cases 171–181 in the example catalog were added to give each of these a
+concrete demonstration; running them through `scripts/benchmark_comparison.py`
+against real `abidiff` 2.4.0 and `abi-compliance-checker` 2.3 (frozen results
+in `scripts/frozen_competitor_results.json`) shows how much of this newer
+surface those tools cover at all:
+
+| ChangeKind | Expected | abicheck | abidiff 2.4.0 | ABICC 2.3 (`abi-dumper`) |
+|---|---|---|---|---|
+| `static_tls_introduced` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `vtable_thunk_offset_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `vtt_slot_count_changed` | BREAKING | ✅ BREAKING | ❌ COMPATIBLE | ✅ BREAKING |
+| `secondary_vtable_group_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `kabi_crc_changed` | BREAKING | ✅ (verified directly — see note) | N/A — no `Module.symvers` concept | N/A — no `Module.symvers` concept |
+| `kabi_symbol_namespace_changed` | BREAKING | ✅ (verified directly — see note) | N/A — no `Module.symvers` concept | N/A — no `Module.symvers` concept |
+| `long_double_abi_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `unnamed_type_in_public_abi` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ COMPATIBLE | ❌ COMPATIBLE |
+| `cet_protection_weakened` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `symbol_binding_lost_unique` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `public_to_internal_dependency` | (L5 cross-check finding) | ✅ MATCH | N/A — no L5 source-graph concept | N/A — no L5 source-graph concept |
+
+**abicheck: 9/9 scored (100%)** — the two kABI rows are excluded from the
+harness's own scoring because `benchmark_comparison.py` only knows how to
+drive compiled-`.so` cases; it has no `Module.symvers` input path, so it
+reports `NO_SOURCE` for both tools *including abicheck's own column* in the
+raw run. That is a benchmark-harness gap, not a detection gap: `abicheck
+compare v1.symvers v2.symvers` correctly reports `kabi_crc_changed` /
+`kabi_symbol_namespace_changed` for both (verified directly — see
+`examples/case175_kabi_crc_changed/README.md` and
+`examples/case176_kabi_symbol_namespace_changed/README.md` — and covered by
+`tests/test_kabi_examples.py`).
+
+**abidiff: 3/8 scored (37%), ABICC: 4/8 scored (50%).** Both misses cluster in
+the same place: neither tool reads anything outside DWARF type/layout info +
+symbol table presence, so ELF dynamic-section/GNU-property facts
+(`DF_STATIC_TLS`, `.note.gnu.property` CET bits, `STB_GNU_UNIQUE` binding) are
+invisible to both — they report `NO_CHANGE`/`COMPATIBLE` on a real security or
+loader-contract regression. `vtt_slot_count_changed` is the one case where
+abidiff's own binary-diff heuristics miss a signal abicheck and ABICC's
+dumper both catch (the `_ZTT` construction-vtable size change). Neither tool
+has any concept of Linux kABI manifests or an L5 source-dependency graph, so
+those rows are a structural "N/A", not a false negative — nothing to score
+against.
+
+### abicheck's own modes on the same 11 cases
+
+The table above uses abicheck's native `compare` command (the actual product
+surface for these cases — 9/9, 100%). abicheck ships three other entry
+points benchmarked alongside it; their scores on this batch aren't a second
+opinion on detection capability, they're each mode doing exactly what it's
+designed to do:
+
+| ChangeKind | Expected | `abicheck compare` | `abicheck compat` | `compat -s` (strict) | `abicheck_full` (L3-L5 plugin) |
+|---|---|---|---|---|---|
+| `static_tls_introduced` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
+| `vtable_thunk_offset_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
+| `vtt_slot_count_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
+| `secondary_vtable_group_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
+| `long_double_abi_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
+| `unnamed_type_in_public_abi` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
+| `cet_protection_weakened` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
+| `symbol_binding_lost_unique` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
+
+- **`abicheck compat`** (`abicheck/compat/cli.py`, the ABICC drop-in-replacement
+  CLI — takes ABICC-format XML descriptors, invoked via `compat check`) —
+  **8/8 (100%), same detection accuracy as native `compare`.** Its *report
+  text* prints the precise verdict (`Verdict: COMPATIBLE_WITH_RISK`) for all
+  four RISK cases, confirmed by inspecting the raw output directly — nothing
+  about compat mode's detection is coarser. What *is* coarser, by design, is
+  its **exit code**: compat mode's exit scheme (0/1/2, mirroring ABICC's own
+  compatible/incompatible/API-break codes) has no separate "risk" bucket, so
+  `COMPATIBLE_WITH_RISK` and `COMPATIBLE` both exit 0 — a CI gate keyed only
+  on exit code, not report text, would treat them the same. (This table
+  originally under-reported compat mode as 4/8 because
+  `scripts/benchmark_comparison.py`'s own scoring script only parsed the exit
+  code plus a couple of substring checks and never looked for
+  `compatible_with_risk` in the text — a benchmark-harness bug, now fixed;
+  it did not reflect a real gap in the tool.)
+- **`compat -s`/strict** (the `-s` strict flag, documented to promote
+  `API_BREAK` → `BREAKING`) — **4/8 (50%), and notably these are the same
+  four RISK cases, now promoted via the exit code all the way to `BREAKING`
+  (confirmed: exit code 1, not just report text).** That's a wider promotion
+  than the flag's stated `API_BREAK`→`BREAKING` description — strict mode is
+  treating any non-`NO_CHANGE` finding as a hard release gate, which is a
+  legitimate "when in doubt, block the release" security-conscious policy
+  choice for a CI gate, but means strict mode over-calls exactly the four
+  cases whose whole teaching point is "compatible but should not silently
+  ship" (CET, TLS, GNU_UNIQUE, the lambda leak) as full breaks — worth
+  knowing if you wire `-s` into a release gate expecting graduated severity
+  rather than a binary pass/fail.
+- **`abicheck_full`** (the Clang-plugin-instrumented L3–L5 lane, builds each
+  case with `contrib/abicheck-clang-plugin` and merges the resulting source
+  pack before comparing) — reported `ERROR` for every case in this run,
+  **including pre-existing catalog cases (verified against case01/case02)**,
+  because the clang plugin wasn't built in the environment that produced
+  this table. This is a local toolchain gap in how the table was generated,
+  not a result to read anything into; rerun with the plugin built
+  (`contrib/abicheck-clang-plugin/`) to get real L3+ numbers for this batch.
+
+Reproduce: `PYTHONPATH=. python3 scripts/benchmark_comparison.py --cases
+case171 case172 case173 case174 case175 case176 case177 case178 case179
+case180 case181` (add `--freeze abidiff abidiff_headers abicc_dumper
+abicc_xml` only when re-running against the **full** catalog — passing it
+alongside `--cases` overwrites the entire frozen file with just the
+filtered subset).
+
+---
+
 ## Upstream Issue Tracking
 
 | Issue | Topic | Status | Evidence | Notes |

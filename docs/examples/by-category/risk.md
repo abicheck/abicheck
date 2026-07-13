@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_26 case(s)._ [← back to all examples](../index.md)
+_31 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -33,3 +33,8 @@ _26 case(s)._ [← back to all examples](../index.md)
 | [case165_polymorphic_nonvirtual_dtor](../case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case169_overload_added](../case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case171_static_tls_introduced](../case171_static_tls_introduced.md) | Static TLS Introduced | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case178_unnamed_type_in_public_abi](../case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |

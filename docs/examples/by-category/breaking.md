@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_95 case(s)._ [← back to all examples](../index.md)
+_101 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -102,3 +102,9 @@ _95 case(s)._ [← back to all examples](../index.md)
 | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](../case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
 | [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
+| [case172_vtable_thunk_offset_changed](../case172_vtable_thunk_offset_changed.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
+| [case173_vtt_slot_count_changed](../case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
+| [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) | Secondary Vtable Group Changed | 🔴 BREAKING | Breaking |
+| [case175_kabi_crc_changed](../case175_kabi_crc_changed.md) | kABI CRC Changed | 🔴 BREAKING | Breaking |
+| [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
+| [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |

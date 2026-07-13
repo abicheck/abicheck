@@ -1,6 +1,6 @@
 {
-  "frozen_at": "2026-07-12T10:35:37Z",
-  "git_commit": "9a2babea7855f1139ea4cb3dcb94c7c4f4f2d597",
+  "frozen_at": "2026-07-13T01:00:24Z",
+  "git_commit": "e879c328f5bd00a5c5580d494ed03ec82b560607",
   "ground_truth_sha256": "99ffed75852d748b3b4313d3e19523bb208498e7fb0d6fd8d90d5c3cbf0fc056",
   "results_by_case": {
     "case01_symbol_removal": {
@@ -863,6 +863,88 @@
       "abidiff_headers_ms": 0,
       "abidiff_ms": 0
     },
+    "case171_static_tls_introduced": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 11013,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 658,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 66,
+      "abidiff_ms": 5
+    },
+    "case172_vtable_thunk_offset_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 477,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 1103,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 7,
+      "abidiff_ms": 7
+    },
+    "case173_vtt_slot_count_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 498,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1087,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 8,
+      "abidiff_ms": 7
+    },
+    "case174_secondary_vtable_group_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 446,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 1055,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 6,
+      "abidiff_ms": 6
+    },
+    "case175_kabi_crc_changed": {
+      "abicc_dumper": "SKIP",
+      "abicc_xml": "SKIP",
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP"
+    },
+    "case176_kabi_symbol_namespace_changed": {
+      "abicc_dumper": "SKIP",
+      "abicc_xml": "SKIP",
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP"
+    },
+    "case177_long_double_abi_changed": {
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 408,
+      "abicc_xml": "BREAKING",
+      "abicc_xml_ms": 638,
+      "abidiff": "BREAKING",
+      "abidiff_headers": "BREAKING",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 5
+    },
+    "case178_unnamed_type_in_public_abi": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 422,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 577,
+      "abidiff": "COMPATIBLE",
+      "abidiff_headers": "COMPATIBLE",
+      "abidiff_headers_ms": 4,
+      "abidiff_ms": 5
+    },
+    "case179_cet_protection_weakened": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 11205,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 687,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 59,
+      "abidiff_ms": 5
+    },
     "case17_template_abi": {
       "abicc_dumper": "COMPATIBLE",
       "abicc_dumper_ms": 2865,
@@ -872,6 +954,26 @@
       "abidiff_headers": "COMPATIBLE",
       "abidiff_headers_ms": 12,
       "abidiff_ms": 11
+    },
+    "case180_symbol_binding_lost_unique": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 418,
+      "abicc_xml": "COMPATIBLE",
+      "abicc_xml_ms": 604,
+      "abidiff": "NO_CHANGE",
+      "abidiff_headers": "NO_CHANGE",
+      "abidiff_headers_ms": 5,
+      "abidiff_ms": 6
+    },
+    "case181_xcheck_public_to_internal_dependency": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0,
+      "abidiff": "SKIP",
+      "abidiff_headers": "SKIP",
+      "abidiff_headers_ms": 0,
+      "abidiff_ms": 0
     },
     "case18_dependency_leak": {
       "abicc_dumper": "COMPATIBLE",

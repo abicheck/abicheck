@@ -816,9 +816,17 @@ def run_abicheck_compat(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
     elif r.returncode == 2:
         verdict = "API_BREAK"
     elif r.returncode == 0:
-        # distinguish NO_CHANGE from COMPATIBLE by output
-        # abicheck compat prints "Verdict: NO_CHANGE" or "Verdict: COMPATIBLE"
-        if "verdict: no_change" in out.lower() or "no changes" in out.lower() or "identical" in out.lower():
+        # Exit code 0 covers NO_CHANGE / COMPATIBLE / COMPATIBLE_WITH_RISK alike
+        # (matching ABICC's compatible/incompatible exit-code scheme, which has
+        # no separate "risk" exit bucket) -- but abicheck compat's own text
+        # output still prints the precise verdict ("Verdict: COMPATIBLE_WITH_RISK"),
+        # so check for it before falling back to the coarser NO_CHANGE/COMPATIBLE
+        # substring checks (previously this always collapsed risk findings to
+        # plain COMPATIBLE, understating what compat mode actually reports).
+        out_lower = out.lower()
+        if "verdict: compatible_with_risk" in out_lower:
+            verdict = "COMPATIBLE_WITH_RISK"
+        elif "verdict: no_change" in out_lower or "no changes" in out_lower or "identical" in out_lower:
             verdict = "NO_CHANGE"
         else:
             verdict = "COMPATIBLE"
@@ -872,7 +880,12 @@ def run_abicheck_strict(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
     elif r.returncode == 2:
         verdict = "API_BREAK"
     elif r.returncode == 0:
-        if "verdict: no_change" in out.lower() or "no changes" in out.lower() or "identical" in out.lower():
+        # Same rationale as run_abicheck_compat above: check for the precise
+        # COMPATIBLE_WITH_RISK text before falling back to coarser buckets.
+        out_lower = out.lower()
+        if "verdict: compatible_with_risk" in out_lower:
+            verdict = "COMPATIBLE_WITH_RISK"
+        elif "verdict: no_change" in out_lower or "no changes" in out_lower or "identical" in out_lower:
             verdict = "NO_CHANGE"
         else:
             verdict = "COMPATIBLE"

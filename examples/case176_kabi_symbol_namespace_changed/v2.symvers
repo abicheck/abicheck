@@ -1,0 +1,2 @@
+0x4e2f9a10	drm_mode_object_add	drivers/gpu/drm/drm	EXPORT_SYMBOL_NS	DRM
+0x7c1d5e88	drm_mode_object_find	drivers/gpu/drm/drm	EXPORT_SYMBOL
