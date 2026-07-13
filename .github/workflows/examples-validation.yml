@@ -72,12 +72,18 @@ jobs:
           python -c "import json; d=json.load(open('examples/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
 
       - name: Run example cases (pytest autodiscovery)
+        env:
+          # This workflow checks out and executes repository-owned fixtures only.
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
             --junit-xml=results/examples-autodiscovery-${{ matrix.toolchain }}.xml
 
       - name: Cross-check via validate_examples.py (full catalog)
         if: always()
+        env:
+          # Preserve the safe default for all other validator invocations.
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           PYTHONPATH=. python tests/validate_examples.py --toolchain ${{ matrix.toolchain }} --json \
             > results/validate_examples-${{ matrix.toolchain }}.json

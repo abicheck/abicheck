@@ -1041,11 +1041,24 @@ def _run_source_smoke(
     if compiler is None:
         return CaseResult(name, "SKIP", expected_raw, None, "no compiler for source smoke")
 
+    allow_run = os.environ.get("ABICHECK_TRUSTED_SOURCE_SMOKE_RUN") == "1"
+    if not allow_run and (
+        spec.mode == "run" or spec.v1.mode == "run" or spec.v2.mode == "run"
+    ):
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "source_smoke run mode requires ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1",
+        )
+
     result = run_source_smoke(
         spec,
         case_dir=case_dir,
         work_dir=tmp_base / f"{name}__source_smoke",
         compiler=compiler,
+        allow_run=allow_run,
     )
     if not result.ok:
         return CaseResult(name, "FAIL", expected_raw, None, "; ".join(result.failures))

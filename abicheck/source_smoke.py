@@ -98,12 +98,14 @@ def run_source_smoke(
     work_dir: Path,
     compiler: str,
     timeout: float = 60.0,
+    allow_run: bool = False,
 ) -> SourceSmokeResult:
     """Run a two-sided consumer compile/link smoke check.
 
     Returns a structured result instead of raising for expected compiler
     failures.  Invalid smoke metadata raises ``ValueError`` because that is a
-    test/fixture bug, not a compatibility outcome.
+    test/fixture bug, not a compatibility outcome. Runtime execution is disabled
+    by default; callers must pass ``allow_run=True`` only for trusted fixtures.
     """
 
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +116,10 @@ def run_source_smoke(
         src = work_dir / f"{label}{source_suffix}"
         src.write_text(code, encoding="utf-8")
         mode = side.mode or spec.mode
+        if mode == "run" and not allow_run:
+            raise ValueError(
+                "source_smoke run mode requires explicit allow_run=True for trusted fixtures"
+            )
         exe = work_dir / f"{label}.out"
         if mode == "syntax":
             cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), "-fsyntax-only", str(src)]

@@ -155,7 +155,9 @@ def test_side_without_code_or_source_is_a_fixture_bug(tmp_path: Path) -> None:
     spec = SourceSmokeSpec(source=None, v1=SourceSmokeSide(code=None))
 
     with pytest.raises(ValueError, match="either code or top-level source"):
-        run_source_smoke(spec, case_dir=tmp_path, work_dir=tmp_path / "work", compiler="true")
+        run_source_smoke(
+            spec, case_dir=tmp_path, work_dir=tmp_path / "work", compiler="true"
+        )
 
 
 def test_unsupported_mode_raises(tmp_path: Path) -> None:
@@ -165,7 +167,9 @@ def test_unsupported_mode_raises(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="unsupported source_smoke mode"):
-        run_source_smoke(spec, case_dir=tmp_path, work_dir=tmp_path / "work", compiler="true")
+        run_source_smoke(
+            spec, case_dir=tmp_path, work_dir=tmp_path / "work", compiler="true"
+        )
 
 
 def test_run_mode_checks_runtime_exit_code(tmp_path: Path) -> None:
@@ -185,9 +189,27 @@ def test_run_mode_checks_runtime_exit_code(tmp_path: Path) -> None:
         v2=SourceSmokeSide(code=app, lib_source="v2.cpp", expect="failure"),
     )
 
-    result = run_source_smoke(spec, case_dir=case, work_dir=tmp_path / "work", compiler=_cxx())
+    result = run_source_smoke(
+        spec,
+        case_dir=case,
+        work_dir=tmp_path / "work",
+        compiler=_cxx(),
+        allow_run=True,
+    )
 
     assert result.ok
+
+
+def test_run_mode_requires_explicit_trust_opt_in(tmp_path: Path) -> None:
+    spec = SourceSmokeSpec(
+        mode="run",
+        v1=SourceSmokeSide(code="int main() { return 0; }\n"),
+    )
+
+    with pytest.raises(ValueError, match="requires explicit allow_run=True"):
+        run_source_smoke(
+            spec, case_dir=tmp_path, work_dir=tmp_path / "work", compiler="true"
+        )
 
 
 def test_timeout_is_treated_as_a_failure(tmp_path: Path) -> None:
@@ -209,7 +231,12 @@ def test_timeout_is_treated_as_a_failure(tmp_path: Path) -> None:
     )
 
     result = run_source_smoke(
-        spec, case_dir=case, work_dir=tmp_path / "work", compiler=_cxx(), timeout=2.0
+        spec,
+        case_dir=case,
+        work_dir=tmp_path / "work",
+        compiler=_cxx(),
+        timeout=2.0,
+        allow_run=True,
     )
 
     assert not result.ok
