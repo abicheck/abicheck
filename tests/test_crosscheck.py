@@ -362,6 +362,19 @@ def test_exported_not_public_marks_template_instantiation():
     assert counters["template_instantiation"] == 1
 
 
+def test_exported_not_public_malformed_long_length_is_conservative():
+    # Malformed Itanium length fields come from untrusted export tables. They must
+    # not abort the audit when the digit run exceeds Python's int-string limit.
+    malformed = "_ZN" + ("9" * 5000) + "Av"
+    snap = _snap(elf=_elf("_Z3fooi", malformed))
+    snap.functions = [_public_fn()]
+    res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
+    hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
+    assert [c.symbol for c in hits] == [malformed]
+    counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
+    assert counters["undeclared_export"] == 1
+
+
 def test_exported_not_public_accounting_sums_to_all_exports():
     # The accounting partitions the whole export table — documented API +
     # compiler artifact + every undocumented reason == number of exports, so the

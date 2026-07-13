@@ -159,6 +159,31 @@ _THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:[hv]?n?\d+_)+")
 _NESTED_QUALIFIERS_RE = re.compile(r"^[rVK]*[RO]?")
 
 
+def _read_decimal_length(text: str, start: int) -> tuple[int, int] | None:
+    """Read an Itanium source-name length without unbounded ``int()`` conversion.
+
+    Exported symbol names can come from untrusted binaries/snapshots. Feeding an
+    arbitrary digit run to :func:`int` can raise on modern Python when it exceeds
+    the interpreter's integer-string limit (and is needless work on older
+    runtimes). Accumulate only while the length can still address ``text``; a
+    longer run is still safe and simply skips past the end of the malformed name.
+    """
+    if start >= len(text) or not ("0" <= text[start] <= "9"):
+        return None
+    i = start
+    length = 0
+    limit = len(text)
+    while i < len(text) and "0" <= text[i] <= "9":
+        digit = ord(text[i]) - ord("0")
+        length = length * 10 + digit
+        i += 1
+        if length > limit:
+            while i < len(text) and "0" <= text[i] <= "9":
+                i += 1
+            return length, i
+    return length, i
+
+
 def _encoding_after_prefixes(symbol: str) -> str:
     """Strip ``_Z`` and any vtable/typeinfo/guard-variable/thunk prefix.
 
@@ -200,9 +225,12 @@ def _mangled_owner_namespace(symbol: str) -> str | None:
         return None  # un-nested top-level name — no namespace owner
     if rest.startswith(_STD_SUBSTITUTIONS):
         return "std"
-    m = re.match(r"(\d+)([A-Za-z_]\w*)", rest)
-    if m:
-        return m.group(2)[: int(m.group(1))]
+    parsed = _read_decimal_length(rest, 0)
+    if parsed is not None:
+        length, name_start = parsed
+        name = rest[name_start : name_start + length]
+        if name and re.match(r"[A-Za-z_]\w*", name):
+            return name
     return None
 
 
@@ -374,11 +402,12 @@ def _nested_component(symbol: str, index: int) -> str | None:
                 break
             depth -= 1
             i += 1
-        elif c.isdigit():
-            j = i
-            while j < len(rest) and rest[j].isdigit():
-                j += 1
-            length = int(rest[i:j])
+        elif "0" <= c <= "9":
+            parsed = _read_decimal_length(rest, i)
+            if parsed is None:
+                i += 1
+                continue
+            length, j = parsed
             name = rest[j : j + length]
             i = j + length
             if depth == 0:
@@ -607,11 +636,12 @@ def _entity_owner_is_internal(symbol: str) -> bool:
                 break
             depth -= 1
             i += 1
-        elif c.isdigit():
-            j = i
-            while j < len(rest) and rest[j].isdigit():
-                j += 1
-            length = int(rest[i:j])
+        elif "0" <= c <= "9":
+            parsed = _read_decimal_length(rest, i)
+            if parsed is None:
+                i += 1
+                continue
+            length, j = parsed
             i = j + length
             if depth == 0:
                 components.append(rest[j : j + length])
@@ -655,18 +685,21 @@ def _has_template_args(symbol: str) -> bool:
                     return saw_template  # depth-0 ``E`` closes the nested name
                 depth -= 1
                 i += 1
-            elif c.isdigit():
-                j = i
-                while j < len(rest) and rest[j].isdigit():
-                    j += 1
-                i = j + int(rest[i:j])  # skip the source-name characters
+            elif "0" <= c <= "9":
+                parsed = _read_decimal_length(rest, i)
+                if parsed is None:
+                    i += 1
+                    continue
+                length, j = parsed
+                i = j + length  # skip the source-name characters
             else:
                 i += 1
         return saw_template
     # Un-nested ``_Z<len><name>…``: a template iff the single name is followed by an
     # ``I`` template-args opener (``_Z9transformIdEv``); the tail is the signature.
-    m = re.match(r"(\d+)", rest)
-    if not m:
+    parsed = _read_decimal_length(rest, 0)
+    if parsed is None:
         return False
-    end = m.end() + int(m.group(1))
+    length, name_start = parsed
+    end = name_start + length
     return end < len(rest) and rest[end] == "I"
