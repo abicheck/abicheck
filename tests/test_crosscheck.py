@@ -375,6 +375,32 @@ def test_exported_not_public_malformed_long_length_is_conservative():
     assert counters["undeclared_export"] == 1
 
 
+@pytest.mark.parametrize(
+    "text, start, expected",
+    [
+        ("3foo", 0, (3, 1)),
+        ("x03foo", 1, (3, 3)),
+        ("0", 0, (0, 1)),
+        ("foo", 0, None),
+        ("3foo", 4, None),
+        ("٣foo", 0, None),  # Itanium lengths are ASCII decimal digits only.
+    ],
+)
+def test_read_decimal_length(text, start, expected):
+    from abicheck.buildsource.export_accounting import _read_decimal_length
+
+    assert _read_decimal_length(text, start) == expected
+
+
+def test_read_decimal_length_consumes_overlong_digit_run_without_int_conversion():
+    from abicheck.buildsource.export_accounting import _read_decimal_length
+
+    digits = "9" * 5000
+    length, end = _read_decimal_length(digits + "name", 0) or (None, None)
+    assert length is not None and length > len(digits) + 4
+    assert end == len(digits)
+
+
 def test_exported_not_public_accounting_sums_to_all_exports():
     # The accounting partitions the whole export table — documented API +
     # compiler artifact + every undocumented reason == number of exports, so the
@@ -757,6 +783,9 @@ def test_external_dependency_origin_msvc_scopes(symbol, self_names, expected):
         # template arguments on a component are skipped, not counted as components.
         ("_ZN3lib3BoxIiE3barEv", 1, "Box"),
         ("_ZN3lib3BoxIiE3barEv", 2, "bar"),
+        ("_ZN999nameE", 0, None),  # length runs beyond malformed input
+        ("_ZN" + ("9" * 5000) + "nameE", 0, None),
+        ("_ZN٣nameE", 0, None),  # non-ASCII digit is not a length field
         ("_Z3fooi", 0, None),  # un-nested name has no nested components
     ],
 )
@@ -794,6 +823,9 @@ def test_nested_component(symbol, index, expected):
         # misclassified (Codex review).
         ("_ZL4mainv", "undeclared_export"),  # un-nested, no leading length digit
         ("_ZN3foo", "undeclared_export"),  # truncated nested name (no closing E)
+        ("_ZN999nameE", "undeclared_export"),  # length runs past input
+        ("_ZN" + ("9" * 5000) + "nameE", "undeclared_export"),
+        ("_Z" + ("9" * 5000) + "nameI", "undeclared_export"),
         ("_ZN3lib10InitEngineEv", "undeclared_export"),
         ("_ZN3lib9InterfaceEv", "undeclared_export"),
         # a template argument in a *parameter* type does not make the entity a
