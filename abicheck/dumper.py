@@ -99,6 +99,14 @@ from .model import (
 log = logging.getLogger(__name__)
 
 
+def _safe_mtime(path: Path) -> float | None:
+    """Return path's mtime, or None if it can't be stat'd right now."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
 
@@ -1531,6 +1539,7 @@ def _build_symbol_only_snapshot(
         library=so_path.name,
         version=version,
         source_path=str(so_path),
+        source_mtime=_safe_mtime(so_path),
         functions=[
             Function(
                 name=sym,
@@ -1660,6 +1669,7 @@ def _dump_elf(
         library=so_path.name,
         version=version,
         source_path=str(so_path),
+        source_mtime=_safe_mtime(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1743,6 +1753,7 @@ def _dump_macho(
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path),
+            source_mtime=_safe_mtime(dylib_path),
             functions=[
                 Function(
                     name=_normalize_macho_sym(exp.name),
@@ -1794,6 +1805,7 @@ def _dump_macho(
         library=dylib_path.name,
         version=version,
         source_path=str(dylib_path),
+        source_mtime=_safe_mtime(dylib_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1850,6 +1862,7 @@ def _dump_pe(
             library=dll_path.name,
             version=version,
             source_path=str(dll_path),
+            source_mtime=_safe_mtime(dll_path),
             functions=[
                 Function(
                     name=sym, mangled=sym, return_type="?",
@@ -1879,6 +1892,7 @@ def _dump_pe(
         library=dll_path.name,
         version=version,
         source_path=str(dll_path),
+        source_mtime=_safe_mtime(dll_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),

@@ -179,6 +179,16 @@ jobs:
         run: |
           choco install cmake --no-progress --yes
           pip install castxml
+      - name: Set up MSVC developer environment (cl.exe on PATH)
+        # Some example cases build via CMake (CMakeLists.txt special flags),
+        # which invokes CMake's own compiler sanity check
+        # (CMakeTestCCompiler.cmake) against cl.exe. Without vcvarsall having
+        # run, cl.exe can't find the MSVC/Windows SDK headers even for a
+        # trivial program ("is not able to compile a simple test program").
+        # windows-msvc job below hits the same class of issue and fixes it
+        # the same way.
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'

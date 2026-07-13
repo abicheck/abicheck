@@ -539,6 +539,15 @@ def fold_l0_hard_removals(
     dumped on a different machine where that path no longer exists) —
     resolution failures are swallowed and *extra_changes* is returned
     unchanged.
+
+    Identity-checked against ``source_mtime``: a pre-dumped JSON snapshot
+    read back into ``compare snap1.json snap2.json`` records the mtime the
+    binary had at dump time; if the file at ``source_path`` has since
+    changed (rebuilt in place, or the path reused for something else) the
+    re-probe would assert a fact about a *different* binary than the one
+    the snapshots actually describe, making the compare non-reproducible.
+    When the mtimes don't match — or either snapshot predates this field —
+    the fold-in declines rather than trust a possibly-stale binary.
     """
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
@@ -546,6 +555,18 @@ def fold_l0_hard_removals(
     old_path = getattr(old, "source_path", None)
     new_path = getattr(new, "source_path", None)
     if not old_path or not new_path:
+        return extra_changes
+
+    old_snapshot_mtime = getattr(old, "source_mtime", None)
+    new_snapshot_mtime = getattr(new, "source_mtime", None)
+    if old_snapshot_mtime is None or new_snapshot_mtime is None:
+        return extra_changes
+    try:
+        old_now_mtime = Path(old_path).stat().st_mtime
+        new_now_mtime = Path(new_path).stat().st_mtime
+    except OSError:
+        return extra_changes
+    if old_now_mtime != old_snapshot_mtime or new_now_mtime != new_snapshot_mtime:
         return extra_changes
 
     # This deliberately re-resolves both sides with no headers — the point is

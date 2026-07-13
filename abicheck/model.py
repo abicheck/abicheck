@@ -426,6 +426,13 @@ class AbiSnapshot:
     # Keyword-only (placed after all other fields) to prevent accidental positional binding.
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
+    # mtime (st_mtime, seconds) of source_path at dump time. Lets a later
+    # best-effort re-probe against source_path (e.g. cli_helpers_compare's
+    # fold_l0_hard_removals) detect that the on-disk binary has since changed
+    # — e.g. rebuilt in place after this snapshot was dumped to JSON — and
+    # decline to trust it, keeping a pre-dumped-snapshot compare reproducible.
+    # None for snapshots predating this field, or when source_path is None.
+    source_mtime: float | None = field(default=None, kw_only=True)
 
     # ADR-028 (schema v7) — optional reference to an out-of-band BuildSourcePack
     # carrying L3/L4/L5 source/build/graph evidence. Only a lightweight

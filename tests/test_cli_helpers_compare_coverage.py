@@ -8,6 +8,7 @@ the severity resolver (``_resolve_severity``), and project-config discovery
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import click
 import pytest
@@ -177,8 +178,20 @@ def test_discover_project_config_returns_none_when_absent(tmp_path):
 
 
 def _snap(source_path=None):
+    """Build an AbiSnapshot whose source_mtime matches the file on disk.
+
+    Touches source_path into existence if needed, so fold_l0_hard_removals'
+    identity check (recorded mtime == current on-disk mtime) passes by
+    default — tests that want to exercise a *mismatch* stat the file
+    themselves after construction and mutate it.
+    """
     snap = AbiSnapshot(library="lib.so", version="1.0")
     snap.source_path = source_path
+    if source_path is not None:
+        p = Path(source_path)
+        if not p.exists():
+            p.touch()
+        snap.source_mtime = p.stat().st_mtime
     return snap
 
 
@@ -204,6 +217,39 @@ def test_fold_l0_hard_removals_one_sided_source_path_is_noop(monkeypatch, tmp_pa
         _snap(str(tmp_path / "old.so")), _snap(None), "c++", extra
     )
     assert result == []
+
+
+def test_fold_l0_hard_removals_mtime_mismatch_is_noop(monkeypatch, tmp_path):
+    """The binary at source_path was modified since the snapshot was dumped
+    (rebuilt in place) — folding in a probe of *that* binary would make a
+    pre-dumped-snapshot compare non-reproducible, so it's declined."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    # Simulate a rebuild: the snapshot still claims the mtime it was dumped
+    # at, but the file on disk has since moved on.
+    old_snap.source_mtime -= 1000
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_missing_recorded_mtime_is_noop(monkeypatch, tmp_path):
+    """A snapshot predating the source_mtime field (or one hand-authored
+    without it) can't be identity-checked — decline rather than trust it."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    old_snap.source_mtime = None
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
 
 
 def test_fold_l0_hard_removals_resolve_failure_returns_unchanged(monkeypatch, tmp_path):

@@ -758,6 +758,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         library=d["library"],
         version=d["version"],
         source_path=d.get("source_path"),
+        source_mtime=d.get("source_mtime"),
         functions=funcs,
         variables=variables,
         types=types,
