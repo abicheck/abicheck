@@ -29,6 +29,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **11 new example-catalog cases (171–181) close implementation-to-example
+  gaps in the detector matrix.** `static_tls_introduced`,
+  `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,
+  `secondary_vtable_group_changed`, `kabi_crc_changed`,
+  `kabi_symbol_namespace_changed`, `long_double_abi_changed`,
+  `unnamed_type_in_public_abi`, `cet_protection_weakened`,
+  `symbol_binding_lost_unique`, and `public_to_internal_dependency` were all
+  implemented but had no linked catalog case; each now has a verified
+  example demonstrating its evidence layer and failure mode. Adds
+  `tests/test_kabi_examples.py` (fast-lane, compiler-free validation of the
+  two `Module.symvers` kABI cases) and extends `scripts/gen_g20_fixtures.py`
+  with a new `case181` snapshot fixture in the existing G20 cross-source
+  series. The catalog is now 181 cases (up from 170).
+
 - **L5 source graph now populates type/reference dependency edges
   (ADR-041 P0).** New `abicheck/buildsource/type_graph.py` folds
   `TYPE_INHERITS` (base classes), `TYPE_HAS_FIELD_TYPE` (field types),
