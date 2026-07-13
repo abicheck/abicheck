@@ -503,7 +503,19 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # already exempts from reachability via `_NEVER_FILTER_KIND_NAMES`).
     # Reachability-only seeding was designed for the struct-layout hazard
     # and is the wrong model for enums (ADR-024; case20 regression).
-    seed_types |= {en.name for en in snap.enums if en.source_header}
+    #
+    # Excludes an enum whose *own* origin is confidently private/system
+    # (``--public-header`` was given and this enum came from outside that
+    # boundary, or from a system header): seeding it into public_types would
+    # make `known & public_types` short-circuit _classify_type_level before
+    # _confident_header_reason ever gets to demote it via provenance, so a
+    # private-header-only enum's value change would wrongly stay BREAKING
+    # instead of landing in the private-header filtered ledger (Codex review).
+    seed_types |= {
+        en.name
+        for en in snap.enums
+        if en.source_header and en.origin not in _DEMOTE_ORIGINS
+    }
 
     # Provenance is available iff some declaration was classified to a real
     # origin (only happens when the snapshot was dumped with a public-header

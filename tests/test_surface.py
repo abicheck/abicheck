@@ -60,11 +60,13 @@ def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
     )
 
 
-def _enum(name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN):
+def _enum(name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN,
+          source_header=None):
     return EnumType(
         name=name,
         members=[EnumMember(name=n, value=v) for n, v in members],
         origin=origin,
+        source_header=source_header,
     )
 
 
@@ -178,7 +180,9 @@ class TestComputePublicSurface:
 
     def test_unreferenced_namespaced_enum_stays_out_of_surface(self):
         # Scoping still works: an enum no public API reaches is not public, so the
-        # tail-alias indexing does not over-keep.
+        # tail-alias indexing does not over-keep. No source_header here — this is
+        # the "we have no header provenance at all" case, distinct from the next
+        # test's "declared in a parsed header but unreferenced" case.
         snap = AbiSnapshot(
             library="l",
             version="1",
@@ -188,6 +192,37 @@ class TestComputePublicSurface:
         surf = compute_public_surface(snap)
         assert "ns::Mode" in surf.all_types
         assert "ns::Mode" not in surf.public_types
+
+    def test_unreferenced_header_declared_enum_is_public(self):
+        # case20 regression: an enum declared in a parsed header (source_header
+        # set) is part of the public surface even when no function/variable
+        # signature references the enum type by name — consumers use its
+        # members as compile-time constants the moment the header is included,
+        # the same as a #define, regardless of signature reachability.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("get_result", ret="int")],
+            enums=[_enum("ErrorCode", source_header="lib.h")],
+        )
+        surf = compute_public_surface(snap)
+        assert "ErrorCode" in surf.public_types
+
+    def test_unreferenced_private_header_enum_stays_out_of_surface(self):
+        # Codex review: a source_header alone must not bypass provenance-based
+        # demotion. An enum from a header outside the --public-header boundary
+        # (origin=PRIVATE_HEADER) stays out of public_types even though it was
+        # parsed from *some* header, so a private-header-only enum's value
+        # change is still confidently demoted, not wrongly kept BREAKING.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("get_result", ret="int")],
+            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
+                          source_header="impl.h")],
+        )
+        surf = compute_public_surface(snap)
+        assert "Internal" not in surf.public_types
 
     def test_ambiguous_enum_tail_keeps_all_matches_public(self):
         # Two namespaces define an enum with the same tail (``Mode``). A public
@@ -328,6 +363,26 @@ class TestChangeClassification:
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
         )
         assert change_in_public_surface(c, s, s) is False
+
+    def test_private_header_enum_value_change_is_confidently_demoted(self):
+        # Codex review: source_header alone (case20's public-surface seed) must
+        # not short-circuit provenance-based demotion. Even though this enum
+        # was parsed from *a* header, its origin is PRIVATE_HEADER (outside the
+        # --public-header boundary), so its member-value change is still a
+        # confident private-header demotion, not a false BREAKING.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="int")],
+            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
+                          source_header="impl.h")],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED, symbol="Internal::A",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
 
     def test_public_type_change_is_in_surface(self):
         snap = AbiSnapshot(
