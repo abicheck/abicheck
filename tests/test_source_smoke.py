@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from abicheck import source_smoke as source_smoke_module
 from abicheck.source_smoke import (
     SourceSmokeResult,
     SourceSmokeSide,
@@ -241,6 +243,73 @@ def test_timeout_is_treated_as_a_failure(tmp_path: Path) -> None:
 
     assert not result.ok
     assert any("timed out" in failure for failure in result.failures)
+
+
+def test_msvc_syntax_mode_uses_cl_flag_syntax(tmp_path, monkeypatch):
+    # cl.exe doesn't understand GCC/Clang's -std=/-I/-fsyntax-only spelling
+    # (it just warns and ignores them) — verify the MSVC branch translates to
+    # cl's own /std:/-I.../Zs syntax instead, without needing a real cl.exe.
+    case = tmp_path / "case"
+    case.mkdir()
+    seen_cmds = []
+
+    def _fake_run(cmd, **kwargs):
+        seen_cmds.append(cmd)
+        assert kwargs.get("cwd") == str(tmp_path / "work")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(source_smoke_module.subprocess, "run", _fake_run)
+
+    spec = SourceSmokeSpec(
+        standard="c++17",
+        mode="syntax",
+        v1=SourceSmokeSide(expect="success", code="int main() { return 0; }\n"),
+        v2=SourceSmokeSide(expect="success", code="int main() { return 0; }\n"),
+    )
+    result = run_source_smoke(
+        spec, case_dir=case, work_dir=tmp_path / "work", compiler="cl"
+    )
+
+    assert result.ok
+    assert len(seen_cmds) == 2
+    for cmd in seen_cmds:
+        assert cmd[0] == "cl"
+        assert "/std:c++17" in cmd
+        assert "/EHsc" in cmd
+        assert f"/I{case}" in cmd
+        assert "/Zs" in cmd
+        assert not any(c.startswith("-") for c in cmd[1:])
+
+
+def test_msvc_link_mode_uses_cl_flag_syntax(tmp_path, monkeypatch):
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "v1.cpp").write_text("void api() {}\n", encoding="utf-8")
+    (case / "v2.cpp").write_text("void api() {}\n", encoding="utf-8")
+    seen_cmds = []
+
+    def _fake_run(cmd, **kwargs):
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(source_smoke_module.subprocess, "run", _fake_run)
+
+    app = "void api();\nint main() { api(); }\n"
+    spec = SourceSmokeSpec(
+        mode="link",
+        v1=SourceSmokeSide(code=app, lib_source="v1.cpp", expect="success"),
+        v2=SourceSmokeSide(code=app, lib_source="v2.cpp", expect="success"),
+    )
+    result = run_source_smoke(
+        spec, case_dir=case, work_dir=tmp_path / "work", compiler="cl.exe"
+    )
+
+    assert result.ok
+    assert len(seen_cmds) == 2
+    for cmd, label in zip(seen_cmds, ("v1", "v2")):
+        assert any(c.startswith("/Fe:") for c in cmd)
+        assert not any(c == "-o" for c in cmd)
+        assert str(case / f"{label}.cpp") in cmd
 
 
 def test_source_smoke_fails_when_expected_success_does_not_compile(tmp_path):

@@ -2581,9 +2581,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L4",
       "doc_slug": "template_body_changed",
-      "examples": ""
+      "examples": "case122_template_signature_uninstantiated"
     },
     {
       "kind": "template_param_type_changed",

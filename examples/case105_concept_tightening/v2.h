@@ -7,15 +7,15 @@
 // previously-emitted instantiation `sum<int>` still links — the new
 // constraint is satisfied for `int` but rejects more exotic types.
 //
-// abicheck cannot currently detect concept tightening end-to-end:
-// castxml emits concept declarations as
+// abicheck's default (castxml-based) comparison cannot see this: castxml
+// emits concept declarations as
 //     <Unimplemented kind="Concept"/>
-// with no body, no name, and no link to the constrained template.
-// Closing this gap requires the header-AST capture path noted on the
-// roadmap (a libclang-based extractor sitting alongside castxml).
+// with no body, no name, and no link to the constrained template. The L4
+// source-ABI replay path (--sources, a clang-based extractor) does see it
+// and reports concept_tightened (API_BREAK) — see the case README.
 //
-// The case is preserved here as a regression fixture for whenever that
-// path lands.
+// The case is preserved here as a regression fixture for both the
+// default-mode gap and the L4 replay that closes it.
 #pragma once
 
 // NOTE: see v1.h — `<concepts>` is intentionally not included so the

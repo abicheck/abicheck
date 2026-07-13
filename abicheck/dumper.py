@@ -99,6 +99,47 @@ from .model import (
 log = logging.getLogger(__name__)
 
 
+def _safe_mtime(path: Path) -> tuple[float | None, bool]:
+    """Return (path's mtime, was_epoch_substituted), or (None, False).
+
+    Honours ``SOURCE_DATE_EPOCH`` (reproducible-builds spec) when set and
+    valid, like ``created_at`` (``cli_helpers_compare._provenance_timestamp``)
+    — two dumps of identical content must stay byte-identical (Codex review).
+    The second element records the substitution so it can be persisted
+    (``AbiSnapshot.source_mtime_epoch``): ``fold_l0_hard_removals`` needs to
+    know a recorded mtime is a fixed epoch even when its own compare-time
+    environment has no ``SOURCE_DATE_EPOCH`` (a dump under a pinned epoch,
+    compared later with none set — Codex review).
+    """
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch:
+        try:
+            return float(int(source_date_epoch.strip())), True
+        except (ValueError, OverflowError):
+            pass
+    try:
+        return path.stat().st_mtime, False
+    except OSError:
+        return None, False
+
+
+def _safe_size(path: Path) -> int | None:
+    """Return path's byte size, or None if it can't be stat'd right now.
+
+    Unlike ``_safe_mtime``, this needs no ``SOURCE_DATE_EPOCH`` gating: two
+    reproducible builds of identical binary content have identical size by
+    definition, so recording the real size never threatens the
+    byte-identical-dump guarantee. A second, cheap identity signal alongside
+    mtime for ``fold_l0_hard_removals``'s re-check (Codex review) — mtime
+    alone can't catch a content-preserving-timestamp rebuild (``cp -p``,
+    ``touch -r``, a coarse-mtime filesystem).
+    """
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
 
@@ -1527,10 +1568,14 @@ def _build_symbol_only_snapshot(
             "No headers provided and no DWARF debug info — only ELF-exported "
             "symbols will be captured; type information will be missing."
         )
+    _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
         library=so_path.name,
         version=version,
-        source_path=str(so_path),
+        source_path=str(so_path.resolve()),
+        source_mtime=_so_mtime,
+        source_mtime_epoch=_so_mtime_epoch,
+        source_size=_safe_size(so_path),
         functions=[
             Function(
                 name=sym,
@@ -1656,10 +1701,14 @@ def _dump_elf(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
         library=so_path.name,
         version=version,
-        source_path=str(so_path),
+        source_path=str(so_path.resolve()),
+        source_mtime=_so_mtime,
+        source_mtime_epoch=_so_mtime_epoch,
+        source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1739,10 +1788,14 @@ def _dump_macho(
         macho_funcs = [exp for exp in _relevant if not exp.is_data]
         macho_vars = [exp for exp in _relevant if exp.is_data]
 
+        _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         return AbiSnapshot(
             library=dylib_path.name,
             version=version,
-            source_path=str(dylib_path),
+            source_path=str(dylib_path.resolve()),
+            source_mtime=_dylib_mtime,
+            source_mtime_epoch=_dylib_mtime_epoch,
+            source_size=_safe_size(dylib_path),
             functions=[
                 Function(
                     name=_normalize_macho_sym(exp.name),
@@ -1790,10 +1843,14 @@ def _dump_macho(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     return AbiSnapshot(
         library=dylib_path.name,
         version=version,
-        source_path=str(dylib_path),
+        source_path=str(dylib_path.resolve()),
+        source_mtime=_dylib_mtime,
+        source_mtime_epoch=_dylib_mtime_epoch,
+        source_size=_safe_size(dylib_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1846,10 +1903,14 @@ def _dump_pe(
             "No headers provided — only PE exported symbols will be captured; "
             "type information will be missing."
         )
+        _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
         return AbiSnapshot(
             library=dll_path.name,
             version=version,
-            source_path=str(dll_path),
+            source_path=str(dll_path.resolve()),
+            source_mtime=_dll_mtime,
+            source_mtime_epoch=_dll_mtime_epoch,
+            source_size=_safe_size(dll_path),
             functions=[
                 Function(
                     name=sym, mangled=sym, return_type="?",
@@ -1875,10 +1936,14 @@ def _dump_pe(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     return AbiSnapshot(
         library=dll_path.name,
         version=version,
-        source_path=str(dll_path),
+        source_path=str(dll_path.resolve()),
+        source_mtime=_dll_mtime,
+        source_mtime_epoch=_dll_mtime_epoch,
+        source_size=_safe_size(dll_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),

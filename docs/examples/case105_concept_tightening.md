@@ -3,14 +3,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟠 **API_BREAK** |
-| **Category** | API Break |
+| **Verdict** | ✅ **NO_CHANGE** |
+| **Category** | No Change |
 | **Platforms** | Linux, macOS |
-| **Flags** | API break |
-| **Detected `ChangeKind`s** | `concept_tightened` |
+| **Flags** | — |
+| **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case105_concept_tightening/` |
 
-**Category:** Subtle source break / regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
+**Category:** Subtle source break / regression suite | **Verdict:** 🟢 NO_CHANGE by
+default (object/DWARF/castxml) — 🔵 API_BREAK (`concept_tightened`) when built
+with `--sources` (L4 source-ABI replay).
 
 ## What breaks
 
@@ -23,8 +25,8 @@ consumer instantiating `sum<T>` against a type that fails the new
 requirement no longer compiles against v2's header.
 
 This is the prototypical "concept tightening" case. The change is
-invisible at the binary layer and invisible to all current snapshot-
-based detectors.
+invisible at the binary layer and to the default castxml-based header
+comparison — but the L4 source-ABI replay path (below) does catch it.
 
 ## Why this is in the regression suite
 
@@ -38,33 +40,39 @@ source-break for whoever was relying on the relaxed contract.
 
 ## How abicheck catches it (and where it doesn't)
 
-The diff currently exposes:
+The default (object/DWARF/castxml) comparison exposes:
 
 - nothing on the `sum<int>` instantiation (mangled name unchanged, the
   exported symbol set is identical between v1 and v2)
-- nothing on the concept itself
+- nothing on the concept itself — castxml emits C++20 concept
+  declarations as
 
-This is a documented **known_gap**. castxml emits C++20 concept
-declarations as
+  ```xml
+  <Unimplemented kind="Concept"/>
+  ```
 
-```xml
-<Unimplemented kind="Concept"/>
-```
+  with no name, no body, and no link to the templates that use the
+  concept. There is *no way* to detect concept tightening from the
+  castxml dump path.
 
-with no name, no body, and no link to the templates that use the
-concept. There is therefore *no way* to detect concept tightening from
-the castxml dump path that abicheck currently uses.
+That castxml limitation is permanent, but it is not the whole story: the
+L4 source-ABI replay path (`--sources`, ADR-030) uses a clang-based
+extractor instead of castxml, which *does* emit named concept
+declarations with a constraint hash (`abicheck/buildsource/source_extractors/clang.py`'s
+`_emit_concept`). `abicheck/buildsource/source_diff.py`'s `_diff_concepts`
+compares that hash and reports a tightened constraint as
+`ChangeKind.CONCEPT_TIGHTENED` (API_BREAK). Verified end to end against
+this case's real `v1.h`/`v2.h`: with L3 compile-unit evidence + an
+explicit public-header root (`abicheck collect -H`) and
+`--no-scope-public-headers` on `compare` (see case122's README for why
+that flag is needed — the same castxml-can't-see-it gap applies to the
+default public-surface scoping), the comparison reports
+`concept_tightened` on `Addable` with verdict `API_BREAK`, exactly as
+`ground_truth.json` expects. Only the *symmetric* direction — a concept
+that loses a requirement (`CONCEPT_RELAXED`) — remains unimplemented.
 
-Closing the gap requires the header-AST capture path on the roadmap:
-a libclang-based extractor that runs alongside castxml and serializes
-each concept's constrained type-parameters and `requires`-expression
-body. With that in place, the diff would emit a new `CONCEPT_TIGHTENED`
-ChangeKind whenever the `requires`-expression gains a constraint, and
-the symmetric `CONCEPT_RELAXED` when it loses one.
-
-This case is preserved as a regression fixture so that whenever the
-header-AST path lands, the detector has a concrete fixture to validate
-against.
+This case is preserved as a regression fixture demonstrating both the
+default-mode gap and the L4 replay that closes it.
 
 ## Code diff
 
@@ -117,4 +125,4 @@ g++ -std=c++20 -I. app.cpp -L. -lv2 -o app
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._

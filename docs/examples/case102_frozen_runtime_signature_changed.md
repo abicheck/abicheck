@@ -81,7 +81,7 @@ Don't edit `detail::r1::*` in place. Either:
 ## References
 
 - [oneTBB VERSIONING.md](https://github.com/uxlfoundation/oneTBB/blob/master/VERSIONING.md)
-- `Policy file syntax` (if available)
+- [Policy file syntax](../user-guide/policies.md)
 
 ---
 

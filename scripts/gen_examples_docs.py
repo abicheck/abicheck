@@ -184,8 +184,14 @@ def _rewrite_links(body: str) -> str:
         text, target = m.group(1), m.group(2)
         if target.startswith(("http://", "https://", "#", "mailto:")):
             return m.group(0)
-        if target.startswith("../docs/"):
-            url = posixpath.normpath("../" + target.removeprefix("../docs/"))
+        # A case README lives two levels below the repo root
+        # (examples/<case>/README.md), so a link into docs/ from there is
+        # "../../docs/..." — but a source file one level up (e.g. from
+        # examples/README.md itself) could write "../docs/...". Match either
+        # depth of leading "../" before "docs/".
+        docs_target = re.match(r"^(?:\.\./)+docs/(.*)$", target)
+        if docs_target:
+            url = posixpath.normpath("../" + docs_target.group(1))
             return f"[{text}]({url})"
         # Bare filenames like v1.c, app.cpp and ../ source-tree paths live
         # outside docs/; keep the reference visible without creating a checked

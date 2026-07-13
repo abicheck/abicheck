@@ -426,6 +426,35 @@ class AbiSnapshot:
     # Keyword-only (placed after all other fields) to prevent accidental positional binding.
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
+    # mtime (st_mtime, seconds) of source_path at dump time. Lets a later
+    # best-effort re-probe against source_path (e.g. cli_helpers_compare's
+    # fold_l0_hard_removals) detect that the on-disk binary has since changed
+    # — e.g. rebuilt in place after this snapshot was dumped to JSON — and
+    # decline to trust it, keeping a pre-dumped-snapshot compare reproducible.
+    # None for snapshots predating this field, or when source_path is None.
+    # Honours SOURCE_DATE_EPOCH the same way created_at does (dumper._safe_mtime)
+    # so two dumps of identical binary content stay byte-identical.
+    source_mtime: float | None = field(default=None, kw_only=True)
+    # True when source_mtime is a SOURCE_DATE_EPOCH substitution rather than
+    # source_path's real filesystem mtime (dumper._safe_mtime). Persisted
+    # because the *compare*-time environment may not have SOURCE_DATE_EPOCH
+    # set even though the *dump* that produced this snapshot did (e.g. a CI
+    # dump step under a pinned epoch, followed by an interactive compare
+    # later with no such variable set) — fold_l0_hard_removals needs to know
+    # the recorded value can never match a live re-probe's real mtime
+    # regardless of what's in its own environment (Codex review: gating on
+    # compare-time os.environ alone missed this combination). False (not
+    # None) for snapshots predating this field, matching the pre-epoch-aware
+    # default of trusting a real mtime.
+    source_mtime_epoch: bool = field(default=False, kw_only=True)
+    # st_size of source_path at dump time — a second, cheap identity signal
+    # alongside source_mtime for the same fold_l0_hard_removals re-check.
+    # mtime alone can't catch a content-preserving-timestamp rebuild (e.g.
+    # `cp -p`, `touch -r`, a coarse-mtime filesystem); size doesn't need
+    # SOURCE_DATE_EPOCH gating the way mtime does — two reproducible builds
+    # of identical content have identical size by definition, so recording
+    # the real size never threatens the byte-identical-dump guarantee.
+    source_size: int | None = field(default=None, kw_only=True)
 
     # ADR-028 (schema v7) — optional reference to an out-of-band BuildSourcePack
     # carrying L3/L4/L5 source/build/graph evidence. Only a lightweight

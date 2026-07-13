@@ -35,7 +35,8 @@ import click
 
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
-    from .checker_types import DiffResult
+    from .checker_types import Change, DiffResult
+    from .model import AbiSnapshot
     from .severity import SeverityConfig
 
 
@@ -496,3 +497,143 @@ def _merge_redundant_changes(result: DiffResult) -> None:
     result.changes = result.changes + result.redundant_changes
     result.redundant_changes = []
     result.redundant_count = 0
+
+
+def fold_l0_hard_removals(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    lang: str,
+    extra_changes: list[Change] | None,
+) -> list[Change] | None:
+    """Preserve hard ELF-only removals a header-scoped compare could hide.
+
+    A function present in the ELF/DWARF exports can be entirely absent from
+    the header AST — most commonly because it is declared behind a
+    consumer-controlled macro the header pass parses without knowing the
+    real build's `-D` set (``examples/case97_api_depends_on_consumer_env``:
+    the header AST is parsed once per compare, with no signal for which
+    macro state the *binary* was actually built under, so a macro-gated
+    declaration silently drops out on both sides). When that happens the
+    function never enters the header-scoped model on either side, so the
+    diff has nothing to compare it against and a real ``BREAKING`` removal
+    is missed.
+
+    Mirrors the fold-in in ``cli_scan_baseline._run_baseline_compare``
+    (PR #494, locked in by ``tests/test_pr494_scan_regressions.py``):
+    re-resolve both inputs symbols-only (bypassing the header AST
+    entirely) and diff them unscoped, then fold only the hard
+    ``func_removed_elf_only`` fact back into *extra_changes* — never a
+    full advisory dump. Per ADR-028 D3 (artifact-backed evidence stays
+    authoritative), this only restores a fact the ELF layer already
+    asserts; it cannot manufacture a break that isn't really there.
+
+    Re-resolves from each snapshot's own ``source_path`` — the binary it was
+    actually dumped from — rather than the compare CLI's raw input paths, so
+    this also covers the ``dump`` (with `-H`) *then* ``compare snap1.json
+    snap2.json`` two-step workflow, not just a direct ``compare a.so b.so
+    -H``: a pre-dumped JSON snapshot carries no `-H` flag of its own for
+    ``compare`` to see, but it does remember the binary it came from.
+
+    Best-effort: a raw binary input to re-resolve may not be available
+    (e.g. a hand-authored JSON snapshot with no real ``source_path``, or one
+    dumped on a different machine where that path no longer exists) —
+    resolution failures are swallowed and *extra_changes* is returned
+    unchanged.
+
+    Identity-checked against ``source_mtime``/``source_size``: a pre-dumped
+    JSON snapshot read back into ``compare snap1.json snap2.json`` records
+    the mtime and byte size the binary had at dump time; if the file at
+    ``source_path`` has since changed (rebuilt in place, or the path reused
+    for something else) the re-probe would assert a fact about a *different*
+    binary than the one the snapshots actually describe, making the compare
+    non-reproducible. When either doesn't match — or either snapshot
+    predates these fields — the fold-in declines rather than trust a
+    possibly-stale binary. Not a cryptographic guarantee (a same-size,
+    mtime-preserving rebuild — e.g. ``cp -p`` — can still slip through;
+    Codex review), but a proportionate check for a best-effort enrichment
+    that's already documented to swallow anything short of a clean match.
+
+    The mtime side of that check is skipped independently for each side whose
+    own ``source_mtime_epoch`` flag is set: ``dumper._safe_mtime`` recorded
+    the fixed ``SOURCE_DATE_EPOCH`` value rather than that binary's real
+    mtime at *dump* time (reproducible-builds spec), so a live re-probe's
+    real mtime almost never equals it. Each side's flag is checked
+    independently (not OR'd together) so a mixed CI/local compare — one
+    snapshot dumped under a pinned epoch, the other dumped normally — still
+    enforces the real mtime on the non-epoch side rather than letting one
+    epoch-dumped side disable the check for both (Codex review, three
+    rounds: same-process direct compares, then a dump/compare environment
+    mismatch, then this per-side mix). The flag is checked per-snapshot
+    rather than via the *compare*-time environment for the same reason as
+    round two — a dump-time epoch must stay recognized regardless of what's
+    set later. Size still applies unconditionally to both sides — it isn't
+    epoch-gated and remains a real (if imperfect) identity signal.
+    """
+    from .errors import AbicheckError
+    from .service import compare_snapshots, resolve_input
+
+    old_path = getattr(old, "source_path", None)
+    new_path = getattr(new, "source_path", None)
+    if not old_path or not new_path:
+        return extra_changes
+
+    old_snapshot_mtime = getattr(old, "source_mtime", None)
+    new_snapshot_mtime = getattr(new, "source_mtime", None)
+    old_snapshot_size = getattr(old, "source_size", None)
+    new_snapshot_size = getattr(new, "source_size", None)
+    if (
+        old_snapshot_mtime is None
+        or new_snapshot_mtime is None
+        or old_snapshot_size is None
+        or new_snapshot_size is None
+    ):
+        return extra_changes
+    try:
+        old_now_stat = Path(old_path).stat()
+        new_now_stat = Path(new_path).stat()
+    except OSError:
+        return extra_changes
+    old_mtime_ok = getattr(old, "source_mtime_epoch", False) or (
+        old_now_stat.st_mtime == old_snapshot_mtime
+    )
+    new_mtime_ok = getattr(new, "source_mtime_epoch", False) or (
+        new_now_stat.st_mtime == new_snapshot_mtime
+    )
+    if (
+        not old_mtime_ok
+        or not new_mtime_ok
+        or old_now_stat.st_size != old_snapshot_size
+        or new_now_stat.st_size != new_snapshot_size
+    ):
+        return extra_changes
+
+    # This deliberately re-resolves both sides with no headers — the point is
+    # to see what ELF/DWARF alone exports — so the "no headers provided" note
+    # `resolve_input` would otherwise log is expected, not a real input
+    # problem; swallow it rather than confuse the user with a warning about
+    # an internal probe they didn't ask for.
+    try:
+        l0_old = resolve_input(
+            Path(old_path), [], [], version="", lang=lang, symbols_only=True,
+            notify=lambda _msg: None,
+        )
+        l0_new = resolve_input(
+            Path(new_path), [], [], version="", lang=lang, symbols_only=True,
+            notify=lambda _msg: None,
+        )
+        # compare_snapshots is a thin wrapper over checker.compare — a
+        # failure there is just as much a "this best-effort probe didn't
+        # pan out" case as a resolve_input failure, so it must not escape
+        # this guard and abort the real compare (Codex/CodeRabbit review).
+        l0_diff = compare_snapshots(
+            l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
+        )
+    except AbicheckError:
+        return extra_changes
+    l0_hard_removals = [
+        change
+        for change in getattr(l0_diff, "breaking", ())
+        if getattr(getattr(change, "kind", None), "value", None)
+        == "func_removed_elf_only"
+    ]
+    return [*(extra_changes or []), *l0_hard_removals]

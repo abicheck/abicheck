@@ -22,6 +22,8 @@ from abicheck.dumper import (
     _parse_vtable_index,
     _pyelftools_exported_symbols,
     _resolve_debug_metadata,
+    _safe_mtime,
+    _safe_size,
     _vt_sort_key,
 )
 from abicheck.model import Visibility
@@ -36,6 +38,72 @@ class TestCastxmlAvailable:
     def test_returns_false_when_castxml_missing(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda _: None)
         assert _castxml_available() is False
+
+
+# ── _safe_mtime ──────────────────────────────────────────────────────────
+
+class TestSafeMtime:
+    def test_returns_mtime_for_existing_file(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == p.stat().st_mtime
+        assert is_epoch is False
+
+    def test_returns_none_when_path_missing(self, tmp_path):
+        mtime, is_epoch = _safe_mtime(tmp_path / "does_not_exist.so")
+        assert mtime is None
+        assert is_epoch is False
+
+    def test_honours_source_date_epoch_over_real_mtime(self, tmp_path, monkeypatch):
+        # Two dumps of identical binary content must stay byte-identical
+        # under SOURCE_DATE_EPOCH (reproducible-builds spec) — the real,
+        # varying filesystem mtime must not leak into the snapshot.
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000000000")
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == 1000000000.0
+        assert mtime != p.stat().st_mtime
+        assert is_epoch is True
+
+    def test_zero_source_date_epoch_is_honoured(self, tmp_path, monkeypatch):
+        # "0" is a valid (if unusual) SOURCE_DATE_EPOCH — a non-empty string
+        # is truthy regardless of the numeric value it parses to, so this
+        # must not fall through to the real mtime (CodeRabbit review).
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "0")
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == 0.0
+        assert is_epoch is True
+
+    def test_invalid_source_date_epoch_falls_back_to_real_mtime(self, tmp_path, monkeypatch):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == p.stat().st_mtime
+        assert is_epoch is False
+
+
+class TestSafeSize:
+    def test_returns_size_for_existing_file(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"abicheck")
+        assert _safe_size(p) == 8
+
+    def test_returns_none_when_path_missing(self, tmp_path):
+        assert _safe_size(tmp_path / "does_not_exist.so") is None
+
+    def test_not_gated_by_source_date_epoch(self, tmp_path, monkeypatch):
+        # Unlike _safe_mtime, size is a property of content, not timestamps
+        # — two reproducible builds of identical content have identical
+        # size by definition, so it needs no SOURCE_DATE_EPOCH gating.
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"abicheck")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000000000")
+        assert _safe_size(p) == 8
 
 
 # ── _parse_vtable_index ─────────────────────────────────────────────────

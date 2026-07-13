@@ -42,7 +42,7 @@ public-contract by construction (`ChangeKind` `constant_changed`).
 
 > Note: this covers `const`/`constexpr` constants. Plain `#define` macro
 > constants are still invisible — castxml emits no macros (a separate documented
-> gap; see `Limitations`).
+> gap; see [Limitations](../concepts/limitations.md)).
 
 ## Reproduce manually
 ```bash

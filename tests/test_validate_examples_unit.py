@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +23,7 @@ from tests.validate_examples import (  # noqa: E402
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
     _build_info_path,
+    _build_with_cmake,
     _check_case_preconditions,
     _embedded_present_layers,
     _evaluate_verdict,
@@ -179,6 +181,140 @@ class TestKnownGapToolchainScope:
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
+
+
+class TestRunSourceSmoke:
+    """source_smoke's own optional "platforms" scope (distinct from the
+    case-level one) — some consumer-runtime-corruption proofs assume Itanium
+    C++ ABI base-class layout evolution and don't reproduce under MSVC's own
+    ABI rules (case43: the same source change doesn't corrupt memory in an
+    observable way there)."""
+
+    def test_no_source_smoke_declared_returns_none(self, tmp_path):
+        assert _run_source_smoke("caseX", {}, tmp_path, tmp_path, None) is None
+
+    def test_platform_not_listed_falls_through_to_verdict_check(self, tmp_path):
+        # None (not a CaseResult) — same as "no source_smoke declared" for
+        # this platform, so run_case() still reaches the build/dump/compare
+        # path for a case that otherwise supports this platform (Codex
+        # review: a SKIP CaseResult would short-circuit run_case() before
+        # the verdict check ever runs, silently un-checking the platform).
+        entry = {
+            "source_smoke": {
+                "platforms": ["linux", "macos"],
+                "v1": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "windows"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "BREAKING")
+        assert result is None
+
+    @pytest.mark.integration
+    def test_platform_listed_runs_for_real(self, tmp_path):
+        entry = {
+            "source_smoke": {
+                "platforms": ["linux"],
+                "proof": "trivial",
+                "v1": {"code": "int main() { return 0; }\n"},
+                "v2": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "linux"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "NO_CHANGE")
+        assert result.status in {"PASS", "SKIP"}
+        if result.status == "SKIP":
+            pytest.skip(result.message)
+        assert result.message == "trivial"
+
+    @pytest.mark.integration
+    def test_no_platforms_key_runs_on_every_platform(self, tmp_path):
+        entry = {
+            "source_smoke": {
+                "proof": "unscoped",
+                "v1": {"code": "int main() { return 0; }\n"},
+                "v2": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "windows"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "NO_CHANGE")
+        assert result.status != "SKIP" or "no compiler" in (result.message or "")
+
+    def test_case43_is_scoped_off_windows(self):
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        assert gt["case43_base_class_member_added"]["source_smoke"]["platforms"] == [
+            "linux",
+            "macos",
+        ]
+
+
+class TestBuildWithCmake:
+    """A CMake WINDOWS_EXPORT_ALL_SYMBOLS + Ninja generator defect (confirmed
+    deterministic — reproduces identically whether the v1/v2 targets build in
+    parallel or serially) makes a per-target exports.def invisible to that
+    target's own link step (LNK1104). A real toolchain limitation, not an
+    abicheck defect — _build_with_cmake converts exactly this symptom to a
+    clean SKIP rather than a hard ERROR."""
+
+    def _mock_run(self, monkeypatch, *, build_stderr, build_returncode=1):
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            is_build = "--build" in cmd
+            returncode = build_returncode if is_build else 0
+            stderr = build_stderr if is_build else ""
+            return subprocess.CompletedProcess(cmd, returncode, stdout="", stderr=stderr)
+
+        monkeypatch.setattr(ve.subprocess, "run", _fake_run)
+        return calls
+
+    def test_ninja_exports_def_defect_is_skip_not_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ve.shutil, "which", lambda t: f"/usr/bin/{t}")
+        monkeypatch.setattr(ve.sys, "platform", "win32")
+        self._mock_run(
+            monkeypatch,
+            build_stderr=(
+                "LINK : fatal error LNK1104: cannot open file "
+                "'case97\\CMakeFiles\\case97_v1.dir\\.\\exports.def'"
+            ),
+        )
+        case_dir = tmp_path / "case97"
+        case_dir.mkdir()
+        v1_lib, v2_lib, err = _build_with_cmake(case_dir, tmp_path / "build")
+        assert v1_lib is None
+        assert v2_lib is None
+        assert err.startswith("SKIP:")
+        assert "exports.def" in err
+
+    def test_other_ninja_build_failures_still_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ve.shutil, "which", lambda t: f"/usr/bin/{t}")
+        monkeypatch.setattr(ve.sys, "platform", "win32")
+        self._mock_run(
+            monkeypatch,
+            build_stderr="error C2065: 'foo': undeclared identifier",
+        )
+        case_dir = tmp_path / "case_other"
+        case_dir.mkdir()
+        v1_lib, v2_lib, err = _build_with_cmake(case_dir, tmp_path / "build")
+        assert v1_lib is None
+        assert v2_lib is None
+        assert not err.startswith("SKIP:")
+        assert err.startswith("cmake build failed:")
+
+    def test_non_windows_exports_def_failure_still_error(self, tmp_path, monkeypatch):
+        # The same symptom text on a non-Windows/non-Ninja build isn't this
+        # specific toolchain defect — don't silently swallow it there too.
+        monkeypatch.setattr(ve.shutil, "which", lambda t: f"/usr/bin/{t}")
+        monkeypatch.setattr(ve.sys, "platform", "linux")
+        self._mock_run(
+            monkeypatch,
+            build_stderr="LINK : fatal error LNK1104: cannot open file 'exports.def'",
+        )
+        case_dir = tmp_path / "case_linux"
+        case_dir.mkdir()
+        v1_lib, v2_lib, err = _build_with_cmake(case_dir, tmp_path / "build")
+        assert not err.startswith("SKIP:")
+        assert err.startswith("cmake build failed:")
 
 
 class TestCasePreconditions:

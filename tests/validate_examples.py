@@ -344,6 +344,24 @@ def _find_built_lib(directory: Path, name: str) -> Path | None:
     return None
 
 
+def _cmake_error_detail(r: subprocess.CompletedProcess[str]) -> str:
+    """Extract a useful diagnostic from a failed cmake invocation.
+
+    MSBuild (CMake's default Windows generator) reports compiler errors on
+    *stdout*, not stderr — a stderr-only capture silently drops the actual
+    diagnostic (observed as an empty "cmake build failed: " message). Include
+    both, generously truncated: a short cap was hiding the real error text
+    (e.g. CMake's own "is not able to compile a simple test program" message
+    continues well past 300 chars into the actual compiler output).
+    """
+    detail = "\n".join(s for s in (r.stderr, r.stdout) if s).strip()
+    # Tail, not head: CMake wraps the real underlying compiler/linker error
+    # in a lot of its own prose (and, for a failed TryCompile, a full command
+    # transcript) *before* the actual diagnostic — a head-anchored cap can
+    # exhaust its budget without ever reaching the useful part.
+    return detail[-4000:]
+
+
 def _build_with_cmake(
     case_dir: Path,
     build_dir: Path,
@@ -359,24 +377,64 @@ def _build_with_cmake(
     case_out = build_dir / case_name
     build_type = "Release" if variant in {"release-headers", "build-source"} else "Debug"
 
-    r = subprocess.run(
-        [cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
-         f"-DCMAKE_BUILD_TYPE={build_type}",
-         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
-        capture_output=True, text=True, timeout=60,
-    )
+    configure_cmd = [
+        cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
+        f"-DCMAKE_BUILD_TYPE={build_type}",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    ]
+    used_ninja = sys.platform == "win32" and bool(shutil.which("ninja"))
+    if used_ninja:
+        # The default Windows generator (Visual Studio/MSBuild) drives builds
+        # through FileTracker .tlog files nested under
+        # <target>.dir/<config>/<hash>.tlog/ — deep enough under an already-
+        # deep pytest tmp path to exceed Windows' MAX_PATH, surfacing as
+        # "FTK1011: could not create the new file tracking log file".
+        # Ninja has no FileTracker step and a flatter build layout, so it
+        # doesn't hit this at all.
+        configure_cmd += ["-G", "Ninja"]
+        # CMake's Ninja-generator DLL link on MSVC always routes through
+        # `cmake -E vs_link_dll`, which — when manifest embedding is on —
+        # shells out to rc.exe/mt.exe against an --intdir path resolved
+        # relative to the ninja invocation's cwd rather than build_dir; on
+        # this toolchain that sub-step intermittently can't create
+        # <target>.dir/intermediate.manifest or manifest.res (LNK1104 /
+        # RC1109). These are throwaway ABI-symbol-export test binaries with
+        # no need for a Windows manifest resource at all, so skip that whole
+        # sub-step rather than chase what looks like a CMake/Ninja/this-MSVC-
+        # toolset interaction bug.
+        configure_cmd += [
+            "-DCMAKE_SHARED_LINKER_FLAGS=/MANIFEST:NO",
+            "-DCMAKE_EXE_LINKER_FLAGS=/MANIFEST:NO",
+        ]
+    r = subprocess.run(configure_cmd, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
-        return None, None, f"cmake configure failed: {r.stderr[:300]}"
+        return None, None, f"cmake configure failed: {_cmake_error_detail(r)}"
 
     v1_target = f"{case_name}_v1"
     v2_target = f"{case_name}_v2"
-    r = subprocess.run(
-        [cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
-         "--config", build_type],
-        capture_output=True, text=True, timeout=120,
-    )
+    build_cmd = [
+        cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
+        "--config", build_type,
+    ]
+    r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
-        return None, None, f"cmake build failed: {r.stderr[:300]}"
+        detail = _cmake_error_detail(r)
+        if used_ninja and "LNK1104" in detail and "exports.def" in detail:
+            # A CMake WINDOWS_EXPORT_ALL_SYMBOLS defect under the Ninja
+            # generator: the per-target custom command that creates
+            # <target>.dir/exports.def from the compiled .obj isn't visible
+            # to that target's own link step. Confirmed deterministic, not a
+            # scheduling race this harness can work around — reproduces
+            # identically whether the v1/v2 targets build in parallel or
+            # serially (--parallel 1 tried and made no difference). A real
+            # CMake/Ninja/this-MSVC-toolset limitation, not an abicheck
+            # defect — skip cleanly rather than hard-ERROR every case that
+            # happens to hit it.
+            return None, None, (
+                f"SKIP:CMake WINDOWS_EXPORT_ALL_SYMBOLS/Ninja exports.def "
+                f"generation defect: {detail[:200]}"
+            )
+        return None, None, f"cmake build failed: {detail}"
 
     v1_lib = _find_built_lib(case_out, "v1")
     v2_lib = _find_built_lib(case_out, "v2")
@@ -1036,6 +1094,22 @@ def _run_source_smoke(
     if not smoke:
         return None
 
+    # Optional per-check platform scope (distinct from the case-level
+    # "platforms" field, which also gates the detector/compare check): some
+    # consumer-runtime-corruption proofs assume Itanium C++ ABI base-class
+    # layout evolution and don't reproduce under MSVC's own ABI rules, where
+    # the same source change can legitimately not corrupt memory in an
+    # observable way. Treated exactly like "no source_smoke declared" for
+    # this platform (return None, not a CaseResult): the case can still
+    # support this platform at the detector/compare level even though this
+    # one runtime proof doesn't apply here — returning a SKIP CaseResult
+    # would make run_case() stop before ever reaching that build/dump/
+    # compare path (Codex review), silently un-checking a platform the case
+    # otherwise declares support for.
+    smoke_platforms = smoke.get("platforms")
+    if smoke_platforms and CURRENT_PLATFORM not in smoke_platforms:
+        return None
+
     spec = SourceSmokeSpec.from_dict(smoke)
     compiler = _find_compiler(spec.standard.startswith("c++"))
     if compiler is None:
@@ -1083,9 +1157,21 @@ def run_case(
         return resolved._replace(variant=variant)
     case_dir, (v1_src, v2_src, v1_hdr, v2_hdr) = resolved
 
+    # A declared source_smoke proves the *consumer-observable* claim (old
+    # binary genuinely misbehaves / fails to link against the new library) —
+    # a hard precondition for the case's premise. It does NOT prove abicheck
+    # itself detects the change: historically this returned straight to the
+    # caller on a smoke PASS, so a case with source_smoke never reached the
+    # build+dump+compare+verdict check below at all. That let a real,
+    # unrelated detector gap (case20, case97) go unnoticed by this "ground
+    # truth" gate for as long as the smoke kept passing. Smoke is now a
+    # gate only on failure/skip; a PASS falls through so the verdict is
+    # still checked for real, and its proof text is folded into the final
+    # result below.
     smoke_result = _run_source_smoke(name, entry, case_dir, tmp_base, expected_raw)
-    if smoke_result is not None:
+    if smoke_result is not None and smoke_result.status != "PASS":
         return smoke_result._replace(variant=variant)
+    smoke_proof = smoke_result.message if smoke_result is not None else None
 
     # A producer-scoped known_gap only excuses a mismatch under the producer that
     # actually built the case (resolved per source language); on other producers
@@ -1184,6 +1270,9 @@ def run_case(
         name, expected_raw, got, known_gap,
         allow_risk_for_compatible=allow_risk,
     )._replace(variant=variant, source_layers=source_layers)
+    if smoke_proof:
+        combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
+        result = result._replace(message=combined)
     return result._replace(
         category_strict=_category_strict_signal(entry, result, source_layers)
     )
