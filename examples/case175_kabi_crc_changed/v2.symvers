@@ -1,0 +1,2 @@
+0xd41d8cd9	ext4_iget	fs/ext4/ext4	EXPORT_SYMBOL_GPL	EXT4
+0x1a2b3c4d	ext4_mark_iloc_dirty	fs/ext4/ext4	EXPORT_SYMBOL_GPL	EXT4

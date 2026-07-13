@@ -42,6 +42,7 @@ from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # no
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
 from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
 from abicheck.buildsource.source_graph import (  # noqa: E402
+    GraphEdge,
     GraphNode,
     SourceGraphSummary,
 )
@@ -286,6 +287,51 @@ def case151_xcheck_provider_matrix_thin() -> AbiSnapshot:
     return case144_audit_private_header_leak()
 
 
+# ── case181: public API reaches an internal declaration (L5 graph) ───────────
+def case181_xcheck_public_to_internal_dependency() -> AbiSnapshot:
+    # A public, header-declared entry point (json_parse) calls straight into an
+    # internal helper (validate_utf8) that is declared only in a private
+    # implementation file, never in any public header. The L5 source graph
+    # records this via a DECL_CALLS_DECL edge; a SOURCE_DECLARES edge from the
+    # implementation file gives the internal decl its provenance (the shape the
+    # built-in call-graph extractor actually emits for project-local callees).
+    # Consumers can only see json_parse — a change to validate_utf8 is an
+    # undeclared behavioral risk (ADR-041 P0).
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://json_parse",
+                kind="source_decl",
+                label="json_parse",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(
+                id="decl://validate_utf8",
+                kind="source_decl",
+                label="validate_utf8",
+            ),
+            GraphNode(
+                id="header://src/json_internal.cc",
+                kind="source",
+                label="src/json_internal.cc",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://json_parse",
+                dst="decl://validate_utf8",
+                kind="DECL_CALLS_DECL",
+            ),
+            GraphEdge(
+                src="header://src/json_internal.cc",
+                dst="decl://validate_utf8",
+                kind="SOURCE_DECLARES",
+            ),
+        ],
+    )
+    return _snap(build_source=BuildSourcePack(root="", source_graph=graph))
+
+
 #: case dir name → {fixture filename: builder}. ``snapshot.abi.json`` is the
 #: primary fixture; extra entries (case151's ``thin``) are secondary variants.
 FIXTURES: dict[str, dict[str, object]] = {
@@ -312,6 +358,9 @@ FIXTURES: dict[str, dict[str, object]] = {
     "case151_xcheck_provider_matrix": {
         "snapshot.abi.json": case151_xcheck_provider_matrix,
         "thin.abi.json": case151_xcheck_provider_matrix_thin,
+    },
+    "case181_xcheck_public_to_internal_dependency": {
+        "snapshot.abi.json": case181_xcheck_public_to_internal_dependency
     },
 }
 

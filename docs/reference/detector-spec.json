@@ -288,7 +288,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "cet_protection_weakened",
-      "examples": ""
+      "examples": "case179_cet_protection_weakened"
     },
     {
       "kind": "char8t_migration",
@@ -1269,7 +1269,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "kabi_crc_changed",
-      "examples": ""
+      "examples": "case175_kabi_crc_changed"
     },
     {
       "kind": "kabi_export_type_changed",
@@ -1296,7 +1296,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "kabi_symbol_namespace_changed",
-      "examples": ""
+      "examples": "case176_kabi_symbol_namespace_changed"
     },
     {
       "kind": "kabi_symbol_removed",
@@ -1359,7 +1359,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "long_double_abi_changed",
-      "examples": ""
+      "examples": "case177_long_double_abi_changed"
     },
     {
       "kind": "lto_mode_changed",
@@ -2061,7 +2061,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "secondary_vtable_group_changed",
-      "examples": ""
+      "examples": "case174_secondary_vtable_group_changed"
     },
     {
       "kind": "serialization_tag_changed",
@@ -2169,7 +2169,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "static_tls_introduced",
-      "examples": ""
+      "examples": "case171_static_tls_introduced"
     },
     {
       "kind": "static_tls_removed",
@@ -2394,7 +2394,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "symbol_binding_lost_unique",
-      "examples": ""
+      "examples": "case180_symbol_binding_lost_unique"
     },
     {
       "kind": "symbol_binding_strengthened",
@@ -2907,7 +2907,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "unnamed_type_in_public_abi",
-      "examples": ""
+      "examples": "case178_unnamed_type_in_public_abi"
     },
     {
       "kind": "unspecified_return_now_named",
@@ -3114,7 +3114,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtable_thunk_offset_changed",
-      "examples": ""
+      "examples": "case172_vtable_thunk_offset_changed"
     },
     {
       "kind": "vtable_thunk_set_changed",
@@ -3132,7 +3132,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtt_slot_count_changed",
-      "examples": ""
+      "examples": "case173_vtt_slot_count_changed"
     },
     {
       "kind": "wchar_model_changed",

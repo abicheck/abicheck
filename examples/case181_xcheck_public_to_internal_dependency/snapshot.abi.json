@@ -1,0 +1,119 @@
+{
+  "build_context_defines": [],
+  "build_id": null,
+  "build_mode": null,
+  "build_source": {
+    "manifest": {
+      "abicheck_version": "",
+      "artifacts": [],
+      "build_source_pack_version": 1,
+      "coverage": [],
+      "created_at": "",
+      "extractors": [],
+      "inputs": {},
+      "redaction": {},
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      }
+    },
+    "source_graph": {
+      "coverage": {},
+      "degraded_passes": {},
+      "edges": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "dst": "decl://validate_utf8",
+          "edge": "DECL_CALLS_DECL",
+          "provenance": "",
+          "src": "decl://json_parse"
+        },
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "dst": "decl://validate_utf8",
+          "edge": "SOURCE_DECLARES",
+          "provenance": "",
+          "src": "header://src/json_internal.cc"
+        }
+      ],
+      "external_graph_refs": [],
+      "extractor_passes": {},
+      "graph_id": "sha256:4b0c873903c7d83eeaec7281f8ee4ec4e144f8ab0d9cb777163ba35bd63a9f3b",
+      "indexes": {
+        "by_binary_symbol": {},
+        "by_file": {},
+        "by_source_decl": {
+          "decl://validate_utf8": [
+            "decl://json_parse",
+            "header://src/json_internal.cc"
+          ]
+        },
+        "by_target": {}
+      },
+      "narrowed_passes": {},
+      "narrowed_scope": {},
+      "nodes": [
+        {
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "id": "decl://json_parse",
+          "kind": "source_decl",
+          "label": "json_parse",
+          "provenance": ""
+        },
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "id": "decl://validate_utf8",
+          "kind": "source_decl",
+          "label": "validate_utf8",
+          "provenance": ""
+        },
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "id": "header://src/json_internal.cc",
+          "kind": "source",
+          "label": "src/json_internal.cc",
+          "provenance": ""
+        }
+      ],
+      "schema_version": 1
+    }
+  },
+  "build_source_pack": null,
+  "conditional_fields": {},
+  "constants": {},
+  "created_at": null,
+  "dependency_info": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "elf": null,
+  "elf_only_mode": false,
+  "enums": [],
+  "from_headers": true,
+  "functions": [],
+  "git_commit": null,
+  "git_tag": null,
+  "kabi": null,
+  "language_profile": null,
+  "library": "libdemo.so",
+  "macho": null,
+  "parsed_with_build_context": false,
+  "pe": null,
+  "platform": null,
+  "python_api": null,
+  "python_ext": null,
+  "schema_version": 8,
+  "scope_fallback": null,
+  "source_path": null,
+  "sycl": null,
+  "typedefs": {},
+  "types": [],
+  "variables": [],
+  "version": "1.0"
+}

@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **170 cases** (165 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **181 cases** (176 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,9 +20,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 95 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 15 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 26 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -293,6 +293,17 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [168](case168_virtual_method_devirtualized/README.md) | Virtual Method Devirtualized (flush() leaves the vtable) | Breaking | 🔴 BREAKING |
 | [169](case169_overload_added/README.md) | Overload Added to a Previously Unique Function | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [170](case170_env_runtime_floor_raised/README.md) | Runtime Floor Raised (glibc relink drift) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [171](case171_static_tls_introduced/README.md) | Static TLS Introduced | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [172](case172_vtable_thunk_offset_changed/README.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
+| [173](case173_vtt_slot_count_changed/README.md) | VTT Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
+| [174](case174_secondary_vtable_group_changed/README.md) | Secondary Vtable Group Changed | Breaking | 🔴 BREAKING |
+| [175](case175_kabi_crc_changed/README.md) | kABI CRC Changed | Breaking | 🔴 BREAKING |
+| [176](case176_kabi_symbol_namespace_changed/README.md) | kABI Export Namespace Changed | Breaking | 🔴 BREAKING |
+| [177](case177_long_double_abi_changed/README.md) | long double ABI Changed | Breaking | 🔴 BREAKING |
+| [178](case178_unnamed_type_in_public_abi/README.md) | Unnamed Type Leaks Into the Public ABI | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

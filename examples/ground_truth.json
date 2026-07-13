@@ -1620,6 +1620,149 @@
     "windows"
    ]
   },
+  "case171_static_tls_introduced": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "risk",
+   "description": "Identical source; v2 is built with -ftls-model=initial-exec instead of the default global-dynamic model. The linker sets DF_STATIC_TLS in the dynamic section because the library now participates in the static TLS surplus assigned at process startup, so it may no longer be reliably dlopen()able after the process has started. Read directly from DT_FLAGS with no DWARF, no headers, no build metadata (L0) -- the binary-only counterpart to case133_tls_model_flip's L3 build-flag view of the same transition.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "static_tls_introduced"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case172_vtable_thunk_offset_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Derived multiply-inherits Base1 (primary) and Base2 (secondary), overriding Base2::f2() behind a non-virtual this-adjusting thunk. v2 adds a field to Base1, growing it and shifting Base2's subobject offset within Derived from 16 to 24 bytes -- Derived's method set and vtable slot count are completely unchanged, so only the thunk's baked-in offset (_ZThn16_ -> _ZThn24_) reveals the break. Detected from the _ZTh.../_ZTv.../_ZTc... symbol names on a stripped binary (L0). A consumer that static_cast<Base2*>()s a Derived* compiled against v1 computes the wrong pointer against v2's binary -- a deterministic crash.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "vtable_thunk_offset_changed"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case173_vtt_slot_count_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Diamond virtually inherits Base through both Left and Right in v1; v2 adds a third virtual-inheritance leg (Mixin), growing the VTT (_ZTT7Diamond, the construction-time scaffolding of sub-vtables used while a virtual-base object is being built) from 56 to 80 bytes. Co-occurs with vtable_slot_count_changed/rtti_inheritance_changed/vtable_thunk_offset_changed (already demonstrated elsewhere), but vtt_slot_count_changed is the only one that names the construction-time fact -- proven deterministically by comparing sizeof(Diamond) as compiled by an old consumer against the value the loaded library actually uses (16 vs 24 bytes), independent of whether any virtual method is ever called.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "vtt_slot_count_changed"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case174_secondary_vtable_group_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Derived : Base1, Base2 {} is byte-for-byte identical in v1 and v2 -- only Base2's own declaration changes, gaining a virtual method (non-polymorphic -> polymorphic). Because Base1 is Derived's primary base, Base2 (now polymorphic) needs a new secondary vtable group, restructuring Derived's dispatch surface even though Derived's own base list never moved -- a cross-type effect a per-type diff of Derived alone cannot see. Reconstructed from DWARF base/vtable metadata on both sides (L1); a stripped binary cannot reveal it, unlike cases 172/173.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "secondary_vtable_group_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case175_kabi_crc_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Two Module.symvers manifests (the Linux kernel's kABI record). ext4_iget keeps its symbol name, module, export type, and namespace but its CRC changes -- genksyms hashes the symbol's transitive type signature, so a CRC change means a type it depends on changed layout even though the symbol itself never disappeared. With CONFIG_MODVERSIONS on, the loader rejects an out-of-tree module whose embedded CRC disagrees ('disagrees about version of symbol'). Read directly from the two manifests with no kernel build and no compiler (L0).",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "kabi_crc_changed"
+   ],
+   "fixtures": [
+    "v1.symvers",
+    "v2.symvers"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case176_kabi_symbol_namespace_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Two Module.symvers manifests. drm_mode_object_add keeps its CRC, module, and GPL class but moves from a plain EXPORT_SYMBOL() to EXPORT_SYMBOL_NS(..., DRM), gaining an export namespace. A module that does not declare a matching MODULE_IMPORT_NS(DRM) fails to load even though the symbol's type signature never changed -- a distinct load-time gate from the CRC break in case175, with a different fix (add the import declaration, not rebuild against new types). Read directly from the two manifests (L0).",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "kabi_symbol_namespace_changed"
+   ],
+   "fixtures": [
+    "v1.symvers",
+    "v2.symvers"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case177_long_double_abi_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "compute()'s name and purpose are unchanged, but v2's library is rebuilt to use IEEE 754 quad precision (__float128, via libquadmath) instead of the platform's native 80-bit long double -- the same kind of representation swap real toolchains perform for long double on ppc64 (IBM double-double <-> IEEE binary128). Itanium mangles long double as 'e' and __float128 as 'g', so the exported symbol changes (_Z7computee -> _Z7computeg) even though nothing in the C++ declaration text needed to change spelling. abicheck re-pairs the removed/added symbols by their demangled signature into one long_double_abi_changed finding rather than an unrelated-looking remove+add (L0); an old consumer linked against _Z7computee fails to load with an undefined-symbol error.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "long_double_abi_changed"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case178_unnamed_type_in_public_abi": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "v2 adds pick_by_policy(), built from a namespace-scope lambda (descending) used as a default comparison policy -- a common header-only convenience pattern. Because the lambda has external linkage, its compiler-generated call operator is exported with default visibility, and its Itanium mangling embeds a per-translation-unit closure-type ordinal (Ul...E_) nobody chose: a trivial, unrelated source reorder can silently rename it on the next rebuild. Detected by parsing newly-introduced exported symbol names for Itanium unnamed-type tokens (L0); flagged only for symbols new this revision.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "unnamed_type_in_public_abi"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case179_cet_protection_weakened": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "Identical source; v1 is built with -fcf-protection=full and v2 with -fcf-protection=none. The .note.gnu.property x86 feature bits drop both IBT (indirect branch tracking) and SHSTK (shadow stack), silently regressing Intel CET hardening for dispatch() 's indirect function-pointer call even though the library behaves identically for legitimate input. Read directly from the ELF property note (L0); analysis-only under the default policy, escalatable to a hard gate under a security-focused profile.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "cet_protection_weakened"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
   "case17_template_abi": {
    "abi_break": true,
    "api_break": true,
@@ -1644,6 +1787,46 @@
      "lib_source": "v2.cpp"
     }
    }
+  },
+  "case180_symbol_binding_lost_unique": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "Identical source (a Meyers-singleton Registry<T>::instance() function-local static inside a class template); v2 is built with -fno-gnu-unique. The guard variable's ELF binding moves from STB_GNU_UNIQUE to an ordinary weak binding, losing the dynamic linker's process-wide uniqueness guarantee -- if the same template is independently instantiated by a second DSO loaded into the same process, each can end up with its own, diverging copy instead of sharing one. Read directly from the symbol table's binding field (L0).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "symbol_binding_lost_unique"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case181_xcheck_public_to_internal_dependency": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "The public, header-declared json_parse() calls straight into validate_utf8(), a helper declared only in a private implementation file with no public declaration anywhere -- invisible from json_parse()'s own signature. The L5 source graph's DECL_CALLS_DECL edge (with a SOURCE_DECLARES edge giving the internal decl its file provenance) is the only way to see the dependency; if validate_utf8() changes behavior, json_parse()'s contract silently shifts with it. The intra-version counterpart to case150's exported_not_public/public_not_exported pair -- this one catches a mismatch inside a single public entry point rather than between the export table and the header set.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_crosscheck_kinds": [
+    "public_to_internal_dependency"
+   ],
+   "expected_kinds": [],
+   "expected_providers": {
+    "public_to_internal_dependency": [
+     "source_index"
+    ]
+   },
+   "fixtures": [
+    "snapshot.abi.json"
+   ],
+   "min_evidence": "L5",
+   "mode": "audit",
+   "platforms": [
+    "linux"
+   ]
   },
   "case18_dependency_leak": {
    "abi_break": true,
