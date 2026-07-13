@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import tests.validate_examples as ve  # noqa: E402
+from abicheck.source_smoke import SourceSmokeResult  # noqa: E402
 from tests.validate_examples import (  # noqa: E402
     ARTIFACT_VARIANTS,
     DEFAULT_ARTIFACT_VARIANT,
@@ -28,6 +29,7 @@ from tests.validate_examples import (  # noqa: E402
     _json_payload,
     _normalize_verdict,
     _result_to_json,
+    _run_source_smoke,
     _selected_variants,
     _source_layers_for_result,
     _sources_path,
@@ -45,6 +47,40 @@ _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
 _EXPECTED_CASE_COUNT = 181
+
+
+def test_source_smoke_run_mode_skips_without_trusted_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ABICHECK_TRUSTED_SOURCE_SMOKE_RUN", raising=False)
+    monkeypatch.setattr(ve, "_find_compiler", lambda _cxx: "c++")
+    run = patch.object(ve, "run_source_smoke")
+
+    with run as mock_run:
+        result = _run_source_smoke(
+            "case", {"source_smoke": {"mode": "run"}}, tmp_path, tmp_path, "BREAKING"
+        )
+
+    assert result is not None and result.status == "SKIP"
+    assert "ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1" in result.message
+    mock_run.assert_not_called()
+
+
+def test_source_smoke_run_mode_executes_with_trusted_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ABICHECK_TRUSTED_SOURCE_SMOKE_RUN", "1")
+    monkeypatch.setattr(ve, "_find_compiler", lambda _cxx: "c++")
+    smoke_result = SourceSmokeResult(ok=True, failures=(), proof="trusted proof")
+
+    with patch.object(ve, "run_source_smoke", return_value=smoke_result) as mock_run:
+        result = _run_source_smoke(
+            "case", {"source_smoke": {"mode": "run"}}, tmp_path, tmp_path, "BREAKING"
+        )
+
+    assert result is not None and result.status == "PASS"
+    assert result.message == "trusted proof"
+    assert mock_run.call_args.kwargs["allow_run"] is True
 
 
 # ── _normalize_verdict ────────────────────────────────────────────────────
