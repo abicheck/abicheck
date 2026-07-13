@@ -884,18 +884,18 @@ class EvidenceStatus(str, Enum):
     *what* it is (its ``Verdict``/severity already say that).
 
     A per-report-format overlay (JSON ``evidence_status`` / SARIF
-    ``evidenceStatus``). Deliberately **policy-independent**: it classifies
-    against the finding's own kind-intrinsic category (:data:`BREAKING_KINDS`
-    / :data:`API_BREAK_KINDS` / :data:`RISK_KINDS`, the same partition
-    regardless of the active ``--policy``), not the policy-resolved
-    ``Verdict`` a named policy (``plugin_abi``/``sdk_vendor``) or a
-    ``PolicyFile`` kind-set override may reassign for gating purposes — see
-    :func:`evidence_status_for_change`. Per the ADR-028 D3 authority rule
-    (artifact evidence is authoritative; build/source evidence corroborates):
+    ``evidenceStatus``). Deliberately a **pure function of the finding's
+    ``kind``** — never the policy-resolved ``Verdict``/severity and never a
+    per-finding ``effective_verdict`` override, since *every* mechanism that
+    sets one (a named policy's kind-set reassignment, a ``PolicyFile``
+    override, ADR-033 D7's evidence-tier ceiling, ADR-027 A4 pattern
+    modulation) is a gating decision about what fails the build, not new
+    evidence about the finding — see :func:`evidence_status_for_change` for
+    why none of them are trusted. Per the ADR-028 D3 authority rule (artifact
+    evidence is authoritative; build/source evidence corroborates):
 
-    - ``ARTIFACT_PROVEN`` — intrinsically a ``BREAKING_KINDS`` member (or a
-      per-finding ``effective_verdict`` override raises it there): L0/L1/L2
-      artifact evidence confirms a shipped ABI break.
+    - ``ARTIFACT_PROVEN`` — intrinsically a ``BREAKING_KINDS`` member:
+      L0/L1/L2 artifact evidence confirms a shipped ABI break.
     - ``SOURCE_CONTRACT`` — intrinsically ``API_BREAK_KINDS``: a source-level
       break that needs a recompile or a policy decision, not necessarily a
       shipped ABI break.
@@ -1203,42 +1203,33 @@ def effective_category(
     return Verdict.BREAKING  # unclassified → fail-safe
 
 
-_VERDICT_TO_EVIDENCE_STATUS: dict[Verdict, EvidenceStatus] = {
-    Verdict.BREAKING: EvidenceStatus.ARTIFACT_PROVEN,
-    Verdict.API_BREAK: EvidenceStatus.SOURCE_CONTRACT,
-    Verdict.COMPATIBLE_WITH_RISK: EvidenceStatus.CONTEXTUAL_RISK,
-}
-
-
 def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
-    """The :class:`EvidenceStatus` label for *change* — deliberately **policy-
-    independent**.
+    """The :class:`EvidenceStatus` label for *change* — a **pure function of
+    its ``kind``**, deliberately independent of every verdict-modulation
+    mechanism (unlike ``severity``/the exit code).
 
-    This is *not* derived from the finding's policy-resolved verdict, unlike
-    ``severity``/the exit code. A named policy (``plugin_abi`` folds every
-    ``RISK_KINDS`` member into its breaking set; ``sdk_vendor`` downgrades
-    source-level kinds) or a ``PolicyFile`` kind-set override changes what
-    *fails the build* — it is a gating decision, not new evidence. Anchoring
-    ``evidence_status`` to the policy-resolved verdict would make a
-    policy-escalated deployment-risk finding (e.g. a plugin-ABI calling-
-    convention check treating ``COMPATIBLE_WITH_RISK`` as build-failing) read
-    ``artifact_proven``, mis-triaging it as a directly shipped-ABI-proven
-    break to JSON/SARIF consumers. So this always classifies against the
-    kind's own **strict_abi-intrinsic** category (:data:`BREAKING_KINDS` /
+    Earlier revisions honoured a per-finding ``Change.effective_verdict``
+    override, reasoning that (unlike a blanket named-policy kind-set swap) it
+    represented a decision about *this specific finding*. That reasoning
+    doesn't hold: ``effective_verdict`` is *also* the mechanism
+    ``buildsource.evidence_policy.apply_evidence_policy`` uses to sweep an
+    entire category of findings (build-context / source-only) to a uniform
+    verdict per a ``PolicyFile`` ``evidence_policy`` knob (``build_context_drift``
+    / ``source_only_findings`` / ``graph_risk_findings``, ADR-033 D7) — the
+    same kind of blanket gating sweep as a named policy's kind-set
+    reassignment, just implemented through a different field. There is no
+    field-level way to tell "a detector individually re-examined this one
+    finding" apart from "an operator's evidence-tier ceiling swept a whole
+    bucket" — so, to stay honest, **no** verdict-modulation mechanism moves
+    this. This always classifies against the kind's own
+    **strict_abi-intrinsic** category (:data:`BREAKING_KINDS` /
     :data:`API_BREAK_KINDS` / :data:`RISK_KINDS`), the same partition every
-    kind is registered under regardless of which policy profile is active.
+    kind is registered under regardless of the active policy, PolicyFile
+    overrides, or any per-finding ``effective_verdict``.
 
-    Two things still *do* override the kind-intrinsic category, both because
-    they represent a decision about *this specific finding*, not a blanket
-    policy sweep:
-
-    - ``EVIDENCE_REQUIRED_MISSING`` (ADR-033 D7) is itself the "missing
-      evidence" signal, not a break — always ``NOT_CHECKABLE``.
-    - a per-finding ``effective_verdict`` override (ADR-027 A4 pattern-aware
-      modulation, frozen-namespace escalation) — the same override
-      ``effective_category`` honours first, so a demoted/promoted finding's
-      ``evidence_status`` and ``severity`` still agree on *that* finding even
-      though both may now diverge from the untouched named-policy verdict.
+    ``EVIDENCE_REQUIRED_MISSING`` (ADR-033 D7) is the one kind-level
+    exception: it **is** the "missing evidence" signal, not a break, so it
+    always reads ``NOT_CHECKABLE``.
 
     ``CONSUMER_PROVEN`` (appcompat/runtime-demonstrated) is never returned
     here: it isn't derivable from a finding's own classification at all, so
@@ -1248,9 +1239,6 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
     kind = getattr(change, "kind", None)
     if kind == ChangeKind.EVIDENCE_REQUIRED_MISSING:
         return EvidenceStatus.NOT_CHECKABLE
-    override = getattr(change, "effective_verdict", None)
-    if isinstance(override, Verdict):
-        return _VERDICT_TO_EVIDENCE_STATUS.get(override)
     if kind in BREAKING_KINDS:
         return EvidenceStatus.ARTIFACT_PROVEN
     if kind in API_BREAK_KINDS:
