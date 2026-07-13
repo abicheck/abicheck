@@ -18,8 +18,8 @@ struct Base2 {
 // (Base1 is primary; Base2 is secondary). The Itanium ABI compiles this
 // override behind a "non-virtual this-adjusting" thunk (`_ZThn..._`) that
 // subtracts Base2's offset from `this` before jumping to the real
-// implementation, so a call through a Base1*/Derived* (which see `this` as
-// the complete object) and a call through a Base2* (which see `this` as the
+// implementation, so a call through a Derived* (which sees `this` as the
+// complete object) and a call through a Base2* (which sees `this` as the
 // Base2 subobject) both land in the same code correctly adjusted.
 struct Derived : Base1, Base2 {
     int f2() override;

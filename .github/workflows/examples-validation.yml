@@ -316,6 +316,7 @@ jobs:
             --proof-python-api \
             --proof-reconcile \
             --proof-snapshot-pair \
+            --proof-kabi \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix

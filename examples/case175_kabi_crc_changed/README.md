@@ -4,7 +4,7 @@
 
 ## What this case is about
 
-```
+```text
 v1.symvers:
 0x8f3a2c11	ext4_iget	fs/ext4/ext4	EXPORT_SYMBOL_GPL	EXT4
 

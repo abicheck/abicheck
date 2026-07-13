@@ -15,16 +15,16 @@
 ## What this case is about
 
 ```c
-/* v1 and v2 share the same source. Only the compiler flag differs. */
+/* v1 and v2 implement identical logic. Only the compiler flag differs. */
 int dispatch(int which, int a, int b) {
     binop_fn table[2] = { add, sub };
     return table[which & 1](a, b);   /* indirect call through a pointer */
 }
 ```
 
-```
-v1: gcc -shared -fPIC -fcf-protection=full lib.c -o libv1.so
-v2: gcc -shared -fPIC -fcf-protection=none lib.c -o libv2.so
+```text
+v1: gcc -shared -fPIC -fcf-protection=full v1.c -o libv1.so
+v2: gcc -shared -fPIC -fcf-protection=none v2.c -o libv2.so
 ```
 
 The **source is unchanged**. `-fcf-protection` controls whether the compiler

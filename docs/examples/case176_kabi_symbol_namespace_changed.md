@@ -14,7 +14,7 @@
 
 ## What this case is about
 
-```
+```text
 v1.symvers:
 0x4e2f9a10	drm_mode_object_add	drivers/gpu/drm/drm	EXPORT_SYMBOL
 
@@ -43,7 +43,7 @@ control, independent of the CRC:
 A module built against v1 that imports `drm_mode_object_add` normally will
 fail to load against a v2 kernel with:
 
-```
+```text
 drm_mode_object_add: exists, but namespace DRM does not match the module's
 imported namespaces: (empty)
 ```

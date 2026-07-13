@@ -48,11 +48,15 @@ several findings at once on a stripped binary:
 
 The first three all describe **how a `Diamond*` is used after construction**
 (dispatch, typeinfo, this-adjustment). `vtt_slot_count_changed` describes
-something none of them do: **how a `Diamond` is built in the first place.**
-A consumer that embeds a `Diamond` by value, copies one, or otherwise
-allocates space for one using its own compiled-in `sizeof(Diamond)` is
-affected purely by the construction-scaffolding change — independent of
-whether it ever calls a virtual function at all.
+something none of them do: **how a `Diamond` is built in the first place** —
+it is the construction-time binary evidence that the virtual-inheritance
+shape changed. The object-layout consequence of that same shape change (a
+consumer's compiled-in `sizeof(Diamond)` disagreeing with the library's
+actual size — see the Real Failure Demo below) comes from `Diamond` actually
+growing once `Mixin` is added, not from the VTT itself; the VTT's size is the
+signal that lets abicheck see the construction-scaffolding change even on a
+stripped binary that carries none of the type information needed to compute
+`sizeof(Diamond)` directly.
 
 ## What abicheck detects
 

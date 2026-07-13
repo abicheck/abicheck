@@ -185,6 +185,73 @@ abicheck workflow:         abidiff workflow:
 
 ---
 
+## Cases 171–181: modern-detector coverage vs ABICC/abidiff
+
+The original 55-scenario matrix above predates a set of newer detector
+families added by the G23 work (loader/runtime, kernel kABI, deep C++
+multiple-inheritance layout, security hardening, source-graph cross-checks).
+Cases 171–181 in the example catalog were added to give each of these a
+concrete demonstration; running them through `scripts/benchmark_comparison.py`
+against real `abidiff` 2.4.0 and `abi-compliance-checker` 2.3 (frozen results
+in `scripts/frozen_competitor_results.json`) shows how much of this newer
+surface those tools cover at all:
+
+| ChangeKind | Expected | abicheck | abidiff 2.4.0 | ABICC 2.3 (`abi-dumper`) |
+|---|---|---|---|---|
+| `static_tls_introduced` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `vtable_thunk_offset_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `vtt_slot_count_changed` | BREAKING | ✅ BREAKING | ❌ COMPATIBLE | ✅ BREAKING |
+| `secondary_vtable_group_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `kabi_crc_changed` | BREAKING | ✅ (verified directly — see note) | N/A — no `Module.symvers` concept | N/A — no `Module.symvers` concept |
+| `kabi_symbol_namespace_changed` | BREAKING | ✅ (verified directly — see note) | N/A — no `Module.symvers` concept | N/A — no `Module.symvers` concept |
+| `long_double_abi_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `unnamed_type_in_public_abi` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ COMPATIBLE | ❌ COMPATIBLE |
+| `cet_protection_weakened` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `symbol_binding_lost_unique` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE | ❌ COMPATIBLE |
+| `public_to_internal_dependency` | (L5 cross-check finding) | ✅ MATCH | N/A — no L5 source-graph concept | N/A — no L5 source-graph concept |
+
+**abicheck: 9/9 scored (100%)** — the two kABI rows are excluded from the
+harness's own scoring because `benchmark_comparison.py` only knows how to
+drive compiled-`.so` cases; it has no `Module.symvers` input path, so it
+reports `NO_SOURCE` for both tools *including abicheck's own column* in the
+raw run. That is a benchmark-harness gap, not a detection gap: `abicheck
+compare v1.symvers v2.symvers` correctly reports `kabi_crc_changed` /
+`kabi_symbol_namespace_changed` for both (verified directly — see
+`examples/case175_kabi_crc_changed/README.md` and
+`examples/case176_kabi_symbol_namespace_changed/README.md` — and covered by
+`tests/test_kabi_examples.py`).
+
+**abidiff: 3/8 scored (37%), ABICC: 4/8 scored (50%).** Both misses cluster in
+the same place: neither tool reads anything outside DWARF type/layout info +
+symbol table presence, so ELF dynamic-section/GNU-property facts
+(`DF_STATIC_TLS`, `.note.gnu.property` CET bits, `STB_GNU_UNIQUE` binding) are
+invisible to both — they report `NO_CHANGE`/`COMPATIBLE` on a real security or
+loader-contract regression. `vtt_slot_count_changed` is the one case where
+abidiff's own binary-diff heuristics miss a signal abicheck and ABICC's
+dumper both catch (the `_ZTT` construction-vtable size change). Neither tool
+has any concept of Linux kABI manifests or an L5 source-dependency graph, so
+those rows are a structural "N/A", not a false negative — nothing to score
+against.
+
+Two tool lanes are intentionally excluded from the table:
+`abicheck_compat`/`abicheck_strict` (abicheck's own ABICC-compatibility
+modes, already tracked in the summary table above) score 50% here because
+they deliberately suppress newer non-ABICC-shaped findings to stay
+ABICC-comparable — that is by design, not a regression. `abicheck_full` (the
+Clang-plugin-instrumented L3/L4/L5 lane) reported `ERROR` for every case in
+this run because the `contrib/abicheck-clang-plugin` build wasn't available
+in the environment that produced this table — a local toolchain gap, not a
+result; rerun with the plugin built to get real L3+ numbers for this batch.
+
+Reproduce: `PYTHONPATH=. python3 scripts/benchmark_comparison.py --cases
+case171 case172 case173 case174 case175 case176 case177 case178 case179
+case180 case181` (add `--freeze abidiff abidiff_headers abicc_dumper
+abicc_xml` only when re-running against the **full** catalog — passing it
+alongside `--cases` overwrites the entire frozen file with just the
+filtered subset).
+
+---
+
 ## Upstream Issue Tracking
 
 | Issue | Topic | Status | Evidence | Notes |

@@ -20,9 +20,9 @@ __thread int counter = 0;
 int bump(void) { return ++counter; }
 ```
 
-```
-v1: gcc -shared -fPIC              lib.c   -o libv1.so   (global-dynamic TLS)
-v2: gcc -shared -fPIC -ftls-model=initial-exec lib.c -o libv2.so   (initial-exec TLS)
+```text
+v1: gcc -shared -fPIC              v1.c   -o libv1.so   (global-dynamic TLS)
+v2: gcc -shared -fPIC -ftls-model=initial-exec v2.c -o libv2.so   (initial-exec TLS)
 ```
 
 The **source is unchanged**. Only the TLS access model selected at compile
@@ -46,7 +46,7 @@ This case demonstrates the **consequence**, read straight from the shipped
 A distributor who receives only the compiled library — no build logs, no
 compile database — can still see that the deployment contract changed:
 
-```
+```text
 $ readelf -d libv1.so | grep FLAGS      # (nothing — no DF_STATIC_TLS)
 $ readelf -d libv2.so | grep FLAGS
  0x000000000000001e (FLAGS)              STATIC_TLS
@@ -67,8 +67,8 @@ risk**: the library's runtime loading contract silently narrowed.
 ## How to reproduce (binary-only)
 
 ```bash
-gcc -shared -fPIC lib.c -o libv1.so
-gcc -shared -fPIC -ftls-model=initial-exec lib.c -o libv2.so
+gcc -shared -fPIC v1.c -o libv1.so
+gcc -shared -fPIC -ftls-model=initial-exec v2.c -o libv2.so
 
 python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
 python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
@@ -80,7 +80,6 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 ```bash
 gcc -g app.c -o app -ldl
-cp libv1.so libv1_active.so   # (or use libv1.so directly, matches app.c's dlopen path)
 ./app
 # dlopen succeeded; bump() = 1
 
@@ -93,9 +92,10 @@ libc reserved at process startup for later `dlopen()`s — a budget that varies
 by glibc version, `LD_DEBUG=statistics` tuning, and how many other
 `initial-exec` libraries are already loaded. On many systems it will simply
 work (the surplus absorbs one more consumer); on a host where the surplus is
-exhausted, `dlopen()` fails outright with `"cannot dynamically load
-executable"` or a similar loader error, and the plugin never loads at all —
-a hard load failure with no exported-symbol change to explain it. Because
+exhausted, `dlopen()` fails outright with glibc's
+`"cannot allocate memory in static TLS block"` (or an analogous diagnostic on
+other libcs), and the plugin never loads at all — a hard load failure with no
+exported-symbol change to explain it. Because
 this outcome is host-dependent, the demo is included for intuition but the
 **CI-graded proof is the `DF_STATIC_TLS` artifact fact above**, not whether
 this particular run happens to fail.

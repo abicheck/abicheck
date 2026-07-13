@@ -1,5 +1,5 @@
-/* v1 and v2 share byte-identical source. Only the compiler's
- * -fcf-protection flag differs between the two builds. */
+/* v1 and v2 implement identical logic. Only the compiler's -fcf-protection
+ * flag differs between the two builds. */
 int add(int a, int b) { return a + b; }
 int sub(int a, int b) { return a - b; }
 

@@ -53,6 +53,10 @@ SPECIAL_PROOFS = {
         "lane": "environment-drift-snapshot-pair",
         "proof": "tests/test_environment_drift.py::TestCase170Example",
     },
+    "kabi": {
+        "lane": "kabi-symvers-fixtures",
+        "proof": "tests/test_kabi_examples.py",
+    },
 }
 
 
@@ -86,6 +90,8 @@ def _case_owner(name: str, entry: dict[str, Any]) -> str:
         return "snapshot_pair"
     if "old.json" in (entry.get("fixtures") or []):
         return "l3l4l5"
+    if set(entry.get("fixtures") or []) == {"v1.symvers", "v2.symvers"}:
+        return "kabi"
     if entry.get("stub_pair"):
         return "python_api"
     if entry.get("bundle") is True or entry.get("category") == "bundle":
@@ -145,6 +151,7 @@ def build_matrix(
     proof_python_api: bool,
     proof_reconcile: bool = False,
     proof_snapshot_pair: bool = False,
+    proof_kabi: bool = False,
 ) -> dict[str, Any]:
     gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     gcc_results = _results_by_case(gcc)
@@ -200,6 +207,8 @@ def build_matrix(
             status, proof_lane, note = _special_status(
                 "snapshot_pair", proof_snapshot_pair
             )
+        elif owner == "kabi":
+            status, proof_lane, note = _special_status("kabi", proof_kabi)
         else:  # pragma: no cover - defensive future-proofing
             status, proof_lane, note = "UNRESOLVED", owner, "unknown owner"
 
@@ -250,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proof-python-api", action="store_true")
     parser.add_argument("--proof-reconcile", action="store_true")
     parser.add_argument("--proof-snapshot-pair", action="store_true")
+    parser.add_argument("--proof-kabi", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--allow-unresolved",
@@ -269,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
         proof_python_api=args.proof_python_api,
         proof_reconcile=args.proof_reconcile,
         proof_snapshot_pair=args.proof_snapshot_pair,
+        proof_kabi=args.proof_kabi,
     )
     text = json.dumps(matrix, indent=2)
     if args.out:

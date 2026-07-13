@@ -1,10 +1,10 @@
 {
  "cross_references": {
   "category_mapping": "breaking \u2192 BREAKING_KINDS | api_break \u2192 API_BREAK_KINDS | risk \u2192 RISK_KINDS | addition \u2192 ADDITION_KINDS | quality \u2192 QUALITY_KINDS | no_change \u2192 (empty)",
-  "crosscheck_engine": "abicheck/buildsource/crosscheck.py \u2014 run_crosschecks() produces the eight ADR-035 D4/D8 cross-source / audit ChangeKinds; the G20 corpus demonstrates seven of them (public_to_internal_dependency is not yet in a catalog case)",
+  "crosscheck_engine": "abicheck/buildsource/crosscheck.py \u2014 run_crosschecks() produces the eight ADR-035 D4/D8 cross-source / audit ChangeKinds; the G20 corpus demonstrates seven of them, and public_to_internal_dependency is demonstrated intra-version by case181_xcheck_public_to_internal_dependency",
   "evidence_tiers": "scripts/evidence_tiers.py \u2014 EVIDENCE_TIER_BY_KIND + KINDLESS_CASE_TIER compute min_evidence; benchmark_comparison.py --evidence-tiers runs the catalog per tier",
   "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)",
-  "g20_fixture_writer": "scripts/gen_g20_fixtures.py \u2014 single source of truth for the committed snapshot fixtures (snapshot.abi.json) of cases 143-151",
+  "g20_fixture_writer": "scripts/gen_g20_fixtures.py \u2014 single source of truth for the committed snapshot fixtures (snapshot.abi.json) of cases 143-151 and case181",
   "test_autodiscovery": "tests/test_example_autodiscovery.py \u2014 reads EXPECTED from this file",
   "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 loads each G20 case's committed snapshot fixture and asserts expected_crosscheck_kinds / expected_providers via run_crosschecks (compiler-free, fast lane)",
   "test_evidence_tiers": "tests/test_evidence_tiers.py \u2014 keeps min_evidence in sync with scripts/evidence_tiers.py",

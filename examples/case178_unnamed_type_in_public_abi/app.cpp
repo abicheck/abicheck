@@ -4,12 +4,12 @@
 // This app links against nothing from v1/v2 at compile time -- it loads
 // whichever library is present as "./libv1.so" at runtime and looks up
 // symbols purely by name. That is deliberate: most consumers only ever call
-// a stable `extern "C"` wrapper (pick_by_policy), but this demo instead
-// reaches for the raw, compiler-generated lambda invoker symbol -- exactly
-// the kind of direct dependency the finding warns is fragile. Its exact
-// spelling is an implementation detail of *this* compiler, *this* standard
-// library, and *this* translation unit's declaration order, not a contract
-// anyone declared.
+// a stable `extern "C"` wrapper (pick_larger, resolved below), but this demo
+// also reaches for the raw, compiler-generated lambda invoker symbol --
+// exactly the kind of direct dependency the finding warns is fragile. Its
+// exact spelling is an implementation detail of *this* compiler, *this*
+// standard library, and *this* translation unit's declaration order, not a
+// contract anyone declared.
 typedef int (*two_int_fn)(int, int);
 
 int main() {

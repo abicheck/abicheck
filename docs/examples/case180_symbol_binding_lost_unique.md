@@ -25,7 +25,7 @@ struct Registry {
 };
 ```
 
-```
+```text
 v1: g++ -shared -fPIC              v1.cpp -o libv1.so   (GNU_UNIQUE, the default)
 v2: g++ -shared -fPIC -fno-gnu-unique v2.cpp -o libv2.so   (ordinary weak binding)
 ```

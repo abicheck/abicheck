@@ -34,7 +34,8 @@ Itanium ABI compiles `Derived::f2()` behind a **non-virtual this-adjusting
 thunk** (`_ZThn16_...f2Ev`): a small stub that subtracts `Base2`'s byte
 offset within `Derived` from `this` before jumping to the real
 implementation, so the same override works correctly whether reached through
-a `Derived*`, a `Base1*`, or a `Base2*`.
+a `Derived*` or a `Base2*` (`Base1` does not declare `f2()`, so it is not a
+valid call path to it).
 
 v2 adds one field to `Base1`. `Derived`'s **method set is completely
 unchanged** — same virtual functions, same vtable slot count — but `Base1`
@@ -112,8 +113,10 @@ change to any function's name or signature.
 - Avoid inserting or resizing data members ahead of a secondary polymorphic
   base in a published class — it silently moves every subobject after it.
 - Prefer composition over multiple inheritance for classes whose layout is
-  part of a stable ABI, or keep secondary bases first so later growth cannot
-  shift their offset.
+  part of a stable ABI, or order bases so the ones most likely to grow are
+  declared *last* (as secondary bases) — the first non-virtual polymorphic
+  base always becomes primary and stays at offset 0, so only bases declared
+  after a growing one have their offset (and thunk adjustments) disturbed.
 
 ## References
 

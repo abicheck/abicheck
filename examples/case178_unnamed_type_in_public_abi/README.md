@@ -5,7 +5,7 @@
 ## What this case is about
 
 ```cpp
-// v1.h                                    // v2.h (adds a convenience overload)
+// v1.h                                    // v2.h (adds a convenience entry point)
 extern "C" int pick_larger(int a, int b);  extern "C" int pick_larger(int a, int b);
                                             extern "C" int pick_by_policy(int a, int b);
 ```

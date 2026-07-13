@@ -20,11 +20,13 @@ _REPO = Path(__file__).resolve().parent.parent
 _EXAMPLES = _REPO / "examples"
 _GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
 
-#: kABI cases: those shipping a v1.symvers/v2.symvers fixture pair.
+#: kABI cases: those shipping a v1.symvers/v2.symvers fixture pair. Order- and
+#: duplicate-insensitive so this predicate can't drift from
+#: tests/validate_examples.py's equivalent (set-based) precondition check.
 _KABI_CASES = sorted(
     name
     for name, info in _GT.items()
-    if info.get("fixtures") == ["v1.symvers", "v2.symvers"]
+    if set(info.get("fixtures") or []) == {"v1.symvers", "v2.symvers"}
 )
 
 
