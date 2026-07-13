@@ -90,14 +90,17 @@ abicheck collect -H v1.h --compile-db v1.compile_commands.json \
 abicheck collect -H v2.h --compile-db v2.compile_commands.json \
     --source-abi --source-abi-scope headers-only -o v2.evidence
 
-abicheck dump libtpl_v1.so -H v1.h --build-info v1.evidence --ast-frontend clang -o v1.abi.json
-abicheck dump libtpl_v2.so -H v2.h --build-info v2.evidence --ast-frontend clang -o v2.abi.json
+abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence --ast-frontend clang -o v1.abi.json
+abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence --ast-frontend clang -o v2.abi.json
 
 abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
     # → COMPATIBLE_WITH_RISK, template_body_changed on clamp
 ```
 (`--ast-frontend clang` is only needed on a castxml-less host; drop it if
-castxml is installed.)
+castxml is installed. `-p`/`--compile-db` on `dump` matters too: without it,
+the L2 header AST is parsed without the build's flags and `compare` also
+reports an unrelated `header_parse_context_drift` risk finding alongside
+`template_body_changed`.)
 
 ## How to mitigate
 For ABI-sensitive templates, ship **explicit instantiations**
