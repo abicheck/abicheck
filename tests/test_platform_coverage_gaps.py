@@ -477,6 +477,31 @@ class TestMachoExportTrieBudgets:
         with pytest.raises(ValueError, match="result budget"):
             _walk_export_trie(root + leaf)
 
+    def test_node_budget_is_enforced_before_visiting_child(self, monkeypatch):
+        monkeypatch.setattr("abicheck.macho_metadata._TRIE_MAX_NODES", 1)
+        root = b"\x00\x01a\x00" + self._uleb(5)
+        leaf = b"\x01\x00\x00"
+
+        with pytest.raises(ValueError, match="node budget"):
+            _walk_export_trie(root + leaf)
+
+    def test_cumulative_symbol_byte_budget_is_enforced(self, monkeypatch):
+        monkeypatch.setattr("abicheck.macho_metadata._TRIE_MAX_SYMBOL_BYTES", 3)
+        root = b"\x00\x01ab\x00" + self._uleb(6)
+        middle = b"\x00\x01cd\x00" + self._uleb(12)
+        leaf = b"\x01\x00\x00"
+
+        with pytest.raises(ValueError, match="symbol data budget"):
+            _walk_export_trie(root + middle + leaf)
+
+    def test_cumulative_symbol_byte_budget_allows_exact_boundary(self, monkeypatch):
+        monkeypatch.setattr("abicheck.macho_metadata._TRIE_MAX_SYMBOL_BYTES", 4)
+        root = b"\x00\x01ab\x00" + self._uleb(6)
+        middle = b"\x00\x01cd\x00" + self._uleb(12)
+        leaf = b"\x01\x00\x00"
+
+        assert _walk_export_trie(root + middle + leaf) == [("abcd", 0)]
+
     def test_symbol_name_length_budget_is_enforced(self, monkeypatch):
         monkeypatch.setattr("abicheck.macho_metadata._TRIE_MAX_SYMBOL_LENGTH", 1)
         root = b"\x00\x01ab\x00" + self._uleb(6)
