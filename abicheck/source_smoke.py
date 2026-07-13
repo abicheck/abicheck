@@ -115,16 +115,44 @@ def run_source_smoke(
         src.write_text(code, encoding="utf-8")
         mode = side.mode or spec.mode
         exe = work_dir / f"{label}.out"
+        # MSVC's cl.exe doesn't understand GCC/Clang flag syntax at all (it
+        # warns D9002/D9035 and ignores -std=/-o rather than acting on them,
+        # so the smoke compile silently doesn't do what's expected).
+        is_msvc = Path(compiler).stem.lower() == "cl"
+        # /EHsc: standard C++ exception-unwind semantics. Without it cl.exe
+        # still compiles try/catch code (just a C4530 warning), but the
+        # generated unwind behavior is unreliable — not what "the same code
+        # compiles the same way under a different compiler" is meant to prove.
+        msvc_cxx_flags = ["/EHsc"] if spec.standard.startswith("c++") else []
         if mode == "syntax":
-            cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), "-fsyntax-only", str(src)]
+            if is_msvc:
+                cmd = [
+                    compiler, f"/std:{spec.standard}", *msvc_cxx_flags,
+                    f"/I{case_dir}", "/Zs", str(src),
+                ]
+            else:
+                cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), "-fsyntax-only", str(src)]
         elif mode in {"link", "run"}:
             lib_source = case_dir / (side.lib_source or f"{label}.cpp")
-            cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), str(lib_source), str(src), "-o", str(exe)]
+            if is_msvc:
+                cmd = [
+                    compiler, f"/std:{spec.standard}", *msvc_cxx_flags, f"/I{case_dir}",
+                    str(lib_source), str(src), f"/Fe:{exe}",
+                ]
+            else:
+                cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), str(lib_source), str(src), "-o", str(exe)]
         else:
             raise ValueError(f"unsupported source_smoke mode: {mode}")
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            # cwd=work_dir keeps cl.exe's default-named .obj droppings (it has
+            # no -fsyntax-only equivalent that skips them for /Zs, and link
+            # mode always writes one per source) inside the per-test tmp dir
+            # instead of the shared process CWD, where parallel (-n auto)
+            # workers running this smoke check concurrently could collide.
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, cwd=str(work_dir),
+            )
             compiled = proc.returncode == 0
             detail = (proc.stderr or proc.stdout or "").strip().splitlines()[:4]
             if compiled and mode == "run":

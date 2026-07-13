@@ -21,11 +21,11 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 15 | `API_BREAK_KINDS` | 🟠 |
+| API_BREAK | 14 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 7 | — | ✅ |
+| NO_CHANGE | 8 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -228,7 +228,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | 🔴 BREAKING |
 | [103](case103_toolchain_flag_drift/README.md) | Toolchain flag drift (`toolchain_flag_drift`) | Quality | 🟢 COMPATIBLE (bad practice) |
 | [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | Breaking | 🔴 BREAKING (bad practice) |
-| [105](case105_concept_tightening/README.md) | Concept Tightening (C++20) | API Break | 🟠 API_BREAK |
+| [105](case105_concept_tightening/README.md) | Concept Tightening (C++20) | No Change | ✅ NO_CHANGE |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | 🟠 API_BREAK |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (historical ABI break) | Breaking | 🔴 BREAKING |
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (historical ABI break — vtable angle) | Breaking | 🔴 BREAKING |
