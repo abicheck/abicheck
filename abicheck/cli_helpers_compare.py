@@ -26,6 +26,7 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -552,6 +553,16 @@ def fold_l0_hard_removals(
     mtime-preserving rebuild — e.g. ``cp -p`` — can still slip through;
     Codex review), but a proportionate check for a best-effort enrichment
     that's already documented to swallow anything short of a clean match.
+
+    The mtime side of that check is skipped while ``SOURCE_DATE_EPOCH`` is
+    set: ``dumper._safe_mtime`` then records the fixed epoch rather than the
+    binary's real mtime (reproducible-builds spec), so a live re-probe's
+    *real* mtime almost never equals it — even for a direct ``compare a.so
+    b.so -H`` where both snapshots were just built in this same process and
+    there is no rebuild/replace window to guard against at all. Without this
+    carve-out, setting ``SOURCE_DATE_EPOCH`` would silently and permanently
+    disable this fold-in (Codex review). Size still applies unconditionally —
+    it isn't epoch-gated and remains a real (if imperfect) identity signal.
     """
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
@@ -577,10 +588,15 @@ def fold_l0_hard_removals(
         new_now_stat = Path(new_path).stat()
     except OSError:
         return extra_changes
+    mtime_gated = bool(os.environ.get("SOURCE_DATE_EPOCH"))
     if (
-        old_now_stat.st_mtime != old_snapshot_mtime
-        or new_now_stat.st_mtime != new_snapshot_mtime
-        or old_now_stat.st_size != old_snapshot_size
+        not mtime_gated
+        and (
+            old_now_stat.st_mtime != old_snapshot_mtime
+            or new_now_stat.st_mtime != new_snapshot_mtime
+        )
+    ) or (
+        old_now_stat.st_size != old_snapshot_size
         or new_now_stat.st_size != new_snapshot_size
     ):
         return extra_changes
