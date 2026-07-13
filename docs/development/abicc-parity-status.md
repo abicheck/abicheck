@@ -233,67 +233,73 @@ has any concept of Linux kABI manifests or an L5 source-dependency graph, so
 those rows are a structural "N/A", not a false negative — nothing to score
 against.
 
-### abicheck's own modes on the same 11 cases
+### abicheck's two evidence depths on the same 11 cases
 
-The table above uses abicheck's native `compare` command (the actual product
-surface for these cases — 9/9, 100%). abicheck ships three other entry
-points benchmarked alongside it; their scores on this batch aren't a second
-opinion on detection capability, they're each mode doing exactly what it's
-designed to do:
+The table above uses abicheck's native `compare` command at **L2** (binary +
+headers — the actual product surface for these cases, 9/9, 100%). The
+benchmark harness (`scripts/benchmark_comparison.py`) also runs abicheck at
+**L3-L5** (`abicheck_full`, the Clang-plugin-instrumented lane: builds each
+case with `contrib/abicheck-clang-plugin`, captures per-declaration source
+facts, and merges that pack before comparing) — the two depths that actually
+matter for a tool-vs-tool comparison. (The harness previously also
+benchmarked the `abicheck compat`/`compat -s` ABICC-drop-in CLI modes as
+separate columns; those remain real product features — see
+[How each tool analyses ABI](../reference/tool-comparison.md#how-each-tool-analyses-abi)
+— but they wrap the same `compare` detection engine behind a different exit
+code, so they were dropped from this cross-tool benchmark as redundant with
+the `compare` row.)
 
-| ChangeKind | Expected | `abicheck compare` | `abicheck compat` | `compat -s` (strict) | `abicheck_full` (L3-L5 plugin) |
-|---|---|---|---|---|---|
-| `static_tls_introduced` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
-| `vtable_thunk_offset_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
-| `vtt_slot_count_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
-| `secondary_vtable_group_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
-| `long_double_abi_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING | ✅ BREAKING | ERROR (infra) |
-| `unnamed_type_in_public_abi` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
-| `cet_protection_weakened` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
-| `symbol_binding_lost_unique` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | BREAKING | ERROR (infra) |
+| ChangeKind | Expected | `abicheck` (L2) | `abicheck_full` (L3-L5) |
+|---|---|---|---|
+| `static_tls_introduced` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK |
+| `vtable_thunk_offset_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `vtt_slot_count_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `secondary_vtable_group_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `kabi_crc_changed` | BREAKING | ✅ (verified directly — see note above) | N/A — no compilable source (`Module.symvers` fixture) |
+| `kabi_symbol_namespace_changed` | BREAKING | ✅ (verified directly — see note above) | N/A — no compilable source (`Module.symvers` fixture) |
+| `long_double_abi_changed` | BREAKING | ✅ BREAKING | ✅ BREAKING |
+| `unnamed_type_in_public_abi` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK |
+| `cet_protection_weakened` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK |
+| `symbol_binding_lost_unique` | COMPATIBLE_WITH_RISK | ✅ COMPATIBLE_WITH_RISK | ❌ NO_CHANGE |
+| `public_to_internal_dependency` | (L5 cross-check finding) | ✅ MATCH | ✅ MATCH |
 
-- **`abicheck compat`** (`abicheck/compat/cli.py`, the ABICC drop-in-replacement
-  CLI — takes ABICC-format XML descriptors, invoked via `compat check`) —
-  **8/8 (100%), same detection accuracy as native `compare`.** Its *report
-  text* prints the precise verdict (`Verdict: COMPATIBLE_WITH_RISK`) for all
-  four RISK cases, confirmed by inspecting the raw output directly — nothing
-  about compat mode's detection is coarser. What *is* coarser, by design, is
-  its **exit code**: compat mode's exit scheme (0/1/2, mirroring ABICC's own
-  compatible/incompatible/API-break codes) has no separate "risk" bucket, so
-  `COMPATIBLE_WITH_RISK` and `COMPATIBLE` both exit 0 — a CI gate keyed only
-  on exit code, not report text, would treat them the same. (This table
-  originally under-reported compat mode as 4/8 because
-  `scripts/benchmark_comparison.py`'s own scoring script only parsed the exit
-  code plus a couple of substring checks and never looked for
-  `compatible_with_risk` in the text — a benchmark-harness bug, now fixed;
-  it did not reflect a real gap in the tool.)
-- **`compat -s`/strict** (the `-s` strict flag, documented to promote
-  `API_BREAK` → `BREAKING`) — **4/8 (50%), and notably these are the same
-  four RISK cases, now promoted via the exit code all the way to `BREAKING`
-  (confirmed: exit code 1, not just report text).** That's a wider promotion
-  than the flag's stated `API_BREAK`→`BREAKING` description — strict mode is
-  treating any non-`NO_CHANGE` finding as a hard release gate, which is a
-  legitimate "when in doubt, block the release" security-conscious policy
-  choice for a CI gate, but means strict mode over-calls exactly the four
-  cases whose whole teaching point is "compatible but should not silently
-  ship" (CET, TLS, GNU_UNIQUE, the lambda leak) as full breaks — worth
-  knowing if you wire `-s` into a release gate expecting graduated severity
-  rather than a binary pass/fail.
-- **`abicheck_full`** (the Clang-plugin-instrumented L3–L5 lane, builds each
-  case with `contrib/abicheck-clang-plugin` and merges the resulting source
-  pack before comparing) — reported `ERROR` for every case in this run,
-  **including pre-existing catalog cases (verified against case01/case02)**,
-  because the clang plugin wasn't built in the environment that produced
-  this table. This is a local toolchain gap in how the table was generated,
-  not a result to read anything into; rerun with the plugin built
-  (`contrib/abicheck-clang-plugin/`) to get real L3+ numbers for this batch.
+**abicheck (L2): 9/9 scored (100%).** **abicheck_full (L3-L5): 8/9 scored
+(89%)** — case175/176 are excluded from `abicheck_full`'s own denominator for
+the same structural reason as every other tool's row (no compiled `.so` to
+build against a `Module.symvers` fixture).
+
+- **`symbol_binding_lost_unique` is a real, structural miss for the L3-L5
+  lane, not a benchmark-harness bug.** `abicheck_full` can only load
+  `contrib/abicheck-clang-plugin` into **Clang** (a Clang AST plugin is
+  ABI-locked to the loading compiler, per ADR-038 C.5 — there is no GCC
+  equivalent), so `_build_plugin_side()` always compiles the case's v1/v2
+  targets with `clang`/`clang++`, regardless of which compiler the L2 lane
+  used. `STB_GNU_UNIQUE` is a GCC-specific COMDAT-guard-variable binding —
+  verified empirically (this session) that Clang never emits it, at any
+  optimization level, for identical source. So the very ELF fact case180
+  demonstrates is invisible to a clang-only build, independent of how good
+  the plugin's fact capture is. The L2 lane sees it because it dumps the
+  case's real prebuilt `.so` (built with whichever compiler the example's
+  `CMakeLists.txt`/CI matrix selected — GCC for this case), not a
+  plugin-instrumented rebuild.
+- The Clang facts plugin itself needs `llvm-{N}-dev`/`libclang-{N}-dev` (not
+  just the `clang`/`clang++` binaries) to configure — `find_package(LLVM
+  REQUIRED CONFIG)` needs `LLVMConfig.cmake`, which only ships in the `-dev`
+  package. Verified building and running it end-to-end in this session
+  (`cmake -S contrib/abicheck-clang-plugin -B build/plugin ... && cmake
+  --build build/plugin`, then the C.6 differential-conformance test in
+  `contrib/abicheck-clang-plugin/tests/conformance.py`) — this is also what
+  `.github/workflows/clang-plugin.yml` installs on every matrix leg.
+  `scripts/benchmark_comparison.py`'s `_find_or_build_abicheck_plugin()`
+  builds the plugin on demand the same way once those packages are present;
+  no harness code change was needed, only the missing system packages.
 
 Reproduce: `PYTHONPATH=. python3 scripts/benchmark_comparison.py --cases
 case171 case172 case173 case174 case175 case176 case177 case178 case179
-case180 case181` (add `--freeze abidiff abidiff_headers abicc_dumper
-abicc_xml` only when re-running against the **full** catalog — passing it
-alongside `--cases` overwrites the entire frozen file with just the
-filtered subset).
+case180 case181 --tools abicheck abicheck_full` (add `--freeze abidiff
+abidiff_headers abicc_dumper abicc_xml` only when re-running against the
+**full** catalog — passing it alongside `--cases` overwrites the entire
+frozen file with just the filtered subset).
 
 ---
 

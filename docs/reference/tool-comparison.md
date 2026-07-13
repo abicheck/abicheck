@@ -389,7 +389,7 @@ often would it tell me the truth?"*
 ```bash
 python3 scripts/benchmark_comparison.py \
   --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
-  --skip-compat --freeze abidiff abidiff_headers abicc_dumper abicc_xml
+  --freeze abidiff abidiff_headers abicc_dumper abicc_xml
 ```
 
 | Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
@@ -529,7 +529,15 @@ break).
 > **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
 > above, which covers all 170 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
-> release-pinned methodology and historical numbers.
+> release-pinned methodology and historical numbers. The harness has since
+> dropped the standalone `abicheck_compat`/`abicheck_strict` tool lanes (the
+> cross-tool comparison now benchmarks only the two evidence depths that
+> matter for tool-vs-tool comparison — `abicheck` at L2 and `abicheck_full`
+> at L3-L5); `abicheck compat`/`compat check -s` remain real CLI modes,
+> documented above under "How each tool analyses ABI", just no longer
+> re-benchmarked as separate harness columns. The `--tools`/`--skip-compat`
+> flags below reflect the harness as it existed at the time and are not
+> reproducible verbatim on the current script.
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
 74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
