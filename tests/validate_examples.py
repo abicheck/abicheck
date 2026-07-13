@@ -382,7 +382,8 @@ def _build_with_cmake(
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     ]
-    if sys.platform == "win32" and shutil.which("ninja"):
+    used_ninja = sys.platform == "win32" and bool(shutil.which("ninja"))
+    if used_ninja:
         # The default Windows generator (Visual Studio/MSBuild) drives builds
         # through FileTracker .tlog files nested under
         # <target>.dir/<config>/<hash>.tlog/ — deep enough under an already-
@@ -411,11 +412,22 @@ def _build_with_cmake(
 
     v1_target = f"{case_name}_v1"
     v2_target = f"{case_name}_v2"
-    r = subprocess.run(
-        [cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
-         "--config", build_type],
-        capture_output=True, text=True, timeout=120,
-    )
+    build_cmd = [
+        cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
+        "--config", build_type,
+    ]
+    r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0 and used_ninja:
+        # Observed once (cold build only, never on a warm one): ninja/MSVC's
+        # generated intermediate — a manifest or WINDOWS_EXPORT_ALL_SYMBOLS
+        # .def file — isn't visible yet when the very next step (rc.exe /
+        # link.exe) reads it, even though ninja's own build graph declares
+        # it as an output of the prior step. A second invocation always
+        # succeeds (ninja's dependency state file is now warm), consistent
+        # with a first-build-only race in this CMake/Ninja/MSVC toolset
+        # combination rather than a real, reproducible build error — retry
+        # once before giving up.
+        r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
         return None, None, f"cmake build failed: {_cmake_error_detail(r)}"
 
@@ -1082,15 +1094,16 @@ def _run_source_smoke(
     # consumer-runtime-corruption proofs assume Itanium C++ ABI base-class
     # layout evolution and don't reproduce under MSVC's own ABI rules, where
     # the same source change can legitimately not corrupt memory in an
-    # observable way. Declared, not silently dropped: it's a SKIP (not a
-    # false PASS) so the harness records that this platform doesn't exercise
-    # the check, rather than claiming success it didn't earn.
+    # observable way. Treated exactly like "no source_smoke declared" for
+    # this platform (return None, not a CaseResult): the case can still
+    # support this platform at the detector/compare level even though this
+    # one runtime proof doesn't apply here — returning a SKIP CaseResult
+    # would make run_case() stop before ever reaching that build/dump/
+    # compare path (Codex review), silently un-checking a platform the case
+    # otherwise declares support for.
     smoke_platforms = smoke.get("platforms")
     if smoke_platforms and CURRENT_PLATFORM not in smoke_platforms:
-        return CaseResult(
-            name, "SKIP", expected_raw, None,
-            f"source_smoke not applicable on {CURRENT_PLATFORM}",
-        )
+        return None
 
     spec = SourceSmokeSpec.from_dict(smoke)
     compiler = _find_compiler(spec.standard.startswith("c++"))

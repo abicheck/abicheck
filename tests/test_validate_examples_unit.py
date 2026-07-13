@@ -156,7 +156,12 @@ class TestRunSourceSmoke:
     def test_no_source_smoke_declared_returns_none(self, tmp_path):
         assert _run_source_smoke("caseX", {}, tmp_path, tmp_path, None) is None
 
-    def test_platform_not_listed_is_skip_not_fail(self, tmp_path):
+    def test_platform_not_listed_falls_through_to_verdict_check(self, tmp_path):
+        # None (not a CaseResult) — same as "no source_smoke declared" for
+        # this platform, so run_case() still reaches the build/dump/compare
+        # path for a case that otherwise supports this platform (Codex
+        # review: a SKIP CaseResult would short-circuit run_case() before
+        # the verdict check ever runs, silently un-checking the platform).
         entry = {
             "source_smoke": {
                 "platforms": ["linux", "macos"],
@@ -165,8 +170,7 @@ class TestRunSourceSmoke:
         }
         with patch.object(ve, "CURRENT_PLATFORM", "windows"):
             result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "BREAKING")
-        assert result.status == "SKIP"
-        assert "windows" in result.message
+        assert result is None
 
     def test_platform_listed_runs_for_real(self, tmp_path):
         entry = {
