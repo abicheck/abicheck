@@ -126,6 +126,23 @@ def _safe_mtime(path: Path) -> float | None:
         return None
 
 
+def _safe_size(path: Path) -> int | None:
+    """Return path's byte size, or None if it can't be stat'd right now.
+
+    Unlike ``_safe_mtime``, this needs no ``SOURCE_DATE_EPOCH`` gating: two
+    reproducible builds of identical binary content have identical size by
+    definition, so recording the real size never threatens the
+    byte-identical-dump guarantee. A second, cheap identity signal alongside
+    mtime for ``fold_l0_hard_removals``'s re-check (Codex review) — mtime
+    alone can't catch a content-preserving-timestamp rebuild (``cp -p``,
+    ``touch -r``, a coarse-mtime filesystem).
+    """
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
 
@@ -1559,6 +1576,7 @@ def _build_symbol_only_snapshot(
         version=version,
         source_path=str(so_path.resolve()),
         source_mtime=_safe_mtime(so_path),
+        source_size=_safe_size(so_path),
         functions=[
             Function(
                 name=sym,
@@ -1689,6 +1707,7 @@ def _dump_elf(
         version=version,
         source_path=str(so_path.resolve()),
         source_mtime=_safe_mtime(so_path),
+        source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1773,6 +1792,7 @@ def _dump_macho(
             version=version,
             source_path=str(dylib_path.resolve()),
             source_mtime=_safe_mtime(dylib_path),
+            source_size=_safe_size(dylib_path),
             functions=[
                 Function(
                     name=_normalize_macho_sym(exp.name),
@@ -1825,6 +1845,7 @@ def _dump_macho(
         version=version,
         source_path=str(dylib_path.resolve()),
         source_mtime=_safe_mtime(dylib_path),
+        source_size=_safe_size(dylib_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),
@@ -1882,6 +1903,7 @@ def _dump_pe(
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_safe_mtime(dll_path),
+            source_size=_safe_size(dll_path),
             functions=[
                 Function(
                     name=sym, mangled=sym, return_type="?",
@@ -1912,6 +1934,7 @@ def _dump_pe(
         version=version,
         source_path=str(dll_path.resolve()),
         source_mtime=_safe_mtime(dll_path),
+        source_size=_safe_size(dll_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
         types=parser.parse_types(),

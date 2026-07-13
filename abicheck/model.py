@@ -435,6 +435,14 @@ class AbiSnapshot:
     # Honours SOURCE_DATE_EPOCH the same way created_at does (dumper._safe_mtime)
     # so two dumps of identical binary content stay byte-identical.
     source_mtime: float | None = field(default=None, kw_only=True)
+    # st_size of source_path at dump time — a second, cheap identity signal
+    # alongside source_mtime for the same fold_l0_hard_removals re-check.
+    # mtime alone can't catch a content-preserving-timestamp rebuild (e.g.
+    # `cp -p`, `touch -r`, a coarse-mtime filesystem); size doesn't need
+    # SOURCE_DATE_EPOCH gating the way mtime does — two reproducible builds
+    # of identical content have identical size by definition, so recording
+    # the real size never threatens the byte-identical-dump guarantee.
+    source_size: int | None = field(default=None, kw_only=True)
 
     # ADR-028 (schema v7) — optional reference to an out-of-band BuildSourcePack
     # carrying L3/L4/L5 source/build/graph evidence. Only a lightweight

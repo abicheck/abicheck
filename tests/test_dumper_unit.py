@@ -23,6 +23,7 @@ from abicheck.dumper import (
     _pyelftools_exported_symbols,
     _resolve_debug_metadata,
     _safe_mtime,
+    _safe_size,
     _vt_sort_key,
 )
 from abicheck.model import Visibility
@@ -65,6 +66,25 @@ class TestSafeMtime:
         p.write_bytes(b"")
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
         assert _safe_mtime(p) == p.stat().st_mtime
+
+
+class TestSafeSize:
+    def test_returns_size_for_existing_file(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"abicheck")
+        assert _safe_size(p) == 8
+
+    def test_returns_none_when_path_missing(self, tmp_path):
+        assert _safe_size(tmp_path / "does_not_exist.so") is None
+
+    def test_not_gated_by_source_date_epoch(self, tmp_path, monkeypatch):
+        # Unlike _safe_mtime, size is a property of content, not timestamps
+        # — two reproducible builds of identical content have identical
+        # size by definition, so it needs no SOURCE_DATE_EPOCH gating.
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"abicheck")
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000000000")
+        assert _safe_size(p) == 8
 
 
 # ── _parse_vtable_index ─────────────────────────────────────────────────

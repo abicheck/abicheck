@@ -540,14 +540,18 @@ def fold_l0_hard_removals(
     resolution failures are swallowed and *extra_changes* is returned
     unchanged.
 
-    Identity-checked against ``source_mtime``: a pre-dumped JSON snapshot
-    read back into ``compare snap1.json snap2.json`` records the mtime the
-    binary had at dump time; if the file at ``source_path`` has since
-    changed (rebuilt in place, or the path reused for something else) the
-    re-probe would assert a fact about a *different* binary than the one
-    the snapshots actually describe, making the compare non-reproducible.
-    When the mtimes don't match — or either snapshot predates this field —
-    the fold-in declines rather than trust a possibly-stale binary.
+    Identity-checked against ``source_mtime``/``source_size``: a pre-dumped
+    JSON snapshot read back into ``compare snap1.json snap2.json`` records
+    the mtime and byte size the binary had at dump time; if the file at
+    ``source_path`` has since changed (rebuilt in place, or the path reused
+    for something else) the re-probe would assert a fact about a *different*
+    binary than the one the snapshots actually describe, making the compare
+    non-reproducible. When either doesn't match — or either snapshot
+    predates these fields — the fold-in declines rather than trust a
+    possibly-stale binary. Not a cryptographic guarantee (a same-size,
+    mtime-preserving rebuild — e.g. ``cp -p`` — can still slip through;
+    Codex review), but a proportionate check for a best-effort enrichment
+    that's already documented to swallow anything short of a clean match.
     """
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
@@ -559,14 +563,26 @@ def fold_l0_hard_removals(
 
     old_snapshot_mtime = getattr(old, "source_mtime", None)
     new_snapshot_mtime = getattr(new, "source_mtime", None)
-    if old_snapshot_mtime is None or new_snapshot_mtime is None:
+    old_snapshot_size = getattr(old, "source_size", None)
+    new_snapshot_size = getattr(new, "source_size", None)
+    if (
+        old_snapshot_mtime is None
+        or new_snapshot_mtime is None
+        or old_snapshot_size is None
+        or new_snapshot_size is None
+    ):
         return extra_changes
     try:
-        old_now_mtime = Path(old_path).stat().st_mtime
-        new_now_mtime = Path(new_path).stat().st_mtime
+        old_now_stat = Path(old_path).stat()
+        new_now_stat = Path(new_path).stat()
     except OSError:
         return extra_changes
-    if old_now_mtime != old_snapshot_mtime or new_now_mtime != new_snapshot_mtime:
+    if (
+        old_now_stat.st_mtime != old_snapshot_mtime
+        or new_now_stat.st_mtime != new_snapshot_mtime
+        or old_now_stat.st_size != old_snapshot_size
+        or new_now_stat.st_size != new_snapshot_size
+    ):
         return extra_changes
 
     # This deliberately re-resolves both sides with no headers — the point is

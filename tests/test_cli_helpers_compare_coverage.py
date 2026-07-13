@@ -178,12 +178,13 @@ def test_discover_project_config_returns_none_when_absent(tmp_path):
 
 
 def _snap(source_path=None):
-    """Build an AbiSnapshot whose source_mtime matches the file on disk.
+    """Build an AbiSnapshot whose source_mtime/source_size match the file on
+    disk.
 
     Touches source_path into existence if needed, so fold_l0_hard_removals'
-    identity check (recorded mtime == current on-disk mtime) passes by
-    default — tests that want to exercise a *mismatch* stat the file
-    themselves after construction and mutate it.
+    identity check (recorded mtime/size == current on-disk mtime/size)
+    passes by default — tests that want to exercise a *mismatch* stat the
+    file themselves after construction and mutate it.
     """
     snap = AbiSnapshot(library="lib.so", version="1.0")
     snap.source_path = source_path
@@ -191,7 +192,9 @@ def _snap(source_path=None):
         p = Path(source_path)
         if not p.exists():
             p.touch()
-        snap.source_mtime = p.stat().st_mtime
+        st = p.stat()
+        snap.source_mtime = st.st_mtime
+        snap.source_size = st.st_size
     return snap
 
 
@@ -265,6 +268,37 @@ def test_fold_l0_hard_removals_missing_recorded_mtime_is_noop(monkeypatch, tmp_p
     old_snap = _snap(str(tmp_path / "old.so"))
     new_snap = _snap(str(tmp_path / "new.so"))
     old_snap.source_mtime = None
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_size_mismatch_is_noop(monkeypatch, tmp_path):
+    """The binary's size differs from what was recorded — mtime alone can't
+    catch every rebuild (e.g. a mtime-preserving copy), so size is checked
+    too."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    old_snap.source_size += 1
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_missing_recorded_size_is_noop(monkeypatch, tmp_path):
+    """A snapshot predating the source_size field can't be identity-checked
+    — decline rather than trust it."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    old_snap.source_size = None
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
     assert result is extra

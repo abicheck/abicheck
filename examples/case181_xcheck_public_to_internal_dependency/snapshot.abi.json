@@ -112,6 +112,7 @@
   "scope_fallback": null,
   "source_mtime": null,
   "source_path": null,
+  "source_size": null,
   "sycl": null,
   "typedefs": {},
   "types": [],
