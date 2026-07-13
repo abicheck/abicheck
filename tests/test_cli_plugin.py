@@ -106,3 +106,40 @@ def test_plugin_check_requires_entrypoints(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["plugin-check", str(old), str(new)])
     assert result.exit_code != 0
     assert "No required entrypoints" in result.output
+
+
+def test_plugin_check_breaking_for_host_is_consumer_proven(tmp_path: Path) -> None:
+    # An entrypoint that stays present but changes signature lands in
+    # breaking_for_host (not missing_entrypoints) — appcompat/plugin-check
+    # evidence that *this specific host* depends on the break, so it reads
+    # consumer_proven rather than the finding's own kind-derived status.
+    old = AbiSnapshot(
+        library="libplugin.so",
+        version="1.0",
+        functions=[
+            Function(name="plugin_run", mangled="plugin_run", return_type="int",
+                      visibility=Visibility.PUBLIC)
+        ],
+    )
+    new = AbiSnapshot(
+        library="libplugin.so",
+        version="2.0",
+        functions=[
+            Function(name="plugin_run", mangled="plugin_run", return_type="void",
+                      visibility=Visibility.PUBLIC)
+        ],
+    )
+    old_path = tmp_path / "p1.json"
+    new_path = tmp_path / "p2.json"
+    old_path.write_text(snapshot_to_json(old))
+    new_path.write_text(snapshot_to_json(new))
+
+    result = CliRunner().invoke(main, [
+        "plugin-check", str(old_path), str(new_path),
+        "-r", "plugin_run", "--format", "json",
+    ])
+    payload = json.loads(result.output)
+    assert payload["breaking_for_host"], result.output
+    assert all(
+        c["evidence_status"] == "consumer_proven" for c in payload["breaking_for_host"]
+    )

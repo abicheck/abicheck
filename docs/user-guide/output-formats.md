@@ -261,6 +261,38 @@ full L0–L4 model.
 }
 ```
 
+### Per-finding epistemic status (`evidence_status`)
+
+The three fields above describe the comparison as a whole. Each individual
+finding in `changes[]` (JSON) or SARIF `results[].properties` can also carry
+an `evidence_status` (JSON) / `evidenceStatus` (SARIF) label — *how* that
+specific finding was proven, distinct from its `kind`/`severity` (*what* it
+is):
+
+| Value | Set when the finding's verdict is | Means |
+|-------|-----------------------------------|-------|
+| `artifact_proven` | `BREAKING` | L0/L1/L2 artifact evidence (or an explicit policy override) confirms a shipped ABI break. |
+| `source_contract` | `API_BREAK` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
+| `contextual_risk` | `COMPATIBLE_WITH_RISK` | Build/source/deployment context suggests risk without proving a break. |
+| `consumer_proven` | *(set explicitly, not derived from verdict)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
+| `not_checkable` | *(the finding itself)* | The finding **is** the missing-evidence signal (`evidence_required_missing`, ADR-033 D7), not a break — the coverage gap is explicit rather than a silent gap in the report. |
+
+`COMPATIBLE`/`NO_CHANGE` findings (additions, clean comparisons) carry no
+`evidence_status` — there is no epistemic strength to qualify. The mapping
+from verdict to status is mechanical (it reuses the same `effective_category`
+classification the verdict itself comes from), so `evidence_status` can never
+disagree with `severity`/the gate/exit code — it is a relabeling for
+automated triage, not a second opinion.
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "severity": "breaking",
+  "evidence_status": "artifact_proven"
+}
+```
+
 ---
 
 ## JSON schema and stability guarantees

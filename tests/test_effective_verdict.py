@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from abicheck.checker_policy import (
     ChangeKind,
+    EvidenceStatus,
     Verdict,
     compute_verdict,
     effective_category,
+    evidence_status_for_change,
     policy_kind_sets,
 )
 from abicheck.checker_types import Change, DiffResult
@@ -79,3 +81,63 @@ def test_diffresult_properties_honor_override() -> None:
 
 def test_compute_verdict_empty_is_no_change() -> None:
     assert compute_verdict([]) == Verdict.NO_CHANGE
+
+
+# ---------------------------------------------------------------------------
+# evidence_status_for_change (the epistemic-status label, derived from verdict)
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_status_breaking_is_artifact_proven() -> None:
+    c = _change(ChangeKind.FUNC_REMOVED)
+    assert (
+        evidence_status_for_change(c, Verdict.BREAKING)
+        is EvidenceStatus.ARTIFACT_PROVEN
+    )
+
+
+def test_evidence_status_api_break_is_source_contract() -> None:
+    c = _change(ChangeKind.FIELD_RENAMED)
+    assert (
+        evidence_status_for_change(c, Verdict.API_BREAK)
+        is EvidenceStatus.SOURCE_CONTRACT
+    )
+
+
+def test_evidence_status_risk_is_contextual_risk() -> None:
+    c = _change(ChangeKind.TYPE_SIZE_CHANGED)
+    assert (
+        evidence_status_for_change(c, Verdict.COMPATIBLE_WITH_RISK)
+        is EvidenceStatus.CONTEXTUAL_RISK
+    )
+
+
+def test_evidence_status_none_for_compatible_and_no_change() -> None:
+    c = _change(ChangeKind.FUNC_ADDED)
+    assert evidence_status_for_change(c, Verdict.COMPATIBLE) is None
+    assert evidence_status_for_change(c, Verdict.NO_CHANGE) is None
+
+
+def test_evidence_status_missing_evidence_kind_is_not_checkable_regardless_of_verdict() -> (
+    None
+):
+    c = _change(ChangeKind.EVIDENCE_REQUIRED_MISSING)
+    # A missing-evidence finding always reads not_checkable, whatever verdict
+    # its category resolves to (it is the "we don't know" signal, not a break).
+    assert (
+        evidence_status_for_change(c, Verdict.API_BREAK) is EvidenceStatus.NOT_CHECKABLE
+    )
+    assert (
+        evidence_status_for_change(c, Verdict.BREAKING) is EvidenceStatus.NOT_CHECKABLE
+    )
+
+
+def test_evidence_status_follows_effective_verdict_override() -> None:
+    # A demoted finding's evidence_status follows its *resolved* verdict, not
+    # its kind's default — consistent with effective_category by construction.
+    demoted = _change(
+        ChangeKind.TYPE_SIZE_CHANGED, effective_verdict=Verdict.COMPATIBLE
+    )
+    sets = policy_kind_sets("strict_abi")
+    resolved = effective_category(demoted, *sets)
+    assert evidence_status_for_change(demoted, resolved) is None

@@ -236,6 +236,11 @@
           "type": "string",
           "enum": ["breaking", "api_break", "risk", "compatible", "unknown"]
         },
+        "evidence_status": {
+          "type": "string",
+          "description": "The epistemic status implied by this finding's verdict (or, for appcompat/plugin-check consumer findings, asserted explicitly): artifact_proven = L0/L1/L2 artifact evidence confirms a shipped ABI break (verdict BREAKING); source_contract = a source-level break needing a recompile/policy decision (verdict API_BREAK); contextual_risk = build/source/deployment context suggests risk without proving a break (verdict COMPATIBLE_WITH_RISK); consumer_proven = runtime/appcompat evidence demonstrated a specific consumer depends on this change; not_checkable = this finding IS the missing-evidence signal (evidence_required_missing), not a break. Absent for COMPATIBLE/NO_CHANGE findings, which need no epistemic status.",
+          "enum": ["artifact_proven", "source_contract", "contextual_risk", "consumer_proven", "not_checkable"]
+        },
         "impact": { "type": "string" },
         "source_location": { "type": "string" },
         "affected_symbols": {

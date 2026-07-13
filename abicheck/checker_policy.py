@@ -879,6 +879,41 @@ _EVIDENCE_TIER_RANK: dict[EvidenceTier, int] = {
 }
 
 
+class EvidenceStatus(str, Enum):
+    """The epistemic status of a single finding — *how* it was proven, not just
+    *what* it is (its ``Verdict``/severity already say that).
+
+    A per-report-format overlay (JSON ``evidence_status`` / SARIF
+    ``evidenceStatus``), derived from data the checker already computes rather
+    than a new classification pass: mostly a relabeling of the existing
+    :class:`Verdict` a finding resolved to, per the ADR-028 D3 authority rule
+    (artifact evidence is authoritative; build/source evidence corroborates).
+
+    - ``ARTIFACT_PROVEN`` — the finding resolved to ``BREAKING``: L0/L1/L2
+      artifact evidence (or an explicit policy override) confirms a shipped
+      ABI break.
+    - ``SOURCE_CONTRACT`` — resolved to ``API_BREAK``: a source-level break
+      that needs a recompile or a policy decision, not necessarily a shipped
+      ABI break.
+    - ``CONTEXTUAL_RISK`` — resolved to ``COMPATIBLE_WITH_RISK``: build/source/
+      deployment context suggests risk without proving a break.
+    - ``CONSUMER_PROVEN`` — not derivable from the verdict alone: set
+      explicitly when runtime/``appcompat`` evidence demonstrates a *specific*
+      consumer actually depends on what changed (see ``reporter.appcompat_to_json``).
+    - ``NOT_CHECKABLE`` — the finding **is** the "missing evidence" signal
+      (``ChangeKind.EVIDENCE_REQUIRED_MISSING``, ADR-033 D7), not a break.
+
+    ``COMPATIBLE``/``NO_CHANGE`` findings (additions, clean comparisons) carry
+    no status — nothing to explain the epistemic strength of.
+    """
+
+    ARTIFACT_PROVEN = "artifact_proven"
+    SOURCE_CONTRACT = "source_contract"
+    CONTEXTUAL_RISK = "contextual_risk"
+    CONSUMER_PROVEN = "consumer_proven"
+    NOT_CHECKABLE = "not_checkable"
+
+
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
 # ---------------------------------------------------------------------------
@@ -1161,6 +1196,36 @@ def effective_category(
     if kind in compatible:
         return Verdict.COMPATIBLE
     return Verdict.BREAKING  # unclassified → fail-safe
+
+
+_VERDICT_TO_EVIDENCE_STATUS: dict[Verdict, EvidenceStatus] = {
+    Verdict.BREAKING: EvidenceStatus.ARTIFACT_PROVEN,
+    Verdict.API_BREAK: EvidenceStatus.SOURCE_CONTRACT,
+    Verdict.COMPATIBLE_WITH_RISK: EvidenceStatus.CONTEXTUAL_RISK,
+}
+
+
+def evidence_status_for_change(
+    change: HasKind, verdict: Verdict
+) -> EvidenceStatus | None:
+    """The :class:`EvidenceStatus` label for *change*, given its resolved verdict.
+
+    ``EVIDENCE_REQUIRED_MISSING`` (ADR-033 D7) is a policy-gate finding *about*
+    absent evidence, not a proven break — it always reads ``NOT_CHECKABLE``
+    regardless of which verdict category it resolves to. Every other kind
+    derives its status purely from *verdict* (see
+    :data:`_VERDICT_TO_EVIDENCE_STATUS`), so this stays consistent with
+    ``effective_category`` by construction — there is no second classification
+    pass to drift out of sync.
+
+    ``CONSUMER_PROVEN`` (appcompat/runtime-demonstrated) is never returned
+    here: it isn't derivable from a verdict alone, so callers that reclassify
+    a finding via consumer evidence (``reporter.appcompat_to_json``) set it
+    explicitly instead of calling this function.
+    """
+    if getattr(change, "kind", None) == ChangeKind.EVIDENCE_REQUIRED_MISSING:
+        return EvidenceStatus.NOT_CHECKABLE
+    return _VERDICT_TO_EVIDENCE_STATUS.get(verdict)
 
 
 def compute_verdict(

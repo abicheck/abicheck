@@ -48,7 +48,12 @@ from typing import Any
 #:       component bumps; consumers pinned to 1.x must update.
 #: 2.1 — added the optional ``evidence_metrics`` object (ADR-033 D6/D9):
 #:       evidence-collection timing + finding split. Additive optional key.
-REPORT_SCHEMA_VERSION = "2.1"
+#: 2.2 — added the optional per-finding ``evidence_status`` key (one of
+#:       "artifact_proven"/"source_contract"/"contextual_risk"/
+#:       "consumer_proven"/"not_checkable"): the epistemic status implied by
+#:       the finding's verdict, or set explicitly for appcompat/plugin-check
+#:       consumer-proven findings. Additive optional key.
+REPORT_SCHEMA_VERSION = "2.2"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

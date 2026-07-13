@@ -7,7 +7,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/abicheck.svg)](https://pypi.org/project/abicheck/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**abicheck** detects breaking changes in C/C++ shared libraries before they reach production. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
+**abicheck** combines binary, debug, header, build, and (optionally) source evidence to detect the widest practical set of mechanical C/C++ ABI/API compatibility breaks — while reporting exactly which finding classes weren't checkable with the evidence you gave it, rather than silently passing. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
 
 It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **352 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
 

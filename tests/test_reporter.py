@@ -71,6 +71,49 @@ class TestJsonReporter:
         assert d["changes"][0]["kind"] == "func_removed"
 
 
+class TestEvidenceStatusInJson:
+    """The per-finding `evidence_status` field (schema 2.2): the epistemic
+    label a finding's verdict implies — see checker_policy.EvidenceStatus."""
+
+    def test_breaking_change_is_artifact_proven(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "artifact_proven"
+
+    def test_api_break_change_is_source_contract(self):
+        c = Change(ChangeKind.FIELD_RENAMED, "s", "field renamed")
+        r = _result(Verdict.API_BREAK, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "source_contract"
+
+    def test_risk_change_is_contextual_risk(self):
+        c = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "libc.so.6",
+            "New GLIBC_2.34 version requirement added",
+        )
+        r = _result(Verdict.COMPATIBLE_WITH_RISK, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "contextual_risk"
+
+    def test_compatible_change_has_no_evidence_status(self):
+        c = Change(ChangeKind.FUNC_ADDED, "s", "function added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r))
+        assert "evidence_status" not in d["changes"][0]
+
+    def test_evidence_required_missing_is_not_checkable(self):
+        c = Change(ChangeKind.EVIDENCE_REQUIRED_MISSING, "s", "required evidence missing")
+        r = _result(Verdict.API_BREAK, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "not_checkable"
+
+    def test_report_schema_version_is_2_2(self):
+        d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
+        assert d["report_schema_version"] == "2.2"
+
+
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):
         md = to_markdown(_result(Verdict.NO_CHANGE))
