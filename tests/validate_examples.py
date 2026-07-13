@@ -416,18 +416,19 @@ def _build_with_cmake(
         cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
         "--config", build_type,
     ]
+    if used_ninja:
+        # Ninja parallelizes the v1/v2 targets by default (they don't depend
+        # on each other). CMake's WINDOWS_EXPORT_ALL_SYMBOLS support
+        # generates a per-target custom "create .def from the compiled
+        # .obj" step ahead of each link — reproducibly (not just once, a
+        # retry doesn't help) one target's link reads its .def before that
+        # target's own create-def step has actually finished writing it
+        # (LNK1104 "cannot open ...exports.def"), even though ninja's build
+        # graph declares the correct dependency edge. Force a serial build
+        # to sidestep whatever inter-target scheduling gap this CMake/
+        # Ninja/MSVC toolset combination has for this custom command.
+        build_cmd += ["--parallel", "1"]
     r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
-    if r.returncode != 0 and used_ninja:
-        # Observed once (cold build only, never on a warm one): ninja/MSVC's
-        # generated intermediate — a manifest or WINDOWS_EXPORT_ALL_SYMBOLS
-        # .def file — isn't visible yet when the very next step (rc.exe /
-        # link.exe) reads it, even though ninja's own build graph declares
-        # it as an output of the prior step. A second invocation always
-        # succeeds (ninja's dependency state file is now warm), consistent
-        # with a first-build-only race in this CMake/Ninja/MSVC toolset
-        # combination rather than a real, reproducible build error — retry
-        # once before giving up.
-        r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
         return None, None, f"cmake build failed: {_cmake_error_detail(r)}"
 

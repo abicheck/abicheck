@@ -120,6 +120,13 @@ def run_source_smoke(
     test/fixture bug, not a compatibility outcome.
     """
 
+    # Resolved to absolute up front: the compile/link subprocess below runs
+    # with cwd=work_dir, so a caller-supplied relative case_dir/work_dir
+    # would otherwise have every path built from them (src, lib_source, the
+    # -I/case_dir include flag, exe) silently misresolve relative to
+    # work_dir instead of the caller's actual cwd (Codex review).
+    case_dir = case_dir.resolve()
+    work_dir = work_dir.resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     failures: list[str] = []
     source_suffix = ".cpp" if spec.standard.startswith("c++") else ".c"

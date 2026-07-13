@@ -2259,9 +2259,10 @@
    "category": "breaking",
    "description": "Data member added to base class shifts derived class layout (libabigail: Added_Base_Class_Data_Member)",
    "expected": "BREAKING",
-   "known_gap": "macOS debug/header extraction currently misses the base-class member addition and observes NO_CHANGE in the nightly. Linux remains the blocking detector lane.",
+   "known_gap": "macOS debug/header extraction currently misses the base-class member addition and observes NO_CHANGE in the nightly. Windows observes COMPATIBLE for the same reason via validate_examples.py's CMake+MSVC build/dump/compare path (verified once the source_smoke shortcut that had been masking this platform's detector check stopped short-circuiting before it ran). Linux remains the blocking detector lane.",
    "known_gap_platforms": [
-    "macos"
+    "macos",
+    "windows"
    ],
    "min_evidence": "L1",
    "platforms": [
