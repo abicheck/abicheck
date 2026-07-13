@@ -127,13 +127,18 @@ class TestUnnamedTypeLeak:
 
         assert _exported_symbol_names(AbiSnapshot(library="x", version="1")) == set()
 
+    def test_normal_source_name_length_then_unnamed_kind(self):
+        from abicheck.diff_unnamed_types import _unnamed_kind
 
-    def test_malformed_huge_source_name_length_not_flagged(self):
-        # Attacker-controlled ELF/snapshot symbol names must not be able to
-        # crash the token walker via Python's int-string conversion limit.
+        assert _unnamed_kind("_Z3fooUt_") == "unnamed struct/enum"
+
+    def test_malformed_source_name_lengths_not_flagged(self):
+        # Cover oversized, truncated, and zero-length source-name encodings.
         from abicheck.diff_unnamed_types import _unnamed_kind
 
         assert _unnamed_kind("_Z" + "9" * 5000) is None
+        assert _unnamed_kind("_Z9abc") is None
+        assert _unnamed_kind("_Z0Ut_") is None
 
     def test_malformed_huge_source_name_length_not_flagged_end_to_end(self):
         old = _elf_snap()

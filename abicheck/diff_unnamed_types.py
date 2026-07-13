@@ -74,9 +74,10 @@ def _unnamed_kind(mangled: str) -> str | None:
             # larger than the whole mangled string cannot be valid anyway.
             if j - i > len(str(n)):
                 return None
-            try:
-                length = int(mangled[i:j])
-            except ValueError:
+            # The slice is non-empty, ASCII-decimal-only, and bounded above,
+            # so int() cannot raise ValueError here.
+            length = int(mangled[i:j])
+            if length == 0 or length > n - j:
                 return None
             i = j + length
             continue
