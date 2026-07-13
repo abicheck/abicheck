@@ -225,6 +225,11 @@ _EXPORT_SYMBOL_FLAGS_REEXPORT = 0x08
 _EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER = 0x10
 
 _TRIE_MAX_DEPTH = 128
+_TRIE_MAX_NODES = 100_000
+_TRIE_MAX_CHILDREN = 200_000
+_TRIE_MAX_RESULTS = 50_000
+_TRIE_MAX_SYMBOL_LENGTH = 4_096
+_TRIE_MAX_SYMBOL_BYTES = 1_000_000
 
 
 def _read_uleb128(data: bytes, off: int) -> tuple[int, int]:
@@ -253,13 +258,20 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
     """
     results: list[tuple[str, int]] = []
     visited: set[int] = set()
+    child_entries = 0
+    symbol_bytes = 0
 
     def visit(off: int, prefix: str, depth: int) -> None:
+        nonlocal child_entries, symbol_bytes
         if depth > _TRIE_MAX_DEPTH or off in visited or off >= len(data):
             return
+        if len(visited) >= _TRIE_MAX_NODES:
+            raise ValueError("export trie node budget exceeded")
         visited.add(off)
         terminal_size, pos = _read_uleb128(data, off)
         if terminal_size > 0:
+            if len(results) >= _TRIE_MAX_RESULTS:
+                raise ValueError("export trie result budget exceeded")
             flags, _ = _read_uleb128(data, pos)
             results.append((prefix, flags))
         # The terminal payload occupies exactly terminal_size bytes after the
@@ -268,11 +280,20 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
         if pos >= len(data):
             return
         child_count = data[pos]
+        if child_entries + child_count > _TRIE_MAX_CHILDREN:
+            raise ValueError("export trie child-entry budget exceeded")
+        child_entries += child_count
         pos += 1
         for _ in range(child_count):
             end = data.find(b"\x00", pos)
             if end < 0:
                 return
+            edge_bytes = end - pos
+            if len(prefix) + edge_bytes > _TRIE_MAX_SYMBOL_LENGTH:
+                raise ValueError("export trie symbol-name budget exceeded")
+            symbol_bytes += edge_bytes
+            if symbol_bytes > _TRIE_MAX_SYMBOL_BYTES:
+                raise ValueError("export trie symbol data budget exceeded")
             edge = data[pos:end].decode("utf-8", errors="replace")
             pos = end + 1
             child_off, pos = _read_uleb128(data, pos)
