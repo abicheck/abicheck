@@ -1070,9 +1070,21 @@ def run_case(
         return resolved._replace(variant=variant)
     case_dir, (v1_src, v2_src, v1_hdr, v2_hdr) = resolved
 
+    # A declared source_smoke proves the *consumer-observable* claim (old
+    # binary genuinely misbehaves / fails to link against the new library) —
+    # a hard precondition for the case's premise. It does NOT prove abicheck
+    # itself detects the change: historically this returned straight to the
+    # caller on a smoke PASS, so a case with source_smoke never reached the
+    # build+dump+compare+verdict check below at all. That let a real,
+    # unrelated detector gap (case20, case97) go unnoticed by this "ground
+    # truth" gate for as long as the smoke kept passing. Smoke is now a
+    # gate only on failure/skip; a PASS falls through so the verdict is
+    # still checked for real, and its proof text is folded into the final
+    # result below.
     smoke_result = _run_source_smoke(name, entry, case_dir, tmp_base, expected_raw)
-    if smoke_result is not None:
+    if smoke_result is not None and smoke_result.status != "PASS":
         return smoke_result._replace(variant=variant)
+    smoke_proof = smoke_result.message if smoke_result is not None else None
 
     # A producer-scoped known_gap only excuses a mismatch under the producer that
     # actually built the case (resolved per source language); on other producers
@@ -1171,6 +1183,9 @@ def run_case(
         name, expected_raw, got, known_gap,
         allow_risk_for_compatible=allow_risk,
     )._replace(variant=variant, source_layers=source_layers)
+    if smoke_proof:
+        combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
+        result = result._replace(message=combined)
     return result._replace(
         category_strict=_category_strict_signal(entry, result, source_layers)
     )
