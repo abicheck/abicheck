@@ -491,6 +491,20 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # Seed roots from public symbols; collect the type names they touch.
     seed_types, has_public = _seed_public_roots(snap, surface)
 
+    # A named enum whose declaration textually came from a parsed header
+    # (``source_header`` set — populated whenever castxml parsed it from a
+    # ``-H``/``--header`` input, independent of the separate opt-in
+    # ``--public-header`` provenance classification) is part of the public
+    # surface even when no function/variable signature references the enum
+    # type by name. Unlike a struct's layout (only observable by a caller
+    # that actually names the type), an enum's members are consumer-visible
+    # the moment the header is included: `ERROR` is used directly as a
+    # compile-time constant, the same as a `#define` (which surface.py
+    # already exempts from reachability via `_NEVER_FILTER_KIND_NAMES`).
+    # Reachability-only seeding was designed for the struct-layout hazard
+    # and is the wrong model for enums (ADR-024; case20 regression).
+    seed_types |= {en.name for en in snap.enums if en.source_header}
+
     # Provenance is available iff some declaration was classified to a real
     # origin (only happens when the snapshot was dumped with a public-header
     # set). Used by the classifier to emit the ``no-provenance`` ledger reason.
