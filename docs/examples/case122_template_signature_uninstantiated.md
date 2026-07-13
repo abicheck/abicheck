@@ -55,8 +55,8 @@ recompile"). A pure source-AST tool that diffs the headers directly *can* see
 this class of change — L4 is abicheck's own answer to that gap, opt-in because
 it needs a real compile context (compile flags, include paths) rather than
 just the two binaries. See
-`Limitations → Source-only changes` and
-`Evidence and detectability`.
+[Limitations → Source-only changes](../concepts/limitations.md) and
+[Evidence and detectability](../concepts/evidence-and-detectability.md).
 
 ## Reproduce manually
 ```bash
@@ -66,16 +66,38 @@ g++ -shared -fPIC -g v2.cpp -o libtpl_v2.so
 # Default (object/header) comparison — documented gap, NO_CHANGE:
 abicheck compare libtpl_v1.so libtpl_v2.so \
     --header old=v1.h --header new=v2.h   # → NO_CHANGE
+```
 
-# With source-ABI replay (L4) — the template signature change surfaces as RISK.
-# --depth source (or --max) is required: compare's default depth collects no
-# source evidence, so a raw --sources tree is otherwise ignored with a warning.
-abicheck compare libtpl_v1.so libtpl_v2.so \
-    --header old=v1.h --header new=v2.h \
-    --sources old=<v1-source-tree> --sources new=<v2-source-tree> \
-    --depth source
+Seeing the L4 finding takes more than adding `--sources`: it needs (1) L3
+compile-unit evidence (a `compile_commands.json` — a real project already has
+one; here we write a one-line entry by hand) explicitly paired with `-H` so
+abicheck knows *which* header is public (a bare `--sources` tree has no build
+metadata declaring that, so the template is never scoped as reachable), and
+(2) `--no-scope-public-headers` on `compare` — the default L2 header backend
+(castxml/clang AST) does not model templates at all (see above), so the
+default public-surface scoping can't recognize `clamp` as public and silently
+drops the L4 finding as "internal". Verified end to end:
+```bash
+cat > v1.compile_commands.json <<EOF
+[{"directory": "$PWD", "command": "c++ -std=c++17 -c v1.cpp -o v1.o", "file": "$PWD/v1.cpp"}]
+EOF
+cat > v2.compile_commands.json <<EOF
+[{"directory": "$PWD", "command": "c++ -std=c++17 -c v2.cpp -o v2.o", "file": "$PWD/v2.cpp"}]
+EOF
+
+abicheck collect -H v1.h --compile-db v1.compile_commands.json \
+    --source-abi --source-abi-scope headers-only -o v1.evidence
+abicheck collect -H v2.h --compile-db v2.compile_commands.json \
+    --source-abi --source-abi-scope headers-only -o v2.evidence
+
+abicheck dump libtpl_v1.so -H v1.h --build-info v1.evidence --ast-frontend clang -o v1.abi.json
+abicheck dump libtpl_v2.so -H v2.h --build-info v2.evidence --ast-frontend clang -o v2.abi.json
+
+abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
     # → COMPATIBLE_WITH_RISK, template_body_changed on clamp
 ```
+(`--ast-frontend clang` is only needed on a castxml-less host; drop it if
+castxml is installed.)
 
 ## How to mitigate
 For ABI-sensitive templates, ship **explicit instantiations**

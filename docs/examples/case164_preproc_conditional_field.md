@@ -87,7 +87,7 @@ the collection layer (`abicheck/header_conditionals.py`) during a `dump` when a
 compile database is supplied: it harvests the active `-D` set from the compile DB
 and scans the public headers for `#ifdef`-guarded fields. This case ships the
 annotated snapshots directly so it also runs compiler-free in the fast lane. See
-`ADR-039`.
+[ADR-039](../development/adr/039-build-context-reconciliation.md).
 
 ---
 

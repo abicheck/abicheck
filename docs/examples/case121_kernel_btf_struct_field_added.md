@@ -52,7 +52,7 @@ bpftool btf dump file vmlinux format raw
 
 A real kernel would carry the BTF inside `vmlinux`'s `.BTF` ELF section;
 `abicheck` extracts and diffs it the same way (`--btf` / autodetection). See
-`Kernel & eBPF (BTF)`.
+[Kernel & eBPF (BTF)](../user-guide/kernel-btf.md).
 
 ---
 

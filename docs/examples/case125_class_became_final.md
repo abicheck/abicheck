@@ -42,7 +42,7 @@ abicheck catches it **only in header mode**, where castxml parses the
 declaration and records the `final` class-key (`ChangeKind` `type_became_final`).
 This case demonstrates why source/header analysis — not just object comparison
 — is required for the full API picture. See
-`Limitations → Source-only changes`.
+[Limitations → Source-only changes](../concepts/limitations.md).
 
 ## Reproduce manually
 ```bash
