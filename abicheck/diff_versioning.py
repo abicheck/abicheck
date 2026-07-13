@@ -35,10 +35,36 @@ from .elf_metadata import ElfMetadata
 _INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
 
 _UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
+_MAX_VERSION_COMPONENT_DIGITS = 9
 """Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
 like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
 non-numeric requirement is always treated as potentially BREAKING — never
 silently COMPAT."""
+
+
+def _parse_dotted_numeric_version(text: str) -> tuple[int, ...] | None:
+    """Parse a dotted numeric version safely, or return ``None``.
+
+    Version tags and declared runtime floors can come from untrusted ELF
+    metadata or snapshots.  Keep integer conversion bounded so pathological
+    digit strings are treated like malformed versions rather than aborting the
+    comparison via Python's integer-conversion guard (or burning CPU/memory on
+    runtimes without one).
+    """
+    parts = text.split(".")
+    if not parts:
+        return None
+    parsed: list[int] = []
+    for part in parts:
+        if (
+            not part
+            or not part.isascii()
+            or not part.isdigit()
+            or len(part) > _MAX_VERSION_COMPONENT_DIGITS
+        ):
+            return None
+        parsed.append(int(part))
+    return tuple(parsed) if parsed else None
 
 
 def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
@@ -48,8 +74,8 @@ def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
     Only the numeric suffix after the last ``_`` is used:
     ``GLIBC_2.34`` → ``(2, 34)``, ``GLIBCXX_3.4.19`` → ``(3, 4, 19)``.
 
-    Returns :data:`_UNPARSEABLE_VERSION` for non-numeric tags such as
-    ``GLIBC_PRIVATE`` — a very large sentinel that always compares as newer
+    Returns :data:`_UNPARSEABLE_VERSION` for non-numeric or malformed tags such
+    as ``GLIBC_PRIVATE`` — a very large sentinel that always compares as newer
     than any real version, so such tags are conservatively treated as BREAKING.
 
     Canonical home: previously lived in ``diff_platform_elf_symbols``; moved
@@ -58,8 +84,8 @@ def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
     """
     parts = ver.rsplit("_", 1)
     numeric = parts[-1] if len(parts) > 1 else ver
-    result = tuple(int(x) for x in numeric.split(".") if x.isdigit())
-    return result if result else _UNPARSEABLE_VERSION
+    result = _parse_dotted_numeric_version(numeric)
+    return result if result is not None else _UNPARSEABLE_VERSION
 
 # Change kinds whose ``symbol`` field is itself a version-node name (not a
 # symbol name) — for these, the node-name marker test applies directly.
@@ -239,10 +265,9 @@ def apply_runtime_floor_contract(
         # caller can hand a prebuilt dict straight to compare(); truncating a
         # "2.28-1" to (2,) here would silently flip verdicts, so a malformed
         # floor leaves the finding at its default instead (Codex review #510).
-        floor_parts = floor.split(".")
-        if not floor_parts or not all(p.isdigit() for p in floor_parts):
+        floor_tuple = _parse_dotted_numeric_version(floor)
+        if floor_tuple is None:
             continue
-        floor_tuple = tuple(int(p) for p in floor_parts)
         if required == _UNPARSEABLE_VERSION:
             continue
         if required <= floor_tuple:
