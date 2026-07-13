@@ -46,10 +46,14 @@ class TestSafeMtime:
     def test_returns_mtime_for_existing_file(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"")
-        assert _safe_mtime(p) == p.stat().st_mtime
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == p.stat().st_mtime
+        assert is_epoch is False
 
     def test_returns_none_when_path_missing(self, tmp_path):
-        assert _safe_mtime(tmp_path / "does_not_exist.so") is None
+        mtime, is_epoch = _safe_mtime(tmp_path / "does_not_exist.so")
+        assert mtime is None
+        assert is_epoch is False
 
     def test_honours_source_date_epoch_over_real_mtime(self, tmp_path, monkeypatch):
         # Two dumps of identical binary content must stay byte-identical
@@ -58,14 +62,18 @@ class TestSafeMtime:
         p = tmp_path / "lib.so"
         p.write_bytes(b"")
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000000000")
-        assert _safe_mtime(p) == 1000000000.0
-        assert _safe_mtime(p) != p.stat().st_mtime
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == 1000000000.0
+        assert mtime != p.stat().st_mtime
+        assert is_epoch is True
 
     def test_invalid_source_date_epoch_falls_back_to_real_mtime(self, tmp_path, monkeypatch):
         p = tmp_path / "lib.so"
         p.write_bytes(b"")
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
-        assert _safe_mtime(p) == p.stat().st_mtime
+        mtime, is_epoch = _safe_mtime(p)
+        assert mtime == p.stat().st_mtime
+        assert is_epoch is False
 
 
 class TestSafeSize:

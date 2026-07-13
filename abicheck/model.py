@@ -435,6 +435,18 @@ class AbiSnapshot:
     # Honours SOURCE_DATE_EPOCH the same way created_at does (dumper._safe_mtime)
     # so two dumps of identical binary content stay byte-identical.
     source_mtime: float | None = field(default=None, kw_only=True)
+    # True when source_mtime is a SOURCE_DATE_EPOCH substitution rather than
+    # source_path's real filesystem mtime (dumper._safe_mtime). Persisted
+    # because the *compare*-time environment may not have SOURCE_DATE_EPOCH
+    # set even though the *dump* that produced this snapshot did (e.g. a CI
+    # dump step under a pinned epoch, followed by an interactive compare
+    # later with no such variable set) — fold_l0_hard_removals needs to know
+    # the recorded value can never match a live re-probe's real mtime
+    # regardless of what's in its own environment (Codex review: gating on
+    # compare-time os.environ alone missed this combination). False (not
+    # None) for snapshots predating this field, matching the pre-epoch-aware
+    # default of trusting a real mtime.
+    source_mtime_epoch: bool = field(default=False, kw_only=True)
     # st_size of source_path at dump time — a second, cheap identity signal
     # alongside source_mtime for the same fold_l0_hard_removals re-check.
     # mtime alone can't catch a content-preserving-timestamp rebuild (e.g.

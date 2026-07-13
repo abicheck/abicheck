@@ -99,6 +99,7 @@
   "schema_version": 8,
   "scope_fallback": null,
   "source_mtime": null,
+  "source_mtime_epoch": false,
   "source_path": null,
   "source_size": null,
   "sycl": null,

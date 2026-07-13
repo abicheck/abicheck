@@ -759,6 +759,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         version=d["version"],
         source_path=d.get("source_path"),
         source_mtime=d.get("source_mtime"),
+        source_mtime_epoch=d.get("source_mtime_epoch", False),
         source_size=d.get("source_size"),
         functions=funcs,
         variables=variables,

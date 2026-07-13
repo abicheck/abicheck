@@ -304,23 +304,26 @@ def test_fold_l0_hard_removals_missing_recorded_size_is_noop(monkeypatch, tmp_pa
     assert result is extra
 
 
-def test_fold_l0_hard_removals_mtime_mismatch_ignored_under_source_date_epoch(
+def test_fold_l0_hard_removals_mtime_mismatch_ignored_when_dump_time_epoch_recorded(
     monkeypatch, tmp_path
 ):
-    """Under SOURCE_DATE_EPOCH, dumper._safe_mtime records the fixed epoch
-    instead of the binary's real mtime, so a live re-probe's real mtime
-    almost never equals it — even for a direct `compare a.so b.so -H` where
-    both snapshots were just built in this same process with no rebuild
-    window at all. The mtime side of the identity check must not block that
-    case (Codex review); size still applies."""
-    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1609459200")
+    """A snapshot dumped under SOURCE_DATE_EPOCH persists source_mtime_epoch
+    so the substitution is known regardless of the *compare*-time
+    environment — a dump-time epoch (CI) followed by a compare with no
+    SOURCE_DATE_EPOCH at all (interactive) must not re-enable a check that
+    can never pass for that permanently-substituted mtime (Codex review,
+    second round). No SOURCE_DATE_EPOCH is set here at all — only the
+    persisted per-snapshot flag drives the carve-out. Size still applies."""
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
     monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
     old_snap = _snap(str(tmp_path / "old.so"))
     new_snap = _snap(str(tmp_path / "new.so"))
-    # Simulate the epoch substitution: the recorded mtime is the fixed
-    # epoch, not the file's real (just-touched) mtime.
+    # Simulate the epoch substitution recorded at dump time: the snapshot
+    # remembers both the fixed epoch value and that it *was* a substitution.
     old_snap.source_mtime = 1609459200.0
+    old_snap.source_mtime_epoch = True
     new_snap.source_mtime = 1609459200.0
+    new_snap.source_mtime_epoch = True
     removal = Change(
         kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
         symbol="_ZN3lib8extendedEv",
@@ -339,12 +342,13 @@ def test_fold_l0_hard_removals_mtime_mismatch_ignored_under_source_date_epoch(
     assert result == extra + [removal]
 
 
-def test_fold_l0_hard_removals_size_mismatch_still_noop_under_source_date_epoch(
+def test_fold_l0_hard_removals_size_mismatch_still_noop_with_dump_time_epoch(
     monkeypatch, tmp_path
 ):
-    """SOURCE_DATE_EPOCH only relaxes the mtime side — a genuine size
-    mismatch (content actually changed) must still block the fold-in."""
-    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1609459200")
+    """The source_mtime_epoch carve-out only relaxes the mtime side — a
+    genuine size mismatch (content actually changed) must still block the
+    fold-in."""
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
     monkeypatch.setattr(
         "abicheck.service.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
@@ -352,8 +356,30 @@ def test_fold_l0_hard_removals_size_mismatch_still_noop_under_source_date_epoch(
     old_snap = _snap(str(tmp_path / "old.so"))
     new_snap = _snap(str(tmp_path / "new.so"))
     old_snap.source_mtime = 1609459200.0
+    old_snap.source_mtime_epoch = True
     new_snap.source_mtime = 1609459200.0
+    new_snap.source_mtime_epoch = True
     old_snap.source_size += 1
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_mtime_mismatch_still_noop_without_epoch_flag(
+    monkeypatch, tmp_path
+):
+    """SOURCE_DATE_EPOCH set at *compare* time alone must not relax the
+    mtime check for a snapshot that was NOT dumped under an epoch — only the
+    persisted source_mtime_epoch flag drives the carve-out, not the
+    compare-time environment (Codex review, second round)."""
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1609459200")
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    old_snap = _snap(str(tmp_path / "old.so"))
+    new_snap = _snap(str(tmp_path / "new.so"))
+    old_snap.source_mtime -= 1000
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
     assert result is extra

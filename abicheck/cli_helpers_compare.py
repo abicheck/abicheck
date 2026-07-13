@@ -26,7 +26,6 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -554,15 +553,22 @@ def fold_l0_hard_removals(
     Codex review), but a proportionate check for a best-effort enrichment
     that's already documented to swallow anything short of a clean match.
 
-    The mtime side of that check is skipped while ``SOURCE_DATE_EPOCH`` is
-    set: ``dumper._safe_mtime`` then records the fixed epoch rather than the
-    binary's real mtime (reproducible-builds spec), so a live re-probe's
-    *real* mtime almost never equals it — even for a direct ``compare a.so
-    b.so -H`` where both snapshots were just built in this same process and
-    there is no rebuild/replace window to guard against at all. Without this
-    carve-out, setting ``SOURCE_DATE_EPOCH`` would silently and permanently
-    disable this fold-in (Codex review). Size still applies unconditionally —
-    it isn't epoch-gated and remains a real (if imperfect) identity signal.
+    The mtime side of that check is skipped for a snapshot whose
+    ``source_mtime_epoch`` flag is set: ``dumper._safe_mtime`` recorded the
+    fixed ``SOURCE_DATE_EPOCH`` value rather than the binary's real mtime at
+    *dump* time (reproducible-builds spec), so a live re-probe's real mtime
+    almost never equals it. This is checked per-snapshot rather than via the
+    *compare*-time environment — a snapshot dumped under a pinned epoch (a CI
+    step) can easily be compared later with no ``SOURCE_DATE_EPOCH`` set at
+    all (an interactive run), and gating on compare-time ``os.environ`` alone
+    would then wrongly re-enable a check that can never pass for that
+    snapshot's permanently-substituted mtime (Codex review, two rounds: the
+    first carve-out covered only same-process direct compares). Without this,
+    a dump-time epoch would either silently and permanently disable the
+    fold-in (checked at compare time) or reintroduce that same silent
+    disabling when the compare-time environment differs from the dump-time
+    one. Size still applies unconditionally — it isn't epoch-gated and
+    remains a real (if imperfect) identity signal.
     """
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
@@ -588,7 +594,9 @@ def fold_l0_hard_removals(
         new_now_stat = Path(new_path).stat()
     except OSError:
         return extra_changes
-    mtime_gated = bool(os.environ.get("SOURCE_DATE_EPOCH"))
+    mtime_gated = getattr(old, "source_mtime_epoch", False) or getattr(
+        new, "source_mtime_epoch", False
+    )
     if (
         not mtime_gated
         and (

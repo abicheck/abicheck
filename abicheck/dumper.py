@@ -99,31 +99,28 @@ from .model import (
 log = logging.getLogger(__name__)
 
 
-def _safe_mtime(path: Path) -> float | None:
-    """Return path's mtime, or None if it can't be stat'd right now.
+def _safe_mtime(path: Path) -> tuple[float | None, bool]:
+    """Return (path's mtime, was_epoch_substituted), or (None, False).
 
     Honours ``SOURCE_DATE_EPOCH`` (reproducible-builds spec) when set and
-    valid, the same way ``created_at`` does via
-    ``cli_helpers_compare._provenance_timestamp`` — two dumps of identical
-    binary content must stay byte-identical for content-addressable caching
-    and reproducible-build verification (Codex review); the real, varying
-    filesystem mtime would otherwise leak into the snapshot and break that
-    guarantee. A build running under ``SOURCE_DATE_EPOCH`` will then see
-    ``fold_l0_hard_removals``'s later identity re-check (a live
-    ``Path.stat()``, deliberately not gated the same way) mismatch this
-    fixed value and decline to fold — best-effort enrichment quietly stepping
-    aside rather than fighting the reproducibility guarantee.
+    valid, like ``created_at`` (``cli_helpers_compare._provenance_timestamp``)
+    — two dumps of identical content must stay byte-identical (Codex review).
+    The second element records the substitution so it can be persisted
+    (``AbiSnapshot.source_mtime_epoch``): ``fold_l0_hard_removals`` needs to
+    know a recorded mtime is a fixed epoch even when its own compare-time
+    environment has no ``SOURCE_DATE_EPOCH`` (a dump under a pinned epoch,
+    compared later with none set — Codex review).
     """
     source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
     if source_date_epoch:
         try:
-            return float(int(source_date_epoch.strip()))
+            return float(int(source_date_epoch.strip())), True
         except (ValueError, OverflowError):
             pass
     try:
-        return path.stat().st_mtime
+        return path.stat().st_mtime, False
     except OSError:
-        return None
+        return None, False
 
 
 def _safe_size(path: Path) -> int | None:
@@ -1571,11 +1568,13 @@ def _build_symbol_only_snapshot(
             "No headers provided and no DWARF debug info — only ELF-exported "
             "symbols will be captured; type information will be missing."
         )
+    _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
         library=so_path.name,
         version=version,
         source_path=str(so_path.resolve()),
-        source_mtime=_safe_mtime(so_path),
+        source_mtime=_so_mtime,
+        source_mtime_epoch=_so_mtime_epoch,
         source_size=_safe_size(so_path),
         functions=[
             Function(
@@ -1702,11 +1701,13 @@ def _dump_elf(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
         library=so_path.name,
         version=version,
         source_path=str(so_path.resolve()),
-        source_mtime=_safe_mtime(so_path),
+        source_mtime=_so_mtime,
+        source_mtime_epoch=_so_mtime_epoch,
         source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
@@ -1787,11 +1788,13 @@ def _dump_macho(
         macho_funcs = [exp for exp in _relevant if not exp.is_data]
         macho_vars = [exp for exp in _relevant if exp.is_data]
 
+        _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         return AbiSnapshot(
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
-            source_mtime=_safe_mtime(dylib_path),
+            source_mtime=_dylib_mtime,
+            source_mtime_epoch=_dylib_mtime_epoch,
             source_size=_safe_size(dylib_path),
             functions=[
                 Function(
@@ -1840,11 +1843,13 @@ def _dump_macho(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     return AbiSnapshot(
         library=dylib_path.name,
         version=version,
         source_path=str(dylib_path.resolve()),
-        source_mtime=_safe_mtime(dylib_path),
+        source_mtime=_dylib_mtime,
+        source_mtime_epoch=_dylib_mtime_epoch,
         source_size=_safe_size(dylib_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
@@ -1898,11 +1903,13 @@ def _dump_pe(
             "No headers provided — only PE exported symbols will be captured; "
             "type information will be missing."
         )
+        _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
         return AbiSnapshot(
             library=dll_path.name,
             version=version,
             source_path=str(dll_path.resolve()),
-            source_mtime=_safe_mtime(dll_path),
+            source_mtime=_dll_mtime,
+            source_mtime_epoch=_dll_mtime_epoch,
             source_size=_safe_size(dll_path),
             functions=[
                 Function(
@@ -1929,11 +1936,13 @@ def _dump_pe(
         extra_hash_dirs=extra_hash_dirs,
     )
 
+    _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     return AbiSnapshot(
         library=dll_path.name,
         version=version,
         source_path=str(dll_path.resolve()),
-        source_mtime=_safe_mtime(dll_path),
+        source_mtime=_dll_mtime,
+        source_mtime_epoch=_dll_mtime_epoch,
         source_size=_safe_size(dll_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
