@@ -583,11 +583,15 @@ def fold_l0_hard_removals(
             Path(new_path), [], [], version="", lang=lang, symbols_only=True,
             notify=lambda _msg: None,
         )
+        # compare_snapshots is a thin wrapper over checker.compare — a
+        # failure there is just as much a "this best-effort probe didn't
+        # pan out" case as a resolve_input failure, so it must not escape
+        # this guard and abort the real compare (Codex/CodeRabbit review).
+        l0_diff = compare_snapshots(
+            l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
+        )
     except AbicheckError:
         return extra_changes
-    l0_diff = compare_snapshots(
-        l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
-    )
     l0_hard_removals = [
         change
         for change in getattr(l0_diff, "breaking", ())

@@ -240,6 +240,9 @@
    "category": "no_change",
    "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. Invisible to the default object/DWARF and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body), but visible at L4: source-ABI replay reports `concept_tightened` (API_BREAK) when that opt-in evidence is supplied.",
    "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "concept_tightened"
+   ],
    "expected_kinds": [],
    "known_gap": "By default (object/DWARF mode, and header/castxml mode) the concept-tightening change is invisible: castxml emits C++20 concept declarations as <Unimplemented kind=\"Concept\"/> with no name, no body, and no link to the constrained template, so there is no way to see the requirement change from the castxml dump path — the tool returns NO_CHANGE and this case's ground truth reflects that default-mode behavior. It is not a permanent blind spot: L4 source-ABI replay uses a clang-based extractor instead of castxml, which does emit named concept declarations with a constraint hash (source_extractors/clang.py's _emit_concept), and abicheck/buildsource/source_diff.py's _diff_concepts reports the tightened constraint as ChangeKind.CONCEPT_TIGHTENED (API_BREAK) when that opt-in evidence is supplied (verified end to end — see the README's Reproduce section, same recipe as case122: L3 compile-unit + public-header evidence via `abicheck collect -H`, plus --no-scope-public-headers on compare since the L2 header backend does not model concepts). min_evidence is L4 for that reason; this entry's expected/expected_kinds describe the tool's default (no build-source evidence) behavior, which is what examples/validate_examples.py exercises for this case.",
    "min_evidence": "L4",

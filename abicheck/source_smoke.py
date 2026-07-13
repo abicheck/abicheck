@@ -125,7 +125,16 @@ def run_source_smoke(
     source_suffix = ".cpp" if spec.standard.startswith("c++") else ".c"
     for label, side in (("v1", spec.v1), ("v2", spec.v2)):
         code = _side_code(spec, side, case_dir)
-        src = work_dir / f"{label}{source_suffix}"
+        # Named distinctly from lib_source (conventionally also "v1"/"v2" +
+        # extension, e.g. "v1.cpp"): cl.exe writes each input's .obj to the
+        # CWD using the source's own basename, with no per-invocation
+        # disambiguation the way GCC/Clang's internal temp-object naming
+        # provides — compiling case_dir/v1.cpp and work_dir/v1.cpp together
+        # collides on "v1.obj", silently dropping one (LNK4042 "object
+        # specified more than once"), which then surfaces as a baffling
+        # LNK1561 "entry point must be defined" once the survivor isn't the
+        # one with main().
+        src = work_dir / f"{label}_consumer{source_suffix}"
         src.write_text(code, encoding="utf-8")
         mode = side.mode or spec.mode
         exe = work_dir / f"{label}.out"
@@ -170,7 +179,10 @@ def run_source_smoke(
             compiled = proc.returncode == 0
             detail = _process_error_detail(proc)
             if compiled and mode == "run":
-                run_proc = subprocess.run([str(exe)], capture_output=True, text=True, timeout=timeout)
+                run_proc = subprocess.run(
+                    [str(exe)], capture_output=True, text=True, timeout=timeout,
+                    cwd=str(work_dir),
+                )
                 compiled = run_proc.returncode == 0
                 detail = _process_error_detail(run_proc)
         except subprocess.TimeoutExpired as exc:

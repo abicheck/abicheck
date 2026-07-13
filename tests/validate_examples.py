@@ -355,7 +355,11 @@ def _cmake_error_detail(r: subprocess.CompletedProcess[str]) -> str:
     continues well past 300 chars into the actual compiler output).
     """
     detail = "\n".join(s for s in (r.stderr, r.stdout) if s).strip()
-    return detail[:4000]
+    # Tail, not head: CMake wraps the real underlying compiler/linker error
+    # in a lot of its own prose (and, for a failed TryCompile, a full command
+    # transcript) *before* the actual diagnostic — a head-anchored cap can
+    # exhaust its budget without ever reaching the useful part.
+    return detail[-4000:]
 
 
 def _build_with_cmake(
@@ -373,12 +377,21 @@ def _build_with_cmake(
     case_out = build_dir / case_name
     build_type = "Release" if variant in {"release-headers", "build-source"} else "Debug"
 
-    r = subprocess.run(
-        [cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
-         f"-DCMAKE_BUILD_TYPE={build_type}",
-         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
-        capture_output=True, text=True, timeout=60,
-    )
+    configure_cmd = [
+        cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
+        f"-DCMAKE_BUILD_TYPE={build_type}",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    ]
+    if sys.platform == "win32" and shutil.which("ninja"):
+        # The default Windows generator (Visual Studio/MSBuild) drives builds
+        # through FileTracker .tlog files nested under
+        # <target>.dir/<config>/<hash>.tlog/ — deep enough under an already-
+        # deep pytest tmp path to exceed Windows' MAX_PATH, surfacing as
+        # "FTK1011: could not create the new file tracking log file".
+        # Ninja has no FileTracker step and a flatter build layout, so it
+        # doesn't hit this at all.
+        configure_cmd += ["-G", "Ninja"]
+    r = subprocess.run(configure_cmd, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         return None, None, f"cmake configure failed: {_cmake_error_detail(r)}"
 

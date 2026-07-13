@@ -112,7 +112,7 @@ classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 
-- XFAIL: `case105`, `case111`, `case64`, `case78`, `case97`
+- XFAIL: `case111`, `case64`, `case78`, `case97`
 - SKIP: `case115`, `case121`, and bundle cases `case84`, `case90`, `case91`,
   `case92`, `case93`
 
