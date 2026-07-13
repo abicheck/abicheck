@@ -12,11 +12,16 @@ import json
 import click
 import pytest
 
+from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_types import Change, DiffResult
 from abicheck.cli_helpers_compare import (
     _resolve_build_context_flags,
     _resolve_severity,
     discover_project_config,
+    fold_l0_hard_removals,
 )
+from abicheck.errors import AbicheckError
+from abicheck.model import AbiSnapshot
 
 
 def _write_compile_db(directory, entries):
@@ -166,3 +171,123 @@ def test_discover_project_config_returns_none_when_absent(tmp_path):
     # by asserting the return is either None or a path outside tmp_path.
     found = discover_project_config(start=nested)
     assert found is None or not str(found).startswith(str(tmp_path.resolve()))
+
+
+# ── fold_l0_hard_removals (case97 fix) ───────────────────────────────────────
+
+
+def _snap(source_path=None):
+    snap = AbiSnapshot(library="lib.so", version="1.0")
+    snap.source_path = source_path
+    return snap
+
+
+def test_fold_l0_hard_removals_no_source_path_is_noop(monkeypatch):
+    """Neither snapshot remembers a real binary — nothing to re-probe, returned as-is."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(_snap(), _snap(), "c++", extra)
+    assert result is extra
+
+
+def test_fold_l0_hard_removals_one_sided_source_path_is_noop(monkeypatch, tmp_path):
+    """Only one side has a source_path — still can't do a meaningful re-probe."""
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input",
+        lambda *a, **kw: pytest.fail("should not be called"),
+    )
+    extra = []
+    result = fold_l0_hard_removals(
+        _snap(str(tmp_path / "old.so")), _snap(None), "c++", extra
+    )
+    assert result == []
+
+
+def test_fold_l0_hard_removals_resolve_failure_returns_unchanged(monkeypatch, tmp_path):
+    """A source_path that can no longer be resolved (moved/missing binary) is
+    swallowed — the real compare must not fail because this best-effort probe
+    couldn't run."""
+
+    def _raise(*_a, **_kw):
+        raise AbicheckError("no such file")
+
+    monkeypatch.setattr("abicheck.service.resolve_input", _raise)
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(
+        _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", extra
+    )
+    assert result == extra
+
+
+def test_fold_l0_hard_removals_folds_elf_only_removal(monkeypatch, tmp_path):
+    """The symbols-only re-probe finds a hard ELF-only removal (case97's exact
+    shape) — it's folded into extra_changes."""
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    removal = Change(
+        kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        symbol="_ZN3lib8extendedEv",
+        description="ELF-only function removed",
+    )
+    unrelated = Change(
+        kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="other", description=""
+    )
+    diff = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="lib.so",
+        changes=[removal, unrelated],
+        verdict=Verdict.BREAKING,
+    )
+    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
+    result = fold_l0_hard_removals(
+        _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", extra
+    )
+    assert result is not extra
+    assert extra + [removal] == result
+    assert unrelated not in result
+
+
+def test_fold_l0_hard_removals_ignores_non_elf_only_findings(monkeypatch, tmp_path):
+    """A breaking finding that isn't func_removed_elf_only is never folded in —
+    this probe restores exactly one specific fact, never a general advisory dump."""
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    diff = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="lib.so",
+        changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="other", description="")],
+        verdict=Verdict.BREAKING,
+    )
+    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    result = fold_l0_hard_removals(
+        _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", None
+    )
+    assert result == []
+
+
+def test_fold_l0_hard_removals_none_extra_changes_defaults_to_empty(
+    monkeypatch, tmp_path
+):
+    """extra_changes=None (compare's default) is treated as an empty list, not a crash."""
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    removal = Change(
+        kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        symbol="gone",
+        description="",
+    )
+    diff = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="lib.so",
+        changes=[removal],
+        verdict=Verdict.BREAKING,
+    )
+    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    result = fold_l0_hard_removals(
+        _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", None
+    )
+    assert result == [removal]

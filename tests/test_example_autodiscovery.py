@@ -717,6 +717,13 @@ def test_example_source_smoke(case_name: str, tmp_path: Path) -> None:
 
     if result.status == "SKIP":
         pytest.skip(f"{case_name}: {result.message}")
+    if result.status == "XFAIL":
+        # A documented, producer-scoped known_gap (e.g. a castxml attribute
+        # gap, or a macOS-only detection limitation) — run_case() now checks
+        # the real compare() verdict in addition to the source_smoke proof
+        # (previously it returned on the smoke PASS alone, before ever
+        # reaching this known_gap path). Mirrors test_example_build_evidence.
+        pytest.xfail(result.message or KNOWN_GAPS.get(case_name, "known gap"))
     assert result.status == "PASS", (
         f"{case_name}: source-smoke validation {result.status} — "
         f"expected={result.expected!r} got={result.got!r} ({result.message})"
