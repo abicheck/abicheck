@@ -391,6 +391,20 @@ def _build_with_cmake(
         # Ninja has no FileTracker step and a flatter build layout, so it
         # doesn't hit this at all.
         configure_cmd += ["-G", "Ninja"]
+        # CMake's Ninja-generator DLL link on MSVC always routes through
+        # `cmake -E vs_link_dll`, which — when manifest embedding is on —
+        # shells out to rc.exe/mt.exe against an --intdir path resolved
+        # relative to the ninja invocation's cwd rather than build_dir; on
+        # this toolchain that sub-step intermittently can't create
+        # <target>.dir/intermediate.manifest or manifest.res (LNK1104 /
+        # RC1109). These are throwaway ABI-symbol-export test binaries with
+        # no need for a Windows manifest resource at all, so skip that whole
+        # sub-step rather than chase what looks like a CMake/Ninja/this-MSVC-
+        # toolset interaction bug.
+        configure_cmd += [
+            "-DCMAKE_SHARED_LINKER_FLAGS=/MANIFEST:NO",
+            "-DCMAKE_EXE_LINKER_FLAGS=/MANIFEST:NO",
+        ]
     r = subprocess.run(configure_cmd, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         return None, None, f"cmake configure failed: {_cmake_error_detail(r)}"
@@ -1062,6 +1076,21 @@ def _run_source_smoke(
     smoke = entry.get("source_smoke")
     if not smoke:
         return None
+
+    # Optional per-check platform scope (distinct from the case-level
+    # "platforms" field, which also gates the detector/compare check): some
+    # consumer-runtime-corruption proofs assume Itanium C++ ABI base-class
+    # layout evolution and don't reproduce under MSVC's own ABI rules, where
+    # the same source change can legitimately not corrupt memory in an
+    # observable way. Declared, not silently dropped: it's a SKIP (not a
+    # false PASS) so the harness records that this platform doesn't exercise
+    # the check, rather than claiming success it didn't earn.
+    smoke_platforms = smoke.get("platforms")
+    if smoke_platforms and CURRENT_PLATFORM not in smoke_platforms:
+        return CaseResult(
+            name, "SKIP", expected_raw, None,
+            f"source_smoke not applicable on {CURRENT_PLATFORM}",
+        )
 
     spec = SourceSmokeSpec.from_dict(smoke)
     compiler = _find_compiler(spec.standard.startswith("c++"))

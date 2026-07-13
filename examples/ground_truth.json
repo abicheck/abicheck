@@ -2271,6 +2271,10 @@
    ],
    "source_smoke": {
     "mode": "run",
+    "platforms": [
+     "linux",
+     "macos"
+    ],
     "proof": "consumer runtime smoke: app compiled against v1 derived/base layout fails with v2 library",
     "source": "app.cpp",
     "standard": "c++17",

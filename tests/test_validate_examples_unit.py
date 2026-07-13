@@ -28,6 +28,7 @@ from tests.validate_examples import (  # noqa: E402
     _json_payload,
     _normalize_verdict,
     _result_to_json,
+    _run_source_smoke,
     _selected_variants,
     _source_layers_for_result,
     _sources_path,
@@ -143,6 +144,64 @@ class TestKnownGapToolchainScope:
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
+
+
+class TestRunSourceSmoke:
+    """source_smoke's own optional "platforms" scope (distinct from the
+    case-level one) — some consumer-runtime-corruption proofs assume Itanium
+    C++ ABI base-class layout evolution and don't reproduce under MSVC's own
+    ABI rules (case43: the same source change doesn't corrupt memory in an
+    observable way there)."""
+
+    def test_no_source_smoke_declared_returns_none(self, tmp_path):
+        assert _run_source_smoke("caseX", {}, tmp_path, tmp_path, None) is None
+
+    def test_platform_not_listed_is_skip_not_fail(self, tmp_path):
+        entry = {
+            "source_smoke": {
+                "platforms": ["linux", "macos"],
+                "v1": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "windows"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "BREAKING")
+        assert result.status == "SKIP"
+        assert "windows" in result.message
+
+    def test_platform_listed_runs_for_real(self, tmp_path):
+        entry = {
+            "source_smoke": {
+                "platforms": ["linux"],
+                "proof": "trivial",
+                "v1": {"code": "int main() { return 0; }\n"},
+                "v2": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "linux"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "NO_CHANGE")
+        assert result.status in {"PASS", "SKIP"}
+        if result.status == "SKIP":
+            pytest.skip(result.message)
+        assert result.message == "trivial"
+
+    def test_no_platforms_key_runs_on_every_platform(self, tmp_path):
+        entry = {
+            "source_smoke": {
+                "proof": "unscoped",
+                "v1": {"code": "int main() { return 0; }\n"},
+                "v2": {"code": "int main() { return 0; }\n"},
+            }
+        }
+        with patch.object(ve, "CURRENT_PLATFORM", "windows"):
+            result = _run_source_smoke("caseX", entry, tmp_path, tmp_path, "NO_CHANGE")
+        assert result.status != "SKIP" or "no compiler" in (result.message or "")
+
+    def test_case43_is_scoped_off_windows(self):
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        assert gt["case43_base_class_member_added"]["source_smoke"]["platforms"] == [
+            "linux",
+            "macos",
+        ]
 
 
 class TestCasePreconditions:
