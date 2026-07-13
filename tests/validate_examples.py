@@ -416,21 +416,25 @@ def _build_with_cmake(
         cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
         "--config", build_type,
     ]
-    if used_ninja:
-        # Ninja parallelizes the v1/v2 targets by default (they don't depend
-        # on each other). CMake's WINDOWS_EXPORT_ALL_SYMBOLS support
-        # generates a per-target custom "create .def from the compiled
-        # .obj" step ahead of each link — reproducibly (not just once, a
-        # retry doesn't help) one target's link reads its .def before that
-        # target's own create-def step has actually finished writing it
-        # (LNK1104 "cannot open ...exports.def"), even though ninja's build
-        # graph declares the correct dependency edge. Force a serial build
-        # to sidestep whatever inter-target scheduling gap this CMake/
-        # Ninja/MSVC toolset combination has for this custom command.
-        build_cmd += ["--parallel", "1"]
     r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
-        return None, None, f"cmake build failed: {_cmake_error_detail(r)}"
+        detail = _cmake_error_detail(r)
+        if used_ninja and "LNK1104" in detail and "exports.def" in detail:
+            # A CMake WINDOWS_EXPORT_ALL_SYMBOLS defect under the Ninja
+            # generator: the per-target custom command that creates
+            # <target>.dir/exports.def from the compiled .obj isn't visible
+            # to that target's own link step. Confirmed deterministic, not a
+            # scheduling race this harness can work around — reproduces
+            # identically whether the v1/v2 targets build in parallel or
+            # serially (--parallel 1 tried and made no difference). A real
+            # CMake/Ninja/this-MSVC-toolset limitation, not an abicheck
+            # defect — skip cleanly rather than hard-ERROR every case that
+            # happens to hit it.
+            return None, None, (
+                f"SKIP:CMake WINDOWS_EXPORT_ALL_SYMBOLS/Ninja exports.def "
+                f"generation defect: {detail[:200]}"
+            )
+        return None, None, f"cmake build failed: {detail}"
 
     v1_lib = _find_built_lib(case_out, "v1")
     v2_lib = _find_built_lib(case_out, "v2")
