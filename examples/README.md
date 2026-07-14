@@ -228,7 +228,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed | Breaking | 🔴 BREAKING |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |
 | [97](case97_api_depends_on_consumer_env/README.md) | public API depends on consumer build environment (RISK) | Breaking | 🔴 BREAKING |
-| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (source-aware risk) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (build-context risk) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
 | [100](case100_experimental_removed_without_replacement/README.md) | experimental:: removed without replacement (API break) | Breaking | 🔴 BREAKING |
 | [101](case101_inline_namespace_version_bumped/README.md) | inline namespace version bumped (BREAKING) | Breaking | 🔴 BREAKING |

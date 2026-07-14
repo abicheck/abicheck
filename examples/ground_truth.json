@@ -3307,7 +3307,7 @@
    "bad_practice": false,
    "build_info": true,
    "category": "risk",
-   "description": "v1 is built with C++17 and v2 with C++20 while their binary surfaces remain identical. Build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed; the merged source-aware verdict is COMPATIBLE_WITH_RISK, while a deliberately context-free per-binary comparison remains NO_CHANGE.",
+   "description": "v1 is built with C++17 and v2 with C++20 while their binary surfaces remain identical. L3 build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed; the merged build-context-aware verdict is COMPATIBLE_WITH_RISK, while an L0-L2 context-free per-binary comparison remains NO_CHANGE. L4/L5 source replay is not required.",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
     "abi_relevant_build_flag_changed"

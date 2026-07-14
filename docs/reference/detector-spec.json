@@ -7,9 +7,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L3",
       "doc_slug": "abi_relevant_build_flag_changed",
-      "examples": ""
+      "examples": "case98_cxx_standard_floor_raised"
     },
     {
       "kind": "abi_surface_explosion",

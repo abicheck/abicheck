@@ -142,8 +142,8 @@ def test_generator_source_section_uses_code_literals() -> None:
         # Regression guard: a title with internal colons keeps the trailing text
         # (the old `split(':', 1)[-1]` heuristic mangled these).
         (
-            "case98 — C++ standard floor raised (source-aware risk)",
-            "C++ standard floor raised (source-aware risk)",
+            "case98 — C++ standard floor raised (build-context risk)",
+            "C++ standard floor raised (build-context risk)",
         ),
         (
             "case100 — experimental:: removed without replacement (API break)",

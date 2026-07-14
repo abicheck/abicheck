@@ -6,7 +6,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
-| `abi_relevant_build_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `abi_relevant_build_flag_changed` | — |
+| `abi_relevant_build_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `abi_relevant_build_flag_changed` | [case98](../examples/case98_cxx_standard_floor_raised.md) |
 | `abi_surface_explosion` | quality | `COMPATIBLE` | `warning` | unspecified | `abi_surface_explosion` | — |
 | `abi_tag_changed` | breaking | `BREAKING` | `error` | L0 | `abi_tag_changed` | [case113](../examples/case113_abi_tag_changed.md) |
 | `allocator_replacement_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `allocator_replacement_added` | — |
