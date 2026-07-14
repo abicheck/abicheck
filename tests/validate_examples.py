@@ -26,6 +26,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -1396,6 +1397,7 @@ def _json_payload(
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "runner": "tests/validate_examples.py",
+        "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": CURRENT_PLATFORM,
         "command": [sys.executable, "tests/validate_examples.py", *argv],
         "ground_truth_cases": total_ground_truth_cases,

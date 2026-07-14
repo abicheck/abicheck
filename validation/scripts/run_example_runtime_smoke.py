@@ -11,6 +11,7 @@ libv1?".
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -359,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/run_example_runtime_smoke.py",
+        "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": _platform(),
         "command": [sys.executable, "validation/scripts/run_example_runtime_smoke.py", *(argv or sys.argv[1:])],
         "build_type": args.build_type,

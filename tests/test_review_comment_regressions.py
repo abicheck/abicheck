@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_script(relpath: str) -> ModuleType:
     path = Path(__file__).resolve().parents[1] / relpath
@@ -31,8 +33,12 @@ def test_full_matrix_load_json_missing_or_malformed_is_missing_lane(
     assert matrix._load_json(bad) is None
 
 
-def test_full_matrix_allow_unresolved_never_masks_failed(monkeypatch) -> None:
+def test_full_matrix_allow_unresolved_never_masks_failed(
+    monkeypatch, tmp_path: Path
+) -> None:
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    monkeypatch.setattr(matrix, "_load_json", lambda _path: {})
+    monkeypatch.setattr(matrix, "_artifact_errors", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         matrix,
         "build_matrix",
@@ -42,7 +48,171 @@ def test_full_matrix_allow_unresolved_never_masks_failed(monkeypatch) -> None:
             "failed_cases": ["case_y"],
         },
     )
-    assert matrix.main(["--allow-unresolved"]) == 1
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(5)]
+    assert matrix.main(
+        [
+            "--gcc",
+            artifacts[0],
+            "--clang",
+            artifacts[1],
+            "--runtime",
+            artifacts[2],
+            "--bundle",
+            artifacts[3],
+            "--proofs",
+            artifacts[4],
+            "--allow-unresolved",
+        ]
+    ) == 1
+
+
+def _artifact(
+    matrix: ModuleType,
+    label: str,
+    cases: set[str],
+    *,
+    status: str = "PASS",
+) -> dict[str, object]:
+    runner, schema = matrix.ARTIFACT_CONTRACTS[label]
+    payload: dict[str, object] = {
+        "schema_version": schema,
+        "runner": runner,
+        "ground_truth_sha256": matrix._ground_truth_digest(),
+        "ground_truth_cases": len(cases),
+        "selected_cases": len(cases),
+        "summary": {status: len(cases)},
+        "results": [
+            {"case_id": case_id, "status": status} for case_id in sorted(cases)
+        ],
+    }
+    if label in {"gcc", "clang"}:
+        payload["toolchain"] = label
+        payload["artifact_variants"] = ["debug-headers"]
+    elif label == "runtime":
+        payload["build_type"] = "Debug"
+    else:
+        payload["platform"] = "linux"
+    return payload
+
+
+@pytest.mark.parametrize("label", ["gcc", "clang", "runtime", "bundle"])
+def test_full_matrix_required_artifact_rejects_missing_or_wrong_identity(
+    label: str,
+) -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01", "case02"}
+    assert matrix._artifact_errors(label, None, expected_cases=cases)
+
+    payload = _artifact(matrix, label, cases)
+    payload["runner"] = "wrong/runner.py"
+    errors = matrix._artifact_errors(label, payload, expected_cases=cases)
+    assert any("runner=" in error for error in errors)
+
+
+def test_full_matrix_artifact_rejects_partial_duplicate_and_stale_catalog() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01", "case02"}
+    payload = _artifact(matrix, "gcc", cases)
+    payload["ground_truth_sha256"] = "stale"
+    payload["results"] = [
+        {"case_id": "case01", "status": "PASS"},
+        {"case_id": "case01", "status": "PASS"},
+    ]
+    errors = matrix._artifact_errors("gcc", payload, expected_cases=cases)
+    assert any("ground_truth_sha256" in error for error in errors)
+    assert any("duplicate case ids: case01" in error for error in errors)
+    assert any("missing case ids: case02" in error for error in errors)
+
+
+def test_full_matrix_runtime_build_error_is_an_artifact_error() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    payload = _artifact(matrix, "runtime", {"case01"}, status="BUILD_ERROR")
+    errors = matrix._artifact_errors(
+        "runtime", payload, expected_cases={"case01"}
+    )
+    assert errors == ["runtime: failing runner statuses for: case01"]
+
+
+def _proof_artifact(matrix: ModuleType) -> dict[str, object]:
+    owners = sorted(matrix.SPECIAL_PROOFS)
+    return {
+        "schema_version": matrix.PROOF_ARTIFACT_SCHEMA,
+        "runner": matrix.PROOF_ARTIFACT_RUNNER,
+        "ground_truth_sha256": matrix._ground_truth_digest(),
+        "selected_owners": len(owners),
+        "summary": {"PASS": len(owners)},
+        "results": [
+            {"owner": owner, "status": "PASS", "returncode": 0}
+            for owner in owners
+        ],
+    }
+
+
+def test_full_matrix_requires_machine_readable_owner_proofs() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    assert matrix._proof_artifact_errors(None)
+
+    payload = _proof_artifact(matrix)
+    payload["results"][0]["status"] = "FAIL"
+    payload["results"][0]["returncode"] = 1
+    payload["summary"] = {
+        "FAIL": 1,
+        "PASS": len(matrix.SPECIAL_PROOFS) - 1,
+    }
+    errors = matrix._proof_artifact_errors(payload)
+    assert any("failing owners" in error for error in errors)
+
+
+def test_owner_proof_runner_records_each_exit_code(monkeypatch) -> None:
+    proofs = _load_script("validation/scripts/run_example_owner_proofs.py")
+
+    class Completed:
+        returncode = 0
+        stdout = "1 passed"
+        stderr = ""
+
+    monkeypatch.setattr(proofs.subprocess, "run", lambda *_args, **_kwargs: Completed())
+    result = proofs._run_owner("g20", proofs.OWNER_PROOFS["g20"])
+    assert result["status"] == "PASS"
+    assert result["returncode"] == 0
+    assert result["proof"] == "tests/test_g20_catalog.py"
+
+
+def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
+    monkeypatch, tmp_path: Path
+) -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    monkeypatch.setattr(matrix, "_load_json", lambda _path: {})
+    monkeypatch.setattr(
+        matrix,
+        "_artifact_errors",
+        lambda label, *_args, **_kwargs: [f"{label}: invalid"],
+    )
+    monkeypatch.setattr(
+        matrix,
+        "build_matrix",
+        lambda **_kwargs: {
+            "summary": {"COVERED": 181},
+            "unresolved_cases": [],
+            "failed_cases": [],
+            "results": [],
+        },
+    )
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(5)]
+    assert matrix.main(
+        [
+            "--gcc",
+            artifacts[0],
+            "--clang",
+            artifacts[1],
+            "--runtime",
+            artifacts[2],
+            "--bundle",
+            artifacts[3],
+            "--proofs",
+            artifacts[4],
+        ]
+    ) == 1
 
 
 def test_stub_pair_case_is_covered_by_python_api_proof() -> None:

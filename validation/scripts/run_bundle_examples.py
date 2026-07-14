@@ -14,6 +14,7 @@ bundle verdict/kinds declared in ``examples/ground_truth.json``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -341,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "runner": "validation/scripts/run_bundle_examples.py",
+            "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
             "summary": {"SKIP": 1},
             "results": [
                 {
@@ -373,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/run_bundle_examples.py",
+        "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": "linux",
         "ground_truth_cases": len(cases),
         "selected_cases": len(cases),

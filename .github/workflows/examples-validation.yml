@@ -295,15 +295,8 @@ jobs:
 
       - name: Validate non-default example owners
         run: |
-          PYTHONPATH=. pytest \
-            tests/test_g20_catalog.py \
-            tests/test_l3l4l5_examples.py \
-            tests/test_python_api_examples.py \
-            tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
-            tests/test_diff_reconcile.py::test_case164_fixtures_reconcile \
-            "tests/test_environment_drift.py::TestCase170Example" \
-            tests/test_kabi_examples.py \
-            -q
+          PYTHONPATH=. python validation/scripts/run_example_owner_proofs.py --json \
+            > results/example-owner-proofs.json
 
       - name: Validate bundle examples
         run: |
@@ -317,13 +310,7 @@ jobs:
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
             --bundle results/bundle-examples.json \
-            --proof-g20 \
-            --proof-l3l4l5 \
-            --proof-btf \
-            --proof-python-api \
-            --proof-reconcile \
-            --proof-snapshot-pair \
-            --proof-kabi \
+            --proofs results/example-owner-proofs.json \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix

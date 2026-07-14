@@ -17,6 +17,7 @@ This script turns runner outputs into one auditable matrix:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from collections import Counter
@@ -27,6 +28,21 @@ REPO_DIR = Path(__file__).resolve().parents[2]
 EXAMPLES_DIR = REPO_DIR / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
 SCHEMA_VERSION = "full_example_matrix.v1"
+
+ARTIFACT_CONTRACTS = {
+    "gcc": ("tests/validate_examples.py", "validate_examples.v2"),
+    "clang": ("tests/validate_examples.py", "validate_examples.v2"),
+    "runtime": (
+        "validation/scripts/run_example_runtime_smoke.py",
+        "example_runtime_smoke.v1",
+    ),
+    "bundle": (
+        "validation/scripts/run_bundle_examples.py",
+        "bundle_examples.v1",
+    ),
+}
+PROOF_ARTIFACT_RUNNER = "validation/scripts/run_example_owner_proofs.py"
+PROOF_ARTIFACT_SCHEMA = "example_owner_proofs.v1"
 
 SPECIAL_PROOFS = {
     "btf": {
@@ -77,6 +93,212 @@ def _results_by_case(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         str(r.get("case_id") or r.get("name") or r.get("case")): r
         for r in data.get("results", [])
     }
+
+
+def _ground_truth_digest() -> str:
+    return hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest()
+
+
+def _artifact_errors(
+    label: str,
+    data: dict[str, Any] | None,
+    *,
+    expected_cases: set[str],
+) -> list[str]:
+    """Return contract violations for one required full-matrix artifact."""
+    if data is None:
+        return [f"{label}: artifact is missing, unreadable, or malformed"]
+
+    errors: list[str] = []
+    expected_runner, expected_schema = ARTIFACT_CONTRACTS[label]
+    if data.get("runner") != expected_runner:
+        errors.append(
+            f"{label}: runner={data.get('runner')!r}, expected {expected_runner!r}"
+        )
+    if data.get("schema_version") != expected_schema:
+        errors.append(
+            f"{label}: schema_version={data.get('schema_version')!r}, "
+            f"expected {expected_schema!r}"
+        )
+    if data.get("ground_truth_sha256") != _ground_truth_digest():
+        errors.append(f"{label}: ground_truth_sha256 does not match this checkout")
+    if data.get("ground_truth_cases") != len(expected_cases):
+        errors.append(
+            f"{label}: ground_truth_cases={data.get('ground_truth_cases')!r}, "
+            f"expected {len(expected_cases)}"
+        )
+
+    results = data.get("results")
+    if not isinstance(results, list):
+        errors.append(f"{label}: results must be a list")
+        return errors
+
+    case_ids = [
+        str(row.get("case_id") or row.get("name") or row.get("case"))
+        for row in results
+        if isinstance(row, dict)
+    ]
+    counts = Counter(case_ids)
+    duplicates = sorted(case_id for case_id, count in counts.items() if count > 1)
+    actual_cases = set(case_ids)
+    missing = sorted(expected_cases - actual_cases)
+    unexpected = sorted(actual_cases - expected_cases)
+    if len(case_ids) != len(results):
+        errors.append(f"{label}: every result must be an object with a case id")
+    if duplicates:
+        errors.append(f"{label}: duplicate case ids: {', '.join(duplicates)}")
+    if missing:
+        errors.append(f"{label}: missing case ids: {', '.join(missing)}")
+    if unexpected:
+        errors.append(f"{label}: unexpected case ids: {', '.join(unexpected)}")
+    if data.get("selected_cases") != len(expected_cases):
+        errors.append(
+            f"{label}: selected_cases={data.get('selected_cases')!r}, "
+            f"expected {len(expected_cases)}"
+        )
+
+    if label in {"gcc", "clang"}:
+        if data.get("toolchain") != label:
+            errors.append(
+                f"{label}: toolchain={data.get('toolchain')!r}, expected {label!r}"
+            )
+        if data.get("artifact_variants") != ["debug-headers"]:
+            errors.append(
+                f"{label}: artifact_variants={data.get('artifact_variants')!r}, "
+                "expected ['debug-headers']"
+            )
+        allowed_statuses = {"PASS", "FAIL", "XFAIL", "SKIP", "ERROR"}
+        bad_statuses = {"FAIL", "ERROR", "BUILD_ERROR"}
+    elif label == "runtime":
+        if data.get("build_type") != "Debug":
+            errors.append(
+                f"runtime: build_type={data.get('build_type')!r}, expected 'Debug'"
+            )
+        allowed_statuses = {
+            "DEMONSTRATED",
+            "NO_RUNTIME_SIGNAL",
+            "BASELINE_SIGNAL",
+            "SKIP",
+            "BUILD_ERROR",
+        }
+        bad_statuses = {"BUILD_ERROR"}
+    else:
+        if data.get("platform") != "linux":
+            errors.append(
+                f"bundle: platform={data.get('platform')!r}, expected 'linux'"
+            )
+        allowed_statuses = {"PASS", "FAIL", "ERROR"}
+        bad_statuses = {"FAIL", "ERROR"}
+    unknown_statuses = sorted(
+        {
+            str(row.get("status"))
+            for row in results
+            if isinstance(row, dict) and row.get("status") not in allowed_statuses
+        }
+    )
+    if unknown_statuses:
+        errors.append(f"{label}: unknown statuses: {', '.join(unknown_statuses)}")
+
+    actual_summary = dict(
+        Counter(
+            str(row.get("status"))
+            for row in results
+            if isinstance(row, dict) and row.get("status") is not None
+        )
+    )
+    if data.get("summary") != actual_summary:
+        errors.append(
+            f"{label}: summary={data.get('summary')!r}, "
+            f"recomputed {actual_summary!r}"
+        )
+    bad_cases = sorted(
+        str(row.get("case_id") or row.get("name") or row.get("case"))
+        for row in results
+        if isinstance(row, dict) and row.get("status") in bad_statuses
+    )
+    if bad_cases:
+        errors.append(
+            f"{label}: failing runner statuses for: {', '.join(bad_cases)}"
+        )
+    return errors
+
+
+def _proof_artifact_errors(data: dict[str, Any] | None) -> list[str]:
+    """Return contract violations for the dedicated-owner proof artifact."""
+    if data is None:
+        return ["proofs: artifact is missing, unreadable, or malformed"]
+
+    errors: list[str] = []
+    if data.get("runner") != PROOF_ARTIFACT_RUNNER:
+        errors.append(
+            f"proofs: runner={data.get('runner')!r}, "
+            f"expected {PROOF_ARTIFACT_RUNNER!r}"
+        )
+    if data.get("schema_version") != PROOF_ARTIFACT_SCHEMA:
+        errors.append(
+            f"proofs: schema_version={data.get('schema_version')!r}, "
+            f"expected {PROOF_ARTIFACT_SCHEMA!r}"
+        )
+    if data.get("ground_truth_sha256") != _ground_truth_digest():
+        errors.append("proofs: ground_truth_sha256 does not match this checkout")
+
+    results = data.get("results")
+    if not isinstance(results, list):
+        errors.append("proofs: results must be a list")
+        return errors
+    owners = [
+        str(row.get("owner")) for row in results if isinstance(row, dict)
+    ]
+    counts = Counter(owners)
+    expected_owners = set(SPECIAL_PROOFS)
+    actual_owners = set(owners)
+    duplicates = sorted(owner for owner, count in counts.items() if count > 1)
+    missing = sorted(expected_owners - actual_owners)
+    unexpected = sorted(actual_owners - expected_owners)
+    if len(owners) != len(results):
+        errors.append("proofs: every result must be an object with an owner")
+    if duplicates:
+        errors.append(f"proofs: duplicate owners: {', '.join(duplicates)}")
+    if missing:
+        errors.append(f"proofs: missing owners: {', '.join(missing)}")
+    if unexpected:
+        errors.append(f"proofs: unexpected owners: {', '.join(unexpected)}")
+    if data.get("selected_owners") != len(expected_owners):
+        errors.append(
+            f"proofs: selected_owners={data.get('selected_owners')!r}, "
+            f"expected {len(expected_owners)}"
+        )
+
+    unknown_statuses = sorted(
+        {
+            str(row.get("status"))
+            for row in results
+            if isinstance(row, dict) and row.get("status") not in {"PASS", "FAIL"}
+        }
+    )
+    if unknown_statuses:
+        errors.append(f"proofs: unknown statuses: {', '.join(unknown_statuses)}")
+    failed = sorted(
+        str(row.get("owner"))
+        for row in results
+        if isinstance(row, dict)
+        and (row.get("status") != "PASS" or row.get("returncode") != 0)
+    )
+    if failed:
+        errors.append(f"proofs: failing owners: {', '.join(failed)}")
+    actual_summary = dict(
+        Counter(
+            str(row.get("status"))
+            for row in results
+            if isinstance(row, dict) and row.get("status") is not None
+        )
+    )
+    if data.get("summary") != actual_summary:
+        errors.append(
+            f"proofs: summary={data.get('summary')!r}, "
+            f"recomputed {actual_summary!r}"
+        )
+    return errors
 
 
 def _case_owner(name: str, entry: dict[str, Any]) -> str:
@@ -249,17 +471,21 @@ def build_matrix(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gcc", type=Path, help="validate_examples gcc JSON")
-    parser.add_argument("--clang", type=Path, help="validate_examples clang JSON")
-    parser.add_argument("--bundle", type=Path, help="run_bundle_examples JSON")
-    parser.add_argument("--runtime", type=Path, help="runtime smoke JSON")
-    parser.add_argument("--proof-g20", action="store_true")
-    parser.add_argument("--proof-l3l4l5", action="store_true")
-    parser.add_argument("--proof-btf", action="store_true")
-    parser.add_argument("--proof-python-api", action="store_true")
-    parser.add_argument("--proof-reconcile", action="store_true")
-    parser.add_argument("--proof-snapshot-pair", action="store_true")
-    parser.add_argument("--proof-kabi", action="store_true")
+    parser.add_argument(
+        "--gcc", type=Path, required=True, help="validate_examples gcc JSON"
+    )
+    parser.add_argument(
+        "--clang", type=Path, required=True, help="validate_examples clang JSON"
+    )
+    parser.add_argument(
+        "--bundle", type=Path, required=True, help="run_bundle_examples JSON"
+    )
+    parser.add_argument(
+        "--runtime", type=Path, required=True, help="runtime smoke JSON"
+    )
+    parser.add_argument(
+        "--proofs", type=Path, required=True, help="dedicated-owner proof JSON"
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--allow-unresolved",
@@ -268,19 +494,53 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    gcc = _load_json(args.gcc)
+    clang = _load_json(args.clang)
+    bundle = _load_json(args.bundle)
+    runtime = _load_json(args.runtime)
+    proofs = _load_json(args.proofs)
+    ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
+    all_cases = set(ground_truth)
+    bundle_cases = {
+        name
+        for name, entry in ground_truth.items()
+        if _case_owner(name, entry) == "bundle"
+    }
+    artifact_errors = [
+        error
+        for label, data, expected_cases in (
+            ("gcc", gcc, all_cases),
+            ("clang", clang, all_cases),
+            ("runtime", runtime, all_cases),
+            ("bundle", bundle, bundle_cases),
+        )
+        for error in _artifact_errors(label, data, expected_cases=expected_cases)
+    ]
+    artifact_errors.extend(_proof_artifact_errors(proofs))
+    proof_results = {
+        str(row.get("owner")): row
+        for row in (proofs or {}).get("results", [])
+        if isinstance(row, dict)
+    }
+
+    def proof_passed(owner: str) -> bool:
+        result = proof_results.get(owner, {})
+        return result.get("status") == "PASS" and result.get("returncode") == 0
+
     matrix = build_matrix(
-        gcc=_load_json(args.gcc),
-        clang=_load_json(args.clang),
-        bundle=_load_json(args.bundle),
-        runtime=_load_json(args.runtime),
-        proof_g20=args.proof_g20,
-        proof_l3l4l5=args.proof_l3l4l5,
-        proof_btf=args.proof_btf,
-        proof_python_api=args.proof_python_api,
-        proof_reconcile=args.proof_reconcile,
-        proof_snapshot_pair=args.proof_snapshot_pair,
-        proof_kabi=args.proof_kabi,
+        gcc=gcc,
+        clang=clang,
+        bundle=bundle,
+        runtime=runtime,
+        proof_g20=proof_passed("g20"),
+        proof_l3l4l5=proof_passed("l3l4l5"),
+        proof_btf=proof_passed("btf"),
+        proof_python_api=proof_passed("python_api"),
+        proof_reconcile=proof_passed("reconcile"),
+        proof_snapshot_pair=proof_passed("snapshot_pair"),
+        proof_kabi=proof_passed("kabi"),
     )
+    matrix["artifact_errors"] = artifact_errors
     text = json.dumps(matrix, indent=2)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -290,10 +550,12 @@ def main(argv: list[str] | None = None) -> int:
         print("UNRESOLVED:", ", ".join(matrix["unresolved_cases"]), file=sys.stderr)
     if matrix["failed_cases"]:
         print("FAILED:", ", ".join(matrix["failed_cases"]), file=sys.stderr)
+    for error in artifact_errors:
+        print("ARTIFACT ERROR:", error, file=sys.stderr)
     if not args.out:
         print(text)
 
-    if matrix["failed_cases"]:
+    if matrix["failed_cases"] or artifact_errors:
         return 1
     if matrix["unresolved_cases"] and not args.allow_unresolved:
         return 1

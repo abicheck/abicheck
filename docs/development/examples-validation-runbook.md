@@ -43,19 +43,12 @@ intentionally disabled. Without this opt-in, source-smoke-owned cases can be
 ### 1. Validate dedicated owners
 
 ```bash
-python -m pytest \
-  tests/test_g20_catalog.py \
-  tests/test_l3l4l5_examples.py \
-  tests/test_python_api_examples.py \
-  tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth \
-  tests/test_diff_reconcile.py::test_case164_fixtures_reconcile \
-  'tests/test_environment_drift.py::TestCase170Example' \
-  tests/test_kabi_examples.py \
-  -q
+python validation/scripts/run_example_owner_proofs.py --json \
+  > results/example-owner-proofs.json
 ```
 
-Do not pass a collector `--proof-*` flag unless its proof command passed in the
-same checkout.
+The proof runner executes every dedicated owner separately and records its
+command, exit code, and bounded output in a machine-readable artifact.
 
 ### 2. Produce lane artifacts
 
@@ -74,8 +67,7 @@ python validation/scripts/collect_full_example_matrix.py \
   --clang results/validate-examples-clang.json \
   --runtime results/example-runtime-smoke.json \
   --bundle results/bundle-examples.json \
-  --proof-g20 --proof-l3l4l5 --proof-btf --proof-python-api \
-  --proof-reconcile --proof-snapshot-pair --proof-kabi \
+  --proofs results/example-owner-proofs.json \
   --out results/full-example-matrix.json
 ```
 
@@ -93,6 +85,7 @@ d = json.loads(Path("results/full-example-matrix.json").read_text())
 total = d["ground_truth_cases"]
 assert len(d["results"]) == total
 assert d["summary"] == {"COVERED": total}
+assert not d["artifact_errors"]
 assert not d["unresolved_cases"]
 assert not d["failed_cases"]
 print(f"{total}/{total} COVERED")
@@ -108,6 +101,8 @@ hard-code a historic count. When this runbook was added, the proven result was
 - `FAILED`: a lane ran and contradicted ground truth, or a proof failed.
 - `UNRESOLVED`: no owner lane proved the case; inspect `lanes`, `proof_lane`,
   and `note` in that row.
+- `artifact_errors`: a required runner artifact was missing, malformed, partial,
+  produced by the wrong runner/toolchain, or came from different ground truth.
 - A compiler-lane `SKIP` is acceptable only when another designated owner
   proves that case and the final row is `COVERED`.
 - Runtime statuses describe behavior; they do not replace verdict proof.
