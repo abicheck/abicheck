@@ -19,8 +19,12 @@ ordinary `library_version()` function.
 
 A consumer writing `clamp<int>(x, a, b)` resolves the call against the new
 parameter types and emits a *different* mangled symbol on its own side; overload
-resolution and deduction can also change. For users of the template this is a
-real source/ABI break.
+resolution and deduction can also change. No shipped binary instantiates the
+template today, so nothing that currently links is broken — a consumer only
+picks up the new signature the next time it recompiles against the updated
+headers. That is why the canonical verdict is COMPATIBLE_WITH_RISK
+(`template_body_changed`) rather than API_BREAK: a source-visible risk for
+future consumers, not a proven break for any consumer that exists yet.
 
 ## Why this case exists — the limit of *artifact* analysis
 

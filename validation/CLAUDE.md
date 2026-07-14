@@ -25,7 +25,7 @@ evidence and is exercised by `.github/workflows/examples-validation.yml`.
 ## Full example matrix
 
 For synthetic example-catalog completeness, follow
-`docs/development/examples-validation-runbook.md`. The matrix aggregates gcc
+`../docs/development/examples-validation-runbook.md`. The matrix aggregates gcc
 and clang validator JSON, runtime smoke, bundle JSON, and dedicated owners. Do
 not call a compiler lane, pair-only scan, benchmark, or depth matrix “full
 catalog.” Success requires one `COVERED` row per current ground-truth entry and

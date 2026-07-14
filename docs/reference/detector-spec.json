@@ -2754,7 +2754,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_offset_changed",
-      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost"
+      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case43_base_class_member_added"
     },
     {
       "kind": "type_field_removed",

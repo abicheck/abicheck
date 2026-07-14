@@ -620,7 +620,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "risk",
-   "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template. The canonical truth is COMPATIBLE_WITH_RISK. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --no-scope-public-headers on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
+   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --no-scope-public-headers on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_absent_kinds": [
     "func_params_changed",
@@ -2345,7 +2345,8 @@
    },
    "expected_kinds": [
     "type_field_added",
-    "type_size_changed"
+    "type_size_changed",
+    "type_field_offset_changed"
    ]
   },
   "case44_cyclic_type_member_added": {

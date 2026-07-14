@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `unversioned_exported_symbol` |
 | **Source files** | `examples/case145_audit_unversioned_export/` |
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `unversioned_exported_symbol` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `unversioned_exported_symbol` ·
 **Mode:** single-release audit · **Evidence tier:** L0
 
 ## What it demonstrates

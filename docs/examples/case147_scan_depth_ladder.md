@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `examples/case147_scan_depth_ladder/` |
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `private_header_leak` ·
 **Mode:** single-release audit · **Evidence tier:** L2 (→ L5 corroboration)
 
 ## What it demonstrates

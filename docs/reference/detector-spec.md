@@ -311,7 +311,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` | [case28](../examples/case28_typedef_opaque.md) |
 | `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` | [case43](../examples/case43_base_class_member_added.md), [case94](../examples/case94_empty_tag_gained_state.md) |
 | `type_field_added_compatible` | addition | `COMPATIBLE` | `warning` | unspecified | `type_field_added_compatible` | — |
-| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](../examples/case117_no_unique_address.md), [case140](../examples/case140_empty_base_optimization_lost.md) |
+| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](../examples/case117_no_unique_address.md), [case140](../examples/case140_empty_base_optimization_lost.md), [case43](../examples/case43_base_class_member_added.md) |
 | `type_field_removed` | breaking | `BREAKING` | `error` | unspecified | `type_field_removed` | — |
 | `type_field_type_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_type_changed` | [case30](../examples/case30_field_qualifiers.md), [case45](../examples/case45_multi_dim_array_change.md) |
 | `type_kind_changed` | breaking | `BREAKING` | `error` | L1 | `type_kind_changed` | [case55](../examples/case55_type_kind_changed.md) |
