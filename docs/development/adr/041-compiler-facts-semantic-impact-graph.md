@@ -826,21 +826,26 @@ header-only pass is never mistaken for a full L4/L5 build-integrated one.
 `SourceGraphSummary.finalize()`'s `type_edges`/`call_edges` coverage flags
 recognize both the build-integrated and header-only pass names (an `or` over
 both), so the human-readable coverage report is honest either way.
-Deliberately **not** done: extending `source_graph_findings.
-_DEPENDENCY_EDGE_FAMILIES` (the version-diff family-widening table) with the
-header-only pass names. That table's per-kind fallback loop unions "common"
-credit across every entry, which is only sound when each entry owns a
-disjoint edge-kind set (`call_graph` → `DECL_CALLS_DECL`, `type_graph` → the
-other four); a `header_type_graph` entry sharing `type_graph`'s exact kinds
-would let a kind correctly excluded under a narrowed/degraded `type_graph`
-pass leak back in as "common" under the second, unmarked entry for the same
-kind (caught by the existing test suite when first tried). A
-header-only-vs-header-only version diff therefore falls back to the more
-conservative per-kind edge-presence check rather than getting full-pass
-family-widening credit — safe, just not optimal; fixing it properly needs a
-redesign of that loop's "one authority per kind" assumption, left for a
-follow-up rather than risking the delicate, many-times-reviewed function this
-change does not otherwise need to touch.
+`source_graph_findings._common_dependency_edge_kinds`/`_dependency_kinds_covered`
+(the version-diff family-widening logic) also honor the header-only pass names
+— but **not** by adding `header_call_graph`/`header_type_graph` as separate
+entries in `_DEPENDENCY_EDGE_FAMILIES`: that table's per-kind fallback loop
+unions "common" credit across every entry, which is only sound when each entry
+owns a disjoint edge-kind set (`call_graph` → `DECL_CALLS_DECL`, `type_graph` →
+the other four); a `header_type_graph` entry sharing `type_graph`'s exact kinds
+would let a kind correctly excluded under a narrowed/degraded `type_graph` pass
+leak back in as "common" under the second, unmarked entry for the same kind
+(caught by the existing test suite, then reverted, on the first attempt — a
+Codex review on the shipped PR caught the resulting gap: an unfixed version
+would silently drop a real `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding
+whenever a header-only baseline's verified-zero family gained its first edge).
+Fixed properly with `_HEADER_PASS_ALIAS` (`{"call_graph":
+"header_call_graph", "type_graph": "header_type_graph"}`) plus four small
+helpers (`_pass_ran`/`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) that each
+check *both* names within the *same*, single loop iteration per
+family — so a header-only graph's own confirmed-pass/narrowed/degraded markers
+are honored without ever double-counting a kind across two independent
+iterations, the exact failure mode the first attempt hit.
 
 **Consumer:** `crosscheck.py`'s `public_to_internal_dependency` and
 `source_graph_findings.diff_source_graph_findings`'s

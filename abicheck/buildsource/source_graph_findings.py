@@ -311,6 +311,59 @@ _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
 }
 
 
+#: Maps a build-integrated pass name to its header-only-graph counterpart
+#: (``header_graph.py``, ADR-041 header-only-graph addendum) — the *same*
+#: edge-kind family, produced by a different, no-build extraction path.
+#: Deliberately NOT folded into :data:`_DEPENDENCY_EDGE_FAMILIES` itself (see
+#: that constant's docstring): adding a second entry sharing the same kinds
+#: would make the per-kind fallback loop iterate the same kind under two
+#: independent "authorities", and one iteration finding it common is enough
+#: to override a *different* iteration's correct exclusion — a real
+#: regression the existing test suite caught. Instead, every flag lookup
+#: below (`_pass_ran`/`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) checks
+#: *both* names for the *same* pass-name iteration, so a header-only graph's
+#: own confirmed-pass/narrowed/degraded markers are honored without ever
+#: double-counting a kind under two separate loop iterations (Codex review).
+_HEADER_PASS_ALIAS: dict[str, str] = {
+    "call_graph": "header_call_graph",
+    "type_graph": "header_type_graph",
+}
+
+
+def _pass_ran(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) ran to completion."""
+    return graph.extractor_passes.get(pass_name, False) or graph.extractor_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_narrowed(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) ran narrowed."""
+    return graph.narrowed_passes.get(pass_name, False) or graph.narrowed_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_degraded(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) hit diagnostics."""
+    return graph.degraded_passes.get(pass_name, False) or graph.degraded_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_scope(graph: SourceGraphSummary, pass_name: str) -> frozenset[str]:
+    """The narrowed scope *pass_name* (or its header-only counterpart) used.
+
+    A graph only ever populates one of the two — a header-only pass is never
+    narrowed by construction (it always parses the whole header aggregate in
+    one shot) — so preferring the build-integrated name when both happen to
+    be non-empty is an arbitrary, safe tie-break, not a real ambiguity.
+    """
+    return graph.narrowed_scope.get(pass_name, frozenset()) or graph.narrowed_scope.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), frozenset()
+    )
+
+
 def _dependency_kinds_covered(
     graph: SourceGraphSummary, edge_kinds: frozenset[str]
 ) -> bool:
@@ -340,10 +393,7 @@ def _dependency_kinds_covered(
     if any(e.kind in edge_kinds for e in graph.edges):
         return True
     return any(
-        (
-            graph.extractor_passes.get(pass_name, False)
-            or graph.narrowed_passes.get(pass_name, False)
-        )
+        (_pass_ran(graph, pass_name) or _pass_narrowed(graph, pass_name))
         and (family & edge_kinds)
         for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items()
     )
@@ -445,12 +495,18 @@ def _common_dependency_edge_kinds(
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        old_pass = old.extractor_passes.get(pass_name, False)
-        new_pass = new.extractor_passes.get(pass_name, False)
-        old_narrowed = old.narrowed_passes.get(pass_name, False)
-        new_narrowed = new.narrowed_passes.get(pass_name, False)
-        old_scope = old.narrowed_scope.get(pass_name, frozenset())
-        new_scope = new.narrowed_scope.get(pass_name, frozenset())
+        # Each lookup also honors *pass_name*'s header-only-graph counterpart
+        # (``header_call_graph``/``header_type_graph``, ADR-041 header-only-
+        # graph addendum) — same pass-name iteration, so a header-only
+        # graph's own confirmed-pass/narrowed/degraded markers are trusted
+        # without adding a second, independently-iterated family entry that
+        # could double-count a kind (see ``_HEADER_PASS_ALIAS``'s docstring).
+        old_pass = _pass_ran(old, pass_name)
+        new_pass = _pass_ran(new, pass_name)
+        old_narrowed = _pass_narrowed(old, pass_name)
+        new_narrowed = _pass_narrowed(new, pass_name)
+        old_scope = _pass_scope(old, pass_name)
+        new_scope = _pass_scope(new, pass_name)
         # A narrowed old side is only trusted against a new side narrowed to
         # the *identical*, non-empty scope — "both narrowed" alone does not
         # establish they examined the same code (fourteenth Codex review).
@@ -470,7 +526,7 @@ def _common_dependency_edge_kinds(
         # "this kind was examined project-wide" any more than a narrowed
         # side's edges may (sixteenth Codex review): the failed TUs are an
         # unknown, untracked gap.
-        old_degraded = old.degraded_passes.get(pass_name, False)
+        old_degraded = _pass_degraded(old, pass_name)
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
         for kind in family:

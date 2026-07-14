@@ -594,6 +594,12 @@ def _attach_header_graph(
     if not header_graph or not headers:
         return snap
     from .buildsource.header_graph import build_header_only_graph
+    from .buildsource.model import (
+        CoverageStatus,
+        DataLayer,
+        LayerConfidence,
+        LayerCoverage,
+    )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump
 
@@ -620,7 +626,30 @@ def _attach_header_graph(
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
     )
-    snap.build_source = BuildSourcePack(root=Path(""), source_graph=graph)
+    pack = BuildSourcePack(root=Path(""), source_graph=graph)
+    # Populate the manifest coverage row the normal collect/embed path always
+    # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's
+    # default empty ``coverage`` reads as "L5 not collected" to
+    # cli_buildsource_helpers._layer_presence/_optional_coverage even though
+    # source_graph is populated, making coverage/asymmetry reporting
+    # misleading (Codex review). L3/L4 stay honestly NOT_COLLECTED — neither
+    # a build nor an L4 source-ABI replay ran in a header-only world.
+    pack.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value,
+            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
+            confidence=LayerConfidence.REDUCED
+            if graph.edges
+            else LayerConfidence.UNKNOWN,
+        ),
+    ]
+    snap.build_source = pack
     return snap
 
 

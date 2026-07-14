@@ -1764,3 +1764,56 @@ def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> 
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )
     assert "own implementation also changed" not in dep_finding.description
+
+
+def test_common_dependency_edge_kinds_header_only_confirmed_pass_widens_family() -> (
+    None
+):
+    # Codex review (ADR-041 header-only-graph addendum): a header-only graph
+    # stamps `extractor_passes["header_type_graph"]`, not `"type_graph"`. Two
+    # header-only graphs both confirming that pass ran must get the same
+    # family-widening credit a build-integrated `"type_graph"` confirmation
+    # would — a baseline public struct with no private fields (verified zero)
+    # compared against a candidate that adds one must still be flagged.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[],  # confirmed pass, zero type edges anywhere
+        extractor_passes={"header_type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
+        edges=[_E("b", "c", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"header_type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset(
+        {
+            "DECL_REFERENCES_DECL",
+            "DECL_HAS_TYPE",
+            "TYPE_HAS_FIELD_TYPE",
+            "TYPE_INHERITS",
+        }
+    )
+
+
+def test_common_dependency_edge_kinds_header_and_build_pass_names_not_double_counted() -> (
+    None
+):
+    # The regression this alias mechanism specifically guards against: a
+    # narrowed/degraded build-integrated pass on one side must still be
+    # correctly excluded, even though the *other* side (or the same side)
+    # might carry no marker under the header-only pass name at all — the
+    # header alias must never manufacture a *second*, independent "vacuously
+    # trusting" authority for the same kind.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
+        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
+        # No extractor_passes/narrowed_passes at all: an unmarked/legacy pack.
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()

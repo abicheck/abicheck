@@ -1653,6 +1653,18 @@ class TestRunDumpHeaderGraph:
         assert result.build_source.source_graph is not None
         node_ids = {n.id for n in result.build_source.source_graph.nodes}
         assert "decl://_Z1fv" in node_ids
+        # The manifest coverage row must be populated too (Codex review) — an
+        # empty default manifest would read as "L5 not collected" to
+        # cli_buildsource_helpers._layer_presence/_optional_coverage even
+        # though source_graph is populated.
+        from abicheck.buildsource.model import CoverageStatus, DataLayer
+
+        l5 = result.build_source.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+        assert l5 is not None
+        assert l5.status == CoverageStatus.PARTIAL  # no edges in this empty AST
+        l3 = result.build_source.manifest.coverage_for(DataLayer.L3_BUILD)
+        assert l3 is not None
+        assert l3.status == CoverageStatus.NOT_COLLECTED
 
     def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
         p = tmp_path / "lib.dll"
