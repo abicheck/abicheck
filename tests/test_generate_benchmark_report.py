@@ -27,7 +27,19 @@ assert _spec and _spec.loader
 gbr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gbr)
 
-_GT_CASE_COUNT = len(json.loads(_GT_PATH.read_text(encoding="utf-8"))["verdicts"])
+_GT_VERDICTS = json.loads(_GT_PATH.read_text(encoding="utf-8"))["verdicts"]
+_GT_CASE_COUNT = len(_GT_VERDICTS)
+_GT_CASE_NAMES = sorted(_GT_VERDICTS)
+
+
+def test_repo_dir_is_on_sys_path_for_uninstalled_checkouts() -> None:
+    """bc._collect_metadata()'s `from abicheck import __version__` must resolve
+    the in-tree package even when abicheck hasn't been pip-installed yet —
+    otherwise abicheck_version silently degrades to "unknown", losing one of
+    the reproducibility pins this report exists to guarantee."""
+    import sys
+
+    assert str(gbr.REPO_DIR) in sys.path
 
 
 def test_parse_doc_table_finds_heading_in_committed_doc() -> None:
@@ -119,6 +131,22 @@ def test_diff_against_doc_partial_run_skips_numeric_rows() -> None:
     assert gbr.diff_against_doc(report, doc_table) == []
 
 
+def _full_run_report(**coverage_overrides: dict[str, Any]) -> dict[str, Any]:
+    """A full-catalog report with matching data for every documented lane and
+    every ground-truth case — the "nothing missing" baseline for drift tests."""
+    coverage_accuracy = {
+        name: {"label": name, "correct": 0, "total": _GT_CASE_COUNT, "pct": 0.0,
+                "false_positives": 0, "false_negatives": 0}
+        for name in gbr.LANE_DOC_LABELS
+    }
+    coverage_accuracy.update(coverage_overrides)
+    return {
+        "full_catalog_run": True,
+        "case_names": list(_GT_CASE_NAMES),
+        "coverage_accuracy": coverage_accuracy,
+    }
+
+
 def test_diff_against_doc_matches_when_numbers_agree() -> None:
     doc_table = {
         "date": "2099-01-01",
@@ -127,14 +155,42 @@ def test_diff_against_doc_matches_when_numbers_agree() -> None:
             abicheck={"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0}
         ),
     }
-    report = {
-        "full_catalog_run": True,
-        "coverage_accuracy": {
-            "abicheck": {"label": "abicheck", "correct": 3, "total": 3, "pct": 100.0,
-                         "false_positives": 0, "false_negatives": 0},
-        },
-    }
+    report = _full_run_report(
+        abicheck={"label": "abicheck", "correct": 3, "total": 3, "pct": 100.0,
+                  "false_positives": 0, "false_negatives": 0},
+    )
     assert gbr.diff_against_doc(report, doc_table) == []
+
+
+def test_diff_against_doc_flags_lane_with_no_data_on_full_run() -> None:
+    """A full-catalog run where a documented lane has neither live nor frozen
+    data must be drift, not a silent "OK" — see the case where stale/deleted
+    frozen-competitor data would otherwise let --check pass unverified."""
+    doc_table = {
+        "date": "2099-01-01",
+        "case_count": _GT_CASE_COUNT,
+        "rows": _all_lanes_rows(),
+    }
+    report = _full_run_report()
+    del report["coverage_accuracy"]["abidiff"]
+    drift = gbr.diff_against_doc(report, doc_table)
+    assert any("abidiff" in line and "no fresh or frozen data" in line for line in drift)
+
+
+def test_diff_against_doc_flags_incomplete_case_coverage_on_full_run() -> None:
+    """A full-catalog run must actually cover every case in ground_truth.json,
+    not just the right *count* — a same-count-different-set drift (one case
+    swapped for another) must not slip through as "matches"."""
+    doc_table = {
+        "date": "2099-01-01",
+        "case_count": _GT_CASE_COUNT,
+        "rows": _all_lanes_rows(),
+    }
+    report = _full_run_report()
+    report["case_names"] = report["case_names"][1:] + ["case_not_in_ground_truth"]
+    drift = gbr.diff_against_doc(report, doc_table)
+    assert any("missing" in line and "ground_truth.json" in line for line in drift)
+    assert any("not in ground_truth.json" in line for line in drift)
 
 
 def test_diff_against_doc_flags_numeric_mismatch() -> None:
@@ -182,6 +238,15 @@ def test_cache_state_for_absent_tool_is_n_a() -> None:
     assert state["a_tool_that_does_not_exist"] == "n/a"
 
 
+def test_display_path_is_relative_inside_repo() -> None:
+    assert gbr._display_path(gbr.DOC_PATH) == "docs/reference/tool-comparison.md"
+
+
+def test_display_path_falls_back_outside_repo() -> None:
+    outside = Path("/tmp/somewhere/else/report.md")
+    assert gbr._display_path(outside) == str(outside)
+
+
 def test_render_markdown_includes_key_fields() -> None:
     report = {
         "generated_at": "2099-01-01T00:00:00Z",
@@ -225,6 +290,7 @@ def test_render_markdown_round_trips_through_parse_and_diff() -> None:
         "ground_truth_sha256": "abc123",
         "case_count": _GT_CASE_COUNT,
         "full_catalog_run": True,
+        "case_names": list(_GT_CASE_NAMES),
         "wall_time_s": 3.0,
         "peak_rss_mb": 10.0,
         "tool_versions": {},

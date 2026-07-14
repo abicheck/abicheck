@@ -55,6 +55,11 @@ REPO_DIR = Path(__file__).parent.parent
 DOC_PATH = REPO_DIR / "docs" / "reference" / "tool-comparison.md"
 
 sys.path.insert(0, str(Path(__file__).parent))
+# So bc._collect_metadata()'s `from abicheck import __version__` resolves the
+# in-tree package even in an uninstalled checkout (pip install -e ".[dev]" not
+# yet run) — otherwise abicheck_version silently falls back to "unknown",
+# losing one of the reproducibility pins this report exists to guarantee.
+sys.path.insert(0, str(REPO_DIR))
 import benchmark_comparison as bc  # noqa: E402
 
 DEFAULT_JSON_OUT = bc.REPORT_DIR / "benchmark_report.json"
@@ -93,6 +98,16 @@ def _peak_rss_mb() -> float | None:
     child_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     divisor = 1024 if sys.platform == "darwin" else 1
     return round((self_rss + child_rss) / 1024 / divisor, 1)
+
+
+def _display_path(path: Path) -> str:
+    """Repo-relative path for display, or the path as given if it's outside
+    REPO_DIR (e.g. a user-supplied --markdown-out elsewhere) — relative_to()
+    raises ValueError in that case rather than falling back."""
+    try:
+        return str(path.relative_to(REPO_DIR))
+    except ValueError:
+        return str(path)
 
 
 def _clean_label(text: str) -> str:
@@ -254,7 +269,7 @@ def diff_against_doc(report: dict[str, Any], doc_table: dict[str, Any] | None) -
     if doc_table is None:
         return [
             f"could not find the 'Full-catalog benchmark (<date>, all N cases)' "
-            f"heading in {DOC_PATH.relative_to(REPO_DIR)} — wording changed? "
+            f"heading in {_display_path(DOC_PATH)} — wording changed? "
             "update DOC_HEADING_RE in this script."
         ]
     drift: list[str] = []
@@ -282,12 +297,31 @@ def diff_against_doc(report: dict[str, Any], doc_table: dict[str, Any] | None) -
         )
         return drift
 
+    gt_case_names = set(bc._gt_data["verdicts"])
+    report_case_names = set(report.get("case_names", []))
+    missing_cases = sorted(gt_case_names - report_case_names)
+    extra_cases = sorted(report_case_names - gt_case_names)
+    if missing_cases:
+        drift.append(
+            f"run claims full-catalog but is missing {len(missing_cases)} case(s) "
+            f"present in ground_truth.json: {missing_cases[:5]}"
+            + (", ..." if len(missing_cases) > 5 else "")
+        )
+    if extra_cases:
+        drift.append(
+            f"run processed {len(extra_cases)} case(s) not in ground_truth.json: "
+            f"{extra_cases[:5]}" + (", ..." if len(extra_cases) > 5 else "")
+        )
+
     cov = report["coverage_accuracy"]
-    skipped = [name for name in doc_table["rows"] if name not in cov]
-    if skipped:
-        print(
-            f"NOTE: not verified this run (no fresh or frozen data for): {', '.join(skipped)}",
-            file=sys.stderr,
+    # A full-catalog run where a documented lane has neither fresh nor frozen
+    # data is drift, not just a note — --check must not report "matches" while
+    # a whole row went entirely unverified (see the row-verified-with-stale-
+    # frozen-data case this exists to catch).
+    for name in sorted(set(doc_table["rows"]) - set(cov)):
+        drift.append(
+            f"{LANE_DOC_LABELS.get(name, name)}: doc has a row but this run has no "
+            "fresh or frozen data for it — nothing verified it"
         )
     for tool_name, doc_row in doc_table["rows"].items():
         if tool_name not in cov:
@@ -401,13 +435,13 @@ def main(argv: list[str] | None = None) -> int:
         for line in drift:
             print(f"  - {line}", file=sys.stderr)
         print(
-            f"\nRegenerate {DOC_PATH.relative_to(REPO_DIR)}'s table from "
-            f"{args.markdown_out.relative_to(REPO_DIR)} (full-catalog run required "
+            f"\nRegenerate {_display_path(DOC_PATH)}'s table from "
+            f"{_display_path(args.markdown_out)} (full-catalog run required "
             "for the numeric rows).",
             file=sys.stderr,
         )
         return 1
-    print(f"OK: {DOC_PATH.relative_to(REPO_DIR)} matches the generated report.")
+    print(f"OK: {_display_path(DOC_PATH)} matches the generated report.")
     return 0
 
 
