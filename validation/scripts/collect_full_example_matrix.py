@@ -50,6 +50,8 @@ BUILD_SOURCE_PROOF_CASES = {
     "case01_symbol_removal",
     "case04_no_change",
     "case98_cxx_standard_floor_raised",
+    "case105_concept_tightening",
+    "case122_template_signature_uninstantiated",
     "case129_struct_return_convention",
     "case130_exceptions_mode_flip",
     "case131_rtti_mode_flip",
@@ -95,18 +97,30 @@ def _load_json(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"warning: failed to load {path}: {exc}", file=sys.stderr)
         return None
+    if not isinstance(payload, dict):
+        print(
+            f"warning: {path} top-level JSON is {type(payload).__name__}, "
+            "expected an object",
+            file=sys.stderr,
+        )
+        return None
+    return payload
 
 
 def _results_by_case(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     if not data:
         return {}
+    results = data.get("results", [])
+    if not isinstance(results, list):
+        return {}
     return {
         str(r.get("case_id") or r.get("name") or r.get("case")): r
-        for r in data.get("results", [])
+        for r in results
+        if isinstance(r, dict)
     }
 
 

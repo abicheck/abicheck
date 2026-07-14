@@ -839,11 +839,11 @@ def _collect_build_source_evidence(
     entry: dict,
 ) -> tuple[Path | None, Path | None, str | None]:
     """Collect L3/L4/L5 build-source packs for the build-source artifact variant."""
-    if not shutil.which("castxml"):
+    extractor = str(entry.get("source_abi_extractor", "castxml"))
+    if extractor == "castxml" and not shutil.which("castxml"):
         return None, None, "SKIP:castxml not found for source-ABI replay"
 
     results: list[Path] = []
-    extractor = str(entry.get("source_abi_extractor", "castxml"))
     scope = str(entry.get("source_abi_scope", "full"))
     for side, src, header, binary in (
         ("old", v1_src, v1_hdr, v1_so),

@@ -28,11 +28,18 @@ Ninja, CastXML, and binutils.
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 mkdir -p results
 export PYTHONPATH=.
 export ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1
 ```
+
+Activating the venv (rather than only installing into it) matters: every
+`python`/`pytest` invocation below relies on `PATH` resolving to
+`.venv/bin/python`, not an ambient interpreter that lacks the pinned dev
+extras. If you cannot activate (e.g. a non-interactive shell), replace every
+bare `python` command in this runbook with `.venv/bin/python` instead.
 
 The source-smoke `run` mode executes fixture commands. Enable it only for a
 trusted checkout containing reviewed repository-owned fixtures. Its default is
@@ -57,7 +64,7 @@ command, exit code, and bounded output in a machine-readable artifact.
 python tests/validate_examples.py --toolchain gcc --json > results/validate-examples-gcc.json
 python tests/validate_examples.py --toolchain clang --json > results/validate-examples-clang.json
 python tests/validate_examples.py \
-  case01 case04 case98 case129 case130 case131 case132 case133 \
+  case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 \
   --artifact-variant build-source --json > results/validate-examples-build-source.json
 python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 python validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json

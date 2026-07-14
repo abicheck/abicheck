@@ -156,8 +156,15 @@ def _run_json_command(command: list[str], timeout: int) -> dict[str, Any]:
         }
 
     try:
-        payload = json.loads(completed.stdout)
-        message = ""
+        decoded = json.loads(completed.stdout)
+        if isinstance(decoded, dict):
+            payload = decoded
+            message = ""
+        else:
+            payload = None
+            message = (
+                f"public CLI JSON root must be an object, got {type(decoded).__name__}"
+            )
     except json.JSONDecodeError as exc:
         payload = None
         message = f"public CLI did not emit valid JSON: {exc}"
@@ -403,13 +410,23 @@ def _run_python_case(
     setup_stderr = ""
     setup_rc = 0
     for setup in setup_commands:
-        completed = subprocess.run(
-            setup,
-            cwd=REPO_DIR,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        try:
+            completed = subprocess.run(
+                setup,
+                cwd=REPO_DIR,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            setup_rc = 124
+            setup_stderr += str(exc.stderr or "")
+            setup_error = f"setup command timed out after {timeout}s: {setup!r}"
+            break
+        except OSError as exc:
+            setup_rc = 127
+            setup_error = f"setup command could not start: {exc}"
+            break
         setup_rc = completed.returncode
         setup_stderr += completed.stderr
         if setup_rc != 0:

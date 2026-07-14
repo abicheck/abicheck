@@ -230,7 +230,7 @@ jobs:
       - name: Build-source smoke (reported-only + FP guard)
         if: always()
         run: |
-          MODE_SMOKE_CASES="case01 case04 case98 case129 case130 case131 case132 case133"
+          MODE_SMOKE_CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
           set +e
           PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json \
             > results/validate_examples-build-source.json
@@ -293,22 +293,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # These runners exit non-zero when any owned case fails, but they still
+      # write a complete artifact before doing so. continue-on-error keeps a
+      # per-case failure here from skipping the collector below — the
+      # collector re-derives the job's pass/fail from the recorded per-case
+      # statuses in each artifact, so a real failure still fails the job.
       - name: Validate non-default example owners
+        continue-on-error: true
         run: |
           PYTHONPATH=. python validation/scripts/run_example_owner_proofs.py --json \
             > results/example-owner-proofs.json
 
       - name: Validate bundle examples
+        continue-on-error: true
         run: |
           PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json \
             > results/bundle-examples.json
 
       - name: Validate special-shape examples through public CLI
+        continue-on-error: true
         run: |
           PYTHONPATH=. python validation/scripts/run_special_cli_examples.py --json \
             > results/special-cli-examples.json
 
       - name: Build full example matrix
+        if: always()
         run: |
           PYTHONPATH=. python validation/scripts/collect_full_example_matrix.py \
             --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \

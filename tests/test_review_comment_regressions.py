@@ -33,6 +33,25 @@ def test_full_matrix_load_json_missing_or_malformed_is_missing_lane(
     assert matrix._load_json(bad) is None
 
 
+@pytest.mark.parametrize("payload", ["[]", '"a string"', "1", "null", "true"])
+def test_full_matrix_load_json_rejects_non_object_top_level(
+    tmp_path: Path, payload: str
+) -> None:
+    """Valid JSON whose root isn't an object must not crash downstream .get() calls."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    non_object = tmp_path / "non_object.json"
+    non_object.write_text(payload, encoding="utf-8")
+    assert matrix._load_json(non_object) is None
+
+
+def test_full_matrix_results_by_case_rejects_non_list_results() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    assert matrix._results_by_case({"results": "not-a-list"}) == {}
+    assert matrix._results_by_case({"results": [1, "two", {"case_id": "case01"}]}) == {
+        "case01": {"case_id": "case01"}
+    }
+
+
 def test_full_matrix_allow_unresolved_never_masks_failed(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -306,6 +325,21 @@ def test_case98_has_one_expected_verdict_and_l2_miss_is_covered_by_l3() -> None:
     assert row["provenance"] == "abicheck-cli-workflow"
 
 
+@pytest.mark.parametrize("stdout", ["[]", '"a string"', "1", "null"])
+def test_run_json_command_rejects_non_object_json_root(
+    monkeypatch, stdout: str
+) -> None:
+    """A CLI that emits valid-but-non-object JSON must fail the case, not crash on .get()."""
+    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    completed = subprocess.CompletedProcess(
+        args=["abicheck", "compare"], returncode=0, stdout=stdout, stderr=""
+    )
+    monkeypatch.setattr(special.subprocess, "run", lambda *_args, **_kwargs: completed)
+    result = special._run_json_command(["abicheck", "compare"], timeout=10)
+    assert result["payload"] is None
+    assert "object" in result["message"]
+
+
 def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> None:
     special = _load_script("validation/scripts/run_special_cli_examples.py")
     monkeypatch.setattr(
@@ -331,6 +365,40 @@ def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> 
     )
     assert result["status"] == "PASS"
     assert result["returncode"] == 4
+
+
+def test_python_case_setup_timeout_is_a_failed_case_not_a_crash(
+    monkeypatch, tmp_path: Path
+) -> None:
+    special = _load_script("validation/scripts/run_special_cli_examples.py")
+
+    def raise_timeout(*_args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=["cc"], timeout=kwargs.get("timeout", 1), output="", stderr="stuck"
+        )
+
+    monkeypatch.setattr(special.subprocess, "run", raise_timeout)
+    with open(special.GROUND_TRUTH) as f:
+        entry = json.load(f)["verdicts"][special.PYTHON_CASE]
+    result = special._run_python_case(entry, timeout=1, temp_root=tmp_path)
+    assert result["status"] in {"FAIL", "ERROR"}
+    assert "timed out" in result["message"]
+
+
+def test_python_case_setup_os_error_is_a_failed_case_not_a_crash(
+    monkeypatch, tmp_path: Path
+) -> None:
+    special = _load_script("validation/scripts/run_special_cli_examples.py")
+
+    def raise_os_error(*_args, **_kwargs):
+        raise FileNotFoundError("cc: command not found")
+
+    monkeypatch.setattr(special.subprocess, "run", raise_os_error)
+    with open(special.GROUND_TRUTH) as f:
+        entry = json.load(f)["verdicts"][special.PYTHON_CASE]
+    result = special._run_python_case(entry, timeout=1, temp_root=tmp_path)
+    assert result["status"] in {"FAIL", "ERROR"}
+    assert "could not start" in result["message"]
 
 
 def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:
