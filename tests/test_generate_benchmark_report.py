@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from typing import Any
 
 _REPO = Path(__file__).resolve().parent.parent
 _GBR_PATH = _REPO / "scripts" / "generate_benchmark_report.py"
@@ -26,11 +27,11 @@ assert _spec and _spec.loader
 gbr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gbr)
 
-_GT_CASE_COUNT = len(json.loads(_GT_PATH.read_text())["verdicts"])
+_GT_CASE_COUNT = len(json.loads(_GT_PATH.read_text(encoding="utf-8"))["verdicts"])
 
 
 def test_parse_doc_table_finds_heading_in_committed_doc() -> None:
-    text = gbr.DOC_PATH.read_text()
+    text = gbr.DOC_PATH.read_text(encoding="utf-8")
     table = gbr.parse_doc_table(text)
     assert table is not None, (
         "DOC_HEADING_RE no longer matches docs/reference/tool-comparison.md's "
@@ -58,7 +59,7 @@ def test_diff_against_doc_reports_missing_heading() -> None:
 def test_diff_against_doc_flags_case_count_drift_against_real_doc() -> None:
     """Regression guard for the exact bug this tool exists to catch: the doc's
     heading case-count silently falling behind examples/ground_truth.json."""
-    text = gbr.DOC_PATH.read_text()
+    text = gbr.DOC_PATH.read_text(encoding="utf-8")
     table = gbr.parse_doc_table(text)
     assert table is not None
     report = {"full_catalog_run": False, "coverage_accuracy": {}}
@@ -72,13 +73,41 @@ def test_diff_against_doc_flags_case_count_drift_against_real_doc() -> None:
         assert drift == []
 
 
+def _all_lanes_rows(**overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """A doc_table['rows'] dict with every known lane present (no missing-row
+    drift), so tests can focus on one lane's numeric behavior."""
+    rows = {
+        name: {"correct": 0, "pct": 0.0, "false_positives": 0, "false_negatives": 0}
+        for name in gbr.LANE_DOC_LABELS
+    }
+    rows.update(overrides)
+    return rows
+
+
+def test_diff_against_doc_flags_missing_row() -> None:
+    """A row silently deleted or relabeled in the doc must be caught, even on
+    a partial run — this is a doc-authoring bug, independent of what a given
+    benchmark invocation happened to cover."""
+    doc_table = {
+        "date": "2099-01-01",
+        "case_count": _GT_CASE_COUNT,
+        "rows": _all_lanes_rows(),
+    }
+    del doc_table["rows"]["abidiff"]
+    report = {"full_catalog_run": False, "coverage_accuracy": {}}
+    drift = gbr.diff_against_doc(report, doc_table)
+    assert any("abidiff" in line and "missing" in line for line in drift)
+
+
 def test_diff_against_doc_partial_run_skips_numeric_rows() -> None:
     """A --cases smoke run must never be diffed against full-catalog doc
     numbers — that would always spuriously "drift" and defeat the check."""
     doc_table = {
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
-        "rows": {"abicheck": {"correct": 999, "pct": 12.3, "false_positives": 9, "false_negatives": 9}},
+        "rows": _all_lanes_rows(
+            abicheck={"correct": 999, "pct": 12.3, "false_positives": 9, "false_negatives": 9}
+        ),
     }
     report = {
         "full_catalog_run": False,
@@ -94,9 +123,9 @@ def test_diff_against_doc_matches_when_numbers_agree() -> None:
     doc_table = {
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
-        "rows": {
-            "abicheck": {"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0},
-        },
+        "rows": _all_lanes_rows(
+            abicheck={"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0}
+        ),
     }
     report = {
         "full_catalog_run": True,
@@ -112,9 +141,9 @@ def test_diff_against_doc_flags_numeric_mismatch() -> None:
     doc_table = {
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
-        "rows": {
-            "abicheck": {"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0},
-        },
+        "rows": _all_lanes_rows(
+            abicheck={"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0}
+        ),
     }
     report = {
         "full_catalog_run": True,

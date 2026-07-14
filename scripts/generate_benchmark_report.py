@@ -243,6 +243,14 @@ def diff_against_doc(report: dict[str, Any], doc_table: dict[str, Any] | None) -
             f"examples/ground_truth.json currently has {gt_count} cases"
         )
 
+    missing_rows = set(LANE_DOC_LABELS) - set(doc_table["rows"])
+    for tool_name in sorted(missing_rows):
+        drift.append(
+            f"doc table is missing the row for {LANE_DOC_LABELS[tool_name]!r} "
+            f"({tool_name}) — row deleted, or its label no longer matches "
+            "LANE_DOC_LABELS in this script"
+        )
+
     if not report.get("full_catalog_run"):
         print(
             "NOTE: this was a partial run (--cases and/or --suite pinned74) — "
@@ -352,10 +360,10 @@ def main(argv: list[str] | None = None) -> int:
     report["cache_state"] = cache_state
 
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
-    args.json_out.write_text(json.dumps(report, indent=2))
+    args.json_out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
     markdown = render_markdown(report, cache_state)
-    args.markdown_out.write_text(markdown)
+    args.markdown_out.write_text(markdown, encoding="utf-8")
 
     print(f"\n  JSON:     {args.json_out}")
     print(f"  Markdown: {args.markdown_out}\n")
@@ -363,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.check:
         return 0
 
-    doc_text = DOC_PATH.read_text() if DOC_PATH.is_file() else ""
+    doc_text = DOC_PATH.read_text(encoding="utf-8") if DOC_PATH.is_file() else ""
     doc_table = parse_doc_table(doc_text)
     drift = diff_against_doc(report, doc_table)
     if drift:
