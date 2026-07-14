@@ -158,26 +158,48 @@ def render_markdown(report: dict[str, Any], cache_state: dict[str, str]) -> str:
     ]
     for name, version in report["tool_versions"].items():
         lines.append(f"- {name}: `{version or 'not found'}`")
+
+    # This table is deliberately shaped to match docs/reference/tool-comparison.md's
+    # "Full-catalog benchmark" table exactly (same label strings via
+    # LANE_DOC_LABELS, same column order/count) — it's meant to be pasted
+    # directly over that table, and parse_doc_table() must be able to read it
+    # back on a later --check. Cache-state/status-count detail (which the doc
+    # table doesn't carry) goes in a separate appendix below instead of extra
+    # columns, so this shape stays stable.
+    case_count = report["case_count"]
     lines += [
         "",
         "## Accuracy (full-catalog denominator — SKIP/ERROR/TIMEOUT count as misses)",
         "",
-        "| Tool | Cache state | Correct / Total | Accuracy | False positives | "
-        "False negatives | Unsupported/error/timeout | Total time |",
-        "|------|-------------|:---:|:---:|:---:|:---:|:---:|:---:|",
+        f"| Tool | Correct / {case_count} | Accuracy | False positives | False negatives | Total time |",
+        "|------|:---:|:---:|:---:|:---:|:---:|",
     ]
     for name, cov in report["coverage_accuracy"].items():
         acc = report["accuracy"].get(name, {})
-        status = report.get("status_counts", {}).get(name, {})
-        status_str = ", ".join(f"{k}={v}" for k, v in sorted(status.items())) or "0"
+        label = LANE_DOC_LABELS.get(name, cov["label"])
         pct = f"{cov['pct']}%" if cov["pct"] is not None else "n/a"
         total_ms = acc.get("total_ms")
         total_s = f"{total_ms / 1000:.1f}s" if total_ms is not None else "n/a"
         lines.append(
-            f"| {cov['label']} | {cache_state.get(name, 'n/a')} | "
-            f"{cov['correct']} / {cov['total']} | {pct} | "
-            f"{cov['false_positives']} | {cov['false_negatives']} | {status_str} | {total_s} |"
+            f"| {label} | {cov['correct']} | {pct} | "
+            f"{cov['false_positives']} | {cov['false_negatives']} | {total_s} |"
         )
+
+    lines += [
+        "",
+        "## Cache state & status detail",
+        "",
+        "(Not part of the pasteable table above — reproducibility detail only.)",
+        "",
+        "| Tool | Cache state | Unsupported/error/timeout |",
+        "|------|--------------|----------------------------|",
+    ]
+    for name, cov in report["coverage_accuracy"].items():
+        status = report.get("status_counts", {}).get(name, {})
+        status_str = ", ".join(f"{k}={v}" for k, v in sorted(status.items())) or "0"
+        label = LANE_DOC_LABELS.get(name, cov["label"])
+        lines.append(f"| {label} | {cache_state.get(name, 'n/a')} | {status_str} |")
+
     return "\n".join(lines) + "\n"
 
 

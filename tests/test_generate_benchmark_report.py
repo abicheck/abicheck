@@ -205,3 +205,38 @@ def test_render_markdown_includes_key_fields() -> None:
     assert "42.0 MiB" in md
     assert "abicheck" in md
     assert "100.0%" in md
+
+
+def test_render_markdown_round_trips_through_parse_and_diff() -> None:
+    """Regression guard for the exact workflow the doc note recommends: paste
+    render_markdown()'s table over the doc's table, then --check it later.
+    parse_doc_table() must recognize the pasted table (same label strings,
+    same column layout) and diff_against_doc() must find no drift against the
+    report that produced it."""
+    coverage_accuracy = {
+        name: {"label": name, "correct": 5, "total": _GT_CASE_COUNT, "pct": 83.3,
+                "false_positives": 1, "false_negatives": 0}
+        for name in gbr.LANE_DOC_LABELS
+    }
+    report = {
+        "generated_at": "2099-01-01T00:00:00Z",
+        "abicheck_version": "0.0.0-test",
+        "git_commit": "cafefeedface",
+        "ground_truth_sha256": "abc123",
+        "case_count": _GT_CASE_COUNT,
+        "full_catalog_run": True,
+        "wall_time_s": 3.0,
+        "peak_rss_mb": 10.0,
+        "tool_versions": {},
+        "accuracy": {name: {"total_ms": 100} for name in gbr.LANE_DOC_LABELS},
+        "coverage_accuracy": coverage_accuracy,
+        "status_counts": {name: {} for name in gbr.LANE_DOC_LABELS},
+    }
+    cache_state = {name: "live" for name in gbr.LANE_DOC_LABELS}
+    md = gbr.render_markdown(report, cache_state)
+
+    pasted_doc = f"## Full-catalog benchmark (2099-01-01, all {_GT_CASE_COUNT} cases)\n\n{md}"
+    table = gbr.parse_doc_table(pasted_doc)
+    assert table is not None, "parse_doc_table() could not read render_markdown()'s own output back"
+    assert set(table["rows"]) == set(gbr.LANE_DOC_LABELS)
+    assert gbr.diff_against_doc(report, table) == []
