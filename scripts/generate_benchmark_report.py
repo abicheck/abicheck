@@ -367,7 +367,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Case suite to run (default: all).")
     p.add_argument("--skip-abicc", action="store_true", help="Skip ABICC entirely.")
     p.add_argument("--timeout", type=int, default=None,
-                   help="Per-tool-call timeout override (passed through to benchmark_comparison.py).")
+                   help="Per-tool-call timeout override, applied to every lane "
+                        "(abicheck/abidiff/abidiff+headers, abicheck_full, and ABICC — "
+                        "benchmark_comparison.py's --timeout/--abicheck-full-timeout/"
+                        "--abicc-timeout each default to a different value otherwise).")
     p.add_argument("--freeze", nargs="+", metavar="TOOL",
                    help="Persist named tools' results to the frozen-competitor cache "
                         "(see benchmark_comparison.py --freeze).")
@@ -385,9 +388,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-
+def _build_bc_args(args: argparse.Namespace) -> argparse.Namespace:
+    """Translate this script's parsed args into a benchmark_comparison.py
+    Namespace. A single --timeout applies to every lane — abicheck/abidiff
+    use bc's `timeout`, abicheck_full uses a separate
+    `abicheck_full_timeout`, and ABICC uses `abicc_timeout`; all three
+    default to different values in benchmark_comparison.py, so leaving any
+    one alone would make --timeout silently not bound that lane's calls."""
     bc_args = bc.parse_args([])
     bc_args.tools = args.tools
     bc_args.cases = args.cases
@@ -397,6 +404,14 @@ def main(argv: list[str] | None = None) -> int:
     bc_args.no_frozen = args.no_frozen
     if args.timeout is not None:
         bc_args.timeout = args.timeout
+        bc_args.abicheck_full_timeout = args.timeout
+        bc_args.abicc_timeout = args.timeout
+    return bc_args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    bc_args = _build_bc_args(args)
 
     rss_before = _peak_rss_mb() or 0.0
     t0 = time.monotonic()

@@ -42,6 +42,26 @@ def test_repo_dir_is_on_sys_path_for_uninstalled_checkouts() -> None:
     assert str(gbr.REPO_DIR) in sys.path
 
 
+def test_timeout_override_propagates_to_every_lane() -> None:
+    """A single --timeout must bound every lane's per-call timeout, not just
+    abicheck/abidiff — benchmark_comparison.py tracks abicheck_full and ABICC
+    on separate Namespace fields with their own (larger) defaults."""
+    args = gbr.parse_args(["--timeout", "5"])
+    bc_args = gbr._build_bc_args(args)
+    assert bc_args.timeout == 5
+    assert bc_args.abicheck_full_timeout == 5
+    assert bc_args.abicc_timeout == 5
+
+
+def test_no_timeout_override_keeps_lane_defaults() -> None:
+    args = gbr.parse_args([])
+    bc_args = gbr._build_bc_args(args)
+    default_bc_args = gbr.bc.parse_args([])
+    assert bc_args.timeout == default_bc_args.timeout
+    assert bc_args.abicheck_full_timeout == default_bc_args.abicheck_full_timeout
+    assert bc_args.abicc_timeout == default_bc_args.abicc_timeout
+
+
 def test_parse_doc_table_finds_heading_in_committed_doc() -> None:
     text = gbr.DOC_PATH.read_text(encoding="utf-8")
     table = gbr.parse_doc_table(text)
@@ -239,7 +259,8 @@ def test_cache_state_for_absent_tool_is_n_a() -> None:
 
 
 def test_display_path_is_relative_inside_repo() -> None:
-    assert gbr._display_path(gbr.DOC_PATH) == "docs/reference/tool-comparison.md"
+    expected = str(Path("docs", "reference", "tool-comparison.md"))
+    assert gbr._display_path(gbr.DOC_PATH) == expected
 
 
 def test_display_path_falls_back_outside_repo() -> None:
