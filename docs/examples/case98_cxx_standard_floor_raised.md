@@ -29,10 +29,11 @@ through the public `abicheck` CLI. L3 build evidence then records
 `std:CXX` changing from `gnu++17` to `c++20`, and comparison emits
 `abi_relevant_build_flag_changed`.
 
-The build-context-aware result is the case's canonical expectation. L3 is
-the first sufficient evidence layer; L4/L5 source replay is not required.
-`NO_CHANGE` is retained only as the honest result of the poorer L0–L2
-per-binary lane and must not override richer L3 evidence in the merged result.
+The case has one ground-truth verdict at every scan depth:
+`COMPATIBLE_WITH_RISK`. L3 is the first sufficient evidence layer; L4/L5
+source replay is not required. An L0–L2 scan that reports `NO_CHANGE` has
+missed the risk because it lacks the required evidence. That is a documented
+detection gap, not a second expected verdict.
 
 ## Expected verdict
 

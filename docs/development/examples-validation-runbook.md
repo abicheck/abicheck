@@ -56,6 +56,9 @@ command, exit code, and bounded output in a machine-readable artifact.
 ```bash
 python tests/validate_examples.py --toolchain gcc --json > results/validate-examples-gcc.json
 python tests/validate_examples.py --toolchain clang --json > results/validate-examples-clang.json
+python tests/validate_examples.py \
+  case01 case04 case98 case129 case130 case131 case132 case133 \
+  --artifact-variant build-source --json > results/validate-examples-build-source.json
 python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 python validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json
 python validation/scripts/run_special_cli_examples.py --json > results/special-cli-examples.json
@@ -68,6 +71,7 @@ python validation/scripts/collect_full_example_matrix.py \
   --gcc results/validate-examples-gcc.json \
   --clang results/validate-examples-clang.json \
   --runtime results/example-runtime-smoke.json \
+  --build-source results/validate-examples-build-source.json \
   --bundle results/bundle-examples.json \
   --special-cli results/special-cli-examples.json \
   --proofs results/example-owner-proofs.json \
@@ -103,6 +107,11 @@ hard-code a historic count. When this runbook was added, the proven result was
 
 ## Interpret results
 
+- Ground truth is invariant across scan depths. A reduced-evidence lane that
+  cannot observe the expected change is an `XFAIL` detection gap, not a second
+  lane-specific expected verdict. Case98 demonstrates this: L0–L2 observes
+  `NO_CHANGE` against the single `COMPATIBLE_WITH_RISK` truth, while the L3
+  build-source lane proves the expected build-flag risk.
 - `FAILED`: a lane ran and contradicted ground truth, or a proof failed.
 - `UNRESOLVED`: no owner lane proved the case; inspect `lanes`, `proof_lane`,
   and `note` in that row.
@@ -112,7 +121,8 @@ hard-code a historic count. When this runbook was added, the proven result was
   proves that case and the final row is `COVERED`.
 - `provenance=compiler` means GCC or Clang demonstrated a compilable pair.
   `abicheck-cli-workflow` means a public CLI command demonstrated a special
-  input shape. The dedicated-owner artifact remains a separate regression
+  input shape or richer build-source evidence. The dedicated-owner artifact
+  remains a separate regression
   proof, but does not substitute for the required public-CLI artifact.
 - G20 audit risks are advisory at the default `scan` gate: the CLI emits the
   expected cross-check kinds/providers and exits 0 with `COMPATIBLE`. The

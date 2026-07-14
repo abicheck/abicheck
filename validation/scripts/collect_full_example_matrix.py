@@ -32,6 +32,7 @@ SCHEMA_VERSION = "full_example_matrix.v2"
 ARTIFACT_CONTRACTS = {
     "gcc": ("tests/validate_examples.py", "validate_examples.v2"),
     "clang": ("tests/validate_examples.py", "validate_examples.v2"),
+    "build_source": ("tests/validate_examples.py", "validate_examples.v2"),
     "runtime": (
         "validation/scripts/run_example_runtime_smoke.py",
         "example_runtime_smoke.v1",
@@ -44,6 +45,16 @@ ARTIFACT_CONTRACTS = {
         "validation/scripts/run_special_cli_examples.py",
         "special_cli_examples.v2",
     ),
+}
+BUILD_SOURCE_PROOF_CASES = {
+    "case01_symbol_removal",
+    "case04_no_change",
+    "case98_cxx_standard_floor_raised",
+    "case129_struct_return_convention",
+    "case130_exceptions_mode_flip",
+    "case131_rtti_mode_flip",
+    "case132_threadsafe_statics_flip",
+    "case133_tls_model_flip",
 }
 PROOF_ARTIFACT_RUNNER = "validation/scripts/run_example_owner_proofs.py"
 PROOF_ARTIFACT_SCHEMA = "example_owner_proofs.v1"
@@ -126,10 +137,15 @@ def _artifact_errors(
         )
     if data.get("ground_truth_sha256") != _ground_truth_digest():
         errors.append(f"{label}: ground_truth_sha256 does not match this checkout")
-    if data.get("ground_truth_cases") != len(expected_cases):
+    expected_ground_truth_cases = (
+        len(json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"])
+        if label == "build_source"
+        else len(expected_cases)
+    )
+    if data.get("ground_truth_cases") != expected_ground_truth_cases:
         errors.append(
             f"{label}: ground_truth_cases={data.get('ground_truth_cases')!r}, "
-            f"expected {len(expected_cases)}"
+            f"expected {expected_ground_truth_cases}"
         )
 
     results = data.get("results")
@@ -170,6 +186,14 @@ def _artifact_errors(
             errors.append(
                 f"{label}: artifact_variants={data.get('artifact_variants')!r}, "
                 "expected ['debug-headers']"
+            )
+        allowed_statuses = {"PASS", "FAIL", "XFAIL", "SKIP", "ERROR"}
+        bad_statuses = {"FAIL", "ERROR", "BUILD_ERROR"}
+    elif label == "build_source":
+        if data.get("artifact_variants") != ["build-source"]:
+            errors.append(
+                "build_source: artifact_variants="
+                f"{data.get('artifact_variants')!r}, expected ['build-source']"
             )
         allowed_statuses = {"PASS", "FAIL", "XFAIL", "SKIP", "ERROR"}
         bad_statuses = {"FAIL", "ERROR", "BUILD_ERROR"}
@@ -371,6 +395,7 @@ def build_matrix(
     bundle: dict[str, Any] | None,
     special_cli: dict[str, Any] | None,
     runtime: dict[str, Any] | None,
+    build_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     gcc_results = _results_by_case(gcc)
@@ -378,6 +403,7 @@ def build_matrix(
     bundle_results = _results_by_case(bundle)
     special_cli_results = _results_by_case(special_cli)
     runtime_results = _results_by_case(runtime)
+    build_source_results = _results_by_case(build_source)
 
     rows: list[dict[str, Any]] = []
     for name, entry in sorted(gt.items()):
@@ -385,12 +411,17 @@ def build_matrix(
         lanes = [
             _lane_record("gcc-debug-headers", gcc_results.get(name)),
             _lane_record("clang-debug-headers", clang_results.get(name)),
+            _lane_record("build-source", build_source_results.get(name)),
         ]
         runtime_lane = runtime_results.get(name)
 
         if owner == "single-library":
             status, proof_lane, note = _single_library_status(name, lanes)
-            provenance = "compiler"
+            provenance = (
+                "abicheck-cli-workflow"
+                if proof_lane == "build-source"
+                else "compiler"
+            )
         elif owner == "bundle":
             bundle_result = bundle_results.get(name)
             lanes.append(_lane_record("bundle-compare-release", bundle_result))
@@ -494,6 +525,12 @@ def main(argv: list[str] | None = None) -> int:
         "--runtime", type=Path, required=True, help="runtime smoke JSON"
     )
     parser.add_argument(
+        "--build-source",
+        type=Path,
+        required=True,
+        help="validate_examples build-source proof JSON",
+    )
+    parser.add_argument(
         "--proofs", type=Path, required=True, help="dedicated-owner proof JSON"
     )
     parser.add_argument("--out", type=Path)
@@ -509,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     bundle = _load_json(args.bundle)
     special_cli = _load_json(args.special_cli)
     runtime = _load_json(args.runtime)
+    build_source = _load_json(args.build_source)
     proofs = _load_json(args.proofs)
     ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     all_cases = set(ground_truth)
@@ -528,6 +566,7 @@ def main(argv: list[str] | None = None) -> int:
             ("gcc", gcc, all_cases),
             ("clang", clang, all_cases),
             ("runtime", runtime, all_cases),
+            ("build_source", build_source, BUILD_SOURCE_PROOF_CASES),
             ("bundle", bundle, bundle_cases),
             ("special_cli", special_cli, special_cli_cases),
         )
@@ -540,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle=bundle,
         special_cli=special_cli,
         runtime=runtime,
+        build_source=build_source,
     )
     matrix["artifact_errors"] = artifact_errors
     text = json.dumps(matrix, indent=2)

@@ -755,7 +755,9 @@ def test_example_build_evidence(case_name: str, tmp_path: Path) -> None:
         pytest.skip("castxml not found in PATH")
 
     ve = _load_validate_examples()
-    result = ve.run_case(case_name, entry, tmp_path)
+    variants = entry.get("build_info_variants")
+    variant = variants[0] if variants else ve.DEFAULT_ARTIFACT_VARIANT
+    result = ve.run_case(case_name, entry, tmp_path, variant=variant)
 
     if result.status == "SKIP":
         pytest.skip(f"{case_name}: {result.message}")

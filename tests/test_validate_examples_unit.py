@@ -22,6 +22,7 @@ from tests.validate_examples import (  # noqa: E402
     ARTIFACT_VARIANTS,
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
+    _build_info_applies,
     _build_info_path,
     _build_with_cmake,
     _check_case_preconditions,
@@ -156,6 +157,12 @@ class TestKnownGapToolchainScope:
         with patch.object(ve, "CURRENT_PLATFORM", "linux"):
             assert _gap_applies({"known_gap_platforms": ["macos"]}, True) is False
 
+    def test_variant_scoped_gap_only_at_that_evidence_depth(self):
+        entry = {"known_gap_variants": ["release-headers", "stripped-headers"]}
+        assert _gap_applies(entry, True, "release-headers") is True
+        assert _gap_applies(entry, True, "stripped-headers") is True
+        assert _gap_applies(entry, True, "build-source") is False
+
     def test_toolchain_and_platform_scopes_both_apply(self):
         entry = {
             "known_gap_toolchains": ["clang"],
@@ -181,6 +188,26 @@ class TestKnownGapToolchainScope:
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
+        case98 = gt["case98_cxx_standard_floor_raised"]
+        assert case98["expected"] == "COMPATIBLE_WITH_RISK"
+        assert case98["build_info_variants"] == ["build-source"]
+        assert set(case98["known_gap_variants"]) == {
+            "debug-headers",
+            "release-headers",
+            "stripped-headers",
+        }
+
+
+class TestBuildInfoVariantScope:
+    def test_unscoped_build_info_applies_to_every_variant(self):
+        entry = {"build_info": True}
+        assert _build_info_applies(entry, "debug-headers") is True
+        assert _build_info_applies(entry, "build-source") is True
+
+    def test_scoped_build_info_only_applies_to_declared_variants(self):
+        entry = {"build_info": True, "build_info_variants": ["build-source"]}
+        assert _build_info_applies(entry, "debug-headers") is False
+        assert _build_info_applies(entry, "build-source") is True
 
 
 class TestRunSourceSmoke:

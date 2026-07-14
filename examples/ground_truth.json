@@ -3306,11 +3306,20 @@
    "api_break": false,
    "bad_practice": false,
    "build_info": true,
+   "build_info_variants": [
+    "build-source"
+   ],
    "category": "risk",
-   "description": "v1 is built with C++17 and v2 with C++20 while their binary surfaces remain identical. L3 build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed; the merged build-context-aware verdict is COMPATIBLE_WITH_RISK, while an L0-L2 context-free per-binary comparison remains NO_CHANGE. L4/L5 source replay is not required.",
+   "description": "The case has one ground-truth verdict: COMPATIBLE_WITH_RISK. L3 build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed. An L0-L2 context-free per-binary scan observes NO_CHANGE, which is a documented false negative from insufficient evidence, not an alternative expected verdict. L4/L5 source replay is not required.",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
     "abi_relevant_build_flag_changed"
+   ],
+   "known_gap": "L0-L2 artifact-only scans cannot observe the C++ standard change because the binary surfaces are identical. Their NO_CHANGE verdict is a missed COMPATIBLE_WITH_RISK finding caused by insufficient evidence, not a lane-specific expectation.",
+   "known_gap_variants": [
+    "debug-headers",
+    "release-headers",
+    "stripped-headers"
    ],
    "min_evidence": "L3",
    "platforms": [

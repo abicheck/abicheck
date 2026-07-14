@@ -230,7 +230,7 @@ jobs:
       - name: Build-source smoke (reported-only + FP guard)
         if: always()
         run: |
-          MODE_SMOKE_CASES="case01 case04 case129 case130 case131 case132 case133"
+          MODE_SMOKE_CASES="case01 case04 case98 case129 case130 case131 case132 case133"
           set +e
           PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json \
             > results/validate_examples-build-source.json
@@ -314,6 +314,7 @@ jobs:
             --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
+            --build-source downloaded/examples-validation-artifact-modes/validate_examples-build-source.json \
             --bundle results/bundle-examples.json \
             --special-cli results/special-cli-examples.json \
             --proofs results/example-owner-proofs.json \

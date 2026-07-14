@@ -48,7 +48,7 @@ def test_full_matrix_allow_unresolved_never_masks_failed(
             "failed_cases": ["case_y"],
         },
     )
-    artifacts = [str(tmp_path / f"{name}.json") for name in range(6)]
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(7)]
     assert (
         matrix.main(
             [
@@ -58,12 +58,14 @@ def test_full_matrix_allow_unresolved_never_masks_failed(
                 artifacts[1],
                 "--runtime",
                 artifacts[2],
-                "--bundle",
+                "--build-source",
                 artifacts[3],
-                "--special-cli",
+                "--bundle",
                 artifacts[4],
-                "--proofs",
+                "--special-cli",
                 artifacts[5],
+                "--proofs",
+                artifacts[6],
                 "--allow-unresolved",
             ]
         )
@@ -90,9 +92,11 @@ def _artifact(
             {"case_id": case_id, "status": status} for case_id in sorted(cases)
         ],
     }
-    if label in {"gcc", "clang"}:
-        payload["toolchain"] = label
-        payload["artifact_variants"] = ["debug-headers"]
+    if label in {"gcc", "clang", "build_source"}:
+        payload["toolchain"] = label if label != "build_source" else "auto"
+        payload["artifact_variants"] = [
+            "build-source" if label == "build_source" else "debug-headers"
+        ]
     elif label == "runtime":
         payload["build_type"] = "Debug"
     else:
@@ -100,7 +104,9 @@ def _artifact(
     return payload
 
 
-@pytest.mark.parametrize("label", ["gcc", "clang", "runtime", "bundle", "special_cli"])
+@pytest.mark.parametrize(
+    "label", ["gcc", "clang", "build_source", "runtime", "bundle", "special_cli"]
+)
 def test_full_matrix_required_artifact_rejects_missing_or_wrong_identity(
     label: str,
 ) -> None:
@@ -200,7 +206,7 @@ def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
             "results": [],
         },
     )
-    artifacts = [str(tmp_path / f"{name}.json") for name in range(6)]
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(7)]
     assert (
         matrix.main(
             [
@@ -210,12 +216,14 @@ def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
                 artifacts[1],
                 "--runtime",
                 artifacts[2],
-                "--bundle",
+                "--build-source",
                 artifacts[3],
-                "--special-cli",
+                "--bundle",
                 artifacts[4],
-                "--proofs",
+                "--special-cli",
                 artifacts[5],
+                "--proofs",
+                artifacts[6],
             ]
         )
         == 1
@@ -256,6 +264,46 @@ def test_special_cli_cases_require_direct_cli_results() -> None:
     assert all(row["status"] == "COVERED" for row in rows)
     assert all(row["proof_lane"] == "special-abicheck-cli" for row in rows)
     assert all(row["provenance"] == "abicheck-cli-workflow" for row in rows)
+
+
+def test_case98_has_one_expected_verdict_and_l2_miss_is_covered_by_l3() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    case_id = "case98_cxx_standard_floor_raised"
+    l2_miss = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "XFAIL",
+                "expected": "COMPATIBLE_WITH_RISK",
+                "got": "NO_CHANGE",
+            }
+        ]
+    }
+    l3_proof = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "PASS",
+                "expected": "COMPATIBLE_WITH_RISK",
+                "got": "COMPATIBLE_WITH_RISK",
+            }
+        ]
+    }
+
+    result = matrix.build_matrix(
+        gcc=l2_miss,
+        clang=l2_miss,
+        bundle=None,
+        special_cli=None,
+        runtime=None,
+        build_source=l3_proof,
+    )
+    row = next(r for r in result["results"] if r["case_id"] == case_id)
+
+    assert row["expected"] == "COMPATIBLE_WITH_RISK"
+    assert row["status"] == "COVERED"
+    assert row["proof_lane"] == "build-source"
+    assert row["provenance"] == "abicheck-cli-workflow"
 
 
 def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> None:

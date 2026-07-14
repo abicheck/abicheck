@@ -173,14 +173,19 @@ def _toolchain_family(is_cpp: bool) -> str:
     return ""
 
 
-def _gap_applies(entry: dict, is_cpp: bool) -> bool:
+def _gap_applies(
+    entry: dict,
+    is_cpp: bool,
+    variant: str = DEFAULT_ARTIFACT_VARIANT,
+) -> bool:
     """Whether *entry*'s known_gap applies under the case's actual compiler.
 
     A ``known_gap_toolchains`` list scopes the gap to specific producers; on any
     other producer a verdict mismatch is a real failure (so a producer-specific
     gap like case64/case103 does not mask a regression on the other producer).
-    ``known_gap_platforms`` similarly scopes platform-specific extractor gaps.
-    Absent ⇒ applies everywhere (back-compat).
+    ``known_gap_platforms`` similarly scopes platform-specific extractor gaps,
+    and ``known_gap_variants`` scopes evidence-depth gaps. Absent ⇒ applies
+    everywhere (back-compat).
     """
     toolchains = entry.get("known_gap_toolchains")
     if toolchains and _toolchain_family(is_cpp) not in toolchains:
@@ -188,7 +193,18 @@ def _gap_applies(entry: dict, is_cpp: bool) -> bool:
     platforms = entry.get("known_gap_platforms")
     if platforms and CURRENT_PLATFORM not in platforms:
         return False
+    variants = entry.get("known_gap_variants")
+    if variants and variant not in variants:
+        return False
     return True
+
+
+def _build_info_applies(entry: dict, variant: str) -> bool:
+    """Whether inline L3 build context is enabled for this artifact variant."""
+    if not entry.get("build_info"):
+        return False
+    variants = entry.get("build_info_variants")
+    return not variants or variant in variants
 
 
 # ---------------------------------------------------------------------------
@@ -1179,7 +1195,7 @@ def run_case(
     # the gap is dropped so a regression FAILs rather than being xfailed.
     known_gap = (
         entry.get("known_gap")
-        if _gap_applies(entry, v1_src.suffix == ".cpp")
+        if _gap_applies(entry, v1_src.suffix == ".cpp", variant)
         else None
     )
 
@@ -1207,7 +1223,7 @@ def run_case(
             return CaseResult(name, "ERROR", expected_raw, None, ev_err, variant)
 
     old_build_info = new_build_info = None
-    if entry.get("build_info"):
+    if _build_info_applies(entry, variant):
         compiler = _find_compiler(v1_src.suffix == ".cpp")
         if compiler:
             old_build_info = _resolved_build_info_path(
