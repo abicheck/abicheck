@@ -424,8 +424,14 @@ def _diff_removed_field(
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
-) -> Change:
-    """Classify a field missing from the new type as reserved-use, rename+retype, or removal."""
+) -> Change | None:
+    """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
+
+    Returns ``None`` for a pure rename (same offset, identical type, different
+    name): ``_diff_field_renames`` independently reports that as FIELD_RENAMED
+    (API_BREAK), so emitting TYPE_FIELD_REMOVED here too would be a redundant,
+    misleading BREAKING finding for a field that still exists at its offset.
+    """
     # Check if this is a reserved field put into use
     matched = _try_match_reserved_field(
         fname, f_old, name, added_by_offset, added_by_type, reserved_matched_added,
@@ -439,18 +445,20 @@ def _diff_removed_field(
             and f_new.name not in reserved_matched_added
             and not _RESERVED_FIELD_RE.match(fname)
             and not _RESERVED_FIELD_RE.match(f_new.name)
-            and canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
-            and not cv_qualifiers_only_differ(f_old.type, f_new.type)
         ):
-            renamed_type_changed_added.add(f_new.name)
-            return make_change(
-                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-                symbol=name,
-                name=name,
-                detail=f"{fname} -> {f_new.name}",
-                old=f_old.type,
-                new=f_new.type,
-            )
+            if canonicalize_type_name(f_old.type) == canonicalize_type_name(f_new.type):
+                renamed_type_changed_added.add(f_new.name)
+                return None
+            if not cv_qualifiers_only_differ(f_old.type, f_new.type):
+                renamed_type_changed_added.add(f_new.name)
+                return make_change(
+                    ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                    symbol=name,
+                    name=name,
+                    detail=f"{fname} -> {f_new.name}",
+                    old=f_old.type,
+                    new=f_new.type,
+                )
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
         symbol=name,
@@ -509,10 +517,12 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
             # Skip trailing FAM removals — handled by _diff_flexible_array_member
             if fname == old_trailing_fam:
                 continue
-            changes.append(_diff_removed_field(
+            removed_change = _diff_removed_field(
                 name, fname, f_old, added_by_offset, added_by_type,
                 reserved_matched_added, renamed_type_changed_added,
-            ))
+            )
+            if removed_change is not None:
+                changes.append(removed_change)
             continue
         # Skip trailing FAM type changes — handled by _diff_flexible_array_member
         if fname == old_trailing_fam and fname == new_trailing_fam:

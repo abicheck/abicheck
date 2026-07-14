@@ -18,11 +18,11 @@ libraries.
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case54_namespace_pollution_app case54_namespace_pollution_v2
+cmake --build /tmp/abicheck-examples-build --target case53_namespace_pollution_app case53_namespace_pollution_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case54_namespace_pollution/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case54_namespace_pollution/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case53_namespace_pollution/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case53_namespace_pollution/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # ./app_v1: symbol lookup error: ./app_v1: undefined symbol: process
 ```

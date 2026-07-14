@@ -34,11 +34,11 @@ linking yields unresolved symbols.
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case86_default_template_arg_changed_app case86_default_template_arg_changed_v2
+cmake --build /tmp/abicheck-examples-build --target case87_default_template_arg_changed_app case87_default_template_arg_changed_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case87_default_template_arg_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case87_default_template_arg_changed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # ./app_v1: symbol lookup error: undefined symbol: descriptor<float, minkowski_distance<float>>::dimension()
 ```
@@ -46,11 +46,13 @@ cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/libv2.so "$t
 ## Why distinct from case32
 
 case32 covers *function* default parameter values, which are resolved at
-the call site and never affect mangling — verdict NO_CHANGE. case87
-covers *template* default arguments, which ARE part of the substituted
-type and DO affect mangling — verdict BREAKING. Opposite outcome,
-opposite mechanism, same English phrase ("default value changed"). Easy
-to confuse without a dedicated case.
+the call site and never affect mangling — a source-only break (verdict
+API_BREAK; old binaries keep working). case87 covers *template* default
+arguments, which ARE part of the substituted type and DO affect
+mangling — a binary break (verdict BREAKING; old binaries fail to link
+against a v2-only build). Different outcome, opposite mechanism, same
+English phrase ("default value changed"). Easy to confuse without a
+dedicated case.
 
 ## How abicheck catches it
 

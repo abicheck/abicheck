@@ -1482,8 +1482,8 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
         reserved_matched: set[str] = set()
 
         for fname in removed_names:
+            old_f = old_fields[fname]
             if _RESERVED_FIELD_RE.match(fname):
-                old_f = old_fields[fname]
                 candidate = added_by_offset.get(old_f.byte_offset)
                 if (
                     candidate is not None
@@ -1500,6 +1500,24 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                         )
                     )
                     reserved_matched.add(candidate.name)
+                    continue
+            else:
+                # Pure rename: same offset, identical type, different name.
+                # The dedicated field-rename detector (_diff_field_renames,
+                # over AbiSnapshot.types) independently reports this as
+                # FIELD_RENAMED (API_BREAK) — mirror the rename-skip already
+                # done for enum members below (ENUM_MEMBER_RENAMED) so this
+                # DWARF-layout detector doesn't also claim the field was
+                # removed when it still exists at the same offset/type under
+                # a new name.
+                candidate = added_by_offset.get(old_f.byte_offset)
+                if (
+                    candidate is not None
+                    and candidate.name not in reserved_matched
+                    and not _RESERVED_FIELD_RE.match(candidate.name)
+                    and _normalize_type_name(old_f.type_name)
+                    == _normalize_type_name(candidate.type_name)
+                ):
                     continue
             changes.append(
                 make_change(

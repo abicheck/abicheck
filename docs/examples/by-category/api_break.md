@@ -10,6 +10,7 @@ _15 case(s)._ [← back to all examples](../index.md)
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](../case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case34_access_level](../case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
+| [case35_field_rename](../case35_field_rename.md) | - Field Rename | 🟠 API_BREAK | API Break |
 | [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
