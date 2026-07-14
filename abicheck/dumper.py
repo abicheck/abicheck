@@ -196,6 +196,27 @@ def _has_explicit_std(
     return any(("-std=" in t or "/std:" in t) for t in gcc_option_tokens)
 
 
+def _has_explicit_cpp_std(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """True when forwarded compiler options select a C++ dialect.
+
+    A compile database is stronger language evidence than a ``.h`` suffix or
+    content heuristic. Parsing ``-std=gnu++17`` under auto-selected C mode is
+    invalid and used to break source-aware collection for C-compatible headers.
+    """
+    tokens = list(gcc_option_tokens)
+    if gcc_options:
+        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    for token in tokens:
+        normalized = token.lower()
+        if normalized.startswith("-std=") and "++" in normalized.partition("=")[2]:
+            return True
+        if normalized.startswith("/std:c++"):
+            return True
+    return False
+
+
 def _build_clang_header_command(
     cc_bin: str, cc_id: str,
     extra_includes: list[Path], agg_path: Path,
@@ -294,6 +315,8 @@ def _resolve_clang_bin(
 
 def _resolve_clang_langmode(
     lang: str | None, headers: list[Path], clang_bin: str,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
 ) -> tuple[bool, bool, bool, str]:
     """Return ``(force_cpp, force_cpp20, explicit_c_request, cc_id)`` for the TU.
 
@@ -303,7 +326,9 @@ def _resolve_clang_langmode(
     """
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers)
+        force_cpp = _detect_cpp_headers(headers) or _has_explicit_cpp_std(
+            gcc_options, gcc_option_tokens
+        )
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
@@ -355,7 +380,7 @@ def _clang_header_dump(
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
-        lang, headers, clang_bin,
+        lang, headers, clang_bin, gcc_options, gcc_option_tokens,
     )
 
     # castxml↔clang parity: probe the host GNU compiler for its ``-isystem`` dirs
@@ -1106,7 +1131,9 @@ def _castxml_dump(
     # Determine language mode: .h / C parse for C-only, .hpp / C++ for C++ (FIX-A).
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers)
+        force_cpp = _detect_cpp_headers(headers) or _has_explicit_cpp_std(
+            gcc_options, gcc_option_tokens
+        )
 
     try:
         try:
