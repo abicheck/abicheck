@@ -88,6 +88,13 @@ build/source-only fixtures, bundle/release cases, BTF, or host feature gaps. The
 catalog keeps them in `ground_truth.json`, and dedicated tests cover those
 families.
 
+The repository-wide completion gate is not an individual row above. Follow the
+[full example validation runbook](../docs/development/examples-validation-runbook.md)
+to aggregate compiler, runtime, bundle, and dedicated proof artifacts. Full
+success means one `COVERED` row per current ground-truth entry, with no
+`UNRESOLVED` or `FAILED` rows. Trusted source-smoke fixtures require the explicit
+`ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` opt-in documented there.
+
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, and `case129_struct_return_convention`.
 

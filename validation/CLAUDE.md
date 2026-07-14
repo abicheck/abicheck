@@ -22,6 +22,18 @@ evidence and is exercised by `.github/workflows/examples-validation.yml`.
 | `suppress_internal.yaml` | Internal-namespace suppression used in the reports. |
 | `*.md` (`REPORT.md`, `DESIGN_ANALYSIS.md`, `realworld-*.md`, `uxl-*.md`) | Curated findings + root-cause analyses; hand-edited narrative. |
 
+## Full example matrix
+
+For synthetic example-catalog completeness, follow
+`docs/development/examples-validation-runbook.md`. The matrix aggregates gcc
+and clang validator JSON, runtime smoke, bundle JSON, and dedicated owners. Do
+not call a compiler lane, pair-only scan, benchmark, or depth matrix “full
+catalog.” Success requires one `COVERED` row per current ground-truth entry and
+no `UNRESOLVED`/`FAILED` rows.
+
+Enable `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` only when intentionally executing
+reviewed repository-owned source-smoke commands from a trusted checkout.
+
 ## Scoring semantics (important)
 
 For `run_matrix.v2`, a non-zero `abicheck compare` exit code is **not** a failure
