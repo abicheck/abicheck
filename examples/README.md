@@ -284,7 +284,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [119](case119_internal_struct_field_removed_scoped/README.md) | Internal struct loses a field (non-public, scoped) | No Change | ✅ NO_CHANGE |
 | [120](case120_internal_struct_reordered_scoped/README.md) | Internal struct fields reordered (non-public, scoped) | No Change | ✅ NO_CHANGE |
 | [121](case121_kernel_btf_struct_field_added/README.md) | Kernel BTF struct grows a field (out-of-tree module break) | Breaking | 🔴 BREAKING |
-| [122](case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change (documented gap) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [122](case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [123](case123_default_argument_removed/README.md) | Default Argument Removed | API Break | 🟠 API_BREAK |
 | [124](case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |

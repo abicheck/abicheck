@@ -17,10 +17,10 @@ Use this catalog to:
 | Verdict | Count | What it means |
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 100 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 15 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 31 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 22 | Backward-compatible changes (additions or quality-only). |
-| ✅ [NO_CHANGE](by-verdict/no-change.md) | 8 | Identical ABI/API — baseline control cases. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 16 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 25 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 30 | Backward-compatible changes (additions or quality-only). |
+| ✅ [NO_CHANGE](by-verdict/no-change.md) | 5 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
 
@@ -40,11 +40,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | Category | Cases | What it covers |
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 100 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 15 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 31 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [API Break](by-category/api_break.md) | 16 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [Risk](by-category/risk.md) | 25 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
-| [Quality (Compatible)](by-category/quality.md) | 13 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
-| [No Change](by-category/no_change.md) | 8 | Identical ABI/API — sanity-check baselines. |
+| [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
+| [No Change](by-category/no_change.md) | 5 | Identical ABI/API — sanity-check baselines. |
 
 ## All cases
 
@@ -145,14 +145,14 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
-| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | library build-setting difference, not a consumer language-floor raise (NO_CHANGE) | ✅ NO_CHANGE | No Change |
+| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (build-context risk) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
 | [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
-| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | ✅ NO_CHANGE | No Change |
+| [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
@@ -169,7 +169,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
-| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change (documented gap) | ✅ NO_CHANGE | No Change |
+| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
@@ -190,15 +190,15 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case140_empty_base_optimization_lost](case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
 | [case141_versioned_symbol_scheme](case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
 | [case142_vtable_slot_count_binary_only](case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
-| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
 | [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
-| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case152_enum_size_flag_flip](case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case153_struct_packing_flip](case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -227,4 +227,4 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case178_unnamed_type_in_public_abi](case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |

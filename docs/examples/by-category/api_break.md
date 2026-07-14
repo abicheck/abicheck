@@ -3,7 +3,7 @@
 
 Listed in `API_BREAK_KINDS` — source/API-level break.
 
-_15 case(s)._ [← back to all examples](../index.md)
+_16 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|

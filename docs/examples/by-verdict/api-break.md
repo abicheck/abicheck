@@ -3,7 +3,7 @@
 
 Source-level / API-only breaks; recompilation fails or behavior shifts.
 
-_15 case(s)._ [← back to all examples](../index.md)
+_16 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
