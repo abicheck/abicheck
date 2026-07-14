@@ -1,4 +1,4 @@
-# ADR-038 Flow C — build the Clang facts plugin against several LLVM/Clang
+# ADR-038 Plugin injection — build the Clang facts plugin against several LLVM/Clang
 # majors (with GCC and Clang as the host compiler), run the C.6 differential-
 # conformance test, and validate the end-to-end scan flow on each. The plugin is
 # ABI-locked to its LLVM major (ADR-038 C.5), so it cannot ship one .so for
@@ -126,7 +126,7 @@ jobs:
             --plugin build/plugin/libabicheck-facts.so \
             --clangxx clang++
 
-      - name: Validate the Flow C scan flow (dump → merge → compare)
+      - name: Validate the Plugin-injection scan flow (dump → merge → compare)
         run: |
           python contrib/abicheck-clang-plugin/tests/scan_flow.py \
             --plugin build/plugin/libabicheck-facts.so \

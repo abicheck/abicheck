@@ -807,7 +807,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Documentation
 
-- **Producing source facts — wiring Flow B into a real build.** The
+- **Producing source facts — wiring Wrapper injection into a real build.** The
   `producing-source-facts.md` guide gained a make/CMake injection recipe for the
   `abicheck-cc` wrapper, an `ABICHECK_CC_EXTRACTOR` table (with the clang-only
   host note), a caveat that extraction concurrency is bound by the build's
@@ -872,7 +872,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`merge` no longer truncates the binary export set.**
   `_exported_symbols_from_snapshot` unions the authoritative platform dynamic
   export table (`elf.symbols` / `pe.exports` / `macho.exports`) instead of only
-  the DWARF-shaped `functions[].mangled` view. On a pvxs Flow-C merge this lifts
+  the DWARF-shaped `functions[].mangled` view. On a pvxs Plugin-injection merge this lifts
   `matched_symbols` from 6 to 287 (`exported_symbols` 126 → 950).
 
 - **Source→binary matching normalizes Mach-O spellings for all names.** The
@@ -888,12 +888,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Changed
 
 - **Clang facts plugin fails loud on a misconfigured `public-roots`** (ADR-038
-  Flow C, Caveat A): it now emits a diagnostic (and records it in the pack's
-  `diagnostics`) when `public-roots` matches zero declarations though header
-  decls were seen outside the roots, instead of silently producing an empty
-  pack with exit 0.
-- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038 Flow
-  C): with no explicit `public-roots=`, roots are inferred from the compile's
+  Plugin injection, Caveat A): it now emits a diagnostic (and records it in the
+  pack's `diagnostics`) when `public-roots` matches zero declarations though
+  header decls were seen outside the roots, instead of silently producing an
+  empty pack with exit 0.
+- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038
+  Plugin injection): with no explicit `public-roots=`, roots are inferred from the compile's
   `-I`/`-iquote` include dirs (compiler/system entries excluded) and a one-time
   inference note is emitted, so a forgotten flag yields a populated surface
   rather than a silently empty pack. An explicit `public-roots=` still scopes
@@ -935,7 +935,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `PARITY_CASES` in `tests/test_abidiff_parity.py` (the vtable/return/param/
   struct-size gaps it still listed as open were closed by castxml
   integration).
-- New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
+- New user-guide page **Producing Source Facts (Full source scan / Wrapper injection / Plugin injection)** documenting the
   three source-fact producers, a selection tree, and the `public-roots`/
   `ABICHECK_CC_HEADERS` header-resolution trap.
 - **Two-way reconciliation in the `public_not_exported` cross-check** (ADR-035

@@ -3,12 +3,12 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
 #
-# ADR-038 Flow C end-to-end scan validation for the abicheck Clang facts plugin.
+# ADR-038 Plugin injection end-to-end scan validation for the abicheck Clang facts plugin.
 #
 # The C.6 conformance test (`conformance.py`) proves the plugin's emitted
 # entities equal the clang backend's. This test proves the complementary thing:
 # a pack the plugin drops during a *real build* is actually consumable by the
-# ordinary abicheck scan pipeline — i.e. the documented Flow C user flow works,
+# ordinary abicheck scan pipeline — i.e. the documented Plugin-injection user flow works,
 # not just the entity comparison. It:
 #   1. compiles the fixture TU into a shared library WITH the plugin active, so
 #      the same build both links the .so and drops `abicheck_inputs/` beside it;
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             cwd=src,
         )
         print(
-            f"\nFlow C scan validation PASSED: plugin pack ingested via merge "
+            f"\nPlugin injection scan validation PASSED: plugin pack ingested via merge "
             f"({folded} source entities folded) and the baseline compares clean."
         )
         return 0

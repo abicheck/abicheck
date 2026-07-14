@@ -115,7 +115,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
 | `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
-| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Flow B `abicheck_inputs/` pack directory to combine. |
+| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Wrapper-injection `abicheck_inputs/` pack directory to combine. |
 | `on-conflict` | merge | `warn` (default, first-wins + diagnostic) or `error` (exit non-zero) when two inputs supply the same layer with differing facts. |
 
 !!! note "format in scan mode"

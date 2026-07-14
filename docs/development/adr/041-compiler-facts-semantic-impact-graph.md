@@ -40,7 +40,8 @@ inline int f() { return DETAIL_CONSTANT + 1; }
 Separately, `SourceAbiTu.source_edges` (`source_abi.py`) has existed since
 ADR-030 as a normalized carrier for exactly this kind of fact and has never
 been populated by any extractor (castxml, clang, Android, or the
-build-integrated plugin — ADR-038 Flow C always emits `"source_edges": []`).
+build-integrated plugin — ADR-038 Plugin injection always emits
+`"source_edges": []`).
 
 This ADR records the fuller roadmap for turning the L5 graph from "optional
 call graph" into a genuine compiler-derived semantic impact graph, and ships
@@ -219,7 +220,7 @@ more instances of the same two bug classes, deeper in each:
 independent `clang -ast-dump=json` pass per translation unit, alongside the
 call graph's own pass — the exact "AST replay is expensive, run it once"
 concern the wider plan below raises. Unifying the two into one parse (or
-better, one Flow-C plugin emission, see P1 below) is deliberately deferred
+better, one Plugin-injection emission, see P1 below) is deliberately deferred
 rather than risking `call_graph.py`'s existing tested extraction path in this
 change.
 
@@ -352,8 +353,9 @@ target gets classified internal rather than *whether* the diff runs at all:
   packs — not two inline dumps — still couldn't tell "ran, zero calls" from
   "never ran." Fixed with the same one-line stamp, mirroring
   `inline._fold_call_graph` exactly. `type_graph.py` has no equivalent
-  out-of-band collection path yet (P1 item 1 — moving extraction into Flow C —
-  is the eventual fix for needing two call sites at all), so nothing else
+  out-of-band collection path yet (P1 item 1 — moving extraction into Plugin
+  injection — is the eventual fix for needing two call sites at all), so
+  nothing else
   needed the same patch.
 
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
@@ -781,7 +783,7 @@ low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all carry
 
 ### P1 — stronger ABI/API intelligence
 
-1. **Move type/reference extraction into Flow C (the ADR-038 plugin).**
+1. **Move type/reference extraction into Plugin injection (the ADR-038 plugin).**
    `contrib/abicheck-clang-plugin/` already rides the compiler's own AST for
    the L4 entity facts (functions/types/macros/hashes) with **zero extra
    frontend passes** — the plugin hardcodes `"source_edges": []` today. Once

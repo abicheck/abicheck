@@ -1,4 +1,4 @@
-# Producing source facts (Flow A / B / C)
+# Producing source facts (Full source scan / Wrapper injection / Plugin injection)
 
 `abicheck`'s deepest evidence — **L4** (the source-ABI replay: inline bodies,
 default arguments, templates, `constexpr`, macro values) and **L5** (the source
@@ -19,7 +19,7 @@ The producer is an implementation choice; the ingest never changes.
 
 ## Which producer? (pick one)
 
-| | Flow A — replay | Flow B — `abicheck-cc` wrapper | Flow C — Clang plugin |
+| | Full source scan — replay | Wrapper injection — `abicheck-cc` wrapper | Plugin injection — Clang plugin |
 |---|---|---|---|
 | **How** | `abicheck dump --sources` / `collect` re-parses each TU from `compile_commands.json` | wrap your compiler; it runs the extractor as a companion action | `-fplugin` reads the AST the compile already built |
 | **Extra parse** | a full second parse (~5 s/TU on template-heavy C++) | a full second parse | **none** — zero-cost byproduct of the build |
@@ -29,17 +29,18 @@ The producer is an implementation choice; the ingest never changes.
 
 ```mermaid
 graph TD
-    A{Own the toolchain image<br/>and second-parse cost hurts?} -->|yes| C[Flow C: Clang plugin]
+    A{Own the toolchain image<br/>and second-parse cost hurts?} -->|yes| C[Plugin injection: Clang plugin]
     A -->|no| B{Have / can generate<br/>compile_commands.json?}
-    B -->|yes| FA[Flow A: dump --sources]
-    B -->|no| FB[Flow B: abicheck-cc wrapper]
+    B -->|yes| FA[Full source scan: dump --sources]
+    B -->|no| FB[Wrapper injection: abicheck-cc wrapper]
 ```
 
-Flow A is the supported default. Flow B and Flow C are optimizations for
-specific situations — they exist to remove a step (a manual compile DB) or a cost
-(the second parse), never to change the result.
+Full source scan is the supported default. Wrapper injection and Plugin
+injection are optimizations for specific situations — they exist to remove a
+step (a manual compile DB) or a cost (the second parse), never to change the
+result.
 
-## Flow A — replay from a compile database
+## Full source scan — replay from a compile database
 
 ```bash
 # Source-only: infer the compile DB, replay L4, fold the L5 graph, all inline.
@@ -55,7 +56,7 @@ With just `--sources`, abicheck infers and runs the build-system query itself
 transcript). Pass `--compile-db` when you already have a `compile_commands.json`
 that isn't under the tree — it is the most faithful input.
 
-## Flow B — the `abicheck-cc` compiler wrapper
+## Wrapper injection — the `abicheck-cc` compiler wrapper
 
 Front your normal build command with `abicheck-cc`; it compiles as usual and runs
 the extractor as a companion action, dropping an `abicheck_inputs/` pack:
@@ -108,13 +109,13 @@ On a host without castxml, `auto` already falls back to clang; set
 !!! warning "Extraction concurrency is bound by your build's `-jN`, not by `ABICHECK_L4_JOBS`"
     Each `abicheck-cc` invocation extracts its source TUs synchronously, so a
     parallel `make -jN` / `cmake --build -jN` runs **up to N** clang/castxml
-    front-ends at once. `ABICHECK_L4_JOBS` only throttles the Flow-A
+    front-ends at once. `ABICHECK_L4_JOBS` only throttles the Full-source-scan
     `dump --sources` replay path — the wrapper does **not** read it. A
     template-heavy TU's clang JSON AST can need several GiB, so on a
     memory-constrained host cap the build parallelism (`-j1`/`-j2`) rather than
     reaching for `ABICHECK_L4_JOBS`.
 
-## Flow C — the Clang facts plugin
+## Plugin injection — the Clang facts plugin
 
 A compiled plugin that emits the same facts from the AST Clang already built —
 **no second parse**. Build it once against your pinned Clang, then inject it:
@@ -130,13 +131,15 @@ clang++ -std=c++17 -Iinclude \
 See [`contrib/abicheck-clang-plugin/README.md`](https://github.com/abicheck/abicheck/blob/main/contrib/abicheck-clang-plugin/README.md)
 for the build. The plugin is **ABI-locked to the loading Clang's LLVM major**
 (a plugin built against LLVM 18 only loads into `clang` 18) — that is the price
-of the zero-parse path, and why Flow A/B remain the portable defaults.
+of the zero-parse path, and why Full source scan and Wrapper injection remain
+the portable defaults.
 
 ## The one trap: public-roots must match how headers *resolve*
 
 !!! warning "Point the public-header root at the resolved path, not the install dir"
-    Flow B (`ABICHECK_CC_HEADERS`) and Flow C (`public-roots=`) classify a
-    declaration as public by the **physical path the compiler resolved its header
+    Wrapper injection (`ABICHECK_CC_HEADERS`) and Plugin injection
+    (`public-roots=`) classify a declaration as public by the **physical path
+    the compiler resolved its header
     to**. If an earlier `-I` makes `<foo/bar.h>` resolve to `src/foo/bar.h` while
     you set the root to the *installed* `include/`, the root matches **nothing**
     and the pack comes back **empty** — even though it all looks configured.
@@ -149,7 +152,7 @@ of the zero-parse path, and why Flow A/B remain the portable defaults.
     # . ./src/foo/bar.h   →  public-roots=src/foo  (not include/)
     ```
 
-    Since ADR-038 Flow C, the plugin **fails loud** here instead of silently: if
+    Since ADR-038's Plugin injection spec, the plugin **fails loud** here instead of silently: if
     `public-roots` matches zero declarations while header decls were seen outside
     the roots, it prints a `public-roots matched 0 declarations` diagnostic naming
     an example header and the `clang -H` tip, and records it in the pack's
