@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `ifunc_introduced` |
 | **Source files** | `examples/case29_ifunc_transition/` |
 
 **Verdict:** 🟢 COMPATIBLE

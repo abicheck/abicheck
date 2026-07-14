@@ -87,6 +87,17 @@ def test_build_command_c_language() -> None:
     assert "-std=c11" in cmd
 
 
+def test_build_command_keeps_effective_last_standard_authoritative() -> None:
+    cu = _cu(
+        standard="c++20",
+        abi_relevant_flags=["-std=gnu++17", "-fPIC", "-std=c++20"],
+    )
+    cmd = build_clang_command(cu, Path("concept.cpp"))
+
+    assert [arg for arg in cmd if arg.startswith("-std=")] == ["-std=c++20"]
+    assert "-fPIC" in cmd
+
+
 def test_public_package_root_maps_to_equivalent_build_include_dir(
     tmp_path: Path,
 ) -> None:

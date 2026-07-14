@@ -102,8 +102,8 @@ That scope is complete: **141/141 targets scanned at every pinned depth**. The
 full catalog is larger, but audit, cross-source, bundle, BTF, and snapshot
 cases run through their dedicated proof lanes rather than this compare-style
 scan matrix. `Eval targets` now covers that whole comparable-target scope: the
-`NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes, and the
-bundle cases are checked against their per-library expected verdicts.
+`NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes. Bundle
+component results are structural diagnostics, never separate ground truths.
 
 | `--depth` | Comparable targets | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | Status |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -113,10 +113,10 @@ bundle cases are checked against their per-library expected verdicts.
 | `source` | 141 | 141 | 141 | 100.0% | 0 | 0 | Highest recall in this matrix; source-smoke proofs cover consumer-only API hazards. |
 | `full` | 141 | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
 
-False positives and false negatives are listed directly. Bundle targets are scored
-against their per-library expected verdicts, so the 141-target FP/FN denominator
-keeps the full comparable scope while the dedicated bundle lane still proves
-whole-bundle findings such as dangling intra-bundle imports and provider drift.
+False positives and false negatives are listed directly. Bundle-component rows
+remain structural diagnostics in the 141-target matrix; only the dedicated
+bundle lane scores the single canonical case-level verdict and proves findings
+such as dangling intra-bundle imports and provider drift.
 
 ## What input each depth needs — and how to get it
 

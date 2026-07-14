@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `examples/case151_xcheck_provider_matrix/` |
 
 **Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
@@ -51,4 +51,4 @@ install its header.
 - `snapshot.abi.json`
 - `thin.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

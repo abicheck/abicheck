@@ -499,7 +499,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (non-virtual base becomes a virtual base), `func_virtual_removed`
   (devirtualized method leaves the vtable while its symbol survives) and
   `overload_added` (a new overload silently re-routes recompiled call sites).
-  `ground_truth.json` entries may now set `"pattern_verdicts": true` to
+  `ground_truth.json` entries may now set `"pattern_analysis": true` to
   validate a case under the opt-in `--pattern-verdicts` analysis mode.
 - **Toolchain / runtime environment drift (binutils & glibc skew — 6 new
   `ChangeKind`s).** Rebuilding the same source on a newer distro/toolchain can

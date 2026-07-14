@@ -52,15 +52,10 @@ class TestGroundTruthStructure:
     def test_every_case_has_expected_verdict(self, verdicts: dict) -> None:
         for case_name, meta in verdicts.items():
             assert "expected" in meta, f"{case_name} missing 'expected' field"
-            # Bundle cases (ADR-023) intentionally set expected=null because
-            # they are not single-library v1/v2 comparisons; their per-library
-            # verdicts live under expected_libraries and their aggregate
-            # verdict under expected_combined_verdict.
-            if meta.get("category") == "bundle":
-                assert meta["expected"] is None, (
-                    f"{case_name}: bundle case must have expected=null"
-                )
-                continue
+            assert "expected_kinds" in meta, f"{case_name} missing 'expected_kinds'"
+            assert isinstance(meta["expected_kinds"], list), (
+                f"{case_name} expected_kinds must be a list"
+            )
             assert meta["expected"] in {
                 "NO_CHANGE",
                 "COMPATIBLE",
@@ -68,6 +63,35 @@ class TestGroundTruthStructure:
                 "API_BREAK",
                 "BREAKING",
             }, f"{case_name} has invalid verdict: {meta['expected']}"
+
+    def test_every_case_has_one_depth_invariant_ground_truth(
+        self, verdicts: dict
+    ) -> None:
+        allowed_expected_fields = {
+            "expected",
+            "expected_kinds",
+            "expected_absent_kinds",
+        }
+        for case_name, meta in verdicts.items():
+            unexpected = {
+                key
+                for key in meta
+                if key.startswith("expected") and key not in allowed_expected_fields
+            }
+            assert not unexpected, (
+                f"{case_name}: only the canonical expected/expected_kinds pair "
+                f"may define case truth; unexpected fields: {sorted(unexpected)}"
+            )
+            aliases = {
+                key
+                for key in meta
+                if any(token in key for token in ("verdict", "ground_truth", "oracle"))
+                and key != "expected"
+            }
+            assert not aliases, (
+                f"{case_name}: alternate case-truth aliases are forbidden: "
+                f"{sorted(aliases)}"
+            )
 
     def test_every_case_has_category(self, verdicts: dict) -> None:
         valid_categories = {
@@ -189,8 +213,7 @@ class TestVerdictCategoryAlignment:
     def test_verdict_matches_category(self, verdicts: dict) -> None:
         mismatches = []
         for case_name, meta in verdicts.items():
-            # Bundle cases (ADR-023) carry expected=null and category=bundle
-            # by design — the aggregate verdict lives in expected_combined_verdict.
+            # Bundle is a composite category with its own component checks.
             if meta.get("category") == "bundle":
                 continue
             verdict = meta["expected"]

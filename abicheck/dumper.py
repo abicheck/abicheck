@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from ._compiler_options import has_explicit_cpp_std, has_explicit_std
 from .dumper_cache import _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
@@ -181,42 +182,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
-def _has_explicit_std(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
-) -> bool:
-    """True if the user supplied an explicit C/C++ standard.
-
-    Checks both ``--gcc-options`` (whitespace-split string) and any repeatable
-    ``--gcc-option`` token (e.g. ``-std=gnu++23`` / ``/std:c++latest``), so the
-    automatic C++20 bump never appends a standard *after* — and thus override —
-    a dialect the user requested through either flag.
-    """
-    if gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options):
-        return True
-    return any(("-std=" in t or "/std:" in t) for t in gcc_option_tokens)
-
-
-def _has_explicit_cpp_std(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
-) -> bool:
-    """True when forwarded compiler options select a C++ dialect.
-
-    A compile database is stronger language evidence than a ``.h`` suffix or
-    content heuristic. Parsing ``-std=gnu++17`` under auto-selected C mode is
-    invalid and used to break source-aware collection for C-compatible headers.
-    """
-    tokens = list(gcc_option_tokens)
-    if gcc_options:
-        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
-    for token in tokens:
-        normalized = token.lower()
-        if normalized.startswith("-std=") and "++" in normalized.partition("=")[2]:
-            return True
-        if normalized.startswith("/std:c++"):
-            return True
-    return False
-
-
 def _build_clang_header_command(
     cc_bin: str, cc_id: str,
     extra_includes: list[Path], agg_path: Path,
@@ -262,7 +227,7 @@ def _build_clang_header_command(
     # (Codex review). Auto-detection is a fallback, never an override.
     for sysinc in system_includes:
         cmd += ["-isystem", sysinc]
-    explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
+    explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
     if not force_cpp:
         if not explicit_std:
             cmd += ["-x", "c", "-std=gnu11"]
@@ -326,7 +291,7 @@ def _resolve_clang_langmode(
     """
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers) or _has_explicit_cpp_std(
+        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
             gcc_options, gcc_option_tokens
         )
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
@@ -868,7 +833,7 @@ def _build_castxml_command(
     # whitespace survives intact and identically on POSIX and Windows.
     cmd += list(gcc_option_tokens)
 
-    explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
+    explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
     # which is rejected when parsing a .h file in C mode. Force C mode, but only
     # impose gnu11 when the user did not request a C standard via --gcc-option(s)
@@ -1131,7 +1096,7 @@ def _castxml_dump(
     # Determine language mode: .h / C parse for C-only, .hpp / C++ for C++ (FIX-A).
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers) or _has_explicit_cpp_std(
+        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
             gcc_options, gcc_option_tokens
         )
 

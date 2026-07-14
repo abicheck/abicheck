@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_alignment_changed` |
 | **Source files** | `examples/case42_type_alignment_changed/` |
 
 **Category:** Type Layout / DWARF | **Verdict:** BREAKING

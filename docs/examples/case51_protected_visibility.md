@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `symbol_elf_visibility_changed` |
 | **Source files** | `examples/case51_protected_visibility/` |
 
 **Category:** ELF / Policy | **Verdict:** 🟢 COMPATIBLE

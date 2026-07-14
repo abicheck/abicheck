@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `examples/case46_pointer_chain_type_change/` |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING

@@ -7,7 +7,7 @@
 | **Category** | Risk |
 | **Platforms** | Linux |
 | **Flags** | API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `runtime_floor_raised` |
 | **Source files** | `examples/case15_noexcept_change/` |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK

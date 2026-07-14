@@ -147,6 +147,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # (DWARF at minimum) to see the underlying width change.
     "runtime_floor_raised": "L0",
     "symbol_version_required_added": "L0",
+    "symbol_version_defined_added": "L0",
     "dt_relr_introduced": "L0",
     "dt_relr_removed": "L0",
     "rpath_type_changed": "L0",
@@ -167,6 +168,17 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "pe_import_load_mode_changed": "L0",
     # wchar_t model drift is read from DW_AT_producer, like toolchain_flag_drift.
     "wchar_model_changed": "L1",
+    # Canonical kinds that older catalog rows previously left implicit.
+    "union_field_added": "L1",
+    "symbol_binding_changed": "L0",
+    "ifunc_introduced": "L0",
+    "type_field_type_changed": "L1",
+    "method_access_changed": "L2",
+    "enum_last_member_value_changed": "L1",
+    "type_alignment_changed": "L1",
+    "soname_changed": "L0",
+    "symbol_elf_visibility_changed": "L0",
+    "base_class_position_changed": "L1",
     # Python-level API of an extension module (G23): recovered from a `.pyi`
     # type stub — a declared-API surface analogous to public headers, and like
     # headers invisible in the binary/debug info. The `.so` export table shows
@@ -361,44 +373,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
 # a false positive.
 KINDLESS_CASE_TIER: dict[str, str] = {
     "case04_no_change": "L0",
-    "case13_symbol_versioning": "L0",
-    "case14_cpp_class_size": "L1",
-    "case15_noexcept_change": "L2",
-    "case16_inline_to_non_inline": "L0",
-    "case17_template_abi": "L1",
-    "case18_dependency_leak": "L1",
-    "case26_union_field_added": "L1",
-    "case27_symbol_binding_weakened": "L0",
-    "case29_ifunc_transition": "L0",
-    "case30_field_qualifiers": "L1",
-    "case34_access_level": "L2",
-    "case36_anon_struct": "L1",
-    "case38_virtual_methods": "L1",
-    "case40_field_layout": "L1",
-    "case41_type_changes": "L1",
-    "case42_type_alignment_changed": "L1",
-    "case26b_union_field_added_compatible": "L1",
-    "case43_base_class_member_added": "L1",
-    "case44_cyclic_type_member_added": "L1",
-    "case45_multi_dim_array_change": "L1",
-    "case46_pointer_chain_type_change": "L1",
-    "case47_inline_to_outlined": "L0",
-    "case48_leaf_struct_through_pointer": "L1",
-    "case49_executable_stack": "L0",
-    "case50_soname_inconsistent": "L0",
-    "case51_protected_visibility": "L0",
-    "case52_rpath_leak": "L0",
-    "case60_base_class_position_changed": "L1",
     "case118_internal_struct_field_added_scoped": "L2",
     "case119_internal_struct_field_removed_scoped": "L2",
     "case120_internal_struct_reordered_scoped": "L2",
-    # Documented gap (ADR-026): an uninstantiated template signature change is
-    # invisible to every artifact layer; only source replay (L4) would see it.
-    "case122_template_signature_uninstantiated": "L4",
-    # castxml emits C++20 concepts as <Unimplemented kind="Concept"/> (no
-    # name, no body) — invisible to every artifact layer; only source replay
-    # (L4, a clang-based extractor) sees the tightened constraint.
-    "case105_concept_tightening": "L4",
     # ADR-039: a context-free header parse false-positives a #ifdef-guarded
     # field; the binary is blind (identical builds) and only build context (the
     # active -D defines) clears the phantom via --reconcile-build-context.
@@ -414,18 +391,12 @@ def compute_min_evidence(case_name: str, info: dict[str, Any]) -> str:
     Raises ``KeyError`` if a kind or kind-less case is unmapped, so a new case
     cannot be added silently without an evidence-tier decision.
 
-    ADR-035 (G20) cross-check / single-release-audit cases declare their finding
-    under ``expected_crosscheck_kinds`` (the ``run_crosschecks`` output) rather
-    than ``expected_kinds`` (the ``compare`` diff). Those eight kinds are already
-    mapped in :data:`EVIDENCE_TIER_BY_KIND`, so the tier is *derived* the same
-    way — a crosscheck case never needs a hand-set :data:`KINDLESS_CASE_TIER`
-    entry.
+    Audit/cross-check cases use the same canonical ``expected_kinds`` field as
+    ordinary comparisons. Their workflow differs; their truth does not. Those
+    kinds are mapped in :data:`EVIDENCE_TIER_BY_KIND`, so their tier is derived
+    in exactly the same way.
     """
-    kinds = (
-        list(info.get("expected_kinds", []))
-        + list(info.get("expected_bundle_kinds", []))
-        + list(info.get("expected_crosscheck_kinds", []))
-    )
+    kinds = list(info.get("expected_kinds", []))
     if not kinds:
         if case_name not in KINDLESS_CASE_TIER:
             raise KeyError(f"no evidence tier mapped for kind-less case {case_name!r}")

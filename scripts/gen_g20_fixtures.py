@@ -8,8 +8,8 @@ which fits the catalog's usual ``v1``/``v2`` binary-diff shape. Each case ships 
 hand-built :class:`~abicheck.model.AbiSnapshot` serialized to
 ``examples/caseNN_*/snapshot.abi.json`` (plus ``thin.abi.json`` for the
 provider-matrix case). ``tests/test_g20_catalog.py`` loads each fixture and runs
-``run_crosschecks`` against the case's ``expected_crosscheck_kinds`` /
-``expected_providers`` in ``ground_truth.json`` — so the corpus is validated in
+``run_crosschecks`` against the case's canonical ``expected_kinds`` and
+``provider_assertions`` assertions in ``ground_truth.json`` — so the corpus is validated in
 the fast lane with **no compiler / castxml** (the snapshots already carry the
 provenance that a live L2 dump would otherwise produce).
 

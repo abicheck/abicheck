@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `unversioned_exported_symbol` |
 | **Source files** | `examples/case145_audit_unversioned_export/` |
 
 **Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `unversioned_exported_symbol` ·
@@ -50,4 +50,4 @@ or, if it is not public API, move it to the script's `local:` block.
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

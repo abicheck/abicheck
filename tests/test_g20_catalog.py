@@ -8,8 +8,8 @@ binary-diff shape: each demonstrates the single-release *audit* or intra-version
 ``scripts/gen_g20_fixtures.py``) carrying the L0/L2/L3/L4/L5 provenance a live
 ``scan --audit`` would dump, so the corpus is validated here **compiler-free**.
 
-Each case's ``ground_truth.json`` entry declares ``expected_crosscheck_kinds``
-(the ``run_crosschecks`` findings it must produce) and ``expected_providers``
+Each case's ``ground_truth.json`` entry declares ``expected_kinds``
+(the ``run_crosschecks`` findings it must produce) and ``provider_assertions``
 (the per-check provider-agreement list). This module asserts both, and keeps the
 committed fixtures in sync with their generator.
 """
@@ -29,7 +29,7 @@ _GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
 
 #: G20 cases: those declaring a cross-check expectation (the v4 audit corpus).
 _G20_CASES = sorted(
-    name for name, info in _GT.items() if info.get("expected_crosscheck_kinds")
+    name for name, info in _GT.items() if info.get("mode") == "audit"
 )
 
 
@@ -50,14 +50,14 @@ def test_g20_corpus_is_non_empty() -> None:
 
 
 @pytest.mark.parametrize("case_name", _G20_CASES)
-def test_case_emits_expected_crosscheck_kinds(case_name: str) -> None:
+def test_case_emits_canonical_expected_kinds(case_name: str) -> None:
     info = _GT[case_name]
     snap_path = _EXAMPLES / case_name / "snapshot.abi.json"
     assert snap_path.is_file(), (
         f"{case_name}: missing committed fixture {snap_path.name}"
     )
     got = _kinds(case_name)
-    want = set(info["expected_crosscheck_kinds"])
+    want = set(info["expected_kinds"])
     assert want.issubset(got), (
         f"{case_name}: expected cross-check kinds {sorted(want)} "
         f"not all produced; got {sorted(got)}"
@@ -65,11 +65,11 @@ def test_case_emits_expected_crosscheck_kinds(case_name: str) -> None:
 
 
 @pytest.mark.parametrize("case_name", _G20_CASES)
-def test_case_records_expected_providers(case_name: str) -> None:
+def test_case_records_provider_assertions(case_name: str) -> None:
     info = _GT[case_name]
-    expected = info.get("expected_providers")
+    expected = info.get("provider_assertions")
     if not expected:
-        pytest.skip(f"{case_name}: no expected_providers declared")
+        pytest.skip(f"{case_name}: no provider_assertions declared")
     provs = _providers(case_name)
     for check, want in expected.items():
         assert provs.get(check) == want, (

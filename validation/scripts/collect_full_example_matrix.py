@@ -325,7 +325,7 @@ def _proof_artifact_errors(data: dict[str, Any] | None) -> list[str]:
 def _case_owner(name: str, entry: dict[str, Any]) -> str:
     if entry.get("skip") and "BTF" in str(entry.get("reason", "")):
         return "btf"
-    if entry.get("mode") == "audit" or entry.get("expected_crosscheck_kinds"):
+    if entry.get("mode") == "audit":
         return "g20"
     if entry.get("mode") == "reconcile":
         return "reconcile"
@@ -458,9 +458,7 @@ def build_matrix(
         row = {
             "case_id": name,
             "owner": owner,
-            "expected": entry.get("expected")
-            or entry.get("expected_bundle_verdict")
-            or entry.get("expected_crosscheck_kinds"),
+            "expected": entry.get("expected"),
             "min_evidence": entry.get("min_evidence"),
             "status": status,
             "proof_lane": proof_lane,

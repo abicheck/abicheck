@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case18_dependency_leak/` |
 
 **Verdict:** 🔴 BREAKING (project policy + binary layout risk)

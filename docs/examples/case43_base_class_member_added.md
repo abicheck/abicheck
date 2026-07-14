@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_field_added`, `type_size_changed` |
 | **Source files** | `examples/case43_base_class_member_added/` |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING

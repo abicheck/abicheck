@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `exported_not_public`, `public_not_exported` |
 | **Source files** | `examples/case150_xcheck_export_public_pair/` |
 
 **Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-checks:** `exported_not_public` +
@@ -46,4 +46,4 @@ abicheck scan --binary libdemo.so -H include/ --audit
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

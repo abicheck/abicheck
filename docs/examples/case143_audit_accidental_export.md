@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `exported_not_public` |
 | **Source files** | `examples/case143_audit_accidental_export/` |
 
 **Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `exported_not_public` ·
@@ -53,4 +53,4 @@ declare it in an installed header.
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

@@ -1,7 +1,8 @@
-# Case 122 — Uninstantiated Template Signature Change (documented gap)
+# Case 122 — Uninstantiated Template Signature Change
 
-**Verdict:** ⚪ NO_CHANGE by default (object/DWARF/header comparison) — RISK
-(`template_body_changed`) when built with `--sources` (L4 source-ABI replay).
+**Ground truth:** ⚠️ COMPATIBLE_WITH_RISK (`template_body_changed`).
+Object/DWARF/header lanes return NO_CHANGE, but that is an L0–L2 missed
+detection; L4 source-ABI replay proves the one canonical verdict.
 
 ## What changes
 

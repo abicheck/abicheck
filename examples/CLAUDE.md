@@ -49,11 +49,11 @@ caseNN_<name>/
 
 `scripts/gen_g20_fixtures.py` is the single source of truth for the snapshot
 content (hand-built `AbiSnapshot`s serialized to JSON); `tests/test_g20_catalog.py`
-loads each fixture and asserts the case's `expected_crosscheck_kinds` /
-`expected_providers` (from `ground_truth.json`) via `run_crosschecks` — **no
+loads each fixture and asserts the case's canonical `expected_kinds` plus
+`provider_assertions` (from `ground_truth.json`) via `run_crosschecks` — **no
 compiler / castxml**, so the corpus runs in the default fast lane. The
-`ground_truth.json` v4 fields (`mode: audit`, `expected_crosscheck_kinds`,
-`expected_providers`, `fixtures`) carry these expectations; `min_evidence` is
+`ground_truth.json` audit fields (`mode: audit`, canonical `expected_kinds`,
+`provider_assertions`, `fixtures`) carry workflow assertions; `min_evidence` is
 derived from the cross-check kinds, not hand-set.
 
 Other build-emitted fixture types these cases may carry (ingested compiler-free

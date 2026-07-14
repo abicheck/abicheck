@@ -7,7 +7,7 @@
 | **Category** | Addition (Compatible) |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case47_inline_to_outlined/` |
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE

@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case14_cpp_class_size/` |
 
 **Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)

@@ -369,8 +369,8 @@ def test_bundle_runner_rejects_unexpected_bundle_kinds(
     result = bundle._validate_case(
         "case90_bundle_intra_dep_removed",
         {
-            "expected_bundle_verdict": "BREAKING",
-            "expected_bundle_kinds": ["bundle_intra_dep_removed"],
+            "expected": "BREAKING",
+            "expected_kinds": ["bundle_intra_dep_removed"],
             "allow_extra_bundle_kinds": False,
         },
         tmp_path,
@@ -379,7 +379,7 @@ def test_bundle_runner_rejects_unexpected_bundle_kinds(
     assert "unexpected" in result["message"]
 
 
-def test_bundle_runner_validates_expected_libraries() -> None:
+def test_bundle_runner_validates_library_assertions() -> None:
     bundle = _load_script("validation/scripts/run_bundle_examples.py")
     payload = {
         "libraries": [
@@ -391,13 +391,13 @@ def test_bundle_runner_validates_expected_libraries() -> None:
         ]
     }
     assert (
-        bundle._validate_expected_libraries(
+        bundle._validate_library_assertions(
             payload,
             {"libcore.so": {"verdict": "BREAKING", "kinds": ["func_removed"]}},
         )
         == []
     )
-    errors = bundle._validate_expected_libraries(
+    errors = bundle._validate_library_assertions(
         payload,
         {"libcore.so": {"verdict": "BREAKING", "kinds": ["func_added"]}},
     )

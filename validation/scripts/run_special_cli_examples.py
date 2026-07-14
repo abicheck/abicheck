@@ -293,12 +293,9 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
     expected = str(entry.get("expected"))
     expected_rc = _expected_returncode(expected)
     got = payload.get("verdict")
-    # Audit risks are advisory and therefore COMPATIBLE at the default gate;
-    # API-break cross-checks are gate-blocking and retain API_BREAK/exit 2.
-    expected_scan_verdict = "API_BREAK" if expected == "API_BREAK" else "COMPATIBLE"
     crosscheck = payload.get("crosscheck") or {}
     got_kinds = set((crosscheck.get("counts_by_check") or {}).keys())
-    expected_kinds = set(entry.get("expected_crosscheck_kinds") or [])
+    expected_kinds = set(entry.get("expected_kinds") or [])
     if execution["returncode"] != expected_rc:
         errors.append(
             f"exit code {execution['returncode']}, expected {expected_rc} for {expected}"
@@ -307,18 +304,18 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
         errors.append(
             f"JSON exit_code {payload.get('exit_code')!r}, expected {expected_rc}"
         )
-    if got != expected_scan_verdict:
-        errors.append(f"scan verdict {got!r}, expected {expected_scan_verdict!r}")
+    if got != expected:
+        errors.append(f"scan verdict {got!r}, expected {expected!r}")
     if got_kinds != expected_kinds:
         errors.append(
             f"cross-check kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
         )
     providers = crosscheck.get("providers") or {}
-    for kind, expected_providers in (entry.get("expected_providers") or {}).items():
-        if providers.get(kind) != expected_providers:
+    for kind, provider_assertions in (entry.get("provider_assertions") or {}).items():
+        if providers.get(kind) != provider_assertions:
             errors.append(
                 f"providers for {kind}: {providers.get(kind)!r}, "
-                f"expected {expected_providers!r}"
+                f"expected {provider_assertions!r}"
             )
     result = _result(
         case_id,
@@ -330,7 +327,7 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
         got_kinds=got_kinds,
         input_sha256={"snapshot.abi.json": _sha256(snapshot)},
     )
-    result["expected_crosscheck_kinds"] = sorted(expected_kinds)
+    result["expected_kinds"] = sorted(expected_kinds)
     return result
 
 

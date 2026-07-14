@@ -30,7 +30,6 @@ from tests.validate_examples import (  # noqa: E402
     _evaluate_verdict,
     _gap_applies,
     _json_payload,
-    _normalize_verdict,
     _result_to_json,
     _run_source_smoke,
     _selected_variants,
@@ -86,39 +85,15 @@ def test_source_smoke_run_mode_executes_with_trusted_env(
     assert mock_run.call_args.kwargs["allow_run"] is True
 
 
-# ── _normalize_verdict ────────────────────────────────────────────────────
+def test_different_verdict_is_not_accepted_as_equivalent() -> None:
+    result = _evaluate_verdict(
+        "case103",
+        "COMPATIBLE",
+        "COMPATIBLE_WITH_RISK",
+        None,
+    )
 
-
-class TestNormalizeVerdict:
-    """_normalize_verdict normalizes verdicts for cross-check comparison.
-
-    API_BREAK and COMPATIBLE are treated as equivalent (both normalize to
-    COMPATIBLE) because the checker may return either depending on header
-    availability. All other verdicts are preserved as-is.
-    """
-
-    _EXPECTED_NORMALIZED = {
-        "API_BREAK": "COMPATIBLE",
-        "BREAKING": "BREAKING",
-        "COMPATIBLE": "COMPATIBLE",
-        "COMPATIBLE_WITH_RISK": "COMPATIBLE_WITH_RISK",
-        "NO_CHANGE": "NO_CHANGE",
-    }
-
-    @pytest.mark.parametrize("verdict", sorted(_VALID_VERDICTS))
-    def test_normalizes_verdict(self, verdict: str) -> None:
-        assert _normalize_verdict(verdict) == self._EXPECTED_NORMALIZED[verdict]
-
-    def test_quality_risk_can_satisfy_compatible_expected(self) -> None:
-        result = _evaluate_verdict(
-            "case103",
-            "COMPATIBLE",
-            "COMPATIBLE_WITH_RISK",
-            None,
-            allow_risk_for_compatible=True,
-        )
-
-        assert result.status == "PASS"
+    assert result.status == "FAIL"
 
 
 # ── ground_truth.json structural integrity ────────────────────────────────
@@ -763,3 +738,18 @@ class TestArtifactVariants:
         assert payload["ground_truth_cases"] == 129
         assert payload["artifact_variants"] == ["debug-headers"]
         assert payload["summary"] == {"FAIL": 1}
+
+
+def test_case_work_dir_shortens_windows_cmake_path(tmp_path: Path) -> None:
+    long_name = "case98_cxx_standard_floor_raised"
+
+    linux_path = ve._case_work_dir(
+        tmp_path, long_name, "build-source", platform_name="posix"
+    )
+    windows_path = ve._case_work_dir(
+        tmp_path, long_name, "build-source", platform_name="nt"
+    )
+
+    assert linux_path.name == f"{long_name}__build-source"
+    assert windows_path.name.startswith("case-")
+    assert len(windows_path.name) == 17

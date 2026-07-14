@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_removed`, `func_removed`, `enum_member_added`, `enum_last_member_value_changed` |
 | **Source files** | `examples/case41_type_changes/` |
 
 **Category:** Type / Enum Changes | **Verdict:** BREAKING

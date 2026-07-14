@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case40_field_layout/` |
 
 **Category:** Struct Field Layout | **Verdict:** BREAKING

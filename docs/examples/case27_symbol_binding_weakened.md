@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `symbol_binding_changed` |
 | **Source files** | `examples/case27_symbol_binding_weakened/` |
 
 **Verdict:** 🟢 COMPATIBLE
