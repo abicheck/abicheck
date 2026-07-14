@@ -22,8 +22,6 @@ scope**.
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 | **G21** | [One-shot deep compare & CLI usability](g21-oneshot-deep-compare.md) | `UC-WF-oneshot-deep` | M |
-| **G22** | [CLI consolidation & interface-contract enforcement](g22-cli-consolidation.md) | `UC-WF-cli-contract` | L |
-| **G23** | [Python-level API diff for extension modules](g23-python-level-api-diff.md) | `UC-ARCH-python-api` | XL |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 
@@ -45,6 +43,8 @@ Completed or decided plans are retained for implementation history:
 | **G8** | Decided — static/import archives are a by-design non-goal | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | [g12](g12-security-hardening.md) |
 | **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit | [g14](g14-stable-abi-subset.md) |
+| **G22** | Done — CLI consolidation & interface-contract enforcement ([ADR-037](../adr/037-cli-interface-contract.md)) | [g22](g22-cli-consolidation.md) |
+| **G23** | Done — Python-level API diff for extension modules (`.pyi`/signature surface, 15 `python_api_*` ChangeKinds) | [g23](g23-python-level-api-diff.md) |
 
 ## How to pick up a plan
 

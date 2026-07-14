@@ -1,7 +1,19 @@
 # ADR-025: PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer)
 
 **Date:** 2026-06-06
-**Status:** Proposed
+**Status:** Proposed, but **substantially implemented/generalized elsewhere** —
+treat this ADR as the rationale record, not the current-state authority. D1–D3
+("diff as trigger and localizer, never authority") were absorbed and extended
+by [ADR-033](033-ci-rollout-performance-and-validation.md) D3 ("PR mode is
+trigger/localizer, not authority", which cites this ADR's model by name) and
+by [ADR-035](035-pr-tier-source-intelligence-and-crosscheck.md)'s PR-tier
+pre-scan/evidence-directed-focusing design (D2, D7). D2's inline-annotation
+mechanism shipped as the `compare-release`/`compare` `--annotate` flag
+("Annotations appear as inline comments on PR diffs", `cli.py`). D4 (the
+optional source-AST pre-filter) remains unimplemented future work, as the
+original text below already scoped it. Read ADR-033/035 for the current PR
+workflow design; this ADR is background for *why* diff-as-primary-input was
+rejected.
 **Decision maker:** Nikolay Petrov
 
 ---

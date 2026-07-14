@@ -25,19 +25,20 @@ in a 5-tier policy model, **164 calibrated example cases** (134 binary shared-li
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
-seven planned breadth/workflow items tracked in `usecase-registry.yaml`:
+five planned breadth/workflow items tracked in `usecase-registry.yaml`:
 header-only/inline-only analysis (G4), auditwheel vendored-library pairing (G9),
-manylinux glibc-floor checks (G10), single-binary audit/lint mode (G11),
-cross-architecture guardrails (G13), CPython `abi3` import-contract checking
-(G14), and inline-namespace version-stamp normalization (G15) — plus one newly
-**partial** item, header-scoped source-mode toolchain robustness (G16), whose
-diagnostics and `castxml --version` floor probe have shipped.
+manylinux glibc-floor checks (G10), single-binary audit/lint mode (G11), and
+cross-architecture guardrails (G13) — plus the **partial** items:
+inline-namespace version-stamp normalization (G15) and header-scoped
+source-mode toolchain robustness (G16), whose diagnostics and
+`castxml --version` floor probe have shipped.
 
 Several formerly broad gaps are now closed and should no longer be treated as
 open roadmap work: native PE/Mach-O compare validation (G1), build-config matrix
 integration (G2), workflow/report coverage (G3), plugin host↔plugin checking
 (G5), BTF/CTF and SYCL workflows (G6), release recommendations (G7), static
-library stance (G8), and security-hardening drift (G12).
+library stance (G8), security-hardening drift (G12), and CPython `abi3`
+import-contract checking (G14).
 
 ---
 
@@ -106,10 +107,10 @@ A real invocation is a point in this space:
 | **G11** | planned | Single-binary ABI audit/lint mode. |
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
 | **G13** | planned | Cross-architecture mismatch guardrail. |
-| **G14** | planned | CPython Limited-API / `abi3` import-contract conformance. |
+| **G14** | ✅ closed | CPython Limited-API / `abi3` import-contract conformance — extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit. |
 | **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
 | **G19** | complete | PR-tier source intelligence (ADR-035, D1–D10): always-on compiler-free pre-scan + risk-scored escalation, intra-version cross-source validation findings (six checks + FP-rate-gate corpus), single-release hygiene audit, evidence-directed scan focusing, build-emitted source-facts protocol, and a typed `run_scan`/`ScanResult` API + per-level provider protocol with per-project cost estimate. |
-| **G20** | planned | Source-scan & cross-source example corpus (ADR-035 demonstration): single-release audit cases, cross-source corroboration cases (combination beats any single source), and evidence-directed focusing scenarios. Grows the `examples/` catalog + test suites to demonstrate the G19 engine; no engine change. |
+| **G20** | partial | Source-scan & cross-source example corpus (ADR-035 demonstration): single-release audit cases, cross-source corroboration cases (combination beats any single source), and evidence-directed focusing scenarios. Grows the `examples/` catalog + test suites to demonstrate the G19 engine; no engine change. |
 | **G21** | partial | One-shot deep compare + CLI usability (oneDAL eval). **Shipped (PR #422):** the `--depth headers\|build\|graph\|source\|full` dial (`--max`=full, reusing the `scan --depth` vocabulary) on `dump`; rich-click option-group `--help` panels (collapse M1); and the strict-mode honesty fix (empty requested L4 → `skipped`). **Remaining:** the one-shot `compare` orchestrator (dump both sides with `--sources`, then compare) + header/source auto-discovery, a cross-platform list-threaded `--gcc-option`, `compile_commands.json` auto-synthesis, a fail-loud signal on an empty requested layer, and vocab unification (M5). |
 | **G22** | ✅ closed | CLI interface contract, config balance, and extension policy ([ADR-037](adr/037-cli-interface-contract.md)). Followed G21's depth dial with the structural cleanup the flag-divergence audit surfaced: three named tiers with `service.py` as the only compare chokepoint (fixes `compare-release` bypassing it with a different `scope_public` default), typed `CompareRequest` dataclasses, one decorator per shared option family (kills the severity/header/policy/debug copy-paste drift), a single `--depth` vocabulary (drops the "evidence" naming and the user-facing L5-graph rung), folding `compare-release`/`deep-compare` into `compare`, `--header-backend` → `--ast-frontend`, a CLI↔`.abicheck.yml` rebalance, an explicit `--exit-code-scheme`, and a `cli-contract` CI gate. Backward-compat mechanism designed, left advisory until 1.0. |
 | **G16** | partial | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. **Shipped**: actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure is a newer-Clang castxml or the libclang extractor (G4). **Remaining**: real-host end-to-end check and a dedicated error type. |
@@ -124,8 +125,6 @@ planned row from drifting away from its plan.
 | Priority | Gap | Plan |
 |---|---|---|
 | High | G9 — wheel vendored-library pairing | [g9](plans/g9-wheel-vendored-matching.md) |
-| Done | G14 — CPython `abi3` import-contract (`scan --abi3`) | [g14](plans/g14-stable-abi-subset.md) |
-| Medium | G23 — Python-level API diff (`.pyi`/signature) for extensions | [g23](plans/g23-python-level-api-diff.md) |
 | Medium | G4 — header-only / inline-only analysis | [g4](plans/g4-header-ast-extractor.md) |
 | Medium | G11 — single-binary audit/lint | [g11](plans/g11-single-binary-audit.md) |
 | Medium | G15 — inline-namespace version stamp | [g15](plans/g15-inline-namespace-version.md) |

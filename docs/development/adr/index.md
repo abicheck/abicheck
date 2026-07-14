@@ -28,7 +28,7 @@
 | [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — partially implemented (filesystem backend only) |
 | [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted — implemented |
 | [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
-| [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed |
+| [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed; D1–D3 absorbed by ADR-033/035, D4 still future work |
 | [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted — substantially superseded by ADR-028/030/035/038 (its "no embedded Clang" conclusion was reversed) |
 | [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted |
 | [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Accepted — implemented |
