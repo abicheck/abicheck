@@ -1516,12 +1516,27 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 # post-processing dedup pass collapses an exact duplicate if
                 # `_diff_field_renames` also matches.
                 candidate = added_by_offset.get(old_f.byte_offset)
+                # _normalize_type_name is lossy by design (it also strips
+                # pointer/reference sigils to compare "struct Foo *" against
+                # "Foo" for the *tag-spelling* case) — on its own it would
+                # also equate "Foo *" with "Foo", letting a genuine
+                # pointer-to-value retype through as a bare rename (caught in
+                # review). Require the byte size to match too whenever both
+                # sides report one, mirroring the type_size_changed guard the
+                # existing-field loop below already applies.
+                same_size = not (
+                    candidate is not None
+                    and old_f.byte_size > 0
+                    and candidate.byte_size > 0
+                    and old_f.byte_size != candidate.byte_size
+                )
                 if (
                     candidate is not None
                     and candidate.name not in reserved_matched
                     and not _RESERVED_FIELD_RE.match(candidate.name)
                     and _normalize_type_name(old_f.type_name)
                     == _normalize_type_name(candidate.type_name)
+                    and same_size
                 ):
                     changes.append(
                         make_change(

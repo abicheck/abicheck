@@ -458,6 +458,53 @@ class TestDwarfStructFieldTypeChanged:
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in _kinds(r)
 
 
+class TestDwarfStructFieldRenamed:
+    """DWARF-level pure field rename: same offset, same type and size."""
+
+    def test_pure_rename_reports_field_renamed_not_removed(self):
+        old_dwarf = DwarfMetadata(
+            structs={"Point": StructLayout(
+                name="Point", byte_size=4,
+                fields=[FieldInfo("x", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Point": StructLayout(
+                name="Point", byte_size=4,
+                fields=[FieldInfo("col", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED not in kinds
+
+    def test_pointer_to_value_retype_is_not_treated_as_a_bare_rename(self):
+        """A same-offset pointer->value retype under a new field name must not
+        be masked as a harmless FIELD_RENAMED just because
+        ``_normalize_type_name`` (which also strips pointer/reference sigils
+        for tag-spelling comparisons) equates "Handle *" with "Handle" —
+        the field's byte size differs, so this is a real layout break
+        (regression guard for a review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_ptr", "Handle *", 0, 8)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=32,
+                fields=[FieldInfo("handle_obj", "Handle", 0, 32)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""
 
