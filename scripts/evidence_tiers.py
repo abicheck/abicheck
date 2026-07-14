@@ -120,9 +120,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_ref_qual_changed": "L2",
     "overload_added": "L0",
     # G23 Phase D — ecosystem detectors (all read symbol-level manifests / names).
-    "unnamed_type_in_public_abi": "L0",   # exported mangled symbol names
-    "long_double_abi_changed": "L0",      # Itanium long-double mangling token
-    "kabi_symbol_removed": "L0",          # Module.symvers manifest
+    "unnamed_type_in_public_abi": "L0",  # exported mangled symbol names
+    "long_double_abi_changed": "L0",  # Itanium long-double mangling token
+    "kabi_symbol_removed": "L0",  # Module.symvers manifest
     "kabi_crc_changed": "L0",
     "kabi_symbol_namespace_changed": "L0",
     "kabi_export_type_changed": "L0",
@@ -276,6 +276,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # the BuildSourcePack build diff (ADR-029). The runtime-model flips below are
     # only proven from the captured build options (a flag flip with no necessary
     # binary footprint), so they are genuinely L3.
+    "abi_relevant_build_flag_changed": "L3",
     "exceptions_mode_changed": "L3",
     "rtti_mode_changed": "L3",
     "tls_model_changed": "L3",
@@ -388,7 +389,6 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     "case51_protected_visibility": "L0",
     "case52_rpath_leak": "L0",
     "case60_base_class_position_changed": "L1",
-    "case98_cxx_standard_floor_raised": "L0",
     "case118_internal_struct_field_added_scoped": "L2",
     "case119_internal_struct_field_removed_scoped": "L2",
     "case120_internal_struct_reordered_scoped": "L2",

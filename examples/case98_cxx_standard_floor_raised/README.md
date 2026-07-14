@@ -1,4 +1,4 @@
-# case98 — C++ standard floor raised (per-binary: NO_CHANGE)
+# case98 — C++ standard floor raised (source-aware risk)
 
 ## What this case demonstrates
 
@@ -10,20 +10,22 @@ with C++17 see no symbol churn but a freshly compiled TU against the
 new headers will hit any C++20-only constructs the library starts to
 require.
 
-## Why per-binary detection cannot see this
+## Why build context changes the verdict
 
 The symbol set, vtable, and declared interface are unchanged between
-v1 and v2, so every conventional ABI diff returns `NO_CHANGE`. The
-break-grade signal only appears when abicheck is fed a *matrix* of
-per-configuration snapshots (one per consumer toolchain): the
-`CXX_STANDARD_FLOOR_RAISED` detector compares the minimum `cxx_std`
-across configurations and emits the finding when the floor moves up.
+v1 and v2, so a deliberately context-free per-binary ABI diff returns
+`NO_CHANGE`. The example validation supplies each side's compile database
+through the public `abicheck` CLI. L3 build evidence then records
+`std:CXX` changing from `gnu++17` to `c++20`, and comparison emits
+`abi_relevant_build_flag_changed`.
 
-The probe-harness mechanism that produces matrix snapshots lives in
-`abicheck.probe_harness`; it is not yet wired into the default
-`compare` CLI (deferred follow-up — see PR #247).
+The source-aware result is the case's canonical expectation. `NO_CHANGE`
+is retained only as the honest result of the poorer per-binary lane; it
+must not override richer build-context evidence in the merged result.
 
 ## Expected verdict
 
-`NO_CHANGE` — single-config diff is correctly silent. The case is a
-fixture for the matrix-detector channel.
+`COMPATIBLE_WITH_RISK` with
+`abi_relevant_build_flag_changed` — the binary ABI is unchanged, but the
+producer's ABI-relevant C++ dialect changed and consumers should review
+the compatibility implications.

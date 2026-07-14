@@ -22,10 +22,10 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 14 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 32 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 8 | — | ✅ |
+| NO_CHANGE | 7 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -228,7 +228,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed | Breaking | 🔴 BREAKING |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |
 | [97](case97_api_depends_on_consumer_env/README.md) | public API depends on consumer build environment (RISK) | Breaking | 🔴 BREAKING |
-| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (per-binary: NO_CHANGE) | No Change | ✅ NO_CHANGE |
+| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (source-aware risk) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
 | [100](case100_experimental_removed_without_replacement/README.md) | experimental:: removed without replacement (API break) | Breaking | 🔴 BREAKING |
 | [101](case101_inline_namespace_version_bumped/README.md) | inline namespace version bumped (BREAKING) | Breaking | 🔴 BREAKING |

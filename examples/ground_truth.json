@@ -3305,12 +3305,14 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
-   "expected": "NO_CHANGE",
-   "expected_kinds": [],
-   "known_gap": "The C++ standard floor signal is invisible to a per-binary diff (symbol/type set is unchanged between v1 and v2). The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std metadata) is the only correct channel for this signal. The CMakeLists.txt builds v2 with -std=c++20 to embed a post-C++17 contract via build configuration, but the public declaration set is intentionally identical to v1's so the case still produces NO_CHANGE under the current single-config pipeline.",
-   "min_evidence": "L0",
+   "build_info": true,
+   "category": "risk",
+   "description": "v1 is built with C++17 and v2 with C++20 while their binary surfaces remain identical. Build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed; the merged source-aware verdict is COMPATIBLE_WITH_RISK, while a deliberately context-free per-binary comparison remains NO_CHANGE.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "abi_relevant_build_flag_changed"
+   ],
+   "min_evidence": "L3",
    "platforms": [
     "linux",
     "macos",

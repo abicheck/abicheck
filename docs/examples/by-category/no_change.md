@@ -3,12 +3,11 @@
 
 Identical ABI/API — sanity-check baselines.
 
-_8 case(s)._ [← back to all examples](../index.md)
+_7 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case04_no_change](../case04_no_change.md) | No Change | ✅ NO_CHANGE | No Change |
-| [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ standard floor raised (per-binary: NO_CHANGE) | ✅ NO_CHANGE | No Change |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | ✅ NO_CHANGE | No Change |
 | [case118_internal_struct_field_added_scoped](../case118_internal_struct_field_added_scoped.md) | Internal struct gains a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case119_internal_struct_field_removed_scoped](../case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
