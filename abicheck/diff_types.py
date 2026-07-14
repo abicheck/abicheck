@@ -454,7 +454,17 @@ def _diff_removed_field(
             and not _RESERVED_FIELD_RE.match(fname)
             and not _RESERVED_FIELD_RE.match(f_new.name)
         ):
-            if canonicalize_type_name(f_old.type) == canonicalize_type_name(f_new.type):
+            if (
+                canonicalize_type_name(f_old.type) == canonicalize_type_name(f_new.type)
+                # A bit-field's width is a layout property the type spelling
+                # doesn't capture (e.g. two "unsigned int" fields can differ
+                # in bit width at the same byte offset) — require it to also
+                # match before treating this as a harmless rename, or a real
+                # FIELD_BITFIELD_CHANGED break gets masked as a bare rename
+                # (caught in review).
+                and f_old.is_bitfield == f_new.is_bitfield
+                and f_old.bitfield_bits == f_new.bitfield_bits
+            ):
                 renamed_type_changed_added.add(f_new.name)
                 return make_change(
                     ChangeKind.FIELD_RENAMED,
@@ -1239,8 +1249,16 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         removed = [f for f in t_old.fields if f.name not in new_names]
         added = [f for f in t_new.fields if f.name not in old_names]
 
-        # Match by (offset, type) — a rename is when the same slot has a different name
-        added_by_sig = {(f.offset_bits, f.type): f for f in added if f.offset_bits is not None}
+        # Match by (offset, type, bitfield width) — a rename is when the same
+        # slot has a different name. A bit-field's width is a layout property
+        # the type spelling alone doesn't capture (two "unsigned int"
+        # bit-fields at the same offset can still differ in width), so it
+        # must be part of the match key or a real width change gets masked
+        # as a bare rename (caught in review).
+        added_by_sig = {
+            (f.offset_bits, f.type, f.is_bitfield, f.bitfield_bits): f
+            for f in added if f.offset_bits is not None
+        }
         for f_old in removed:
             if f_old.offset_bits is None:
                 continue
@@ -1248,7 +1266,7 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # as USED_RESERVED_FIELD (compatible), not FIELD_RENAMED (API break).
             if _RESERVED_FIELD_RE.match(f_old.name):
                 continue
-            sig = (f_old.offset_bits, f_old.type)
+            sig = (f_old.offset_bits, f_old.type, f_old.is_bitfield, f_old.bitfield_bits)
             f_new = added_by_sig.get(sig)
             if f_new is not None:
                 changes.append(make_change(

@@ -504,6 +504,31 @@ class TestDwarfStructFieldRenamed:
         assert ChangeKind.FIELD_RENAMED not in kinds
         assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
 
+    def test_same_size_pointer_to_value_retype_is_not_a_bare_rename(self) -> None:
+        """A byte-size guard alone is not enough: an 8-byte pointer and an
+        (incidentally) 8-byte-by-value class at the same offset must not be
+        treated as a rename either, because ``_normalize_type_name`` strips
+        the ``*`` and would equate "Handle *" with "Handle" regardless of
+        size (second review finding on the case35 fix — exact, non-lossy
+        type-spelling equality is required, not normalized-name-plus-size).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_ptr", "Handle *", 0, 8)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_obj", "Handle", 0, 8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
 
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""

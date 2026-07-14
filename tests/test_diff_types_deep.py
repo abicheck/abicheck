@@ -250,6 +250,23 @@ class TestFieldRenamed:
         assert ChangeKind.FIELD_RENAMED in kinds
         assert ChangeKind.TYPE_FIELD_REMOVED not in kinds
 
+    def test_bitfield_width_change_is_not_masked_as_a_bare_rename(self) -> None:
+        """A bit-field's width is a layout property the type spelling alone
+        doesn't capture — two "unsigned int" bit-fields at the same offset
+        can still differ in width. Renaming *and* widening a bit-field in
+        the same edit must not collapse to a bare FIELD_RENAMED (regression
+        guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Flags", kind="struct", size_bits=32,
+                           fields=[TypeField("flag_a", "unsigned int", 0,
+                                             is_bitfield=True, bitfield_bits=1)])
+        t_new = RecordType(name="Flags", kind="struct", size_bits=32,
+                           fields=[TypeField("flag_b", "unsigned int", 0,
+                                             is_bitfield=True, bitfield_bits=4)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+
 
 # ── enum_member_renamed (source-level break) ─────────────────────────────
 
