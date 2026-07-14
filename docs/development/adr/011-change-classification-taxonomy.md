@@ -1,16 +1,24 @@
 # ADR-011: ABI Change Classification Taxonomy
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. Amendment (2026-07-14): the change-kind
+counts below (119 kinds in Context, 114 in Consequences) were a
+point-in-time snapshot and are now stale — the registry has grown since this
+ADR was written. Treat `len(list(ChangeKind))` in `checker_policy.py` as the
+generated source of truth for the current count, not any number in this
+document.
 **Decision maker:** Nikolay Petrov
 
 ---
 
 ## Context
 
-abicheck detects 119 distinct types of ABI/API changes via the `ChangeKind`
-enum. Each kind must be classified into exactly one severity tier under the
-default `strict_abi` policy (see ADR-010):
+abicheck detects a large and growing number of distinct ABI/API change types
+via the `ChangeKind` enum (see `len(list(ChangeKind))` in
+`checker_policy.py` for the current count — do not hardcode it here, it
+changes every time a kind is added). Each kind must be classified into
+exactly one severity tier under the default `strict_abi` policy (see
+ADR-010):
 
 - **BREAKING** — binary ABI break; existing compiled binaries will crash or
   fail to load
@@ -143,7 +151,8 @@ When adding a new `ChangeKind`:
 
 ### Negative
 
-- 114 kinds require maintenance as ABI standards evolve
+- All `ChangeKind` values require maintenance as ABI standards evolve (see
+  `len(list(ChangeKind))` in `checker_policy.py` for the current count)
 - Divergences from reference tools may surprise users migrating from ABICC
 - Some classifications are judgment calls (e.g., `noexcept`) that may need
   revisiting as C++ standards evolve

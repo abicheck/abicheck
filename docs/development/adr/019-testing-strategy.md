@@ -1,15 +1,24 @@
 # ADR-019: Testing Strategy and Parity Validation
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. Amendment (2026-07-14): the specific
+numbers in this ADR (change-type count, coverage threshold, parity test
+count, example-case count, CI matrix details) were a point-in-time snapshot
+and have drifted. The core principles (four-tier architecture, conditional
+parity gating, examples as dual-purpose tests) still hold; for current
+numbers see `CLAUDE.md` (coverage-floor policy), `docs/development/testing.md`
+(maintained testing strategy page, explicitly kept up to date), and
+`.github/workflows/ci.yml` (CI topology) rather than this document.
 **Decision maker:** Nikolay Petrov
 
 ---
 
 ## Context
 
-abicheck's correctness depends on accurately classifying 85+ change types
-across three binary formats. False negatives (missed breaks) can cause
+abicheck's correctness depends on accurately classifying a large and
+growing number of change types (see ADR-011 and `len(list(ChangeKind))` in
+`checker_policy.py` for the current count) across three binary formats.
+False negatives (missed breaks) can cause
 production outages. False positives (spurious breaks) erode user trust and
 block CI pipelines.
 
@@ -45,22 +54,32 @@ abicheck intentionally diverges from their classifications in some cases
 - **mypy** — strict mode with targeted overrides for untyped external
   libraries (pyelftools, Click, FastMCP)
 - **mkdocs build --strict** — documentation build validation
-- Single matrix entry: Python 3.13 on ubuntu-latest
+- Single matrix entry on ubuntu-latest (exact Python version drifts with
+  each toolchain bump — see `.github/workflows/ci.yml` `lint-and-types` job
+  for the current pin)
 
 ### Tier 2: Unit tests
 
 - Test all core logic without external tools: checker, policy, model,
   serialization, reporter, suppression, CLI parsing
-- **Coverage threshold: 80%** enforced via `--cov-fail-under=80`
-- Matrix: ubuntu (3.12, 3.13, 3.14), windows (3.13), macos (3.13)
-- Codecov upload (ubuntu + 3.13 only)
+- A coverage floor is enforced on one canonical Linux/Python lane via
+  `--cov-fail-under=<N>`; the exact threshold moves over time and is
+  documented in `CLAUDE.md` ("Line-coverage floor" section) and
+  `docs/development/testing.md`, not here
+- Matrix: ubuntu (multiple Python versions), windows (one pinned version),
+  macos (one pinned version) — see `.github/workflows/ci.yml` `unit-tests`
+  job for the current matrix
+- Codecov upload (canonical Linux/Python lane only)
 
-The 80% threshold applies to the full test suite aggregate. Core logic
-(checker, policy, model, suppression) targets 90%+ coverage. Platform-specific
-code (elf_metadata, pe_metadata, macho_metadata) is structurally harder to
-cover because each module only runs on its native platform in CI. The 80%
-floor catches regressions without forcing artificial test-writing for
-unreachable platform branches.
+The coverage floor applies only to the canonical Linux/Python lane, not the
+full matrix aggregate — the other Linux Pythons run the same suite without
+coverage instrumentation (they would only re-check the identical floor), and
+macOS/Windows skip the Linux-only ELF/DWARF tests, which structurally lowers
+their coverage, so those lanes run without the fail-under gate. Platform-
+specific code (elf_metadata, pe_metadata, macho_metadata) is structurally
+harder to cover because each module only runs on its native platform in CI.
+See `CLAUDE.md` for the durable statement of this policy — it is
+intentionally not duplicated with a hardcoded number here.
 
 ### Tier 3: Integration tests
 
