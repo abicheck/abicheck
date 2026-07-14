@@ -9,6 +9,13 @@ phases landed (D1–D12), enforced by the `cli-contract` AI-readiness gate and
 `tests/test_cli_contract.py`. The single residual is the `--ast-frontend android`
 value, which stays exposed on `collect`'s `--source-abi-extractor` rather than
 the header-AST commands (it has no header-AST path).
+**Note the "implemented" scope:** the *contract itself* (tiers, decorators,
+one `--depth` dial, one exit-code scheme, the CI gate) is implemented and
+enforced today. The §"Backward compatibility" *mechanism* (deprecated-flag
+aliases, e.g. `--depth symbols`/`--collect-mode`) is also implemented and does
+warn on stderr (see `cli_params.py`), but per that section it remains
+**advisory, not mandatory, until the 1.0 switch-on criteria are met** — old
+flags still work and nothing errors on their use yet.
 **Decision maker:** (pending)
 
 ---

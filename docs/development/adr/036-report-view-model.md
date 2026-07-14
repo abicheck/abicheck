@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted (implemented incrementally — see "Rollout").
+Accepted — core implemented (Increments 1-2: `ReportModel`, the consolidated
+verdict→vocabulary table, and the cross-channel integrity tests are in place
+and route the Markdown/text/JSON/SARIF/JUnit reporters). Increment 3 (routing
+`html_report.py` and `pr_comment.py` through `ReportModel` to delete their
+remaining local bucketing, e.g. `pr_comment._bucket_changes`) is still open —
+see "Rollout" below.
 
 ## Context
 
