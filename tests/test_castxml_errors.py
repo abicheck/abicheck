@@ -297,24 +297,24 @@ def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
 def test_has_explicit_std_checks_both_flag_forms():
     """Codex review: an explicit -std supplied via the repeatable --gcc-option
     must be honoured, not just one in the whitespace --gcc-options string."""
-    from abicheck.dumper import _has_explicit_std
+    from abicheck._compiler_options import has_explicit_std
 
-    assert _has_explicit_std("-O2 -std=gnu++23", ()) is True
-    assert _has_explicit_std(None, ("-std=gnu++23",)) is True
-    assert _has_explicit_std(None, ("/std:c++latest",)) is True
-    assert _has_explicit_std("-O2", ("-Wall",)) is False
-    assert _has_explicit_std(None, ()) is False
+    assert has_explicit_std("-O2 -std=gnu++23", ()) is True
+    assert has_explicit_std(None, ("-std=gnu++23",)) is True
+    assert has_explicit_std(None, ("/std:c++latest",)) is True
+    assert has_explicit_std("-O2", ("-Wall",)) is False
+    assert has_explicit_std(None, ()) is False
 
 
 def test_has_explicit_cpp_std_distinguishes_c_and_cpp_dialects():
     """Compile-DB C++ standards are language evidence, unlike C standards."""
-    from abicheck.dumper import _has_explicit_cpp_std
+    from abicheck._compiler_options import has_explicit_cpp_std
 
-    assert _has_explicit_cpp_std("-O2 -std=gnu++17", ()) is True
-    assert _has_explicit_cpp_std(None, ("-std=c++20",)) is True
-    assert _has_explicit_cpp_std(None, ("/std:c++latest",)) is True
-    assert _has_explicit_cpp_std("-O2 -std=gnu17", ()) is False
-    assert _has_explicit_cpp_std(None, ("-std=c23",)) is False
+    assert has_explicit_cpp_std("-O2 -std=gnu++17", ()) is True
+    assert has_explicit_cpp_std(None, ("-std=c++20",)) is True
+    assert has_explicit_cpp_std(None, ("/std:c++latest",)) is True
+    assert has_explicit_cpp_std("-O2 -std=gnu17", ()) is False
+    assert has_explicit_cpp_std(None, ("-std=c23",)) is False
 
 
 def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(
