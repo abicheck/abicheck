@@ -1,7 +1,15 @@
 # ADR-001: Technology Stack — Python + pyelftools + castxml
 
 **Date:** 2026-03-07  
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented, **substantially amended**. The core
+Python + pyelftools + castxml decision (and the "no LLVM as a runtime
+dependency" call) still holds. But several claims below are historical and no
+longer describe current behavior: distribution (now published — see
+"Distribution" below), Windows debug-info cross-check (PDB is implemented, not
+planned — ADR-024 Phase 1), and "zero C/C++ code" (an optional Clang plugin,
+`contrib/abicheck-clang-plugin/`, ships as C++ — see ADR-038). Treat this ADR
+for its stack rationale; treat `goals.md`, `platforms.md`, and ADR-038 for
+current distribution/platform/tooling status.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -57,18 +65,18 @@ parse path goes through pyelftools only (no subprocess, no text parsing).
 
 ### Distribution
 
-abicheck is not yet published to PyPI or conda-forge. Currently it must be installed
-from source (`pip install -e ".[dev]"`).
+**As shipped (see `development/goals.md` Goal 6):** abicheck is published to both
+PyPI (`pip install abicheck`, Trusted Publishing/OIDC, `.github/workflows/publish.yml`)
+and conda-forge (`conda install -c conda-forge abicheck`, `castxml` declared as a
+run dependency). Installing from source (`pip install -e ".[dev]"`) remains the
+path for contributors.
 
-Future distribution plans:
+Original plan (historical, now realized as above):
 
-- **conda-forge** (planned): `conda install -c conda-forge abicheck` — will declare
-  `castxml` as a run dependency, giving users a complete install with no manual system
-  package setup.
-- **PyPI** (planned): `pip install abicheck` — will install Python dependencies only.
-  `castxml` must be installed separately via system packages (`apt install castxml`),
-  conda-forge (`conda install -c conda-forge castxml`), or — if a maintained castxml
-  wheel becomes available — via an optional extra (`pip install abicheck[castxml]`).
+- **conda-forge**: declare `castxml` as a run dependency, giving users a complete
+  install with no manual system package setup.
+- **PyPI**: install Python dependencies only; `castxml` installed separately via
+  system packages, conda-forge, or an optional extra.
 
 Note: An earlier version of this ADR incorrectly stated pyelftools is used by Ghidra.
 Ghidra is Java-based and uses its own ELF parser. The correct reference projects are
@@ -88,7 +96,10 @@ Ghidra is Java-based and uses its own ELF parser. The correct reference projects
 - Full Python — easy to test, debug, extend, run in CI
 - `pyelftools` gives ELF/DWARF parsing for free (no reimplementing the spec)
 - `castxml` is the industry standard for C++ header → AST
-- Zero C/C++ code to maintain in our repo
+- Zero C/C++ code in the core Python package (`abicheck/`); the one exception is
+  the optional Clang plugin under `contrib/abicheck-clang-plugin/` (ADR-038),
+  which is not built or loaded by default and exists purely as an opt-in
+  fast-path producer
 - `elf_metadata.py` is an explicit abstraction boundary — backend is swappable
 
 ### Negative
@@ -125,8 +136,8 @@ if subprocess overhead becomes a bottleneck.
 | Header AST (castxml) | Yes (GCC, Clang) | Yes (MSVC, MinGW) | Yes (Clang, GCC) |
 | Debug info cross-check | Yes (DWARF) | Planned (PDB) | Yes (DWARF) |
 
-- **Header AST analysis** works on all platforms via castxml (cross-platform, maintained by Kitware). castxml emulates the target compiler's preprocessor via `--castxml-cc-gnu` (GCC/Clang) or `--castxml-cc-msvc` (MSVC)
-- **Debug info cross-check** uses DWARF (Linux, macOS) via pyelftools; PDB support for Windows is planned
+- **Header AST analysis** works on all platforms via castxml (cross-platform, maintained by Kitware) or the clang AST-JSON backend (ADR-037 D8). castxml emulates the target compiler's preprocessor via `--castxml-cc-gnu` (GCC/Clang) or `--castxml-cc-msvc` (MSVC)
+- **Debug info cross-check** uses DWARF (Linux, macOS) via pyelftools; PDB support for Windows is implemented (`pdb_parser.py`/`pdb_metadata.py`/`pdb_utils.py`, ADR-024 Phase 1) — see `platforms.md` for the current per-toolchain maturity matrix, since Windows/MSVC lanes are not all CI-blocking yet
 - **DWARF version:** DWARF 4 (GCC ≤10 default) fully supported; DWARF 5 (GCC 11+ default) partially supported via pyelftools ≥0.29
 - **Architectures:** x86-64, aarch64 (ELF); any architecture for PE and Mach-O metadata
 

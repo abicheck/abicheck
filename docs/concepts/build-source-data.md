@@ -3,8 +3,9 @@
 abicheck primarily compares **built artifacts** — binaries (L0), debug info
 (L1), and public headers (L2). A **build/source pack** is an *optional* sidecar
 that augments a snapshot with **source and build evidence** (ADR-028): build
-context (L3), and — in later releases — source ABI replay (L4) and source
-graph summaries (L5).
+context (L3), source ABI replay (L4, ADR-030), and source graph summaries
+(L5, ADR-031) — all three are implemented and shipped today; see "Evidence
+layers" below for what each one requires and produces.
 
 The pack exists to give the existing ABI/API decision engine **more facts** —
 to reduce false positives, explain and localize breaks, and detect

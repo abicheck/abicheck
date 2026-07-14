@@ -2,9 +2,9 @@
 
 | # | Title | Status |
 |---|-------|--------|
-| [001](001-technology-stack.md) | Technology Stack — Python + pyelftools + castxml | Accepted — implemented |
+| [001](001-technology-stack.md) | Technology Stack — Python + pyelftools + castxml | Accepted — implemented, substantially amended |
 | [002](002-multi-binary-release-compare.md) | Multi-binary / release compare UX and architecture | Accepted — implemented |
-| [003](003-data-source-architecture.md) | Data Source Architecture — checks, instruments, and binary types (+ exploratory binary fingerprint extension) | Accepted — implemented |
+| [003](003-data-source-architecture.md) | Data Source Architecture — checks, instruments, and binary types (+ exploratory binary fingerprint extension) | Accepted — implemented; conceptually extended by the L0–L5 model (ADR-028–031, 041) |
 | [004](004-report-filtering-and-deduplication.md) | Report Filtering, Deduplication, and Leaf-Change Mode | Accepted — implemented |
 | [005](005-application-compat-check.md) | Application Compatibility Checking | Accepted — implemented |
 | [006](006-package-level-comparison.md) | Package-Level Comparison | Accepted — implemented |
@@ -17,7 +17,7 @@
 | [013](013-suppression-system.md) | Suppression System Design | Accepted — implemented |
 | [014](014-output-format-strategy.md) | Output Format Strategy | Accepted — implemented |
 | [015](015-snapshot-serialization.md) | Snapshot Serialization and Schema Versioning | Accepted — implemented |
-| [016](016-visibility-model.md) | Three-Tier Visibility Model | Accepted — implemented |
+| [016](016-visibility-model.md) | Three-Tier Visibility Model | Accepted — implemented; extended by ADR-024's two-axis surface model |
 | [017](017-github-action.md) | GitHub Action Design | Accepted — implemented |
 | [018](018-cross-platform-support.md) | Cross-Platform Binary Format Support | Accepted — implemented |
 | [019](019-testing-strategy.md) | Testing Strategy and Parity Validation | Accepted — implemented |
@@ -25,11 +25,11 @@
 | [020b](020-sycl-and-heterogeneous-stack-support.md) | SYCL and Heterogeneous Computing Stack Support | Accepted — implemented |
 | [021a](021-debug-artifact-resolution.md) | Debug Artifact Resolution Subsystem | Accepted — implemented |
 | [021b](021-mcp-security-model.md) | MCP Security Model | Accepted — implemented |
-| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — implemented |
+| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — partially implemented (filesystem backend only) |
 | [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted — implemented |
 | [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
 | [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed |
-| [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted |
+| [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted — substantially superseded by ADR-028/030/035/038 (its "no embedded Clang" conclusion was reversed) |
 | [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted |
 | [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Accepted — implemented |
 | [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Accepted — implemented |
