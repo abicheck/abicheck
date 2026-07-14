@@ -1,11 +1,17 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 169 cases (`01–158`, `160–169` + `26b`),
-including 5 multi-library bundle cases and the 9 G20 audit /
-cross-source cases (`143–151`). Each case is a minimal, compilable C/C++
-example demonstrating a specific ABI/API pitfall. The authoritative
-count is the number of entries in `ground_truth.json` — trust that over
-this sentence.
+The catalog has multiple owner families: ordinary single-library pairs,
+multi-library bundles, G20 audit/cross-source fixtures, L3/L4/L5 fixtures, BTF,
+Python API, reconcile, snapshot-pair, KABI, and other specialized cases. The
+authoritative count is the number of entries in `ground_truth.json` — never
+trust a hard-coded count over that file.
+
+Before reporting catalog status, read
+`../docs/development/examples-validation-runbook.md`. `validate_examples.py`
+alone and ad-hoc pair scans are not full-catalog proof. Only collector output
+with every row `COVERED` and no `UNRESOLVED`/`FAILED` cases supports that claim.
+For trusted repository fixtures, preserve CI's explicit
+`ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` opt-in.
 
 Read `README.md` in this directory first — it indexes every case and
 explains the verdict taxonomy.
@@ -43,11 +49,11 @@ caseNN_<name>/
 
 `scripts/gen_g20_fixtures.py` is the single source of truth for the snapshot
 content (hand-built `AbiSnapshot`s serialized to JSON); `tests/test_g20_catalog.py`
-loads each fixture and asserts the case's `expected_crosscheck_kinds` /
-`expected_providers` (from `ground_truth.json`) via `run_crosschecks` — **no
+loads each fixture and asserts the case's canonical `expected_kinds` plus
+`provider_assertions` (from `ground_truth.json`) via `run_crosschecks` — **no
 compiler / castxml**, so the corpus runs in the default fast lane. The
-`ground_truth.json` v4 fields (`mode: audit`, `expected_crosscheck_kinds`,
-`expected_providers`, `fixtures`) carry these expectations; `min_evidence` is
+`ground_truth.json` audit fields (`mode: audit`, canonical `expected_kinds`,
+`provider_assertions`, `fixtures`) carry workflow assertions; `min_evidence` is
 derived from the cross-check kinds, not hand-set.
 
 Other build-emitted fixture types these cases may carry (ingested compiler-free

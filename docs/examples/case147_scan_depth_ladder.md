@@ -3,14 +3,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `examples/case147_scan_depth_ladder/` |
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `private_header_leak` ·
 **Mode:** single-release audit · **Evidence tier:** L2 (→ L5 corroboration)
 
 ## What it demonstrates
@@ -48,4 +48,4 @@ Same as a private-header leak: opaque-handle the type, or install its header.
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

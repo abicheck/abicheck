@@ -7,7 +7,7 @@
 | **Category** | Risk |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `soname_changed` |
 | **Source files** | `examples/case50_soname_inconsistent/` |
 
 **Policy verdict:** 🟡 BAD PRACTICE | **ABI compatibility verdict:** COMPATIBLE

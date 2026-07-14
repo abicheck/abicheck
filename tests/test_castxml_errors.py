@@ -297,13 +297,67 @@ def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
 def test_has_explicit_std_checks_both_flag_forms():
     """Codex review: an explicit -std supplied via the repeatable --gcc-option
     must be honoured, not just one in the whitespace --gcc-options string."""
-    from abicheck.dumper import _has_explicit_std
+    from abicheck._compiler_options import has_explicit_std
 
-    assert _has_explicit_std("-O2 -std=gnu++23", ()) is True
-    assert _has_explicit_std(None, ("-std=gnu++23",)) is True
-    assert _has_explicit_std(None, ("/std:c++latest",)) is True
-    assert _has_explicit_std("-O2", ("-Wall",)) is False
-    assert _has_explicit_std(None, ()) is False
+    assert has_explicit_std("-O2 -std=gnu++23", ()) is True
+    assert has_explicit_std(None, ("-std=gnu++23",)) is True
+    assert has_explicit_std(None, ("/std:c++latest",)) is True
+    assert has_explicit_std("-O2", ("-Wall",)) is False
+    assert has_explicit_std(None, ()) is False
+
+
+def test_has_explicit_cpp_std_distinguishes_c_and_cpp_dialects():
+    """Compile-DB C++ standards are language evidence, unlike C standards."""
+    from abicheck._compiler_options import has_explicit_cpp_std
+
+    assert has_explicit_cpp_std("-O2 -std=gnu++17", ()) is True
+    assert has_explicit_cpp_std(None, ("-std=c++20",)) is True
+    assert has_explicit_cpp_std(None, ("/std:c++latest",)) is True
+    assert has_explicit_cpp_std("-O2 -std=gnu17", ()) is False
+    assert has_explicit_cpp_std(None, ("-std=c23",)) is False
+
+
+def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(
+    tmp_path, monkeypatch
+):
+    """Cases 66/69: compile-DB -std=gnu++17 beats .h/content heuristics."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck import dumper
+
+    header = tmp_path / "public.h"
+    header.write_text('extern "C" int api(void);\n', encoding="utf-8")
+    captured: dict[str, bool] = {}
+
+    def fake_run(*args, force_cpp: bool, **kwargs):
+        captured["force_cpp"] = force_cpp
+        return Element("GCC_XML")
+
+    monkeypatch.setattr(dumper, "_castxml_available", lambda: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda key: tmp_path / "cache.xml")
+    monkeypatch.setattr(dumper, "_resolve_compiler_binary", lambda *args: ("g++", "gnu"))
+    monkeypatch.setattr(dumper, "_run_castxml_attempt", fake_run)
+
+    dumper._castxml_dump(
+        [header], [], gcc_option_tokens=("-std=gnu++17",), lang=None
+    )
+
+    assert captured["force_cpp"] is True
+
+
+def test_explicit_c_language_overrides_forwarded_cpp_standard(tmp_path):
+    """An explicit --lang c remains authoritative despite conflicting flags."""
+    from abicheck.dumper import _resolve_clang_langmode
+
+    header = tmp_path / "public.h"
+    header.write_text("int api(void);\n", encoding="utf-8")
+
+    force_cpp, _, explicit_c, _ = _resolve_clang_langmode(
+        "C", [header], "clang", gcc_option_tokens=("-std=gnu++17",)
+    )
+
+    assert force_cpp is False
+    assert explicit_c is True
 
 
 def test_castxml_command_user_std_token_not_overridden(tmp_path):

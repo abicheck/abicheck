@@ -1,7 +1,8 @@
-# Case 122 — Uninstantiated Template Signature Change (documented gap)
+# Case 122 — Uninstantiated Template Signature Change
 
-**Verdict:** ⚪ NO_CHANGE by default (object/DWARF/header comparison) — RISK
-(`template_body_changed`) when built with `--sources` (L4 source-ABI replay).
+**Ground truth:** ⚠️ COMPATIBLE_WITH_RISK (`template_body_changed`).
+Object/DWARF/header lanes return NO_CHANGE, but that is an L0–L2 missed
+detection; L4 source-ABI replay proves the one canonical verdict.
 
 ## What changes
 
@@ -18,8 +19,12 @@ ordinary `library_version()` function.
 
 A consumer writing `clamp<int>(x, a, b)` resolves the call against the new
 parameter types and emits a *different* mangled symbol on its own side; overload
-resolution and deduction can also change. For users of the template this is a
-real source/ABI break.
+resolution and deduction can also change. No shipped binary instantiates the
+template today, so nothing that currently links is broken — a consumer only
+picks up the new signature the next time it recompiles against the updated
+headers. That is why the canonical verdict is COMPATIBLE_WITH_RISK
+(`template_body_changed`) rather than API_BREAK: a source-visible risk for
+future consumers, not a proven break for any consumer that exists yet.
 
 ## Why this case exists — the limit of *artifact* analysis
 

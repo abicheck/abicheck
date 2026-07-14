@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `executable_stack_removed` |
 | **Source files** | `examples/case49_executable_stack/` |
 
 **Category:** ELF / Security | **Verdict:** BAD PRACTICE

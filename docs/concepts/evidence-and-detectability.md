@@ -74,8 +74,8 @@ struct is non-public ([case118](../examples/case118_internal_struct_field_added_
 Current scan-depth status is measured on the comparable v1/v2 shared-library
 targets: **141/141 targets scanned at every pinned depth**. FP/FN math uses the
 **141 targets** in that scope: `NO_CHANGE` sentinel cases are checked as
-compatible/no-change outcomes, and bundle cases are checked against their
-per-library expected verdicts.
+compatible/no-change outcomes. Bundle-component results are structural
+diagnostics only; the catalog keeps one canonical case-level verdict.
 
 | Pinned scan depth | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | What this says about the layer today |
 |---|---:|---:|---:|---:|---:|---|

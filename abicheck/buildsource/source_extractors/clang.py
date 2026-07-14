@@ -218,7 +218,18 @@ def _clang_context_args(
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and not msvc:
         cmd.append(f"--target={compile_unit.target_triple}")
-    cmd += replay_extra_flags(compile_unit, cmd, cc_id)
+    extra = replay_extra_flags(compile_unit, cmd, cc_id)
+    if compile_unit.standard:
+        # ``standard`` is normalized from the *effective* (last) dialect flag.
+        # Do not replay an earlier conflicting -std=/std: token from
+        # abi_relevant_flags after it, or clang would silently parse the TU at
+        # the wrong language level (e.g. CMake's gnu++17 then c++20 pair).
+        extra = [
+            flag for flag in extra
+            if not flag.startswith("-std=")
+            and not flag.lower().startswith(("/std:", "-std:"))
+        ]
+    cmd += extra
     return cmd, msvc
 
 

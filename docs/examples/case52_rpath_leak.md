@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `runpath_changed` |
 | **Source files** | `examples/case52_rpath_leak/` |
 
 **Category:** ELF / Deployment | **Verdict:** BAD PRACTICE

@@ -113,9 +113,9 @@ Bump `version` `"3"`→`"4"`. Add to each verdict entry (all optional, defaulted
 | field | type | meaning |
 |---|---|---|
 | `mode` | `"compare"` (default) \| `"audit"` | `"audit"` = single-build, no `v2`/baseline |
-| `expected_crosscheck_kinds` | `list[str]` | subset-checked against `run_crosschecks(snapshot).findings[].kind` (distinct from `expected_kinds`, which is the `compare` diff) |
-| `expected_providers` | `dict[str, list[str]]` | per check name → expected `ScanResult.confidence[check]` provider list (the §6.8 matrix) |
-| `expected_scan` | `dict[str, int\|str]` | scan-plan counters the case asserts (`selected_tus`, `parsed_tus`, `skipped_tus`, `matched_symbols`, `unmatched_exports`, `cache_hits`); used by POI/integrity cases |
+| `expected_kinds` | `list[str]` | canonical case kinds, subset-checked against the active public workflow (`compare` or `run_crosschecks`) |
+| `provider_assertions` | `dict[str, list[str]]` | per check name → expected `ScanResult.confidence[check]` provider list (the §6.8 matrix) |
+| `scan_assertions` | `dict[str, int\|str]` | scan-plan counters the case asserts (`selected_tus`, `parsed_tus`, `skipped_tus`, `matched_symbols`, `unmatched_exports`, `cache_hits`); used by POI/integrity cases |
 | `fixtures` | `list[str]` | declares non-`v1`/`v2` fixture files the case ships (`compile_commands.json`, `install_manifest.txt`, `abicheck_inputs/`, `.abicheck.yml`) |
 
 `min_evidence` already accepts `L0`–`L4`; add `L5` to the accepted set. The eight
@@ -195,7 +195,7 @@ row), and a focusing case (a "scan plan" counter table). Regenerate
 
 Compiler-free / smallest fixtures first. All four hygiene cases are buildable as
 a single binary + headers + manifest (or an `abicheck_inputs/` pack), run through
-`scan --audit`, asserting `expected_crosscheck_kinds`.
+`scan --audit`, asserting the canonical `expected_kinds`.
 
 | Case | Kind | Sources combined | Fixture | Lane |
 |---|---|---|---|---|
@@ -218,9 +218,8 @@ failed".
   "expected": "RISK", "category": "risk", "mode": "audit",
   "min_evidence": "L2", "platforms": ["linux"],
   "abi_break": false, "api_break": false, "bad_practice": true,
-  "expected_kinds": [],
-  "expected_crosscheck_kinds": ["exported_not_public"],
-  "expected_providers": {"exported_not_public": ["binary_exports", "public_header_ast"]},
+  "expected_kinds": ["exported_not_public"],
+  "provider_assertions": {"exported_not_public": ["binary_exports", "public_header_ast"]},
   "fixtures": ["abicheck_inputs/"]
 }
 ```

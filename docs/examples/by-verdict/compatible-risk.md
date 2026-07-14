@@ -3,26 +3,21 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_31 case(s)._ [← back to all examples](../index.md)
+_25 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ standard floor raised (build-context risk) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case130_exceptions_mode_flip](../case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case132_threadsafe_statics_flip](../case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case134_relro_weakened](../case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case135_stack_canary_removed](../case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case143_audit_accidental_export](../case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case144_audit_private_header_leak](../case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case145_audit_unversioned_export](../case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case146_audit_rtti_for_internal](../case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case152_enum_size_flag_flip](../case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case153_struct_packing_flip](../case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case154_lto_mode_flip](../case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -37,4 +32,3 @@ _31 case(s)._ [← back to all examples](../index.md)
 | [case178_unnamed_type_in_public_abi](../case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |

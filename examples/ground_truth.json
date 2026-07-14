@@ -6,12 +6,12 @@
   "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)",
   "g20_fixture_writer": "scripts/gen_g20_fixtures.py \u2014 single source of truth for the committed snapshot fixtures (snapshot.abi.json) of cases 143-151 and case181",
   "test_autodiscovery": "tests/test_example_autodiscovery.py \u2014 reads EXPECTED from this file",
-  "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 loads each G20 case's committed snapshot fixture and asserts expected_crosscheck_kinds / expected_providers via run_crosschecks (compiler-free, fast lane)",
+  "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 validates each G20 fixture against canonical expected_kinds and provider_assertions via run_crosschecks",
   "test_evidence_tiers": "tests/test_evidence_tiers.py \u2014 keeps min_evidence in sync with scripts/evidence_tiers.py",
   "test_manual": "tests/test_abi_examples.py \u2014 hardcoded expectations for cases 01-18 (must stay in sync)",
   "verdict_classification": "abicheck/checker_policy.py \u2014 BREAKING_KINDS, API_BREAK_KINDS, RISK_KINDS, COMPATIBLE_KINDS (= ADDITION_KINDS \u222a QUALITY_KINDS)"
  },
- "description": "Ground-truth expected verdicts and change kinds for all abicheck example cases. Single source of truth \u2014 kept in sync with tests/test_example_autodiscovery.py::EXPECTED. expected_kinds lists the ChangeKind values that MUST appear in the diff result (subset check). expected_absent_kinds lists kinds that MUST NOT appear (false positive guard). min_evidence is the minimum evidence layer (L0 binary / L1 +debug / L2 +headers / L3 +build / L4 +source / L5 +source-graph) at which abicheck reaches the correct verdict \u2014 derived by scripts/evidence_tiers.py and validated by tests/test_evidence_tiers.py. Schema v4 (ADR-035 / G20) adds optional fields for the single-release audit and intra-version cross-source corpus: mode (\"compare\" default | \"audit\" = single build, no v2/baseline | \"reconcile\" = ADR-039 build-context reconciliation fixture, validated compiler-free by tests/test_diff_reconcile.py); expected_crosscheck_kinds (subset-checked against run_crosschecks(snapshot).findings[].kind, distinct from the compare-diff expected_kinds); expected_providers (per check name \u2192 the provider-agreement list ScanResult records); expected_scan (scan-plan counters a focusing case asserts); fixtures (non-v1/v2 fixture files the case ships, e.g. snapshot.abi.json / abicheck_inputs/ / compile_commands.json); l4_kinds (kinds the case demonstrates only at L4 source-ABI replay, for a case whose default-mode expected_kinds is correctly empty \u2014 read only by scripts/gen_detector_spec.py to keep that kind's doc-example link, never consulted for verdict validation). All v4 fields are optional and defaulted \u2014 existing rows are untouched.",
+ "description": "Ground-truth verdict and change kinds for all abicheck examples. Every case has exactly one canonical expected verdict and one canonical expected_kinds set, invariant across compiler, workflow, artifact variant, and evidence depth. A lane that cannot observe that truth reports a scoped detection gap; it never supplies another expectation. expected_absent_kinds are negative false-positive guards. min_evidence is the first evidence layer able to prove the canonical truth (L0 binary / L1 +debug / L2 +headers / L3 +build / L4 +source / L5 +source-graph). Audit cases use the same expected/expected_kinds contract; provider_assertions describes provider agreement, not another truth. Bundle library assertions are structural checks beneath the single case-level verdict.",
  "verdicts": {
   "case01_symbol_removal": {
    "abi_break": true,
@@ -235,19 +235,16 @@
   },
   "case105_concept_tightening": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. Invisible to the default object/DWARF and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body), but visible at L4: source-ABI replay reports `concept_tightened` (API_BREAK) when that opt-in evidence is supplied.",
-   "expected": "NO_CHANGE",
-   "expected_absent_kinds": [
+   "category": "api_break",
+   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by default object/DWARF and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body), but visible at L4: source-ABI replay reports `concept_tightened` (API_BREAK) when that opt-in evidence is supplied.",
+   "expected": "API_BREAK",
+   "expected_absent_kinds": [],
+   "expected_kinds": [
     "concept_tightened"
    ],
-   "expected_kinds": [],
-   "known_gap": "By default (object/DWARF mode, and header/castxml mode) the concept-tightening change is invisible: castxml emits C++20 concept declarations as <Unimplemented kind=\"Concept\"/> with no name, no body, and no link to the constrained template, so there is no way to see the requirement change from the castxml dump path — the tool returns NO_CHANGE and this case's ground truth reflects that default-mode behavior. It is not a permanent blind spot: L4 source-ABI replay uses a clang-based extractor instead of castxml, which does emit named concept declarations with a constraint hash (source_extractors/clang.py's _emit_concept), and abicheck/buildsource/source_diff.py's _diff_concepts reports the tightened constraint as ChangeKind.CONCEPT_TIGHTENED (API_BREAK) when that opt-in evidence is supplied (verified end to end — see the README's Reproduce section, same recipe as case122: L3 compile-unit + public-header evidence via `abicheck collect -H`, plus --no-scope-public-headers on compare since the L2 header backend does not model concepts). min_evidence is L4 for that reason; this entry's expected/expected_kinds describe the tool's default (no build-source evidence) behavior, which is what examples/validate_examples.py exercises for this case.",
-   "l4_kinds": [
-    "concept_tightened"
-   ],
+   "known_gap": "L0-L2 artifact/header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes. Their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay emits the named concept and constraint hash and detects concept_tightened.",
    "min_evidence": "L4",
    "platforms": [
     "linux",
@@ -273,7 +270,14 @@
       ]
      ]
     }
-   }
+   },
+   "known_gap_variants": [
+    "debug-headers",
+    "release-headers",
+    "stripped-headers"
+   ],
+   "source_abi_extractor": "clang",
+   "source_abi_scope": "headers-only"
   },
   "case106_ctor_became_explicit": {
    "abi_break": false,
@@ -615,25 +619,31 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template. Invisible to the default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --no-scope-public-headers on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
-   "expected": "NO_CHANGE",
+   "category": "risk",
+   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --no-scope-public-headers on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
+   "expected": "COMPATIBLE_WITH_RISK",
    "expected_absent_kinds": [
     "func_params_changed",
     "func_added",
     "func_removed"
    ],
-   "expected_kinds": [],
-   "known_gap": "By default (object/DWARF mode, and header/castxml mode) the change is invisible: the library ships the function template header-only and instantiates nothing, so no symbol is emitted and the v1/v2 binaries are byte-identical, and castxml does not emit uninstantiated template declarations into its AST output either. This is the boundary of comparing built artifacts: code that never becomes a symbol leaves no trace a binary or castxml comparison can observe \u2014 the tool returns NO_CHANGE and this case's ground truth reflects that default-mode behavior. It is not a permanent blind spot, though: L4 source-ABI replay (ADR-030) parses the real clang AST, which does emit uninstantiated FunctionTemplateDecl nodes, and abicheck/buildsource/source_diff.py reports the parameter-type change as ChangeKind.TEMPLATE_BODY_CHANGED (RISK) when that opt-in evidence is supplied. Verified end to end (see the README's Reproduce section): the L4 surface needs L3 compile-unit evidence paired with an explicit public-header root (abicheck collect -H <header> --compile-db <compile_commands.json> --source-abi), and compare needs --no-scope-public-headers, because the default L2 header backend does not model templates so the default public-surface scoping drops the finding as internal. min_evidence is L4 for that reason; this entry's expected/expected_kinds describe the tool's default (no build-source evidence) behavior, which is what examples/validate_examples.py exercises for this case.",
-   "l4_kinds": [
+   "expected_kinds": [
     "template_body_changed"
    ],
+   "known_gap": "L0-L2 artifact/header scans cannot observe the uninstantiated function template because it emits no symbol and CastXML omits the declaration. Their NO_CHANGE verdict is a missed COMPATIBLE_WITH_RISK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay parses the real Clang AST and detects template_body_changed.",
    "min_evidence": "L4",
    "platforms": [
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "known_gap_variants": [
+    "debug-headers",
+    "release-headers",
+    "stripped-headers"
+   ],
+   "source_abi_extractor": "clang",
+   "source_abi_scope": "headers-only"
   },
   "case123_default_argument_removed": {
    "abi_break": false,
@@ -642,7 +652,6 @@
    "category": "api_break",
    "description": "A function's default argument is removed in v2. The mangled symbol is identical (defaults don't affect mangling), so binaries keep running, but callers relying on the default no longer compile. Detected only in header mode via the param_default_value_removed ChangeKind (castxml exposes the Argument `default` attribute); invisible in object/DWARF mode.",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "expected_kinds": [
     "param_default_value_removed"
    ],
@@ -659,7 +668,6 @@
    "category": "api_break",
    "description": "A public constexpr constant changes value (8 -> 16). The value is baked into consumers at compile time, so mixing header versions disagrees on sizes; yet the constant has internal linkage (no symbol), so the binaries are identical and object/DWARF comparison sees nothing. Detected only in header mode via constant_changed: the dumper extracts const/constexpr initializers declared in the provided public headers (castxml `init` attribute). Plain #define macros remain invisible (castxml emits no macros).",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "expected_kinds": [
     "constant_changed"
    ],
@@ -681,7 +689,6 @@
    "category": "api_break",
    "description": "A public, extensible base class gains the `final` specifier in v2. Layout, vtable and mangled names are unchanged, so already-compiled binaries keep running, but any consumer that derives from it no longer compiles. Detected via the new TYPE_BECAME_FINAL ChangeKind, which reads the `final` class-key from castxml header analysis. Invisible in object/DWARF mode (the binaries are ABI-identical), demonstrating why source/header analysis is required for the full API picture.",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "expected_kinds": [
     "type_became_final"
    ],
@@ -957,6 +964,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "symbol_version_defined_added"
    ]
   },
   "case140_empty_base_optimization_lost": {
@@ -1013,19 +1023,12 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Single-release audit (no baseline): a function defined with default visibility but never declared in a public header is an accidental export. Crosschecking the binary export table against the public-header AST flags it (EXPORTED_NOT_PUBLIC); neither source alone sees it.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "exported_not_public"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "exported_not_public": [
-     "binary_exports",
-     "public_header_ast"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1033,24 +1036,24 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "exported_not_public": [
+     "binary_exports",
+     "public_header_ast"
+    ]
+   }
   },
   "case144_audit_private_header_leak": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Single-release audit: a public API returns detail::WidgetImpl*, a type defined only in a private (non-installed) header. The public-header AST cross-check flags the un-installed-type leak (PRIVATE_HEADER_LEAK).",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "private_header_leak"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "private_header_leak": [
-     "public_header_ast"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1058,24 +1061,23 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "private_header_leak": [
+     "public_header_ast"
+    ]
+   }
   },
   "case145_audit_unversioned_export": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Single-release audit, pure L0: the library defines a symbol-versioning scheme (DEMO_1.0) but a new export ships with no version node. It cannot be evolved compatibly later (UNVERSIONED_EXPORTED_SYMBOL) - read from the export table vs .gnu.version_d alone.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "unversioned_exported_symbol"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "unversioned_exported_symbol": [
-     "binary_exports"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1083,25 +1085,23 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "unversioned_exported_symbol": [
+     "binary_exports"
+    ]
+   }
   },
   "case146_audit_rtti_for_internal": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Single-release audit: _ZTI/_ZTV (typeinfo + vtable) are exported for InternalNode, a type declared only in a private header. Consumers cannot name the type yet its RTTI is on the ABI surface (RTTI_FOR_INTERNAL_TYPE) - export table cross-checked against header provenance.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "rtti_for_internal_type"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "rtti_for_internal_type": [
-     "binary_exports",
-     "public_header_ast"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1109,25 +1109,24 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "rtti_for_internal_type": [
+     "binary_exports",
+     "public_header_ast"
+    ]
+   }
   },
   "case147_scan_depth_ladder": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Depth-ladder legibility case: the same input answered at increasing depth. An S3 lexical pattern scan flags a risky construct; the S5 source graph + replay confirm a genuine PRIVATE_HEADER_LEAK and add the source_index provider. The README's honest-coverage block shows exactly what each depth proved.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "private_header_leak"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "private_header_leak": [
-     "public_header_ast",
-     "source_index"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1135,7 +1134,13 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "private_header_leak": [
+     "public_header_ast",
+     "source_index"
+    ]
+   }
   },
   "case148_xcheck_header_build_mismatch": {
    "abi_break": false,
@@ -1144,16 +1149,9 @@
    "category": "api_break",
    "description": "Cross-source corroboration (flagship): the headers were parsed without the build's ABI-relevant flags (glibcxx_use_cxx11_abi, -DBIG_BUFFERS), so the recorded layout cannot be trusted. Only L2 macros cross-checked against L3 build flags expose the divergence (HEADER_BUILD_CONTEXT_MISMATCH); binary-only is blind.",
    "expected": "API_BREAK",
-   "expected_crosscheck_kinds": [
+   "expected_kinds": [
     "header_build_context_mismatch"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "header_build_context_mismatch": [
-     "build_config",
-     "public_header_ast"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1161,7 +1159,13 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "header_build_context_mismatch": [
+     "build_config",
+     "public_header_ast"
+    ]
+   }
   },
   "case149_xcheck_odr_variant": {
    "abi_break": false,
@@ -1170,15 +1174,9 @@
    "category": "api_break",
    "description": "Cross-source corroboration: two translation units materialize one public type (geometry::Vec3) with different layouts. Only the L4 per-TU source-ABI surface cross-checking layout against layout records the ODR conflict (ODR_TYPE_VARIANT); no single artifact layer sees it.",
    "expected": "API_BREAK",
-   "expected_crosscheck_kinds": [
+   "expected_kinds": [
     "odr_type_variant"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "odr_type_variant": [
-     "source_index"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1186,7 +1184,12 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "odr_type_variant": [
+     "source_index"
+    ]
+   }
   },
   "case14_cpp_class_size": {
    "abi_break": true,
@@ -1197,21 +1200,31 @@
    "min_evidence": "L1",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case150_xcheck_export_public_pair": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Bidirectional L0-exports vs L2-decls cross-check: one symbol is exported with no public declaration (EXPORTED_NOT_PUBLIC) and one public-header declaration is never exported because a static definition slipped in (PUBLIC_NOT_EXPORTED). The combination of the two sources reveals both halves of the contract mismatch.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "exported_not_public",
     "public_not_exported"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
+   "fixtures": [
+    "snapshot.abi.json"
+   ],
+   "min_evidence": "L2",
+   "mode": "audit",
+   "platforms": [
+    "linux"
+   ],
+   "provider_assertions": {
     "exported_not_public": [
      "binary_exports",
      "public_header_ast"
@@ -1220,33 +1233,18 @@
      "public_header_ast",
      "binary_exports"
     ]
-   },
-   "fixtures": [
-    "snapshot.abi.json"
-   ],
-   "min_evidence": "L2",
-   "mode": "audit",
-   "platforms": [
-    "linux"
-   ]
+   }
   },
   "case151_xcheck_provider_matrix": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "Provider-agreement matrix: the same PRIVATE_HEADER_LEAK finding corroborated by two providers in the rich fixture (public_header_ast + source_index, with an L5 source graph present) vs one provider in the thin fixture (public_header_ast only). Demonstrates that better corroboration comes from the combination of sources - the provider list ScanResult records grows with the evidence.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "private_header_leak"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "private_header_leak": [
-     "public_header_ast",
-     "source_index"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json",
     "thin.abi.json"
@@ -1255,7 +1253,13 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "private_header_leak": [
+     "public_header_ast",
+     "source_index"
+    ]
+   }
   },
   "case152_enum_size_flag_flip": {
    "abi_break": false,
@@ -1396,10 +1400,13 @@
    "bad_practice": false,
    "category": "risk",
    "expected": "COMPATIBLE_WITH_RISK",
-   "min_evidence": "L2",
+   "min_evidence": "L0",
    "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "runtime_floor_raised"
    ]
   },
   "case160_public_api_internal_dep_added": {
@@ -1516,11 +1523,11 @@
     "macos"
    ],
    "min_evidence": "L1",
-   "pattern_verdicts": true,
    "platforms": [
     "linux",
     "macos"
-   ]
+   ],
+   "pattern_analysis": true
   },
   "case166_ref_qualifier_added": {
    "abi_break": true,
@@ -1603,6 +1610,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "func_added"
    ]
   },
   "case170_env_runtime_floor_raised": {
@@ -1800,7 +1810,10 @@
      "expect": "failure",
      "lib_source": "v2.cpp"
     }
-   }
+   },
+   "expected_kinds": [
+    "type_size_changed"
+   ]
   },
   "case180_symbol_binding_lost_unique": {
    "abi_break": false,
@@ -1825,18 +1838,12 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "risk",
+   "category": "quality",
    "description": "The public, header-declared json_parse() calls straight into validate_utf8(), a helper declared only in a private implementation file with no public declaration anywhere -- invisible from json_parse()'s own signature. The L5 source graph's DECL_CALLS_DECL edge (with a SOURCE_DECLARES edge giving the internal decl its file provenance) is the only way to see the dependency; if validate_utf8() changes behavior, json_parse()'s contract silently shifts with it. The intra-version counterpart to case150's exported_not_public/public_not_exported pair -- this one catches a mismatch inside a single public entry point rather than between the export table and the header set.",
-   "expected": "COMPATIBLE_WITH_RISK",
-   "expected_crosscheck_kinds": [
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
     "public_to_internal_dependency"
    ],
-   "expected_kinds": [],
-   "expected_providers": {
-    "public_to_internal_dependency": [
-     "source_index"
-    ]
-   },
    "fixtures": [
     "snapshot.abi.json"
    ],
@@ -1844,7 +1851,12 @@
    "mode": "audit",
    "platforms": [
     "linux"
-   ]
+   ],
+   "provider_assertions": {
+    "public_to_internal_dependency": [
+     "source_index"
+    ]
+   }
   },
   "case18_dependency_leak": {
    "abi_break": true,
@@ -1855,6 +1867,9 @@
    "min_evidence": "L1",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case19_enum_member_removed": {
@@ -1993,6 +2008,10 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "union_field_added",
+    "type_size_changed"
    ]
   },
   "case26b_union_field_added_compatible": {
@@ -2006,6 +2025,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "union_field_added"
    ]
   },
   "case27_symbol_binding_weakened": {
@@ -2017,6 +2039,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "symbol_binding_changed"
    ]
   },
   "case28_typedef_opaque": {
@@ -2044,6 +2069,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "ifunc_introduced"
    ]
   },
   "case30_field_qualifiers": {
@@ -2057,6 +2085,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_field_type_changed"
    ]
   },
   "case31_enum_rename": {
@@ -2065,7 +2096,6 @@
    "bad_practice": false,
    "category": "api_break",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "expected_kinds": [
     "enum_member_renamed"
    ],
@@ -2083,7 +2113,6 @@
    "category": "api_break",
    "description": "Parameter default-value changes: connect() default 30->60 (changed), configure()'s verbose loses its default (removed -> source break), disconnect() gains a default (compatible). The mangled symbols are unchanged so binaries keep running; the break is source-only and detectable only in header mode (castxml Argument `default` attribute). Previously a documented gap (NO_CHANGE) until default-arg extraction was wired up.",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "expected_kinds": [
     "param_default_value_changed",
     "param_default_value_removed"
@@ -2116,7 +2145,6 @@
    "bad_practice": false,
    "category": "api_break",
    "expected": "API_BREAK",
-   "expected_compat": "NO_CHANGE",
    "known_gap": "macOS/Homebrew castxml currently drops the access-level transition for this fixture, so the macOS nightly observes NO_CHANGE. Linux remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
@@ -2125,6 +2153,9 @@
    "platforms": [
     "linux",
     "macos"
+   ],
+   "expected_kinds": [
+    "method_access_changed"
    ]
   },
   "case35_field_rename": {
@@ -2154,6 +2185,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case37_base_class": {
@@ -2201,6 +2235,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_vtable_changed"
    ]
   },
   "case39_var_const": {
@@ -2230,6 +2267,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case41_type_changes": {
@@ -2242,6 +2282,12 @@
    "platforms": [
     "linux",
     "macos"
+   ],
+   "expected_kinds": [
+    "type_removed",
+    "func_removed",
+    "enum_member_added",
+    "enum_last_member_value_changed"
    ]
   },
   "case42_type_alignment_changed": {
@@ -2256,6 +2302,9 @@
    "platforms": [
     "linux",
     "macos"
+   ],
+   "expected_kinds": [
+    "type_alignment_changed"
    ]
   },
   "case43_base_class_member_added": {
@@ -2293,7 +2342,12 @@
      "expect": "failure",
      "lib_source": "v2.cpp"
     }
-   }
+   },
+   "expected_kinds": [
+    "type_field_added",
+    "type_size_changed",
+    "type_field_offset_changed"
+   ]
   },
   "case44_cyclic_type_member_added": {
    "abi_break": true,
@@ -2307,6 +2361,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case45_multi_dim_array_change": {
@@ -2321,6 +2378,10 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_field_type_changed",
+    "type_size_changed"
    ]
   },
   "case46_pointer_chain_type_change": {
@@ -2335,6 +2396,10 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "func_params_changed",
+    "func_return_changed"
    ]
   },
   "case47_inline_to_outlined": {
@@ -2349,6 +2414,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "func_added"
    ]
   },
   "case48_leaf_struct_through_pointer": {
@@ -2363,6 +2431,9 @@
     "linux",
     "macos",
     "windows"
+   ],
+   "expected_kinds": [
+    "type_size_changed"
    ]
   },
   "case49_executable_stack": {
@@ -2375,6 +2446,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "executable_stack_removed"
    ]
   },
   "case50_soname_inconsistent": {
@@ -2387,6 +2461,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "soname_changed"
    ]
   },
   "case51_protected_visibility": {
@@ -2399,6 +2476,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "symbol_elf_visibility_changed"
    ]
   },
   "case52_rpath_leak": {
@@ -2411,6 +2491,9 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
+   ],
+   "expected_kinds": [
+    "runpath_changed"
    ]
   },
   "case53_namespace_pollution": {
@@ -2542,6 +2625,9 @@
    "platforms": [
     "linux",
     "macos"
+   ],
+   "expected_kinds": [
+    "base_class_position_changed"
    ]
   },
   "case61_var_added": {
@@ -2952,17 +3038,15 @@
    "bundle": true,
    "category": "bundle",
    "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
-   "expected": null,
-   "expected_bundle_kinds": [
-    "bundle_soname_skew"
-   ],
-   "expected_bundle_verdict": "BREAKING",
-   "expected_combined_verdict": "BREAKING",
+   "expected": "BREAKING",
    "min_evidence": "L0",
    "platforms": [
     "linux"
    ],
-   "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. Validated end-to-end through `compare-release` in tests/test_bundle.py::TestCompareReleaseBundleE2E::test_compare_release_emits_soname_skew_for_case84; detect_bundle_soname_skew() also unit-tested in tests/test_cpp_pattern_detectors.py."
+   "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. Validated end-to-end through `compare-release` in tests/test_bundle.py::TestCompareReleaseBundleE2E::test_compare_release_emits_soname_skew_for_case84; detect_bundle_soname_skew() also unit-tested in tests/test_cpp_pattern_detectors.py.",
+   "expected_kinds": [
+    "bundle_soname_skew"
+   ]
   },
   "case85_internal_template_signature_changed": {
    "abi_break": true,
@@ -3070,16 +3154,18 @@
    "bundle": true,
    "category": "bundle",
    "description": "Bundle (ADR-023): libcore removes core_mul; sibling libalgo still imports it (DT_NEEDED libcore.so.1 + U core_mul). Per-library compare reports libalgo NO_CHANGE; the bundle layer catches the dangling intra-bundle import.",
-   "expected": null,
-   "expected_bundle_kinds": [
+   "expected": "BREAKING",
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "expected_kinds": [
     "bundle_intra_dep_removed"
    ],
-   "expected_bundle_verdict": "BREAKING",
-   "expected_combined_verdict": "BREAKING",
-   "expected_libraries": {
+   "library_assertions": {
     "libalgo.so": {
      "expected_kinds": [],
-     "verdict": "NO_CHANGE"
+     "verdict": "COMPATIBLE"
     },
     "libcore.so": {
      "expected_kinds": [
@@ -3087,11 +3173,7 @@
      ],
      "verdict": "BREAKING"
     }
-   },
-   "min_evidence": "L0",
-   "platforms": [
-    "linux"
-   ]
+   }
   },
   "case91_bundle_intra_signature_drift": {
    "abi_break": true,
@@ -3100,16 +3182,18 @@
    "bundle": true,
    "category": "bundle",
    "description": "Bundle (ADR-023): libcore changes core_add(int,int) -> core_add(long,long). extern C, mangled name unchanged. libalgo binary is byte-identical between versions but its call sites still use the int calling convention. Bundle layer flags libalgo as bundle_intra_dep_signature_changed.",
-   "expected": null,
-   "expected_bundle_kinds": [
+   "expected": "BREAKING",
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "expected_kinds": [
     "bundle_intra_dep_signature_changed"
    ],
-   "expected_bundle_verdict": "BREAKING",
-   "expected_combined_verdict": "BREAKING",
-   "expected_libraries": {
+   "library_assertions": {
     "libalgo.so": {
      "expected_kinds": [],
-     "verdict": "NO_CHANGE"
+     "verdict": "COMPATIBLE"
     },
     "libcore.so": {
      "expected_kinds": [
@@ -3118,11 +3202,7 @@
      ],
      "verdict": "BREAKING"
     }
-   },
-   "min_evidence": "L0",
-   "platforms": [
-    "linux"
-   ]
+   }
   },
   "case92_bundle_provider_changed": {
    "abi_break": false,
@@ -3131,13 +3211,15 @@
    "bundle": true,
    "category": "bundle",
    "description": "Bundle (ADR-023): shared_util moves from libcore to libutil between releases. The bundle's union of exported symbols is unchanged but DT_NEEDED contracts shift; downstream binaries that only linked -lcore now miss the symbol. Per-library worst-of reports BREAKING; the bundle layer adds COMPATIBLE_WITH_RISK provider-change finding.",
-   "expected": null,
-   "expected_bundle_kinds": [
+   "expected": "COMPATIBLE_WITH_RISK",
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "expected_kinds": [
     "bundle_provider_changed"
    ],
-   "expected_bundle_verdict": "COMPATIBLE_WITH_RISK",
-   "expected_combined_verdict": "BREAKING",
-   "expected_libraries": {
+   "library_assertions": {
     "libcore.so": {
      "expected_kinds": [
       "func_removed"
@@ -3150,11 +3232,7 @@
      ],
      "verdict": "COMPATIBLE"
     }
-   },
-   "min_evidence": "L0",
-   "platforms": [
-    "linux"
-   ]
+   }
   },
   "case93_bundle_manifest_drift": {
    "abi_break": true,
@@ -3163,25 +3241,23 @@
    "bundle": true,
    "category": "bundle",
    "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
-   "expected": null,
-   "expected_bundle_kinds": [
+   "expected": "BREAKING",
+   "manifest_file": "manifest.yaml",
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "expected_kinds": [
     "bundle_manifest_instantiation_removed"
    ],
-   "expected_bundle_verdict": "BREAKING",
-   "expected_combined_verdict": "BREAKING",
-   "expected_libraries": {
+   "library_assertions": {
     "libcore.so": {
      "expected_kinds": [
       "func_removed"
      ],
      "verdict": "BREAKING"
     }
-   },
-   "manifest_file": "manifest.yaml",
-   "min_evidence": "L0",
-   "platforms": [
-    "linux"
-   ]
+   }
   },
   "case94_empty_tag_gained_state": {
    "abi_break": true,
@@ -3305,12 +3381,23 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
-   "expected": "NO_CHANGE",
-   "expected_kinds": [],
-   "known_gap": "The C++ standard floor signal is invisible to a per-binary diff (symbol/type set is unchanged between v1 and v2). The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std metadata) is the only correct channel for this signal. The CMakeLists.txt builds v2 with -std=c++20 to embed a post-C++17 contract via build configuration, but the public declaration set is intentionally identical to v1's so the case still produces NO_CHANGE under the current single-config pipeline.",
-   "min_evidence": "L0",
+   "build_info": true,
+   "build_info_variants": [
+    "build-source"
+   ],
+   "category": "risk",
+   "description": "The case has one ground-truth verdict: COMPATIBLE_WITH_RISK. L3 build-context comparison detects std:CXX changing from gnu++17 to c++20 as abi_relevant_build_flag_changed. An L0-L2 context-free per-binary scan observes NO_CHANGE, which is a documented false negative from insufficient evidence, not an alternative expected verdict. L4/L5 source replay is not required.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "abi_relevant_build_flag_changed"
+   ],
+   "known_gap": "L0-L2 artifact-only scans cannot observe the C++ standard change because the binary surfaces are identical. Their NO_CHANGE verdict is a missed COMPATIBLE_WITH_RISK finding caused by insufficient evidence, not a lane-specific expectation.",
+   "known_gap_variants": [
+    "debug-headers",
+    "release-headers",
+    "stripped-headers"
+   ],
+   "min_evidence": "L3",
    "platforms": [
     "linux",
     "macos",
@@ -3336,5 +3423,6 @@
    ]
   }
  },
- "version": "4"
+ "version": "4",
+ "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 validates each G20 audit fixture against the case's canonical expected_kinds and provider assertions via run_crosschecks"
 }

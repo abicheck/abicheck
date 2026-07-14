@@ -1,8 +1,9 @@
 # Case 105: Concept Tightening (C++20)
 
-**Category:** Subtle source break / regression suite | **Verdict:** 🟢 NO_CHANGE by
-default (object/DWARF/castxml) — 🔵 API_BREAK (`concept_tightened`) when built
-with `--sources` (L4 source-ABI replay).
+**Category:** Subtle source break / regression suite | **Ground truth:** 🔵
+API_BREAK (`concept_tightened`). Object/DWARF/castxml lanes return NO_CHANGE,
+but that is an L0–L2 missed detection; L4 source-ABI replay proves the one
+canonical verdict.
 
 ## What breaks
 

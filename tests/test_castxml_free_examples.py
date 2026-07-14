@@ -104,11 +104,6 @@ CASTXML_FREE_CASES = [
 ]
 
 
-def _norm(verdict: str) -> str:
-    """API_BREAK and COMPATIBLE collapse for the source-vs-binary view."""
-    return "COMPATIBLE" if verdict in ("API_BREAK", "COMPATIBLE") else verdict
-
-
 def _sources(case_dir: Path) -> tuple[Path, Path]:
     for ext in (".c", ".cpp"):
         v1 = case_dir / f"v1{ext}"
@@ -175,7 +170,14 @@ def test_castxml_free_verdict_matches_ground_truth(
     result = compare(snap1, snap2, scope_to_public_surface=scope)
     got = result.verdict.value.upper()
 
-    assert _norm(got) == _norm(expected), (
+    if got != expected:
+        rank = {f"L{i}": i for i in range(6)}
+        if rank.get(str(entry.get("min_evidence", "L0")), 0) > 1:
+            pytest.xfail(
+                f"L0/L1 lane missed canonical {expected}; "
+                f"case requires {entry['min_evidence']} evidence"
+            )
+    assert got == expected, (
         f"{case_name}: castxml-free verdict {got!r} != expected {expected!r}\n"
         + "\n".join(f"  {c.kind.value}: {c.description}" for c in result.changes)
     )

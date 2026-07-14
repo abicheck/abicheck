@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `union_field_added`, `type_size_changed` |
 | **Source files** | `examples/case26_union_field_added/` |
 
 **Verdict:** 🔴 BREAKING

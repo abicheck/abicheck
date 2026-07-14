@@ -26,6 +26,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -172,14 +173,19 @@ def _toolchain_family(is_cpp: bool) -> str:
     return ""
 
 
-def _gap_applies(entry: dict, is_cpp: bool) -> bool:
+def _gap_applies(
+    entry: dict,
+    is_cpp: bool,
+    variant: str = DEFAULT_ARTIFACT_VARIANT,
+) -> bool:
     """Whether *entry*'s known_gap applies under the case's actual compiler.
 
     A ``known_gap_toolchains`` list scopes the gap to specific producers; on any
     other producer a verdict mismatch is a real failure (so a producer-specific
     gap like case64/case103 does not mask a regression on the other producer).
-    ``known_gap_platforms`` similarly scopes platform-specific extractor gaps.
-    Absent ⇒ applies everywhere (back-compat).
+    ``known_gap_platforms`` similarly scopes platform-specific extractor gaps,
+    and ``known_gap_variants`` scopes evidence-depth gaps. Absent ⇒ applies
+    everywhere (back-compat).
     """
     toolchains = entry.get("known_gap_toolchains")
     if toolchains and _toolchain_family(is_cpp) not in toolchains:
@@ -187,7 +193,18 @@ def _gap_applies(entry: dict, is_cpp: bool) -> bool:
     platforms = entry.get("known_gap_platforms")
     if platforms and CURRENT_PLATFORM not in platforms:
         return False
+    variants = entry.get("known_gap_variants")
+    if variants and variant not in variants:
+        return False
     return True
+
+
+def _build_info_applies(entry: dict, variant: str) -> bool:
+    """Whether inline L3 build context is enabled for this artifact variant."""
+    if not entry.get("build_info"):
+        return False
+    variants = entry.get("build_info_variants")
+    return not variants or variant in variants
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +219,8 @@ class CaseResult(NamedTuple):
     variant: str = DEFAULT_ARTIFACT_VARIANT
     seconds: float = 0.0
     source_layers: tuple[str, ...] = ()
-    # Strict-category signal: "ok" | "collapsed" | "n/a". "collapsed" means the
-    # verdict PASSed only because _normalize_verdict folds API_BREAK into
-    # COMPATIBLE, while the case had full (L2+) evidence and a source-level
-    # expected category — i.e. the exact semantic category was lost. Surfaced
-    # (not failed) by default; check_validate_results.py can gate on it.
+    # Retained in the artifact schema for compatibility. Exact verdict matching
+    # means a PASS is "ok"; category collapse is no longer possible.
     category_strict: str = "n/a"
 
 
@@ -445,16 +459,6 @@ def _build_with_cmake(
     return v1_lib, v2_lib, ""
 
 
-def _normalize_verdict(v: str) -> str:
-    """Normalize verdict for comparison.
-
-    Must stay in sync with the _normalize helper in test_example_autodiscovery.py.
-    API_BREAK and COMPATIBLE are treated as equivalent because the checker may
-    return either depending on header availability and castxml parsing.
-    """
-    return "COMPATIBLE" if v in ("API_BREAK", "COMPATIBLE") else v
-
-
 # ---------------------------------------------------------------------------
 # Core: build / dump+compare / verdict helpers
 # ---------------------------------------------------------------------------
@@ -618,7 +622,7 @@ def _build_compare_cmd(
     cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
     # ADR-027 pattern-aware verdicts are an opt-in analysis mode; cases whose
     # expected verdict depends on it (e.g. anti-pattern RISK findings) set
-    # "pattern_verdicts": true in ground_truth.json.
+    # "pattern_analysis": true in ground_truth.json.
     if pattern_verdicts:
         cmd.append("--pattern-verdicts")
     return cmd
@@ -828,15 +832,23 @@ def _collect_build_source_evidence(
     case_dir: Path,
     v1_src: Path,
     v2_src: Path,
+    v1_hdr: Path | None,
+    v2_hdr: Path | None,
     v1_so: Path,
     v2_so: Path,
+    entry: dict,
 ) -> tuple[Path | None, Path | None, str | None]:
     """Collect L3/L4/L5 build-source packs for the build-source artifact variant."""
-    if not shutil.which("castxml"):
+    extractor = str(entry.get("source_abi_extractor", "castxml"))
+    if extractor == "castxml" and not shutil.which("castxml"):
         return None, None, "SKIP:castxml not found for source-ABI replay"
 
     results: list[Path] = []
-    for side, src, binary in (("old", v1_src, v1_so), ("new", v2_src, v2_so)):
+    scope = str(entry.get("source_abi_scope", "full"))
+    for side, src, header, binary in (
+        ("old", v1_src, v1_hdr, v1_so),
+        ("new", v2_src, v2_hdr, v2_so),
+    ):
         compiler = _find_compiler(src.suffix == ".cpp")
         if not compiler:
             return None, None, f"SKIP:no compiler found for {side} source evidence"
@@ -854,9 +866,10 @@ def _collect_build_source_evidence(
             "--binary", str(binary),
             "--compile-db", str(db_path),
             "--source-root", str(case_dir),
+            *(["-H", str(header)] if header is not None and header.exists() else []),
             "--source-abi",
-            "--source-abi-extractor", "castxml",
-            "--source-abi-scope", "full",
+            "--source-abi-extractor", extractor,
+            "--source-abi-scope", scope,
             "--source-graph", "summary",
             "-o", str(out_dir),
         )
@@ -938,17 +951,10 @@ def _evaluate_verdict(
     expected_raw: str | None,
     got: str,
     known_gap: str | None,
-    allow_risk_for_compatible: bool = False,
 ) -> CaseResult:
     """Compare *got* verdict against *expected_raw* and return a CaseResult."""
     expected = expected_raw or "UNKNOWN"
-    if (
-        allow_risk_for_compatible
-        and expected == "COMPATIBLE"
-        and got == "COMPATIBLE_WITH_RISK"
-    ):
-        return CaseResult(name, "PASS", expected_raw, got, "")
-    if _normalize_verdict(got) == _normalize_verdict(expected):
+    if got == expected:
         return CaseResult(name, "PASS", expected_raw, got, "")
     if known_gap:
         return CaseResult(name, "XFAIL", expected_raw, got, known_gap)
@@ -971,7 +977,7 @@ def _check_case_preconditions(
     # G20 single-release audit / cross-source cases (ADR-035) have no v1/v2
     # compilable pair by design — they ship a committed snapshot.abi.json and are
     # validated compiler-free by tests/test_g20_catalog.py via run_crosschecks.
-    if entry.get("mode") == "audit" or entry.get("expected_crosscheck_kinds"):
+    if entry.get("mode") == "audit":
         return CaseResult(name, "SKIP", expected_raw, None,
                           "G20 audit/cross-source case — validated by tests/test_g20_catalog.py")
 
@@ -1138,6 +1144,23 @@ def _run_source_smoke(
         return CaseResult(name, "FAIL", expected_raw, None, "; ".join(result.failures))
     return CaseResult(name, "PASS", expected_raw, entry.get("expected"), result.proof)
 
+
+def _case_work_dir(
+    tmp_base: Path,
+    name: str,
+    variant: str,
+    *,
+    platform_name: str = os.name,
+) -> Path:
+    """Return a stable work path, shortened for CMake's nested Windows paths."""
+    tmp_name = name
+    if variant != DEFAULT_ARTIFACT_VARIANT:
+        tmp_name = f"{name}__{variant}"
+    if platform_name == "nt":
+        tmp_name = "case-" + hashlib.sha256(tmp_name.encode()).hexdigest()[:12]
+    return tmp_base / tmp_name
+
+
 def run_case(
     name: str,
     entry: dict,
@@ -1178,13 +1201,11 @@ def run_case(
     # the gap is dropped so a regression FAILs rather than being xfailed.
     known_gap = (
         entry.get("known_gap")
-        if _gap_applies(entry, v1_src.suffix == ".cpp")
+        if _gap_applies(entry, v1_src.suffix == ".cpp", variant)
         else None
     )
 
-    tmp = tmp_base / name
-    if variant != DEFAULT_ARTIFACT_VARIANT:
-        tmp = tmp_base / f"{name}__{variant}"
+    tmp = _case_work_dir(tmp_base, name, variant)
     tmp.mkdir(parents=True)
 
     # Build
@@ -1198,7 +1219,7 @@ def run_case(
     old_build_source = new_build_source = None
     if variant == "build-source":
         old_build_source, new_build_source, ev_err = _collect_build_source_evidence(
-            tmp, case_dir, v1_src, v2_src, v1_so, v2_so
+            tmp, case_dir, v1_src, v2_src, v1_hdr, v2_hdr, v1_so, v2_so, entry
         )
         if ev_err is not None:
             if ev_err.startswith("SKIP:"):
@@ -1206,7 +1227,7 @@ def run_case(
             return CaseResult(name, "ERROR", expected_raw, None, ev_err, variant)
 
     old_build_info = new_build_info = None
-    if entry.get("build_info"):
+    if _build_info_applies(entry, variant):
         compiler = _find_compiler(v1_src.suffix == ".cpp")
         if compiler:
             old_build_info = _resolved_build_info_path(
@@ -1240,12 +1261,11 @@ def run_case(
         old_build_info=old_build_info,
         new_build_info=new_build_info,
         sources=bool(entry.get("sources", False)),
-        pattern_verdicts=bool(entry.get("pattern_verdicts", False)),
+        pattern_verdicts=bool(entry.get("pattern_analysis", False)),
     )
     if dc_err is not None:
         return CaseResult(name, "ERROR", expected_raw, None, dc_err, variant)
 
-    allow_risk = bool(entry.get("bad_practice") or entry.get("category") == "quality")
     # Report L3/L4/L5 from the inline opt-ins only when both dumped snapshots
     # actually embedded those layers with `present` coverage. Directory/flag
     # presence is insufficient: `_dump_and_compare` omits `--sources` when the
@@ -1268,7 +1288,6 @@ def run_case(
     )
     result = _evaluate_verdict(
         name, expected_raw, got, known_gap,
-        allow_risk_for_compatible=allow_risk,
     )._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
         combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
@@ -1283,25 +1302,11 @@ def _category_strict_signal(
     result: CaseResult,
     source_layers: tuple[str, ...],
 ) -> str:
-    """Detect an API_BREAK→COMPATIBLE category collapse masked by normalization.
-
-    Returns "collapsed" when the run PASSed only because API_BREAK and
-    COMPATIBLE normalize together, *and* the case had full header evidence (L2)
-    so the precise category was observable. Otherwise "ok" (PASS with no
-    collapse) or "n/a" (not a PASS, or no full evidence to judge by).
-    """
+    """Return the compatibility field for an exact-verdict result."""
     if result.status != "PASS":
         return "n/a"
     if "L2" not in source_layers:
         return "n/a"
-    expected = result.expected or ""
-    got = result.got or ""
-    if expected == got:
-        return "ok"
-    # PASS with differing raw verdicts ⇒ normalization folded them. Flag only
-    # the source-level category boundary the doc cares about (api_break).
-    if entry.get("category") == "api_break" and _normalize_verdict(got) == _normalize_verdict(expected):
-        return "collapsed"
     return "ok"
 
 
@@ -1396,6 +1401,7 @@ def _json_payload(
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "runner": "tests/validate_examples.py",
+        "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": CURRENT_PLATFORM,
         "command": [sys.executable, "tests/validate_examples.py", *argv],
         "ground_truth_cases": total_ground_truth_cases,

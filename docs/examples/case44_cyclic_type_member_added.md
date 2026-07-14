@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case44_cyclic_type_member_added/` |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING

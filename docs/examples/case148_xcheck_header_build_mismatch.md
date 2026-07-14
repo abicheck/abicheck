@@ -7,7 +7,7 @@
 | **Category** | API Break |
 | **Platforms** | Linux |
 | **Flags** | API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `header_build_context_mismatch` |
 | **Source files** | `examples/case148_xcheck_header_build_mismatch/` |
 
 **Verdict:** 🟠 API_BREAK · **Cross-check:** `header_build_context_mismatch` ·

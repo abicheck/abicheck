@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_field_type_changed` |
 | **Source files** | `examples/case30_field_qualifiers/` |
 
 **Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy escalated source break)
