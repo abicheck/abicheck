@@ -199,8 +199,9 @@ ADR-030) — not a separate external tool:
 | Default argument removed/changed ([`case123`](../examples/case123_default_argument_removed.md), [`case32`](../examples/case32_param_defaults.md)) | ❌ invisible | ✅ `param_default_value_removed` / `_changed` | ✅ `default_argument_changed` |
 | `const`/`constexpr` constant value changed ([`case124`](../examples/case124_header_constant_value_changed.md)) | ❌ invisible (internal linkage, no symbol) | ✅ `constant_changed` | ✅ `constexpr_value_changed` |
 | `#define` macro constant changed ([`case156`](../examples/case156_public_macro_removed.md)) | ❌ invisible | ❌ (castxml emits no macros) | ✅ `public_macro_value_changed`/`_removed` |
-| Inline/`constexpr`/template function *body* change (signature unchanged) ([`case157`](../examples/case157_inline_function_removed.md)) | ❌ invisible | ❌ (declaration only; body not modelled) | ✅ `inline_body_changed`/`template_body_changed` |
-| Uninstantiated template signature ([`case122`](../examples/case122_template_signature_uninstantiated.md)) | ❌ invisible | ❌ (castxml omits uninstantiated templates) | ✅ `uninstantiated_template_removed` |
+| Inline/`constexpr`/template function *body* change (signature unchanged) | ❌ invisible | ❌ (declaration only; body not modelled) | ✅ `inline_body_changed`/`template_body_changed` |
+| Public header-only inline function *removed* entirely ([`case157`](../examples/case157_inline_function_removed.md)) | ❌ invisible | ❌ (no exported symbol to compare) | ✅ `inline_function_removed` |
+| Uninstantiated template signature/body changed ([`case122`](../examples/case122_template_signature_uninstantiated.md)) | ❌ invisible | ❌ (castxml omits uninstantiated templates) | ✅ `template_body_changed` (a template that disappears entirely is `uninstantiated_template_removed`) |
 
 The upper rows are recovered by **supplying public headers** (L2/`header_aware`)
 — note that several (default-argument values, `const`/`constexpr` constant
