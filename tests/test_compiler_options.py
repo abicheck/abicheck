@@ -15,3 +15,10 @@ def test_has_explicit_cpp_std_distinguishes_c_and_cpp() -> None:
     assert has_explicit_cpp_std(None, ("/std:c++latest",))
     assert not has_explicit_cpp_std("-std=c17")
     assert not has_explicit_cpp_std(None, ("-Wall",))
+
+
+def test_has_explicit_cpp_std_accepts_long_dash_spelling() -> None:
+    """GCC/Clang accept --std=c++17 as a GNU long-option alias for -std=c++17."""
+    assert has_explicit_cpp_std(None, ("--std=c++17",))
+    assert has_explicit_cpp_std("--std=gnu++20")
+    assert not has_explicit_cpp_std(None, ("--std=c17",))

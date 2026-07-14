@@ -24,6 +24,10 @@ def has_explicit_cpp_std(
         tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
     for token in tokens:
         normalized = token.lower()
+        if normalized.startswith("--"):
+            # GCC/Clang accept the GNU long-option spelling (--std=c++17) as
+            # an alias for -std=c++17; strip one dash so both are recognized.
+            normalized = normalized[1:]
         if normalized.startswith("-std=") and "++" in normalized.partition("=")[2]:
             return True
         if normalized.startswith("/std:c++"):
