@@ -1078,6 +1078,28 @@ def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     return out
 
 
+def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
+    """Public wrapper: qualified type/enum/typedef name -> declaring file.
+
+    Reuses the same first-indexing pass :func:`parse_clang_ast_types` already
+    runs over the AST (:func:`_index_declared_entities`), exposed standalone
+    for a caller that only needs the declaring-file index (e.g. a header-only
+    graph builder resolving a type's public/private origin) and not the
+    type/reference edges themselves. Duplicates the one AST walk rather than
+    threading an output parameter through the hardened, heavily-reviewed
+    ``_index_declared_entities``/``_walk_types`` pair — an acceptable, cheap
+    cost for a header-only pass (ADR-041 header-only-graph addendum).
+    """
+    name_index: dict[str, list[str]] = {}
+    decl_file: dict[str, str] = {}
+    ref_name_index: dict[str, list[str]] = {}
+    id_index: dict[str, tuple[str, str]] = {}
+    _index_declared_entities(
+        ast, [], "", name_index, decl_file, ref_name_index, id_index
+    )
+    return decl_file
+
+
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     """Extract type/reference edges from a ``clang -ast-dump=json`` tree (pure).
 

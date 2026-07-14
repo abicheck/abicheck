@@ -3,7 +3,8 @@
 **Date:** 2026-07-12
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
-explain` proof paths), and P0 slice 4 (body/type-hash-change correlation)
+explain` proof paths), P0 slice 4 (body/type-hash-change correlation), and the
+header-only-graph addendum (`header_graph.py`, no build integration required)
 implemented; the rest of this ADR is a roadmap, not a commitment to ship on
 any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
@@ -753,6 +754,128 @@ No new `ChangeKind` — same convention as slice 3's proof paths: the
 correlation rides in `Change.description`, keeping this additive and
 low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all carry
 `description` verbatim already).
+
+## Decision — header-only-graph addendum (this change)
+
+Every P0 slice above is an **L4/L5** feature: it needs a real build (a
+`compile_commands.json`, per-TU `clang -ast-dump=json` replay of full bodies)
+via `inline.collect_inline_pack`. That requirement is not fundamental to the
+"not a call at all" risk this ADR opens with — a public struct with a private
+field type, or a public class inheriting an internal base, is visible in the
+**declarations alone**, with no build and no function body needed. A project
+with no `compile_commands.json` at all — the common case for a quick `abicheck
+dump libfoo.so -H api.h --public-header api.h` — got none of this ADR's
+recall, even for the exact "no call at all" case it was written to close.
+
+Added `abicheck/buildsource/header_graph.py`:
+
+- `build_header_only_graph(snapshot, ast_root, *, public_header_paths,
+  public_dir_paths)` — seeds `source_decl` nodes for every function/variable in
+  the already-parsed `AbiSnapshot` (visibility straight from
+  `Function.origin`/`Variable.origin`, the `ScopeOrigin` classification
+  `provenance.apply_provenance` already computes whenever `--public-header`/
+  `--public-header-dir` is given — no new classification logic), then folds
+  `type_graph.parse_clang_ast_types()`/`call_graph.parse_clang_ast_calls()`
+  over the *same* header-aggregate `clang -ast-dump=json` tree the L2 clang
+  frontend (`dumper_clang.py`) already produces when `--ast-frontend clang` is
+  selected. Both parsers are pure functions over a bare AST dict (P0 slice 1's
+  own docstring: "unit-tested without a compiler") — nothing about them
+  assumes a real, build-integrated translation unit, so reusing them here
+  needed zero changes to either.
+- Type-node visibility (public struct vs. private field type) is **not**
+  derived by matching `AbiSnapshot.types`/`.enums` against the type graph's
+  `type://` node ids: the flat snapshot model records a bare, unqualified type
+  name (`dumper_clang._ClangAstParser._build_record` never threads the
+  namespace scope into `RecordType.name`), while the type graph's node ids are
+  the AST's *resolved qualified* name (`ns::Widget`) — two representations
+  that would silently fail to join for any namespaced type. `type_graph.py`
+  gained a small additive public wrapper, `index_declared_type_files(ast)`
+  (qualified name → declaring file), factored out of the same first-indexing
+  pass `parse_clang_ast_types` already runs — rather than thread a new output
+  parameter through the hardened, many-times-reviewed
+  `_index_declared_entities`/`_walk_types` pair, this duplicates that one AST
+  walk, an acceptable cost for a header-only pass. `build_header_only_graph`
+  classifies each declaring file via `provenance.classify_origin` (the same
+  primitive `apply_provenance` uses) and sets `visibility` directly on the
+  type node — covering the ADR's own headline case, since a public struct
+  rarely has its own exported binary symbol and needs its `visibility` set
+  directly to act as a valid graph "entry" (`is_public_dependency_node`).
+
+**What is structurally available vs. not, from headers alone:**
+
+- `TYPE_INHERITS` / `TYPE_HAS_FIELD_TYPE` / `DECL_HAS_TYPE` / `SOURCE_DECLARES`
+  — fully available; a base class, a field type, and a parameter/return type
+  are declaration-level facts. This is also exactly the ADR's own motivating
+  example.
+- `DECL_CALLS_DECL` / `DECL_REFERENCES_DECL` — only for declarations whose
+  *body* is actually written in a header (inline/template/constexpr
+  functions). An ordinary out-of-line function has a prototype but no body in
+  a header, so it contributes no call/reference edges here — a real, honestly
+  bounded subset of the L4/L5 graph's recall, not a false claim of parity.
+- Anything from the *build*-level schema (`target`/`compile_unit`/
+  `build_option` nodes, `TARGET_HAS_SOURCE`, …) — not available at all; there
+  is no `BuildEvidence` in a header-only world, so this module never calls
+  `build_source_graph`.
+
+**Coverage honesty (ADR-031 D9).** Every node/edge this module creates carries
+`provenance="header_ast_l2"`, and the graph's `extractor_passes` use this
+module's own pass names, `HEADER_CALL_GRAPH_PASS`/`HEADER_TYPE_GRAPH_PASS`
+(`"header_call_graph"`/`"header_type_graph"`), distinct from
+`inline_graph_fold`'s build-integrated `"call_graph"`/`"type_graph"` — a
+header-only pass is never mistaken for a full L4/L5 build-integrated one.
+`SourceGraphSummary.finalize()`'s `type_edges`/`call_edges` coverage flags
+recognize both the build-integrated and header-only pass names (an `or` over
+both), so the human-readable coverage report is honest either way.
+Deliberately **not** done: extending `source_graph_findings.
+_DEPENDENCY_EDGE_FAMILIES` (the version-diff family-widening table) with the
+header-only pass names. That table's per-kind fallback loop unions "common"
+credit across every entry, which is only sound when each entry owns a
+disjoint edge-kind set (`call_graph` → `DECL_CALLS_DECL`, `type_graph` → the
+other four); a `header_type_graph` entry sharing `type_graph`'s exact kinds
+would let a kind correctly excluded under a narrowed/degraded `type_graph`
+pass leak back in as "common" under the second, unmarked entry for the same
+kind (caught by the existing test suite when first tried). A
+header-only-vs-header-only version diff therefore falls back to the more
+conservative per-kind edge-presence check rather than getting full-pass
+family-widening credit — safe, just not optimal; fixing it properly needs a
+redesign of that loop's "one authority per kind" assumption, left for a
+follow-up rather than risking the delicate, many-times-reviewed function this
+change does not otherwise need to touch.
+
+**Consumer:** `crosscheck.py`'s `public_to_internal_dependency` and
+`source_graph_findings.diff_source_graph_findings`'s
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` both already read
+`snapshot.build_source.source_graph` generically — a header-only graph is
+just a different (cheaper, always-available) producer of the same edge
+vocabulary, so no detector-side change was needed, mirroring exactly how P0
+slice 1 wired `type_graph.py` into `crosscheck.py`.
+
+**Wiring:** `service.run_dump(..., header_graph=True)` builds and embeds the
+graph uniformly across all three binary formats (ELF/PE/Mach-O) — a
+`BuildSourcePack` with only `source_graph` set (`build_evidence`/`source_abi`
+stay `None`, since there is no L3/L4 payload in a header-only world). It runs
+a second, independent `clang -ast-dump=json` pass over the same header
+aggregate `dumper._clang_header_dump` already knows how to build (reused
+directly — private only by convention; `dumper.py` sits at its 2000-line hard
+cap, so a public wrapper was not added there), and degrades to a graph with
+declaration-visibility nodes only (no type/call edges) when clang is
+unavailable or the header parse fails — never aborts the dump (ADR-028 D3).
+`service.run_dump` is reachable from `compare`'s implicit dump-from-binary
+resolution and the buildsource merge/collect paths (`cli_resolve.py`,
+`cli_buildsource_helpers.py`), but **not** from the standalone `abicheck dump`
+command, which still calls `dumper.dump()` via its own legacy
+`cli_dump_helpers.py` path rather than `service.run_dump`. Adding a
+`--header-graph` flag to the standalone `dump`/`scan` CLI commands is a
+follow-up, deliberately deferred: `cli.py` and `dumper.py` are both at or near
+their line-count caps (`dumper.py` at 1995/2000 — five lines of margin — is
+where the header AST is produced), so threading a new flag through
+`cli_dump_helpers.perform_elf_dump`/`handle_non_elf_dump` needs its own
+reviewed slice rather than a rushed addition risking the hard cap.
+
+No new `ChangeKind` — same convention as every other graph slice in this ADR:
+this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and the intra-version
+`public_to_internal_dependency` check, broadening *when they have evidence to
+run at all* (no build needed), not what they detect.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 

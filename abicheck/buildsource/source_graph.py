@@ -382,8 +382,18 @@ class SourceGraphSummary:
         # pass never ran", which is the exact coverage-honesty gap
         # ``extractor_passes`` closes. Fall back to edge presence alone when
         # the flag is absent (a hand-built or pre-slice-2 graph).
-        call_pass_ran = self.extractor_passes.get("call_graph", False)
-        type_pass_ran = self.extractor_passes.get("type_graph", False)
+        # ``header_call_graph``/``header_type_graph`` are the header-only graph
+        # builder's own pass names (ADR-041 header-only-graph addendum) — a
+        # distinct AST-walk shape (one synthetic header-aggregate TU, no build
+        # integration) from the build-integrated ``call_graph``/``type_graph``
+        # passes, but "ran to completion, found nothing" is the same honesty
+        # gap either way, so both pass names count here.
+        call_pass_ran = self.extractor_passes.get(
+            "call_graph", False
+        ) or self.extractor_passes.get("header_call_graph", False)
+        type_pass_ran = self.extractor_passes.get(
+            "type_graph", False
+        ) or self.extractor_passes.get("header_type_graph", False)
         has_calls = call_pass_ran or any(
             e.kind == "DECL_CALLS_DECL" for e in self.edges
         )

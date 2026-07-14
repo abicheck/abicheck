@@ -1155,7 +1155,10 @@ class TestRunCompare:
         monkeypatch.setattr(service_mod, "resolve_input", _spy)
 
         run_compare(
-            old_p, new_p, old_headers=[old_h], new_headers=[new_h],
+            old_p,
+            new_p,
+            old_headers=[old_h],
+            new_headers=[new_h],
         )
         assert len(calls) == 2
         old_call, new_call = calls
@@ -1606,6 +1609,70 @@ class TestRunDumpHeaderWiring:
         with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
             run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
+
+
+class TestRunDumpHeaderGraph:
+    """``header_graph=True`` embeds the header-only (L2) semantic graph
+    (ADR-041 addendum) uniformly across all three binary formats."""
+
+    def test_noop_when_not_requested(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
+        assert result.build_source is None
+
+    def test_noop_when_no_headers_parsed(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(p, "pe", [], [], "1.0", "c++", header_graph=True)
+        assert result.build_source is None
+
+    def test_embeds_graph_from_clang_ast(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(
+            library="lib",
+            version="1.0",
+            platform="pe",
+            functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+        )
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+        ):
+            result = run_dump(
+                p, "pe", [Path("api.h")], [], "1.0", "c++", header_graph=True
+            )
+        mock_ast.assert_called_once()
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
+        node_ids = {n.id for n in result.build_source.source_graph.nodes}
+        assert "decl://_Z1fv" in node_ids
+
+    def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+
+        def _raise(*a, **k):
+            raise SnapshotError("clang not found")
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", side_effect=_raise),
+        ):
+            result = run_dump(
+                p, "pe", [Path("api.h")], [], "1.0", "c++", header_graph=True
+            )
+        # Never aborts the dump (ADR-028 D3); the graph is embedded but inert.
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
+        assert result.build_source.source_graph.edges == []
 
 
 class TestCliNativeBinaryHeaderWiring:

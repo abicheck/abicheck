@@ -438,6 +438,7 @@ def run_dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    header_graph: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -448,6 +449,13 @@ def run_dump(
     via :func:`_apply_native_provenance`. A no-op when no header set is supplied.
     ``debug_format`` forces the ELF debug format. ``notify`` receives
     user-facing progress notes (see :func:`resolve_input`).
+
+    ``header_graph`` builds and embeds the header-only (L2) semantic graph
+    (:func:`abicheck.buildsource.header_graph.build_header_only_graph`, ADR-041
+    addendum) — a smaller, build-free alternative to the L4/L5 build-integrated
+    graph, available uniformly across all three binary formats. A no-op when no
+    headers were parsed; degrades to a graph with declaration-visibility nodes
+    only (no type/call edges) when clang is unavailable.
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
@@ -485,7 +493,16 @@ def run_dump(
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     if binary_fmt == "pe":
         snap = _dump_pe(
             path,
@@ -500,7 +517,16 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -514,7 +540,16 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
@@ -532,6 +567,61 @@ def _apply_native_provenance(
     from .provenance import apply_provenance
 
     return apply_provenance(snap, public_headers, public_header_dirs)
+
+
+def _attach_header_graph(
+    snap: AbiSnapshot,
+    header_graph: bool,
+    headers: list[Path],
+    includes: list[Path],
+    lang: str,
+    compile: CompileContext | None,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+) -> AbiSnapshot:
+    """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
+
+    A no-op when ``header_graph`` was not requested or no headers were parsed.
+    Runs a second, independent ``clang -ast-dump=json`` pass over the same
+    header aggregate ``dumper._clang_header_dump`` already knows how to build —
+    reused directly (private only by convention; ``dumper.py`` sits at its
+    2000-line hard cap, so a public wrapper is not added there) rather than
+    threading the parser's already-consumed AST back out through three
+    format-specific builders. Degrades to a graph with declaration-visibility
+    nodes only (no type/call edges) when clang is unavailable or the header
+    parse fails — never aborts the dump itself (ADR-028 D3).
+    """
+    if not header_graph or not headers:
+        return snap
+    from .buildsource.header_graph import build_header_only_graph
+    from .buildsource.pack import BuildSourcePack
+    from .dumper import _clang_header_dump
+
+    cc = compile if compile is not None else CompileContext()
+    ast_root: dict[str, Any] | None
+    try:
+        ast_root = _clang_header_dump(
+            headers,
+            includes,
+            compiler="cc" if lang == "c" else "c++",
+            gcc_path=cc.gcc_path,
+            gcc_prefix=cc.gcc_prefix,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=cc.gcc_option_tokens,
+            sysroot=cc.sysroot,
+            nostdinc=cc.nostdinc,
+            lang=lang,
+        )
+    except SnapshotError:
+        ast_root = None
+    graph = build_header_only_graph(
+        snap,
+        ast_root,
+        public_header_paths=[str(p) for p in (public_headers or [])],
+        public_dir_paths=[str(p) for p in (public_header_dirs or [])],
+    )
+    snap.build_source = BuildSourcePack(root=Path(""), source_graph=graph)
+    return snap
 
 
 def _emit(notify: Callable[[str], None] | None, message: str) -> None:
@@ -1152,7 +1242,9 @@ def compare_snapshots(
     if public_surface_allowlist is not None:
         from .post_manifest import _snapshot_contract_symbols
 
-        public_surface_allowlist = set(public_surface_allowlist) | _snapshot_contract_symbols(old)
+        public_surface_allowlist = set(
+            public_surface_allowlist
+        ) | _snapshot_contract_symbols(old)
     return compare(
         old,
         new,

@@ -29,6 +29,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Header-only (L2) semantic graph — the ADR-041 dependency graph now works
+  with zero build integration.** New `abicheck/buildsource/header_graph.py`
+  (`build_header_only_graph`) builds a smaller, build-free alternative to the
+  L4/L5 graph straight from an ordinary header scan: `TYPE_INHERITS`/
+  `TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/`SOURCE_DECLARES` — the ADR's own
+  motivating "public struct with a private field type" example — are fully
+  available with no `compile_commands.json` at all, reusing
+  `type_graph.parse_clang_ast_types()`/`call_graph.parse_clang_ast_calls()`
+  unmodified over the same header-aggregate `clang -ast-dump=json` tree the L2
+  clang frontend already produces. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  are available only for in-header (inline/template) bodies — an honestly
+  bounded subset, not a false claim of L4/L5 parity. `crosscheck.py`'s
+  `public_to_internal_dependency` gets this for free (no detector change — it
+  already reads `snapshot.build_source.source_graph` generically). Wired via
+  `service.run_dump(..., header_graph=True)` uniformly across ELF/PE/Mach-O; a
+  `--header-graph` flag on the standalone `dump`/`scan` CLI commands is a
+  deliberately deferred follow-up (`cli.py`/`dumper.py` are both at/near their
+  line-count caps). See the ADR-041 header-only-graph addendum.
+
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
   `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,

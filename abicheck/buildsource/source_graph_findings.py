@@ -286,6 +286,18 @@ def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) ->
 #: a new side that has both — the first ``TYPE_HAS_FIELD_TYPE`` edge there is
 #: a real new dependency, not a collector-coverage artifact, and must not be
 #: dropped just because that exact kind is new.
+#: Deliberately does NOT also list ``header_call_graph``/``header_type_graph``
+#: (the header-only graph builder's own pass names, ADR-041 header-only-graph
+#: addendum) alongside their build-integrated namesakes: the per-kind fallback
+#: loop below unions "common" credit across every entry in this dict, so two
+#: entries sharing the same edge-kind family are not additive-safe — a kind
+#: correctly excluded under ``type_graph`` (a narrowed/degraded pass) would
+#: still leak back in as "common" under a second, unmarked ``header_type_graph``
+#: entry for the very same kind, since that entry's own narrowed/degraded
+#: flags are independently (and here, vacuously) false. A header-only-vs-
+#: header-only comparison therefore always falls back to the conservative
+#: per-kind edge-presence path (safe, just without full-pass family-widening
+#: credit) rather than risk this cross-family leak.
 _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
     "call_graph": frozenset({"DECL_CALLS_DECL"}),
     "type_graph": frozenset(
