@@ -11,7 +11,8 @@ catalog accounting.
 | Is a single-library `v1`/`v2` case classified correctly? | `tests/validate_examples.py` |
 | Does a case demonstrate a runtime effect? | `validation/scripts/run_example_runtime_smoke.py` |
 | Are multi-library release bundles correct? | `validation/scripts/run_bundle_examples.py` |
-| Are audit, BTF, L3/L4/L5, Python API, reconcile, snapshot-pair, and KABI fixtures valid? | The dedicated pytest files below |
+| Do all non-compiler, non-bundle fixtures pass through public CLI workflows? | `validation/scripts/run_special_cli_examples.py` |
+| Are audit, BTF, L3/L4/L5, Python API, reconcile, snapshot-pair, and KABI fixtures valid? | The dedicated pytest proof artifact below |
 | Is every ground-truth case accounted for? | `validation/scripts/collect_full_example_matrix.py` |
 | How accurate are evidence depths or external tools? | Benchmark/depth runners; measurement only |
 
@@ -57,6 +58,7 @@ python tests/validate_examples.py --toolchain gcc --json > results/validate-exam
 python tests/validate_examples.py --toolchain clang --json > results/validate-examples-clang.json
 python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 python validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json
+python validation/scripts/run_special_cli_examples.py --json > results/special-cli-examples.json
 ```
 
 ### 3. Aggregate one row per case
@@ -67,6 +69,7 @@ python validation/scripts/collect_full_example_matrix.py \
   --clang results/validate-examples-clang.json \
   --runtime results/example-runtime-smoke.json \
   --bundle results/bundle-examples.json \
+  --special-cli results/special-cli-examples.json \
   --proofs results/example-owner-proofs.json \
   --out results/full-example-matrix.json
 ```
@@ -88,7 +91,9 @@ assert d["summary"] == {"COVERED": total}
 assert not d["artifact_errors"]
 assert not d["unresolved_cases"]
 assert not d["failed_cases"]
-print(f"{total}/{total} COVERED")
+direct = d["direct_coverage"]
+assert direct["covered"] == total
+print(f"{total}/{total} COVERED; direct={direct['covered']}/{direct['total']}")
 PY
 ```
 
@@ -105,6 +110,14 @@ hard-code a historic count. When this runbook was added, the proven result was
   produced by the wrong runner/toolchain, or came from different ground truth.
 - A compiler-lane `SKIP` is acceptable only when another designated owner
   proves that case and the final row is `COVERED`.
+- `provenance=compiler` means GCC or Clang demonstrated a compilable pair.
+  `abicheck-cli-workflow` means a public CLI command demonstrated a special
+  input shape. The dedicated-owner artifact remains a separate regression
+  proof, but does not substitute for the required public-CLI artifact.
+- G20 audit risks are advisory at the default `scan` gate: the CLI emits the
+  expected cross-check kinds/providers and exits 0 with `COMPATIBLE`. The
+  special runner validates that contract instead of falsely requiring the
+  comparison-only `COMPATIBLE_WITH_RISK` label.
 - Runtime statuses describe behavior; they do not replace verdict proof.
 
 ## Agent checklist

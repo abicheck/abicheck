@@ -27,7 +27,7 @@ from typing import Any
 REPO_DIR = Path(__file__).resolve().parents[2]
 EXAMPLES_DIR = REPO_DIR / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
-SCHEMA_VERSION = "full_example_matrix.v1"
+SCHEMA_VERSION = "full_example_matrix.v2"
 
 ARTIFACT_CONTRACTS = {
     "gcc": ("tests/validate_examples.py", "validate_examples.v2"),
@@ -39,6 +39,10 @@ ARTIFACT_CONTRACTS = {
     "bundle": (
         "validation/scripts/run_bundle_examples.py",
         "bundle_examples.v1",
+    ),
+    "special_cli": (
+        "validation/scripts/run_special_cli_examples.py",
+        "special_cli_examples.v2",
     ),
 }
 PROOF_ARTIFACT_RUNNER = "validation/scripts/run_example_owner_proofs.py"
@@ -185,7 +189,7 @@ def _artifact_errors(
     else:
         if data.get("platform") != "linux":
             errors.append(
-                f"bundle: platform={data.get('platform')!r}, expected 'linux'"
+                f"{label}: platform={data.get('platform')!r}, expected 'linux'"
             )
         allowed_statuses = {"PASS", "FAIL", "ERROR"}
         bad_statuses = {"FAIL", "ERROR"}
@@ -208,8 +212,7 @@ def _artifact_errors(
     )
     if data.get("summary") != actual_summary:
         errors.append(
-            f"{label}: summary={data.get('summary')!r}, "
-            f"recomputed {actual_summary!r}"
+            f"{label}: summary={data.get('summary')!r}, recomputed {actual_summary!r}"
         )
     bad_cases = sorted(
         str(row.get("case_id") or row.get("name") or row.get("case"))
@@ -217,9 +220,7 @@ def _artifact_errors(
         if isinstance(row, dict) and row.get("status") in bad_statuses
     )
     if bad_cases:
-        errors.append(
-            f"{label}: failing runner statuses for: {', '.join(bad_cases)}"
-        )
+        errors.append(f"{label}: failing runner statuses for: {', '.join(bad_cases)}")
     return errors
 
 
@@ -231,8 +232,7 @@ def _proof_artifact_errors(data: dict[str, Any] | None) -> list[str]:
     errors: list[str] = []
     if data.get("runner") != PROOF_ARTIFACT_RUNNER:
         errors.append(
-            f"proofs: runner={data.get('runner')!r}, "
-            f"expected {PROOF_ARTIFACT_RUNNER!r}"
+            f"proofs: runner={data.get('runner')!r}, expected {PROOF_ARTIFACT_RUNNER!r}"
         )
     if data.get("schema_version") != PROOF_ARTIFACT_SCHEMA:
         errors.append(
@@ -246,9 +246,7 @@ def _proof_artifact_errors(data: dict[str, Any] | None) -> list[str]:
     if not isinstance(results, list):
         errors.append("proofs: results must be a list")
         return errors
-    owners = [
-        str(row.get("owner")) for row in results if isinstance(row, dict)
-    ]
+    owners = [str(row.get("owner")) for row in results if isinstance(row, dict)]
     counts = Counter(owners)
     expected_owners = set(SPECIAL_PROOFS)
     actual_owners = set(owners)
@@ -295,8 +293,7 @@ def _proof_artifact_errors(data: dict[str, Any] | None) -> list[str]:
     )
     if data.get("summary") != actual_summary:
         errors.append(
-            f"proofs: summary={data.get('summary')!r}, "
-            f"recomputed {actual_summary!r}"
+            f"proofs: summary={data.get('summary')!r}, recomputed {actual_summary!r}"
         )
     return errors
 
@@ -354,11 +351,17 @@ def _single_library_status(
     return "UNRESOLVED", "none", f"{name}: no PASS lane"
 
 
-def _special_status(owner: str, present: bool) -> tuple[str, str, str]:
-    proof = SPECIAL_PROOFS[owner]
-    if present:
-        return "COVERED", proof["lane"], proof["proof"]
-    return "UNRESOLVED", proof["lane"], f"proof not supplied: {proof['proof']}"
+def _special_cli_status(
+    result: dict[str, Any] | None,
+) -> tuple[str, str, str]:
+    lane = "special-abicheck-cli"
+    if result is None:
+        return "UNRESOLVED", lane, "special CLI runner did not report this case"
+    if result.get("status") == "PASS":
+        return "COVERED", lane, ""
+    if result.get("status") in {"FAIL", "ERROR"}:
+        return "FAILED", lane, str(result.get("message", ""))
+    return "UNRESOLVED", lane, str(result.get("message", ""))
 
 
 def build_matrix(
@@ -366,19 +369,14 @@ def build_matrix(
     gcc: dict[str, Any] | None,
     clang: dict[str, Any] | None,
     bundle: dict[str, Any] | None,
+    special_cli: dict[str, Any] | None,
     runtime: dict[str, Any] | None,
-    proof_g20: bool,
-    proof_l3l4l5: bool,
-    proof_btf: bool,
-    proof_python_api: bool,
-    proof_reconcile: bool = False,
-    proof_snapshot_pair: bool = False,
-    proof_kabi: bool = False,
 ) -> dict[str, Any]:
     gt = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
     gcc_results = _results_by_case(gcc)
     clang_results = _results_by_case(clang)
     bundle_results = _results_by_case(bundle)
+    special_cli_results = _results_by_case(special_cli)
     runtime_results = _results_by_case(runtime)
 
     rows: list[dict[str, Any]] = []
@@ -392,6 +390,7 @@ def build_matrix(
 
         if owner == "single-library":
             status, proof_lane, note = _single_library_status(name, lanes)
+            provenance = "compiler"
         elif owner == "bundle":
             bundle_result = bundle_results.get(name)
             lanes.append(_lane_record("bundle-compare-release", bundle_result))
@@ -415,24 +414,15 @@ def build_matrix(
                     "bundle-compare-release",
                     bundle_result.get("message", ""),
                 )
-        elif owner == "btf":
-            status, proof_lane, note = _special_status("btf", proof_btf)
-        elif owner == "g20":
-            status, proof_lane, note = _special_status("g20", proof_g20)
-        elif owner == "l3l4l5":
-            status, proof_lane, note = _special_status("l3l4l5", proof_l3l4l5)
-        elif owner == "python_api":
-            status, proof_lane, note = _special_status("python_api", proof_python_api)
-        elif owner == "reconcile":
-            status, proof_lane, note = _special_status("reconcile", proof_reconcile)
-        elif owner == "snapshot_pair":
-            status, proof_lane, note = _special_status(
-                "snapshot_pair", proof_snapshot_pair
-            )
-        elif owner == "kabi":
-            status, proof_lane, note = _special_status("kabi", proof_kabi)
+            provenance = "abicheck-cli-workflow"
+        elif owner in SPECIAL_PROOFS:
+            special_result = special_cli_results.get(name)
+            lanes.append(_lane_record("special-abicheck-cli", special_result))
+            status, proof_lane, note = _special_cli_status(special_result)
+            provenance = "abicheck-cli-workflow"
         else:  # pragma: no cover - defensive future-proofing
             status, proof_lane, note = "UNRESOLVED", owner, "unknown owner"
+            provenance = "unknown"
 
         row = {
             "case_id": name,
@@ -443,6 +433,7 @@ def build_matrix(
             "min_evidence": entry.get("min_evidence"),
             "status": status,
             "proof_lane": proof_lane,
+            "provenance": provenance,
             "note": note,
             "lanes": lanes,
         }
@@ -455,14 +446,27 @@ def build_matrix(
 
     counts = Counter(row["status"] for row in rows)
     owners = Counter(row["owner"] for row in rows)
+    covered_provenance = Counter(
+        row["provenance"] for row in rows if row["status"] == "COVERED"
+    )
+    direct_covered = sum(
+        covered_provenance.get(key, 0) for key in ("compiler", "abicheck-cli-workflow")
+    )
     unresolved = [row for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row for row in rows if row["status"] == "FAILED"]
     return {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/collect_full_example_matrix.py",
+        "ground_truth_sha256": _ground_truth_digest(),
         "ground_truth_cases": len(gt),
         "summary": dict(sorted(counts.items())),
         "owners": dict(sorted(owners.items())),
+        "coverage_by_provenance": dict(sorted(covered_provenance.items())),
+        "direct_coverage": {
+            "covered": direct_covered,
+            "total": len(gt),
+            "percent": round(100 * direct_covered / len(gt), 1),
+        },
         "unresolved_cases": [row["case_id"] for row in unresolved],
         "failed_cases": [row["case_id"] for row in failed],
         "results": rows,
@@ -481,6 +485,12 @@ def main(argv: list[str] | None = None) -> int:
         "--bundle", type=Path, required=True, help="run_bundle_examples JSON"
     )
     parser.add_argument(
+        "--special-cli",
+        type=Path,
+        required=True,
+        help="run_special_cli_examples JSON",
+    )
+    parser.add_argument(
         "--runtime", type=Path, required=True, help="runtime smoke JSON"
     )
     parser.add_argument(
@@ -497,6 +507,7 @@ def main(argv: list[str] | None = None) -> int:
     gcc = _load_json(args.gcc)
     clang = _load_json(args.clang)
     bundle = _load_json(args.bundle)
+    special_cli = _load_json(args.special_cli)
     runtime = _load_json(args.runtime)
     proofs = _load_json(args.proofs)
     ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))["verdicts"]
@@ -506,6 +517,11 @@ def main(argv: list[str] | None = None) -> int:
         for name, entry in ground_truth.items()
         if _case_owner(name, entry) == "bundle"
     }
+    special_cli_cases = {
+        name
+        for name, entry in ground_truth.items()
+        if _case_owner(name, entry) not in {"single-library", "bundle"}
+    }
     artifact_errors = [
         error
         for label, data, expected_cases in (
@@ -513,32 +529,17 @@ def main(argv: list[str] | None = None) -> int:
             ("clang", clang, all_cases),
             ("runtime", runtime, all_cases),
             ("bundle", bundle, bundle_cases),
+            ("special_cli", special_cli, special_cli_cases),
         )
         for error in _artifact_errors(label, data, expected_cases=expected_cases)
     ]
     artifact_errors.extend(_proof_artifact_errors(proofs))
-    proof_results = {
-        str(row.get("owner")): row
-        for row in (proofs or {}).get("results", [])
-        if isinstance(row, dict)
-    }
-
-    def proof_passed(owner: str) -> bool:
-        result = proof_results.get(owner, {})
-        return result.get("status") == "PASS" and result.get("returncode") == 0
-
     matrix = build_matrix(
         gcc=gcc,
         clang=clang,
         bundle=bundle,
+        special_cli=special_cli,
         runtime=runtime,
-        proof_g20=proof_passed("g20"),
-        proof_l3l4l5=proof_passed("l3l4l5"),
-        proof_btf=proof_passed("btf"),
-        proof_python_api=proof_passed("python_api"),
-        proof_reconcile=proof_passed("reconcile"),
-        proof_snapshot_pair=proof_passed("snapshot_pair"),
-        proof_kabi=proof_passed("kabi"),
     )
     matrix["artifact_errors"] = artifact_errors
     text = json.dumps(matrix, indent=2)

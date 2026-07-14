@@ -48,22 +48,27 @@ def test_full_matrix_allow_unresolved_never_masks_failed(
             "failed_cases": ["case_y"],
         },
     )
-    artifacts = [str(tmp_path / f"{name}.json") for name in range(5)]
-    assert matrix.main(
-        [
-            "--gcc",
-            artifacts[0],
-            "--clang",
-            artifacts[1],
-            "--runtime",
-            artifacts[2],
-            "--bundle",
-            artifacts[3],
-            "--proofs",
-            artifacts[4],
-            "--allow-unresolved",
-        ]
-    ) == 1
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(6)]
+    assert (
+        matrix.main(
+            [
+                "--gcc",
+                artifacts[0],
+                "--clang",
+                artifacts[1],
+                "--runtime",
+                artifacts[2],
+                "--bundle",
+                artifacts[3],
+                "--special-cli",
+                artifacts[4],
+                "--proofs",
+                artifacts[5],
+                "--allow-unresolved",
+            ]
+        )
+        == 1
+    )
 
 
 def _artifact(
@@ -95,7 +100,7 @@ def _artifact(
     return payload
 
 
-@pytest.mark.parametrize("label", ["gcc", "clang", "runtime", "bundle"])
+@pytest.mark.parametrize("label", ["gcc", "clang", "runtime", "bundle", "special_cli"])
 def test_full_matrix_required_artifact_rejects_missing_or_wrong_identity(
     label: str,
 ) -> None:
@@ -127,9 +132,7 @@ def test_full_matrix_artifact_rejects_partial_duplicate_and_stale_catalog() -> N
 def test_full_matrix_runtime_build_error_is_an_artifact_error() -> None:
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
     payload = _artifact(matrix, "runtime", {"case01"}, status="BUILD_ERROR")
-    errors = matrix._artifact_errors(
-        "runtime", payload, expected_cases={"case01"}
-    )
+    errors = matrix._artifact_errors("runtime", payload, expected_cases={"case01"})
     assert errors == ["runtime: failing runner statuses for: case01"]
 
 
@@ -142,8 +145,7 @@ def _proof_artifact(matrix: ModuleType) -> dict[str, object]:
         "selected_owners": len(owners),
         "summary": {"PASS": len(owners)},
         "results": [
-            {"owner": owner, "status": "PASS", "returncode": 0}
-            for owner in owners
+            {"owner": owner, "status": "PASS", "returncode": 0} for owner in owners
         ],
     }
 
@@ -198,43 +200,89 @@ def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
             "results": [],
         },
     )
-    artifacts = [str(tmp_path / f"{name}.json") for name in range(5)]
-    assert matrix.main(
-        [
-            "--gcc",
-            artifacts[0],
-            "--clang",
-            artifacts[1],
-            "--runtime",
-            artifacts[2],
-            "--bundle",
-            artifacts[3],
-            "--proofs",
-            artifacts[4],
-        ]
-    ) == 1
+    artifacts = [str(tmp_path / f"{name}.json") for name in range(6)]
+    assert (
+        matrix.main(
+            [
+                "--gcc",
+                artifacts[0],
+                "--clang",
+                artifacts[1],
+                "--runtime",
+                artifacts[2],
+                "--bundle",
+                artifacts[3],
+                "--special-cli",
+                artifacts[4],
+                "--proofs",
+                artifacts[5],
+            ]
+        )
+        == 1
+    )
 
 
-def test_stub_pair_case_is_covered_by_python_api_proof() -> None:
-    # A .pyi-pair example (G23 case163) is owned by the python_api proof lane and
-    # counts as COVERED when --proof-python-api is supplied — it must not fall
-    # through to the compiled single-library lanes and be reported UNRESOLVED.
+def test_stub_pair_case_requires_public_cli_proof() -> None:
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
     result = matrix.build_matrix(
         gcc=None,
         clang=None,
         bundle=None,
+        special_cli=None,
         runtime=None,
-        proof_g20=True,
-        proof_l3l4l5=True,
-        proof_btf=True,
-        proof_python_api=True,
     )
     stub_rows = [r for r in result["results"] if r["owner"] == "python_api"]
     assert stub_rows, "no python_api-owned example case found"
-    for row in stub_rows:
-        assert row["status"] == "COVERED"
-        assert row["case_id"] not in result["unresolved_cases"]
+    assert all(row["status"] == "UNRESOLVED" for row in stub_rows)
+
+
+def test_special_cli_cases_require_direct_cli_results() -> None:
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    special_payload = {
+        "results": [
+            {"case_id": case_id, "status": "PASS"} for case_id in special.CASE_IDS
+        ]
+    }
+    result = matrix.build_matrix(
+        gcc=None,
+        clang=None,
+        bundle=None,
+        special_cli=special_payload,
+        runtime=None,
+    )
+    rows = [row for row in result["results"] if row["case_id"] in special.CASE_IDS]
+    assert len(rows) == 26
+    assert all(row["status"] == "COVERED" for row in rows)
+    assert all(row["proof_lane"] == "special-abicheck-cli" for row in rows)
+    assert all(row["provenance"] == "abicheck-cli-workflow" for row in rows)
+
+
+def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> None:
+    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    monkeypatch.setattr(
+        special,
+        "_run_json_command",
+        lambda *_args, **_kwargs: {
+            "returncode": 4,
+            "payload": {
+                "verdict": "BREAKING",
+                "changes": [{"kind": "kabi_crc_changed"}],
+            },
+            "message": "",
+            "stdout": "",
+            "stderr": "",
+            "seconds": 0.1,
+        },
+    )
+    result = special._run_compare_case(
+        "case175_kabi_crc_changed",
+        special.COMPARE_CASES["case175_kabi_crc_changed"],
+        {"expected": "BREAKING", "expected_kinds": ["kabi_crc_changed"]},
+        10,
+    )
+    assert result["status"] == "PASS"
+    assert result["returncode"] == 4
 
 
 def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:

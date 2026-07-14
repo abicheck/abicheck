@@ -303,6 +303,11 @@ jobs:
           PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json \
             > results/bundle-examples.json
 
+      - name: Validate special-shape examples through public CLI
+        run: |
+          PYTHONPATH=. python validation/scripts/run_special_cli_examples.py --json \
+            > results/special-cli-examples.json
+
       - name: Build full example matrix
         run: |
           PYTHONPATH=. python validation/scripts/collect_full_example_matrix.py \
@@ -310,6 +315,7 @@ jobs:
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
             --bundle results/bundle-examples.json \
+            --special-cli results/special-cli-examples.json \
             --proofs results/example-owner-proofs.json \
             --out results/full-example-matrix.json
 
@@ -331,6 +337,8 @@ jobs:
           import json
           d=json.load(open("results/full-example-matrix.json"))
           print("summary:", json.dumps(d["summary"], sort_keys=True))
+          print("coverage by provenance:", json.dumps(d["coverage_by_provenance"], sort_keys=True))
+          print("direct coverage:", json.dumps(d["direct_coverage"], sort_keys=True))
           if d["unresolved_cases"]:
               print("unresolved:", ", ".join(d["unresolved_cases"]))
           if d["failed_cases"]:
