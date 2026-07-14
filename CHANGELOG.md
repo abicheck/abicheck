@@ -293,7 +293,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   Both detectors now suppress the redundant removed/added pair for an
   exact-match rename, mirroring the existing rename+retype special case and
   the analogous `ENUM_MEMBER_RENAMED` skip already used in
-  `diff_platform.py`.
+  `diff_platform.py`. The suppression reports `FIELD_RENAMED` itself rather
+  than assuming a separate detector will independently re-match the same
+  pair, which a review of the fix correctly flagged as a way to silently
+  *lose* a finding (not just duplicate it) when two extractors spell an
+  otherwise-identical field type differently.
+
+- **`INLINE_BODY_REFERENCES_RENAMED_MEMBER` (case89) never actually fired.**
+  Three independent symbol/name-format mismatches in
+  `diff_cpp_patterns.py` meant this detector had never triggered on real
+  compiled input, only on hand-crafted unit-test fixtures that (unlike real
+  detector output) embedded the field name directly in `Change.symbol` and
+  used fully-qualified `Function.name`: `_collect_field_rename_candidates`
+  expected `FIELD_RENAMED.symbol` as `"Record::field"` when it is actually
+  the bare record name (field names live in `old_value`/`new_value`), and
+  `_inline_accessors_for` expected `Function.name` to be qualified
+  (`"ns::Class::method"`) when it is the short, unqualified demangled name.
+  Surfaced by the case35 fix above: case89's expected `BREAKING` verdict was
+  previously reached only via the *redundant* `TYPE_FIELD_REMOVED`/
+  `STRUCT_FIELD_REMOVED` that fix removes, masking that the case's own named
+  detector was dead code. Both mismatches are fixed (the second via a single
+  batched demangle of the mangled name); the two hand-crafted unit tests
+  that encoded the wrong symbol shape are corrected to match real detector
+  output.
 
 ### Documentation
 

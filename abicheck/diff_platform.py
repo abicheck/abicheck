@@ -1503,13 +1503,18 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                     continue
             else:
                 # Pure rename: same offset, identical type, different name.
-                # The dedicated field-rename detector (_diff_field_renames,
-                # over AbiSnapshot.types) independently reports this as
-                # FIELD_RENAMED (API_BREAK) — mirror the rename-skip already
-                # done for enum members below (ENUM_MEMBER_RENAMED) so this
-                # DWARF-layout detector doesn't also claim the field was
-                # removed when it still exists at the same offset/type under
-                # a new name.
+                # Report FIELD_RENAMED (API_BREAK) directly instead of a
+                # STRUCT_FIELD_REMOVED that would falsely claim the field no
+                # longer exists — mirrors the rename-skip already done for
+                # enum members below (ENUM_MEMBER_RENAMED). This does not
+                # depend on `_diff_field_renames` (over AbiSnapshot.types, a
+                # different model with its own type-name strings) also firing
+                # for the same pair — relying on that would silently drop the
+                # finding entirely whenever the two independent extractors
+                # spell the type differently (caught in review). Emitting the
+                # same FIELD_RENAMED shape here is safe either way: the
+                # post-processing dedup pass collapses an exact duplicate if
+                # `_diff_field_renames` also matches.
                 candidate = added_by_offset.get(old_f.byte_offset)
                 if (
                     candidate is not None
@@ -1518,6 +1523,15 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                     and _normalize_type_name(old_f.type_name)
                     == _normalize_type_name(candidate.type_name)
                 ):
+                    changes.append(
+                        make_change(
+                            ChangeKind.FIELD_RENAMED,
+                            symbol=name,
+                            name=name,
+                            old=fname,
+                            new=candidate.name,
+                        )
+                    )
                     continue
             changes.append(
                 make_change(

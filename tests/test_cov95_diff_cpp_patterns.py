@@ -492,7 +492,10 @@ class TestDetectInlineBodyNoCandidates:
         assert detect_inline_body_renamed_member(old, new, changes) == []
 
     def test_field_renamed_candidate_path(self) -> None:
-        # Drive the FIELD_RENAMED collector (lines 682-686).
+        # Drive the FIELD_RENAMED collector (lines 682-686). FIELD_RENAMED's
+        # real symbol is the bare record name (see _diff_field_renames /
+        # diff_types._diff_removed_field) — the field names live in
+        # old_value/new_value, not appended to symbol as "Record::field".
         holder = RecordType(
             name="mylib::Widget",
             kind="class",
@@ -500,13 +503,15 @@ class TestDetectInlineBodyNoCandidates:
             fields=[TypeField(name="impl_", type="mylib::detail::Impl*")],
         )
         impl = RecordType(name="mylib::detail::Impl", kind="class", size_bits=32)
-        inline_fn = _fn("mylib::Widget::get", "_Zget", is_inline=True)
+        # Function.name is the short (unqualified) demangled name — no "::" —
+        # so the enclosing class is recovered via the mangled name instead.
+        inline_fn = _fn("get", "_ZN5mylib6Widget3getEv", is_inline=True)
         old = _snap(functions=[inline_fn], types=[impl, holder])
         new = _snap(functions=[inline_fn], types=[impl, holder])
         changes = [
             Change(
                 kind=ChangeKind.FIELD_RENAMED,
-                symbol="mylib::detail::Impl::a_",
+                symbol="mylib::detail::Impl",
                 description="",
                 old_value="a_",
                 new_value="b_",

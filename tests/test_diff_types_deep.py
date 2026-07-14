@@ -213,6 +213,42 @@ class TestFieldRenamed:
                                    TypeField("vertical", "int", 32)])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_RENAMED in _kinds(r)
+        # A pure rename must not ALSO surface as a field removal/addition —
+        # that would overstate a source-only break as BREAKING (case35).
+        assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
+        assert ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE not in _kinds(r)
+        assert r.verdict == Verdict.API_BREAK
+
+    def test_field_renamed_reports_severity_not_verdict_breaking(self):
+        """A rename-only diff resolves to API_BREAK, never BREAKING."""
+        t_old = RecordType(name="Point", kind="struct", size_bits=64,
+                           fields=[TypeField("x", "int", 0),
+                                   TypeField("y", "int", 32)])
+        t_new = RecordType(name="Point", kind="struct", size_bits=64,
+                           fields=[TypeField("col", "int", 0),
+                                   TypeField("row", "int", 32)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        assert r.verdict == Verdict.API_BREAK
+
+    def test_field_renamed_with_differently_spelled_equal_type(self):
+        """A rename is still reported even when the two sides spell the
+        (canonically identical) field type differently.
+
+        ``_diff_field_renames`` keys on the *raw* ``(offset, type)`` tuple, so
+        it alone would not match "struct Foo" against "Foo" for the same
+        field. The generic field-removed/-added path must report the rename
+        itself rather than assuming the dedicated detector already covers
+        it — otherwise the finding is silently dropped instead of merely
+        duplicated (regression guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Widget", kind="struct", size_bits=64,
+                           fields=[TypeField("handle", "struct Foo *", 0)])
+        t_new = RecordType(name="Widget", kind="struct", size_bits=64,
+                           fields=[TypeField("ref", "Foo *", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED not in kinds
 
 
 # ── enum_member_renamed (source-level break) ─────────────────────────────

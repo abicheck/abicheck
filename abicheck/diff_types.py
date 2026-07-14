@@ -427,10 +427,18 @@ def _diff_removed_field(
 ) -> Change | None:
     """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
 
-    Returns ``None`` for a pure rename (same offset, identical type, different
-    name): ``_diff_field_renames`` independently reports that as FIELD_RENAMED
-    (API_BREAK), so emitting TYPE_FIELD_REMOVED here too would be a redundant,
-    misleading BREAKING finding for a field that still exists at its offset.
+    Returns FIELD_RENAMED directly for a pure rename (same offset, identical
+    type, different name) instead of TYPE_FIELD_REMOVED: emitting a redundant,
+    misleading BREAKING removal for a field that still exists at its offset
+    would overstate the severity. This does not rely on ``_diff_field_renames``
+    independently matching the same pair — that detector keys on the *raw*
+    ``(offset_bits, type)`` tuple while canonical-equal-but-differently-spelled
+    types (e.g. ``struct Foo`` vs ``Foo``) would canonicalize equal here but
+    not raw-match there, which would silently drop the finding entirely rather
+    than just double-report it (caught in review). Emitting the same
+    ``FIELD_RENAMED`` shape here (identical description) is safe either way:
+    when ``_diff_field_renames`` *also* fires for a raw-matching pair, the
+    post-processing dedup pass collapses the duplicate.
     """
     # Check if this is a reserved field put into use
     matched = _try_match_reserved_field(
@@ -448,7 +456,13 @@ def _diff_removed_field(
         ):
             if canonicalize_type_name(f_old.type) == canonicalize_type_name(f_new.type):
                 renamed_type_changed_added.add(f_new.name)
-                return None
+                return make_change(
+                    ChangeKind.FIELD_RENAMED,
+                    symbol=name,
+                    name=name,
+                    old=fname,
+                    new=f_new.name,
+                )
             if not cv_qualifiers_only_differ(f_old.type, f_new.type):
                 renamed_type_changed_added.add(f_new.name)
                 return make_change(

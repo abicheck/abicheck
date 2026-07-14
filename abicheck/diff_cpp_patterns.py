@@ -648,14 +648,23 @@ def _collect_field_rename_candidates(
     namespaces: tuple[str, ...],
 ) -> list[tuple[str, str, str]]:
     """Return ``(record_name, old_field, new_field)`` triples from FIELD_RENAMED changes
-    whose record belongs to an internal namespace."""
+    whose record belongs to an internal namespace.
+
+    FIELD_RENAMED's ``symbol`` is the (possibly namespace-qualified) record
+    name itself — e.g. ``mylib::detail::descriptor_impl`` — not a
+    ``Record::field`` pair; the field names live in ``old_value``/
+    ``new_value``. Splitting on the last ``::`` here used to strip the record
+    name down to its enclosing namespace (or drop it to ``""`` when
+    unqualified), so ``is_internal_type`` never matched and no candidate was
+    ever collected — this detector never actually fired (case89).
+    """
     from .internal_leak import is_internal_type  # local import: cycle-free
 
     candidates: list[tuple[str, str, str]] = []
     for ch in changes:
         if ch.kind != ChangeKind.FIELD_RENAMED:
             continue
-        record_name = ch.symbol.rsplit("::", 1)[0] if "::" in ch.symbol else ""
+        record_name = ch.symbol
         if not is_internal_type(record_name, namespaces):
             continue
         if ch.old_value and ch.new_value:
@@ -804,17 +813,40 @@ def _inline_accessors_for(
     functions: Iterable[Function],
     holders: set[str],
 ) -> list[Function]:
-    """Return inline public functions whose qualified name lives inside
-    one of *holders*."""
+    """Return inline public functions whose enclosing class is one of *holders*.
+
+    ``Function.name`` is the short (unqualified) demangled name — e.g.
+    ``"get_class_count"``, not ``"mylib::descriptor::get_class_count"`` — so
+    it never contains ``::`` and the old prefix-based lookup here always
+    missed every real accessor. Recover the enclosing scope from the mangled
+    name via a single batched demangle instead (functions without ``::`` in
+    ``name`` are the common case, not the exception).
+    """
+    from .demangle import demangle_batch
+
+    fns = list(functions)
+    inline_fns = [fn for fn in fns if getattr(fn, "is_inline", False)]
+    if not inline_fns:
+        return []
+
+    already_qualified = [fn for fn in inline_fns if "::" in fn.name]
+    needs_demangle = [fn for fn in inline_fns if "::" not in fn.name and fn.mangled]
+    demangled = demangle_batch([fn.mangled for fn in needs_demangle])
+
     out: list[Function] = []
-    for fn in functions:
-        if not getattr(fn, "is_inline", False):
-            continue
-        # qualified function name like "ns::Holder::method_name"
-        if "::" not in fn.name:
-            continue
+    for fn in already_qualified:
         holder = fn.name.rsplit("::", 1)[0]
-        if holder in holders:
+        if holder in holders or _last_segment(holder) in holders:
+            out.append(fn)
+    for fn in needs_demangle:
+        text = demangled.get(fn.mangled)
+        if not text:
+            continue
+        head = text.split("(", 1)[0]
+        if "::" not in head:
+            continue
+        holder = head.rsplit("::", 1)[0]
+        if holder in holders or _last_segment(holder) in holders:
             out.append(fn)
     return out
 
