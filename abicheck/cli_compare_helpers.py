@@ -470,6 +470,12 @@ def run_compare(
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
 
+    if secondary_output is not None and secondary_fmt is None:
+        raise click.UsageError(
+            "--secondary-output requires --secondary-format: with no format "
+            "given there is nothing to render, and the path would be silently "
+            "ignored."
+        )
     if (
         secondary_output is not None
         and output is not None

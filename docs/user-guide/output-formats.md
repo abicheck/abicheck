@@ -220,8 +220,9 @@ abicheck compare old.json new.json \
   --secondary-format json --secondary-output report.json
 ```
 
-- `--secondary-format` requires `--secondary-output` — writing two formats
-  to the same stream would be ambiguous.
+- `--secondary-format` and `--secondary-output` require each other — either
+  alone is rejected (passing just `--secondary-output` would otherwise
+  silently produce no secondary artifact at all).
 - `--secondary-output` must point at a different file than `--output`/`-o` —
   otherwise the secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores

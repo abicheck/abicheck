@@ -229,6 +229,20 @@ class TestCompareSecondaryFormat:
         assert result.exit_code == 64
         assert "--secondary-format requires --secondary-output" in result.output
 
+    def test_secondary_output_requires_secondary_format(self, tmp_path):
+        # Passing --secondary-output alone would otherwise be silently
+        # ignored — no secondary artifact, no error (Codex review, PR #557).
+        old_p, new_p = _write_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-output requires --secondary-format" in result.output
+        assert not secondary_out.exists()
+
     def test_secondary_output_rejects_same_path_as_primary(self, tmp_path):
         # Writing both formats to the same file would silently overwrite the
         # primary report with the secondary one (Codex review, PR #557).

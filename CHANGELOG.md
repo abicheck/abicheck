@@ -306,12 +306,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   invocation (e.g. `--format markdown` for a human report alongside
   `--secondary-format json --secondary-output report.json` for tooling),
   instead of requiring a second full `abicheck compare` invocation just to
-  get a different format. `--secondary-format` requires
-  `--secondary-output` (writing two formats to the same stream would be
-  ambiguous), must point at a different file than `--output`/`-o` (else the
-  secondary render would silently overwrite the primary report), and always
-  renders the full, unfiltered report — it ignores `--show-only`/`--stat`,
-  which describe only the primary format's display.
+  get a different format. `--secondary-format` and `--secondary-output`
+  require each other (either alone is rejected — passing just
+  `--secondary-output` would otherwise silently produce no secondary
+  artifact at all), `--secondary-output` must point at a different file than
+  `--output`/`-o` (else the secondary render would silently overwrite the
+  primary report), and the secondary render always renders the full,
+  unfiltered report — it ignores `--show-only`/`--stat`, which describe only
+  the primary format's display.
   Not supported for directory/package (release) comparisons yet (rejected
   with a `UsageError`, same as `--exit-code-scheme`/
   `--reconcile-build-context`/`--env-matrix`). The bundled GitHub Action
