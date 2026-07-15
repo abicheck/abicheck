@@ -320,6 +320,60 @@ def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
     assert len(surface.source_edges) == 2
 
 
+def test_linker_fills_missing_dst_file_from_later_duplicate_tu() -> None:
+    # Codex review, PR #555: dedup keeps only the first-seen (edge, src, dst)
+    # row across TUs. If that first copy's attrs lack dst_file (this TU
+    # couldn't resolve the callee/type's declaring file) but a later TU's
+    # copy of the SAME logical edge has it, the richer dst_file must be
+    # merged in -- otherwise fold_source_edges() can never mark that
+    # endpoint defined_in_project and PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    # is skipped for a dependency the graph otherwise has full evidence for.
+    tu_a = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"call_kind": "direct"},
+            }
+        ]
+    )
+    tu_b = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"call_kind": "direct", "dst_file": "src/detail/impl.cc"},
+            }
+        ]
+    )
+    surface = link_source_abi([tu_a, tu_b])
+    assert len(surface.source_edges) == 1
+    assert surface.source_edges[0]["attrs"]["dst_file"] == "src/detail/impl.cc"
+
+
+def test_linker_keeps_first_dst_file_when_later_duplicate_has_none() -> None:
+    # The merge is additive only -- a later duplicate lacking dst_file must
+    # never clobber an already-resolved one.
+    tu_a = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"dst_file": "src/detail/impl.cc"},
+            }
+        ]
+    )
+    tu_b = SourceAbiTu(
+        source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "attrs": {}}]
+    )
+    surface = link_source_abi([tu_a, tu_b])
+    assert len(surface.source_edges) == 1
+    assert surface.source_edges[0]["attrs"]["dst_file"] == "src/detail/impl.cc"
+
+
 def test_linker_skips_malformed_source_edges_rows() -> None:
     tu = SourceAbiTu(source_edges=[{}, "not-a-dict", {"edge": "DECL_CALLS_DECL"}])
     surface = link_source_abi([tu])

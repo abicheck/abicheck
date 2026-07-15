@@ -1150,6 +1150,7 @@ def link_source_abi(
     state.export_index = _build_export_index(exported)
     state.exact_index = _build_exact_index(exported)
     seen_edge_keys: set[tuple[str, str, str]] = set()
+    edge_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
     source_edges: list[dict[str, Any]] = []
     for tu in tus:
         for edge in tu.source_edges:
@@ -1171,8 +1172,31 @@ def link_source_abi(
                 continue
             edge_key = (edge_name, edge_src, edge_dst)
             if edge_key in seen_edge_keys:
+                # A later TU's copy of the same logical (edge, src, dst) may
+                # resolve a dst_file the first-seen copy couldn't (e.g. only
+                # this TU's AST carries the callee/type's declaring file) --
+                # fill it into the surviving row rather than silently
+                # keeping the poorer one (Codex review): otherwise the
+                # surviving row's missing dst_file means
+                # fold_source_edges() can never mark that endpoint
+                # defined_in_project, and PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+                # is skipped for a dependency the graph otherwise has full
+                # evidence for.
+                existing = edge_by_key.get(edge_key)
+                new_attrs = edge.get("attrs")
+                new_dst_file = (
+                    new_attrs.get("dst_file") if isinstance(new_attrs, dict) else None
+                )
+                if existing is not None and new_dst_file:
+                    existing_attrs = existing.get("attrs")
+                    if not isinstance(existing_attrs, dict):
+                        existing_attrs = {}
+                        existing["attrs"] = existing_attrs
+                    if not existing_attrs.get("dst_file"):
+                        existing_attrs["dst_file"] = new_dst_file
                 continue
             seen_edge_keys.add(edge_key)
+            edge_by_key[edge_key] = edge
             source_edges.append(edge)
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (

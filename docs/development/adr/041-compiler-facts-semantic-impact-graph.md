@@ -1096,7 +1096,16 @@ there is no equivalent "should this be automatic" question for them.
    out-of-line-helper shape) left `callee_file` empty. Now records a
    declaration-only file as a fallback (a later body for the same identity
    still upgrades it — the definition is the more authoritative location).
-   The inline extractor actually carries `dst_file` for **all five** kinds
+   `link_source_abi()`'s cross-TU `source_edges` dedup had a matching gap
+   (Codex review): it keeps only the first-seen `(edge, src, dst)` row across
+   every TU, so if TU A's copy of the same logical edge lacked `dst_file`
+   (that TU's AST couldn't resolve it) while TU B's copy — the same edge,
+   from a TU whose AST does carry the declaration/definition — had it, the
+   poorer first row silently won and the richer one was discarded. Now
+   merges a missing `dst_file` into the surviving row from any later
+   duplicate that has one (additive only — never clobbers an
+   already-resolved `dst_file`). The inline extractor actually carries
+   `dst_file` for **all five** kinds
    (`type_graph.py`'s
    two-pass indexing resolves a type spelling to its declaring file
    regardless of edge kind); the plugin's three type-edge kinds
