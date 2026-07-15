@@ -529,6 +529,56 @@ class TestDwarfStructFieldRenamed:
         assert ChangeKind.FIELD_RENAMED not in kinds
         assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
 
+    def test_same_spelling_different_resolved_size_is_not_a_bare_rename(self) -> None:
+        """Exact type-spelling equality is still not enough: the *same*
+        typedef name ("Word") can resolve to a different byte size across
+        versions (e.g. widened 4B->8B elsewhere) while the field at this
+        offset keeps a stable-looking struct size via padding. This must
+        fall through to STRUCT_FIELD_REMOVED, not a bare FIELD_RENAMED
+        (third review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("word_val", "Word", 0, 4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("word_value", "Word", 0, 8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+    def test_bitfield_width_change_at_same_offset_is_not_a_bare_rename(self) -> None:
+        """A bit-field at the same byte offset that changes width under a
+        new name must not be masked as a bare rename either — same
+        reasoning as the byte-size guard, applied to bit_offset/bit_size
+        (third review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[FieldInfo("mode", "unsigned int", 0, 4,
+                                   bit_offset=0, bit_size=4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[FieldInfo("mode_flags", "unsigned int", 0, 4,
+                                   bit_offset=0, bit_size=8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
 
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""

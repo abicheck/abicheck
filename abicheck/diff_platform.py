@@ -1523,18 +1523,28 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 # it: a same-size pointer-to-inline-value retype (e.g.
                 # "Handle *" (8B) -> an 8-byte-by-value "Handle") would still
                 # pass a size check while being a real layout/representation
-                # break (caught in review — twice). Require exact,
-                # non-lossy equality of the raw type spelling instead of any
-                # normalized/sized comparison; this is strictly narrower than
-                # a real rename check would ideally be (a harmless "struct
-                # Foo *" vs "Foo *" spelling difference now falls through to
-                # STRUCT_FIELD_REMOVED instead of FIELD_RENAMED) but never
-                # mis-classifies a genuine type change as a bare rename.
+                # break (caught in review — twice). Require exact, non-lossy
+                # equality of the raw type spelling instead of any
+                # normalized comparison. Spelling alone is still not enough,
+                # though: the *same* typedef name can resolve to a different
+                # size/bit-layout across versions (e.g. "Word" widened
+                # 4B->8B elsewhere, or a bit-field at the same byte offset
+                # changing width) without the spelling changing at all, so
+                # also require byte_size and bit_offset/bit_size to match
+                # (caught in review — three times now). This is strictly
+                # narrower than a real rename check would ideally be (a
+                # harmless "struct Foo *" vs "Foo *" spelling difference now
+                # falls through to STRUCT_FIELD_REMOVED instead of
+                # FIELD_RENAMED) but never misclassifies a genuine type or
+                # layout change as a bare rename.
                 if (
                     candidate is not None
                     and candidate.name not in reserved_matched
                     and not _RESERVED_FIELD_RE.match(candidate.name)
                     and old_f.type_name == candidate.type_name
+                    and old_f.byte_size == candidate.byte_size
+                    and old_f.bit_offset == candidate.bit_offset
+                    and old_f.bit_size == candidate.bit_size
                 ):
                     changes.append(
                         make_change(
