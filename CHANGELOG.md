@@ -319,7 +319,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--reconcile-build-context`/`--env-matrix`). The bundled GitHub Action
   (`action/run.sh`) now uses this instead of re-running the whole comparison
   a second time to get JSON for its sticky PR comment, halving the work for
-  a `compare` step that posts a PR comment with a non-json primary format.
+  a `compare` step that posts a PR comment with a non-json primary format —
+  a new `_is_release_style_operand` check skips the optimization when the
+  `old-library`/`new-library` inputs are directories or package archives
+  (`compare` fans those out through the same release engine internally
+  regardless of the Action's `mode` input, and that engine rejects
+  `--secondary-format`), so a directory/package comparison under
+  `mode: compare` keeps working instead of hard-failing (Codex review).
 
 - **Canonical fact-set versioning and per-family coverage honesty for the
   Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by

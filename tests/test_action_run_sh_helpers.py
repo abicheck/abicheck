@@ -121,6 +121,26 @@ def _cmd_items(stdout: str) -> list[str]:
     return [item for item in stdout.split("\x1f") if item]
 
 
+def _run_predicate(call: str) -> bool:
+    """Source the real helper functions and evaluate a boolean-returning call
+    (e.g. an ``_is_release_style_operand "path"`` invocation), returning
+    whether it exited zero (true) or non-zero (false)."""
+    script = _helpers_region() + f"\nif {call}; then exit 0; else exit 1; fi\n"
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+    finally:
+        os.unlink(script_path)
+    return result.returncode == 0
+
+
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestAddFlagSplitting:
     def test_legacy_space_separated_single_line(self) -> None:
@@ -160,3 +180,46 @@ class TestAddSidedFlagSplitting:
         assert _cmd_items(out) == [
             "--header", "new=inc/a", "--header", "new=path with spaces/inc",
         ]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestIsReleaseStyleOperand:
+    """``compare`` mode now skips its --secondary-format optimization for
+    directory/package operands, since the release fan-out engine rejects
+    that flag — verified defect: it previously hard-failed a working
+    directory/package compare under MODE=compare (Codex review, PR #557)."""
+
+    def test_directory_is_release_style(self, tmp_path) -> None:
+        d = tmp_path / "libdir"
+        d.mkdir()
+        assert _run_predicate(f'_is_release_style_operand "{d}"')
+
+    def test_plain_file_is_not_release_style(self, tmp_path) -> None:
+        f = tmp_path / "libfoo.so.1"
+        f.write_text("", encoding="utf-8")
+        assert not _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_json_snapshot_is_not_release_style(self, tmp_path) -> None:
+        f = tmp_path / "snapshot.json"
+        f.write_text("{}", encoding="utf-8")
+        assert not _run_predicate(f'_is_release_style_operand "{f}"')
+
+    @pytest.mark.parametrize("suffix", [
+        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst",
+        ".tgz", ".conda", ".whl",
+    ])
+    def test_package_extensions_are_release_style(self, tmp_path, suffix) -> None:
+        f = tmp_path / f"libfoo{suffix}"
+        f.write_text("", encoding="utf-8")
+        assert _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_package_extension_matched_case_insensitively(self, tmp_path) -> None:
+        f = tmp_path / "libfoo.RPM"
+        f.write_text("", encoding="utf-8")
+        assert _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_missing_path_is_not_release_style(self) -> None:
+        # A nonexistent path isn't a directory and doesn't match a package
+        # extension by name — the required-args guard in run.sh catches a
+        # genuinely missing operand before this check ever runs.
+        assert not _run_predicate('_is_release_style_operand "/no/such/path.so"')

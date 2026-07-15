@@ -65,6 +65,29 @@ add_single_flag() {
   fi
 }
 
+# A directory, or a file whose name matches a recognized package extension
+# (mirrors package.py's is_package() name-suffix check; extensionless
+# RPM/Deb detected only by magic bytes is not covered here). `compare` fans
+# such an operand out through the release engine internally regardless of
+# the Action's MODE, and the release engine rejects --secondary-format
+# (Codex review, PR #557) — used to skip the --secondary-format optimization
+# for compare mode's PR-comment JSON rather than let it hard-fail a
+# directory/package comparison that used to work.
+_is_release_style_operand() {
+  local path="$1"
+  [[ -d "$path" ]] && return 0
+  # Portable lowercasing: ${path,,} is bash-4+ only, but this script also
+  # supports macOS's stock (GPLv2-frozen) bash 3.2 (see add_flag above).
+  local lower
+  lower=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    *.rpm | *.deb | *.tar | *.tar.gz | *.tar.xz | *.tar.bz2 | *.tar.zst | *.tgz | *.conda | *.whl)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -204,8 +227,14 @@ elif [[ "$MODE" == "compare" ]]; then
   # second time just to get JSON. Only needed when the primary format isn't
   # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
   # below). compare-release/appcompat don't build CMD through this branch, so
-  # they keep using the rerun fallback.
-  if [[ "$FORMAT" != "json" ]]; then
+  # they keep using the rerun fallback. MODE=compare dispatches through the
+  # same release-fan-out engine internally when the operands are directories
+  # or packages (regardless of the Action's MODE), and that engine rejects
+  # --secondary-format — skip it there too, so a directory/package compare
+  # under MODE=compare keeps working instead of hard-failing (Codex review).
+  if [[ "$FORMAT" != "json" ]] \
+     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
     CMD+=(--secondary-format json --secondary-output "$PR_JSON")
   fi
