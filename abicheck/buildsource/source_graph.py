@@ -134,6 +134,18 @@ DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: ``fact_set["producer"]`` id of the one ``source_edges`` producer whose
+#: coverage genuinely matches a full, unfiltered call/type-graph replay (Codex
+#: review, PR #555): the Python inline extractor
+#: (``source_extractors/clang.py``) reuses ``call_graph.py``'s/
+#: ``type_graph.py``'s pure AST walk with no public/private filtering. The
+#: ADR-038 C.8 clang plugin's own producer id (``"abicheck-clang-plugin"``)
+#: is deliberately NOT this constant: it only walks call/reference bodies for
+#: functions ``classify()`` accepts (public-header-declared), and never emits
+#: ``DECL_HAS_TYPE`` for a typedef's underlying type or a variable's type —
+#: see :func:`mark_source_edges_extractor_coverage`.
+_FULL_WALK_SOURCE_EDGES_PRODUCER = "abicheck-cc-clang-extractor"
+
 
 def _conf_from_build(conf: Confidence) -> str:
     """Map an ADR-029 build-evidence confidence onto a graph confidence label."""
@@ -1306,6 +1318,28 @@ def mark_source_edges_extractor_coverage(
     such a legacy baseline is compared against a freshly regenerated
     candidate. A mismatched "complete"-with-no-edges is left unmarked here
     (same as absent/unsupported), never silently upgraded.
+
+    Gated on the producer being ``_FULL_WALK_SOURCE_EDGES_PRODUCER`` (Codex
+    review, PR #555): "complete"/"empty-confirmed" only means "every TU's
+    ``source_edges`` collection ran without trouble", not "every function/type
+    in the TU was walked". The Python inline extractor
+    (``clang_source_edges.build_source_edges``) reuses ``call_graph.py``'s/
+    ``type_graph.py``'s full, unfiltered AST walk, so its coverage genuinely
+    matches a standalone replay. The ADR-038 C.8 clang plugin's ``source_edges``
+    does not: ``VisitFunctionDecl`` returns before running ``CallRefVisitor``
+    unless ``classify()`` accepts the function (public-header-declared only --
+    a private/internal helper defined purely in a ``.cpp`` is skipped
+    entirely, its outgoing calls never walked), and it never emits
+    ``DECL_HAS_TYPE`` for a typedef's underlying type or a variable's type (only
+    for function return/parameter types) at all. Aliasing the plugin's
+    ``source_edges`` to full ``call_graph``/``type_graph`` trust would read
+    "the public surface's calls/types were captured" as "the whole TU's
+    call/type graph is confirmed empty beyond what's here" -- hiding a
+    genuinely new dependency added inside a private helper's body, or a
+    changed typedef/variable type, as a false negative. A rolled-up
+    ``fact_set`` that disagrees across TUs, or is missing (pre-C.8 producer,
+    mixed pack), is treated the same as the plugin case: never grant blanket
+    trust without a positive, unambiguous "full walk" signal.
     """
     if surface is None:
         return
@@ -1313,6 +1347,13 @@ def mark_source_edges_extractor_coverage(
     if not isinstance(families, dict):
         return
     state = families.get("source_edges")
+    fact_set = surface.coverage.get("fact_set")
+    full_walk_producer = (
+        isinstance(fact_set, dict)
+        and fact_set.get("producer") == _FULL_WALK_SOURCE_EDGES_PRODUCER
+    )
+    if not full_walk_producer:
+        return
     if state == "empty-confirmed" or (state == "complete" and surface.source_edges):
         graph.extractor_passes["call_graph"] = True
         graph.extractor_passes["type_graph"] = True

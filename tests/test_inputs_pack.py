@@ -252,7 +252,13 @@ def test_ingest_marks_call_type_graph_coverage_from_complete_source_edges(
     from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
 
     tu = _tu("foo", mangled="_Z3foov")
-    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    # producer must be the full-walk extractor id (source_graph.
+    # _FULL_WALK_SOURCE_EDGES_PRODUCER) -- the plugin's source_edges doesn't
+    # walk every function/type, so it can't grant this blanket trust
+    # (Codex review, PR #555).
+    tu.fact_set = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="1"
+    )
     tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
     # "complete" requires entities_present -- non-empty source_edges backs
     # that claim (a "complete" state with no edges is the legacy-drop
@@ -335,7 +341,11 @@ def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
     from abicheck.model import AbiSnapshot, Function
 
     tu = _tu("foo", mangled="_Z3foov")
-    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    # producer must be the full-walk extractor id -- the plugin's
+    # source_edges can't grant this blanket trust (Codex review, PR #555).
+    tu.fact_set = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="1"
+    )
     tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
     # "complete" requires entities_present -- non-empty source_edges backs
     # that claim (a "complete" state with no edges is the legacy-drop

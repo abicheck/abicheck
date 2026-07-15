@@ -566,6 +566,11 @@ def test_build_source_graph_marks_source_edges_dst_defined_in_project() -> None:
     assert dst_node.attrs.get("defined_in_project") is True
 
 
+#: The one source_edges producer whose coverage genuinely matches a full,
+#: unfiltered call/type-graph replay (source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER).
+_FULL_WALK_PRODUCER_FACT_SET = {"producer": "abicheck-cc-clang-extractor"}
+
+
 def test_mark_source_edges_extractor_coverage_when_complete() -> None:
     """A caller that folds source_edges but never runs a call/type-graph
     replay (e.g. Flow-2 pack ingestion) must still translate a
@@ -580,6 +585,7 @@ def test_mark_source_edges_extractor_coverage_when_complete() -> None:
         {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
     ]
     s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert g.extractor_passes["call_graph"] is True
@@ -597,6 +603,7 @@ def test_mark_source_edges_extractor_coverage_legacy_complete_with_no_edges_not_
     # coverage: it's a schema-version gap, not an "empty-confirmed" run.
     s = _sample_surface()
     s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     assert s.source_edges == []  # the legacy-drop scenario
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
@@ -607,6 +614,7 @@ def test_mark_source_edges_extractor_coverage_legacy_complete_with_no_edges_not_
 def test_mark_source_edges_extractor_coverage_empty_confirmed_also_counts() -> None:
     s = _sample_surface()
     s.coverage["fact_family_states"] = {"source_edges": "empty-confirmed"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert g.extractor_passes["call_graph"] is True
@@ -615,6 +623,7 @@ def test_mark_source_edges_extractor_coverage_empty_confirmed_also_counts() -> N
 def test_mark_source_edges_extractor_coverage_skips_when_incomplete() -> None:
     s = _sample_surface()
     s.coverage["fact_family_states"] = {"source_edges": "partial"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert "call_graph" not in g.extractor_passes
@@ -630,8 +639,45 @@ def test_mark_source_edges_extractor_coverage_handles_none_surface_and_malformed
 
     s = _sample_surface()
     s.coverage["fact_family_states"] = "not-a-dict"
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     mark_source_edges_extractor_coverage(g, s)  # must not raise
     assert g.extractor_passes == {}
+
+
+def test_mark_source_edges_extractor_coverage_not_trusted_for_plugin_producer() -> None:
+    # Codex review, PR #555: the ADR-038 C.8 clang plugin's source_edges only
+    # walks call/reference bodies for classify()-accepted (public-header)
+    # functions and never emits DECL_HAS_TYPE for a typedef/variable's type --
+    # aliasing it to full call_graph/type_graph trust would hide a genuinely
+    # new dependency added inside a private helper's body.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = {"producer": "abicheck-clang-plugin"}
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+
+
+def test_mark_source_edges_extractor_coverage_not_trusted_when_producer_unknown() -> (
+    None
+):
+    # A missing/disagreeing rolled-up fact_set (pre-C.8 producer, mixed pack)
+    # must not be treated as "safe to assume the full-walk producer" -- the
+    # gate requires a positive, unambiguous signal.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    assert "fact_set" not in s.coverage or not s.coverage.get("fact_set")
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
 
 
 def test_build_graph_without_surface_is_phase2_only() -> None:

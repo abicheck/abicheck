@@ -1108,7 +1108,26 @@ there is no equivalent "should this be automatic" question for them.
    nowhere to persist them); and `fold_source_edges()` now gates on
    `DEPENDENCY_EDGE_KINDS` rather than the broader `EDGE_KINDS`, so a
    forward-incompatible/malformed row can't silently fold as a decl/decl
-   dependency edge.
+   dependency edge. **ADR-038 C.12 closes a deeper coverage-honesty gap**
+   (Codex review): `mark_source_edges_extractor_coverage()` used to alias
+   *any* confirmed-complete `source_edges` rollup to full `call_graph`/
+   `type_graph` trust — correct for the Python inline extractor (a genuine,
+   unfiltered full-TU walk) but wrong for the clang plugin, whose
+   `source_edges` only walks call/reference bodies for functions
+   `classify()` accepts (public-header-declared; a private/internal helper
+   defined purely in a `.cpp` is skipped entirely, its outgoing calls never
+   captured) and never emits `DECL_HAS_TYPE` for a typedef's underlying type
+   or a variable's type at all (only function return/parameter types).
+   Aliasing the plugin's `source_edges` to full trust would hide a
+   genuinely new dependency added inside a private helper's body, or a
+   changed typedef/variable type, as a false negative — exactly the
+   coverage-honesty failure mode this whole chain exists to prevent. The
+   fix gates the alias on the rolled-up `fact_set["producer"]` being the
+   Python inline extractor's id (`"abicheck-cc-clang-extractor"`); the
+   plugin's own id (`"abicheck-clang-plugin"`), and a missing/disagreeing
+   `fact_set` (pre-C.8 producer, mixed-producer pack), both fall back to no
+   blanket trust — the same conservative default an unrecognized coverage
+   state already gets.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges
