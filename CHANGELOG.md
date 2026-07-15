@@ -734,8 +734,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     `--secondary-format json`, which the release fan-out engine rejects —
     hard-failing a directory/package comparison that previously worked
     under `mode: compare` regardless of the `mode` input. A new
-    `_is_release_style_operand` check (directory, or a recognized package
-    extension) skips the optimization for those operands.
+    `_is_release_style_operand` check (directory, a recognized package
+    extension, or an extensionless RPM/Deb detected by magic bytes —
+    mirroring `package.py`'s own `is_package()` fallback, since
+    `classify_compare_operand()` uses it regardless of filename) skips the
+    optimization for those operands.
+  - The secondary render reused the *primary* format's resolved `--demangle`
+    default instead of resolving its own: pairing a machine primary format
+    (e.g. `--format json`) with a text `--secondary-format markdown`/`review`
+    got raw mangled C++ names in the secondary report even though
+    markdown/review default to demangling ON. `demangle` is now resolved
+    against `secondary_fmt` independently (honouring an explicit
+    `--demangle`/`--no-demangle` either way).
+  - The `finding_id` schema/docs contract still described the fingerprint as
+    a hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location` only,
+    omitting `description` (added earlier in this same list to fix
+    same-symbol collisions) — a waiver/correlation tool following the
+    documented contract would compute different IDs than abicheck actually
+    emits. Docs and schema description updated to match.
 
 - **SARIF `_parse_source_location` still mishandled a path containing a
   colon before the line separator** (e.g. a synthetic scheme like

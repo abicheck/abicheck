@@ -274,7 +274,7 @@
         },
         "finding_id": {
           "type": "string",
-          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location, truncated to 16 hex chars) — lets a consumer correlate the same finding across two report runs without relying on array order. Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy."
+          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars) — lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy."
         },
         "recommended_action": {
           "type": "string",

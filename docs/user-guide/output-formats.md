@@ -348,15 +348,19 @@ Each finding in `changes[]` also carries:
   filter findings by operation without hand-maintaining its own list of
   `_added`/`_removed` kind-name suffixes.
 - **`finding_id`** — a stable, deterministic fingerprint (a truncated SHA-256
-  hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`) that
-  identifies *this finding* independent of its position in the `changes[]`
-  array. Two `compare` runs over the same underlying change produce the same
-  `finding_id`, so a consumer can correlate a finding across two report runs
-  (e.g. tracking a waiver, or diffing which findings are new between two CI
-  runs) without relying on array order or index, neither of which abicheck
-  guarantees stays stable release to release. `finding_id` deliberately
-  excludes policy-derived fields (`severity`, `evidence_status`) — the same
-  underlying finding hashes identically regardless of the active `--policy`.
+  hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`/
+  `description`) that identifies *this finding* independent of its position
+  in the `changes[]` array. Two `compare` runs over the same underlying
+  change produce the same `finding_id`, so a consumer can correlate a
+  finding across two report runs (e.g. tracking a waiver, or diffing which
+  findings are new between two CI runs) without relying on array order or
+  index, neither of which abicheck guarantees stays stable release to
+  release. `description` is included specifically to disambiguate two
+  otherwise-identical findings on the same symbol (e.g. the same
+  pointer-depth change reported on two different parameters of one
+  function). `finding_id` deliberately excludes policy-derived fields
+  (`severity`, `evidence_status`) — the same underlying finding hashes
+  identically regardless of the active `--policy`.
 
 ```json
 {

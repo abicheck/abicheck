@@ -65,14 +65,17 @@ add_single_flag() {
   fi
 }
 
-# A directory, or a file whose name matches a recognized package extension
-# (mirrors package.py's is_package() name-suffix check; extensionless
-# RPM/Deb detected only by magic bytes is not covered here). `compare` fans
-# such an operand out through the release engine internally regardless of
-# the Action's MODE, and the release engine rejects --secondary-format
-# (Codex review, PR #557) — used to skip the --secondary-format optimization
-# for compare mode's PR-comment JSON rather than let it hard-fail a
-# directory/package comparison that used to work.
+# A directory, a file whose name matches a recognized package extension, or
+# an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
+# is_package(), including its magic-byte fallback — abicheck/package.py:547-554
+# — since classify_compare_operand() delegates to it regardless of filename;
+# a name-suffix-only check here would still let the Action add
+# --secondary-format for such an operand and have the CLI reject it, Codex
+# review, PR #557). `compare` fans such an operand out through the release
+# engine internally regardless of the Action's MODE, and the release engine
+# rejects --secondary-format — used to skip the --secondary-format
+# optimization for compare mode's PR-comment JSON rather than let it
+# hard-fail a directory/package comparison that used to work.
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -84,6 +87,16 @@ _is_release_style_operand() {
     *.rpm | *.deb | *.tar | *.tar.gz | *.tar.xz | *.tar.bz2 | *.tar.zst | *.tgz | *.conda | *.whl)
       return 0
       ;;
+  esac
+  [[ -f "$path" ]] || return 1
+  # Extensionless RPM (0xedabeedb lead magic) / Deb (ar archive "!<arch>\n")
+  # packages — read the first 8 bytes as hex (binary-safe; a bash string
+  # would truncate at an embedded NUL) and compare.
+  local magic
+  magic=$(od -An -tx1 -N 8 "$path" 2>/dev/null | tr -d ' \n')
+  case "$magic" in
+    edabeedb*) return 0 ;;          # RPM lead magic (first 4 bytes)
+    213c617263683e0a) return 0 ;;   # "!<arch>\n" (Deb ar archive, 8 bytes)
   esac
   return 1
 }

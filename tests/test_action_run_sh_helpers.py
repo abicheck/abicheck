@@ -223,3 +223,27 @@ class TestIsReleaseStyleOperand:
         # extension by name — the required-args guard in run.sh catches a
         # genuinely missing operand before this check ever runs.
         assert not _run_predicate('_is_release_style_operand "/no/such/path.so"')
+
+    def test_extensionless_rpm_detected_by_magic_bytes(self, tmp_path) -> None:
+        # abicheck/package.py:is_package() classifies an extensionless RPM by
+        # its lead magic (0xedabeedb) regardless of filename — the Action's
+        # name-suffix-only precheck missed this, so it would still add
+        # --secondary-format for an operand the CLI goes on to reject
+        # (Codex review, PR #557).
+        f = tmp_path / "libfoo-release"
+        f.write_bytes(b"\xed\xab\xee\xdb\x00\x00\x03\x00" + b"\x00" * 90)
+        assert _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_extensionless_deb_detected_by_magic_bytes(self, tmp_path) -> None:
+        # Deb packages are ar archives ("!<arch>\n" magic) — also detected
+        # without a .deb extension by package.py's is_package().
+        f = tmp_path / "libfoo-release"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 90)
+        assert _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_extensionless_plain_binary_not_release_style(self, tmp_path) -> None:
+        # A real shared library's ELF magic (0x7f 'ELF') must not be
+        # mistaken for RPM/Deb.
+        f = tmp_path / "libfoo.so.1"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 92)
+        assert not _run_predicate(f'_is_release_style_operand "{f}"')

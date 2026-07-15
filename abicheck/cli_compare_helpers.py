@@ -593,6 +593,11 @@ def run_compare(
         jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
     )
 
+    # Preserved before _normalize_compare_options resolves `demangle` against
+    # the *primary* fmt below — the secondary render needs the same tri-state
+    # input resolved against `secondary_fmt` instead (see its call site).
+    demangle_explicit = demangle
+
     (
         collect_mode, headers, old_headers_only, new_headers_only,
         effective_debug_format, demangle, report_mode, show_impact,
@@ -863,6 +868,14 @@ def run_compare(
         # set the gate actually acted on, not whatever the primary format
         # chose to filter or group down to. Reuses the same already-computed
         # `result` — no second comparison run.
+        # Resolve demangle against secondary_fmt, not the primary-resolved
+        # value above — otherwise a machine primary format (e.g. json) paired
+        # with a markdown/review secondary format would wrongly inherit
+        # demangle=False into the secondary render (Codex review, PR #557).
+        secondary_demangle = (
+            secondary_fmt in {"markdown", "review"}
+            if demangle_explicit is None else demangle_explicit
+        )
         secondary_text = _render_output(
             secondary_fmt, result, old, new,
             follow_deps=follow_deps,
@@ -870,7 +883,7 @@ def run_compare(
             show_impact=show_impact, stat=False,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
             show_recommendation=recommend,
-            demangle=demangle,
+            demangle=secondary_demangle,
         )
         _write_or_echo(secondary_output, secondary_text)
 

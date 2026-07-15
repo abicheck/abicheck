@@ -237,6 +237,24 @@ class TestCompareSecondaryFormat:
         assert "leaf_changes" not in parsed
         assert parsed["changes"]
 
+    def test_secondary_format_resolves_own_demangle_default(self, tmp_path):
+        # demangle is resolved per-format (markdown/review default ON, json/
+        # sarif/html/junit default OFF) — a machine primary format (json)
+        # must not force demangle=False onto a markdown/review secondary
+        # render just because that's the primary's own default
+        # (Codex review, PR #557).
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.md"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "json",
+            "--secondary-format", "markdown", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        secondary_text = secondary_out.read_text(encoding="utf-8")
+        assert "_Z3barv" not in secondary_text
+        assert "bar" in secondary_text
+
     def test_secondary_format_requires_secondary_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
