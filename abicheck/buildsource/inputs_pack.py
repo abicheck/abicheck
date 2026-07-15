@@ -501,6 +501,17 @@ def read_source_facts(
     root = Path(root)
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
+    # Captured before ANY discovery/read step below (mirrors
+    # compact_inputs_pack's before_diag_count) -- _iter_source_fact_files()
+    # itself can append a diagnostic (an explicitly-named source_facts entry
+    # that resolves to no readable files, or an escaping/unsafe path) for
+    # what may well be one of the *fresh* per-TU entries below. If that
+    # diagnostic is not counted here, a rebuilt/removed TU whose fresh file
+    # corresponds to the unresolved entry never shows up as "lossy" -- its
+    # stale last_compacted record then survives untouched, hiding a real
+    # discovery problem behind what looks like a clean carry-forward (Codex
+    # review).
+    fresh_before = len(sink)
     files = _iter_source_fact_files(root, manifest, sink)
 
     prior_files: list[Path] = []
@@ -527,7 +538,6 @@ def read_source_facts(
     # the one TU we cannot identify -- matching compact_inputs_pack's own
     # all-or-nothing fail-closed rule for a lossy read, rather than guessing
     # which subset of prior records might still be safe.
-    fresh_before = len(sink)
     fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
     fresh_lossy = len(sink) > fresh_before
     fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}

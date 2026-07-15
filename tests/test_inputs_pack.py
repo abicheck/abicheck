@@ -599,6 +599,44 @@ def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
     assert rec.status == "partial"
 
 
+def test_read_source_facts_fails_closed_when_fresh_discovery_is_lossy(
+    tmp_path: Path,
+) -> None:
+    """A manifest listing ``last_compacted`` plus an explicit fresh entry that
+    fails to resolve (e.g. a rebuilt TU's file went missing/typo'd) must not
+    silently serve the stale ``last_compacted`` record for that TU.
+    ``_iter_source_fact_files()``'s "resolved to no readable fact files"
+    discovery diagnostic fires before ``read_source_facts()``'s own
+    fresh-vs-prior split, so it must be counted toward "was this a lossy
+    fresh read" the same way a fresh file that fails to *parse* already is —
+    otherwise the discovery-time diagnostic is silently absorbed and the
+    stale prior-compaction record for the missing TU is carried forward as
+    if nothing were wrong (Codex review)."""
+    pack = tmp_path / "abicheck_inputs"
+    (pack / "source_facts").mkdir(parents=True)
+    stale = _tu("a", mangled="_Z1av")
+    (pack / "source_facts" / "compacted.jsonl").write_text(
+        json.dumps(stale.to_dict()) + "\n", encoding="utf-8"
+    )
+    manifest = {
+        "kind": INPUTS_KIND,
+        "abicheck_inputs_version": ABICHECK_INPUTS_VERSION,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "created_by": "abicheck-clang-plugin 0.1",
+        "source_facts": ["source_facts/compacted.jsonl", "source_facts/a.new.jsonl"],
+        "last_compacted": "source_facts/compacted.jsonl",
+    }
+    (pack / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    assert any("resolved to no readable fact files" in d for d in diagnostics)
+    # Fails closed: the stale prior-compaction record for "a" must not be
+    # silently served once an explicit fresh entry couldn't be found.
+    assert tus == []
+
+
 def test_ingest_diagnoses_explicit_missing_compile_db(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,
