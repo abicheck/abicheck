@@ -688,6 +688,8 @@ def _attach_header_graph(
             [str(p) for p in resolved_headers],
             [str(p) for p in eff_includes],
             language="C" if lang == "c" else "CXX",
+            sysroot=str(cc.sysroot) if cc.sysroot else None,
+            nostdinc=cc.nostdinc,
             gcc_options=cc.gcc_options,
             gcc_option_tokens=eff_tokens,
         )

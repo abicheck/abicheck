@@ -369,3 +369,93 @@ def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> Non
         e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == pub_id for e in graph.edges
     )
     assert graph.coverage["include_edges"]["collected"] is True
+
+
+def test_ast_only_reference_target_gets_visibility_even_when_unseeded() -> None:
+    # Codex review: a private declaration referenced only via
+    # DECL_REFERENCES_DECL (e.g. an EnumConstantDecl) has no equivalent
+    # entity in the flat AbiSnapshot model to seed from
+    # snapshot.functions/snapshot.variables — it must still get visibility
+    # from its own edge's declaring file, or is_internal_dependency_node
+    # treats it as third-party/system and the public_to_internal_dependency
+    # finding never fires.
+    ast = _tu(
+        # The real, top-level declaration — this is what
+        # `_index_declared_entities` indexes into `decl_file`, giving the
+        # reference stub below something to resolve its file against (clang
+        # commonly emits an incomplete referencedDecl stub with no `loc` of
+        # its own).
+        {
+            "kind": "EnumDecl",
+            "name": "Color",
+            "loc": _loc(PRIVATE_HEADER),
+            "inner": [
+                {
+                    "kind": "EnumConstantDecl",
+                    "name": "RED",
+                    "mangledName": "_ZN5Color3REDE",
+                    "loc": _loc(PRIVATE_HEADER),
+                },
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "loc": _loc(PUBLIC_HEADER),
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            "referencedDecl": {
+                                "kind": "EnumConstantDecl",
+                                "name": "RED",
+                                "mangledName": "_ZN5Color3REDE",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    graph = build_header_only_graph(
+        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+    )
+    node_by_id = {n.id: n for n in graph.nodes}
+    target_id = "decl://_ZN5Color3REDE"
+    assert target_id in node_by_id
+    assert node_by_id[target_id].attrs["visibility"] == "private_header"
+    assert any(
+        e.kind == "DECL_REFERENCES_DECL" and e.dst == target_id for e in graph.edges
+    )
+    exported: set[str] = set()
+    assert is_internal_dependency_node(target_id, node_by_id, exported, {})
+
+
+def test_header_include_extractor_forwards_sysroot_and_nostdinc(
+    tmp_path, monkeypatch
+) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    pub = tmp_path / "pub.h"
+    pub.write_text("void f();\n")
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_argv = {}
+
+    def _fake_run(cmd, **_kwargs):
+        seen_argv["cmd"] = cmd
+
+        class _Proc:
+            stdout = f"pub.o: {pub}"
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    ClangHeaderIncludeExtractor().extract(
+        [str(pub)], [], sysroot="/opt/cross-sysroot", nostdinc=True
+    )
+    assert "--sysroot=/opt/cross-sysroot" in seen_argv["cmd"]
+    assert "-nostdinc" in seen_argv["cmd"]

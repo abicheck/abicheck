@@ -269,8 +269,54 @@ def build_header_only_graph(
                 )
             )
 
-        augment_graph_with_types(graph, parse_clang_ast_types(ast_root))
-        augment_graph_with_calls(graph, parse_clang_ast_calls(ast_root))
+        type_edges = parse_clang_ast_types(ast_root)
+        call_edges = parse_clang_ast_calls(ast_root)
+        # Annotate any AST-only decl target `augment_graph_with_types`/
+        # `augment_graph_with_calls` would otherwise create with no
+        # provenance at all — a private declaration that isn't a function or
+        # (namespace-scope) variable, e.g. an `EnumConstantDecl` referenced
+        # by `inline int f() { return Color::RED; }`, is never seeded by the
+        # `snapshot.functions`/`snapshot.variables` loop above, since the
+        # flat AbiSnapshot model has no equivalent per-enumerator entity to
+        # iterate. The build-integrated path backfills this via
+        # `augment_graph_with_types`'s `project_files` parameter (matched
+        # against `BuildEvidence`'s compile-unit sources); a header-only
+        # world has no such set, but each edge already carries its own
+        # target's declaring file (`dst_file`/`callee_file`/`caller_file`),
+        # which is exactly what `classify_origin` needs (Codex review).
+        for identity, file in (
+            *(
+                (e.dst, e.dst_file)
+                for e in type_edges
+                if e.kind == "DECL_REFERENCES_DECL"
+            ),
+            *((e.caller, e.caller_file) for e in call_edges),
+            *((e.callee, e.callee_file) for e in call_edges),
+        ):
+            if not identity or not file:
+                continue
+            node_id = _decl_node_id(identity)
+            if graph.has_node(node_id):
+                continue
+            origin = classify_origin(
+                file, header_segs, dir_segs, have_public_set=have_public_set
+            )
+            attrs = (
+                {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
+            )
+            graph.add_node(
+                GraphNode(
+                    id=node_id,
+                    kind="source_decl",
+                    label=identity,
+                    provenance=_PROVENANCE,
+                    confidence=CONF_HIGH,
+                    attrs=attrs,
+                )
+            )
+
+        augment_graph_with_types(graph, type_edges)
+        augment_graph_with_calls(graph, call_edges)
         # A header-only pass is a single parse over the whole header
         # aggregate — never narrowed/scoped like a per-compile-unit
         # build-integrated pass, and ``_clang_header_dump`` raises on a
@@ -319,6 +365,8 @@ class ClangHeaderIncludeExtractor:
         includes: list[str],
         *,
         language: str = "CXX",
+        sysroot: str | None = None,
+        nostdinc: bool = False,
         gcc_options: str | None = None,
         gcc_option_tokens: tuple[str, ...] = (),
     ) -> tuple[dict[str, list[str]], list[str]]:
@@ -331,6 +379,13 @@ class ClangHeaderIncludeExtractor:
         this include pass silently missing edges the AST pass could resolve
         (Codex review: an earlier version of this method only forwarded
         *gcc_option_tokens*, the deferred-``-isystem`` roots, not this).
+        *sysroot*/*nostdinc* are the same cross/hermetic-toolchain flags the
+        AST pass receives (``--sysroot=<path>``/``-nostdinc``) — without
+        them a cross-compiled or ``--nostdinc`` header context resolves this
+        include pass against the *host*'s system headers instead (or fails
+        outright under ``-nostdinc``), producing missing or wrong
+        ``COMPILE_UNIT_INCLUDES_FILE`` edges for the same headers the AST
+        pass parsed correctly (Codex review).
         """
         import shlex
 
@@ -342,12 +397,18 @@ class ClangHeaderIncludeExtractor:
         extra_tokens = (
             shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
         )
+        toolchain_tokens: list[str] = []
+        if sysroot:
+            toolchain_tokens.append(f"--sysroot={sysroot}")
+        if nostdinc:
+            toolchain_tokens.append("-nostdinc")
         compile_units = [
             CompileUnit(
                 id=_header_node_id(h),
                 source=h,
                 argv=[
                     *(f"-I{i}" for i in includes),
+                    *toolchain_tokens,
                     *extra_tokens,
                     *gcc_option_tokens,
                     h,
