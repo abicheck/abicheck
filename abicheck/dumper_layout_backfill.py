@@ -317,6 +317,26 @@ def backfill_dwarf_layout(
         # near-fixed and small regardless of identity — the same bounded,
         # low-consequence residual risk already accepted for the plain
         # fieldless-tag-type case above.
+        #
+        # A namespaced class with *only* virtual methods (no fields, no
+        # bases, no anonymous-aggregate flatten) is a deliberately accepted
+        # gap in this same vein, not an oversight (Codex review): it too is
+        # fieldless/baseless with a real, non-empty ``dwarf.vtable``, so by
+        # the reasoning just above it would need a structural signal on the
+        # *header* side analogous to ``has_anonymous_aggregate_fields`` —
+        # but "the class declares a virtual method" only demonstrates that
+        # *some* class does, not that this unique suffix-matched candidate
+        # is that same one; unlike anonymous-aggregate flattening (a fact
+        # about field provenance) or field/base-name overlap (specific
+        # identifiers), "has a vtable" is a coarse category shared by
+        # every polymorphic class in the binary. Trusting it here would
+        # reintroduce exactly the over-trust the ``not dwarf.vtable``
+        # guard above exists to prevent, just from the opposite class
+        # shape. Closing this safely would need to cross-reference actual
+        # member-function names/mangled symbols between the header and
+        # DWARF views — data this function doesn't have (only
+        # ``RecordType``s, not the snapshot's ``functions`` list) — so it's
+        # left unbackfilled (stays ``None``) rather than guessed.
         return header.has_anonymous_aggregate_fields and not dwarf.vtable
 
     out: list[RecordType] = []
