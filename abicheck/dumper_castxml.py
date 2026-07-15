@@ -264,7 +264,56 @@ class _CastxmlParser:
             max_ = el.get("max", "")
             base = self._type_name(el.get("type", ""), depth + 1)
             return f"{base}[{max_}]" if max_ else f"{base}[]"
+        if tag == "Unimplemented" and el.get("type_class") == "Atomic":
+            # castxml cannot model C11 _Atomic: it emits a bare Unimplemented
+            # node with no `type` reference to the wrapped type at all, so the
+            # inner type name can't be recovered here. Spell it "_Atomic" (not
+            # the literal tag name) so diff_atomic.py's _has_atomic() can still
+            # detect the qualifier being added/removed on this slot.
+            return "_Atomic"
         return el.get("name", tag)
+
+    def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
+        """Namespace/enclosing-class-qualified name for a Struct/Class/Union
+        element, or ``None`` if it's already at global scope (or a cycle /
+        depth cap was hit).
+
+        Walks castxml's ``context`` chain — each Struct/Class/Union/Namespace
+        element points at its lexical parent via ``context`` — prepending each
+        ancestor's name, stopping at the root ``Namespace`` (``name="::"``,
+        which itself carries no ``context``). Used only where a real namespace
+        path is required (internal-leak detection, SYCL-queue param matching);
+        ``RecordType.name`` itself stays bare (see its docstring in model.py).
+        """
+        segments: list[str] = []
+        seen_ids: set[str] = set()
+        cur = el
+        for _ in range(16):
+            ctx_id = cur.get("context", "")
+            if not ctx_id or ctx_id in seen_ids:
+                break
+            seen_ids.add(ctx_id)
+            parent = self._resolve(ctx_id)
+            if parent is None:
+                break
+            if parent.tag == "Namespace":
+                pname = parent.get("name", "")
+                if pname and pname != "::":
+                    segments.append(pname)
+                cur = parent
+                continue
+            if parent.tag in ("Struct", "Class", "Union"):
+                pname = parent.get("name", "")
+                if pname:
+                    segments.append(pname)
+                cur = parent
+                continue
+            break
+        leaf = leaf_name if leaf_name is not None else el.get("name", "")
+        if not segments or not leaf:
+            return None
+        segments.reverse()
+        return "::".join([*segments, leaf])
 
     def _pointer_depth(self, id_: str, depth: int = 0) -> int:
         """Count pointer nesting depth: T=0, T*=1, T**=2, etc."""
@@ -350,6 +399,31 @@ class _CastxmlParser:
         if access == AccessLevel.PUBLIC and not is_deleted and not is_artificial:
             return Visibility.PUBLIC
         return Visibility.HIDDEN
+
+    def _variable_visibility(self, el: Element, mangled: str, name: str) -> Visibility:
+        """Visibility for a namespace-scope Variable element, with a
+        no-symbol-emitted fallback for genuine customisation point objects.
+
+        A real CPO (``inline constexpr __sort_fn sort{};``) has external
+        linkage but, when never ODR-used, the compiler emits **no** symbol
+        for it at all — not even a local one — so ``_visibility()``'s ELF
+        lookup correctly finds nothing and defaults to HIDDEN. That hid a
+        CPO's own kind-changed finding: ``detect_cpo_kind_changed``
+        (diff_templates.py) requires ``visibility == PUBLIC`` to consider a
+        variable at all (case88).
+
+        Falls back to PUBLIC only when castxml's own attributes rule out
+        internal linkage: no ``static="1"`` (an explicit C++ ``static``) and
+        no anonymous-namespace mangling marker (``_GLOBAL__N_1``) — the same
+        "declared public, without contrary evidence" principle already
+        applied to constructors (:meth:`_constructor_visibility`).
+        """
+        vis = self._visibility(mangled, name)
+        if vis is not Visibility.HIDDEN:
+            return vis
+        if el.get("static") == "1" or "_GLOBAL__N_1" in mangled:
+            return Visibility.HIDDEN  # genuine internal linkage, not just unexported
+        return Visibility.PUBLIC
 
     def _is_builtin_element(self, el: Element) -> bool:
         """Return True if element originates from a compiler built-in pseudo-file.
@@ -576,6 +650,29 @@ class _CastxmlParser:
         params, is_variadic = self._parse_function_params(el)
         mangled = self._function_mangled_name(el, name, params, raw_mangled)
 
+        # Real ELF export evidence overrides castxml's language-mode guess:
+        # castxml ALWAYS emits a pseudo-Itanium `mangled` attribute, even for
+        # a plain C function parsed in ambiguous/C++ mode (confirmed
+        # empirically — the "C functions: use plain name" fallback in
+        # _function_mangled_name is otherwise dead code, since raw_mangled is
+        # never actually empty). When that guessed mangling matches no real
+        # exported symbol at all while the function's bare declared name
+        # *is* a real export, that's strong, low-false-positive-risk
+        # evidence the function actually has C linkage — a genuine C++
+        # function's real compiled export would essentially never coincide
+        # with its bare unqualified name. Use the bare name as the
+        # canonical symbol identity instead (case141).
+        if (
+            el.tag == "Function"
+            and mangled.startswith("_Z")
+            and mangled not in self._exported_dynamic
+            and name in self._exported_dynamic
+        ):
+            mangled = name
+            is_extern_c_override = True
+        else:
+            is_extern_c_override = False
+
         is_virtual = el.get("virtual") == "1"
         noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
         vtable_index = (
@@ -588,6 +685,7 @@ class _CastxmlParser:
             or (
                 not raw_mangled and el.tag == "Function"
             )  # C functions have no mangled name
+            or is_extern_c_override
         )
 
         source_loc, loc_el = self._function_source_location(el)
@@ -656,7 +754,7 @@ class _CastxmlParser:
             is_const = el.get("const") == "1" or bool(
                 re.search(r"\bconst\b", type_name)
             )
-            vis = self._visibility(mangled, name)
+            vis = self._variable_visibility(el, mangled, name)
             variables.append(
                 Variable(
                     name=name,
@@ -901,6 +999,7 @@ class _CastxmlParser:
             # when non-polymorphic so the diff can tell "gained a vptr" apart.
             vptr_offset_bits=0 if vtable else None,
             base_offsets=base_offsets,
+            qualified_name=self._qualified_type_name(el, leaf_name=name),
             # castxml records the `final` class-key specifier as a `final`
             # token inside the compound ``attributes`` string (e.g.
             # ``attributes="final"``), the same channel used for noexcept.

@@ -278,6 +278,33 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
+def _typename_is_internal(
+    typename: str,
+    type_map: dict[str, RecordType],
+    internal_namespaces: Iterable[str],
+) -> bool:
+    """Like :func:`is_internal_type`, but also consults the matching
+    ``RecordType.qualified_name`` when the bare *typename* itself carries no
+    namespace segment.
+
+    ``RecordType.name`` (and every bare spelling derived from it — bases,
+    field types, param/return types) is deliberately unqualified so it keeps
+    matching the DWARF backend's equally-bare struct names (see
+    ``RecordType.qualified_name``'s docstring in model.py); castxml is the
+    only source that can currently recover the real namespace path, and only
+    via that separate field. Without this fallback, a type genuinely declared
+    in an internal namespace (``mylib::detail::descriptor_base``) is invisible
+    to :func:`is_internal_type` once reduced to its bare spelling
+    (``descriptor_base``), silently disabling the leak check for it.
+    """
+    if is_internal_type(typename, internal_namespaces):
+        return True
+    rec = type_map.get(typename)
+    if rec is not None and rec.qualified_name:
+        return is_internal_type(rec.qualified_name, internal_namespaces)
+    return False
+
+
 def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     """Build a type-name → RecordType map for *snap*.
 
@@ -452,7 +479,7 @@ def _seed_queue_from_public_types(
     if is_dwarf_fallback:
         return
     for seed_name in type_map:
-        if seed_name and not is_internal_type(seed_name, internal_set):
+        if seed_name and not _typename_is_internal(seed_name, type_map, internal_set):
             queue.append((seed_name, [f"type:{seed_name}"]))
 
 
@@ -543,14 +570,14 @@ def _bfs_collect_paths(
             # Still record the leak if this typename is internal — paths
             # vary by entry point, but the *first* recorded one is enough
             # for user-facing reporting.
-            if is_internal_type(typename, internal_set):
+            if _typename_is_internal(typename, type_map, internal_set):
                 paths[typename].append(list(path + [typename]))
             continue
         visited.add(key)
 
         _enqueue_typedef_targets(typename, typedefs or {}, path, queue)
 
-        if is_internal_type(typename, internal_set):
+        if _typename_is_internal(typename, type_map, internal_set):
             paths[typename].append(list(path + [typename]))
 
         rec = type_map.get(typename)
@@ -748,6 +775,7 @@ def _path_is_value_propagating(path: list[str], snap: AbiSnapshot | None = None)
 def _collect_internal_changes(
     changes: list[Change],
     internal_set: tuple[str, ...],
+    type_map: dict[str, RecordType],
 ) -> dict[str, list[Change]]:
     """Phase 1: bucket changes by internal type name.
 
@@ -761,7 +789,7 @@ def _collect_internal_changes(
         # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
         # qualifier so we look up the type itself.
         type_name = _root_type_name_for_change(c)
-        if is_internal_type(type_name, internal_set):
+        if _typename_is_internal(type_name, type_map, internal_set):
             internal_changes[type_name].append(c)
     return internal_changes
 
@@ -843,7 +871,13 @@ def detect_internal_leaks(
     entry points, the description lists up to three of them.
     """
     internal_set = tuple(internal_namespaces)
-    internal_changes = _collect_internal_changes(changes, internal_set)
+    # Merge both sides' type maps so a change's bare symbol resolves to its
+    # RecordType.qualified_name regardless of which snapshot it belongs to
+    # (an added/removed type only appears on one side).
+    old_type_map, _ = _build_type_map(old)
+    new_type_map, _ = _build_type_map(new)
+    merged_type_map = {**old_type_map, **new_type_map}
+    internal_changes = _collect_internal_changes(changes, internal_set, merged_type_map)
     if not internal_changes:
         return []
 

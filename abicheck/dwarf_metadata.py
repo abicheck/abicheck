@@ -574,6 +574,11 @@ def _compute_type_info(
         qualifier = tag.split("_")[2].lower()
         return _compute_qualified_type_info(die, CU, depth, cache, qualifier)
 
+    if tag == "DW_TAG_atomic_type":
+        # Spelled "_Atomic" (not the generic tag.split() lowercase form) so it
+        # matches the C11 keyword diff_atomic.py's _has_atomic() looks for.
+        return _compute_qualified_type_info(die, CU, depth, cache, "_Atomic")
+
     if tag == "DW_TAG_typedef":
         return _compute_typedef_info(die, CU, depth, cache)
 

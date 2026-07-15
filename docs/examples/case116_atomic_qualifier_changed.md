@@ -9,7 +9,6 @@
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `atomic_qualifier_changed` |
 | **Source files** | `examples/case116_atomic_qualifier_changed/` |
-| **Known kind gap** | `atomic_qualifier_changed` — verdict is correct; see note below |
 
 **Category:** Binary ABI break / C11 | **Verdict:** 🔴 BREAKING
 
@@ -37,10 +36,6 @@ names the `_Atomic` root cause.
 - `app.c` — consumer built against the plain interface
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap:** The overall verdict (BREAKING) is correct via type_field_type_changed, but atomic_qualifier_changed never fires — a real, root-caused detector gap in both metadata layers diff_atomic.py's regex detector (_ATOMIC_RE) reads from. DWARF: dwarf_metadata.py only special-cases DW_TAG_const_type/volatile_type/restrict_type; DW_TAG_atomic_type (which gcc does emit) falls through to a fallback path that never recurses into the wrapped inner type and never spells '_Atomic'. Headers: castxml cannot model _Atomic at all and emits an Unimplemented AtomicType node, which dumper_castxml.py's final fallback renders as the literal string 'Unimplemented' for the field's type. Neither layer ever produces a type string containing '_Atomic', so _has_atomic() is False on both sides and the dedicated detector always skips; the generic type_field_type_changed fires instead on the real 'int'->'Unimplemented' string diff.
 
 ## Source files
 

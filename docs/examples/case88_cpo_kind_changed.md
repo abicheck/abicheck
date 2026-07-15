@@ -9,7 +9,6 @@
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `cpo_kind_changed` |
 | **Source files** | `examples/case88_cpo_kind_changed/` |
-| **Known kind gap** | `cpo_kind_changed` — verdict is correct; see note below |
 
 ## What this case demonstrates
 
@@ -41,10 +40,6 @@ symbol churn lines.
 with `lib::sort` must be updated.
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed/constant_added, but cpo_kind_changed never fires — a real, root-caused detector gap. detect_cpo_kind_changed's _var_names requires Variable.visibility == PUBLIC, but dumper_castxml.py's parse_variables always computes visibility via the plain ELF-lookup path, with no header-declared-public fallback (unlike _constructor_visibility, which got exactly this fallback for the analogous case78/case111 gap). A real CPO like `inline constexpr __sort_fn sort{}` emits no ELF symbol at all when it has no forced ODR-use (the canonical, correct shape) — confirmed live, only operator() is exported — so it is classified hidden and excluded from _var_names, and the function-to-variable correlation never fires.
 
 ## Source files
 

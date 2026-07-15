@@ -165,9 +165,14 @@ class TestInternalTemplateLeaks:
 
 
 class TestCpoKindChanged:
+    # Variables use a bare, unqualified name ("sort") to match real castxml
+    # output — it never namespace-qualifies Variable elements, unlike the
+    # demangled function name ("lib::sort"), which is qualified. The
+    # detector's _func_names reduces to the same bare leaf name so the two
+    # sides can correlate (see _bare_leaf_name in diff_templates.py).
     def test_function_became_variable(self) -> None:
         old = _snap(funcs=[_fn("lib::sort")])
-        new = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn")])
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -176,7 +181,7 @@ class TestCpoKindChanged:
         assert c.new_value == "variable"
 
     def test_variable_became_function(self) -> None:
-        old = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        old = _snap(vars_=[_var("sort", type_="lib::__sort_fn")])
         new = _snap(funcs=[_fn("lib::sort")])
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
@@ -193,9 +198,9 @@ class TestCpoKindChanged:
         # false positives.
         old = _snap(
             funcs=[_fn("lib::sort")],
-            vars_=[_var("lib::sort")],
+            vars_=[_var("sort")],
         )
-        new = _snap(vars_=[_var("lib::sort")])
+        new = _snap(vars_=[_var("sort")])
         assert detect_cpo_kind_changed(old, new) == []
 
 
@@ -387,7 +392,9 @@ class TestCombined:
                 _fn("lib::__detail::walk<char>"),
                 _fn("lib::make", return_type="lib::Foo"),
             ],
-            vars_=[_var("lib::sort", type_="lib::__sort_fn")],
+            # Bare, unqualified name — matches real castxml Variable output
+            # (see TestCpoKindChanged's comment).
+            vars_=[_var("sort", type_="lib::__sort_fn")],
         )
         changes = detect_template_patterns(old, new)
         kinds = {c.kind for c in changes}

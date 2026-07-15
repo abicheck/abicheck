@@ -119,6 +119,30 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
+def _bare_leaf_name(qualified: str) -> str:
+    """Reduce a (possibly namespace-qualified, demangled) function signature
+    to its bare leaf identifier: strip the parameter-list signature (from
+    the first top-level ``(``) and any ``::``-qualification.
+
+    Used to compare a function's demangled name (``lib::sort(int*, int*)``)
+    against a variable's bare, unqualified ``name`` (castxml never
+    namespace-qualifies ``Variable`` elements — see ``_var_names`` in
+    :func:`detect_cpo_kind_changed`), so the two sides of a customization
+    point object's function<->variable transition can actually match by name.
+    """
+    depth = 0
+    cut = len(qualified)
+    for i, ch in enumerate(qualified):
+        if ch == "(":
+            if depth == 0:
+                cut = i
+                break
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    return qualified[:cut].rsplit("::", 1)[-1]
+
+
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
 # ---------------------------------------------------------------------------
@@ -261,7 +285,7 @@ def detect_cpo_kind_changed(
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                out.add(_strip_template_args(qname))
+                out.add(_bare_leaf_name(_strip_template_args(qname)))
         return out
 
     def _var_names(snap: AbiSnapshot) -> set[str]:
@@ -596,21 +620,43 @@ def detect_missing_instantiations(
     PR #239; the heuristic (instantiation = function name contains
     ``<`` at top level) is library-agnostic. Re-exported from
     :mod:`abicheck.diff_cpp_patterns` for backwards compatibility.
+
+    Uses :func:`_qualified_function_name` (demangles when ``Function.name``
+    itself carries no ``<...>``) rather than the raw ``name`` field: the
+    header/castxml backend populates ``.name`` from the bare AST method name
+    only (e.g. ``threshold``, never ``descriptor<float>::threshold``), so
+    template args are never present there and this check could otherwise
+    never match a real instantiation (case79).
+
+    Both the "still present" and "enclosing template survives" checks are
+    scoped to Visibility.PUBLIC functions: a header can still *declare* a
+    now-absent instantiation (e.g. via a stale ``extern template class``),
+    which the merge keeps as a Visibility.HIDDEN entry for cross-reference —
+    counting that declaration-only entry as "surviving" would silently mask
+    the exact removal this detector exists to catch.
     """
+    from .model import Visibility
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
+    new_mangled = {
+        f.mangled for f in new.functions if f.visibility == Visibility.PUBLIC
+    }
     findings: list[Change] = []
     surviving_stems: set[str] = set()
     for fn in new.functions:
-        if _looks_like_template_instantiation(fn.name):
-            surviving_stems.add(_strip_template_args(fn.name))
+        if fn.visibility != Visibility.PUBLIC:
+            continue
+        qname = _qualified_function_name(fn.name, fn.mangled)
+        if _looks_like_template_instantiation(qname):
+            surviving_stems.add(_strip_template_args(qname))
     for fn in old.functions:
         if fn.mangled in new_mangled:
             continue
-        if not _looks_like_template_instantiation(fn.name):
+        qname = _qualified_function_name(fn.name, fn.mangled)
+        if not _looks_like_template_instantiation(qname):
             continue
-        stem = _strip_template_args(fn.name)
+        stem = _strip_template_args(qname)
         if stem not in surviving_stems:
             continue
         findings.append(make_change(

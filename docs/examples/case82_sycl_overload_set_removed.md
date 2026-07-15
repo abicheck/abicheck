@@ -9,7 +9,6 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `sycl_overload_set_removed` |
 | **Source files** | `examples/case82_sycl_overload_set_removed/` |
-| **Known kind gap** | `sycl_overload_set_removed` — verdict is correct; see note below |
 
 **Category:** Overload-family ABI | **Verdict:** BREAKING
 
@@ -73,10 +72,6 @@ Switching off DPC++ at build time withdraws every queue-taking overload in
 one go.
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed, but sycl_overload_set_removed never fires — a real, root-caused detector gap in the same family as case74-77's namespace-qualification issue, but for parameter types rather than record names. _has_sycl_queue_first_param regex-matches the first parameter's type string against sycl::queue, but dumper_castxml.py's type-name resolver never namespace-qualifies Struct/Class/Union nodes by design (castxml spellings must stay comparable across dumps), so the real parameter type is the bare 'queue&', never 'sycl::queue&'. This precondition is unsatisfiable as written for any fixture, not specific to this one.
 
 ## Source files
 

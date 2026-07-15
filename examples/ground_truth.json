@@ -97,12 +97,11 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
+   "description": "internal_helper's default→hidden visibility change is a DWARF-only (no headers, no castxml) L0/L1 fixture. Detected via func_visibility_changed: dwarf_snapshot.py's _process_subprogram no longer unconditionally drops a non-exported function — when DW_AT_external shows real external linkage (not a genuine C `static`) but the symbol is absent from .dynsym, the function is kept as Visibility.HIDDEN (mirroring the header/castxml backend's existing hidden-retention behaviour) instead of vanishing from the snapshot, so the hidden-visibility transition is distinguishable from an outright removal.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_visibility_changed"
    ],
-   "known_kind_gap": "func_visibility_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct, but internal_helper's default→hidden visibility change is currently reported as func_removed instead of func_visibility_changed — a real, root-caused detector gap, not a fixture or metadata problem. Root cause: this repository's dump/validate harnesses never pass `--lang c`, so castxml parses bad.c/good.c under the CLI's `--lang` default of c++ (see cli_options.py LANG_DEFAULT), giving internal_helper a spurious Itanium-mangled `mangled` field (e.g. `_Z15internal_helper`) instead of its real plain-C exported symbol name. In v1, internal_helper is still exported, so the ELF/DWARF merge reconciles that mangled field back to the real symbol name; in v2, hidden visibility means it never reaches .dynsym, so nothing corrects the header-only castxml-derived mangled name. `_check_removed_function` (diff_symbols.py) then looks up v1's real symbol name in v2's function map and finds no match under that key (v2 only has the wrong mangled key), so it falls through to the FUNC_REMOVED branch instead of finding the hidden-visibility counterpart and emitting FUNC_VISIBILITY_CHANGED. Fixing this needs a C-language-aware castxml invocation for C fixtures (or an ELF-symbol-name-first merge key), not a fixture or metadata change.",
    "min_evidence": "L0",
    "platforms": [
     "linux"
@@ -523,13 +522,11 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge.",
+   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge. Detected via atomic_qualifier_changed: both metadata layers now spell the qualifier as the literal string \"_Atomic\" instead of losing it — dwarf_metadata.py/dwarf_snapshot.py special-case DW_TAG_atomic_type (previously unhandled, falling through to a generic fallback), and dumper_castxml.py recognises castxml's Unimplemented/type_class=\"Atomic\" node (castxml cannot model _Atomic at all and exposes no reference to the wrapped inner type) and renders it as \"_Atomic\" rather than the literal tag name \"Unimplemented\".",
    "expected": "BREAKING",
    "expected_kinds": [
     "atomic_qualifier_changed"
    ],
-   "known_kind_gap": "atomic_qualifier_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via type_field_type_changed, but atomic_qualifier_changed never fires — a real, root-caused detector gap in both metadata layers diff_atomic.py's regex detector (_ATOMIC_RE) reads from. DWARF: dwarf_metadata.py only special-cases DW_TAG_const_type/volatile_type/restrict_type; DW_TAG_atomic_type (which gcc does emit) falls through to a fallback path that never recurses into the wrapped inner type and never spells '_Atomic'. Headers: castxml cannot model _Atomic at all and emits an Unimplemented AtomicType node, which dumper_castxml.py's final fallback renders as the literal string 'Unimplemented' for the field's type. Neither layer ever produces a type string containing '_Atomic', so _has_atomic() is False on both sides and the dedicated detector always skips; the generic type_field_type_changed fires instead on the real 'int'->'Unimplemented' string diff.",
    "min_evidence": "L1",
    "platforms": [
     "linux"
@@ -1015,15 +1012,13 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
-   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta.",
+   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta. Detected via versioned_symbol_scheme_detected: dumper_castxml.py now reconciles a function's mangled identity against the real ELF export table before it reaches the detector — these are plain C functions with no extern \"C\", so castxml (parsing the header in ambiguous/C++ mode) previously pseudo-mangled them (e.g. 'mylib_init_3' -> '_Z12mylib_init_3'); when that guessed mangling matches no real export while the bare declared name does, the bare name is now used as the canonical symbol identity instead, so the digit-collapse path in versioned_symbol_scheme.py's _scheme_key sees the real plain names and pairs them correctly.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_removed",
     "func_added",
     "versioned_symbol_scheme_detected"
    ],
-   "known_kind_gap": "versioned_symbol_scheme_detected",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed/func_added, but versioned_symbol_scheme_detected never fires here — a real, root-caused detector gap, not a fixture problem (6/6 symbols renamed is well above versioned_symbol_scheme.py's _MIN_PAIRS/_MIN_FRACTION thresholds for this exact ICU-style scheme). Root cause: these plain C functions (no extern \"C\") get pseudo-mangled by castxml as e.g. '_Z12mylib_init_3' even though they're C-linkage. _scheme_key() sees the '_Z' prefix and routes into the C++ inline-namespace-token path, which requires a token followed by '::' to match; these flat demangled names have no '::', so that path returns None and _scheme_key never falls back to the plain digit-collapse path that would correctly pair mylib_init_3 with mylib_init_4.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -2276,12 +2271,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
+   "description": "A previously-mutable public variable becomes const-qualified. Detected via var_became_const: _check_variable (diff_symbols.py) now compares the canonicalized type strings with the `const` token stripped from both sides before deciding a base-type change occurred, so a pure const-qualifier flip (which canonicalize_type_name normalizes but never removes) reaches the VAR_BECAME_CONST/VAR_LOST_CONST check instead of being swallowed by VAR_TYPE_CHANGED first.",
    "expected": "BREAKING",
    "expected_kinds": [
     "var_became_const"
    ],
-   "known_kind_gap": "var_became_const",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via var_type_changed/var_removed, but var_became_const never fires — a real, root-caused detector gap. _check_variable (diff_symbols.py) compares canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type) before checking is_const, and returns early with VAR_TYPE_CHANGED whenever the type strings differ. Both the DWARF and castxml type-name resolvers bake the const qualifier directly into the type string (e.g. 'int' vs 'const int'), and canonicalize_type_name only reorders qualifiers, never strips them, so a pure const-only flip always differs textually and always hits the earlier VAR_TYPE_CHANGED branch first — the VAR_BECAME_CONST branch is structurally unreachable as written, not a fixture problem.",
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2780,7 +2774,7 @@
     "func_language_linkage_changed"
    ],
    "known_kind_gap": "func_language_linkage_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed_elf_only/func_visibility_changed, but func_language_linkage_changed never fires \u2014 a real, root-caused detector gap. _match_old_function has a purpose-built extern-C fallback pairing path keyed on Function.is_extern_c, and _check_linkage_change exists to catch exactly this. But castxml's `--castxml-output=1` XML never emits an extern=\"1\" attribute for extern \"C\" functions, so dumper_castxml.py's is_extern_c detection stays False on both sides regardless of the real linkage; and dump skips the DWARF-derived function set (whose is_extern_c is correctly derived from the mangled-name prefix) whenever headers are supplied, so that correct signal never reaches the merged snapshot either. The fallback pairing and linkage check therefore never trigger, and the pair falls apart into a removal + a visibility change instead. This is a castxml-integration gap, not a fixture problem.",
+   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed (v1's plain-name pair has no counterpart under v2's mangled name), but func_language_linkage_changed never fires \u2014 a real, root-caused gap, not a fixture problem, though narrower than first documented (superseding an earlier, incorrect theory about castxml never emitting extern=\"1\"). Root cause, confirmed by direct castxml invocation: v2.h has no extern \"C\" and no other C++-looking construct, so dumper.py's _detect_cpp_headers() content-sniff (correctly, from the header text alone) does not classify it as C++ and castxml parses it in C mode (`-x c -std=gnu11`). castxml still emits a pseudo-Itanium `mangled` attribute even in C mode, but *without* parameter-type encoding (e.g. 'parse_config' -> '_Z12parse_config', missing the 'PKc' suffix a real `const char*` parameter would add) \u2014 this incomplete guess matches neither v1's real plain export ('parse_config') nor v2's real, fully-mangled C++ export ('_Z12parse_configPKc', since v2.cpp is genuinely compiled as C++). The real fix needs TU-level context (this header is included from a .cpp, so it has C++ linkage) that no per-header content sniff can recover; a bare-name/real-export reconciliation (the fix applied for case141) does not help here because neither side of this pair matches by bare name.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -2889,8 +2883,6 @@
     "type_vtable_changed",
     "func_return_changed"
    ],
-   "known_kind_gap": "func_return_changed",
-   "known_kind_gap_note": "On the Linux lane (where the verdict itself is correct — see known_gap for the separate macOS verdict gap), func_return_changed IS computed for Circle::clone() (Circle* -> Drawable*) — proven by the surviving type_field_offset_changed change carrying affected_symbols referencing clone(). But it is then silently absorbed as 'redundant' by diff_filtering.py's _match_root_type, whose word-boundary regex matches the change's old_value text against every known root-type-change symbol name; here the return type text 'Circle*' coincidentally also names the unrelated root-type-change symbol (Circle::radius_'s own type_field_offset_changed), so the return-type finding is merged into that root and dropped from the emitted changes. A real, distinct finding is swallowed by an overly loose collapsing heuristic, not a fixture problem.",
    "known_gap": "macOS debug/header extraction currently reports this hierarchy/covariant-return fixture as COMPATIBLE instead of BREAKING. Linux remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
@@ -2924,13 +2916,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected by existing type_size_changed/struct_field_added, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected via internal_type_leaks_via_public_api, escalating the existing type_size_changed/struct_field_added findings: dumper_castxml.py's _build_record_type now also records a namespace-qualified RecordType.qualified_name (e.g. \"mylib::detail::descriptor_base\") alongside the bare RecordType.name, and internal_leak.py consults it whenever the bare spelling alone carries no namespace segment — RecordType.name itself stays bare so it keeps matching the DWARF backend's equally-bare struct names.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
    ],
-   "known_kind_gap": "internal_type_leaks_via_public_api",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via type_size_changed/struct_field_offset_changed, but internal_type_leaks_via_public_api never fires — a real, root-caused detector gap shared with case75/case76 (same mechanism) and case77 (same root cause, different symptom). dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name/bases — the emitted symbol is the bare 'descriptor_base', not 'mylib::detail::descriptor_base' — so is_internal_type('descriptor_base') finds no 'detail' path segment and returns False, and the leak reachability walker never buckets this change as an internal-type leak. This is a castxml naming-path gap, not a fixture or reachability-logic problem.",
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -2943,13 +2933,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected by existing struct_field_added on detail::table_impl, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected via internal_type_leaks_via_public_api, escalating the existing struct_size_changed/type_field_added_compatible findings — same fix as case74/case76: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
    ],
-   "known_kind_gap": "internal_type_leaks_via_public_api",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via struct_size_changed/type_field_added_compatible, but internal_type_leaks_via_public_api never fires — same root cause as case74/case76: dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name, so the emitted symbol is the bare 'table_impl' rather than 'mylib::detail::table_impl'; is_internal_type('table_impl') finds no 'detail' path segment and returns False. This is a castxml naming-path gap, not a fixture problem.",
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -2962,13 +2950,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected via internal_type_leaks_via_public_api on the Linux lane, escalating the existing type_vtable_changed/vtable_slot_count_changed findings \u2014 same fix as case74/case75: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment. See known_gap below for the separate macOS/Windows verdict gap (unrelated to this fix).",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
    ],
-   "known_kind_gap": "internal_type_leaks_via_public_api",
-   "known_kind_gap_note": "On the Linux lane (where the verdict itself is correct \u2014 see known_gap below for the separate macOS/Windows verdict gap), the overall verdict is correct via type_vtable_changed/vtable_slot_count_changed, but internal_type_leaks_via_public_api never fires \u2014 same root cause as case74/case75: dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name, so the emitted symbol is the bare 'algorithm_iface' rather than 'mylib::detail::algorithm_iface'; is_internal_type('algorithm_iface') finds no 'detail' path segment and returns False. This is a castxml naming-path gap, not a fixture problem.",
    "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot \u2014 neither signal fires on these platforms",
    "known_gap_platforms": [
     "macos",
@@ -2986,7 +2972,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Detected by the dedicated template-leak detector (diff_templates.py), which emits INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API for this pattern (not the generic INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API).",
+   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. The leak is templated, so the sibling mangled-name-based detect_internal_template_leaks (diff_templates.py) — not the plain non-template internal_type_leaks_via_public_api — is the kind that actually fires and correctly captures this: it works from fully-qualified mangled names rather than castxml's bare RecordType.name (RecordType.qualified_name, added for case74/75/76, does not cover template instantiations — castxml's context-chain walk only reaches the enclosing namespace/class path, not per-instantiation template args).",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_template_leaks_via_public_api"
@@ -3022,13 +3008,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY.",
+   "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY: detect_missing_instantiations (diff_templates.py) demangles Function.mangled to recover the template-arg-embedded name (the header/castxml dumper's bare Function.name never carries template args) and scopes its removed/surviving checks to Visibility.PUBLIC functions, so a stale extern-template declaration for the dropped instantiation (kept as a HIDDEN cross-reference entry) can't be mistaken for a surviving one.",
    "expected": "BREAKING",
    "expected_kinds": [
     "instantiation_missing_from_binary"
    ],
-   "known_kind_gap": "instantiation_missing_from_binary",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed_elf_only/func_visibility_changed, but instantiation_missing_from_binary never fires — a real, root-caused detector gap in the same family as case87's default_template_arg_changed gap. detect_missing_instantiations (diff_templates.py) requires _looks_like_template_instantiation(fn.name) to find a top-level '<' in the function's declared name, but the header/castxml dumper populates Function.name from the bare AST method name only (e.g. 'threshold', never 'descriptor<float>::threshold') — confirmed live: dumping this exact fixture's v1.so with headers shows every descriptor<float>/descriptor<double> member with a plain, template-arg-free .name. The check can never match, regardless of the fixture.",
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -3081,13 +3065,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed.",
+   "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed. Detected via sycl_overload_set_removed: _has_sycl_queue_first_param now falls back to the first parameter's RecordType.qualified_name (populated by dumper_castxml.py) when the bare param spelling alone ('queue&') doesn't match \u2014 the same qualified-name mechanism used for case74/75/76's internal-leak detection.",
    "expected": "BREAKING",
    "expected_kinds": [
     "sycl_overload_set_removed"
    ],
-   "known_kind_gap": "sycl_overload_set_removed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed, but sycl_overload_set_removed never fires \u2014 a real, root-caused detector gap in the same family as case74-77's namespace-qualification issue, but for parameter types rather than record names. _has_sycl_queue_first_param regex-matches the first parameter's type string against sycl::queue, but dumper_castxml.py's type-name resolver never namespace-qualifies Struct/Class/Union nodes by design (castxml spellings must stay comparable across dumps), so the real parameter type is the bare 'queue&', never 'sycl::queue&'. This precondition is unsatisfiable as written for any fixture, not specific to this one.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -3172,13 +3154,11 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, source-only API_BREAK), template defaults are part of the substituted type and re-mangle, so this is a binary BREAKING change.",
+   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED: detect_default_template_arg_changed (diff_cpp_patterns.py) demangles Function.mangled to recover the template-arg-embedded name before extracting/comparing template args, since Function.name itself never carries them (the header/castxml backend sets .name from the bare AST method name). Unlike case32 (function default param, source-only API_BREAK), template defaults are part of the substituted type and re-mangle, so this is a binary BREAKING change.",
    "expected": "BREAKING",
    "expected_kinds": [
     "default_template_arg_changed"
    ],
-   "known_kind_gap": "default_template_arg_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed/type_removed on the re-mangled instantiation, but default_template_arg_changed never fires \u2014 a real, root-caused detector gap. detect_default_template_arg_changed requires _extract_template_args(fn.name) to find <...> template args embedded in the removed function's demangled name, but no dumper backend ever populates Function.name that way: the header/castxml backend sets .name from the bare AST method name (no template args), and the pure-ELF/DWARF path leaves .name equal to the raw mangled symbol (no demangling). old_args is therefore always None and the correlation loop never emits, regardless of the fixture.",
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -3191,13 +3171,11 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
+   "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break. Detected via cpo_kind_changed: dumper_castxml.py's parse_variables falls back to Visibility.PUBLIC for a namespace-scope variable with external linkage and no ELF symbol at all (a real CPO with no forced ODR-use emits none), mirroring the existing _constructor_visibility fallback; detect_cpo_kind_changed's function-name and variable-name sets are both reduced to a bare, unqualified leaf name so they correlate correctly.",
    "expected": "BREAKING",
    "expected_kinds": [
     "cpo_kind_changed"
    ],
-   "known_kind_gap": "cpo_kind_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed/constant_added, but cpo_kind_changed never fires — a real, root-caused detector gap. detect_cpo_kind_changed's _var_names requires Variable.visibility == PUBLIC, but dumper_castxml.py's parse_variables always computes visibility via the plain ELF-lookup path, with no header-declared-public fallback (unlike _constructor_visibility, which got exactly this fallback for the analogous case78/case111 gap). A real CPO like `inline constexpr __sort_fn sort{}` emits no ELF symbol at all when it has no forced ODR-use (the canonical, correct shape) — confirmed live, only operator() is exported — so it is classified hidden and excluded from _var_names, and the function-to-variable correlation never fires.",
    "min_evidence": "L2",
    "platforms": [
     "linux",

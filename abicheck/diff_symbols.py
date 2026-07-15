@@ -1105,22 +1105,50 @@ def _check_variable_alignment(
     ]
 
 
+_CONST_TOKEN_RE = re.compile(r"\bconst\b\s*")
+
+
+def _without_const_qualifier(canonical_type: str) -> str:
+    """Strip the ``const`` token from an already-canonicalized type name.
+
+    ``canonicalize_type_name`` normalizes a leading ``const T`` to ``T
+    const`` but never removes it, so a pure const-only qualifier flip (e.g.
+    ``int`` -> ``const int``) still differs textually. This lets
+    :func:`_check_variable` compare *base* types independent of
+    const-qualification, so that case is classified as VAR_BECAME_CONST/
+    VAR_LOST_CONST rather than the generic VAR_TYPE_CHANGED.
+    """
+    return _CONST_TOKEN_RE.sub("", canonical_type).strip()
+
+
 def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
     """Compare a matched pair of public variables."""
     changes = _check_variable_alignment(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return changes
-    if canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type):
-        return changes + [
-            make_change(
-                ChangeKind.VAR_TYPE_CHANGED,
-                symbol=mangled,
-                name=v_old.name,
-                old=v_old.type,
-                new=v_new.type,
-            )
-        ]
+    canon_old = canonicalize_type_name(v_old.type)
+    canon_new = canonicalize_type_name(v_new.type)
+    if canon_old != canon_new:
+        # A pure const-qualifier flip is a real, common case where the type
+        # strings differ (the dumper bakes "const" into the type text) but
+        # the base type is otherwise identical — that's a const transition
+        # (below), not a base-type change, so only report VAR_TYPE_CHANGED
+        # when something besides const-qualification actually differs.
+        is_pure_const_flip = (
+            v_old.is_const != v_new.is_const
+            and _without_const_qualifier(canon_old) == _without_const_qualifier(canon_new)
+        )
+        if not is_pure_const_flip:
+            return changes + [
+                make_change(
+                    ChangeKind.VAR_TYPE_CHANGED,
+                    symbol=mangled,
+                    name=v_old.name,
+                    old=v_old.type,
+                    new=v_new.type,
+                )
+            ]
     # const-qualification transitions only matter when the type is unchanged.
     return changes + bool_transition(
         v_old.is_const,

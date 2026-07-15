@@ -761,6 +761,17 @@ def _match_root_type(
     Conservative: false negatives (showing too much) are safer than false
     positives (hiding real changes).
 
+    When both ``old_value`` and ``new_value`` are present, the root type name
+    must appear in *both* to match — not just either one. A change whose
+    value moves to a wholly different type that merely shares a name with a
+    root type (e.g. a covariant return override switching ``Circle*`` to
+    ``Drawable*``, where "Circle" is coincidentally also a root type from an
+    unrelated field change) is an independent finding, not a side effect of
+    that root type's own layout change, and must not be swallowed just
+    because the *old* value happens to mention it (case72). When only one of
+    old/new is set (e.g. a pure addition/removal with no "before" or
+    "after"), that one value is still sufficient, matching prior behavior.
+
     When *compiled_patterns* is provided, uses pre-compiled regex objects
     instead of recompiling per call (performance optimisation).
     """
@@ -771,9 +782,12 @@ def _match_root_type(
             pat = re.compile(
                 r"(?<![A-Za-z0-9_])" + re.escape(type_name) + r"(?![A-Za-z0-9_])"
             )
-        if c.old_value and pat.search(c.old_value):
+        if c.old_value and c.new_value:
+            if pat.search(c.old_value) and pat.search(c.new_value):
+                return type_name
+        elif c.old_value and pat.search(c.old_value):
             return type_name
-        if c.new_value and pat.search(c.new_value):
+        elif c.new_value and pat.search(c.new_value):
             return type_name
         if pat.search(c.description):
             return type_name

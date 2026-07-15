@@ -67,6 +67,7 @@ from .diff_serialization import (  # noqa: F401
 )
 from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
+    _qualified_function_name,
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
@@ -122,11 +123,34 @@ def _parent_namespace(qualified_name: str) -> str:
 _SYCL_QUEUE_PARAM_RE = re.compile(r"\bsycl\s*::\s*queue\b")
 
 
-def _has_sycl_queue_first_param(fn: Function) -> bool:
+def _strip_param_decorators(type_str: str) -> str:
+    """Reduce a param type spelling to its bare base identifier for a
+    type-map lookup: drop ``const``/``volatile`` and trailing pointer/
+    reference markers (``queue&`` -> ``queue``)."""
+    s = re.sub(r"\bconst\b|\bvolatile\b", "", type_str or "")
+    return s.strip().rstrip("*&").strip()
+
+
+def _has_sycl_queue_first_param(
+    fn: Function, type_map: Mapping[str, RecordType] | None = None
+) -> bool:
     if not fn.params:
         return False
     first = fn.params[0]
-    return bool(_SYCL_QUEUE_PARAM_RE.search(first.type or ""))
+    type_str = first.type or ""
+    if _SYCL_QUEUE_PARAM_RE.search(type_str):
+        return True
+    if type_map is None:
+        return False
+    # castxml never namespace-qualifies a Struct/Class/Union spelling in a
+    # param type (RecordType.name itself stays bare — see its docstring in
+    # model.py), so a real ``sycl::queue&`` param shows up here as the bare
+    # ``queue&``. Fall back to the RecordType's qualified_name (when the
+    # dumper recovered one) before giving up (case82).
+    rec = type_map.get(_strip_param_decorators(type_str))
+    if rec is not None and rec.qualified_name:
+        return bool(_SYCL_QUEUE_PARAM_RE.search(rec.qualified_name))
+    return False
 
 
 def _unqualified_function_name(name: str) -> str:
@@ -174,6 +198,11 @@ def detect_sycl_overload_set_removal(
     old.index()
     new.index()
     new_mangled = {f.mangled for f in new.functions}
+    # Bare-name -> RecordType, merged from both sides, so a bare param
+    # spelling (``queue&``) can be resolved to its real namespace path via
+    # RecordType.qualified_name when castxml recovered one (case82).
+    type_map: dict[str, RecordType] = {t.name: t for t in old.types}
+    type_map.update({t.name: t for t in new.types})
     # Group removed SYCL-overload candidates by the *qualified* callable
     # stem (full namespace path with template args stripped). Keying by
     # the unqualified leaf name alone would let unrelated symbols like
@@ -185,7 +214,7 @@ def detect_sycl_overload_set_removal(
     for fn in old.functions:
         if fn.mangled in new_mangled:
             continue
-        if not _has_sycl_queue_first_param(fn):
+        if not _has_sycl_queue_first_param(fn, type_map):
             continue
         by_entity[_callable_stem(fn.name)].append(fn)
     # Surviving non-SYCL siblings give us confidence that the family
@@ -193,7 +222,7 @@ def detect_sycl_overload_set_removal(
     # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
     for fn in new.functions:
-        if not _has_sycl_queue_first_param(fn):
+        if not _has_sycl_queue_first_param(fn, type_map):
             surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
     suppressed: set[str] = set()
@@ -589,6 +618,12 @@ def detect_default_template_arg_changed(
     emit the finding when the args differ but the *prefix* (everything
     up to the differing arg) matches and the function unqualified name
     matches one-for-one.
+
+    Uses :func:`_qualified_function_name` (demangles when ``Function.name``
+    itself carries no template args) rather than the raw ``name`` field: the
+    header/castxml backend populates ``.name`` from the bare AST method name
+    only, so a real templated method name (e.g. ``dimension``) never shows
+    ``<...>`` there, and this check could otherwise never match (case87).
     """
     old.index()
     new.index()
@@ -601,16 +636,19 @@ def detect_default_template_arg_changed(
     # paired.
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
     for fn in new.functions:
-        added_by_entity[_callable_stem(fn.name)].append(fn)
+        qname = _qualified_function_name(fn.name, fn.mangled)
+        added_by_entity[_callable_stem(qname)].append(fn)
     findings: list[Change] = []
     seen_pairs: set[tuple[str, str]] = set()
     for fn in removed:
-        old_args = _extract_template_args(fn.name)
+        old_qname = _qualified_function_name(fn.name, fn.mangled)
+        old_args = _extract_template_args(old_qname)
         if old_args is None:
             continue
-        entity = _callable_stem(fn.name)
+        entity = _callable_stem(old_qname)
         for cand in added_by_entity.get(entity, []):
-            new_args = _extract_template_args(cand.name)
+            new_qname = _qualified_function_name(cand.name, cand.mangled)
+            new_args = _extract_template_args(new_qname)
             if new_args is None or new_args == old_args:
                 continue
             # Require that the two argument lists differ only in trailing
