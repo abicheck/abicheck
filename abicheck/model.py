@@ -275,6 +275,15 @@ class RecordType:
     #           diff skips the finality detector when either side is None to
     #           avoid false findings from schema evolution / tier downgrade.
     is_final: bool | None = None
+    # True when this RecordType is a class/struct template's own pattern body
+    # (e.g. the clang header backend's CXXRecordDecl nested inside a
+    # ClassTemplateDecl) rather than a concrete, instantiable type. Its field
+    # *names*/*types* are still real public surface, but it has no fixed
+    # layout for any one instantiation — detectors that need real
+    # size/offset data (e.g. DWARF layout backfill's name-based matching)
+    # must not treat it as an ordinary type. False for every non-clang
+    # producer (castxml/DWARF never emit an uninstantiated pattern this way).
+    is_template_pattern: bool = False
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN

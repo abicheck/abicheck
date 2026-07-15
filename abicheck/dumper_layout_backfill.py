@@ -88,7 +88,13 @@ def backfill_dwarf_layout(
     layout-blind header backend, a no-op otherwise. An opaque (forward-
     declared-only) header type is also left alone: its blank layout is a
     meaningful "this header only forward-declares it" signal, not a gap to
-    paper over with an unrelated full definition DWARF happens to carry.
+    paper over with an unrelated full definition DWARF happens to carry. A
+    class-template pattern (``is_template_pattern``) is left alone for the
+    same reason: it has no single fixed layout to backfill from — matching
+    it by bare name against one particular DWARF instantiation, or worse an
+    unrelated same-named type, would silently attach the wrong data (Codex
+    review: template patterns and ordinary records share the same clang AST
+    kind and bare name, with nothing else to tell them apart).
 
     The clang header backend emits a bare record name with no namespace
     scope, while the DWARF builder qualifies it (``scope::name``) — an exact
@@ -120,7 +126,7 @@ def backfill_dwarf_layout(
 
     out: list[RecordType] = []
     for t in header_types:
-        if t.size_bits is not None or t.is_opaque:
+        if t.size_bits is not None or t.is_opaque or t.is_template_pattern:
             out.append(t)
             continue
         dwarf_t = _dwarf_match(t.name)

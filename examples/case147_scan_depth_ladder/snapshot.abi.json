@@ -186,6 +186,7 @@
       "is_final": null,
       "is_opaque": false,
       "is_standard_layout": null,
+      "is_template_pattern": false,
       "is_trivially_copyable": null,
       "is_union": false,
       "kind": "struct",

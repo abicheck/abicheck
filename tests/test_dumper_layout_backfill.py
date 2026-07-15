@@ -95,6 +95,22 @@ class TestBackfillDwarfLayout:
         assert out[0].size_bits is None
         assert out[0].is_opaque
 
+    def test_leaves_template_pattern_untouched(self) -> None:
+        """A class template's pattern body (e.g. clang's CXXRecordDecl inside a
+        ClassTemplateDecl) shares the bare name "Foo" with any unrelated real
+        type or instantiation named "Foo" in DWARF — matching it by name would
+        silently attach the wrong layout, since the pattern itself has no
+        fixed layout for any one instantiation (Codex review)."""
+        header = RecordType(
+            name="Buffer", kind="class", is_template_pattern=True,
+            fields=[TypeField(name="data_", type="T *")],
+        )
+        dwarf = RecordType(name="Buffer", kind="class", size_bits=128)
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits is None
+        assert out[0].is_template_pattern
+        assert [f.name for f in out[0].fields] == ["data_"]
+
     def test_matches_namespaced_dwarf_name_by_unambiguous_suffix(self) -> None:
         """The clang header backend emits a bare name ("Foo") while DWARF
         qualifies it ("api::Foo"); an unambiguous suffix match must still
