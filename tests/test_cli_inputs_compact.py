@@ -19,6 +19,7 @@ The underlying merge/compress logic is unit-tested directly in
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -113,6 +114,18 @@ def test_compact_output_filename_option(tmp_path: Path) -> None:
 def test_compact_bad_path_exits_usage_error(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["inputs", "compact", str(tmp_path / "nope")])
     assert result.exit_code == 64, result.output
+
+
+def test_compact_wrong_kind_manifest_exits_usage_error(tmp_path: Path) -> None:
+    # A directory with a manifest.json for a different pack kind (e.g. a
+    # BuildSourcePack) must be rejected, not silently treated as a Flow-2
+    # pack and written into (Codex review, P2).
+    bsp = tmp_path / "pack"
+    bsp.mkdir()
+    (bsp / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
+    result = CliRunner().invoke(main, ["inputs", "compact", str(bsp)])
+    assert result.exit_code == 64, result.output
+    assert not (bsp / "source_facts").exists()
 
 
 def test_compact_escaping_output_filename_exits_usage_error(tmp_path: Path) -> None:

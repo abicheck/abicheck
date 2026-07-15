@@ -301,6 +301,44 @@ def test_compact_rerun_prefers_fresh_record_over_stale_prior_output(
     assert names == {"foo2", "bar"}  # fresh "foo2" wins over stale "foo"
 
 
+def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> None:
+    """A hand-written/older record that never stamped tu_id defaults to
+    tu_id="" (SourceAbiTu.tu_id); a single fresh no-tu_id record must not
+    supersede *every* no-tu_id prior record -- they are unrelated TUs that
+    merely share the same "unknown identity" (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+
+    def _no_id_tu(name: str, mangled: str) -> SourceAbiTu:
+        ent = SourceEntity(
+            id=f"decl://{name}", kind="function", qualified_name=name,
+            mangled_name=mangled, signature_hash="sig1",
+            source_location=SourceLocation(
+                path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"
+            ),
+            visibility="public_header",
+        )
+        return SourceAbiTu(tu_id="", target_id="target://libfoo", functions=[ent])
+
+    append_source_facts(
+        pack, [_no_id_tu("foo", "_Z3foov")], filename=facts_filename("foo")
+    )
+    append_source_facts(
+        pack, [_no_id_tu("bar", "_Z3barv")], filename=facts_filename("bar")
+    )
+    compact_inputs_pack(pack)
+
+    # A fresh no-tu_id record appears (unrelated to either prior one).
+    append_source_facts(
+        pack, [_no_id_tu("baz", "_Z3bazv")], filename=facts_filename("baz")
+    )
+    compact_inputs_pack(pack)
+
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo", "bar", "baz"}  # foo/bar survive, not dropped
+
+
 def test_compact_preserves_originals_on_lossy_read(tmp_path: Path) -> None:
     # A malformed sibling source-fact file makes this compaction "lossy"
     # (read_source_fact_files reports a diagnostic for it); every original

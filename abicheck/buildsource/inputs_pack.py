@@ -222,7 +222,16 @@ def is_inputs_pack(path: Path | str) -> bool:
 
 
 def load_inputs_manifest(root: Path | str) -> InputsManifest:
-    """Load and parse the pack manifest. Raises ``FileNotFoundError`` if absent."""
+    """Load and parse the pack manifest.
+
+    Raises ``FileNotFoundError`` if absent, ``ValueError`` if *root* carries a
+    manifest.json but it does not declare ``kind: abicheck_inputs`` (e.g. a
+    :class:`~.pack.BuildSourcePack` directory, which uses a different manifest
+    schema entirely) — without this check, ``InputsManifest.from_dict()``'s
+    forward-compat ``kind`` default would silently accept it as a Flow-2 pack,
+    letting a write path like :func:`~.inputs_emit.compact_inputs_pack`
+    corrupt an unrelated directory's manifest (Codex review, P2).
+    """
     root = Path(root)
     manifest_path = root / INPUTS_MANIFEST_NAME
     if not manifest_path.is_file():
@@ -234,6 +243,11 @@ def load_inputs_manifest(root: Path | str) -> InputsManifest:
         data = json.load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{manifest_path} must contain a JSON object.")
+    if data.get("kind") != INPUTS_KIND:
+        raise ValueError(
+            f"{manifest_path} does not declare kind: {INPUTS_KIND} — not a "
+            "Flow-2 abicheck_inputs pack."
+        )
     return InputsManifest.from_dict(data)
 
 

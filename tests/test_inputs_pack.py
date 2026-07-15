@@ -660,3 +660,16 @@ def test_load_inputs_manifest_round_trips_on_disk(tmp_path: Path) -> None:
     assert m.kind == INPUTS_KIND
     assert m.library == "libfoo.so"
     assert m.created_by == "abicheck-clang-plugin 0.1"
+
+
+def test_load_inputs_manifest_rejects_wrong_kind(tmp_path: Path) -> None:
+    """A directory whose manifest.json declares a different (or no) `kind`
+    -- e.g. a BuildSourcePack -- must be rejected, not silently accepted via
+    InputsManifest.from_dict()'s forward-compat kind default. Otherwise a
+    write path like compact_inputs_pack() could corrupt an unrelated pack
+    (Codex review, P2)."""
+    bsp = tmp_path / "pack"
+    bsp.mkdir()
+    (bsp / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
+    with pytest.raises(ValueError, match="does not declare kind"):
+        load_inputs_manifest(bsp)

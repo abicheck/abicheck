@@ -301,8 +301,14 @@ def compact_inputs_pack(
     fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
     lossy_read = len(sink) > before_diag_count
 
-    fresh_ids = {tu.tu_id for tu in fresh_tus}
-    tus = [tu for tu in prior_tus if tu.tu_id not in fresh_ids] + fresh_tus
+    # Only a non-empty tu_id identifies "this fresh record supersedes that
+    # prior one" -- SourceAbiTu.tu_id defaults to "" for an older/hand-written
+    # record that never stamped one, and treating "" as a real id would make
+    # any single no-tu_id fresh record supersede *every* no-tu_id prior
+    # record, dropping unrelated TUs that just happen to share the same
+    # "unknown identity" (Codex review, P2).
+    fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}
+    tus = [tu for tu in prior_tus if not tu.tu_id or tu.tu_id not in fresh_ids] + fresh_tus
 
     # Temp file + atomic rename so a concurrent reader never observes a
     # partially-written merge (same discipline as _write_manifest).
