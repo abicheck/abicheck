@@ -710,6 +710,7 @@ def run_compare(
         old_debug_roots=resolved_old_debug or None,
         new_debug_roots=resolved_new_debug or None,
         enable_debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
 
     suppression, pf = _load_suppression_and_policy(

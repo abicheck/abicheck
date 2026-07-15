@@ -5,37 +5,34 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# Helper: split a multi-value input into items.
+# Helper: append a flag with value(s) to the command array.
 # Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
 # supports path values containing spaces. A value with no newline falls back
 # to legacy whitespace-splitting for backward compatibility with the
 # documented single-line "space-separated" form; a space-containing path
 # still cannot be expressed on a single line this way.
+#
+# Deliberately avoids process substitution (`< <(...)`) — a `while read`
+# fed by a here-string (`<<<`) gets the same "no subshell, so CMD+=(...)
+# survives the loop" property without it, and unlike process substitution
+# is portable to macOS's stock (GPLv2-frozen) bash 3.2 and behaves
+# consistently under Windows Git Bash.
 # ---------------------------------------------------------------------------
-_split_multi_value() {
-  local value="$1"
-  if [[ "$value" == *$'\n'* ]]; then
-    local item
-    while IFS= read -r item; do
-      [[ -n "$item" ]] && printf '%s\n' "$item"
-    done <<< "$value"
-  else
-    local item
-    for item in $value; do
-      printf '%s\n' "$item"
-    done
-  fi
-}
-
-# Helper: append a flag with value(s) to the command array.
 add_flag() {
   local flag="$1"
   local value="$2"
   local item
-  if [[ -n "$value" ]]; then
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  if [[ "$value" == *$'\n'* ]]; then
     while IFS= read -r item; do
+      [[ -n "$item" ]] && CMD+=("$flag" "$item")
+    done <<< "$value"
+  else
+    for item in $value; do
       CMD+=("$flag" "$item")
-    done < <(_split_multi_value "$value")
+    done
   fi
 }
 
@@ -46,10 +43,17 @@ add_sided_flag() {
   local side="$2"
   local value="$3"
   local item
-  if [[ -n "$value" ]]; then
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  if [[ "$value" == *$'\n'* ]]; then
     while IFS= read -r item; do
+      [[ -n "$item" ]] && CMD+=("$flag" "${side}=${item}")
+    done <<< "$value"
+  else
+    for item in $value; do
       CMD+=("$flag" "${side}=${item}")
-    done < <(_split_multi_value "$value")
+    done
   fi
 }
 

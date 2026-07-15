@@ -226,6 +226,7 @@ def resolve_input(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -254,6 +255,9 @@ def resolve_input(
     Args:
         debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
             *None* for auto-detection.
+        debuginfod_url: Override debuginfod server URL (only meaningful when
+            ``enable_debuginfod`` is set); ``None`` uses the resolver's
+            default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
         follow_linker_scripts: When True (default), a GNU ld linker script is
@@ -283,6 +287,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -307,6 +312,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -380,6 +386,7 @@ def resolve_input(
                     dwarf_only=dwarf_only,
                     debug_roots=debug_roots,
                     enable_debuginfod=enable_debuginfod,
+                    debuginfod_url=debuginfod_url,
                     debug_format=debug_format,
                     symbols_only=symbols_only,
                     debug_presence_only=debug_presence_only,
@@ -431,6 +438,7 @@ def run_dump(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -473,6 +481,7 @@ def run_dump(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -628,6 +637,7 @@ def _dump_elf(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -661,6 +671,7 @@ def _dump_elf(
         from .debug_resolver import resolve_debug_info
         artifact = resolve_debug_info(
             path, debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
         )
         if artifact is not None and artifact.dwarf_path is not None:
             resolved_dwarf = artifact.dwarf_path.resolve()
@@ -1244,6 +1255,7 @@ def run_compare_request(
         pdb_path=request.old.pdb,
         debug_roots=list(request.old.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.old.headers),
     )
@@ -1257,6 +1269,7 @@ def run_compare_request(
         pdb_path=request.new.pdb,
         debug_roots=list(request.new.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.new.headers),
     )
@@ -1307,6 +1320,7 @@ def run_compare(
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
@@ -1359,6 +1373,7 @@ def run_compare(
         ),
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
     )
     return run_compare_request(request)
 
