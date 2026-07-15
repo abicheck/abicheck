@@ -604,6 +604,74 @@ def test_ast_only_reference_target_gets_visibility_even_when_unseeded() -> None:
     assert is_internal_dependency_node(target_id, node_by_id, exported, {})
 
 
+def test_ast_only_reference_source_gets_visibility_even_when_unseeded() -> None:
+    # Codex review: the *source* side of a DECL_REFERENCES_DECL edge can be
+    # unseeded too, not just the target — a field's default member
+    # initializer (`struct Widget { int x = detail::k; };`) makes
+    # `Widget::x` the edge's source, and a field has no equivalent entity in
+    # snapshot.functions/snapshot.variables to seed from either. Without a
+    # declaring-file backfill for the source too, Widget::x carried no
+    # visibility at all, so the public struct's dependency on the private
+    # constant through it was invisible to public_to_internal_dependency.
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "k",
+                    "mangledName": "_ZN6detail1kE",
+                    "loc": _loc(PRIVATE_HEADER),
+                    "type": {"qualType": "const int"},
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Widget",
+            "loc": _loc(PUBLIC_HEADER),
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "x",
+                    "loc": _loc(PUBLIC_HEADER),
+                    "type": {"qualType": "int"},
+                    "inner": [
+                        {
+                            "kind": "ImplicitCastExpr",
+                            "inner": [
+                                {
+                                    "kind": "DeclRefExpr",
+                                    "referencedDecl": {
+                                        "kind": "VarDecl",
+                                        "name": "k",
+                                        "mangledName": "_ZN6detail1kE",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    graph = build_header_only_graph(
+        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+    )
+    node_by_id = {n.id: n for n in graph.nodes}
+    src_id = "decl://Widget::x"
+    dst_id = "decl://_ZN6detail1kE"
+    assert node_by_id[src_id].attrs["visibility"] == "public_header"
+    assert node_by_id[dst_id].attrs["visibility"] == "private_header"
+    assert any(
+        e.kind == "DECL_REFERENCES_DECL" and e.src == src_id and e.dst == dst_id
+        for e in graph.edges
+    )
+    exported: set[str] = set()
+    assert is_internal_dependency_node(dst_id, node_by_id, exported, {})
+
+
 def test_header_include_extractor_forwards_sysroot_and_nostdinc(
     tmp_path, monkeypatch
 ) -> None:

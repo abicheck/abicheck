@@ -635,6 +635,34 @@ def _index_declared_entities(
             )
         return cur_file
 
+    if kind == "FieldDecl" and name and not in_body:
+        # A field's own qualified identity (``Widget::x``), mirroring
+        # ``_walk_types``'s own ``field_ident`` computation — so a
+        # DECL_REFERENCES_DECL edge whose *source* is a field (a default
+        # member initializer, ``int x = detail::k;``) has a declaring file
+        # to resolve, not just its target (Codex review: without this, such
+        # a field was never seeded as a `source_decl` and never backfilled
+        # either, so it carried no visibility at all and a public struct's
+        # dependency on a private constant through it was silently dropped).
+        # Deliberately NOT added to ``name_index``/``ref_name_index`` —
+        # fields are not resolvable *type* targets or reference targets in
+        # their own right, only entities with their own file to look up.
+        field_ident = "::".join([*scope, name])
+        if cur_file:
+            decl_file.setdefault(field_ident, cur_file)
+        for child in node.get("inner", []) or []:
+            cur_file = _index_declared_entities(
+                child,
+                scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
+                in_body,
+            )
+        return cur_file
+
     if kind in _FUNCTION_DECL_KINDS:
         # Everything declared inside a function/method body — including a
         # plain block-scope local (``int api() { int x; return x; }``) — is
@@ -1142,6 +1170,36 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     )
     type_qnames = {qname for qnames in name_index.values() for qname in qnames}
     return {qname: decl_file[qname] for qname in type_qnames if qname in decl_file}
+
+
+def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:
+    """Public wrapper: every declared identity's own declaring file.
+
+    Unlike :func:`index_declared_type_files`, deliberately **unfiltered** —
+    every entity kind :func:`_index_declared_entities` indexes into
+    ``decl_file`` (record/enum/typedef, var/enum-constant, and field), not
+    just the type-only subset. Safe for a caller that only ever backfills a
+    *declaration node's own origin* (always seeded as a ``source_decl``,
+    never a type node) — the "public constant mistaken for a record/enum/
+    typedef" risk :func:`index_declared_type_files`'s filtering guards
+    against does not apply to that use.
+
+    For a header-only graph, this resolves the *source* side of a
+    ``DECL_REFERENCES_DECL`` edge whose source is a field's default member
+    initializer (``struct Widget { int x = detail::k; };`` — ``Widget::x``
+    is never seeded from ``snapshot.functions``/``snapshot.variables``, the
+    flat model has no per-field entity to iterate) — mirroring the existing
+    per-edge ``dst_file``/``caller_file``/``callee_file`` backfill for each
+    edge's *target* (Codex review).
+    """
+    name_index: dict[str, list[str]] = {}
+    decl_file: dict[str, str] = {}
+    ref_name_index: dict[str, list[str]] = {}
+    id_index: dict[str, tuple[str, str]] = {}
+    _index_declared_entities(
+        ast, [], "", name_index, decl_file, ref_name_index, id_index
+    )
+    return decl_file
 
 
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:

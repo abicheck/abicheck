@@ -116,6 +116,7 @@ from .type_graph import (
     _is_excluded_type,
     _resolve_nested_type_names,
     augment_graph_with_types,
+    index_declared_entity_files,
     index_declared_type_files,
     parse_clang_ast_types,
 )
@@ -448,12 +449,26 @@ def build_header_only_graph(
         # world has no such set, but each edge already carries its own
         # target's declaring file (`dst_file`/`callee_file`/`caller_file`),
         # which is exactly what `classify_origin` needs (Codex review).
+        #
+        # A `DECL_REFERENCES_DECL` edge's *source* can be unseeded too — a
+        # field's default member initializer (`struct Widget { int x =
+        # detail::k; };`) makes `Widget::x` the edge's `src`, and a field is
+        # never in `snapshot.functions`/`snapshot.variables` either (Codex
+        # review). Unlike the targets above, `TypeEdge` carries no
+        # `src_file`, so this falls back to `index_declared_entity_files`
+        # (the unfiltered declaring-file index, including fields) — computed
+        # once, lazily, only if there is at least one such source to look up.
+        # A source that was already seeded (a real function/variable) is
+        # simply skipped below by the existing `graph.has_node` check.
+        ref_srcs = {e.src for e in type_edges if e.kind == "DECL_REFERENCES_DECL"}
+        entity_files = index_declared_entity_files(ast_root) if ref_srcs else {}
         for identity, file in (
             *(
                 (e.dst, e.dst_file)
                 for e in type_edges
                 if e.kind == "DECL_REFERENCES_DECL"
             ),
+            *((src, entity_files.get(src, "")) for src in ref_srcs),
             *((e.caller, e.caller_file) for e in call_edges),
             *((e.callee, e.callee_file) for e in call_edges),
         ):
