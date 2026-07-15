@@ -38,26 +38,30 @@ class TestDwarfLayoutTypesOrEmpty:
     not a static --ast-frontend guess (Codex/CodeRabbit review: the "auto"
     frontend can fall back from castxml to clang internally)."""
 
-    def test_empty_when_not_clang_backend(self) -> None:
+    @pytest.mark.parametrize(
+        ("is_clang_backend", "has_dwarf", "symbols_only", "debug_presence_only"),
+        [
+            (False, True, False, False),
+            (True, False, False, False),
+            (True, True, True, False),
+            (True, True, False, True),
+        ],
+        ids=["not-clang-backend", "no-dwarf", "symbols-only", "debug-presence-only"],
+    )
+    def test_no_op_gates(
+        self,
+        is_clang_backend: bool,
+        has_dwarf: bool,
+        symbols_only: bool,
+        debug_presence_only: bool,
+    ) -> None:
+        """Each gate is a no-op on its own: wrong backend, no DWARF, or either
+        of the two evidence-skipping modes (CodeRabbit: the original tests
+        didn't cover debug_presence_only, so a regression there could have
+        started building a full DWARF snapshot it never needs)."""
         result = dwarf_layout_types_or_empty(
-            None, None, _dwarf_meta(True), None, False,
-            symbols_only=False, debug_presence_only=False,
-            version="1.0", language_profile=None, session=None,
-        )
-        assert result == []
-
-    def test_empty_when_no_dwarf(self) -> None:
-        result = dwarf_layout_types_or_empty(
-            None, None, _dwarf_meta(False), None, True,
-            symbols_only=False, debug_presence_only=False,
-            version="1.0", language_profile=None, session=None,
-        )
-        assert result == []
-
-    def test_empty_when_symbols_only(self) -> None:
-        result = dwarf_layout_types_or_empty(
-            None, None, _dwarf_meta(True), None, True,
-            symbols_only=True, debug_presence_only=False,
+            None, None, _dwarf_meta(has_dwarf), None, is_clang_backend,
+            symbols_only=symbols_only, debug_presence_only=debug_presence_only,
             version="1.0", language_profile=None, session=None,
         )
         assert result == []
@@ -288,6 +292,32 @@ class TestBackfillDwarfLayout:
         dwarf = RecordType(name="Tag", kind="struct", size_bits=8, fields=[], bases=[])
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
+
+    def test_suffix_only_match_with_no_remaining_evidence_is_never_guessed(self) -> None:
+        """Regression (CodeRabbit review): with zero fields and zero bases on
+        either side, name equality is the only signal left — and a *suffix*
+        match (the unique DWARF candidate is only reached via the bare-name
+        fallback, e.g. `impl::Foo` recovered for a public `Foo`) is a weaker
+        signal than an exact match, since it already means the header's bare
+        name lacks the scope DWARF's qualified name carries. Stacking that on
+        top of zero field/base evidence must not be trusted."""
+        header = RecordType(name="Foo", kind="struct", fields=[], bases=[])
+        unrelated = RecordType(name="impl::Foo", kind="struct", size_bits=8, fields=[], bases=[])
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_suffix_only_match_with_no_remaining_evidence_and_header_fields_is_never_guessed(
+        self,
+    ) -> None:
+        """Same as above but for the anonymous-aggregate branch (header has
+        real fields, DWARF's are empty): a suffix-only match to an unrelated,
+        genuinely empty type must still be rejected, not silently trusted."""
+        header = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
+        )
+        unrelated = RecordType(name="impl::Foo", kind="struct", size_bits=8, fields=[])
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
 
     def test_union_vs_struct_kind_mismatch_is_never_guessed(self) -> None:
         """Regression (Codex review): a struct and a union can share a bare

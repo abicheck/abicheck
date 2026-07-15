@@ -173,16 +173,20 @@ def backfill_dwarf_layout(
     just the unrelated ones.
 
     The one case this still can't distinguish (Codex review, fresh evidence
-    after the base-corroboration fix above): a header type with real fields
-    matched against a *totally unrelated* DWARF candidate that happens to
-    have zero fields *and* zero bases — e.g. public ``struct Foo { int x;
-    }`` next to an unrelated, genuinely empty ``impl::Foo {};``. There is no
-    remaining signal on the DWARF side to disagree with (no fields, no
-    bases), so it is still trusted; the residual risk is accepted because a
-    baseless, fieldless DWARF type carries a trivial, near-fixed layout
-    (typically 1 byte) regardless of identity, bounding how wrong a
-    misattribution here can be — unlike the non-empty-vs-non-empty or
-    differing-bases cases above, which are rejected outright.
+    after the base-corroboration fix above): a header type matched against a
+    *totally unrelated* DWARF candidate that happens to have zero fields
+    *and* zero bases — e.g. public ``struct Foo { int x; }`` next to an
+    unrelated, genuinely empty ``impl::Foo {};`` reached only via the
+    bare-suffix fallback. There is no remaining signal on the DWARF side to
+    disagree with (no fields, no bases), so name equality is the last
+    signal left — and a *suffix* match (``impl::Foo`` recovered only because
+    it ends in "Foo") is rejected here rather than trusted (CodeRabbit
+    review): it already means the header's bare name lacks the scope
+    DWARF's qualified name carries, so stacking that on top of zero
+    field/base evidence would trust two independently weak signals at once.
+    An *exact* name match (``dwarf.name == header.name``, e.g. a genuinely
+    unscoped ``struct Foo {};`` gaining a field later) carries no such scope
+    ambiguity and is still trusted even with nothing else to go on.
     """
     if not dwarf_types:
         return header_types
@@ -219,8 +223,14 @@ def backfill_dwarf_layout(
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         # Truly nothing left to disagree on: no fields (or asymmetrically
-        # flattened away) and no bases on either side.
-        return True
+        # flattened away) and no bases on either side — the record's name is
+        # the only remaining signal, so only trust it when *exact*, not a
+        # suffix match (CodeRabbit review): a suffix match already means the
+        # header's bare name lacks the scope DWARF's qualified name carries,
+        # so on top of zero field/base evidence it would be trusting two
+        # independently weak signals at once. An exact match has no such
+        # scope ambiguity even with nothing else to go on.
+        return header.name == dwarf.name
 
     out: list[RecordType] = []
     for t in header_types:
