@@ -11,6 +11,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`compare --header-graph` / `--header-graph-includes` — the L2 header-only
+  semantic graph is now reachable from a plain `compare` run.**
+  `service.run_dump` could already build this graph (declaration reachability
+  / include edges from the header AST alone, no build system needed), but
+  nothing in the CLI exposed it — `resolve_input`/`_resolve_input`/
+  `_resolve_compare_snapshots` didn't forward it, so it only fired from
+  bespoke test/internal call sites. `--header-graph` now threads through that
+  whole chain into `resolve_input`, which already routes to `run_dump` for
+  every binary format (ELF/PE/Mach-O) uniformly; the existing build-source-
+  pack graph diff (`cli_buildsource_helpers.diff_embedded_build_source`)
+  picks it up automatically once either side carries a `build_source` (no new
+  diff pass needed — it already treats an L2 header-only pack and an L3-L5
+  build-integrated one the same way). `--header-graph-includes` additionally
+  collects per-header include-file edges. Two new `COMPARE_FLAG_BUDGET_RAISES`
+  ledger entries. **Scope note:** this exposes the graph on an ordinary
+  binary+headers `compare`; it does not add support for comparing a
+  header-only library with *no* binary at all (`UC-ARCH-header-only` / gap G4
+  remains open — that needs a new no-binary snapshot-building path plus
+  `CompareRequest`/`InputSpec` changes, deliberately out of scope here since
+  the maintainers already looked at that larger wiring and deferred it in
+  ADR-041 pending `cli.py`/`dumper.py` file-size headroom).
+
 - **`abicheck init` / `abicheck config validate` / `abicheck config
   show-effective` / `abicheck doctor` — new diagnostic commands.** Closes a
   recurring adoption-friction gap: `.abicheck.yml` had no scaffolding, no

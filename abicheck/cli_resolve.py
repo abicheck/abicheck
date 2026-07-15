@@ -263,6 +263,8 @@ def _resolve_input(
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -298,6 +300,9 @@ def _resolve_input(
             treat *headers* as the public contract (e.g. ``compare``'s
             ``--header``, which is documented as "Public header file or
             directory") should pass the same paths here too.
+        header_graph / header_graph_includes: Forwarded to
+            ``service.resolve_input`` — build and embed the L2 header-only
+            semantic graph (ADR-041 addendum) for a binary input.
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -320,6 +325,8 @@ def _resolve_input(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -499,6 +506,8 @@ def _resolve_compare_snapshots(
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debuginfod_url: str | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -521,6 +530,13 @@ def _resolve_compare_snapshots(
     resolved ``.debug`` file actually feeds that side's DWARF parse — a custom
     debuginfod server must reach the actual fetch, not just the (log-only)
     resolution probe elsewhere.
+
+    ``header_graph`` / ``header_graph_includes`` (ADR-041 addendum): both
+    sides opt into the L2 header-only semantic graph — the existing
+    build-source-pack graph diff already handles a ``SourceGraphSummary``
+    from any evidence tier uniformly, so populating it here from headers
+    alone (no build system required) makes it reachable from plain
+    ``compare`` for the first time.
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
@@ -544,6 +560,8 @@ def _resolve_compare_snapshots(
         header_backend=old_backend,
         compile=compile_context,
         public_headers=old_h,
+        header_graph=header_graph,
+        header_graph_includes=header_graph_includes,
     )
     new = _resolve_input(
         new_input,
@@ -560,6 +578,8 @@ def _resolve_compare_snapshots(
         debuginfod_url=debuginfod_url,
         header_backend=new_backend,
         compile=compile_context,
+        header_graph=header_graph,
+        header_graph_includes=header_graph_includes,
         public_headers=new_h,
     )
     if follow_deps:

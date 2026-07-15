@@ -235,6 +235,8 @@ def resolve_input(
     follow_linker_scripts: bool = True,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
@@ -263,6 +265,13 @@ def resolve_input(
         follow_linker_scripts: When True (default), a GNU ld linker script is
             followed to the shared library named in its ``INPUT()``/``GROUP()``
             directive.
+        header_graph / header_graph_includes: Forwarded to :func:`run_dump`
+            for binary inputs (ELF/PE/Mach-O) — builds and embeds the L2
+            header-only semantic graph so ``compare``'s existing
+            build-source-pack graph diff (which already handles any
+            ``SourceGraphSummary`` uniformly, L3-L5 or this L2 one) picks it
+            up on both sides. A no-op for non-binary inputs (BTF/CTF,
+            snapshots, ABICC dumps).
         notify: Optional callback for user-facing progress notes (e.g. "following
             a linker script", "no headers provided"). When *None*, such notes go
             to the module logger. The CLI passes a ``click.echo(..., err=True)``
@@ -295,6 +304,8 @@ def resolve_input(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 
@@ -320,6 +331,8 @@ def resolve_input(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 

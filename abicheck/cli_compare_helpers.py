@@ -455,6 +455,8 @@ def run_compare(
     depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
@@ -711,6 +713,8 @@ def run_compare(
         new_debug_roots=resolved_new_debug or None,
         enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
+        header_graph=header_graph,
+        header_graph_includes=header_graph_includes,
     )
 
     suppression, pf = _load_suppression_and_policy(

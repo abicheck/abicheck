@@ -1361,6 +1361,20 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
         "1-2 lower BASE to bring the net well below today."
     ),
+    "--header-graph": (
+        "ADR-041 addendum: opts into the L2 header-only semantic graph for a "
+        "run, letting the existing build-source-pack graph diff (source_graph, "
+        "previously only reachable from L3-L5 build-integrated evidence) fire "
+        "on a plain binary+headers compare. A per-run analysis-depth toggle "
+        "like --pattern-verdicts/--reconcile-build-context, not a stable "
+        "project setting."
+    ),
+    "--header-graph-includes": (
+        "ADR-041 addendum: with --header-graph, additionally collects "
+        "per-header include-file edges (one extra clang -M invocation per "
+        "top-level header) — opt-in separately since it costs more than "
+        "--header-graph alone. Same per-run analysis-depth rationale."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

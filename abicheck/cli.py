@@ -1300,6 +1300,19 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
+@click.option("--header-graph", is_flag=True, default=False,
+              help="Build and embed the L2 header-only semantic graph (ADR-041 addendum) "
+                   "for both sides from the parsed header AST alone (no build system "
+                   "needed); the existing build-source-pack graph diff picks it up "
+                   "automatically, so declaration reachability / internal-dependency "
+                   "risk findings become available on an ordinary binary+headers compare, "
+                   "not just L3-L5 build-integrated runs. Degrades to declaration-visibility "
+                   "nodes only (no type/call edges) when clang is unavailable.")
+@click.option("--header-graph-includes", is_flag=True, default=False,
+              help="With --header-graph, additionally run a per-header 'clang -M' pass to "
+                   "add include-file edges from each top-level header to everything it "
+                   "transitively includes. One extra clang invocation per top-level header, "
+                   "so opt-in separately from --header-graph. Ignored without --header-graph.")
 @click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "
