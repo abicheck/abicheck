@@ -429,6 +429,30 @@ class TestInlineAccessorsFor:
         out = _inline_accessors_for([fn], {"mylib::Widget"})
         assert out == [fn]
 
+    def test_qualified_conversion_operator_target_is_not_mistaken_for_return_type(
+        self,
+    ) -> None:
+        # A conversion operator whose target type is itself qualified
+        # ("operator ns::Type") has a top-level space (from "operator") AND
+        # a "::" in what follows (from "ns::Type") — exactly the signal the
+        # generic return-type-stripping heuristic uses to decide a split is
+        # safe. Stripping there yields just "ns::Type", losing the
+        # "mylib::Widget" prefix entirely (review finding on the
+        # conversion-operator fix); the "::operator" marker must be
+        # special-cased ahead of that heuristic instead.
+        # Function.name carries only the bare target ("operator Type", per
+        # real castxml/DWARF output — DW_AT_name never includes the
+        # target's own namespace) so this fn is demangled rather than
+        # treated as already-qualified; the demangled text is what
+        # actually surfaces the qualified target.
+        fn = _fn(
+            "operator Type",
+            "_ZNK5mylib6WidgetcvN2ns4TypeEEv",
+            is_inline=True,
+        )
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
     def test_templated_accessor_matched_despite_leading_return_type(self) -> None:
         # c++filt includes a leading return type for a function
         # template/specialization (e.g. "int mylib::Widget::foo<int>(int)")

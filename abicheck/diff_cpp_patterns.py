@@ -809,6 +809,9 @@ def _find_public_pimpl_holders(
     return found
 
 
+_OPERATOR_MARKER_RE = re.compile(r"::operator(?![A-Za-z0-9_])")
+
+
 def _strip_leading_return_type(head: str) -> str:
     """Strip a leading return type from a demangled function signature head.
 
@@ -822,17 +825,12 @@ def _strip_leading_return_type(head: str) -> str:
     everything after the *last* top-level space rather than naively
     splitting on the first space.
 
-    A conversion operator or ``operator new``/``operator delete`` also
-    contains a top-level space in its own name (``"operator int"``,
-    ``"operator new"``) with no leading return type at all, so splitting
-    there would discard the real qualified prefix. Guard against that: only
-    strip when the text after the split still looks like a qualified name
-    (contains ``"::"``) — an operator's own space never does, since the
-    class/namespace qualification always precedes it (e.g.
-    ``"mylib::Widget::operator int"``), so leaving the head untouched there
-    still lets ``_holder_of``'s trailing ``rsplit("::", 1)`` recover the
-    correct holder with ``"operator int"`` folded into the leftover method
-    segment.
+    Callers must route anything matching ``_OPERATOR_MARKER_RE`` through
+    ``_holder_of``'s operator special case instead — an operator's own name
+    can itself contain a top-level space (``"operator int"``,
+    ``"operator new"``) or even ``"::"`` (a qualified conversion-operator
+    target, ``"operator ns::Type"``), neither of which this generic
+    space/`::`-based split can tell apart from a real return-type boundary.
     """
     depth = 0
     last_space = -1
@@ -859,11 +857,26 @@ def _holder_of(head: str, holders: set[str]) -> str | None:
     so both the full enclosing-scope name and its last segment are checked
     against *holders*, mirroring how a record name would be looked up
     either way.
+
+    An operator overload (conversion operator, ``operator new``/``delete``,
+    ``operator+`` etc.) is handled as an explicit special case: its own
+    name can contain a top-level space and/or ``"::"`` (a qualified
+    conversion-operator target type, ``"operator ns::Type"``), which
+    otherwise defeats both the return-type-stripping heuristic and a plain
+    trailing ``rsplit("::", 1)``. The enclosing scope is unambiguous
+    regardless of what the operator's own name contains: everything before
+    the last ``"::operator"`` marker.
     """
-    qualified = _strip_leading_return_type(head)
-    if "::" not in qualified:
+    operator_matches = list(_OPERATOR_MARKER_RE.finditer(head))
+    if operator_matches:
+        holder = head[: operator_matches[-1].start()]
+    else:
+        qualified = _strip_leading_return_type(head)
+        if "::" not in qualified:
+            return None
+        holder = qualified.rsplit("::", 1)[0]
+    if not holder:
         return None
-    holder = qualified.rsplit("::", 1)[0]
     if holder in holders:
         return holder
     leaf = _last_segment(holder)
