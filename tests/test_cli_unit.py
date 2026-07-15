@@ -229,6 +229,20 @@ class TestCompareSecondaryFormat:
         assert result.exit_code == 64
         assert "--secondary-format requires --secondary-output" in result.output
 
+    def test_secondary_output_rejects_same_path_as_primary(self, tmp_path):
+        # Writing both formats to the same file would silently overwrite the
+        # primary report with the secondary one (Codex review, PR #557).
+        old_p, new_p = _write_snapshots(tmp_path)
+        same_path = tmp_path / "report"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "-o", str(same_path),
+            "--secondary-format", "json", "--secondary-output", str(same_path),
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-output must differ from --output/-o" in result.output
+
 
 # ── compare with suppression ────────────────────────────────────────────
 

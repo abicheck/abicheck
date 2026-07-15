@@ -222,6 +222,8 @@ abicheck compare old.json new.json \
 
 - `--secondary-format` requires `--secondary-output` — writing two formats
   to the same stream would be ambiguous.
+- `--secondary-output` must point at a different file than `--output`/`-o` —
+  otherwise the secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
   `--show-only`/`--stat`, which describe only the primary format's display.
 - Not supported for directory/package (release) comparisons — the release

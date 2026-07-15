@@ -1267,7 +1267,9 @@ def _embed_inline_source_side(
                    "supported for directory/package (release) comparisons.")
 @click.option("--secondary-output", "secondary_output",
               type=click.Path(dir_okay=False, path_type=Path), default=None,
-              help="File path to write --secondary-format's output to.")
+              help="File path to write --secondary-format's output to. Must "
+                   "differ from --output/-o, or the secondary render would "
+                   "silently overwrite the primary report.")
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "
                    "ON; use --no-demangle to turn off). json/sarif always keep raw "

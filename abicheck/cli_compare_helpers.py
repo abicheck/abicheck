@@ -470,6 +470,17 @@ def run_compare(
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
 
+    if (
+        secondary_output is not None
+        and output is not None
+        and secondary_output.resolve() == output.resolve()
+    ):
+        raise click.UsageError(
+            "--secondary-output must differ from --output/-o: writing both "
+            "formats to the same file would silently overwrite the primary "
+            "report with the secondary one."
+        )
+
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.

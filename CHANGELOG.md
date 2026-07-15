@@ -308,8 +308,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   instead of requiring a second full `abicheck compare` invocation just to
   get a different format. `--secondary-format` requires
   `--secondary-output` (writing two formats to the same stream would be
-  ambiguous) and always renders the full, unfiltered report — it ignores
-  `--show-only`/`--stat`, which describe only the primary format's display.
+  ambiguous), must point at a different file than `--output`/`-o` (else the
+  secondary render would silently overwrite the primary report), and always
+  renders the full, unfiltered report — it ignores `--show-only`/`--stat`,
+  which describe only the primary format's display.
   Not supported for directory/package (release) comparisons yet (rejected
   with a `UsageError`, same as `--exit-code-scheme`/
   `--reconcile-build-context`/`--env-matrix`). The bundled GitHub Action
