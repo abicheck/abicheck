@@ -33,6 +33,7 @@ import re
 
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
+from .fact_set import check_fact_set_compatibility, incomplete_families
 from .source_abi import EVIDENCE_TIER_L4, SourceAbiSurface, SourceEntity
 
 
@@ -112,6 +113,59 @@ def _richer(candidate: SourceEntity, current: SourceEntity) -> bool:
     return _score(candidate) > _score(current)
 
 
+def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+    """ADR-038 C.8: flag incompatible or incomplete L4 fact-set evidence.
+
+    Fires only when there is something to report: at least one side carries a
+    ``fact_set`` identity (``link_source_abi`` rolls it up from the per-TU
+    records), or a mandatory family was rolled up as ``partial``/``failed``.
+    Silent when neither side has ever populated this metadata (a producer that
+    predates ADR-038 C.8, or hand-built test fixtures), matching the existing
+    forward-compat convention rather than manufacturing noise for a producer
+    that never claimed to report coverage.
+    """
+    old_cov = old.coverage if isinstance(old.coverage, dict) else {}
+    new_cov = new.coverage if isinstance(new.coverage, dict) else {}
+    old_fact_set = old_cov.get("fact_set") or {}
+    new_fact_set = new_cov.get("fact_set") or {}
+    old_families = old_cov.get("fact_family_states") or {}
+    new_families = new_cov.get("fact_family_states") or {}
+
+    issues = (
+        check_fact_set_compatibility(old_fact_set, new_fact_set)
+        if (old_fact_set or new_fact_set)
+        else []
+    )
+    old_incomplete = incomplete_families(old_families)
+    new_incomplete = incomplete_families(new_families)
+    if not issues and not old_incomplete and not new_incomplete:
+        return []
+
+    parts = [f"{issue.rule}: {issue.message}" for issue in issues]
+    if old_incomplete:
+        parts.append(f"old side mandatory family/families incomplete: {', '.join(old_incomplete)}")
+    if new_incomplete:
+        parts.append(f"new side mandatory family/families incomplete: {', '.join(new_incomplete)}")
+
+    return [
+        Change(
+            kind=ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
+            symbol="",
+            description=(
+                "L4 source-fact evidence for this comparison is incomplete or used "
+                "incompatible producers/fact-set versions: "
+                + "; ".join(parts)
+                + ". Per ADR-038 C.8, treat this pair's other source-replay "
+                "findings as unreliable until re-collected with a consistent, "
+                "complete fact set."
+            ),
+            old_value=str(old_fact_set or old_incomplete or ""),
+            new_value=str(new_fact_set or new_incomplete or ""),
+            source_location=f"[{EVIDENCE_TIER_L4}]",
+        )
+    ]
+
+
 def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     """Return source-replay findings for the old→new source-surface transition.
 
@@ -119,6 +173,7 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     a ``DiffResult`` and run through the existing verdict/policy pipeline.
     """
     changes: list[Change] = []
+    changes.extend(_diff_fact_coverage(old, new))
     changes.extend(_diff_generated(old, new))
     changes.extend(_diff_typedefs(old, new))
     changes.extend(_diff_macros(old, new))

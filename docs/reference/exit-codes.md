@@ -194,6 +194,20 @@ exit 0
 
 ---
 
+## `abicheck inputs validate`
+
+Validates a Flow-2 `abicheck_inputs/` pack (ADR-038 C.8) before it is folded
+into an authoritative baseline.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Clean — no issues found |
+| `1` | Warnings only (e.g. an incomplete mandatory fact family, no fact-set identity reported) |
+| `2` | Validation errors (e.g. a fact-set version mismatch, duplicate TU identities) |
+| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
+
+---
+
 ## `abicheck debian-symbols`
 
 ### `debian-symbols generate`

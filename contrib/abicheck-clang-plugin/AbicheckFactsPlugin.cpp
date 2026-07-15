@@ -51,6 +51,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
+#include "clang/Basic/Version.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 #include "clang/Index/USRGeneration.h"
@@ -99,6 +100,16 @@ namespace {
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe.
 constexpr const char *kPluginVersion = "0.4";
+
+// ADR-038 C.8: the canonical fact-set identity every SourceAbiTu producer
+// stamps (abicheck.buildsource.source_abi.SOURCE_ABI_FACT_SET_NAME/VERSION —
+// keep these two literals in sync with that module). There is exactly one
+// fact-set version this plugin can emit: it always collects the complete
+// mandatory family list for that version. A build that wants LESS evidence
+// simply does not load this plugin (ADR-038's own "optional, not modal"
+// deployment story) — there is no in-plugin flag that narrows collection.
+constexpr const char *kFactSetName = "abicheck-clang-canonical";
+constexpr int kFactSetVersion = 1;
 
 // ---------------------------------------------------------------------------
 // Optional profiling (ABICHECK_PLUGIN_PROFILE=1): attribute subtree-hash cost
@@ -231,6 +242,37 @@ std::string jsonStrMap(const std::map<std::string, std::string> &items) {
   }
   out += "}";
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// ADR-038 C.8 coverage: one of complete/empty-confirmed/partial/unsupported/
+// failed per fact family, mirroring
+// abicheck.buildsource.source_abi.coverage_state_for_family()'s decision
+// table exactly so every producer reports coverage the same way. This is
+// NOT a user-selectable mode: every family is always attempted; the state
+// only records what happened.
+std::string familyCoverageState(bool entitiesPresent, bool diagnosticsSeen,
+                                 bool unsupported = false) {
+  if (unsupported)
+    return "unsupported";
+  if (diagnosticsSeen)
+    return entitiesPresent ? "partial" : "failed";
+  return entitiesPresent ? "complete" : "empty-confirmed";
+}
+
+// Whether any diagnostic in `diags` contains one of `substrs` — the plugin's
+// existing per-family "JSON dump failed" diagnostics (emitted where an
+// individual declaration's dump/canonicalization failed, see
+// VisitFunctionDecl/emitConstexprVar/emitDataVariable/emitType/emitTemplate/
+// emitClassTemplateMemberPatterns) double as the coverage signal, so no new
+// state has to be threaded through the visitor.
+bool anyDiagContains(const std::set<std::string> &diags,
+                     std::initializer_list<const char *> substrs) {
+  for (const std::string &d : diags)
+    for (const char *s : substrs)
+      if (d.find(s) != std::string::npos)
+        return true;
+  return false;
 }
 
 // ===========================================================================
@@ -2495,6 +2537,49 @@ private:
                             jsonStr(kPluginVersion) + "}";
     std::vector<std::string> diagVec(diags.begin(), diags.end());
 
+    // ADR-038 C.8: fact-set identity + per-family coverage, always computed —
+    // never behind a flag. See familyCoverageState()/anyDiagContains() above.
+    std::string factSet =
+        "{\"name\":" + jsonStr(kFactSetName) +
+        ",\"version\":" + std::to_string(kFactSetVersion) +
+        ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
+        jsonStr(kPluginVersion) +
+        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
+        jsonStr(CLANG_VERSION_STRING) + "}";
+
+    std::map<std::string, std::string> coverageMap = {
+        {"functions", familyCoverageState(
+                          !functions.empty(),
+                          anyDiagContains(diags, {"function facts unavailable"}))},
+        {"variables", familyCoverageState(
+                          !variables.empty(),
+                          anyDiagContains(diags, {"variable facts unavailable"}))},
+        {"types", familyCoverageState(
+                      !types.empty(),
+                      anyDiagContains(diags, {"record/enum type_hash unavailable"}))},
+        {"macros", familyCoverageState(!macros.empty(), /*diagnosticsSeen=*/false)},
+        {"templates",
+         familyCoverageState(
+             !templates.empty(),
+             anyDiagContains(diags, {"template body_hash unavailable",
+                                     "class-template member facts unavailable"}))},
+        {"inline_bodies",
+         familyCoverageState(
+             !inlineBodies.empty(),
+             anyDiagContains(diags, {"function facts unavailable"}))},
+        {"constexpr_values",
+         familyCoverageState(
+             !constexprValues.empty(),
+             anyDiagContains(diags, {"constexpr value unavailable"}))},
+        // Never collected by this producer (no second AST walk for source
+        // edges, no forensic read-file capture yet) — a structural producer
+        // limitation, reported honestly rather than as an empty array that
+        // looks identical to "collected, found nothing" (ADR-038 C.8 rule 5).
+        {"source_edges", familyCoverageState(false, false, /*unsupported=*/true)},
+        {"read_files", familyCoverageState(false, false, /*unsupported=*/true)},
+    };
+    std::string coverage = jsonStrMap(coverageMap);
+
     std::string tu =
         "{\"schema_version\":1,\"tu_id\":" + jsonStr(tuId) +
         ",\"target_id\":" + jsonStr(targetId) + ",\"extractor\":" + extractor +
@@ -2507,7 +2592,8 @@ private:
         ",\"inline_bodies\":" + arr(inlineBodies) +
         ",\"constexpr_values\":" + arr(constexprValues) +
         ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
-        ",\"read_files\":[]}";
+        ",\"read_files\":[],\"fact_set\":" + factSet +
+        ",\"coverage\":" + coverage + "}";
 
     // Per-TU, deterministic filename keyed by source path AND compile context.
     // Including the context hash keeps distinct ABI-relevant compile variants of
@@ -2588,11 +2674,22 @@ private:
       return;
     std::string createdBy =
         std::string("abicheck-clang-plugin ") + kPluginVersion;
+    // ADR-038 C.8: the pack-level fact_set mirrors every TU record's — one
+    // canonical fact set per pack, never per-TU variance (this plugin instance
+    // only ever emits one fact-set version for its whole run).
+    std::string factSet =
+        "{\"name\":" + jsonStr(kFactSetName) +
+        ",\"version\":" + std::to_string(kFactSetVersion) +
+        ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
+        jsonStr(kPluginVersion) +
+        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
+        jsonStr(CLANG_VERSION_STRING) + "}";
     std::string manifest =
         "{\n  \"abicheck_inputs_version\": 1,\n  \"binary\": \"\",\n"
         "  \"compile_db\": \"\",\n  \"created_at\": " +
         jsonStr(nowIso8601Utc()) + ",\n  \"created_by\": " + jsonStr(createdBy) +
-        ",\n  \"exported_symbols\": [],\n  \"headers\": [],\n"
+        ",\n  \"exported_symbols\": [],\n  \"fact_set\": " + factSet +
+        ",\n  \"headers\": [],\n"
         "  \"kind\": \"abicheck_inputs\",\n  \"library\": " + jsonStr(Library) +
         ",\n  \"source_facts\": [\"source_facts\"],\n  \"version\": " + jsonStr(Version) +
         "\n}\n";

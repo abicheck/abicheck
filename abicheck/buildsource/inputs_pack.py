@@ -136,6 +136,11 @@ class InputsManifest:
     #: Exported (mangled) symbols the build already knows, if any. When empty the
     #: surface is relinked against the artifact side's exports during ``merge``.
     exported_symbols: list[str] = field(default_factory=list)
+    #: Pack-level canonical fact-set identity (ADR-038 C.8), when the producer
+    #: declares one at the manifest level (the Clang plugin does; a producer
+    #: that only stamps per-TU records leaves this ``{}`` and
+    #: ``inputs validate`` falls back to the TU records).
+    fact_set: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,6 +155,7 @@ class InputsManifest:
             "compile_db": self.compile_db,
             "source_facts": list(self.source_facts),
             "exported_symbols": list(self.exported_symbols),
+            "fact_set": dict(self.fact_set),
         }
 
     @classmethod
@@ -172,6 +178,7 @@ class InputsManifest:
             compile_db=_opt_str(d.get("compile_db")),
             source_facts=_str_list("source_facts"),
             exported_symbols=_str_list("exported_symbols"),
+            fact_set=dict(d.get("fact_set") or {}),
         )
 
 

@@ -127,6 +127,7 @@ module = [
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
     "abicheck.cli_graph",
+    "abicheck.cli_inputs",
     "abicheck.cli_plugin",
     "abicheck.cli_pr_comment",
     "abicheck.cli_probe",

@@ -577,6 +577,7 @@ class ChangeKind(str, Enum):
     PUBLIC_MACRO_REMOVED = "public_macro_removed"  # public macro removed from the headers → API_BREAK
     INLINE_FUNCTION_REMOVED = "inline_function_removed"  # public header-only inline function removed (no exported symbol) → API_BREAK
     PUBLIC_TYPEDEF_REMOVED = "public_typedef_removed"  # public typedef/alias removed (no exported symbol) → API_BREAK
+    SOURCE_FACT_COVERAGE_INCOMPLETE = "source_fact_coverage_incomplete"  # a mandatory fact family was partial/failed, or the two sides' fact-set identity is incompatible (ADR-038 C.8) → RISK
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     # Emitted only by the source-graph diff over two L5 graph summaries

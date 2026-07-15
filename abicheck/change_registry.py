@@ -1311,6 +1311,16 @@ REGISTRY = ChangeKindRegistry([
               "replay surfaces the removal. Consumer source that named the alias "
               "(variables, casts, template arguments) no longer compiles. A "
               "source/API break; retain the alias or provide a replacement name."),
+    _E("source_fact_coverage_incomplete", _R,
+       impact="The L4 source-fact evidence for this comparison is incomplete or "
+              "produced by incompatible producers/fact-set versions — a mandatory "
+              "fact family (functions, macros, templates, inline bodies, "
+              "constexpr values, ...) was 'partial' or 'failed' on one or both "
+              "sides, or the old/new fact-set version or producer differ. Per "
+              "ADR-038 C.8, absence of another L4 finding must not be read as "
+              "proof nothing changed in that family; treat this pair's other "
+              "source-replay findings as unreliable until re-collected with a "
+              "consistent, complete fact set."),
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     _E("public_reachability_changed", _R,

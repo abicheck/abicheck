@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
+from .fact_set import rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 
 
@@ -1137,6 +1138,7 @@ def link_source_abi(
     ``forced_public`` names declarations the policy forces onto the surface even
     without a public-header origin.
     """
+    tus = list(tus)
     exported = set(exported_symbols)
     forced = set(forced_public)
     surface = SourceAbiSurface(library=library, target_id=target_id)
@@ -1264,6 +1266,11 @@ def link_source_abi(
         "unmatched_symbols": len(exported) - len(all_matched),
         "odr_conflicts": len(state.odr_conflicts),
     }
+    # ADR-038 C.8: roll the per-TU fact-set identity and per-family coverage up
+    # to the surface, so a downstream comparison (source_diff.py) can apply the
+    # fact-set compatibility rules without re-reading every TU record.
+    surface.coverage["fact_set"] = rollup_fact_set(tus)
+    surface.coverage["fact_family_states"] = rollup_coverage(tus)
     return surface
 
 

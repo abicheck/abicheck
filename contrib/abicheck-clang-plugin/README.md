@@ -44,6 +44,33 @@ Per `SourceEntity`: `id`, `kind`, `qualified_name`, `mangled_name`,
 `signature_hash`, `value`, `source_location {path,line,origin}`, `visibility`,
 `api_relevant`, `confidence`.
 
+### Fact-set identity and per-family coverage (ADR-038 C.8)
+
+Every TU record (and `manifest.json`) carries a `fact_set` block —
+`{name: "abicheck-clang-canonical", version, producer, producer_version,
+compiler_family, compiler_version}` — and a `coverage` block reporting one of
+`complete`/`empty-confirmed`/`partial`/`unsupported`/`failed` per fact
+family (`functions`, `variables`, `types`, `macros`, `templates`,
+`inline_bodies`, `constexpr_values`, `source_edges`, `read_files`). This is
+**not** a collection mode: every family is always attempted; the state only
+records what happened, derived from the same per-declaration "JSON dump
+failed" diagnostics already described below. `source_edges`/`read_files` are
+`unsupported` — this plugin does not collect them yet (a structural
+limitation, not a flag).
+
+`abicheck merge` compares `fact_set`/`coverage` across the old/new baselines
+(`buildsource/fact_set.py`) and emits `SOURCE_FACT_COVERAGE_INCOMPLETE`
+(RISK) when the two sides' fact-set versions/producers are incompatible or a
+mandatory family was incomplete on either side — so a missing L4 finding is
+never silently read as "nothing changed there". Validate a pack's coverage
+*before* merging with:
+
+```bash
+abicheck inputs validate ./abicheck_inputs/
+```
+
+See ADR-038 C.8 for the full design.
+
 ### Coverage (ADR-038 C.7)
 
 Implemented and matching `clang.py`, validated by the C.6 CI matrix:

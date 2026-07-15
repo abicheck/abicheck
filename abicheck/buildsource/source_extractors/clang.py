@@ -50,6 +50,7 @@ shells out (integration-marked).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -63,7 +64,13 @@ from typing import Any
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
-from ..source_abi import SourceAbiTu, SourceEntity, SourceLocation
+from ..source_abi import (
+    SourceAbiTu,
+    SourceEntity,
+    SourceLocation,
+    coverage_state_for_family,
+    default_fact_set,
+)
 from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
@@ -101,6 +108,27 @@ from .clang_public_roots import (  # noqa: F401
 #: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
 #: from an older recipe. 0.6: emit external-linkage ``variables``.
 CLANG_EXTRACTOR_VERSION = "0.6"
+
+
+@functools.lru_cache(maxsize=8)
+def _clang_compiler_version(clang_bin: str) -> str:
+    """``clang -dumpversion`` for *clang_bin*, cached (ADR-038 C.8 fact_set).
+
+    Cached per binary path so a many-TU build pays this subprocess once, not
+    once per compile unit. Best-effort: any failure yields ``""`` rather than
+    aborting extraction (compiler_version is provenance, not required input).
+    """
+    try:
+        r = subprocess.run(
+            [clang_bin, "-dumpversion"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -1768,7 +1796,51 @@ class ClangSourceExtractor:
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root
         self._attach_macros(tu, compile_unit, source, directory, effective_public_roots)
+        self._stamp_fact_set_and_coverage(tu)
         return tu
+
+    def _stamp_fact_set_and_coverage(self, tu: SourceAbiTu) -> None:
+        """ADR-038 C.8: record this TU's canonical fact-set identity + per-family
+        coverage. Always attempts every family (no user-selectable mode) — a
+        family is ``unsupported`` only when this extractor structurally never
+        collects it (``source_edges``), never because of a flag.
+        """
+        # A non-zero *recovered* AST exit is TU-wide (clang.py has no per-family
+        # granularity, unlike the plugin's per-decl JSON-dump diagnostics), so it
+        # marks every AST-derived family as partial/failed rather than only the
+        # families that happen to be empty.
+        ast_recovered = any(d.startswith("clang exited") for d in tu.diagnostics)
+        coverage: dict[str, str] = {
+            family: coverage_state_for_family(
+                entities_present=bool(entities), family_diagnostics_seen=ast_recovered
+            )
+            for family, entities in (
+                ("functions", tu.functions),
+                ("variables", tu.variables),
+                ("types", tu.types),
+                ("templates", tu.templates),
+                ("inline_bodies", tu.inline_bodies),
+                ("constexpr_values", tu.constexpr_values),
+            )
+        }
+        macro_diag = any(d.startswith("macro pass") for d in tu.diagnostics)
+        coverage["macros"] = coverage_state_for_family(
+            entities_present=bool(tu.macros), family_diagnostics_seen=macro_diag
+        )
+        # source_edges: this extractor never populates them (no second AST-walk
+        # for call/type edges yet) — a structural producer limitation, not a mode.
+        coverage["source_edges"] = coverage_state_for_family(
+            entities_present=False, family_diagnostics_seen=False, unsupported=True
+        )
+        coverage["read_files"] = coverage_state_for_family(
+            entities_present=bool(tu.read_files), family_diagnostics_seen=False
+        )
+        tu.coverage = coverage
+        tu.fact_set = default_fact_set(
+            producer="abicheck-cc-clang-extractor",
+            producer_version=CLANG_EXTRACTOR_VERSION,
+            compiler_version=_clang_compiler_version(self.clang_bin),
+        )
 
     def _run(
         self, cmd: list[str], directory: str, source_label: str
