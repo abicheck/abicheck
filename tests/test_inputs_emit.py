@@ -41,7 +41,7 @@ from abicheck.buildsource.inputs_emit import (
     compact_inputs_pack,
     facts_filename,
 )
-from abicheck.buildsource.inputs_pack import load_inputs_manifest
+from abicheck.buildsource.inputs_pack import is_inputs_pack, load_inputs_manifest
 from abicheck.buildsource.inputs_validate import validate_inputs_pack
 from abicheck.cc_wrapper import (
     compile_unit_from_command,
@@ -332,6 +332,39 @@ def test_compact_normalizes_extensionless_output_filename(
     assert ingested.tu_count == 1
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
     assert "foo" in names
+
+
+def test_compact_root_directory_scan_does_not_destroy_manifest(
+    tmp_path: Path,
+) -> None:
+    """A hand-written manifest using source_facts: ["."] (root-level JSONL
+    facts, no source_facts/ subdirectory) would otherwise sweep the pack's
+    own manifest.json into the read path's "*.json" glob as if it were a
+    (silently valid, empty) TU record. With the default
+    remove_originals=True, compaction then deletes it as a merged
+    "original" -- destroying the pack's own manifest and leaving a
+    directory is_inputs_pack() no longer recognizes at all (Codex review,
+    P2, reproduced empirically)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["."]
+    _write_manifest(pack, manifest)
+    (pack / "root.jsonl").write_text(
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict()) + "\n",
+        encoding="utf-8",
+    )
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is not None
+
+    # The core regression: manifest.json must never be treated as a merged
+    # "original" and deleted -- the pack must still be recognizable and
+    # loadable afterward.
+    assert (pack / "manifest.json").is_file()
+    assert is_inputs_pack(pack)
+    load_inputs_manifest(pack)  # must not raise
 
 
 def test_compact_rerun_prefers_fresh_record_over_stale_prior_output(

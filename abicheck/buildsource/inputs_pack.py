@@ -277,6 +277,20 @@ def _iter_source_fact_files(
     explicit = bool(manifest.source_facts)
     entries = manifest.source_facts or [SOURCE_FACTS_DIR]
     files: list[Path] = []
+    # A directory-scan entry that IS (or contains) the pack root -- e.g. a
+    # hand-written manifest using source_facts: ["."] -- would otherwise
+    # sweep the pack's own manifest.json into the "*.json" glob below as if
+    # it were a (harmless-looking, empty) TU record: SourceAbiTu.from_dict()
+    # never raises for it (none of its keys match SourceAbiTu's fields), so
+    # it reads as silently valid. compact_inputs_pack's default
+    # remove_originals=True then deletes it as a merged "original" --
+    # destroying the pack's own manifest (Codex review, P2, reproduced
+    # empirically: is_inputs_pack() returned False immediately after
+    # compaction). Excluded by resolved identity, not name alone, so a
+    # legitimately different file that merely happens to be named
+    # "manifest.json" inside a *sub*directory the manifest never points a
+    # scan at is unaffected.
+    manifest_path_resolved = (root / INPUTS_MANIFEST_NAME).resolve()
     for entry in entries:
         target = _safe_pack_path(root, entry, sink)
         if target is None:
@@ -289,10 +303,12 @@ def _iter_source_fact_files(
             # A gzip-compressed sibling of either (P1 #22: post-build
             # compaction can gzip the merged file to shrink pack transfer
             # size) is read transparently — same decoded facts either way.
-            files.extend(target.glob("*.jsonl"))
-            files.extend(target.glob("*.jsonl.gz"))
-            files.extend(target.glob("*.json"))
-            files.extend(target.glob("*.json.gz"))
+            found: list[Path] = []
+            found.extend(target.glob("*.jsonl"))
+            found.extend(target.glob("*.jsonl.gz"))
+            found.extend(target.glob("*.json"))
+            found.extend(target.glob("*.json.gz"))
+            files.extend(f for f in found if f.resolve() != manifest_path_resolved)
         elif target.is_file():
             files.append(target)
         # An *explicitly named* entry that resolves to nothing at all (typo,

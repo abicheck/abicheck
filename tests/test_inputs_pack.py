@@ -393,6 +393,35 @@ def test_read_source_facts_skips_malformed_lines(tmp_path: Path) -> None:
     assert len(tus) == 1
 
 
+def test_read_source_facts_excludes_manifest_from_root_directory_scan(
+    tmp_path: Path,
+) -> None:
+    """A hand-written manifest using source_facts: ["."] (root-level JSONL
+    facts, no source_facts/ subdirectory) would otherwise sweep the pack's
+    own manifest.json into the "*.json" glob as if it were a TU record:
+    SourceAbiTu.from_dict() never raises for it (none of its keys match
+    SourceAbiTu's fields), so it silently reads as an empty-but-valid TU.
+    compact_inputs_pack's default remove_originals=True then deletes it as
+    a merged "original" -- destroying the pack's own manifest (Codex
+    review, P2)."""
+    pack = _write_inputs_pack(
+        tmp_path, [_tu("foo", mangled="_Z3foov")], manifest_extra={"source_facts": ["."]}
+    )
+    # Root-level fact file, matching a producer that used "." as its
+    # source_facts directory instead of the default source_facts/ subdir.
+    (pack / "root.jsonl").write_text(
+        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict()) + "\n",
+        encoding="utf-8",
+    )
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    tu_ids = {tu.tu_id for tu in tus}
+    # manifest.json must not appear as a (spurious, empty-tu_id) record.
+    assert "" not in tu_ids
+    assert tu_ids == {"cu://src/bar.cpp#cfg:abc"}
+
+
 def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
     tmp_path: Path,
 ) -> None:
