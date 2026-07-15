@@ -51,6 +51,31 @@ def _helpers_region() -> str:
     return text[:idx]
 
 
+def _bash_executable() -> str:
+    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
+
+    On GitHub's windows-latest runners, ``%SystemRoot%\\System32\\bash.exe``
+    is the WSL launcher stub — present even with no distro installed — and a
+    bare ``["bash", ...]`` subprocess call can resolve to it ahead of Git for
+    Windows' real bash depending on the calling process's inherited PATH
+    order. The stub exits immediately (non-zero) without running anything,
+    which looks identical to every helper-function test failing at once with
+    no bash-level diagnostic (Codex/CI investigation, PR #551). Prefer Git for
+    Windows' own bash explicitly on that platform; every other platform keeps
+    using whatever "bash" already resolves to on PATH.
+    """
+    if os.name != "nt":
+        return "bash"
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return "bash"
+
+
 def _run_harness(harness: str) -> str:
     """Source the real helper functions + *harness*, return CMD joined by '\\x1f'.
 
@@ -78,11 +103,17 @@ def _run_harness(harness: str) -> str:
         script_path = f.name
     try:
         result = subprocess.run(
-            ["bash", script_path],
-            capture_output=True, text=True, encoding="utf-8", check=True,
+            [_bash_executable(), script_path],
+            capture_output=True, text=True, encoding="utf-8",
         )
     finally:
         os.unlink(script_path)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"harness script failed (exit {result.returncode})\n"
+            f"--- stdout ---\n{result.stdout}\n"
+            f"--- stderr ---\n{result.stderr}"
+        )
     return result.stdout
 
 

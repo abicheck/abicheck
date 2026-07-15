@@ -194,6 +194,26 @@ class TestComputeAbiRisk:
         )]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
+    def test_breaking_dso_wide_elf_header_change_fails_despite_unrelated_import(self):
+        # Codex review regression: a DSO-wide break (wrong machine/class/
+        # endianness/ABI-flags) is recorded against the sentinel symbol
+        # "ELF_HEADER" (diff_platform_elf_dynamic.py), never a real export.
+        # No import is ever literally named "ELF_HEADER", so the plain
+        # symbol/affected_symbols intersection would never match it and
+        # would wrongly downgrade this to WARN — but a wrong-arch/class DSO
+        # cannot satisfy ANY import at runtime, so this must FAIL.
+        diff = _make_diff_result(
+            Verdict.BREAKING, breaking=[_make_breaking_change("ELF_HEADER")]
+        )
+        binding = _make_binding(symbol="totally_unrelated_export")
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[binding],
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.FAIL
+
     def test_api_break_verdict_with_impacted_imports_warn(self):
         diff = _make_diff_result(Verdict.API_BREAK)
         binding = _make_binding()
