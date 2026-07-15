@@ -336,21 +336,29 @@ def test_flat_model_builtin_and_pointer_types_excluded() -> None:
     assert not any(e.kind == "DECL_HAS_TYPE" for e in graph.edges)
 
 
-def test_flat_model_ambiguous_bare_name_left_unresolved() -> None:
+def test_flat_model_ambiguous_bare_name_edge_skipped_entirely() -> None:
     # Two distinct types share the bare name "Impl" (e.g. from different,
     # unrecorded namespaces) — the flat model has no scope info to
-    # disambiguate, so a reference to "Impl" must not guess which one.
-    impl_a = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
-    impl_b = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    # disambiguate, so a reference to "Impl" must not guess which one. In
+    # particular it must NOT emit an edge to the shared, collapsed
+    # `type://Impl` node at all: that node's visibility is whichever
+    # same-named declaration happened to be seeded first, so an edge to it
+    # could misattribute a reference to the wrong one's visibility —
+    # reporting (or hiding) a public-to-internal dependency that may not
+    # actually exist (Codex review; the fix that only labelled the edge
+    # "unresolved" without skipping it still let this happen).
+    impl_public = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
+    impl_private = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
     public = RecordType(
         name="Public",
         kind="struct",
         fields=[TypeField(name="p", type="Impl*")],
         origin=ScopeOrigin.PUBLIC_HEADER,
     )
-    graph = build_header_only_graph(_snapshot(types=[public, impl_a, impl_b]))
-    edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
-    assert edge.attrs["resolution"] == "unresolved"
+    graph = build_header_only_graph(
+        _snapshot(types=[public, impl_public, impl_private])
+    )
+    assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
 
 
 def test_flat_model_resolves_private_type_nested_in_a_template_argument() -> None:

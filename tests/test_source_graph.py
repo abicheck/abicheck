@@ -611,6 +611,12 @@ def test_include_graph_public_header_drift_finding() -> None:
     b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
                                        target_id="target://libfoo"))
     old = build_source_graph(b)
+    # The old side must have *confirmed* include-graph coverage (a pass that
+    # ran and genuinely found nothing) for its absence to be trusted evidence
+    # — otherwise this is indistinguishable from an older snapshot that never
+    # collected include data at all, and "entered" would be a coverage
+    # artifact, not a real drift (Codex review; _include_graph_covered).
+    old.extractor_passes["include_graph"] = True
     new = build_source_graph(b)
     augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
     new.finalize()
@@ -618,6 +624,27 @@ def test_include_graph_public_header_drift_finding() -> None:
            if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
     assert len(inc) == 1
     assert inc[0].symbol == "inc/foo.h"
+
+
+def test_include_graph_public_header_drift_suppressed_without_old_coverage() -> None:
+    # The exact false-positive Codex flagged: an old snapshot with no
+    # include-graph data at all (never collected, or clang unavailable) vs a
+    # new one that has it must NOT report every header in the new side as
+    # newly "entered" — that's a coverage artifact, not a real change.
+    from abicheck.buildsource.include_graph import augment_graph_with_includes
+
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
+                            confidence=Confidence.HIGH))
+    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
+                                       target_id="target://libfoo"))
+    old = build_source_graph(b)  # no include data, no confirmed pass at all
+    new = build_source_graph(b)
+    augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
+    new.finalize()
+    inc = [c for c in diff_source_graph_findings(old, new)
+           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    assert inc == []
 
 
 def test_localize_symbol_walks_the_graph() -> None:

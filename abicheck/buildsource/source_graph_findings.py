@@ -924,6 +924,22 @@ def _call_reachability_findings(
     return findings
 
 
+def _include_graph_covered(graph: SourceGraphSummary) -> bool:
+    """Whether *graph* actually collected include-graph data at all.
+
+    True when its include-graph pass is confirmed (``extractor_passes``,
+    ADR-041 P0 slice 2 coverage-honesty convention: a pass can run and find
+    zero edges) or it carries any ``COMPILE_UNIT_INCLUDES_FILE`` edge at all
+    (an unmarked/legacy graph with real recorded data). False only when the
+    graph has neither — i.e. include-graph folding never ran, whether
+    because the caller never requested it (an older snapshot dumped before
+    the fold became automatic) or clang was unavailable.
+    """
+    return graph.extractor_passes.get("include_graph", False) or any(
+        e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
+    )
+
+
 def _include_graph_drift_findings(
     old: SourceGraphSummary,
     new: SourceGraphSummary,
@@ -931,7 +947,21 @@ def _include_graph_drift_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """Public headers entering/leaving the compiled include graph."""
+    """Public headers entering/leaving the compiled include graph.
+
+    Trusts a side's *absence* of a header from the include graph only when
+    that side actually collected include-graph data at all
+    (:func:`_include_graph_covered`) — mirroring the same "an absent/never-
+    run pass is not evidence of absence" principle
+    :func:`_common_dependency_edge_kinds` already applies to the dependency-
+    edge families. Without this, comparing a snapshot with no include-graph
+    data (dumped before the fold existed/became automatic, or where clang
+    was unavailable) against one that has it would read *every* header in
+    the covered side as newly "entered"/"left" — a coverage artifact, not a
+    real change (Codex review: this became a much more likely everyday
+    scenario once include-graph folding stopped being an explicit opt-in
+    flag both sides had to remember to pass identically).
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -941,24 +971,26 @@ def _include_graph_drift_findings(
         _public_headers_in_include_graph(old),
         _public_headers_in_include_graph(new),
     )
-    if old_inc or new_inc:
-        for hdr in sorted(new_inc - old_inc) + sorted(old_inc - new_inc):
-            entered = hdr in new_inc
-            label = (new_labels if entered else old_labels).get(hdr, hdr)
-            findings.append(
-                Change(
-                    kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
-                    symbol=label,
-                    description=(
-                        f"Public header {label!r} {'entered' if entered else 'left'} "
-                        "the compiled include graph. Consumers may pull in different "
-                        "declarations/macros through it. Source-graph evidence to review."
-                    ),
-                    old_value="in include graph" if not entered else "not included",
-                    new_value="in include graph" if entered else "not included",
-                    source_location=boundary,
-                )
+    old_covered, new_covered = _include_graph_covered(old), _include_graph_covered(new)
+    entered = sorted(new_inc - old_inc) if old_covered else []
+    left = sorted(old_inc - new_inc) if new_covered else []
+    for hdr in entered + left:
+        is_entered = hdr in new_inc
+        label = (new_labels if is_entered else old_labels).get(hdr, hdr)
+        findings.append(
+            Change(
+                kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+                symbol=label,
+                description=(
+                    f"Public header {label!r} {'entered' if is_entered else 'left'} "
+                    "the compiled include graph. Consumers may pull in different "
+                    "declarations/macros through it. Source-graph evidence to review."
+                ),
+                old_value="in include graph" if not is_entered else "not included",
+                new_value="in include graph" if is_entered else "not included",
+                source_location=boundary,
             )
+        )
     return findings
 
 

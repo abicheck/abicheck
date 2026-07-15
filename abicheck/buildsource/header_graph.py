@@ -263,6 +263,20 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
             name, resolution = _resolve_flat_type_name(candidate, counts)
             if not name or name in seen:
                 continue
+            # An *ambiguous* name (more than one declared type/enum shares
+            # it — count() > 1, as opposed to 0 for a genuinely external
+            # name like "std::vector") must not join the shared, collapsed
+            # `type://<name>` node at all: that node's visibility is
+            # whichever of the same-named declarations happened to be
+            # seeded first, so an edge to it can misattribute a reference to
+            # the wrong one's visibility — reporting (or hiding) a
+            # public-to-internal dependency that may not actually exist
+            # (Codex review). A genuinely external/unresolved name is safe
+            # to still emit: nothing was seeded for it, so its node stays
+            # unclassified (origin unknown) rather than borrowing a wrong
+            # declaration's visibility.
+            if resolution == RESOLUTION_UNRESOLVED and counts.get(name, 0) > 1:
+                continue
             seen.add(name)
             edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
 
