@@ -208,6 +208,13 @@ def test_manifest_level_fact_set_used_when_no_tu_ever_stamped_one(
     report = validate_inputs_pack(pack)
     assert report.fact_set == fs
     assert report.ok
+    # The manifest's fact_set identity is trusted (it's not a "no fact_set
+    # anywhere" pack), but no TU record actually backs mandatory-family
+    # coverage completeness — that gap must still be surfaced, not silently
+    # swallowed by the identity check passing (Codex review).
+    assert any(
+        "no TU record" in w and "coverage" in w for w in report.warnings
+    )
 
 
 def test_incomplete_mandatory_family_warns(tmp_path: Path) -> None:

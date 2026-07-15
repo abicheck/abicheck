@@ -179,6 +179,21 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
             )
 
     coverage = rollup_coverage(tus)
+    # A fact_set accepted above may have come entirely from the
+    # manifest-level fallback (no TU ever stamped one — see
+    # test_manifest_level_fact_set_used_when_no_tu_ever_stamped_one): every
+    # TU that *does* carry a fact_set contributes at least "failed" to every
+    # mandatory family (rollup_coverage), so an empty rollup here while *tus*
+    # is non-empty and a fact_set was accepted can only mean no TU record
+    # backs that claim at all (stale/pre-C.8 records, or a manifest stamped
+    # ahead of any TU write) — surface that instead of letting the identity
+    # check passing imply coverage was verified too (Codex review).
+    if tus and fact_set and not coverage:
+        report.warnings.append(
+            "fact_set identity came only from the manifest — no TU record in "
+            "this pack carries fact_set/coverage metadata, so mandatory-family "
+            "coverage completeness could not be verified against it."
+        )
     incomplete = incomplete_families(coverage)
     report.incomplete_families = incomplete
     if incomplete:
