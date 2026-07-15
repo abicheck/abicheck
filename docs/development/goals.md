@@ -34,6 +34,17 @@ Fix known ABICC / libabigail limitations and add new detection capability:
 
 **Backlog (MSVC end-to-end hardening):** Windows CI includes a non-blocking MSVC + PDB lane, while MinGW/native cross-platform coverage is part of the regular validation story. Promoting the MSVC lane to blocking and broadening its fixture matrix are tracked in `docs/development/backlog.md`.
 
+**In progress (scientific-Python direction):** the CPython-extension-adjacent gap
+work (G14 `abi3`, G23 Python-level API) generalizes toward scientific-Python
+distributions specifically — compiled Python wheels have compatibility
+surfaces (Cython capsule APIs, the NumPy C-API, multi-platform wheel
+deployment claims) that plain native-symbol analysis doesn't see. Scoped as
+three new `planned` gaps: G25 (Cython API/ABI frontend), G26 (NumPy C-API
+compatibility envelope), G27 (wheel tag/deployment-claim verification across
+Linux/macOS/Windows). See the
+[SciPy / Scientific-Python Roadmap](scipy-scientific-python-roadmap.md) for
+the full ten-item vision this scoping was drawn from.
+
 ---
 
 ## Goal 3 — Pass libabigail Test Suite

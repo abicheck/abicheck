@@ -22,6 +22,9 @@ scope**.
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 | **G20** | [Source-scan & cross-source example corpus](g20-source-scan-example-catalog.md) | `UC-WORKFLOW-audit-example-corpus`, `UC-CHANGE-crosscheck-example-corpus`, `UC-WORKFLOW-focusing-example-corpus` | L |
 | **G21** | [One-shot deep compare & CLI usability](g21-oneshot-deep-compare.md) | `UC-WF-oneshot-deep` | M |
+| **G25** | [Cython API/ABI frontend](g25-cython-api-abi-frontend.md) | `UC-ARCH-cython-api` | XL |
+| **G26** | [NumPy C-API compatibility envelope](g26-numpy-capi-envelope.md) | `UC-TC-numpy-capi-envelope` | L |
+| **G27** | [Wheel tag / deployment-claim verification](g27-wheel-deployment-verification.md) | `UC-TC-wheel-deployment-claims` | L |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 

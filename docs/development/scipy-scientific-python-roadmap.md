@@ -1,11 +1,17 @@
 # SciPy / Scientific-Python Roadmap
 
-**Status:** Proposed — vision/roadmap doc, not yet gap-plan-ified. None of the
-items below have a `usecase-registry.yaml` entry or an implementation plan
-yet; the "Relationship to existing work" section maps each idea to the
-closest existing gap/ADR, and new work should follow the normal
-[gap-plan process](plans/index.md) (registry entry → `docs/development/plans/gNN-*.md`
-→ acceptance criteria → tests/examples) before implementation starts.
+**Status:** Proposed — vision/roadmap doc. The three highest-priority items
+(§1 Cython API/ABI frontend, §2 NumPy C-API envelope, §3 wheel/deployment
+verification) are now gap-plan-ified as **G25**, **G26**, and **G27**
+(`usecase-registry.yaml` entries, status `planned`,
+[plans/g25-cython-api-abi-frontend.md](plans/g25-cython-api-abi-frontend.md) /
+[plans/g26-numpy-capi-envelope.md](plans/g26-numpy-capi-envelope.md) /
+[plans/g27-wheel-deployment-verification.md](plans/g27-wheel-deployment-verification.md)) —
+these are ready to pick up via the normal
+[gap-plan process](plans/index.md). The remaining seven items (§4–§10) are
+still vision-only; the "Relationship to existing work" section maps each to
+the closest existing gap/ADR, and turning one into real work still means
+adding a registry entry and a plan file first.
 **Origin:** external roadmap review (feedback captured verbatim below and
 lightly reformatted), 2026-07. Recorded here per the pattern in
 [`backlog.md` § "Other deferred roadmap items"](backlog.md#other-deferred-roadmap-items) —
@@ -623,18 +629,19 @@ problems faced by SciPy and compiled scientific Python.
 | Idea above | Closest existing plan/ADR | Relationship |
 |---|---|---|
 | §0 Wheel foundations | [G9](plans/g9-wheel-vendored-matching.md), [G10](plans/g10-glibc-floor-check.md), [G16](plans/g16-header-scope-toolchain-robustness.md)/[G4](plans/g4-header-ast-extractor.md) | Already planned; this doc just re-prioritizes them as prerequisites. |
-| §1 Cython API/ABI frontend | [G23](plans/g23-python-level-api-diff.md) (Python-level API), [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C frontends) | New frontend, same shape as G23's `.pyi` surface work; narrower than ADR-034's general non-native-language scope. |
-| §2 NumPy C-API envelope | [G14](plans/g14-stable-abi-subset.md) (`abi3`/Limited API) | New provider; extends the existing CPython-extension recognition to NumPy's own capsule-based API. |
-| §3 Wheel/deployment verification | [G10](plans/g10-glibc-floor-check.md), [G13](plans/g13-arch-mismatch-guard.md) (arch mismatch), [G12](plans/g12-security-hardening.md) (hardening flags) | Generalizes G10 across platforms/toolchains; reuses G13/G12 machinery. |
+| §1 Cython API/ABI frontend | **[G25](plans/g25-cython-api-abi-frontend.md)** (`UC-ARCH-cython-api`, `planned`) | Gap-plan-ified. Same shape as G23's `.pyi` surface work; narrower than [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md)'s general non-native-language scope. |
+| §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `planned`) | Gap-plan-ified. New provider; extends the existing CPython-extension recognition ([G14](plans/g14-stable-abi-subset.md)) to NumPy's own capsule-based API. |
+| §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `planned`) | Gap-plan-ified. Generalizes [G10](plans/g10-glibc-floor-check.md) across platforms/toolchains; reuses [G13](plans/g13-arch-mismatch-guard.md)/[G12](plans/g12-security-hardening.md) machinery. |
 | §4 Release-matrix parity | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md) | Extends multi-binary release compare from "verdict" to "support-set delta." |
 | §5 Downstream-impact analysis | `abicheck/appcompat.py`, [ADR-005](adr/005-application-compat-check.md) | Extends existing app-compat checking into a scientific-Python consumer graph. |
 | §6 One-command PyPI/conda compare | none yet | New CLI surface; would need a package-resolution/caching layer not currently in scope. |
 | §7 Hermetic runtime-surface provider | [G23](plans/g23-python-level-api-diff.md) (deferred runtime fallback), [ADR-021b](adr/021-mcp-security-model.md) (sandboxing posture) | Picks up G23's explicitly-deferred runtime-introspection path. |
 | §8 BLAS/LAPACK/Fortran profile | [ADR-010](adr/010-policy-profile-system.md) (policy profiles) | New profile + new fact extraction (LP64/ILP64, OpenMP runtime IDs) the profile system doesn't yet have inputs for. |
 | §9 Deprecation-aware policy | none yet | Needs multi-baseline history, which the current two-snapshot `compare` model doesn't carry. |
-| §10 ufunc/gufunc/dtype surface | none yet | New provider alongside NumPy C-API envelope (§2). |
+| §10 ufunc/gufunc/dtype surface | none yet | New provider alongside NumPy C-API envelope (§2); explicitly out of scope for G26 itself (see that plan's "Out of scope"). |
 
-None of these have registry entries yet. The next step for any item above is
+§1–§3 have registry entries (G25/G26/G27, above) and are ready to pick up.
+The remaining rows are still vision-only. The next step for any of them is
 to add a `UC-*` entry to [`usecase-registry.yaml`](usecase-registry.yaml)
 with `status: planned` and a `docs/development/plans/gNN-*.md` plan file
 following the existing template (Problem · Goal & acceptance criteria ·
