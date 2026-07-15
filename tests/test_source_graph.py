@@ -47,6 +47,7 @@ from abicheck.buildsource.source_graph import (
     build_source_graph,
     diff_source_graph,
     diff_source_graph_findings,
+    fold_source_edges,
 )
 from abicheck.checker_policy import RISK_KINDS, ChangeKind
 from abicheck.cli import main
@@ -282,6 +283,100 @@ def test_source_abi_degenerate_inputs_handled() -> None:
     assert not any(e.kind == "BINARY_EXPORTS_SYMBOL" for e in g.edges)
     # The blank mapping value is skipped; the real one becomes a symbol node.
     assert any(n.kind == "binary_symbol" and n.label == "_Zsym" for n in g.nodes)
+
+
+# ── PR1: source_edges fold (ADR-038 C.9) ────────────────────────────────────
+
+
+def test_fold_source_edges_call_edge_creates_decl_nodes() -> None:
+    g = SourceGraphSummary()
+    added = fold_source_edges(
+        g,
+        [
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "_ZN3foo3barEv",
+                "dst": "_ZN3foo3bazEv",
+                "provenance": "clang-plugin",
+                "confidence": "high",
+                "attrs": {"call_kind": "direct"},
+            }
+        ],
+    )
+    assert added == 1
+    call_edges = [e for e in g.edges if e.kind == "DECL_CALLS_DECL"]
+    assert len(call_edges) == 1
+    assert call_edges[0].src == "decl://_ZN3foo3barEv"
+    assert call_edges[0].dst == "decl://_ZN3foo3bazEv"
+    assert call_edges[0].provenance == "clang-plugin"
+    assert call_edges[0].attrs == {"call_kind": "direct"}
+    assert {n.id for n in g.nodes} == {"decl://_ZN3foo3barEv", "decl://_ZN3foo3bazEv"}
+    assert all(n.kind == "source_decl" for n in g.nodes)
+
+
+def test_fold_source_edges_decl_has_type_maps_decl_and_type_nodes() -> None:
+    g = SourceGraphSummary()
+    fold_source_edges(
+        g, [{"edge": "DECL_HAS_TYPE", "src": "foo::field", "dst": "foo::Widget"}]
+    )
+    src_node = next(n for n in g.nodes if n.id == "decl://foo::field")
+    dst_node = next(n for n in g.nodes if n.id == "type://foo::Widget")
+    assert src_node.kind == "source_decl"
+    assert dst_node.kind == "record_type"
+
+
+def test_fold_source_edges_type_inherits_maps_both_sides_to_type_nodes() -> None:
+    g = SourceGraphSummary()
+    fold_source_edges(
+        g, [{"edge": "TYPE_INHERITS", "src": "foo::Derived", "dst": "foo::Base"}]
+    )
+    assert all(n.kind == "record_type" for n in g.nodes)
+
+
+def test_fold_source_edges_dedupes_against_call_graph_pass() -> None:
+    """An edge already folded by a separate call/type-graph pass must not be
+    duplicated -- first-writer-wins via add_edge's (src, dst, kind) key."""
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="decl://a", kind="source_decl", provenance="call_graph"))
+    g.add_node(GraphNode(id="decl://b", kind="source_decl", provenance="call_graph"))
+    g.add_edge(
+        GraphEdge(
+            src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL",
+            provenance="call_graph", confidence="high",
+        )
+    )
+    added = fold_source_edges(
+        g, [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "reduced"}]
+    )
+    assert added == 0
+    call_edges = [e for e in g.edges if e.kind == "DECL_CALLS_DECL"]
+    assert len(call_edges) == 1
+    assert call_edges[0].provenance == "call_graph"  # first writer wins
+
+
+def test_fold_source_edges_skips_malformed_rows() -> None:
+    g = SourceGraphSummary()
+    added = fold_source_edges(
+        g,
+        [
+            {"edge": "", "src": "a", "dst": "b"},
+            {"edge": "DECL_CALLS_DECL", "src": "", "dst": "b"},
+            {"edge": "DECL_CALLS_DECL", "src": "a", "dst": ""},
+            "not-a-dict",
+            {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"},
+        ],
+    )
+    assert added == 1
+    assert len(g.edges) == 1
+
+
+def test_build_source_graph_folds_surface_source_edges() -> None:
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "_ZN3foo3barEv", "dst": "_ZN3foo3quxEv"}
+    ]
+    g = build_source_graph(BuildEvidence(), source_abi=s)
+    assert any(e.kind == "DECL_CALLS_DECL" for e in g.edges)
 
 
 def test_build_graph_without_surface_is_phase2_only() -> None:

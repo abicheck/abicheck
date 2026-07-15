@@ -195,6 +195,137 @@ def test_inline_graph_no_call_edges_when_clang_absent(monkeypatch):
     assert any(r.name == "call_graph:clang" and r.status == "failed" for r in rows)
 
 
+# --------------------------------------------------------------------------- #
+# PR1: skip the separate call/type-graph replay when source_edges is complete
+# (ADR-038 C.9 / latest-main Clang plugin review)
+# --------------------------------------------------------------------------- #
+
+
+def test_inline_graph_skips_call_type_graph_when_source_edges_confirmed(monkeypatch):
+    """A broad-scope L4 replay that already produced confirmed-complete
+    source_edges must not re-run the separate call/type-graph frontend
+    replay passes -- build_source_graph() already folded those edges in via
+    fold_source_edges."""
+    from abicheck.buildsource import call_graph, type_graph
+
+    called = {"call": False, "type": False}
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            called["call"] = True
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            called["type"] = True
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+
+    merged = _build_with_one_unit()
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.source_edges = [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]
+    surface.coverage["fact_family_states"] = {"source_edges": "complete"}
+    graph = inline._build_inline_graph(
+        merged, surface=surface, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    # The edge reached the graph via fold_source_edges (inside build_source_graph),
+    # not the (skipped) call-graph replay.
+    assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    assert called == {"call": False, "type": False}
+    # Still credited as a confirmed, full pass -- crosscheck.py's decl-dependency
+    # reads must not treat this as unexamined territory.
+    assert graph.extractor_passes["call_graph"] is True
+    assert graph.extractor_passes["type_graph"] is True
+
+
+def test_inline_graph_does_not_skip_when_source_edges_incomplete(monkeypatch):
+    """partial/failed/unsupported (or no fact_set at all) source_edges
+    coverage must not suppress the separate call-graph replay -- only a
+    confirmed complete/empty-confirmed rollup does."""
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return [CallEdge("caller", "callee", "direct", "exact")]
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = _build_with_one_unit()
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.coverage["fact_family_states"] = {"source_edges": "partial"}
+    graph = inline._build_inline_graph(
+        merged, surface=surface, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+
+
+def test_inline_graph_narrowed_scope_does_not_skip_despite_confirmed_source_edges(
+    monkeypatch,
+):
+    """A changed-path-narrowed run must still run the call-graph replay even
+    when source_edges rolls up as complete for that narrow scope -- narrowed
+    source_edges only proves completeness for the TUs L4 actually parsed, the
+    same reasoning extractor_pass_fully_covered already applies."""
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.call_graph import CallEdge
+
+    called = {"call": False}
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            called["call"] = True
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://src/a.cpp", source="src/a.cpp")]
+    )
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.coverage["fact_family_states"] = {"source_edges": "complete"}
+    graph = inline._build_inline_graph(
+        merged,
+        surface=surface,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert graph is not None
+    assert called["call"] is True
+
+
 def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     # A PR/--since scan scopes the call-graph pass to the changed compile units —
     # parsing every TU of a large compile DB would defeat the targeted PR cost

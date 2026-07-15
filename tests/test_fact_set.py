@@ -27,8 +27,11 @@ from abicheck.buildsource import (
     link_source_abi,
 )
 from abicheck.buildsource.fact_set import (
+    FactCompatibility,
     FactSetIssue,
+    check_fact_compatibility,
     check_fact_set_compatibility,
+    hash_recipe_id,
     incomplete_families,
     rollup_coverage,
     rollup_fact_set,
@@ -540,3 +543,204 @@ def test_source_fact_coverage_incomplete_is_risk_kind() -> None:
     from abicheck.checker_policy import RISK_KINDS
 
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in RISK_KINDS
+
+
+# -- hash_recipe_id / check_fact_compatibility (PR2 gating) ------------------
+
+
+def test_hash_recipe_id_explicit_field_wins() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    assert hash_recipe_id(fs) == "clang-json-canonical-v3"
+
+
+def test_hash_recipe_id_falls_back_to_producer_triple() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    assert hash_recipe_id(fs) == "p|1|18"
+
+
+def test_check_fact_compatibility_matching_fact_sets_all_comparable() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    compat = check_fact_compatibility(fs, dict(fs))
+    assert compat.structured_facts_comparable
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+    assert compat.issues == ()
+
+
+def test_check_fact_compatibility_producer_mismatch_blocks_opaque_and_edges_only() -> (
+    None
+):
+    old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new = default_fact_set(producer="abicheck-cc-clang-extractor", producer_version="0.6")
+    compat = check_fact_compatibility(old, new)
+    assert compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert any(i.rule == "producer_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_name_mismatch_blocks_everything() -> None:
+    old = default_fact_set(producer="p", producer_version="1")
+    new = dict(old)
+    new["name"] = "some-other-fact-set"
+    compat = check_fact_compatibility(old, new)
+    assert not compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+
+
+def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch() -> (
+    None
+):
+    """A differential conformance run (ADR-038 C.6) can prove two differently
+    named producers emit byte-comparable opaque hashes; declaring the same
+    hash_recipe_id on both sides should override the producer-mismatch gate
+    rather than forcing every future comparison to suppress unnecessarily."""
+    old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    old["hash_recipe_id"] = "clang-json-canonical-v3"
+    new = default_fact_set(producer="abicheck-cc-clang-extractor", producer_version="0.6")
+    new["hash_recipe_id"] = "clang-json-canonical-v3"
+    compat = check_fact_compatibility(old, new)
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+    # The producer_mismatch issue is still reported for visibility even though
+    # it's overridden -- callers that want the raw prose still see it.
+    assert any(i.rule == "producer_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_one_side_empty_stays_comparable() -> None:
+    """A pre-C.8 producer (no fact_set at all) must not gate anything -- only
+    the informational fact_set_unknown warning fires (forward-compat)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, {})
+    assert compat.structured_facts_comparable
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+
+
+def test_fact_compatibility_is_frozen() -> None:
+    compat = FactCompatibility(True, True, True, ())
+    with pytest.raises(AttributeError):
+        compat.opaque_hashes_comparable = False  # type: ignore[misc]
+
+
+# -- diff_source_abi: gating INLINE_BODY_CHANGED/TEMPLATE_BODY_CHANGED ------
+
+
+def _inline_entity(body_hash: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id="f",
+        kind="inline",
+        qualified_name="ns::f",
+        mangled_name="_Z1fv",
+        body_hash=body_hash,
+    )
+
+
+def _template_entity(body_hash: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id="T",
+        kind="template",
+        qualified_name="ns::T",
+        signature_hash="sig",
+        body_hash=body_hash,
+    )
+
+
+def test_diff_suppresses_inline_body_changed_on_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED not in {c.kind for c in changes}
+    coverage_finding = next(
+        c for c in changes if c.kind == ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE
+    )
+    assert "suppressed" in coverage_finding.description
+
+
+def test_diff_suppresses_template_body_changed_on_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.TEMPLATE_BODY_CHANGED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_body_changed_when_compatible() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_function_removed_on_producer_mismatch() -> None:
+    """Removal is an existence check, not a hash comparison -- it must not be
+    suppressed by an opaque-hash incompatibility (only *_BODY_CHANGED is)."""
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    # An unrelated declaration keeps _surface_has_facts(new) True (L4 ran on
+    # the new side too) without resurrecting the removed inline function.
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[SourceEntity(id="g", qualified_name="ns::g")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_FUNCTION_REMOVED in {c.kind for c in changes}
+
+
+def test_diff_matching_recipe_id_keeps_hash_diffs_despite_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    old_fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    new_fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED in {c.kind for c in changes}

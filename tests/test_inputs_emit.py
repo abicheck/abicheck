@@ -63,7 +63,7 @@ def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:
         visibility="public_header",
     )
     return SourceAbiTu(
-        tu_id=f"cu://{source}", target_id="target://libfoo", source=source,
+        tu_id=f"cu://{source}", target_id="target://libfoo.so", source=source,
         public_header_roots=[f"include/{name}.h"], functions=[ent],
     )
 
@@ -126,10 +126,46 @@ def test_init_recovers_from_partial_manifest(tmp_path: Path) -> None:
 def test_init_inputs_pack_is_idempotent(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     m1 = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
-    m2 = init_inputs_pack(pack, library="OTHER", created_by="OTHER")
-    # Second call loads the existing manifest, does not clobber it.
+    # A repeated call naming the *same* library (created_by may vary -- not
+    # part of the target-isolation identity) loads the existing manifest.
+    m2 = init_inputs_pack(pack, library="libfoo.so", created_by="OTHER")
     assert m2.library == m1.library == "libfoo.so"
     assert m2.created_by == "abicheck-cc"
+
+
+def test_init_inputs_pack_rejects_conflicting_library(tmp_path: Path) -> None:
+    """PR3 target isolation (latest-main Clang plugin review): a second
+    invocation naming a *different* library against the same pack root is
+    exactly the same-source/two-library collision the prior first-writer-
+    wins manifest allowed -- raise instead of silently keeping the first
+    library's identity."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    with pytest.raises(ValueError, match="library"):
+        init_inputs_pack(pack, library="libbar.so", created_by="abicheck-cc")
+    # The pack must be untouched by the rejected call.
+    assert json.loads((pack / "manifest.json").read_text())["library"] == "libfoo.so"
+
+
+def test_init_inputs_pack_rejects_conflicting_version(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(
+        pack, library="libfoo.so", version="1.0", created_by="abicheck-cc"
+    )
+    with pytest.raises(ValueError, match="version"):
+        init_inputs_pack(
+            pack, library="libfoo.so", version="2.0", created_by="abicheck-cc"
+        )
+
+
+def test_init_inputs_pack_allows_unspecified_library_or_version(tmp_path: Path) -> None:
+    """Omitting library/version (the default "") is never treated as a
+    conflict either way -- only two *different* non-empty values collide."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", version="1.0", created_by="abicheck-cc")
+    m = init_inputs_pack(pack, created_by="abicheck-cc")  # no library/version passed
+    assert m.library == "libfoo.so"
+    assert m.version == "1.0"
 
 
 def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
@@ -693,7 +729,7 @@ def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> No
             ),
             visibility="public_header",
         )
-        return SourceAbiTu(tu_id="", target_id="target://libfoo", functions=[ent])
+        return SourceAbiTu(tu_id="", target_id="target://libfoo.so", functions=[ent])
 
     append_source_facts(
         pack, [_no_id_tu("foo", "_Z3foov")], filename=facts_filename("foo")
@@ -800,7 +836,7 @@ def test_compact_skips_on_duplicate_fresh_tu_id(tmp_path: Path) -> None:
     # or third-party pack instead).
     other = SourceAbiTu(
         tu_id="cu://src/x.cpp",
-        target_id="target://libfoo",
+        target_id="target://libfoo.so",
         functions=[
             SourceEntity(
                 id="decl://bar", kind="function", qualified_name="bar",
@@ -1200,6 +1236,58 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     # fresh foo2 wins, bar carried forward, extra merged in from its
     # explicit file entry -- none lost despite the manifest write failure.
     assert names == {"_Z4foo2v", "_Z3barv", "_Z5extrav"}
+
+
+def test_compact_rejects_output_filename_colliding_with_unrelated_file(
+    tmp_path: Path,
+) -> None:
+    """PR4 (latest-main Clang plugin review): an operator's --output-filename
+    coincidentally matching an ordinary pre-existing file (here, an untouched
+    per-TU original from a normal build -- never a published compaction
+    result manifest.last_compacted points at) must be rejected outright
+    rather than silently overwritten by the merge. A bare
+    `output_path.exists()` check used to treat this as "a legitimate prior
+    compaction rerun," letting os.replace() clobber the unrelated file, and
+    a later manifest-write failure would then leave that clobbered
+    replacement in place (rollback skips deletion for anything
+    "pre-existing")."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    # An ordinary per-TU original that happens to share its name with the
+    # --output-filename this call will request. manifest.last_compacted is
+    # unset (compaction has never run), so this file is definitely not a
+    # recognized prior compaction output.
+    collision_name = "collide.jsonl"
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=collision_name
+    )
+    original_bytes = (pack / "source_facts" / collision_name).read_bytes()
+
+    with pytest.raises(ValueError, match="already exists"):
+        compact_inputs_pack(pack, output_filename=collision_name)
+
+    # The collision must be rejected before any write -- the original file's
+    # content survives untouched, and the manifest is not repointed.
+    assert (pack / "source_facts" / collision_name).read_bytes() == original_bytes
+    assert load_inputs_manifest(pack).last_compacted == ""
+
+
+def test_compact_reruns_with_recognized_prior_output_without_raising(
+    tmp_path: Path,
+) -> None:
+    """The rejection above must not regress the legitimate rerun case: reusing
+    the SAME output_filename as a real prior compaction (recognized via
+    manifest.last_compacted) is not a collision."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    first = compact_inputs_pack(pack, output_filename="merged.jsonl")
+    assert first is not None
+    # Rerunning with the identical output_filename must not raise.
+    second = compact_inputs_pack(pack, output_filename="merged.jsonl")
+    assert second == first
 
 
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:

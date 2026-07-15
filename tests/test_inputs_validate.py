@@ -81,7 +81,10 @@ def _write_pack(
     manifest = {
         "kind": INPUTS_KIND,
         "abicheck_inputs_version": ABICHECK_INPUTS_VERSION,
-        "library": "libfoo.so",
+        # Matches _tu()'s/this file's fixture target_id ("target://libfoo") so
+        # the PR3 target-isolation check (target_id == target://<library>)
+        # does not false-positive on every fixture in this file.
+        "library": "libfoo",
         "version": "1.0",
         "created_by": "abicheck-clang-plugin 0.4",
     }
@@ -136,6 +139,84 @@ def test_duplicate_tu_id_is_an_error(tmp_path: Path) -> None:
     assert not report.ok
     assert tu1.tu_id in report.duplicate_tu_ids
     assert any("duplicate tu_id" in e for e in report.errors)
+
+
+def test_multiple_target_ids_is_an_error(tmp_path: Path) -> None:
+    """PR3 target isolation (latest-main Clang plugin review): two different
+    libraries' TUs sharing one pack is exactly the same-source/two-library
+    collision the plugin's first-writer-wins manifest/filename allowed."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=fs)
+    tu2.target_id = "target://libbar"
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("mixes more than one target_id" in e for e in report.errors)
+
+
+def test_target_id_disagreeing_with_manifest_library_is_an_error(
+    tmp_path: Path,
+) -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu = _tu("a", fact_set=fs)
+    tu.target_id = "target://not-libfoo"
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("does not agree on which target" in e for e in report.errors)
+
+
+def test_target_id_matching_manifest_library_is_clean(tmp_path: Path) -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
+    report = validate_inputs_pack(pack)
+    assert not any("target_id" in e for e in report.errors)
+
+
+def test_missing_target_id_is_not_flagged(tmp_path: Path) -> None:
+    """A pre-target-isolation producer's TUs (no target_id at all) must not
+    be flagged -- this is additive validation, not a new hard requirement."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu = _tu("a", fact_set=fs)
+    tu.target_id = ""
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not any("target_id" in e for e in report.errors)
+
+
+def test_inconsistent_fact_set_recipe_within_pack_is_an_error(tmp_path: Path) -> None:
+    """A fact_set *name*/*version* mismatch between two TUs in the same pack
+    is a hard contract disagreement, not routine producer/version drift --
+    promoted to an error, not just rollup_fact_set's existing soft warning
+    (latest-main Clang plugin review, PR3)."""
+    fs_a = default_fact_set(producer="p", producer_version="1")
+    fs_b = dict(fs_a)
+    fs_b["version"] = 999
+    tu1 = _tu("a", fact_set=fs_a)
+    tu2 = _tu("b", fact_set=fs_b)
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("fact_set_version_mismatch" in e for e in report.errors)
+
+
+def test_same_producer_different_producer_version_within_pack_is_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """Routine producer-version drift across TUs stays a warning (via the
+    existing rollup_fact_set "TUs disagree" path) -- only a name/version
+    contract mismatch is promoted to an error."""
+    fs_a = default_fact_set(producer="p", producer_version="1")
+    fs_b = default_fact_set(producer="p", producer_version="2")
+    tu1 = _tu("a", fact_set=fs_a)
+    tu2 = _tu("b", fact_set=fs_b)
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not any(
+        "fact_set_version_mismatch" in e or "fact_set_name_mismatch" in e
+        for e in report.errors
+    )
 
 
 def test_no_fact_set_anywhere_warns_not_errors(tmp_path: Path) -> None:

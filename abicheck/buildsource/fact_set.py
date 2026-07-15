@@ -75,6 +75,40 @@ class FactSetIssue:
     message: str
 
 
+@dataclass(frozen=True)
+class FactCompatibility:
+    """Structured comparability verdict for one old/new ``fact_set`` pair.
+
+    ``check_fact_set_compatibility`` reports *what* differs as prose-bearing
+    :class:`FactSetIssue` rows; nothing previously packaged that into a
+    boolean a diff pass could act on, so ``source_diff.diff_source_abi`` used
+    to emit a "these hashes may be unreliable" finding and then unconditionally
+    diff the (possibly incomparable) opaque hashes anyway (P1 gating gap,
+    latest-main Clang plugin review). This type is that missing verdict:
+
+    - ``structured_facts_comparable``: compiler-neutral facts (signatures,
+      declarations, type shapes) — false only on a ``fact_set`` name/version
+      mismatch, since those change what the mandatory-family contract even
+      promises.
+    - ``opaque_hashes_comparable``: producer-specific body/template hashes
+      (``inline_body_changed``, ``template_body_changed``) — false on a
+      producer/producer_version/compiler_version mismatch too, since the
+      canonicalization recipe can change independently of ``fact_set.version``
+      (rule 3 in the module docstring), *unless* both sides declare the same
+      :func:`hash_recipe_id`, which overrides a producer/version mismatch that
+      a differential conformance run (ADR-038 C.6) has proven irrelevant.
+    - ``source_edges_comparable``: plugin/replay-produced graph edge endpoint
+      identities share the same producer-dependent-recipe risk as opaque
+      hashes (endpoint identity is derived from the same AST-dump recipe), so
+      it is gated identically.
+    """
+
+    structured_facts_comparable: bool
+    opaque_hashes_comparable: bool
+    source_edges_comparable: bool
+    issues: tuple[FactSetIssue, ...]
+
+
 def rollup_coverage(tus: list[SourceAbiTu]) -> dict[str, str]:
     """Worst-of-across-TUs coverage state per fact family.
 
@@ -266,3 +300,93 @@ def check_fact_set_compatibility(
                 )
 
     return issues
+
+
+#: A mismatch in the mandatory-family *contract itself* (rules 1/2) always
+#: invalidates everything -- it means the two sides don't even agree on what
+#: the fact set promises to collect, which no declared hash_recipe_id can
+#: paper over. Never overridable by a matching hash_recipe_id.
+_HARD_BLOCKING_RULES = frozenset(
+    {"fact_set_name_mismatch", "fact_set_version_mismatch"}
+)
+
+#: FactSetIssue rules whose presence means opaque body/template hashes may
+#: not be byte-comparable across the old/new pair (rule 3: producer/
+#: producer_version/compiler_version identify the canonicalization recipe
+#: that produced the opaque hashes). These *are* overridable by a matching
+#: hash_recipe_id -- a differential conformance run can prove two different
+#: producer identities emit byte-comparable hashes.
+_RECIPE_OVERRIDABLE_RULES = frozenset(
+    {"producer_mismatch", "producer_version_mismatch", "compiler_version_mismatch"}
+)
+
+#: source_edges endpoint identities are derived from the same producer/
+#: compiler-dependent AST-dump recipe as opaque hashes (mangled-name
+#: resolution, canonicalization), so they are gated by the same rule set.
+_SOURCE_EDGE_OVERRIDABLE_RULES = _RECIPE_OVERRIDABLE_RULES
+
+#: Only a mismatch in the mandatory-family *contract itself* invalidates
+#: compiler-neutral structured facts (signatures, declarations, type shapes);
+#: a different producer/compiler can still extract the same structured facts
+#: correctly even if its opaque-hash recipe differs.
+_STRUCTURED_FACT_INVALIDATING_RULES = _HARD_BLOCKING_RULES
+
+
+def hash_recipe_id(fact_set: dict[str, Any]) -> str:
+    """Stable id for the opaque-hash canonicalization recipe a ``fact_set`` used.
+
+    Two sides reporting the *same* recipe id have declared — typically because
+    a differential conformance run (ADR-038 C.6) proved it — that their
+    opaque body/template hashes are byte-comparable even when their producer
+    name/version differs formally, which is more precise than treating any
+    producer-name difference as inherently incompatible. Absent an explicit
+    ``"hash_recipe_id"`` field, falls back to the ``producer``/
+    ``producer_version``/``compiler_version`` triple
+    :func:`check_fact_set_compatibility` already keys its rule-3 checks on, so
+    fact-sets recorded before this field existed still compare consistently
+    (two such fact-sets only share a fallback recipe id when they'd already
+    pass rule 3 with no issues).
+    """
+    recipe = fact_set.get("hash_recipe_id")
+    if isinstance(recipe, str) and recipe:
+        return recipe
+    return "|".join(
+        str(fact_set.get(key, ""))
+        for key in ("producer", "producer_version", "compiler_version")
+    )
+
+
+def check_fact_compatibility(
+    old_fact_set: dict[str, Any], new_fact_set: dict[str, Any]
+) -> FactCompatibility:
+    """Structured, actionable comparability verdict (ADR-038 C.8 / PR2 gating).
+
+    Wraps :func:`check_fact_set_compatibility` so a diff pass can gate
+    specific evidence categories instead of only reporting prose that nothing
+    downstream reads. A matching :func:`hash_recipe_id` on both sides
+    overrides an otherwise-invalidating producer/producer_version/
+    compiler_version mismatch for ``opaque_hashes_comparable`` and
+    ``source_edges_comparable`` specifically — those two sides have declared
+    they use the same canonicalization recipe despite differing producer
+    identity strings.
+
+    When one or both sides carry no ``fact_set`` at all (a pre-C.8 producer),
+    :func:`check_fact_set_compatibility` reports only the informational
+    ``fact_set_unknown`` warning — not one of the invalidating rules — so
+    every category stays comparable here too, preserving the existing
+    forward-compat behavior of never gating a pre-C.8 baseline's findings.
+    """
+    issues = check_fact_set_compatibility(old_fact_set, new_fact_set)
+    rules = {issue.rule for issue in issues}
+    same_recipe = bool(old_fact_set) and bool(new_fact_set)
+    if same_recipe:
+        same_recipe = hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
+    hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
+    return FactCompatibility(
+        structured_facts_comparable=not hard_blocked,
+        opaque_hashes_comparable=not hard_blocked
+        and (same_recipe or not (rules & _RECIPE_OVERRIDABLE_RULES)),
+        source_edges_comparable=not hard_blocked
+        and (same_recipe or not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)),
+        issues=tuple(issues),
+    )

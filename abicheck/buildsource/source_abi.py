@@ -457,6 +457,15 @@ class SourceAbiSurface:
     reachable_macros: list[SourceEntity] = field(default_factory=list)
     reachable_templates: list[SourceEntity] = field(default_factory=list)
     reachable_inline_bodies: list[SourceEntity] = field(default_factory=list)
+    #: Deduplicated ``source_edges`` folded across every linked TU (ADR-038
+    #: C.9 / latest-main Clang plugin review, PR1): call/reference/type-shape
+    #: relationships collected during the *same* L4 frontend invocation that
+    #: produced the entities above, in the same ``{edge, src, dst, provenance,
+    #: confidence, attrs}`` shape as ``SourceAbiTu.source_edges`` (which itself
+    #: mirrors ``source_graph.GraphEdge.to_dict()``). ``build_source_graph``
+    #: folds these into the L5 graph so a plugin/replay producer's edges are
+    #: no longer serialized-but-unused dead data.
+    source_edges: list[dict[str, Any]] = field(default_factory=list)
     #: decl_to_binary_symbol maps qualified_name -> exported symbol ("" when the
     #: declaration has no exported symbol, i.e. a public decl that is not shipped)
     mappings: dict[str, Any] = field(
@@ -495,6 +504,7 @@ class SourceAbiSurface:
                 name: [e.to_dict() for e in bucket]
                 for name, bucket in self.reachable_buckets().items()
             },
+            "source_edges": list(self.source_edges),
             "mappings": {
                 "source_decl_to_binary_symbol": dict(
                     self.mappings.get("source_decl_to_binary_symbol", {})
@@ -577,6 +587,7 @@ class SourceAbiSurface:
             reachable_macros=_ents("macros"),
             reachable_templates=_ents("templates"),
             reachable_inline_bodies=_ents("inline_bodies"),
+            source_edges=list(d.get("source_edges", [])),
             mappings=mappings,
             odr_conflicts=list(d.get("odr_conflicts", [])),
             unmatched=unmatched,

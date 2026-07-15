@@ -68,6 +68,7 @@
     "public_header_declarations": []
   },
   "schema_version": 1,
+  "source_edges": [],
   "target_id": "",
   "unmatched": {
     "decls_without_symbol": [],

@@ -1082,6 +1082,94 @@ def _augment_with_source_abi(
         )
         header_declares(ent, mid, conf)
 
+    fold_source_edges(graph, surface.source_edges)
+
+
+def _source_edge_endpoint_ids(
+    kind: str, src: str, dst: str
+) -> tuple[str, str, str, str]:
+    """Map a raw ``source_edges`` row's ``(kind, src, dst)`` identities onto
+    graph node ids/kinds, mirroring the id scheme
+    ``call_graph.augment_graph_with_calls``/``type_graph.augment_graph_with_types``
+    already use — so an edge folded from L4 facts lands on the same
+    ``decl://``/``type://`` node a separate call/type-graph replay pass (or L4
+    declaration enrichment) would have created, rather than a disconnected
+    duplicate.
+    """
+    if kind == "DECL_HAS_TYPE":
+        return _decl_node_id(src), "source_decl", _type_node_id(dst), "record_type"
+    if kind in ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE"):
+        return _type_node_id(src), "record_type", _type_node_id(dst), "record_type"
+    # DECL_CALLS_DECL / DECL_REFERENCES_DECL / any unrecognized-but-preserved kind.
+    return _decl_node_id(src), "source_decl", _decl_node_id(dst), "source_decl"
+
+
+def fold_source_edges(
+    graph: SourceGraphSummary, source_edges: list[dict[str, Any]]
+) -> int:
+    """Fold ``SourceAbiSurface.source_edges`` into *graph* (ADR-038 C.9 / PR1).
+
+    Closes the gap where a Clang-plugin/replay-collected ``source_edges`` fact
+    was serialized onto ``SourceAbiTu``/``SourceAbiSurface`` but never reached
+    the L5 graph (latest-main Clang plugin review): ``DECL_CALLS_DECL``,
+    ``DECL_REFERENCES_DECL``, ``DECL_HAS_TYPE``, ``TYPE_HAS_FIELD_TYPE``, and
+    ``TYPE_INHERITS`` rows collected during the *same* L4 frontend invocation
+    are folded in exactly like a separate ``call_graph``/``type_graph`` replay
+    pass would, using the identical node-id scheme -- so an edge here
+    reconciles with (de-duplicates against, via ``add_edge``'s
+    ``(src, dst, kind)`` key) one already present from L4 declaration
+    enrichment or a separate replay pass, first-writer-wins.
+
+    Malformed rows (missing edge-kind/src/dst, or a non-dict entry from a
+    hand-edited/forward-versioned pack) are skipped rather than raising --
+    ``source_edges`` is best-effort collected evidence (ADR-028 D7), never a
+    reason to abort the rest of the graph build. Returns the number of edges
+    actually added (excludes rows that duplicated an edge already present).
+    """
+    added = 0
+    for row in source_edges:
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("edge") or row.get("kind") or "")
+        src_ident = str(row.get("src") or "")
+        dst_ident = str(row.get("dst") or "")
+        if not kind or not src_ident or not dst_ident:
+            continue
+        src_id, src_kind, dst_id, dst_kind = _source_edge_endpoint_ids(
+            kind, src_ident, dst_ident
+        )
+        confidence = str(row.get("confidence") or CONF_UNKNOWN)
+        provenance = str(row.get("provenance") or "source_edges")
+        for node_id, node_kind, ident in (
+            (src_id, src_kind, src_ident),
+            (dst_id, dst_kind, dst_ident),
+        ):
+            if not graph.has_node(node_id):
+                graph.add_node(
+                    GraphNode(
+                        id=node_id,
+                        kind=node_kind,
+                        label=ident,
+                        provenance=provenance,
+                        confidence=confidence,
+                    )
+                )
+        before = len(graph.edges)
+        attrs_raw = row.get("attrs")
+        graph.add_edge(
+            GraphEdge(
+                src=src_id,
+                dst=dst_id,
+                kind=kind,
+                provenance=provenance,
+                confidence=confidence,
+                attrs=dict(attrs_raw) if isinstance(attrs_raw, dict) else {},
+            )
+        )
+        if len(graph.edges) > before:
+            added += 1
+    return added
+
 
 # ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────
 

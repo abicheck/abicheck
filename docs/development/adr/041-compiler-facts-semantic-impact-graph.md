@@ -1056,18 +1056,30 @@ there is no equivalent "should this be automatic" question for them.
 
 ### P1 — stronger ABI/API intelligence
 
-1. **Move type/reference extraction into Plugin injection (the ADR-038 plugin).**
-   `contrib/abicheck-clang-plugin/` already rides the compiler's own AST for
-   the L4 entity facts (functions/types/macros/hashes) with **zero extra
-   frontend passes** — the plugin hardcodes `"source_edges": []` today. Once
-   it emits `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/
+1. ~~**Move type/reference extraction into Plugin injection (the ADR-038
+   plugin).**~~ — **done, ADR-038 C.9/C.10.** The plugin emits
+   `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/
    `DECL_REFERENCES_DECL`/`DECL_CALLS_DECL` into `source_edges` during the
-   *real* product compile, `inputs_pack.py`'s ingest path folds them for free
-   and both `call_graph.py`'s and `type_graph.py`'s standalone replay passes
-   become optional (CI/no-build-integration fallback only) rather than the
-   only source. This is the direct fix for the "two separate expensive AST
-   passes" limitation above, and for the wider "AST replay vs. compiler facts
-   during build" tension the original proposal opens with.
+   real product compile (a `CallRefVisitor` sub-walk per function body, no
+   second frontend pass), and the reference `clang.py` extractor does the
+   same by reusing `call_graph.py`'s/`type_graph.py`'s pure AST parsers on
+   the JSON AST it already parsed (ADR-038 C.8). What ADR-038 C.10 closes on
+   top of that collection: `source_graph.fold_source_edges()` now actually
+   folds these into the L5 graph (previously serialized-but-unused —
+   `SourceAbiSurface` had no edge field at all), and
+   `inline._build_inline_graph()` skips the separate `call_graph`/
+   `type_graph` replay passes when a full-scope `source_edges` collection is
+   already confirmed complete, per-TU/full-vs-narrowed the same way
+   `extractor_pass_fully_covered()` already gates `SourceGraphSummary.
+   extractor_passes`. A narrowed L4 scope still runs the replay passes
+   (narrowed `source_edges` only proves completeness for the TUs L4 actually
+   parsed), and `fold_include_graph()` (a different edge kind) is never
+   gated by this. ADR-038 C.10 also fixed the callee-identity resolution bug
+   this depended on: `call_graph.py`'s JSON-AST replay used to resolve an
+   overloaded callee's compact `referencedDecl` stub by bare name (real
+   Clang never puts `mangledName` on that stub), collapsing overloads onto
+   one endpoint; it now builds an id-index from the full declarations seen
+   in the same walk, mirroring the fix `type_graph.py` already had.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges

@@ -258,6 +258,41 @@ def test_linker_dedups_identical_entities_across_tus() -> None:
     assert surface.odr_conflicts, "divergent same-name type must still conflict"
 
 
+def test_linker_folds_source_edges_across_tus() -> None:
+    """PR1: link_source_abi rolls tu.source_edges up onto the surface,
+    deduplicating byte-identical rows the same way repeated public-header
+    entities are deduplicated (Codex review's "deduplicate equivalent TU
+    copies" recommendation)."""
+    edge = {
+        "edge": "DECL_CALLS_DECL",
+        "src": "_ZN3foo3barEv",
+        "dst": "_ZN3foo3bazEv",
+        "provenance": "clang-plugin",
+        "confidence": "high",
+        "attrs": {},
+    }
+    tus = [SourceAbiTu(source_edges=[dict(edge)]) for _ in range(3)]
+    surface = link_source_abi(tus)
+    assert surface.source_edges == [edge]
+
+
+def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
+    tu_a = SourceAbiTu(
+        source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]
+    )
+    tu_b = SourceAbiTu(
+        source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "c"}]
+    )
+    surface = link_source_abi([tu_a, tu_b])
+    assert len(surface.source_edges) == 2
+
+
+def test_linker_skips_malformed_source_edges_rows() -> None:
+    tu = SourceAbiTu(source_edges=[{}, "not-a-dict", {"edge": "DECL_CALLS_DECL"}])
+    surface = link_source_abi([tu])
+    assert surface.source_edges == []
+
+
 def test_linker_keeps_unmangled_overloads_distinct() -> None:
     # castxml omits a mangled name for some decls (notably constructors), so two
     # public overloads share the bare qualified_name "Widget". identity() folds

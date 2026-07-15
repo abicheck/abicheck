@@ -299,9 +299,12 @@ std::string familyCoverageState(bool entitiesPresent, bool diagnosticsSeen,
 // Whether any diagnostic in `diags` contains one of `substrs` — the plugin's
 // existing per-family "JSON dump failed" diagnostics (emitted where an
 // individual declaration's dump/canonicalization failed, see
-// VisitFunctionDecl/emitConstexprVar/emitDataVariable/emitType/emitTemplate/
-// emitClassTemplateMemberPatterns) double as the coverage signal, so no new
-// state has to be threaded through the visitor.
+// VisitFunctionDecl/emitConstexprVar/emitDataVariable/emitType/
+// VisitTypedefNameDecl/emitTemplate/emitClassTemplateMemberPatterns) double
+// as the coverage signal, so no new state has to be threaded through the
+// visitor. Every post-classification early return that can drop an
+// otherwise-accessible entity should insert one of these -- a return with no
+// diagnostic is invisible to family coverage (PR4 audit).
 bool anyDiagContains(const std::set<std::string> &diags,
                      std::initializer_list<const char *> substrs) {
   for (const std::string &d : diags)
@@ -2144,8 +2147,19 @@ public:
           if (auto dq = t->getString("desugaredQualType"))
             underlying = dq->str();
       }
-    if (underlying.empty())
+    if (underlying.empty()) {
+      // A publicly-visible typedef whose JSON dump was absent/non-object, or
+      // lacked both qualType and desugaredQualType, is silently dropped here
+      // -- no diagnostic, and "types" coverage only watches for "record/enum
+      // type_hash unavailable" (below), so a batch of failed typedefs
+      // alongside one successfully-collected record/enum still reported
+      // types as "complete", hiding the missing typedefs entirely
+      // (latest-main Clang plugin review, PR4). Record a diagnostic and fold
+      // it into the same family so a comparison sees partial/failed
+      // coverage instead of a silent gap.
+      Diags.insert("typedef facts unavailable (JSON dump/type spelling failed)");
       return true;
+    }
     std::string name = scopedName(td);
     Entity e;
     e.id = H({"typedef", name, underlying});
@@ -2610,8 +2624,15 @@ public:
     std::string source = resolveMainSource(sm);
     const std::string &ctxHash = CtxHash;
     std::string cfg = ctxHash.substr(std::string("sha256:").size(), 12);
-    std::string tuId = "cu://" + source + "#cfg:" + cfg;
     std::string targetId = Library.empty() ? "" : "target://" + Library;
+    // Fold the target/library identity into tu_id (not just the separate
+    // target_id field) so two different libraries compiling the *same*
+    // source+compile-context never collide on one tu_id — the exact
+    // same-source/two-library ambiguity a shared tu_id would otherwise leave
+    // undetectable downstream (latest-main Clang plugin review, PR3).
+    std::string tuId = Library.empty()
+                            ? "cu://" + source + "#cfg:" + cfg
+                            : "cu://" + source + "#cfg:" + cfg + "#target:" + Library;
 
     // P1 #15-16: every file the preprocessor actually opened for this TU —
     // captured from the SourceManager it already built, not a second pass.
@@ -2875,9 +2896,15 @@ private:
         {"variables", familyCoverageState(
                           !variables.empty(),
                           anyDiagContains(diags, {"variable facts unavailable"}))},
+        // "typedef facts unavailable" (PR4) included alongside the
+        // record/enum diagnostic: VisitTypedefNameDecl() also pushes into
+        // `types`, so a JSON-dump failure there must count toward this
+        // family's diagnostic check too, the same reasoning already applied
+        // to "functions" above for class-template member patterns.
         {"types", familyCoverageState(
                       !types.empty(),
-                      anyDiagContains(diags, {"record/enum type_hash unavailable"}))},
+                      anyDiagContains(diags, {"record/enum type_hash unavailable",
+                                               "typedef facts unavailable"}))},
         {"macros", familyCoverageState(!macros.empty(), /*diagnosticsSeen=*/false)},
         // "class-template member facts unavailable" deliberately excluded
         // here: emitClassTemplateMemberPatterns() pushes a failed member's
@@ -2933,20 +2960,29 @@ private:
         ",\"read_files\":" + jsonStrArray(readFiles) + ",\"fact_set\":" + factSet +
         ",\"coverage\":" + coverage + "}";
 
-    // Per-TU, deterministic filename keyed by source path AND compile context.
-    // Including the context hash keeps distinct ABI-relevant compile variants of
-    // the same source (e.g. SIMD/feature builds) in separate files — one is not
-    // erased by another — while a rebuild of the *same* variant overwrites its
-    // own file (truncate), so no stale/duplicate records accumulate. Ingest
-    // globs `source_facts/*.jsonl`, so the filename shape is free.
+    // Per-TU, deterministic filename keyed by source path, compile context,
+    // AND target/library identity. Including the context hash keeps distinct
+    // ABI-relevant compile variants of the same source (e.g. SIMD/feature
+    // builds) in separate files — one is not erased by another — while a
+    // rebuild of the *same* variant overwrites its own file (truncate), so no
+    // stale/duplicate records accumulate. Including the library identity
+    // additionally prevents two different targets that happen to compile the
+    // *same* source file with the *same* compile context (a common object
+    // shared into two libraries) from clobbering each other when both point
+    // `out=` at one shared directory (latest-main Clang plugin review, PR3) —
+    // previously the filename hashed only the source path, so the later
+    // compile's facts silently overwrote the earlier target's. Ingest globs
+    // `source_facts/*.jsonl`, so the filename shape is free.
     std::string cfg = (ctxHash.rfind("sha256:", 0) == 0)
                           ? ctxHash.substr(std::string("sha256:").size(), 12)
                           : ctxHash.substr(0, 12);
     llvm::StringRef stem = llvm::sys::path::filename(source);
+    std::string pathAndLibraryHash =
+        sha256Hex(Library.empty() ? source : (Library + "\x1f" + source))
+            .substr(0, 12);
     std::string factsFile = factsDir + "/" +
                             (stem.empty() ? std::string("tu") : stem.str()) +
-                            "." + sha256Hex(source).substr(0, 12) + "." + cfg +
-                            ".jsonl";
+                            "." + pathAndLibraryHash + "." + cfg + ".jsonl";
     std::ofstream out(factsFile, std::ios::trunc);
     if (!out)
       return false;
@@ -3010,10 +3046,62 @@ private:
     return true;
   }
 
+  // Loudly flag (never abort the compile over) an existing manifest naming a
+  // different non-empty library/version than this invocation — the exact
+  // same-source/two-library collision a silent first-writer-wins manifest
+  // allowed (latest-main Clang plugin review, PR3): the manifest would keep
+  // describing whichever target/version compiled first while later targets'
+  // facts (now isolated per-target by writeTu's filename fix) accumulate
+  // underneath it, describing a library manifest.json never claims to be.
+  // A stderr warning, not a hard error, matches every other best-effort
+  // diagnostic in this plugin (ADR-028 D7: source-fact collection never
+  // aborts the build it is instrumenting) — the fix is an operational one
+  // (one out= directory per target/configuration/architecture), not
+  // something this TU's compile can itself repair.
+  void checkManifestTargetAgreement(const std::string &manifestPath) {
+    auto bufOrErr = llvm::MemoryBuffer::getFile(manifestPath);
+    if (!bufOrErr)
+      return;
+    auto parsed = llvm::json::parse((*bufOrErr)->getBuffer());
+    if (!parsed) {
+      llvm::consumeError(parsed.takeError());
+      return;
+    }
+    const Object *obj = parsed->getAsObject();
+    if (!obj)
+      return;
+    if (!Library.empty()) {
+      if (auto existing = obj->getString("library"))
+        if (!existing->empty() && *existing != Library)
+          llvm::errs()
+              << "abicheck-facts: WARNING: " << manifestPath
+              << " already names library " << *existing
+              << "; this compile names " << Library
+              << ". Two different targets must not share one "
+                 "abicheck_inputs pack directory -- use a separate out= "
+                 "directory per target/configuration/architecture, or "
+                 "downstream `abicheck inputs validate` will reject this "
+                 "pack.\n";
+    }
+    if (!Version.empty()) {
+      if (auto existing = obj->getString("version"))
+        if (!existing->empty() && *existing != Version)
+          llvm::errs()
+              << "abicheck-facts: WARNING: " << manifestPath
+              << " already names version " << *existing
+              << "; this compile names " << Version
+              << ". Two different versions must not share one "
+                 "abicheck_inputs pack directory -- use a fresh out= "
+                 "directory per build.\n";
+    }
+  }
+
   void ensureManifest() {
     std::string manifestPath = OutDir + "/manifest.json";
-    if (llvm::sys::fs::exists(manifestPath))
+    if (llvm::sys::fs::exists(manifestPath)) {
+      checkManifestTargetAgreement(manifestPath);
       return;
+    }
     std::string createdBy =
         std::string("abicheck-clang-plugin ") + kPluginVersion;
     // ADR-038 C.8: the pack-level fact_set mirrors every TU record's — one
