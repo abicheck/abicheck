@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from abicheck.html_report import generate_html_report, write_html_report
 
 # ---------------------------------------------------------------------------
@@ -167,22 +169,29 @@ def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None
     assert "(0 breaking change(s))" in out
 
 
-def test_policy_escalated_addition_not_in_green_added_section() -> None:
-    """Codex review on #549: a policy file that escalates an inherently
-    additive kind (e.g. `func_added: BREAKING`) must not leave the finding
-    in the green "Added" section — `_change_bucket`'s canonical
-    `BREAKING_KINDS` membership check can never see a policy-file escalation
-    since it only looks at the kind's own default classification, so the
-    page could show a breaking compatibility metric while navigation/summary
-    still said "Added"."""
+@pytest.mark.parametrize(
+    "escalated_verdict",
+    ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK"],
+)
+def test_policy_escalated_addition_not_in_green_added_section(escalated_verdict: str) -> None:
+    """Codex review on #549 (two rounds): a policy file that escalates an
+    inherently additive kind away from COMPATIBLE — to BREAKING, API_BREAK,
+    *or* COMPATIBLE_WITH_RISK — must not leave the finding in the green
+    "Added" section. `_change_bucket`'s canonical `BREAKING_KINDS`
+    membership check can never see a policy-file escalation since it only
+    looks at the kind's own default classification. The first fix only
+    diverted the `== Verdict.BREAKING` case; a non-BREAKING escalation
+    (API_BREAK, COMPATIBLE_WITH_RISK) still rendered under "Added" even
+    though it needs review/recompilation like any other non-COMPATIBLE
+    finding — the guard must check "not COMPATIBLE", not "is BREAKING"."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
     from abicheck.policy_file import PolicyFile
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "new function: bar")
-    pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict.BREAKING})
+    pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict[escalated_verdict]})
     result = DiffResult(
         old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+        changes=[c], verdict=Verdict[escalated_verdict], policy_file=pf,
     )
     out = generate_html_report(result)
     assert "id='added'" not in out

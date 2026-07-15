@@ -80,12 +80,14 @@ def _change_bucket(
     *effective_verdict*, when given (typically
     ``result._effective_verdict_for_change``), is also consulted for
     otherwise-additive kinds: a policy file can escalate an inherently
-    additive kind (e.g. ``func_added: BREAKING``) to ``Verdict.BREAKING``,
-    which the canonical ``BREAKING_KINDS`` membership check above can never
-    see since it only looks at the kind's own default classification.
-    Without this, such a finding would still render in the green "Added"
-    section even though the compatibility metrics on the same page count it
-    as breaking.
+    additive kind (e.g. ``func_added``) to ``Verdict.BREAKING``,
+    ``Verdict.API_BREAK``, or ``Verdict.COMPATIBLE_WITH_RISK`` — none of
+    which the canonical ``BREAKING_KINDS`` membership check above can ever
+    see, since it only looks at the kind's own default classification.
+    Any effective verdict other than ``Verdict.COMPATIBLE`` means the
+    finding needs review, so it is excluded from "added" here too — not
+    just the ``BREAKING`` case — to match the compatibility metrics and
+    verdict banner on the same page.
     """
     ks = kind_str(change)
     if ks in REMOVED_KINDS:
@@ -94,7 +96,7 @@ def _change_bucket(
         if effective_verdict is not None:
             from .checker import Verdict
 
-            if effective_verdict(change) == Verdict.BREAKING:
+            if effective_verdict(change) != Verdict.COMPATIBLE:
                 return "changed"
         return "added"
     return "changed"
