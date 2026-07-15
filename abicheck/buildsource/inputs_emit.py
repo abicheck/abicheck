@@ -187,8 +187,17 @@ def append_source_facts(
     # under a name read_source_facts() later tries to gunzip (CodeRabbit
     # review, P2).
     compress = compress or filename.endswith(".gz")
-    if compress and not filename.endswith(".gz"):
-        filename = f"{filename}.gz"
+    # The default directory scan _iter_source_fact_files() only recognizes
+    # *.jsonl(.gz)/*.json(.gz) -- a caller-supplied basename without one of
+    # those extensions (e.g. filename="tu", with or without compress=True)
+    # wrote a file that scan could never find, so it silently vanished from
+    # every later ingest/validate. Normalize to the canonical .jsonl
+    # extension before the optional .gz suffix, same fix already applied to
+    # compact_inputs_pack's output_filename (Codex review, P2).
+    base = filename[: -len(".gz")] if filename.endswith(".gz") else filename
+    if not (base.endswith(".jsonl") or base.endswith(".json")):
+        base = f"{base}.jsonl"
+    filename = f"{base}.gz" if compress else base
     path = facts_dir / filename
     lines = "".join(json.dumps(tu.to_dict(), sort_keys=True) + "\n" for tu in tus)
     if compress:

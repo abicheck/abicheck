@@ -239,6 +239,38 @@ def test_append_source_facts_infers_compression_from_gz_filename(
     assert ingested.tu_count == 1
 
 
+@pytest.mark.parametrize(
+    ("filename", "compress", "expected_name"),
+    [
+        ("tu", True, "tu.jsonl.gz"),
+        ("tu", False, "tu.jsonl"),
+        ("tu.gz", False, "tu.jsonl.gz"),
+    ],
+)
+def test_append_source_facts_normalizes_extensionless_filename(
+    tmp_path: Path, filename: str, compress: bool, expected_name: str
+) -> None:
+    """The default directory scan _iter_source_fact_files() runs on every
+    later read only recognizes *.jsonl(.gz)/*.json(.gz) -- a caller-
+    supplied filename without one of those extensions (e.g.
+    append_source_facts(..., filename="tu", compress=True)) wrote a file
+    that scan could never find. The write succeeded with no diagnostic,
+    but ingest/validate silently read zero TUs from it -- the same class
+    of bug already fixed for compact_inputs_pack's output_filename
+    (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    path = append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=filename, compress=compress
+    )
+    assert path.name == expected_name
+
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names
+
+
 # -- post-build compaction (P1 #21) -------------------------------------------
 
 
