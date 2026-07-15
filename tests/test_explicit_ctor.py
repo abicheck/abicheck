@@ -192,7 +192,11 @@ def _snap_with_types(
 
 
 def _conv_ctor(
-    cls: str, mangled: str, param_type: str, is_explicit: bool | None = False
+    cls: str,
+    mangled: str,
+    param_type: str,
+    is_explicit: bool | None = False,
+    default: str | None = None,
 ) -> Function:
     # A castxml Constructor's demangled `name` is the bare class name, not
     # `Class::Class` — C++ forbids any other member from sharing that name,
@@ -202,7 +206,7 @@ def _conv_ctor(
         name=cls,
         mangled=mangled,
         return_type="void",
-        params=[Param(name="x", type=param_type)],
+        params=[Param(name="x", type=param_type, default=default)],
         visibility=Visibility.PUBLIC,
         is_explicit=is_explicit,
     )
@@ -230,6 +234,27 @@ class TestCtorOverloadAmbiguityRisk:
         )
         assert ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK in RISK_KINDS
         assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
+
+    def test_defaulted_first_parameter_still_counts_as_converting(self) -> None:
+        """`Widget(int x = 0)` is single-argument-callable (`Widget w = 5;`)
+        exactly like `Widget(int x)` — a defaulted first parameter must not
+        exempt it from the ambiguity-risk heuristic (Codex review #556)."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int", default="0")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int", default="0"),
+                _conv_ctor("Widget", "c2", "double", default="0.0"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
 
     def test_first_converting_ctor_is_not_flagged(self) -> None:
         """0 -> 1 converting constructor cannot be ambiguous by itself."""

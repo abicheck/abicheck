@@ -955,11 +955,17 @@ def _converting_ctors_by_class(
 
     "Converting constructor" here means: not deleted, definitively non-explicit
     (``is_explicit is False`` — ``None`` is unknown evidence and skipped, same
-    tri-state convention as ``_check_explicit_change``), exactly one *required*
-    argument (trailing defaulted params don't block single-argument calling),
-    and that argument is not the class's own type (excludes copy/move ctors).
-    Keyed by the full parameter-type tuple so two overloads are distinguished
-    even when both qualify.
+    tri-state convention as ``_check_explicit_change``), and callable with
+    exactly one argument — at most one *required* parameter (everything after
+    it defaulted), and at least one parameter total (excludes the zero-arg
+    default constructor). A leading defaulted parameter still makes the
+    constructor single-argument-callable (``Widget(int x = 0)`` accepts
+    ``Widget w = 5;`` the same as ``Widget(int x)`` would), so the exclusion
+    check below binds to the *first* parameter regardless of whether it has a
+    default, not to the (possibly empty) required-parameter list. That first
+    parameter's type is checked against the class's own type to exclude
+    copy/move constructors. Keyed by the full parameter-type tuple so two
+    overloads are distinguished even when both qualify.
 
     Caveat shared with ``diff_cxx_rules._resolve_owner_type``: ``class_names``
     is unqualified/leaf, so two distinct classes sharing a bare name in
@@ -969,11 +975,13 @@ def _converting_ctors_by_class(
     for f in snap.functions:
         if f.name not in class_names or f.is_deleted or f.is_explicit is not False:
             continue
+        if not f.params:
+            continue
         required = [p for p in f.params if p.default is None]
-        if len(required) != 1:
+        if len(required) > 1:
             continue
         arg_type = " ".join(
-            required[0].type.replace("const", "").replace("&", "").split()
+            f.params[0].type.replace("const", "").replace("&", "").split()
         )
         if arg_type == f.name:
             continue
