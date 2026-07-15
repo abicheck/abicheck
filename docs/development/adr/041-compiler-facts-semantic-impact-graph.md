@@ -41,7 +41,7 @@ inline int f() { return DETAIL_CONSTANT + 1; }
 Separately, `SourceAbiTu.source_edges` (`source_abi.py`) has existed since
 ADR-030 as a normalized carrier for exactly this kind of fact and has never
 been populated by any extractor (castxml, clang, Android, or the
-build-integrated plugin — ADR-038 Plugin injection always emits
+build-integrated plugin, ADR-038 Plugin injection — it always emits
 `"source_edges": []`).
 
 This ADR records the fuller roadmap for turning the L5 graph from "optional

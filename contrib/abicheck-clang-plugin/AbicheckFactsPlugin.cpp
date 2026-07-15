@@ -2793,4 +2793,4 @@ private:
 } // namespace
 
 static FrontendPluginRegistry::Add<FactsAction>
-    X("abicheck-facts", "emit abicheck Plugin-injection source facts during compile");
+    X("abicheck-facts", "emit abicheck Plugin injection source facts during compile");

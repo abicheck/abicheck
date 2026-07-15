@@ -126,7 +126,7 @@ jobs:
             --plugin build/plugin/libabicheck-facts.so \
             --clangxx clang++
 
-      - name: Validate the Plugin-injection scan flow (dump → merge → compare)
+      - name: Validate the Plugin injection scan flow (dump → merge → compare)
         run: |
           python contrib/abicheck-clang-plugin/tests/scan_flow.py \
             --plugin build/plugin/libabicheck-facts.so \

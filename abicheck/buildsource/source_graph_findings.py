@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from .header_graph import HEADER_CALL_GRAPH_PASS, HEADER_TYPE_GRAPH_PASS
 from .source_graph import (
     _TYPE_ENTITY_KINDS,
     EVIDENCE_TIER_L5,
@@ -329,8 +330,8 @@ _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
 #: own confirmed-pass/narrowed/degraded markers are honored without ever
 #: double-counting a kind under two separate loop iterations (Codex review).
 _HEADER_PASS_ALIAS: dict[str, str] = {
-    "call_graph": "header_call_graph",
-    "type_graph": "header_type_graph",
+    "call_graph": HEADER_CALL_GRAPH_PASS,
+    "type_graph": HEADER_TYPE_GRAPH_PASS,
 }
 
 
