@@ -90,6 +90,49 @@ def _compute_loadability(
     return StackVerdict.PASS
 
 
+#: Sentinel ``Change.symbol`` values diff_platform*.py uses for a whole-binary
+#: (not per-export) finding — e.g. a machine/class/endianness/ABI-flags
+#: mismatch. No real import is ever named this, so an *equality* match against
+#: it would never fire; these findings mean the provider DSO cannot satisfy
+#: *any* dynamic symbol resolution at load time, so any root importing
+#: anything from it is unconditionally touched (Codex review, PR #551).
+_DSO_WIDE_BREAK_SYMBOLS = frozenset({"ELF_HEADER", "PE_HEADER", "MACHO_HEADER"})
+
+
+def _breaking_change_touches_imports(change: StackChange) -> bool:
+    """True if a symbol this root actually imports from *change*'s provider is
+    among the DSO's own BREAKING findings (not just any breaking finding
+    anywhere in the DSO).
+
+    ``change.abi_diff.verdict`` is a whole-DSO verdict: a provider can be
+    BREAKING because of one removed symbol while a given root only imports an
+    unrelated, unaffected symbol from the same DSO. Without this intersection
+    every root importing *anything* from a broken provider was marked FAIL,
+    even when the specific break could never have affected it (P1.4).
+
+    A BREAKING finding for a type/layout change (e.g. a resized struct) names
+    the *type* in ``Change.symbol`` (e.g. "Point"), not the functions that use
+    it — those exported functions are separately recorded in
+    ``Change.affected_symbols``. A root importing ``foo(Point)`` must still
+    count as touched even though "foo" never equals "Point" (Codex review).
+
+    A DSO-wide break (wrong machine/class/endianness/ABI-flags) is recorded
+    against a sentinel symbol, not a real export, so it can never appear in
+    ``imported_symbols`` — but such a DSO cannot satisfy *any* import at
+    runtime, so it counts as touching every symbol this root imports from it
+    (Codex review).
+    """
+    assert change.abi_diff is not None
+    imported_symbols = {b.symbol for b in change.impacted_imports}
+    breaking_symbols: set[str] = set()
+    for c in change.abi_diff.breaking:
+        if c.symbol in _DSO_WIDE_BREAK_SYMBOLS:
+            return True
+        breaking_symbols.add(c.symbol)
+        breaking_symbols.update(c.affected_symbols or ())
+    return bool(imported_symbols & breaking_symbols)
+
+
 def _compute_abi_risk(
     stack_changes: list[StackChange],
     binding_changes: list[Change] | None = None,
@@ -107,7 +150,13 @@ def _compute_abi_risk(
             has_risk = True
         elif change.abi_diff is not None and change.impacted_imports:
             if change.abi_diff.verdict.value == "BREAKING":
-                has_breaking = True
+                if _breaking_change_touches_imports(change):
+                    has_breaking = True
+                else:
+                    # The DSO is broken, but not by anything this root
+                    # imports — real "environment contains a broken DSO"
+                    # signal, but not a confirmed impact on this root.
+                    has_risk = True
             elif change.abi_diff.verdict.value in ("API_BREAK", "COMPATIBLE_WITH_RISK"):
                 has_risk = True
         elif change.abi_diff is not None and not change.impacted_imports:

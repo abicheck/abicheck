@@ -719,6 +719,46 @@ class TestDumpElf:
             or call_kwargs[1].get("compiler") == "cc"
         )
 
+    def test_debuginfod_url_reaches_resolve_debug_info(self, tmp_path):
+        # Codex (PR #551): a custom --debuginfod-url must reach the resolver's
+        # debuginfod_urls kwarg, not just gate enable_debuginfod on/off.
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch("abicheck.dumper.dump", return_value=snap),
+        ):
+            _dump_elf(
+                p,
+                [],
+                [],
+                "1.0",
+                "c++",
+                enable_debuginfod=True,
+                debuginfod_url="https://debuginfod.example.test/",
+            )
+        assert mock_resolve.call_args.kwargs["debuginfod_urls"] == [
+            "https://debuginfod.example.test/"
+        ]
+
+    def test_no_debuginfod_url_passes_none(self, tmp_path):
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch("abicheck.dumper.dump", return_value=snap),
+        ):
+            _dump_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
+        assert mock_resolve.call_args.kwargs["debuginfod_urls"] is None
+
 
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
 
@@ -1164,6 +1204,20 @@ class TestRunCompare:
         old_call, new_call = calls
         assert old_call["public_headers"] == [old_h]
         assert new_call["public_headers"] == [new_h]
+
+    def test_debuginfod_url_appended_last_preserves_positional_order(self):
+        # Codex review (PR #551): debuginfod_url was originally inserted right
+        # after enable_debuginfod, ahead of scope_to_public_surface — any
+        # caller invoking run_compare positionally that far would have every
+        # later positional argument silently shift by one slot. It must be
+        # the LAST parameter so no pre-existing positional binding moves.
+        import inspect
+
+        params = list(inspect.signature(run_compare).parameters)
+        assert params[-1] == "debuginfod_url"
+        assert params.index("scope_to_public_surface") == (
+            params.index("enable_debuginfod") + 1
+        )
 
 
 # ── render_output() ─────────────────────────────────────────────────────────

@@ -431,8 +431,13 @@ def perform_elf_dump(
     user_gcc_options: str | None = None,
     compile_db_filter: str | None = None,
     inputs_pack: Path | None = None,
+    debug_info_path: Path | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
+
+    ``debug_info_path`` (P1.1, ADR-021a): a resolved detached debug artifact
+    (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
+    ``so_path`` itself — threaded straight into :func:`dumper.dump`.
 
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
@@ -510,6 +515,7 @@ def perform_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             extra_hash_dirs=deferred_dirs,
+            debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

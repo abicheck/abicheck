@@ -1,7 +1,14 @@
 # G13 — cross-architecture comparison guardrail
 
-**Registry:** `UC-PLAT-arch-guard` (`planned`)
+**Registry:** `UC-PLAT-arch-guard` (`complete`)
 **Effort:** S · **Risk:** low
+**Status:** Done. The ELF snapshot captures `e_machine`, `EI_CLASS`, and
+endianness; `checker_policy.py` classifies a mismatch via dedicated
+`ELF_MACHINE_CHANGED`/`ELF_CLASS_CHANGED`/`ELF_ENDIANNESS_CHANGED` (and
+`ELF_ABI_FLAGS_CHANGED` for decoded float-ABI/EABI drift) kinds in
+`BREAKING_KINDS` — a top-level dominating finding rather than the single
+refusing `ARCHITECTURE_MISMATCH` kind originally sketched below. See
+`abicheck/diff_platform_elf_dynamic.py` and `tests/test_g23_elf_facts.py`.
 
 ## Problem
 

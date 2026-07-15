@@ -68,6 +68,7 @@ from .cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -107,6 +108,7 @@ class ScanOutcome:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "scan_schema_version": SCAN_SCHEMA_VERSION,
             "mode": self.mode,
             "level": {
                 "source_method": self.resolved_method,

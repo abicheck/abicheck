@@ -340,9 +340,16 @@ Every JSON report carries a top-level `report_schema_version` field
 > whichever field belongs to the file they loaded.
 >
 > `scan --format json` is a **third, separate shape**: it emits a `ScanOutcome`
-> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …) and does **not**
-> currently carry a `report_schema_version` field, so do not key scan-output
-> consumers off it.
+> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
+> own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
+> `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
+> interchangeable with, `report_schema_version`. The typed Python/MCP
+> `ScanResult.to_dict()` envelope (`abicheck.service`) stamps the same value at
+> its own top level, in addition to nesting the `ScanOutcome` dict (with its
+> own `scan_schema_version`) under its `report` key. There is currently no
+> packaged `.schema.json` for scan output (unlike `compare`'s
+> `compare_report.schema.json`); the version field is honored the same way
+> (accept a shared `MAJOR`, ignore unknown keys) until one exists.
 
 ```json
 {

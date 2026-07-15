@@ -496,6 +496,15 @@ def run_compare(
     debuginfod_url = resolved_cfg.debuginfod_url
     show_redundant = resolved_cfg.show_redundant
 
+    # P1.1 (Codex review): resolved ahead of the inline-embed block below (not
+    # just before _resolve_compare_snapshots, where this used to live) so a raw
+    # --old/new-sources tree's inline `dump` invocation also gets the per-side
+    # debug roots — otherwise --debug-root + --old-sources together silently
+    # dumped the inline side without detached DWARF.
+    resolved_old_debug, resolved_new_debug = _resolve_debug_roots(
+        debug_roots, debug_roots_old, debug_roots_new
+    )
+
     # ADR-037 D7: input-type dispatch. The resolved config (scope/suppression/
     # severity) is forwarded so a set-input compare classifies the same way a
     # single-pair one would (ADR-037 D4).
@@ -646,6 +655,8 @@ def run_compare(
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=old_pdb_path or pdb_path,
+            debug_roots=tuple(resolved_old_debug),
+            debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
@@ -657,6 +668,8 @@ def run_compare(
             nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=new_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
+            debug_roots=tuple(resolved_new_debug),
+            debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=new_pdb_path or pdb_path,
@@ -677,9 +690,6 @@ def run_compare(
         old_includes_only, new_includes_only,
     )
 
-    resolved_old_debug, resolved_new_debug = _resolve_debug_roots(
-        debug_roots, debug_roots_old, debug_roots_new
-    )
     _log_debug_resolution(
         old_input, new_input,
         resolved_old_debug, resolved_new_debug,
@@ -697,6 +707,10 @@ def run_compare(
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
         compile_context=side_compile_context,
+        old_debug_roots=resolved_old_debug or None,
+        new_debug_roots=resolved_new_debug or None,
+        enable_debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
 
     suppression, pf = _load_suppression_and_policy(

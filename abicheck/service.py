@@ -226,6 +226,7 @@ def resolve_input(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -254,6 +255,9 @@ def resolve_input(
     Args:
         debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
             *None* for auto-detection.
+        debuginfod_url: Override debuginfod server URL (only meaningful when
+            ``enable_debuginfod`` is set); ``None`` uses the resolver's
+            default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
         follow_linker_scripts: When True (default), a GNU ld linker script is
@@ -283,6 +287,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -307,6 +312,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -380,6 +386,7 @@ def resolve_input(
                     dwarf_only=dwarf_only,
                     debug_roots=debug_roots,
                     enable_debuginfod=enable_debuginfod,
+                    debuginfod_url=debuginfod_url,
                     debug_format=debug_format,
                     symbols_only=symbols_only,
                     debug_presence_only=debug_presence_only,
@@ -431,6 +438,7 @@ def run_dump(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -489,6 +497,7 @@ def run_dump(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -859,6 +868,7 @@ def _dump_elf(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -878,6 +888,31 @@ def _dump_elf(
     provenance-gated cross-checks on the ``scan`` entry point.
     """
     from .dumper import dump
+
+    # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
+    # --debuginfod) was previously only used for a CLI log line — the DWARF
+    # parse always read `path` itself, so a stripped production .so stayed
+    # L0-only even after abicheck reported it found the matching debug file.
+    # Resolve here (gated on the caller actually requesting it, same as the
+    # CLI) and thread the artifact's DWARF-bearing file through to dumper.dump
+    # so it's read instead of `path`. Split DWARF (.dwo/.dwp) and dSYM are not
+    # threaded here — narrower follow-up, not this fix's scope.
+    debug_info_path: Path | None = None
+    if not symbols_only and not debug_presence_only and (debug_roots or enable_debuginfod):
+        from .debug_resolver import resolve_debug_info
+        artifact = resolve_debug_info(
+            path, debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
+        )
+        if artifact is not None and artifact.dwarf_path is not None:
+            resolved_dwarf = artifact.dwarf_path.resolve()
+            if resolved_dwarf != path.resolve():
+                debug_info_path = artifact.dwarf_path
+                message = f"Debug info for {path.name}: {artifact.source}"
+                if notify is not None:
+                    notify(message)
+                else:
+                    _logger.info(message)
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
@@ -948,6 +983,7 @@ def _dump_elf(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=deferred_dirs,
+            debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
@@ -1452,6 +1488,7 @@ def run_compare_request(
         pdb_path=request.old.pdb,
         debug_roots=list(request.old.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.old.headers),
     )
@@ -1465,6 +1502,7 @@ def run_compare_request(
         pdb_path=request.new.pdb,
         debug_roots=list(request.new.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.new.headers),
     )
@@ -1519,6 +1557,7 @@ def run_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    debuginfod_url: str | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1526,6 +1565,11 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
+
+    ``debuginfod_url`` is appended after every pre-existing parameter (not
+    inserted alongside ``enable_debuginfod``) so a caller invoking this
+    positionally keeps binding every argument after it to the same parameter
+    it always did (Codex review, PR #551).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1567,6 +1611,7 @@ def run_compare(
         ),
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
     )
     return run_compare_request(request)
 

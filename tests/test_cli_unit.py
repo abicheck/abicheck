@@ -532,6 +532,39 @@ class TestBaselineEvidenceCli:
         assert pull.exit_code != 0
         assert "content hash mismatch" in pull.output
 
+    def test_pull_corrupt_snapshot_checksum_is_clean_cli_error(self, tmp_path: Path) -> None:
+        """A corrupt/tampered registry entry must surface as a ClickException
+        (clean message, non-zero exit), not an uncaught BaselineIntegrityError
+        traceback — `registry.pull(key)` itself is not wrapped in a try/except
+        in `baseline_pull`, unlike every sibling registry call in the module."""
+        snap = self._snapshot(tmp_path)
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        push = runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry),
+        ])
+        assert push.exit_code == 0, push.output
+
+        # Tamper with the stored snapshot so its checksum no longer matches
+        # the metadata recorded at push time.
+        stored_snap = registry / "libfoo" / "1.0" / "linux-x86_64" / "snapshot.json"
+        stored_snap.write_text(
+            stored_snap.read_text(encoding="utf-8").replace("libfoo.so", "libfoo-tampered.so"),
+            encoding="utf-8",
+        )
+
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry),
+        ])
+        assert pull.exit_code != 0
+        assert pull.exception is None or isinstance(pull.exception, SystemExit)
+        assert "Checksum mismatch" in pull.output
+        assert "Traceback" not in pull.output
+
     def test_pull_evidence_output_to_registry_dir_is_noop(self, tmp_path: Path) -> None:
         snap = self._snapshot(tmp_path)
         pack_dir = self._pack(tmp_path / "ev.evidence")

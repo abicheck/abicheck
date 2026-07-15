@@ -770,12 +770,30 @@ def test_cli_audit_json_carries_poi(
     assert payload["poi"]["version"] == 1
 
 
+def test_cli_scan_json_carries_scan_schema_version(
+    runner: CliRunner, snap_path: Path, header: Path
+) -> None:
+    """The CLI's ``scan --format json`` contract (ScanOutcome.to_dict) must
+    carry a schema-version marker, same as compare's ``report_schema_version``,
+    so external consumers can pin/validate the envelope (P1.5)."""
+    from abicheck.schemas import SCAN_SCHEMA_VERSION
+
+    res = runner.invoke(
+        main,
+        ["scan", "--binary", str(snap_path), "-H", str(header), "--format", "json"],
+    )
+    assert res.exit_code == 0
+    payload = json.loads(res.output)
+    assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
+
+
 # --------------------------------------------------------------------------- #
 # run_scan / run_audit typed engine (ADR-035 D10 / Phase 3b tail)
 # --------------------------------------------------------------------------- #
 
 
 def test_run_audit_returns_typed_result_with_findings(snap_path: Path) -> None:
+    from abicheck.schemas import SCAN_SCHEMA_VERSION
     from abicheck.service import ScanResult, run_audit
 
     res = run_audit(ScanRequest(binaries=[snap_path]))
@@ -789,6 +807,10 @@ def test_run_audit_returns_typed_result_with_findings(snap_path: Path) -> None:
     d = res.to_dict()
     assert d["verdict"] == res.verdict
     assert d["findings"] == len(res.findings)
+    # P1.5: both the service envelope and the nested CLI-facing report carry
+    # the same scan schema version marker.
+    assert d["scan_schema_version"] == SCAN_SCHEMA_VERSION
+    assert d["report"]["scan_schema_version"] == SCAN_SCHEMA_VERSION
 
 
 def test_run_scan_no_baseline_matches_audit_findings(snap_path: Path) -> None:

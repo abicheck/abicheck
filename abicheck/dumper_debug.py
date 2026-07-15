@@ -44,6 +44,7 @@ def _resolve_debug_metadata(
     debug_format: str | None,
     *,
     _session_out: list[DwarfSession] | None = None,
+    dwarf_source: Path | None = None,
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Resolve debug metadata using the specified or auto-detected format.
 
@@ -55,8 +56,18 @@ def _resolve_debug_metadata(
     it so a subsequent snapshot build can reuse the same open ``DWARFInfo``
     (F5b: avoid re-parsing every DIE). The caller must close it. BTF/CTF and
     no-debug paths leave the list untouched (session stays ``None``).
+
+    ``dwarf_source`` (P1.1, ADR-021a): when a detached debug artifact was
+    resolved for *so_path* (``--debug-root``/``--debuginfod``: a build-id-tree
+    or path-mirror ``.debug`` file, distinct from ``so_path`` itself), this is
+    that file's path — DWARF sections are read from it instead of *so_path*.
+    BTF/CTF detection and the kernel-binary heuristic always use *so_path*
+    itself (those formats are not split-debug-file candidates here). ``None``
+    (the default) parses DWARF from *so_path*, unchanged from before.
     """
     from .dwarf_advanced import AdvancedDwarfMetadata
+
+    dwarf_path = dwarf_source or so_path
 
     if debug_format == "btf":
         from .btf_metadata import parse_btf_metadata
@@ -74,7 +85,7 @@ def _resolve_debug_metadata(
 
     if debug_format == "dwarf":
         from .dwarf_unified import parse_dwarf
-        return parse_dwarf(so_path, _session_out=_session_out)
+        return parse_dwarf(dwarf_path, _session_out=_session_out)
 
     if debug_format is not None:
         raise ValueError(
@@ -97,7 +108,7 @@ def _resolve_debug_metadata(
                 return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
-    dwarf_meta, dwarf_adv = parse_dwarf(so_path, _session_out=_session_out)
+    dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
     if dwarf_meta.has_dwarf:
         return dwarf_meta, dwarf_adv
 

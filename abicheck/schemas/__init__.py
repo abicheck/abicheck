@@ -56,6 +56,18 @@ from typing import Any
 #:       plugin-check consumer-proven findings. Additive optional key.
 REPORT_SCHEMA_VERSION = "2.2"
 
+#: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
+#: ``scan_schema_version`` at the top level of both public scan dict shapes:
+#: :meth:`abicheck.scan_engine.ScanOutcome.to_dict` (the CLI's
+#: ``scan --format json`` contract — mode/level/risk/coverage/diff/verdict/
+#: exit_code) and :meth:`abicheck.service_scan.ScanResult.to_dict` (the typed
+#: Python/MCP service envelope — verdict/exit_code/findings/layers/confidence/
+#: estimate/report, where ``report`` nests the former). Same additive/breaking
+#: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
+#: and compare are separate contracts that evolve on their own schedules).
+#: 1.0 — initial versioned envelope.
+SCAN_SCHEMA_VERSION = "1.0"
+
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
 
@@ -70,6 +82,7 @@ def load_compare_report_schema() -> dict[str, Any]:
 
 __all__ = [
     "REPORT_SCHEMA_VERSION",
+    "SCAN_SCHEMA_VERSION",
     "COMPARE_REPORT_SCHEMA_PATH",
     "load_compare_report_schema",
 ]

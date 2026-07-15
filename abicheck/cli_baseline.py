@@ -184,7 +184,10 @@ def baseline_pull(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    result = registry.pull(key)
+    try:
+        result = registry.pull(key)
+    except AbicheckError as exc:
+        raise click.ClickException(str(exc)) from exc
     if result is None:
         raise click.ClickException(f"Baseline not found: {key.path}")
 

@@ -641,16 +641,23 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
-    # Debug artifact resolution (ADR-021a): resolve before dump
+    # Debug artifact resolution (ADR-021a): resolve before dump. P1.1: thread
+    # a resolved detached debug file (build-id tree / path-mirror / debuginfod
+    # — distinct from so_path itself) into the actual DWARF parse instead of
+    # only logging it, so a stripped binary still gets DWARF-aware comparison.
+    debug_info_path: Path | None = None
     if debug_roots or debuginfod:
         artifact = _resolve_debug_artifact(
             so_path, debug_roots, debuginfod, debuginfod_url,
         )
         if artifact:
             click.echo(f"Debug info: {artifact.source}", err=True)
+            if artifact.dwarf_path and artifact.dwarf_path.resolve() != so_path.resolve():
+                debug_info_path = artifact.dwarf_path
 
     perform_elf_dump(
         so_path=so_path,
+        debug_info_path=debug_info_path,
         headers=headers,
         includes=includes,
         version=version,
@@ -1091,6 +1098,9 @@ def _embed_inline_source_side(
     collect_mode: str,
     out_dir: Path,
     label: str,
+    debug_roots: tuple[Path, ...] = (),
+    debuginfod: bool = False,
+    debuginfod_url: str | None = None,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -1108,6 +1118,13 @@ def _embed_inline_source_side(
     The caller passes the *resolved* values plus the toolchain/dependency/native
     knobs (``follow_deps``/``--gcc-*``/``--dwarf-only``/…) so the inline dump
     parses this side exactly as a native ``compare``/``dump`` would.
+
+    ``debug_roots``/``debuginfod``/``debuginfod_url`` (P1.1, Codex review):
+    this side's resolved detached-debug-artifact inputs, forwarded verbatim to
+    the inline ``dump`` invocation below — without this, a raw
+    ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
+    dump used its own unset defaults), so a stripped binary on this side still
+    lost its DWARF even though the sibling non-inline path was fixed.
     """
     sources_raw = sources is not None and not _source_is_pack(sources)
     build_info_raw = build_info is not None and not _source_is_pack(build_info)
@@ -1194,6 +1211,9 @@ def _embed_inline_source_side(
         build_info=dump_build_info,
         _resolved_collect_mode=collect_mode,
         output=out,
+        debug_roots=debug_roots,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so

@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import DiffResult
-from abicheck.checker_policy import Verdict
+from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_types import Change
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import (
     StackChange,
@@ -60,10 +61,20 @@ def _make_resolved_dso(path, soname="libfoo.so"):
     )
 
 
-def _make_diff_result(verdict=Verdict.NO_CHANGE):
+def _make_diff_result(verdict=Verdict.NO_CHANGE, breaking=None):
     mock = MagicMock(spec=DiffResult)
     mock.verdict = verdict
+    mock.breaking = [] if breaking is None else breaking
     return mock
+
+
+def _make_breaking_change(symbol="sym", affected_symbols=None):
+    return Change(
+        kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        symbol=symbol,
+        description="test",
+        affected_symbols=affected_symbols,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +129,83 @@ class TestComputeAbiRisk:
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
     def test_breaking_verdict_with_impacted_imports_fail(self):
-        diff = _make_diff_result(Verdict.BREAKING)
-        binding = _make_binding()
+        # P1.4: a root only FAILs when the imported symbol is among the
+        # DSO's own BREAKING findings — here "sym" is both imported and
+        # the symbol the breaking change removed, so this is a confirmed hit.
+        diff = _make_diff_result(Verdict.BREAKING, breaking=[_make_breaking_change("sym")])
+        binding = _make_binding(symbol="sym")
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[binding],
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.FAIL
+
+    def test_breaking_verdict_with_unrelated_impacted_import_warns_not_fail(self):
+        # P1.4 regression: the DSO is BREAKING because it removed
+        # "unrelated_sym", but this root only imports "sym" — an unrelated,
+        # unaffected symbol from the same provider. That must not FAIL the
+        # root; it's still a real "environment contains a broken DSO" signal
+        # (WARN), not a confirmed impact on this specific root/import.
+        diff = _make_diff_result(
+            Verdict.BREAKING, breaking=[_make_breaking_change("unrelated_sym")]
+        )
+        binding = _make_binding(symbol="sym")
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[binding],
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.WARN
+
+    def test_breaking_verdict_multiple_imports_one_matches_fails(self):
+        # One of several imports from this provider does match a broken
+        # symbol — still a confirmed FAIL even though other imports don't.
+        diff = _make_diff_result(
+            Verdict.BREAKING, breaking=[_make_breaking_change("broken_sym")]
+        )
+        bindings = [_make_binding(symbol="unrelated_a"), _make_binding(symbol="broken_sym")]
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=bindings,
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.FAIL
+
+    def test_breaking_type_change_matched_via_affected_symbols_fails(self):
+        # Codex review regression: a BREAKING type/layout change (e.g. a
+        # resized struct) names the *type* in Change.symbol ("Point"), not
+        # the exported functions that use it — those live in
+        # affected_symbols. A root importing "foo" (which takes a Point
+        # parameter) must still FAIL, not be missed because "foo" != "Point".
+        diff = _make_diff_result(
+            Verdict.BREAKING,
+            breaking=[_make_breaking_change("Point", affected_symbols=["foo", "bar"])],
+        )
+        binding = _make_binding(symbol="foo")
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[binding],
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.FAIL
+
+    def test_breaking_dso_wide_elf_header_change_fails_despite_unrelated_import(self):
+        # Codex review regression: a DSO-wide break (wrong machine/class/
+        # endianness/ABI-flags) is recorded against the sentinel symbol
+        # "ELF_HEADER" (diff_platform_elf_dynamic.py), never a real export.
+        # No import is ever literally named "ELF_HEADER", so the plain
+        # symbol/affected_symbols intersection would never match it and
+        # would wrongly downgrade this to WARN — but a wrong-arch/class DSO
+        # cannot satisfy ANY import at runtime, so this must FAIL.
+        diff = _make_diff_result(
+            Verdict.BREAKING, breaking=[_make_breaking_change("ELF_HEADER")]
+        )
+        binding = _make_binding(symbol="totally_unrelated_export")
         changes = [StackChange(
             library="libfoo.so",
             change_type="content_changed",
