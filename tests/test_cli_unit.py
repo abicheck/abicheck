@@ -188,6 +188,28 @@ class TestCompareHtml:
         assert "<html" in result.output.lower()
 
 
+# ── _resolve_demangle (shared by primary and --secondary-format renders) ──
+
+class TestResolveDemangle:
+    def test_defaults_on_for_markdown_and_review(self):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        assert _resolve_demangle("markdown", None) is True
+        assert _resolve_demangle("review", None) is True
+
+    def test_defaults_off_for_machine_formats_and_html(self):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        for fmt in ("json", "sarif", "junit", "html"):
+            assert _resolve_demangle(fmt, None) is False
+
+    def test_explicit_flag_always_wins(self):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        assert _resolve_demangle("json", True) is True
+        assert _resolve_demangle("markdown", False) is False
+
+
 # ── compare --secondary-format/--secondary-output ───────────────────────
 
 class TestCompareSecondaryFormat:

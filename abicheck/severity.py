@@ -648,7 +648,20 @@ def compute_gate_decision(
     Without *severity_config* the gate is the legacy verdict-based scheme:
     the caller supplies *legacy_exit_code* (typically from
     :func:`legacy_exit_code` or a flow-specific floor, e.g. removed-library
-    escalation) and no category can be singled out as "the" blocker.
+    escalation) and no category can be singled out as "the" blocker
+    (``blocking_categories`` is always empty in this scheme — there is no
+    per-category configuration to single one out from). None of this
+    function's three current call sites (``reporter._build_severity_json``,
+    ``sarif._severity_gate_properties``, ``cli_compare_release._release_gating_buckets``)
+    actually reach this branch — each already special-cases
+    ``severity_config is None`` itself before calling in, since their
+    own legacy-scheme needs differ from an empty ``blocking_categories``
+    (e.g. ``_release_gating_buckets``'s legacy branch needs three fixed
+    *named* buckets — breaking/api_break/risk — to walk, which this
+    branch's empty tuple can't supply). The legacy branch exists so a
+    caller that only ever wants a single, uniform :class:`GateDecision`
+    regardless of scheme has one to call — see ``tests/test_severity.py``'s
+    ``TestComputeGateDecision`` for its own direct coverage.
 
     With *severity_config*, ``exit_code`` (via :func:`compute_exit_code`)
     and ``blocking_categories`` (via :func:`categorize_changes`) are both

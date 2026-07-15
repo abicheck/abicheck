@@ -781,6 +781,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (CodeRabbit review, PR #557). All five are now `required` (the emitter
   already always populates them; this only tightens the contract).
 
+- **Self-review polish on the `GateDecision`/`--secondary-format` work above
+  (PR #557):** the native HTML report's "CI Gate" card computed pass/fail
+  via `severity.compute_exit_code()` directly instead of the canonical
+  `compute_gate_decision()` `reporter.py`/`sarif.py`/`cli_compare_release.py`
+  were all migrated to — now routed through it too, so all four gate-status
+  call sites share one computation. The primary and `--secondary-format`
+  render paths each independently resolved the tri-state `--demangle` flag
+  with a duplicated one-line rule; factored into a single
+  `cli_compare_helpers._resolve_demangle()` both call. `compute_gate_decision`'s
+  legacy (no `SeverityConfig`) branch was found to be unreachable from any
+  of its three production call sites (each already special-cases
+  `severity_config is None` itself, since their legacy-scheme needs differ
+  from an empty `blocking_categories`) — documented explicitly in its
+  docstring rather than silently left as untested-in-practice code.
+
 - **Clang plugin: `source_edges` collected but never reached the L5 graph,
   plus four related correctness gaps from an independent review of the
   ADR-038 C.8 canonical fact-set work (ADR-038 C.10-C.12).**

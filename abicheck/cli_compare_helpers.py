@@ -228,6 +228,24 @@ class _NormalizedCompareOptions(NamedTuple):
     show_impact: bool
 
 
+def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
+    """Resolve the tri-state ``--demangle`` flag against a specific format.
+
+    Default ON for the text formats whose renderer post-processes symbols
+    through ``demangle_text`` (markdown/review), OFF for machine formats
+    (json/sarif/junit) and HTML — the HTML renderer emits symbols
+    structurally and demangling its string would inject unescaped
+    ``<``/``>``/``&`` from C++ names and corrupt the markup. An explicit
+    flag always wins over the per-format default.
+
+    Shared by the primary render (:func:`_normalize_compare_options`) and
+    the ``--secondary-format`` render in :func:`run_compare`, each resolved
+    against its own format — a machine primary format paired with a text
+    secondary format (or vice versa) must not inherit the other's default.
+    """
+    return fmt in {"markdown", "review"} if demangle is None else demangle
+
+
 def _normalize_compare_options(
     resolved_cfg: ResolvedCompareConfig,
     *,
@@ -267,12 +285,7 @@ def _normalize_compare_options(
     else:
         effective_debug_format = debug_format
 
-    # Tri-state --demangle: default ON for the text formats whose renderer
-    # post-processes symbols through demangle_text (markdown/review), OFF for
-    # machine formats (json/sarif/junit) and HTML — the HTML renderer emits
-    # symbols structurally and demangling its string would inject unescaped
-    # '<'/'>'/'&' from C++ names and corrupt the markup. Explicit flag wins.
-    demangle_resolved = fmt in {"markdown", "review"} if demangle is None else demangle
+    demangle_resolved = _resolve_demangle(fmt, demangle)
 
     # --report-mode impact is sugar for "full" report with the impact table on.
     if report_mode == "impact":
@@ -872,10 +885,7 @@ def run_compare(
         # value above — otherwise a machine primary format (e.g. json) paired
         # with a markdown/review secondary format would wrongly inherit
         # demangle=False into the secondary render (Codex review, PR #557).
-        secondary_demangle = (
-            secondary_fmt in {"markdown", "review"}
-            if demangle_explicit is None else demangle_explicit
-        )
+        secondary_demangle = _resolve_demangle(secondary_fmt, demangle_explicit)
         secondary_text = _render_output(
             secondary_fmt, result, old, new,
             follow_deps=follow_deps,

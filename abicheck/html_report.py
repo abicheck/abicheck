@@ -772,21 +772,21 @@ def generate_html_report(
 
     gate_html = ""
     if severity_config is not None:
-        from .severity import compute_exit_code
+        from .severity import compute_gate_decision
 
         _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
-        gate_exit_code = compute_exit_code(
+        gate = compute_gate_decision(
             cast(list[HasKind], all_changes),
             severity_config,
             policy=getattr(result, "policy", None),
             kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
             policy_file=getattr(result, "policy_file", None),
         )
-        gate_passed = gate_exit_code == 0
+        gate_passed = not gate.blocking
         gate_fg, gate_bg = (
             ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
         )
-        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
+        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate.exit_code})"
         gate_icon = "✅" if gate_passed else "🛑"
         gate_html = (
             f"<div class='verdict-box' "
