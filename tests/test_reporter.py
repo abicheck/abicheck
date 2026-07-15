@@ -46,6 +46,52 @@ class TestReviewDigest:
         assert "`sym12`" not in out
 
 
+class TestReviewDigestSeverityAware:
+    """Without severity_config, the merge-effect phrase is inferred purely
+    from the compatibility verdict — which can misreport the actual CI gate
+    once severity configuration is in play (compatibility and "blocks CI" are
+    independent decisions). These guard the fix."""
+
+    def test_compatible_addition_configured_as_error_is_not_safe_to_merge(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, changes=[c])
+
+        # Legacy (no severity_config): the old, misleading claim.
+        legacy = to_review_digest(result)
+        assert "safe to merge" in legacy
+
+        cfg = resolve_severity_config("default", addition="error")
+        out = to_review_digest(result, severity_config=cfg)
+        assert "safe to merge" not in out
+        assert "blocked by severity policy" in out
+
+    def test_breaking_demoted_to_non_error_is_not_reported_as_blocking(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, changes=[c])
+
+        # Legacy (no severity_config): claims it blocks merge under a strict gate.
+        legacy = to_review_digest(result)
+        assert "blocks merge" in legacy
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        out = to_review_digest(result, severity_config=cfg)
+        assert "blocks merge" not in out
+        assert "safe to merge" in out
+
+    def test_severity_config_confirms_a_real_block(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, changes=[c])
+        cfg = resolve_severity_config("default")  # default: abi_breaking=error
+        out = to_review_digest(result, severity_config=cfg)
+        assert "blocked by severity policy" in out
+
+
 def _result(verdict: Verdict, changes=None) -> DiffResult:
     return DiffResult(
         old_version="1.0", new_version="2.0",

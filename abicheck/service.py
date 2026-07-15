@@ -1416,7 +1416,7 @@ def render_output(
     if fmt == "review":
         from .reporter import to_review_digest
 
-        txt = to_review_digest(result)
+        txt = to_review_digest(result, severity_config=severity_config)
         if demangle:
             from .demangle import demangle_text
 

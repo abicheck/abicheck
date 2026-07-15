@@ -702,7 +702,35 @@ _VERDICT_MERGE_EFFECT = {
 }
 
 
-def to_review_digest(result: DiffResult) -> str:
+def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) -> str:
+    """Merge-effect phrase reflecting the actual severity-aware gate.
+
+    Compatibility (``result.verdict``) and the CI gate are independent
+    decisions once a severity configuration is in play — e.g. an ``addition``
+    finding configured as ``error`` blocks the build even though the verdict
+    is ``COMPATIBLE``, and an ``abi_breaking`` finding configured below
+    ``error`` does not. The hard-coded ``_VERDICT_MERGE_EFFECT`` phrases would
+    misreport both cases, so this asks the severity gate directly instead of
+    inferring "safe to merge" from the verdict alone.
+    """
+    from .severity import compute_exit_code
+
+    eff_sets = result._effective_kind_sets()
+    exit_code = compute_exit_code(
+        result.changes,
+        severity_config,
+        policy=result.policy,
+        kind_sets=eff_sets,
+        policy_file=result.policy_file,
+    )
+    if exit_code == 0:
+        return "no error-level findings under the configured severity policy — safe to merge"
+    return "blocked by severity policy — review required before merge"
+
+
+def to_review_digest(
+    result: DiffResult, *, severity_config: SeverityConfig | None = None,
+) -> str:
     """Compact GitHub-facing review digest (Markdown).
 
     A single, reviewer-oriented summary suitable for a job summary
@@ -712,12 +740,21 @@ def to_review_digest(result: DiffResult) -> str:
     public-header scoping fell back (issue #235), and the top impacted symbols.
     Distinct from to_markdown (the full report) — this is the "presentation"
     layer over the same machine-readable decision contract.
+
+    *severity_config*, when given, drives the merge-effect phrase from the
+    actual severity-aware CI gate instead of the raw compatibility verdict —
+    compatibility and "blocks CI" are independent decisions once severity
+    configuration is in play (see :func:`_severity_merge_effect`).
     """
     summary = build_summary(result)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
-    effect = _VERDICT_MERGE_EFFECT.get(v, "")
+    effect = (
+        _severity_merge_effect(result, severity_config)
+        if severity_config is not None
+        else _VERDICT_MERGE_EFFECT.get(v, "")
+    )
 
     lines: list[str] = [
         f"## ABI review — `{result.library}` {result.old_version} → {result.new_version}",

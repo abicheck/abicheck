@@ -190,6 +190,34 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
     return RiskRules.from_dict(block if isinstance(block, dict) else raw)
 
 
+#: Cap on findings embedded in the ``scan --baseline`` summary so a large
+#: diff cannot blow up the always-on scan text/JSON output; ``--format json``
+#: on the full ``compare`` command remains the way to see everything.
+_MAX_BASELINE_FINDINGS = 20
+
+
+def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:
+    """Project *changes* (one verdict bucket) into small, renderable dicts.
+
+    Reads only duck-typed attributes (not ``DiffResult`` internals) so this
+    stays safe to call against the lightweight fakes/stubs used in tests, not
+    just a real ``Change``.
+    """
+    findings = []
+    for c in changes:
+        kind = getattr(c, "kind", None)
+        findings.append(
+            {
+                "bucket": bucket,
+                "kind": getattr(kind, "value", str(kind)),
+                "symbol": getattr(c, "symbol", None),
+                "description": getattr(c, "description", None),
+                "source_location": getattr(c, "source_location", None),
+            }
+        )
+    return findings
+
+
 def _baseline_is_native_library(path: Path) -> bool:
     """True if *path* is a native binary, not a JSON / ABICC-dump snapshot.
 
@@ -368,12 +396,27 @@ def _run_baseline_compare(
         extra_changes=merged_extra,
         scope_to_public_surface=True,
     )
-    summary = {
+    summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
         "api_break": len(diff.source_breaks),
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # Preserve the actual findings (kind/symbol/description/location), not just
+    # their counts — a failing `scan --baseline` used to report e.g.
+    # "breaking=1" with no way to tell which symbol broke without a separate
+    # `compare` run. Only the gating buckets are embedded (compatible findings
+    # are additions/quality noise this summary was never meant to itemize);
+    # capped so a large diff cannot blow up the always-on scan output.
+    findings = [
+        *_baseline_finding_dicts(diff.breaking, "breaking"),
+        *_baseline_finding_dicts(diff.source_breaks, "api_break"),
+        *_baseline_finding_dicts(diff.risk, "risk"),
+    ]
+    if findings:
+        summary["findings"] = findings[:_MAX_BASELINE_FINDINGS]
+        if len(findings) > _MAX_BASELINE_FINDINGS:
+            summary["findings_truncated"] = True
     verdict = diff.verdict.value
     if verdict == "BREAKING":
         exit_code = 4

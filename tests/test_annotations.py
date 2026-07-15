@@ -567,3 +567,61 @@ class TestCollectAndFormatAnnotations:
         # All 20 errors survive; 30 of 40 warnings fit.
         assert len(error_lines) == 20
         assert len(warning_lines) == 30
+
+
+# ---------------------------------------------------------------------------
+# severity_config-aware annotation levels
+# ---------------------------------------------------------------------------
+
+class TestSeverityConfigAwareAnnotations:
+    """Without severity_config, annotation levels follow the fixed kind-set
+    mapping regardless of what actually gates CI. These guard the fix: when a
+    SeverityConfig is supplied, the annotation level mirrors the real gate."""
+
+    def test_addition_configured_as_error_gets_error_annotation(self):
+        """An addition that severity config promotes to `error` must not be
+        silently absent — the build fails on it, so the annotation must too."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+
+        # Legacy behaviour (no severity_config, additions not opted in): silent.
+        assert collect_annotations(result) == []
+
+        cfg = resolve_severity_config("default", addition="error")
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 0
+        assert line.startswith("::error ")
+
+    def test_breaking_demoted_to_info_does_not_emit_error(self):
+        """A breaking kind that severity config demotes below `error` must not
+        emit `::error` — that would misreport a non-blocking finding as fatal."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, [c])
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        # info-level findings are opt-in (annotate_additions), same gate as
+        # the legacy compatible/notice behaviour.
+        assert collect_annotations(result, severity_config=cfg) == []
+
+        annotations = collect_annotations(
+            result, severity_config=cfg, annotate_additions=True,
+        )
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 2  # notice
+        assert line.startswith("::notice ")
+
+    def test_emit_github_annotations_forwards_severity_config(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default", addition="error")
+        output = emit_github_annotations(result, severity_config=cfg)
+        assert output.startswith("::error ")

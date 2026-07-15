@@ -1856,7 +1856,7 @@ class TestMaybeEmitAnnotationsInCI:
         monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
         monkeypatch.setattr(
             "abicheck.annotations.collect_annotations",
-            lambda result, annotate_additions=False: ["a1"],
+            lambda result, annotate_additions=False, severity_config=None: ["a1"],
         )
         monkeypatch.setattr(
             "abicheck.annotations.format_annotations",

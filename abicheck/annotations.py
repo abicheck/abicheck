@@ -23,6 +23,7 @@ See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-gi
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from .checker import (
     Change,
@@ -31,6 +32,9 @@ from .checker import (
 from .checker_policy import (
     ChangeKind,
 )
+
+if TYPE_CHECKING:
+    from .severity import KindSets, SeverityConfig
 
 # GitHub caps visible annotations at ~50 per step.
 _MAX_ANNOTATIONS = 50
@@ -144,6 +148,35 @@ def _classify_change(
     return None
 
 
+def _classify_change_by_severity(
+    change: Change,
+    kind_sets: KindSets,
+    severity_config: SeverityConfig,
+    annotate_additions: bool,
+) -> str | None:
+    """Return the annotation level driven by *severity_config*, or None to skip.
+
+    Reflects the actual CI gate (ADR "GateDecision" direction): a category
+    configured ``error`` always emits ``::error`` regardless of whether it is
+    an addition or a breaking kind, so an annotation is never silently absent
+    for a finding that will fail the build. ``warning``/``info`` mirror the
+    severity level directly; ``info`` only surfaces (as ``::notice``) when
+    *annotate_additions* opts into the noisier informational annotations —
+    matching the pre-existing opt-in behaviour for additions.
+    """
+    from .severity import SeverityLevel, classify_effective_change
+
+    category = classify_effective_change(change, kind_sets=kind_sets)
+    level = severity_config.level_for(category)
+    if level == SeverityLevel.ERROR:
+        return "error"
+    if level == SeverityLevel.WARNING:
+        return "warning"
+    if level == SeverityLevel.INFO:
+        return "notice" if annotate_additions else None
+    return None
+
+
 def _title_for_change(
     kind: ChangeKind,
     breaking_set: frozenset[ChangeKind],
@@ -189,21 +222,36 @@ def collect_annotations(
     diff_result: DiffResult,
     *,
     annotate_additions: bool = False,
+    severity_config: SeverityConfig | None = None,
 ) -> list[tuple[int, str]]:
     """Collect raw annotation tuples (sort_key, line) for a single DiffResult.
 
     This is the building block for both single-library and multi-library flows.
     Callers are responsible for sorting, truncating, and emitting.
+
+    Without *severity_config*, annotation levels follow the fixed
+    kind-set mapping (BREAKING → error, API_BREAK/RISK → warning, additions →
+    notice when opted in) — the legacy, verdict-only behaviour. When
+    *severity_config* is supplied, it takes priority: the annotation level
+    mirrors each finding's actually-configured severity so an annotation is
+    never silently absent (or under/over-stated) for a finding that does (or
+    does not) gate CI — see :func:`_classify_change_by_severity`.
     """
-    breaking_set, api_break_set, compatible_set, risk_set = diff_result._effective_kind_sets()
+    kind_sets = diff_result._effective_kind_sets()
+    breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
-        level = _classify_change(
-            change.kind, breaking_set, api_break_set, risk_set,
-            compatible_set, annotate_additions,
-        )
+        if severity_config is not None:
+            level = _classify_change_by_severity(
+                change, kind_sets, severity_config, annotate_additions,
+            )
+        else:
+            level = _classify_change(
+                change.kind, breaking_set, api_break_set, risk_set,
+                compatible_set, annotate_additions,
+            )
         if level is None:
             continue
 
@@ -241,6 +289,7 @@ def emit_github_annotations(
     *,
     annotate_additions: bool = False,
     max_annotations: int = _MAX_ANNOTATIONS,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Generate GitHub Actions annotation lines for ABI changes.
 
@@ -248,11 +297,18 @@ def emit_github_annotations(
         diff_result: The diff result to annotate.
         annotate_additions: If True, also emit ``::notice`` for additions/compatible changes.
         max_annotations: Maximum number of annotations to emit (default 50).
+        severity_config: When given, annotation levels follow the configured
+            per-category severity instead of the fixed kind-set mapping (see
+            :func:`collect_annotations`).
 
     Returns:
         A string of newline-separated workflow commands (may be empty).
     """
-    annotations = collect_annotations(diff_result, annotate_additions=annotate_additions)
+    annotations = collect_annotations(
+        diff_result,
+        annotate_additions=annotate_additions,
+        severity_config=severity_config,
+    )
     return format_annotations(annotations, max_annotations=max_annotations)
 
 
