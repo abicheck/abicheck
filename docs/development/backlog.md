@@ -56,6 +56,7 @@ strategy decisions rather than engineering tasks.
 | Item | Notes |
 |------|-------|
 | Parser/fuzzer safety checks | Add a fuzz/parser-safety harness for ELF/PE/Mach-O/XML/YAML inputs (the security docs already warn that untrusted binaries deserve sandboxing). |
+| Scientific-Python (SciPy/NumPy) positioning | See the detailed [SciPy / Scientific-Python Roadmap](scipy-scientific-python-roadmap.md) — Cython API/ABI frontend, NumPy C-API compatibility envelope, wheel/deployment-claim verification, release-matrix parity, downstream-impact analysis, and a BLAS/LAPACK/Fortran policy profile. Recorded separately because it is large enough to need its own document; not yet gap-plan-ified. |
 
 ### Done
 

@@ -146,6 +146,7 @@ nav:
       - Troubleshooting: troubleshooting.md
     - Roadmap & Status:
       - Goals: development/goals.md
+      - SciPy / Scientific-Python Roadmap: development/scipy-scientific-python-roadmap.md
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
