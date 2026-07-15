@@ -1715,6 +1715,64 @@ class TestRunDumpHeaderGraph:
         assert result.build_source is not None
         assert result.build_source.source_graph is not None
 
+    def test_header_graph_includes_folds_include_edges(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pub = tmp_path / "pub.h"
+        pub.write_text('#include "detail/impl.h"\n')
+        impl_dir = tmp_path / "detail"
+        impl_dir.mkdir()
+        impl = impl_dir / "impl.h"
+        impl.write_text("struct Impl {};\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _Proc:
+            stdout = f"pub.o: {pub} {impl}"
+            stderr = ""
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                lambda *a, **k: _Proc(),
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [pub],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        pub_id = f"header://{pub}"
+        assert any(
+            e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == pub_id
+            for e in graph.edges
+        )
+        assert graph.coverage["include_edges"]["collected"] is True
+
+    def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(
+                p, "pe", [header], [], "1.0", "c++", header_graph_includes=True
+            )
+        assert result.build_source is None
+
 
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""

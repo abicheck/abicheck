@@ -48,6 +48,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   deliberately deferred follow-up (`cli.py`/`dumper.py` are both at/near their
   line-count caps). See the ADR-041 header-only-graph addendum.
 
+- **Header-only graph gains an optional per-header include graph.**
+  `header_graph.ClangHeaderIncludeExtractor` (opt-in via
+  `service.run_dump(..., header_graph_includes=True)`, separate from
+  `header_graph` alone since it costs one extra `clang -M` invocation per
+  top-level header) adds `COMPILE_UNIT_INCLUDES_FILE` edges from each
+  top-level header to everything it transitively includes, reusing
+  `include_graph.ClangIncludeExtractor`'s vetted depfile-replay logic through
+  a throwaway per-header `BuildEvidence`. `build_header_only_graph` also
+  gained a `header_paths` parameter that pre-seeds a classified `header` node
+  for every top-level header even when it declares nothing itself (a pure
+  `#include`-only umbrella header is still a real public entry point).
+
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
   `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,

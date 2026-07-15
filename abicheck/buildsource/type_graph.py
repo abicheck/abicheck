@@ -1089,6 +1089,16 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     threading an output parameter through the hardened, heavily-reviewed
     ``_index_declared_entities``/``_walk_types`` pair — an acceptable, cheap
     cost for a header-only pass (ADR-041 header-only-graph addendum).
+
+    ``_index_declared_entities``'s ``decl_file`` output is a dict shared
+    between two unrelated uses: type declarations (records/enums/typedefs,
+    also indexed in ``name_index``) *and* var/enum-constant identities (used
+    only to resolve ``DECL_REFERENCES_DECL`` edge targets, never indexed in
+    ``name_index``). Returning it unfiltered would let a caller (Codex
+    review: caught in ``header_graph.py``, which treats every key as a type)
+    mistake a public constant or enum value for a record/enum/typedef
+    declaration. Filtered here to exactly the qualified names
+    ``name_index`` actually collected — the type-only subset.
     """
     name_index: dict[str, list[str]] = {}
     decl_file: dict[str, str] = {}
@@ -1097,7 +1107,8 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     _index_declared_entities(
         ast, [], "", name_index, decl_file, ref_name_index, id_index
     )
-    return decl_file
+    type_qnames = {qname for qnames in name_index.values() for qname in qnames}
+    return {qname: decl_file[qname] for qname in type_qnames if qname in decl_file}
 
 
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:

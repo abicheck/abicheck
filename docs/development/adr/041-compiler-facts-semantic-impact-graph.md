@@ -902,6 +902,37 @@ this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and the intra-version
 `public_to_internal_dependency` check, broadening *when they have evidence to
 run at all* (no build needed), not what they detect.
 
+**Follow-up: header include graph.** `header_graph.ClangHeaderIncludeExtractor`
+adds an optional, separately-opted-in (`service.run_dump(...,
+header_graph_includes=True)`) per-header `clang -M` pass —
+`COMPILE_UNIT_INCLUDES_FILE` edges from each top-level header to everything it
+transitively includes. Reuses `include_graph.ClangIncludeExtractor`'s vetted
+depfile-replay logic (argv sanitization, timeouts, diagnostics) through a
+throwaway per-header `BuildEvidence`/`CompileUnit` — the header-only world has
+no real compile units, so each header's own graph-node id doubles as its
+synthetic compile-unit id, letting `include_graph.augment_graph_with_includes`
+fold the result with zero id translation. This is advisory structure only
+(`graph explain`/future triage material), not a classification override: a
+"private" header transitively reached from a public entry is still labelled
+by its own declaring-file origin. `build_header_only_graph` also gained a
+`header_paths` parameter that pre-seeds a `header` node (with classified
+visibility) for every top-level header even when it declares nothing itself
+(a pure `#include`-only umbrella header) — both because that's a real,
+independently-worth-fixing gap (such a header is still a genuine public entry
+point) and because the include-graph edges need a valid source node to attach
+to. A Codex review on the shipped commit caught two more issues in the same
+slice, both fixed: (1) `_attach_header_graph`'s deferred `-isystem` roots
+(from `resolve_inferred_header_roots`) rode only in `gcc_option_tokens`,
+which `_clang_header_dump`'s disk cache never hashes — fixed by threading
+`extra_hash_dirs=deferred_token_dirs(deferred)` through, mirroring
+`_dump_elf`'s own handling; (2) `type_graph.index_declared_type_files`
+returned `_index_declared_entities`'s shared `decl_file` dict unfiltered,
+which also carries var/enum-constant identities (used only for
+`DECL_REFERENCES_DECL` resolution) alongside real type declarations — a
+public constant could therefore get mistaken for a record/enum/typedef and
+seeded as a bogus `record_type` node; fixed by filtering to exactly the
+qualified names `name_index` (the type-only index) actually collected.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

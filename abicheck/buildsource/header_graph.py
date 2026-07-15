@@ -63,9 +63,23 @@ the module's own pass names (:data:`HEADER_CALL_GRAPH_PASS` /
 :data:`HEADER_TYPE_GRAPH_PASS`), distinct from the build-integrated
 ``call_graph``/``type_graph`` pass names — so a header-only graph is never
 mistaken for (and never grants the same build-integrated "confirmed full
-pass" trust to a comparison against) a real L4/L5 graph, while still getting
-symmetric family-widening credit against another header-only graph
-(``source_graph_findings._DEPENDENCY_EDGE_FAMILIES``).
+pass" trust to a comparison against) a real L4/L5 graph. A header-only
+confirmation only ever grants trust for the structural kinds it has genuine
+project-wide visibility of (``source_graph_findings._HEADER_FULL_VISIBILITY_KINDS``)
+— never the two body-dependent kinds, regardless of the other side's shape.
+
+**Header include graph** (:class:`ClangHeaderIncludeExtractor`): an optional,
+separate ``clang -M`` pass per top-level header — reusing
+``include_graph.ClangIncludeExtractor``'s vetted depfile-replay logic via a
+throwaway per-header ``BuildEvidence``/``CompileUnit`` rather than
+duplicating its argv-sanitization/timeout/diagnostics handling — adds
+``COMPILE_UNIT_INCLUDES_FILE`` edges from each public entry header to every
+file it (transitively) includes. This is advisory structure, not a
+classification override: a "private" header transitively reached from a
+public entry header is still labelled by its own declaring-file origin
+(ADR-031 D9 coverage honesty — inclusion reachability and declaration
+provenance are different facts), but the edge lets `graph explain`/future
+triage show *how* a public entry reaches it.
 
 Same authority boundary as the rest of ADR-028/041: this can only explain,
 localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
@@ -73,6 +87,7 @@ localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..model import AbiSnapshot, ScopeOrigin
@@ -121,6 +136,7 @@ def build_header_only_graph(
     *,
     public_header_paths: list[str] | None = None,
     public_dir_paths: list[str] | None = None,
+    header_paths: list[str] | None = None,
 ) -> SourceGraphSummary:
     """Build a header-only semantic graph from an L2 :class:`AbiSnapshot`.
 
@@ -135,6 +151,14 @@ def build_header_only_graph(
     :func:`abicheck.provenance.apply_provenance` — required for anything to
     classify as ``public_header``/``private_header`` rather than ``unknown``
     (provenance stays opt-in, matching the rest of the L2 pipeline).
+
+    *header_paths* are the top-level header files the caller parsed (the
+    ``-H``/``--header`` inputs, already expanded from any directory) —
+    pre-seeded as ``header`` nodes even when they declare nothing themselves
+    (a pure ``#include``-only umbrella header is still a real public entry
+    point). Without this, such a header would get no node at all, leaving a
+    later :func:`ClangHeaderIncludeExtractor` include edge with no valid
+    source endpoint to attach to.
     """
     graph = SourceGraphSummary()
     header_segs, dir_segs, have_public_set = build_public_set(
@@ -143,6 +167,10 @@ def build_header_only_graph(
 
     def header_node(path: str) -> str:
         node_id = _header_node_id(path)
+        origin = classify_origin(
+            path, header_segs, dir_segs, have_public_set=have_public_set
+        )
+        attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
         graph.add_node(
             GraphNode(
                 id=node_id,
@@ -150,9 +178,13 @@ def build_header_only_graph(
                 label=path,
                 provenance=_PROVENANCE,
                 confidence=CONF_HIGH,
+                attrs=attrs,
             )
         )
         return node_id
+
+    for h in header_paths or ():
+        header_node(h)
 
     def seed_decl(entity: Function | Variable) -> None:
         identity = _decl_identity(entity)
@@ -252,3 +284,87 @@ def build_header_only_graph(
         graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
 
     return graph.finalize()
+
+
+@dataclass
+class ClangHeaderIncludeExtractor:
+    """Per-header include-closure extractor via ``clang -M`` (integration-only).
+
+    A header-only world has no real compile units — only the top-level
+    header paths a caller parses. Rather than duplicating
+    ``include_graph.ClangIncludeExtractor``'s vetted depfile-replay logic
+    (argv sanitization, timeouts, per-unit diagnostics), :meth:`extract`
+    drives it through a throwaway :class:`~abicheck.buildsource.build_evidence.BuildEvidence`
+    with one synthetic :class:`~abicheck.buildsource.build_evidence.CompileUnit`
+    per header — its ``id`` set to that header's graph node id
+    (:func:`abicheck.buildsource.source_graph._header_node_id`), so
+    :func:`abicheck.buildsource.include_graph.augment_graph_with_includes`
+    can fold the result straight onto the already-built
+    :class:`~abicheck.buildsource.source_graph.SourceGraphSummary` without any
+    extra id translation. A missing ``clang`` (or any per-header failure)
+    degrades to an empty/partial map — never aborts the dump (ADR-028 D3).
+    """
+
+    clang_bin: str = "clang++"
+
+    def available(self) -> bool:
+        import shutil
+
+        return shutil.which(self.clang_bin) is not None
+
+    def extract(
+        self,
+        headers: list[str],
+        includes: list[str],
+        *,
+        language: str = "CXX",
+        gcc_option_tokens: tuple[str, ...] = (),
+    ) -> tuple[dict[str, list[str]], list[str]]:
+        """Return ``({header_node_id: [included path, ...]}, diagnostics)``."""
+        from .build_evidence import BuildEvidence, CompileUnit
+        from .include_graph import ClangIncludeExtractor
+
+        if not self.available():
+            return {}, [f"{self.clang_bin} not found in PATH"]
+        compile_units = [
+            CompileUnit(
+                id=_header_node_id(h),
+                source=h,
+                argv=[*(f"-I{i}" for i in includes), *gcc_option_tokens, h],
+                language=language,
+            )
+            for h in headers
+        ]
+        extractor = ClangIncludeExtractor(clang_bin=self.clang_bin)
+        include_map = extractor.extract_from_build(
+            BuildEvidence(compile_units=compile_units)
+        )
+        # `clang -M`'s depfile lists the source itself as the first
+        # prerequisite (`foo.o: foo.h bar.h ...`) — here the "source" is the
+        # header itself, which would otherwise create a `header X includes
+        # header X` self-loop once folded (the header's own node id doubles
+        # as both the synthetic compile unit id and its own include target).
+        # Path-resolve both sides so a relative vs. absolute spelling
+        # mismatch still filters correctly.
+        from pathlib import Path
+
+        filtered: dict[str, list[str]] = {}
+        for h in headers:
+            paths = include_map.get(_header_node_id(h), [])
+            if not paths:
+                continue
+            try:
+                self_resolved = Path(h).resolve()
+            except OSError:
+                self_resolved = Path(h)
+            kept = []
+            for p in paths:
+                try:
+                    if Path(p).resolve() == self_resolved:
+                        continue
+                except OSError:
+                    pass
+                kept.append(p)
+            if kept:
+                filtered[_header_node_id(h)] = kept
+        return filtered, list(extractor.diagnostics)

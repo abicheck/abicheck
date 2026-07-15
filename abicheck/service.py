@@ -439,6 +439,7 @@ def run_dump(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     header_graph: bool = False,
+    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -455,7 +456,14 @@ def run_dump(
     addendum) — a smaller, build-free alternative to the L4/L5 build-integrated
     graph, available uniformly across all three binary formats. A no-op when no
     headers were parsed; degrades to a graph with declaration-visibility nodes
-    only (no type/call edges) when clang is unavailable.
+    only (no type/call edges) when clang is unavailable. ``header_graph_includes``
+    additionally runs a per-header ``clang -M`` pass
+    (:class:`abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`) to
+    add ``COMPILE_UNIT_INCLUDES_FILE`` edges from each top-level header to
+    everything it transitively includes — a separate opt-in from
+    ``header_graph`` alone since it costs one extra clang invocation per
+    top-level header, not just one for the whole aggregate; ignored when
+    ``header_graph`` is not also set.
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
@@ -496,6 +504,7 @@ def run_dump(
         return _attach_header_graph(
             snap,
             header_graph,
+            header_graph_includes,
             _headers,
             _includes,
             lang,
@@ -520,6 +529,7 @@ def run_dump(
         return _attach_header_graph(
             snap,
             header_graph,
+            header_graph_includes,
             _headers,
             _includes,
             lang,
@@ -543,6 +553,7 @@ def run_dump(
         return _attach_header_graph(
             snap,
             header_graph,
+            header_graph_includes,
             _headers,
             _includes,
             lang,
@@ -572,6 +583,7 @@ def _apply_native_provenance(
 def _attach_header_graph(
     snap: AbiSnapshot,
     header_graph: bool,
+    header_graph_includes: bool,
     headers: list[Path],
     includes: list[Path],
     lang: str,
@@ -601,10 +613,20 @@ def _attach_header_graph(
     Degrades to a graph with declaration-visibility nodes only (no type/call
     edges) when clang is unavailable or the header parse fails — never aborts
     the dump itself (ADR-028 D3).
+
+    ``header_graph_includes`` additionally folds a per-header include graph
+    (:class:`~abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`) —
+    a separate opt-in since it costs one extra ``clang -M`` invocation per
+    top-level header, not just the one aggregate pass ``header_graph`` alone
+    needs.
     """
     if not header_graph or not headers:
         return snap
-    from .buildsource.header_graph import build_header_only_graph
+    from .buildsource.header_graph import (
+        ClangHeaderIncludeExtractor,
+        build_header_only_graph,
+    )
+    from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.model import (
         CoverageStatus,
         DataLayer,
@@ -615,11 +637,13 @@ def _attach_header_graph(
     from .dumper import _clang_header_dump
 
     cc = compile if compile is not None else CompileContext()
-    ast_root: dict[str, Any] | None
+    ast_root: dict[str, Any] | None = None
+    resolved_headers: list[Path] = []
+    eff_includes: list[Path] = list(includes)
+    eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
+    deferred_dirs: tuple[Path, ...] = ()
     try:
         resolved_headers = expand_header_inputs(headers)
-        eff_includes = list(includes)
-        eff_tokens = cc.gcc_option_tokens
         if resolved_headers:
             inc_extra, deferred = resolve_inferred_header_roots(
                 resolved_headers,
@@ -627,8 +651,16 @@ def _attach_header_graph(
                 gcc_options=cc.gcc_options,
                 gcc_option_tokens=cc.gcc_option_tokens,
             )
-            eff_includes += inc_extra
+            eff_includes = list(includes) + inc_extra
             eff_tokens = cc.gcc_option_tokens + tuple(deferred)
+            # The deferred roots ride in gcc_option_tokens (-isystem), not
+            # extra_includes, so their contents must also be hashed into the
+            # AST cache key explicitly — _clang_header_dump's disk cache
+            # never inspects option-token content, only extra_includes/
+            # extra_hash_dirs, so without this a header changed under an
+            # inferred root would reuse a stale cached AST (Codex review;
+            # mirrors _dump_elf's own deferred_dirs handling).
+            deferred_dirs = tuple(deferred_token_dirs(deferred))
         ast_root = _clang_header_dump(
             resolved_headers,
             eff_includes,
@@ -640,6 +672,7 @@ def _attach_header_graph(
             sysroot=cc.sysroot,
             nostdinc=cc.nostdinc,
             lang=lang,
+            extra_hash_dirs=deferred_dirs,
         )
     except (SnapshotError, ValidationError):
         ast_root = None
@@ -648,7 +681,18 @@ def _attach_header_graph(
         ast_root,
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
+        header_paths=[str(p) for p in resolved_headers],
     )
+    if header_graph_includes and resolved_headers:
+        include_map, _diags = ClangHeaderIncludeExtractor().extract(
+            [str(p) for p in resolved_headers],
+            [str(p) for p in eff_includes],
+            language="C" if lang == "c" else "CXX",
+            gcc_option_tokens=eff_tokens,
+        )
+        if include_map:
+            augment_graph_with_includes(graph, include_map)
+            graph.finalize()
     pack = BuildSourcePack(root=Path(""), source_graph=graph)
     # Populate the manifest coverage row the normal collect/embed path always
     # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's

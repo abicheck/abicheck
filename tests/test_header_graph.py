@@ -26,8 +26,10 @@ from __future__ import annotations
 from abicheck.buildsource.header_graph import (
     HEADER_CALL_GRAPH_PASS,
     HEADER_TYPE_GRAPH_PASS,
+    ClangHeaderIncludeExtractor,
     build_header_only_graph,
 )
+from abicheck.buildsource.include_graph import augment_graph_with_includes
 from abicheck.buildsource.source_graph import (
     is_internal_dependency_node,
     is_public_dependency_node,
@@ -218,3 +220,110 @@ def test_no_ast_root_yields_no_type_nodes_or_edges() -> None:
     assert graph.nodes == []
     assert graph.edges == []
     assert graph.extractor_passes == {}
+
+
+# ── header_paths pre-seeding ─────────────────────────────────────────────────
+
+
+def test_header_paths_preseeded_even_without_declarations() -> None:
+    # A pure #include-only umbrella header declares nothing itself, but is
+    # still a real public entry point — it must get a node (and visibility)
+    # so a later include-graph edge has a valid source to attach to.
+    graph = build_header_only_graph(
+        _snapshot(),
+        header_paths=[PUBLIC_HEADER],
+        public_header_paths=[PUBLIC_HEADER],
+    )
+    node = next(n for n in graph.nodes if n.id == f"header://{PUBLIC_HEADER}")
+    assert node.attrs["visibility"] == "public_header"
+
+
+def test_header_node_visibility_classified_from_declarations_too() -> None:
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type="void",
+        source_header=PRIVATE_HEADER,
+        origin=ScopeOrigin.PRIVATE_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]), public_header_paths=[PUBLIC_HEADER]
+    )
+    node = next(n for n in graph.nodes if n.id == f"header://{PRIVATE_HEADER}")
+    assert node.attrs["visibility"] == "private_header"
+
+
+# ── ClangHeaderIncludeExtractor ──────────────────────────────────────────────
+
+
+def test_header_include_extractor_returns_empty_without_clang(monkeypatch) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: None)
+    include_map, diags = ClangHeaderIncludeExtractor().extract(
+        ["pub.h"], ["/proj/include"]
+    )
+    assert include_map == {}
+    assert diags
+
+
+def test_header_include_extractor_parses_mocked_clang(tmp_path, monkeypatch) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    pub = tmp_path / "pub.h"
+    pub.write_text('#include "detail/impl.h"\n')
+    impl = tmp_path / "detail" / "impl.h"
+    impl.parent.mkdir()
+    impl.write_text("struct Impl {};\n")
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    class _Proc:
+        stdout = f"pub.o: {pub} {impl}"
+        stderr = ""
+
+    monkeypatch.setattr(ig.subprocess, "run", lambda *a, **k: _Proc())
+
+    include_map, diags = ClangHeaderIncludeExtractor().extract(
+        [str(pub)], [str(tmp_path)]
+    )
+    assert diags == []
+    # The header's own path is filtered out (clang -M lists the "source" —
+    # here the header itself — as the first prerequisite); only the real
+    # included file remains.
+    assert include_map == {f"header://{pub}": [str(impl)]}
+
+
+def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> None:
+    import abicheck.buildsource.include_graph as ig
+
+    pub = tmp_path / "pub.h"
+    pub.write_text('#include "detail/impl.h"\n')
+    impl = tmp_path / "detail" / "impl.h"
+    impl.parent.mkdir()
+    impl.write_text("struct Impl {};\n")
+
+    graph = build_header_only_graph(
+        _snapshot(), header_paths=[str(pub)], public_header_paths=[str(pub)]
+    )
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    class _Proc:
+        stdout = f"pub.o: {pub} {impl}"
+        stderr = ""
+
+    monkeypatch.setattr(ig.subprocess, "run", lambda *a, **k: _Proc())
+
+    include_map, _diags = ClangHeaderIncludeExtractor().extract(
+        [str(pub)], [str(tmp_path)]
+    )
+    added = augment_graph_with_includes(graph, include_map)
+    graph.finalize()
+
+    assert added == 1
+    pub_id = f"header://{pub}"
+    assert any(
+        e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == pub_id for e in graph.edges
+    )
+    assert graph.coverage["include_edges"]["collected"] is True

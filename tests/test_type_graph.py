@@ -30,6 +30,7 @@ from abicheck.buildsource.type_graph import (
     _base_type_name,
     _merge_type_edges,
     augment_graph_with_types,
+    index_declared_type_files,
     parse_clang_ast_types,
 )
 
@@ -1634,3 +1635,43 @@ def test_block_scope_local_var_decl_gets_no_own_type_edge() -> None:
     )
     edges = parse_clang_ast_types(ast)
     assert not [e for e in edges if e.role == "var"]
+
+
+# ── index_declared_type_files ────────────────────────────────────────────────
+
+
+def test_index_declared_type_files_returns_qualified_type_names() -> None:
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [_record("Widget", inner=[_field("x", "int")])],
+        }
+    )
+    # Stamp a declaring file on the record (the shared _record helper in this
+    # file doesn't set loc; do it directly here).
+    ast["inner"][0]["inner"][0]["loc"] = {"file": "ns/widget.h"}
+    assert index_declared_type_files(ast) == {"ns::Widget": "ns/widget.h"}
+
+
+def test_index_declared_type_files_excludes_var_and_enum_constant_identities() -> None:
+    # Codex review: `_index_declared_entities`'s `decl_file` output is shared
+    # between type declarations (indexed in `name_index`) and var/enum-constant
+    # identities (used only for DECL_REFERENCES_DECL resolution, never indexed
+    # in `name_index`) — a namespace-scope constant must not leak into this
+    # type-only wrapper's result and get mistaken for a record/enum/typedef.
+    ast = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "k",
+            "mangledName": "_ZN2ns1kE",
+            "loc": {"file": "ns/consts.h"},
+            "type": {"qualType": "const int"},
+        },
+        _record("Widget", inner=[_field("x", "int")]),
+    )
+    ast["inner"][1]["loc"] = {"file": "widget.h"}
+    result = index_declared_type_files(ast)
+    assert result == {"Widget": "widget.h"}
+    assert "_ZN2ns1kE" not in result
+    assert "k" not in result
