@@ -7,9 +7,14 @@
 
 ## Why this document exists
 
-`abicheck` is a healthy, mature codebase (≈158 modules, ≈77k LoC, 34 ADRs) with
-several genuinely *deep* modules — a lot of behaviour sits behind small, stable
-interfaces:
+`abicheck` is a healthy, mature codebase (227 modules, ~120k LoC under
+`abicheck/`, 41 ADRs as of 2026-07 — these numbers are stale as soon as
+written, so re-derive with `find abicheck -name '*.py' | wc -l`, `find
+abicheck -name '*.py' -exec cat {} + | wc -l`, and `ls docs/development/adr/*.md
+| grep -v index.md | sed -E 's#.*/([0-9]+).*#\1#' | sort -u | wc -l` (counts
+distinct ADR numbers, not files — 020/021 each have two sibling "a"/"b" files)
+rather than trusting this line) with several genuinely *deep* modules — a lot
+of behaviour sits behind small, stable interfaces:
 
 - the self-registering `@registry.detector` pattern (`detector_registry.py`),
 - the single-declaration `change_registry.py` (one entry per `ChangeKind`,

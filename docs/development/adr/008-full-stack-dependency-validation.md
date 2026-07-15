@@ -4,6 +4,17 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment:** "all 80+ detectors" below is a volatile implementation
+> count that will keep drifting — don't treat it as current. The stable count
+> to cite is `len(ChangeKind)` (see `abicheck/checker_policy.py`; currently 352
+> change types, per `CLAUDE.md`), not a detector-function tally. Also, the
+> loader-search-order design decisions below (`resolver.py`/`binder.py`) are
+> Linux ELF `ld.so` semantics specifically, not cross-platform loader
+> behavior — this is already captured explicitly in "Scope limitations" and
+> the "Negative" consequences below (PE/Mach-O dependency graphs are out of
+> scope); flagging it here too since the "Architecture"/"Key design decisions"
+> sections state the rules without repeating the Linux-only qualifier inline.
+
 ---
 
 ## Context

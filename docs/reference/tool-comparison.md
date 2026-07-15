@@ -310,6 +310,15 @@ pipeline four times:
 | **L2** + public headers | `-g` `.so`, `-H include/` | Full (AST + DWARF) | 30 / 30 |
 | **L3** + build context | L2 plus `-p build/` (when a compile DB exists) | Full + build evidence | 30 / 30 + L3 |
 
+> The `/30` denominator above is a point-in-time snapshot from an earlier run
+> and has not been refreshed since (the registered-detector count is now 56,
+> per `detector_registry.registry` — see `abicheck/detector_registry.py`).
+> `--show-data-sources` also no longer reports a detector-enabled fraction at
+> all (it now lists which `Lx` layers are present, with basic per-layer
+> stats). Re-run `python3 scripts/benchmark_comparison.py --evidence-tiers`
+> (needs `castxml` + `gcc`/`g++`) for current per-tier numbers rather than
+> trusting this table.
+
 > **L4 (source ABI replay)** uses the build/source pack produced by `collect`.
 > The tiered benchmark runner does not exercise that mode yet, so the empirical
 > L0-L3 run still reports L4-only cases as not reached until source-pack support
@@ -322,6 +331,15 @@ carries a `min_evidence` field — the weakest source at which abicheck reaches 
 correct verdict — derived by
 `scripts/evidence_tiers.py`
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
+
+> **Freshness note.** `examples/ground_truth.json` now has 181 total entries
+> (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
+> not the 153/134 cited above — this table's per-tier breakdown predates
+> case growth since it was last regenerated and has not been re-derived from
+> `scripts/evidence_tiers.py` against the current catalog. Treat the *shape*
+> (evidence compounds, L0→L1 is the biggest single jump) as durable and the
+> exact counts/percentages as stale; regenerating this table against the
+> current catalog is a follow-up, not done as part of this pass.
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|

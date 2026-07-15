@@ -120,6 +120,8 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 |-----|------|---------|
 | `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
+| `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
+| `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the opt-in `--reconcile-build-context` diff pass; empty when no compile database was supplied at dump time. |
 
 > Internal cache fields on the model (`_func_by_mangled`, `_var_by_mangled`,
 > `_type_by_name`) and the runtime-only `from_headers_inferred` qualifier are

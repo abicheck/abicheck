@@ -105,12 +105,16 @@ compare that uses build/source evidence prints an **evidence-coverage** table
 findings are artifact-proven vs. context-only — see [Build & Source Packs](build-source-data.md).
 
 **Graceful degradation.** `abicheck dump --show-data-sources` reports exactly
-which of L0/L1/L2 a binary affords and how many detectors that enables
-(symbols-only ≈ 6/30, DWARF-only ≈ 24/30, with headers 30/30). With less input
-abicheck degrades down the staircase rather than failing; with more it both
-finds more and false-positives less. The empirical per-tier behaviour across the
-example catalog is benchmarked in
-[Tool Comparison §Benchmarking by evidence tier](../reference/tool-comparison.md#benchmarking-by-evidence-tier).
+which of L0/L1/L2 a binary affords (as of this writing it lists per-layer
+presence and basic stats — symbol/type/enum counts — not a detector-enabled
+fraction). With less input abicheck degrades down the staircase rather than
+failing; with more it both finds more and false-positives less. The empirical
+per-tier behaviour across the example catalog is benchmarked in [Tool
+Comparison §Benchmarking by evidence
+tier](../reference/tool-comparison.md#benchmarking-by-evidence-tier) — that
+page's detector-fraction table is a stale snapshot too (registered-detector
+count has grown since it was captured); re-run
+`scripts/benchmark_comparison.py --evidence-tiers` for current numbers.
 
 ---
 

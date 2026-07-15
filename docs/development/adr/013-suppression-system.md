@@ -1,7 +1,9 @@
 # ADR-013: Suppression System Design
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** the detector count and
+regex-safety framing below have drifted from the current implementation —
+see the notes inline.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -106,11 +108,16 @@ Patterns are compiled eagerly at rule load time — malformed patterns produce
 immediate errors. Matching uses `fullmatch()` which applies the pattern to the
 complete string.
 
-While the documentation references RE2-style safety (guaranteed O(N)), the
-implementation uses Python's standard `re` library. Complex patterns with
-pathological backtracking are possible in theory but unlikely in practice for
-symbol name patterns. For production deployments processing untrusted
-suppression files, consider validating pattern complexity at load time.
+The implementation uses Python's standard backtracking `re` library — not an
+RE2-style engine with a guaranteed linear-time bound. `abicheck/suppression.py`
+has no complexity check or evaluation timeout on compiled patterns as of this
+writing; the "resist ReDoS" requirement above is a partial mitigation (eager
+`re.compile()` at load time surfaces malformed patterns immediately, and
+`fullmatch()` keeps typical symbol-name patterns simple), not an absolute
+guarantee. Complex patterns with pathological backtracking remain possible in
+theory. For production deployments processing untrusted suppression files,
+validating pattern complexity (or wrapping matching with a timeout) at load
+time is still an open hardening item, not something currently implemented.
 
 ### Expiry mechanism
 
@@ -134,7 +141,8 @@ def is_expired(self, today: date | None = None) -> bool:
 Suppression is applied at a specific point in the `compare()` pipeline:
 
 ```text
-[30 detectors]
+[detector suite — 56 registered detectors as of this writing, see
+ detector_registry.registry]
   → _deduplicate_ast_dwarf(changes)     # AST↔DWARF dedup
   → suppress.filter(changes)            # ← Suppression applied here
   → _filter_redundant(unsuppressed)     # Redundancy filtering (ADR-004)

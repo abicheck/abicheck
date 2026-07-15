@@ -2,6 +2,20 @@
 
 **Date:** 2026-06-12
 **Status:** Proposed
+**Amendment note (docs review, 2026-07):** the "no non-C/C++ languages"
+framing below predates a narrower, already-shipped exception: CPython
+extension modules get a purpose-built Python-level API frontend
+(`abicheck/python_api.py`, `diff_python_api.py`; gap G23, see
+[goals.md § Non-goals](../goals.md) and
+[plans/g23-python-level-api-diff.md](../plans/g23-python-level-api-diff.md)).
+That work recovers the `.pyi`/signature surface a native extension exposes to
+`import` — a native-ABI-adjacent contract check, not the general Rust/Go/Java
+source-analysis frontends this ADR proposes. It is useful precedent for "a
+narrow, purpose-built non-native frontend can ship without waiting on this
+ADR's broader design," but it does not resolve this ADR's own open question
+(§D1, `AbiSnapshot` genericity vs. a language-neutral IR) — that question
+remains open. The `234`/`ChangeKind` counts below are also stale (see the
+correction inline where they appear).
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -10,8 +24,9 @@
 
 abicheck's detector core, evidence model (L0–L4), policy system, and example
 catalog are built around the **native C/C++ ABI** as expressed in ELF, PE/COFF,
-and Mach-O with DWARF/PDB debug info. Within that scope coverage is strong: 234
-`ChangeKind`s span symbol surface, layout, the C++ object model, calling
+and Mach-O with DWARF/PDB debug info. Within that scope coverage is strong: 352
+`ChangeKind`s (current count, `len(ChangeKind)`; was 234 when this ADR was
+written) span symbol surface, layout, the C++ object model, calling
 convention, mangling, and loader/identity metadata.
 
 A recurring request — and a recurring theme in cross-ecosystem ABI guidance — is
@@ -86,7 +101,7 @@ core, and aligns with the evidence-extractor plugin direction of ADR-032.
 
 ### D4. Keep the native core's coverage claims unqualified
 
-The README/docs "234 change types across ELF/PE/Mach-O" claim stays native-scoped.
+The README/docs "352 change types" claim (234 when this ADR was written) stays native-scoped.
 Non-C frontends advertise their own coverage and maturity (Experimental →
 Stable) independently, so adding an early Java frontend never weakens the native
 guarantees.

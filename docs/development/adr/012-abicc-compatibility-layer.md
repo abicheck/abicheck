@@ -1,7 +1,14 @@
 # ADR-012: ABICC Drop-In Compatibility Layer
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** this ADR predates the
+Tier-2 service boundary introduced by ADR-037 (D10.1, enforced by the
+`cli-contract` AI-readiness check). `abicheck/compat/cli.py` still calls
+`checker.compare()` directly rather than routing through
+`service.run_compare` / `service.compare_snapshots`, consistent with its
+"thin adapter" design below — the automated `cli-contract` gate scans
+root-level `cli*.py` and does not currently cover the `compat/` subpackage,
+so this is not enforced.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -64,8 +71,8 @@ The compatibility layer is a **thin adapter** over the native pipeline:
    objects. Heuristic: names containing regex characters (`*?.[`) become
    `symbol_pattern`; plain names become exact `symbol` matches with C++
    demangling fallback (`_Z\d+{name}.*`)
-3. **Analysis**: Delegate to native `compare()` pipeline — all 85+ detectors
-   run identically
+3. **Analysis**: Delegate to native `compare()` pipeline — the full detector
+   suite (covering all 352 `ChangeKind` values) runs identically
 4. **Output translation**: Convert `DiffResult` → ABICC XML report format
 5. **Exit code translation**: Map native verdicts to ABICC exit codes
 
@@ -149,8 +156,8 @@ The XML schema maps abicheck `ChangeKind` values to ABICC problem types
 ### Positive
 
 - Existing ABICC users can migrate by changing one command in their CI scripts
-- Native pipeline benefits (85+ detectors, policy profiles, SARIF output) are
-  available through the compat entry point
+- Native pipeline benefits (the full detector suite, policy profiles, SARIF
+  output) are available through the compat entry point
 - Clean separation prevents compat concerns from cluttering the native CLI
 - ABICC suppression files work without modification
 
@@ -166,9 +173,12 @@ The XML schema maps abicheck `ChangeKind` values to ABICC problem types
 
 ## References
 
-- `abicheck/compat/cli.py` — ABICC-compatible CLI (1328 lines)
-- `abicheck/compat/xml_report.py` — ABICC XML report generation (398 lines)
+- `abicheck/compat/cli.py` — ABICC-compatible CLI
+- `abicheck/compat/xml_report.py` — ABICC XML report generation
 - ADR-009 — Exit code contract (covers both `compare` and `compat` schemes)
-- ADR-011 — ABI change classification taxonomy (all 85+ ChangeKinds used in
+- ADR-011 — ABI change classification taxonomy (all 352 ChangeKinds used in
   compat reports)
+- ADR-037 — Tier-2 service boundary (`service.run_compare` /
+  `compare_snapshots`); see the amendment above for how `compat/cli.py`
+  relates to it
 - Goal 1 in `docs/development/goals.md` — "Drop-In Replacement for ABICC"

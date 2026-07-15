@@ -1,7 +1,12 @@
 # ADR-003: Data Source Architecture — Checks, Instruments, and Binary Types
 
 **Date:** 2026-03-17
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Conceptually extended** by the L0–L5
+evidence model (ADR-028, ADR-029, ADR-030, ADR-031, ADR-041): the "three
+independent layers" framing below is now L0–L2 of a five-layer model (L3 build
+context, L4 source-ABI replay, L5 source/implementation graph). The L0–L2
+detector-mapping content on this page remains current; for the full evidence
+model see [Evidence & Detectability](../../concepts/evidence-and-detectability.md).
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -4,6 +4,20 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment:** The `_deduplicate_ast_dwarf()` / `_enrich_affected_symbols()`
+> line-number citations below (`checker.py:1922` / `checker.py:1841`) are stale —
+> both functions now live in `abicheck/diff_filtering.py`. Don't trust hardcoded
+> line numbers in this doc; they drift. All of the mechanisms decided here
+> (`--show-redundant`, `--report-mode leaf`, `--show-only`, `--stat`,
+> `--show-impact`, `caused_by_type`/`caused_count` on `Change`) are implemented
+> and live on the `compare` command in `abicheck/cli.py`/`abicheck/reporter.py`.
+> Presentation/classification for rendering has since been centralized further:
+> ADR-036 introduced `ReportModel` (`abicheck/report_model.py`) as the render-ready
+> view over a `DiffResult`, and renderers (including the `--show-only` filter
+> pipeline described here) are now thin projections over it rather than each
+> re-deriving buckets — see ADR-036 for the current ownership of report
+> presentation.
+
 ---
 
 ## Context

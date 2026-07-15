@@ -231,8 +231,12 @@ The `evidence_tier` scalar collapses the raw sources into a single ordered label
   struct layout, enum, and calling-convention analysis, but no header/AST
   surface is available to cross-check declared API intent.
 - **`header_aware`** — a parsed header/AST surface (functions/types/enums) is
-  present. The richest tier, and the only one that can reason about
-  declared-but-not-emitted API, inline/template changes, and macro contracts.
+  present. The richest of the three **artifact** tiers: it can reason about
+  declared-but-not-emitted API (default-argument values, `const`/`constexpr`
+  constants, `final`, access, ref-qualifiers). It does **not** see macro
+  contracts or inline/template **body** changes — castxml/clang's declaration
+  AST doesn't model macros or bodies at all; that requires the separate L4
+  source-ABI-replay layer below.
 
 These three values correspond to the **artifact** evidence layers **L0–L2**.
 The higher layers do **not** promote this scalar, and they differ in what they

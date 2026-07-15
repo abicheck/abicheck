@@ -116,7 +116,14 @@ Public documentation at <https://abicheck.github.io/abicheck/>:
 
 - Runtime instrumentation or dynamic analysis — abicheck is a static offline tool.
 - Source-level refactoring suggestions — it reports *what* broke, not how to fix your code.
-- Support for languages other than C/C++ (Rust, Go, etc.) — out of scope for now.
+- General-purpose analysis of non-native source languages (Rust, Go, Java, …) —
+  out of scope. The one exception: CPython extension modules get a narrow,
+  purpose-built frontend (`abicheck/python_api.py`, `diff_python_api.py`; gap
+  G23, `docs/development/plans/g23-python-level-api-diff.md`) that recovers the
+  **Python-level** API surface (`.pyi`/signatures) a native extension exposes to
+  `import` — this is a native-ABI-adjacent contract check, not general Rust/Go/
+  Java source analysis, and ADR-034 (managed-runtime/non-C frontends) remains a
+  proposal for anything broader.
 - Static / import library archives (`.a`, `.lib`) — abicheck compares single
   linkable images (shared libraries and objects), not `ar` member archives. A
   static library has no runtime ABI surface (no SONAME, no dynamic symbol

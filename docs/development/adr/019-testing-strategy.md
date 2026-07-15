@@ -1,15 +1,24 @@
 # ADR-019: Testing Strategy and Parity Validation
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. Amendment (2026-07-14): the specific
+numbers in this ADR (change-type count, coverage threshold, parity test
+count, example-case count, CI matrix details) were a point-in-time snapshot
+and have drifted. The core principles (four-tier architecture, conditional
+parity gating, examples as dual-purpose tests) still hold; for current
+numbers see `CLAUDE.md` (coverage-floor policy), `docs/development/testing.md`
+(maintained testing strategy page, explicitly kept up to date), and
+`.github/workflows/ci.yml` (CI topology) rather than this document.
 **Decision maker:** Nikolay Petrov
 
 ---
 
 ## Context
 
-abicheck's correctness depends on accurately classifying 85+ change types
-across three binary formats. False negatives (missed breaks) can cause
+abicheck's correctness depends on accurately classifying a large and
+growing number of change types (see ADR-011 and `len(list(ChangeKind))` in
+`checker_policy.py` for the current count) across three binary formats.
+False negatives (missed breaks) can cause
 production outages. False positives (spurious breaks) erode user trust and
 block CI pipelines.
 
@@ -45,22 +54,32 @@ abicheck intentionally diverges from their classifications in some cases
 - **mypy** — strict mode with targeted overrides for untyped external
   libraries (pyelftools, Click, FastMCP)
 - **mkdocs build --strict** — documentation build validation
-- Single matrix entry: Python 3.13 on ubuntu-latest
+- Single matrix entry on ubuntu-latest (exact Python version drifts with
+  each toolchain bump — see `.github/workflows/ci.yml` `lint-and-types` job
+  for the current pin)
 
 ### Tier 2: Unit tests
 
 - Test all core logic without external tools: checker, policy, model,
   serialization, reporter, suppression, CLI parsing
-- **Coverage threshold: 80%** enforced via `--cov-fail-under=80`
-- Matrix: ubuntu (3.12, 3.13, 3.14), windows (3.13), macos (3.13)
-- Codecov upload (ubuntu + 3.13 only)
+- A coverage floor is enforced on one canonical Linux/Python lane via
+  `--cov-fail-under=<N>`; the exact threshold moves over time and is
+  documented in `CLAUDE.md` ("Line-coverage floor" section) and
+  `docs/development/testing.md`, not here
+- Matrix: ubuntu (multiple Python versions), windows (one pinned version),
+  macos (one pinned version) — see `.github/workflows/ci.yml` `unit-tests`
+  job for the current matrix
+- Codecov upload (canonical Linux/Python lane only)
 
-The 80% threshold applies to the full test suite aggregate. Core logic
-(checker, policy, model, suppression) targets 90%+ coverage. Platform-specific
-code (elf_metadata, pe_metadata, macho_metadata) is structurally harder to
-cover because each module only runs on its native platform in CI. The 80%
-floor catches regressions without forcing artificial test-writing for
-unreachable platform branches.
+The coverage floor applies only to the canonical Linux/Python lane, not the
+full matrix aggregate — the other Linux Pythons run the same suite without
+coverage instrumentation (they would only re-check the identical floor), and
+macOS/Windows skip the Linux-only ELF/DWARF tests, which structurally lowers
+their coverage, so those lanes run without the fail-under gate. Platform-
+specific code (elf_metadata, pe_metadata, macho_metadata) is structurally
+harder to cover because each module only runs on its native platform in CI.
+See `CLAUDE.md` for the durable statement of this policy — it is
+intentionally not duplicated with a hardcoded number here.
 
 ### Tier 3: Integration tests
 
@@ -72,12 +91,17 @@ unreachable platform branches.
 
 ### Tier 4: Parity tests
 
-- **ABICC parity** (`test_abicc_parity.py`, `test_abicc_full_parity.py`,
-  `test_xml_parity.py`):
-  Compile example cases, run both abicheck and ABICC, compare verdicts
-- **libabigail parity** (`test_abidiff_parity.py`):
-  Compile example cases, run both abicheck and abidiff, compare verdicts
-- ~54 parity test functions across suites
+- **ABICC parity** (`test_abicc_parity.py` and sibling `test_abicc_*.py` /
+  `test_*_parity.py` modules): compile example cases, run both abicheck and
+  ABICC, compare verdicts
+- **libabigail parity** (`test_abidiff_parity.py` and sibling
+  `test_abidiff_*.py` modules): compile example cases, run both abicheck and
+  abidiff, compare verdicts
+- The parity suite has grown past its original size and spans more files
+  than the two named above (both `abicc` and `libabigail` markers now
+  collect well over the tens-of-tests scale this ADR originally described)
+  — run `pytest tests/ -m "libabigail or abicc" --collect-only -q` for the
+  current count rather than trusting a number in this document
 
 ### Conditional gating for parity tests
 
@@ -102,7 +126,10 @@ This means:
 
 ### Example cases as tests
 
-126 real-world ABI/API scenario cases in `examples/` serve dual purpose:
+Real-world ABI/API scenario cases in `examples/` (181 as of this amendment;
+see `examples/ground_truth.json` for the current count — it is the
+generated source of truth the AI-readiness gate checks docs against) serve
+dual purpose:
 
 1. **Documentation**: Each case has `README.md` with scenario description,
    expected break type, and detection evidence
@@ -170,21 +197,28 @@ tests/
 
 ### Negative
 
-- 80% coverage threshold is arbitrary — some platform-specific code paths
-  are inherently hard to cover on all CI platforms
+- The single-lane coverage threshold is somewhat arbitrary — some
+  platform-specific code paths are inherently hard to cover on all CI
+  platforms (see `CLAUDE.md` for the current floor and its scoping rationale)
 - Parity tests depend on unmaintained tools (ABICC, libabigail) that may
   have their own bugs. If these tools become unavailable (repos deleted,
   dependencies break), parity tests will be skipped with a warning —
   abicheck's own Tier 2 test suite provides the primary safety net
 - Conditional gating means parity regressions can land if changes don't
   touch gated paths
-- 126 example cases require C/C++ compilation, adding CI complexity
+- A large and growing example-case set requires C/C++ compilation, adding
+  CI complexity (see `examples/ground_truth.json` for the current count)
 
 ---
 
 ## References
 
-- `.github/workflows/ci.yml` — CI pipeline definition
+- `.github/workflows/ci.yml` — CI pipeline definition (current source of
+  truth for job names, matrix, and topology)
 - `tests/` — Test directory (large unit, integration, parity, and workflow suite)
-- `examples/` — 126 real-world ABI/API scenario cases
+- `examples/` — real-world ABI/API scenario cases; `ground_truth.json` is
+  the generated source of truth for the current count
 - `pyproject.toml` — pytest markers, coverage configuration
+- `CLAUDE.md` (root) — current coverage-floor policy and CI-lane scoping
+- `docs/development/testing.md` — maintained testing-strategy page, kept up
+  to date as CI gates and test layers change (see its maintainer note)

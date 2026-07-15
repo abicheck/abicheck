@@ -100,22 +100,26 @@ The "native mode" above is not one fixed mode — it **adapts to the evidence yo
 give it**. Each additional source (the five of the
 [L0–L4 model](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information))
 switches on more detectors. Run `abicheck dump <lib> --show-data-sources` to see
-exactly which sources a binary affords and which mode abicheck will use.
+exactly which `Lx` layers a binary affords (it lists per-layer presence and
+basic stats — e.g. exported-symbol/type/enum counts — not a detector-count
+fraction or a named "mode").
 
-| Mode | You provide | `--show-data-sources` label | What data you get | Detectors | How you use it |
-|------|-------------|-----------------------------|-------------------|:---------:|----------------|
-| **L0 — symbols-only** | a stripped `.so`/`.dll`, no `-H` | *Symbols-only mode* | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED` deps | ~6 / 30 | Fast gate on production/stripped artifacts — catches removed/added/renamed symbols, SONAME and versioning regressions. Cannot see layout or source API. |
-| **L1 — + debug info** | a `-g` build (DWARF/PDB), no `-H` | *DWARF-only mode* | L0 **plus** type layout: sizes, field offsets, enum values, vtable slots, calling convention, packing, recorded build flags | ~24 / 30 | The accurate no-headers path: `abicheck compare v1.so v2.so` on debug builds. Catches struct/enum/vtable/calling-convention breaks. Add `--dwarf-only` to force it even when headers exist. |
-| **L2 — + public headers** | `-g` build **and** `-H include/` (needs castxml) | *Full (AST + DWARF)* | L1 **plus** source API: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping | 30 / 30 | The recommended default: `abicheck compare … -H include/`. Catches source-only API breaks **and** scopes out internal types to avoid false positives. |
-| **L3 — + build data** | L2 **plus** `-p build/` (a `compile_commands.json`) | *Full + build context* | L2 **plus** the exact ABI-relevant flags/toolchain the lib was built with | 30 / 30 + build | `abicheck dump … -H include/ -p build/`. Confirms headers were parsed with the real build flags (suppresses `header_parse_context_drift`) and flags toolchain/flag drift on stripped binaries. |
-| **L4 — + sources** | a build/source pack (`--build-info pack/`) | *Full + source replay* | L3 **plus** macro/`constexpr` values, default-argument values, inline/template bodies | 30 / 30 + source | Catch the source-only facts no artifact carries. Opt-in, post-build; see [Build & Source Packs](../concepts/build-source-data.md). |
+| Mode | You provide | What data you get | How you use it |
+|------|-------------|-------------------|----------------|
+| **L0 — symbols-only** | a stripped `.so`/`.dll`, no `-H` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED` deps | Fast gate on production/stripped artifacts — catches removed/added/renamed symbols, SONAME and versioning regressions. Cannot see layout or source API. |
+| **L1 — + debug info** | a `-g` build (DWARF/PDB), no `-H` | L0 **plus** type layout: sizes, field offsets, enum values, vtable slots, calling convention, packing, recorded build flags | The accurate no-headers path: `abicheck compare v1.so v2.so` on debug builds. Catches struct/enum/vtable/calling-convention breaks. Add `--dwarf-only` to force it even when headers exist. |
+| **L2 — + public headers** | `-g` build **and** `-H include/` (needs castxml) | L1 **plus** source API: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping | The recommended default: `abicheck compare … -H include/`. Catches source-only API breaks **and** scopes out internal types to avoid false positives. |
+| **L3 — + build data** | L2 **plus** `-p build/` (a `compile_commands.json`) | L2 **plus** the exact ABI-relevant flags/toolchain the lib was built with | `abicheck dump … -H include/ -p build/`. Confirms headers were parsed with the real build flags (suppresses `header_parse_context_drift`) and flags toolchain/flag drift on stripped binaries. |
+| **L4 — + sources** | a build/source pack (`--build-info pack/`) | L3 **plus** macro/`constexpr` values, default-argument values, inline/template bodies | Catch the source-only facts no artifact carries. Opt-in, post-build; see [Build & Source Packs](../concepts/build-source-data.md). |
 
 **Reading the modes.** Going down the table only ever *adds* — each mode is a
 superset of the one above, both finding more breaks and (from L2) removing false
 positives by scoping to the public surface. The
 [`--evidence-tiers` benchmark](../reference/tool-comparison.md#benchmarking-by-evidence-tier)
 quantifies the cumulative gain across the compare-mode example catalog (33% →
-75% → 90% → 95% → 98% → 100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
+75% → 90% → 95% → 98% → 100% as last measured — see that page's freshness
+note; the shape holds, the exact numbers are a stale snapshot). The
+[authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
 keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
 (and the `L5` source graph abicheck derives from them — see
 [Evidence & Detectability](../concepts/evidence-and-detectability.md)) explain, scope,

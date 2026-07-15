@@ -2,6 +2,14 @@
 
 **Date:** 2026-06-09
 **Status:** Accepted / Implemented (2026-06-12). **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below. Implementation status below.
+**Superseded naming (see ADR-037):** the `--collect-mode` CI-mode vocabulary
+in D2 below is preserved as history. ADR-037 (2026-06-16) unified it, along
+with `dump`/`scan`'s separate depth vocabularies, onto one `--depth`/`--max`
+dial; `--collect-mode` is now a deprecated alias (still functional, warns on
+stderr) resolved internally to the same `off | build | source-changed |
+source-target | graph-summary | graph-full` layer set via
+`collection_for_ci_mode()` — the D2 mode→layer mapping table itself is
+unchanged and current.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -309,7 +317,7 @@ After every run, users should be able to answer:
 | Decision | Status | Where |
 |---|---|---|
 | D1 complexity ladder | done | `buildsource/` L0–L5 layers |
-| D2 CI modes | done | `dump --collect-mode` (build = L3-only, source/graph = L3+L4+L5); pre-captured packs filtered to the layer set; `collection_for_ci_mode()` |
+| D2 CI modes | done | `dump --depth`/`--max` (ADR-037; `--collect-mode` is the deprecated pre-unification spelling) resolves internally to the collect-mode layer set (build = L3-only, source/graph = L3+L4+L5); pre-captured packs filtered to the layer set; `collection_for_ci_mode()` |
 | D3 PR localizer | done | `recommend_collect_mode()` + `abicheck recommend-collect-mode` (build-file ⇒ `build`, source/header ⇒ `source-changed`); artifact compare stays authoritative |
 | D4 baseline coverage block | done | `BaselineMetadata.evidence_coverage` persists `{build_context, source_abi, graph}` |
 | D5 deterministic caching | done | per-TU `SourceAbiCache` (L4, the dominant cost) + content-addressed `BuildEvidenceCache` (L3); both false-miss-preferring. The cheap L5 graph fold is recomputed by design (D6 rates it low-cost) |

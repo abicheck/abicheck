@@ -1,7 +1,13 @@
 # ADR-016: Three-Tier Visibility Model
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented; **extended by ADR-024**. ADR-024 D1 found
+this single `Visibility` axis conflates two orthogonal facts (export-table
+linkage and header-declaration provenance) and de-conflates them into a
+Linkage × Origin model. `Visibility` is retained here as a backward-compatible
+*derived* view — not superseded, but no longer the primary surface model. Read
+ADR-024 for the current two-axis design before relying on this page for surface
+semantics.
 **Decision maker:** Nikolay Petrov
 
 ---

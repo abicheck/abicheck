@@ -1,7 +1,16 @@
 # ADR-021a: Debug Artifact Resolution Subsystem
 
 **Date:** 2026-03-23
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Implementation status note:** the
+durable decision — a pluggable `DebugResolver` chain (`abicheck/debug_resolver.py`)
+covering embedded DWARF, split DWARF (`.dwo`/`.dwp`), build-id tree and
+path-mirror search, dSYM bundles, PDB, and opt-in debuginfod, wired to
+`--debug-root` / `--debuginfod` on `compare` — is implemented and current.
+The "Multi-package set support for `compare-release`" section (§6) and its
+`PackageSet` / `--extra-pkg1` / `--old-packages` / `--old-package-list` CLI
+surface remain an implementation-plan item, not shipped as of this writing;
+treat the "Implementation Plan" phase table and any gaps below the resolver
+design as historical planning detail, not a current-status report.
 **Decision maker:** Nikolay Petrov
 
 ---

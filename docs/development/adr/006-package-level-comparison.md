@@ -4,6 +4,15 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment:** The scope below (RPM, Deb, tar archives) undersells
+> current support. `abicheck/package.py` also ships `CondaExtractor` (`.conda`
+> v2 zip format and legacy `.tar.bz2`) and `WheelExtractor` (`.whl`), alongside
+> `RpmExtractor`/`DebExtractor`/`TarExtractor`/`DirExtractor` — all through the
+> same `detect_extractor()` auto-detection and the same path-traversal/symlink
+> safe-extraction checks described below. Treat the "Implementation Plan" table
+> and format list in this ADR as a historical snapshot of the initial scope,
+> not the current supported-format list.
+
 ---
 
 ## Context

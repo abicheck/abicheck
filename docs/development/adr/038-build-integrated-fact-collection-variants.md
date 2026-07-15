@@ -462,17 +462,17 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
   finding; only the cross-producer C.6 gate can surface it. Should a dump fail at
   runtime, the entity is still emitted without the subtree hash (partial, never
   wrong) plus a diagnostic.
-- **Macros:** macro parity must be delivered by in-compile `PPCallbacks` (C.2),
-  never a second `-E -dD` pass — a companion preprocess would reintroduce exactly
-  the extra front-end pass Flow C exists to avoid. Until the `PPCallbacks` path is
-  implemented, the plugin marks macros unsupported (emits none, records a
-  diagnostic); a project needing macro findings runs Flow A/B for **both** sides
-  of the comparison (where the `-E -dD` pass is expected), not a Flow-C/Flow-A
-  split within one comparison. Once implemented, the plugin must normalize
-  captured macro values to match `macros_from_preprocessor` so it stays
-  entity-equivalent to the clang backend it substitutes (the C.6 gate covers
-  macros) — the sanctioned plugin↔clang-backend equivalence of D0, not a licence
-  to mix arbitrary producers.
+- **Macros:** macro parity is delivered by in-compile `PPCallbacks` (`MacroCollector`
+  in `AbicheckFactsPlugin.cpp`, registered on the preprocessor in
+  `CreateASTConsumer`/`ParseArgs`), never a second `-E -dD` pass — a companion
+  preprocess would reintroduce exactly the extra front-end pass Flow C exists to
+  avoid (C.2/C.3). Captured macro values are normalized to match
+  `macros_from_preprocessor` so the plugin stays entity-equivalent to the clang
+  backend it substitutes; the C.6 gate covers macros (leniently — operator-adjacent
+  spacing is the documented soft edge). A project that still hits a macro mismatch
+  runs Flow A/B for **both** sides of the comparison rather than mixing producers —
+  the sanctioned plugin↔clang-backend equivalence of D0, not a licence to mix
+  arbitrary producers.
 - **Public-surface classifier (pragmatic):** the plugin classifies a decl/macro
   as public by matching its declaring file's path segments against the
   `public-roots` set (with a `SourceManager::isInSystemHeader` guard so stdlib

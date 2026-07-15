@@ -112,8 +112,8 @@ hidden.
 
 | Mode | Behavior |
 |------|----------|
-| `export` (current default) | No header scoping; everything exported is surface. Preserves today's behavior. |
-| `header-scoped` (opt-in now → default after validation) | Surface = exported ∧ public-header (+ reachable closure). Out-of-surface changes are **still computed**, but re-classified to a compatible/informational tier and **labeled with the reason**. |
+| `export` (`--no-scope-public-headers`) | No header scoping; everything exported is surface. Preserves pre-Phase-5 behavior; opt out with this flag. |
+| `header-scoped` (**default since Phase 5**, below) | Surface = exported ∧ public-header (+ reachable closure). Out-of-surface changes are **still computed**, but re-classified to a compatible/informational tier and **labeled with the reason**. |
 
 Out-of-surface findings are never dropped from the data model — they are demoted (e.g. an
 out-of-surface signature change becomes `*_NON_PUBLIC` / reduced-confidence) and remain
