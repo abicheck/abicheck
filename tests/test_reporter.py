@@ -180,6 +180,15 @@ class TestEvidenceStatusInJson:
         by_symbol = {c["symbol"]: c["operation"] for c in d["changes"]}
         assert by_symbol == {"s1": "added", "s2": "removed", "s3": "modified"}
 
+    def test_change_operation_field_experimental_graduated(self):
+        """Codex review on #557: experimental_graduated (ADDITION_KINDS) was
+        misclassified as operation="modified" since its kind name contains
+        no "_added" suffix."""
+        c = Change(ChangeKind.EXPERIMENTAL_GRADUATED, "lib::sort", "graduated to stable")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["operation"] == "added"
+
     def test_change_recommended_action_field(self):
         breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
         api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")

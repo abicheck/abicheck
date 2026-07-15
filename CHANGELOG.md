@@ -950,6 +950,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   severity categories instead, whenever a severity-aware exit-code scheme
   is active, matching whichever categories are actually configured `error`.
 
+- **`experimental_graduated` (schema `operation` field) misclassified as
+  `"modified"`.** Unlike the earlier `_OPERATION_OVERRIDES` misses (which
+  all had *some* add/remove synonym in their name), `experimental_graduated`
+  contains none — it's the dedicated case99 detector for "a stable name is
+  added alongside the still-present experimental alias" ("without the
+  dedicated detector the diff is just a `func_added`"), and is correctly in
+  the canonical `ADDITION_KINDS` registry set, but `operation_for_kind`'s
+  suffix rule had nothing to match on (Codex review on #557). Added to the
+  override table; also added a permanent regression test that cross-checks
+  every `ADDITION_KINDS` member classifies as `"added"`, catching this class
+  of miss for any future addition-kind whose name doesn't contain an
+  add/remove synonym (the word-matching sweep test added earlier this cycle
+  cannot catch these by construction).
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**

@@ -408,6 +408,20 @@ class TestOperationForKind:
                     f"operation_for_kind() returned {op!r}"
                 )
 
+    def test_addition_kinds_all_classify_as_added(self):
+        """Authoritative cross-check against the canonical ADDITION_KINDS
+        registry set: every member must classify as operation "added".
+        Catches misses the word-matching sweep above cannot (e.g.
+        experimental_graduated, whose name contains no add/remove synonym
+        at all but is unambiguously an addition — case99: "without the
+        dedicated detector the diff is just a func_added" — Codex review
+        on #557)."""
+        from abicheck.checker_policy import ADDITION_KINDS
+        from abicheck.reporter_markdown import operation_for_kind
+
+        misses = [k.value for k in ADDITION_KINDS if operation_for_kind(k.value) != "added"]
+        assert not misses, f"ADDITION_KINDS members not classified as 'added': {misses}"
+
 
 # ---------------------------------------------------------------------------
 # Stat mode tests

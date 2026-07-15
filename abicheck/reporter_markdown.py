@@ -146,6 +146,11 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     # A whole ISA-dispatch family's concrete symbols vanish (case83), not a
     # property change on a persisting symbol.
     "cpu_dispatch_isa_dropped": "removed",
+    # A stable name is added alongside the still-present experimental alias
+    # (case99) -- without the dedicated detector this would just be a plain
+    # func_added; ADDITION_KINDS already classifies it as an addition
+    # (Codex review on #557).
+    "experimental_graduated": "added",
 }
 
 
