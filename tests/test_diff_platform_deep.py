@@ -579,6 +579,42 @@ class TestDwarfStructFieldRenamed:
         assert ChangeKind.FIELD_RENAMED not in kinds
         assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
 
+    def test_multiple_same_byte_bitfields_each_matched_by_own_bit_position(
+        self,
+    ) -> None:
+        """Two renamed bit-fields sharing a byte_offset must each find their
+        *own* rename candidate by bit position/width, not whichever one a
+        single-value ``dict[byte_offset]`` index happened to keep last — a
+        naive index silently drops every same-byte candidate but the most
+        recently inserted, so only one of the two renames would be seen and
+        the other would misreport as a real STRUCT_FIELD_REMOVED (review
+        finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[
+                    FieldInfo("a", "unsigned int", 0, 4, bit_offset=0, bit_size=1),
+                    FieldInfo("b", "unsigned int", 0, 4, bit_offset=1, bit_size=1),
+                ])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[
+                    FieldInfo("x", "unsigned int", 0, 4, bit_offset=0, bit_size=1),
+                    FieldInfo("y", "unsigned int", 0, 4, bit_offset=1, bit_size=1),
+                ])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.STRUCT_FIELD_REMOVED not in kinds
+        assert ChangeKind.FIELD_RENAMED in kinds
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        assert {(c.old_value, c.new_value) for c in renames} == {("a", "x"), ("b", "y")}
+
 
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""

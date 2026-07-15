@@ -1473,23 +1473,33 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
         # 3. Removed fields — check for reserved-field activations first
         removed_names = sorted(old_fields.keys() - new_fields.keys())
         added_names = new_fields.keys() - old_fields.keys()
-        # Build added-field index by byte_offset for reserved-field matching
-        added_by_offset: dict[int, FieldInfo] = {
-            new_fields[fn].byte_offset: new_fields[fn]
-            for fn in added_names
-            if not _RESERVED_FIELD_RE.match(fn)
-        }
+        # Build added-field index by byte_offset for reserved-field matching.
+        # A list per offset, not a single value: two renamed bit-fields can
+        # legitimately share a byte_offset (e.g. two 1-bit flags in the same
+        # storage byte), and a plain ``dict[int, FieldInfo]`` comprehension
+        # would silently keep only the last one, leaving every other
+        # same-byte bit-field with no candidate to match against and
+        # falling through to a false STRUCT_FIELD_REMOVED (caught in
+        # review).
+        added_by_offset: dict[int, list[FieldInfo]] = {}
+        for fn in added_names:
+            if _RESERVED_FIELD_RE.match(fn):
+                continue
+            added_by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
         reserved_matched: set[str] = set()
 
         for fname in removed_names:
             old_f = old_fields[fname]
             if _RESERVED_FIELD_RE.match(fname):
-                candidate = added_by_offset.get(old_f.byte_offset)
-                if (
-                    candidate is not None
-                    and not _RESERVED_FIELD_RE.match(candidate.name)
-                    and old_f.type_name == candidate.type_name
-                ):
+                candidate = next(
+                    (
+                        c
+                        for c in added_by_offset.get(old_f.byte_offset, [])
+                        if old_f.type_name == c.type_name
+                    ),
+                    None,
+                )
+                if candidate is not None:
                     changes.append(
                         make_change(
                             ChangeKind.USED_RESERVED_FIELD,
@@ -1515,7 +1525,6 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 # same FIELD_RENAMED shape here is safe either way: the
                 # post-processing dedup pass collapses an exact duplicate if
                 # `_diff_field_renames` also matches.
-                candidate = added_by_offset.get(old_f.byte_offset)
                 # _normalize_type_name is lossy by design (it also strips
                 # pointer/reference sigils to compare "struct Foo *" against
                 # "Foo" for the *tag-spelling* case), so it alone would equate
@@ -1536,16 +1545,28 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 # harmless "struct Foo *" vs "Foo *" spelling difference now
                 # falls through to STRUCT_FIELD_REMOVED instead of
                 # FIELD_RENAMED) but never misclassifies a genuine type or
-                # layout change as a bare rename.
-                if (
-                    candidate is not None
-                    and candidate.name not in reserved_matched
-                    and not _RESERVED_FIELD_RE.match(candidate.name)
-                    and old_f.type_name == candidate.type_name
-                    and old_f.byte_size == candidate.byte_size
-                    and old_f.bit_offset == candidate.bit_offset
-                    and old_f.bit_size == candidate.bit_size
-                ):
+                # layout change as a bare rename. Scanning the full
+                # same-offset candidate list (not just one arbitrary entry)
+                # also matters when two bit-fields share a byte_offset —
+                # each removed bit-field must find *its own* matching
+                # candidate by bit position/width, not whichever one a
+                # single-value dict happened to keep (caught in review —
+                # four times now).
+                candidate = next(
+                    (
+                        c
+                        for c in added_by_offset.get(old_f.byte_offset, [])
+                        if (
+                            c.name not in reserved_matched
+                            and old_f.type_name == c.type_name
+                            and old_f.byte_size == c.byte_size
+                            and old_f.bit_offset == c.bit_offset
+                            and old_f.bit_size == c.bit_size
+                        )
+                    ),
+                    None,
+                )
+                if candidate is not None:
                     changes.append(
                         make_change(
                             ChangeKind.FIELD_RENAMED,
