@@ -204,6 +204,29 @@ class TestEvidenceStatusInJson:
         assert d["leaf_changes"][0]["severity"] == "breaking"
         assert d["severity"]["exit_code"] == 4
 
+    def test_leaf_mode_non_type_change_honours_frozen_namespace_floor(self):
+        """Codex review on #549 (follow-on to the root-type leaf-entry fix):
+        the adjacent non_type_changes path in the same leaf-mode function
+        called _change_to_dict without policy_file, so a non-root-type kind
+        (func_removed) demoted by a policy override, but tagged
+        frozen_namespace_violation, read "compatible" in non_type_changes
+        (and the backward-compat changes union) while the top-level severity
+        block correctly reported exit_code=4 for the same finding."""
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.policy_file = pf
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert d["non_type_changes"][0]["severity"] == "breaking"
+        assert d["changes"][0]["severity"] == "breaking"
+        assert d["severity"]["exit_code"] == 4
+
     def test_leaf_mode_carries_severity_block(self):
         """report_mode="leaf" returned before the severity block was ever
         built, so a caller passing severity_config silently got no severity

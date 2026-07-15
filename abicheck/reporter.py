@@ -292,7 +292,9 @@ def _to_json_leaf(
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
     non_type_list = [
-        _change_to_dict(c, policy=effective_policy, kind_sets=eff_sets)
+        _change_to_dict(
+            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file,
+        )
         for c in non_type_changes
     ]
 
