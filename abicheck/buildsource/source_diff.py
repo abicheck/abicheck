@@ -34,7 +34,12 @@ import re
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
 from .fact_set import check_fact_set_compatibility, incomplete_families
-from .source_abi import EVIDENCE_TIER_L4, SourceAbiSurface, SourceEntity
+from .source_abi import (
+    COVERAGE_STATES,
+    EVIDENCE_TIER_L4,
+    SourceAbiSurface,
+    SourceEntity,
+)
 
 
 def _header_basename(path: str) -> str:
@@ -113,6 +118,21 @@ def _richer(candidate: SourceEntity, current: SourceEntity) -> bool:
     return _score(candidate) > _score(current)
 
 
+def _coerce_coverage_states(family_states: dict[str, str]) -> dict[str, str]:
+    """Coerce an unrecognized per-family coverage state to ``"failed"``.
+
+    Mirrors :func:`~.fact_set.rollup_coverage`'s own coercion (Codex review,
+    P2) so a value outside :data:`~.source_abi.COVERAGE_STATES` — a typo, or
+    a hand-written/forward-versioned producer's newer vocabulary — cannot
+    read as an implicitly "fine" state just because it isn't a *known*
+    incomplete one either.
+    """
+    return {
+        family: state if state in COVERAGE_STATES else "failed"
+        for family, state in family_states.items()
+    }
+
+
 def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     """ADR-038 C.8: flag incompatible or incomplete L4 fact-set evidence.
 
@@ -154,8 +174,19 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     issues = (
         check_fact_set_compatibility(old_fact_set, new_fact_set) if has_signal else []
     )
-    old_incomplete = incomplete_families(old_families)
-    new_incomplete = incomplete_families(new_families)
+    # A serialized surface's fact_family_states can come from a hand-written
+    # or forward-versioned source_abi.json, not just rollup_coverage()'s own
+    # output -- so its per-family values are not guaranteed to already be one
+    # of COVERAGE_STATES the way rollup_coverage()'s coercion (Codex review,
+    # P2) guarantees for its own callers. incomplete_families() only matches
+    # documented incomplete states, so an unrecognized value like "bad" or
+    # "complete-ish" (a typo, or a newer vocabulary this build predates)
+    # would otherwise never be flagged as incomplete, silently suppressing
+    # SOURCE_FACT_COVERAGE_INCOMPLETE for malformed/forward-versioned
+    # coverage metadata this comparison cannot actually trust (Codex review,
+    # P2). Coerce it to the same worst-known-state fallback here too.
+    old_incomplete = incomplete_families(_coerce_coverage_states(old_families))
+    new_incomplete = incomplete_families(_coerce_coverage_states(new_families))
     if not issues and not old_incomplete and not new_incomplete:
         return []
 

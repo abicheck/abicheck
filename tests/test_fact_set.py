@@ -495,6 +495,27 @@ def test_diff_degrades_on_non_dict_nested_coverage_metadata() -> None:
     assert isinstance(changes, list)
 
 
+def test_diff_flags_unrecognized_family_coverage_state_as_incomplete() -> None:
+    """fact_family_states on a serialized SourceAbiSurface can come from a
+    hand-written or forward-versioned source_abi.json, not just
+    rollup_coverage()'s own output -- so its values aren't guaranteed to
+    already be one of COVERAGE_STATES the way rollup_coverage()'s own
+    coercion guarantees for its callers. incomplete_families() only matches
+    documented incomplete states ("partial"/"failed"), so an unrecognized
+    value like a typo or a newer vocabulary this build predates must not
+    silently read as "fine" and suppress SOURCE_FACT_COVERAGE_INCOMPLETE
+    (Codex review, P2)."""
+    fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.5")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {"functions": "bad-typo-state"}}
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {"functions": "bad-typo-state"}}
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in {c.kind for c in changes}
+
+
 def test_source_fact_coverage_incomplete_is_risk_kind() -> None:
     from abicheck.checker_policy import RISK_KINDS
 
