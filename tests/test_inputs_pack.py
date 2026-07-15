@@ -314,6 +314,36 @@ def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None
     assert surface.coverage.get("unmatched_symbols", 1) == 0
 
 
+def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
+    tmp_path: Path,
+) -> None:
+    """embed_inputs_pack's export-relink rebuilds the L5 graph from scratch
+    (source-only packs carry no exported_symbols root) -- that rebuild must
+    reapply mark_source_edges_extractor_coverage(), or a confirmed-complete
+    source_edges rollup's call_graph/type_graph coverage -- correctly set at
+    ingest time -- is silently dropped and a real
+    PUBLIC_API_INTERNAL_DEPENDENCY_ADDED finding could be suppressed as a
+    coverage artifact downstream (Codex review)."""
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+    from abicheck.cli_buildsource_merge import embed_inputs_pack
+    from abicheck.model import AbiSnapshot, Function
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    pack = _write_inputs_pack(tmp_path, [tu])  # no exported_symbols -> relink runs
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+
+    embed_inputs_pack(snap, pack, tmp_path / "out.json")
+
+    assert snap.build_source is not None
+    graph = snap.build_source.source_graph
+    assert graph is not None
+    assert graph.extractor_passes.get("call_graph") is True
+    assert graph.extractor_passes.get("type_graph") is True
+
+
 def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
     # The dump CLI seam: _write_snapshot_output(..., inputs_pack=pack) folds the
     # pack and serializes an embedded build_source (single-artifact UX), so a plain
