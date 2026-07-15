@@ -210,6 +210,38 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
+    def test_fieldless_but_different_bases_is_never_guessed(self) -> None:
+        """Regression (Codex review): a fieldless C++ record's ABI surface can
+        still come from its base classes (an empty derived class) or virtual
+        methods, so "both sides have no data fields" alone must not be
+        trusted when the header and the unique DWARF candidate declare
+        different bases — that's the same unrelated-internal-type risk as
+        the field-overlap check, just via a different ABI-surface signal."""
+        header = RecordType(name="Foo", kind="class", fields=[], bases=["PublicBase"])
+        unrelated = RecordType(
+            name="impl::Foo", kind="class", size_bits=64, fields=[], bases=["InternalBase"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_fieldless_with_matching_base_is_trusted(self) -> None:
+        """The legitimate counterpart: same source, so the base class name
+        genuinely overlaps even though neither side has data fields (e.g. an
+        empty derived class that only exists to establish a base relation)."""
+        header = RecordType(name="Foo", kind="class", fields=[], bases=["Base"])
+        dwarf = RecordType(name="Foo", kind="class", size_bits=8, fields=[], bases=["Base"])
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 8
+
+    def test_fieldless_and_baseless_on_both_sides_is_trusted(self) -> None:
+        """A truly trivial record (no fields, no bases on either side) has
+        nothing left to disagree on beyond the name match itself — same
+        residual-risk trade-off already accepted for plain tag types."""
+        header = RecordType(name="Tag", kind="struct", fields=[], bases=[])
+        dwarf = RecordType(name="Tag", kind="struct", size_bits=8, fields=[], bases=[])
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 8
+
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)

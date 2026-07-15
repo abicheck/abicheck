@@ -146,6 +146,20 @@ def backfill_dwarf_layout(
     layout from a type that isn't actually the same declaration. Both sides
     empty (a genuine fieldless tag type) is still trusted; header-empty with
     dwarf-non-empty is not.
+
+    A C++ record's ABI surface is not only its data fields, though: an empty
+    *derived* class, or one with only virtual methods, has no fields on
+    either side yet still carries real layout via its base classes or
+    vtable (Codex review — fresh evidence after the field-emptiness fix
+    above: a fieldless ``impl::Foo`` with unrelated *bases* would otherwise
+    pass the "both sides fieldless" trust unchallenged). When both sides are
+    fieldless, base-class-name overlap is checked as a second corroborating
+    signal before falling back to trusting a truly trivial (no fields, no
+    bases) match on name alone. Vtable entries can't play the same role:
+    the clang header parser never populates ``RecordType.vtable`` itself
+    (only the DWARF side ever does, pre-backfill), so comparing vtable
+    presence would reject every legitimate virtual-only match, not just the
+    unrelated ones.
     """
     if not dwarf_types:
         return header_types
@@ -165,10 +179,25 @@ def backfill_dwarf_layout(
             # unrelated-internal-type risk this check exists to catch, not
             # the anonymous-aggregate asymmetry below. Only trust it when
             # DWARF is empty too (both sides genuinely fieldless).
-            return not dwarf.fields
-        if not dwarf.fields:
+            if dwarf.fields:
+                return False
+        elif not dwarf.fields:
             return True  # anonymous-aggregate asymmetry: header flattens, DWARF doesn't
-        return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
+        else:
+            return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
+        # Both sides have no data fields. A C++ record's ABI surface can
+        # still be bases/vtable-only (an empty derived class, or one with
+        # only virtual methods) — fall back to base-class-name overlap
+        # before trusting a fieldless-both match on name alone (vtable
+        # can't serve the same role: the clang header parser never
+        # populates RecordType.vtable itself, only DWARF does, so an
+        # empty-vs-populated vtable comparison would reject every real
+        # match instead of just the unrelated ones).
+        header_bases = set(header.bases)
+        dwarf_bases = set(dwarf.bases)
+        if header_bases or dwarf_bases:
+            return bool(header_bases & dwarf_bases)
+        return True  # truly trivial on both sides (no fields, no bases)
 
     out: list[RecordType] = []
     for t in header_types:
