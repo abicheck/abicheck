@@ -432,6 +432,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Clang plugin: `source_edges` collected but never reached the L5 graph,
+  plus four related correctness gaps from an independent review of the
+  ADR-038 C.8 canonical fact-set work (ADR-038 C.10-C.12).**
+  `SourceAbiTu.source_edges` (call/type-relationship facts the plugin and the
+  reference `clang.py` extractor both collect during their existing frontend
+  pass) was serialized and round-tripped but `SourceAbiSurface` had no edge
+  field at all, so nothing ever folded them into the L5 graph — the separate
+  `call_graph`/`type_graph` Clang AST replay passes remained the only
+  producer of those edges end-to-end. `source_link.link_source_abi()` now
+  folds them onto a new `SourceAbiSurface.source_edges`, and
+  `source_graph.fold_source_edges()` consumes it from inside
+  `build_source_graph()`; the separate replay passes are skipped when a
+  full-scope `source_edges` collection is already confirmed complete.
+  Fixing this exposed (and required fixing) a callee-identity bug in
+  `call_graph.py`: clang's compact `referencedDecl` stub never carries
+  `mangledName` (verified against a real Clang 18 AST dump), so an
+  overloaded/constructor/destructor callee collapsed onto one bare-name
+  endpoint; it now builds an id-index from full declarations in the same
+  walk, mirroring `type_graph.py`'s existing fix. Also fixed: opaque
+  inline/template body-hash diffs are now suppressed (not silently computed
+  from possibly-incomparable hashes) when the two sides' fact-set
+  producer/version disagree (`fact_set.FactCompatibility`), with a
+  `hash_recipe_id` override for producers proven equivalent via the C.6
+  differential conformance test; the plugin's fact filename/`tu_id` now fold
+  in the target/library identity so two libraries sharing one `out=`
+  directory no longer silently clobber each other's facts, and
+  `abicheck inputs validate` rejects a pack mixing more than one target;
+  `compact_inputs_pack()` rejects an `--output-filename` colliding with an
+  unrecognized pre-existing file instead of silently overwriting it; and a
+  public typedef whose underlying type can't be determined from the JSON
+  dump now records a diagnostic instead of silently vanishing from `types`
+  coverage.
+
 - **Review digest, GitHub annotations, and `scan --baseline` could misreport
   the actual CI gate once severity configuration is in play.** Compatibility
   (`Verdict`) and "blocks CI" (`SeverityConfig`) are independent decisions —
