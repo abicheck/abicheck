@@ -76,7 +76,7 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 139 PASS / 5 XFAIL / 37 SKIP; clang: 139 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 144 PASS / 5 XFAIL / 32 SKIP; clang: 144 PASS / 6 XFAIL / 31 SKIP | Green default/debug verdict lane |
 | Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 84 DEMONSTRATED / 64 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
 | Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 1 FAIL / 5 XFAIL / 37 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
 | Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 134 PASS / 5 FAIL / 5 XFAIL / 37 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
@@ -96,14 +96,16 @@ the way it previously did (stale at a 169-case catalog for several releases).
   so a case could PASS with the right severity for the wrong detector reason. The latest full-catalog
   run under this check found 18 (gcc) / 19 (clang) such cases (verdict correct, named detector kind
   not actually produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
-  `case65_symbol_version_removed`, `case66_language_linkage_changed`,
+  `case59_func_became_inline`, `case65_symbol_version_removed`, `case66_language_linkage_changed`,
   `case72_covariant_return_changed`, `case74/75/76/77/80_detail_*` (the `internal_type_leaks_via_
   public_api` escalation doesn't fire for any of these detail-namespace-leak cases — its reachability
   check appears to need namespace-qualified symbols that the DWARF-derived struct/type diff doesn't
   currently emit), `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
   `case87_default_template_arg_changed`, `case88_cpo_kind_changed`, `case94_empty_tag_gained_state`,
-  `case116_atomic_qualifier_changed`, `case141_versioned_symbol_scheme`, and (clang only)
-  `case115_bit_int_width_changed`. These are real, pre-existing detector gaps this check
+  `case116_atomic_qualifier_changed`, and (clang only) `case115_bit_int_width_changed`. Case-level
+  membership is toolchain-sensitive even within "gcc"/"clang" (e.g. `case59`/`case141`'s
+  `kinds_strict` differ between a gcc 13 and a gcc 14 install), so treat this list as the latest
+  CI-authoritative run, not a fixed set. These are real, pre-existing detector gaps this check
   surfaces, not regressions from this pass — set `ABICHECK_STRICT_KINDS=1` (see
   `tests/check_validate_results.py`) to make them blocking once triaged and fixed case by case.
   The full example matrix (`validation/scripts/collect_full_example_matrix.py`) now surfaces each
