@@ -1667,13 +1667,15 @@ def _dump_elf(
         resolved_debug_format = _dwarf_format_out[0] if _dwarf_format_out else debug_format
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
         profile_hint = _lang_to_profile(lang)
-        # ADR-003: Updated fallback chain
-        # --dwarf-only → force DWARF mode regardless of headers
-        # no headers + DWARF available -> DWARF-only mode with type-aware checks
-        # no headers + no DWARF -> symbols-only mode
-        # resolved_debug_format, not dwarf_meta.has_dwarf alone, gates the no-headers branch: has_dwarf mirrors BTF/CTF presence too (Codex review).
-        if not (symbols_only or debug_presence_only) and (
-            dwarf_only or (not headers and dwarf_meta.has_dwarf and resolved_debug_format == "dwarf")
+        # ADR-003 fallback chain: --dwarf-only forces DWARF mode; no headers +
+        # DWARF -> DWARF-only mode; no headers + no DWARF -> symbols-only. Both
+        # legs gated on resolved_debug_format, not dwarf_meta.has_dwarf (which
+        # mirrors BTF/CTF presence too, and --dwarf-only + --debug-format
+        # btf/ctf resolves no real DWARF either — Codex review, twice).
+        if dwarf_only and resolved_debug_format != "dwarf":
+            warnings.warn(f"--dwarf-only requested but resolved debug format is {resolved_debug_format!r}; ignoring.", UserWarning, stacklevel=2)
+        if not (symbols_only or debug_presence_only) and resolved_debug_format == "dwarf" and (
+            dwarf_only or (not headers and dwarf_meta.has_dwarf)
         ):
             snap, dwarf_only_types = _try_dwarf_snapshot(
                 so_path, elf_meta, dwarf_meta, dwarf_adv,
