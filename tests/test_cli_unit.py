@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -197,11 +198,11 @@ class TestResolveDemangle:
         assert _resolve_demangle("markdown", None) is True
         assert _resolve_demangle("review", None) is True
 
-    def test_defaults_off_for_machine_formats_and_html(self):
+    @pytest.mark.parametrize("fmt", ["json", "sarif", "junit", "html"])
+    def test_defaults_off_for_machine_formats_and_html(self, fmt):
         from abicheck.cli_compare_helpers import _resolve_demangle
 
-        for fmt in ("json", "sarif", "junit", "html"):
-            assert _resolve_demangle(fmt, None) is False
+        assert _resolve_demangle(fmt, None) is False
 
     def test_explicit_flag_always_wins(self):
         from abicheck.cli_compare_helpers import _resolve_demangle

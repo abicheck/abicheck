@@ -151,6 +151,28 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     # func_added; ADDITION_KINDS already classifies it as an addition
     # (Codex review on #557).
     "experimental_graduated": "added",
+    # These four end in "_added" but each names a trait *gained by an
+    # existing, persisting function* ("Function became virtual: {name}",
+    # "noexcept specifier added: {name}", "Function became variadic (gained
+    # ...): {name}" -- verified against their diff_symbols.py descriptions
+    # and change_registry.py entries, none of which set is_addition=True /
+    # belong to ADDITION_KINDS) -- the same "*_lost_*"/"*_introduced" trait-
+    # change pattern above, just spelled with "_added" (Codex review, PR
+    # #557). `func_pure_virtual_added` ("Function became pure virtual:
+    # {name}") is the identical pattern applied to its sibling kind
+    # `func_virtual_became_pure`, which already classifies correctly as
+    # "modified" since it doesn't end in "_added".
+    "func_noexcept_added": "modified",
+    "func_virtual_added": "modified",
+    "func_variadic_added": "modified",
+    "func_pure_virtual_added": "modified",
+    # A field inserted into an existing struct/class shifts every
+    # subsequent field's offset -- this modifies the *layout of the
+    # existing type*, not merely a new field appearing in isolation.
+    # `type_field_added_compatible` (append-at-end, no offset shift) is the
+    # dedicated addition-kind carve-out and is unaffected by this override
+    # (it doesn't end in plain "_added"). (Codex review, PR #557.)
+    "type_field_added": "modified",
 }
 
 

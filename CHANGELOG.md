@@ -781,20 +781,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (CodeRabbit review, PR #557). All five are now `required` (the emitter
   already always populates them; this only tightens the contract).
 
+- **`operation_for_kind()` misclassified five trait changes on an
+  already-existing entity as `"added"`** (Codex review, PR #557):
+  `func_noexcept_added`, `func_virtual_added`, `func_variadic_added`, and
+  `func_pure_virtual_added` each name a property *gained by an existing
+  function* ("Function became virtual: {name}", "noexcept specifier added:
+  {name}", …) — the same trait-change-on-a-persisting-entity pattern as the
+  existing `"*_lost_*"`/`"*_introduced"` overrides, just spelled with
+  `"_added"` — and `type_field_added` (a field inserted mid-struct, which
+  shifts every subsequent field's offset) modifies the type's existing
+  layout rather than merely adding something in isolation; the dedicated
+  append-at-end addition kind, `type_field_added_compatible`, is unaffected.
+  None of these five is in `ADDITION_KINDS`. All five now classify as
+  `"modified"` via `_OPERATION_OVERRIDES`, affecting both the JSON
+  `operation` field and `--show-only=added`/`--show-only=changed` (the two
+  share the same classifier by design).
+
 - **Self-review polish on the `GateDecision`/`--secondary-format` work above
   (PR #557):** the native HTML report's "CI Gate" card computed pass/fail
   via `severity.compute_exit_code()` directly instead of the canonical
-  `compute_gate_decision()` `reporter.py`/`sarif.py`/`cli_compare_release.py`
-  were all migrated to — now routed through it too, so all four gate-status
-  call sites share one computation. The primary and `--secondary-format`
-  render paths each independently resolved the tri-state `--demangle` flag
-  with a duplicated one-line rule; factored into a single
-  `cli_compare_helpers._resolve_demangle()` both call. `compute_gate_decision`'s
-  legacy (no `SeverityConfig`) branch was found to be unreachable from any
-  of its three production call sites (each already special-cases
-  `severity_config is None` itself, since their legacy-scheme needs differ
-  from an empty `blocking_categories`) — documented explicitly in its
-  docstring rather than silently left as untested-in-practice code.
+  `compute_gate_decision()` that `reporter.py`/`sarif.py`/
+  `cli_compare_release.py` were all migrated to — now routed through it too,
+  so all four gate-status call sites share one computation. The primary and
+  `--secondary-format` render paths each independently resolved the
+  tri-state `--demangle` flag with a duplicated one-line rule; factored into
+  a single `cli_compare_helpers._resolve_demangle()` that both call.
+  `compute_gate_decision`'s legacy (no `SeverityConfig`) branch was found to
+  be unreachable from any of its three production call sites (each already
+  special-cases `severity_config is None` itself, since their legacy-scheme
+  needs differ from an empty `blocking_categories`) — documented explicitly
+  in its docstring rather than silently left as untested-in-practice code.
 
 - **Clang plugin: `source_edges` collected but never reached the L5 graph,
   plus four related correctness gaps from an independent review of the

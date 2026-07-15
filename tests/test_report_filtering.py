@@ -376,6 +376,32 @@ class TestOperationForKind:
         assert operation_for_kind("vptr_introduced") == "modified"
         assert operation_for_kind("static_tls_introduced") == "modified"
 
+    def test_added_suffix_trait_change_on_persisting_entity_is_modified(self):
+        """The same trait-change-on-a-persisting-entity pattern as above, but
+        spelled with an "_added" suffix instead of "_lost_"/"_introduced" —
+        the plain suffix rule alone would misclassify these as "added" even
+        though no new function/type appears; each names a trait gained by an
+        already-existing entity ("Function became virtual: {name}", "noexcept
+        specifier added: {name}", ...) and none is in ADDITION_KINDS
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_noexcept_added") == "modified"
+        assert operation_for_kind("func_virtual_added") == "modified"
+        assert operation_for_kind("func_variadic_added") == "modified"
+        assert operation_for_kind("func_pure_virtual_added") == "modified"
+
+    def test_field_added_mid_struct_is_modified_not_added(self):
+        """`type_field_added` (a field inserted into an existing struct,
+        shifting every subsequent field's offset) modifies the type's
+        existing layout — the safe append-at-end case has its own dedicated
+        addition kind, `type_field_added_compatible`, which is unaffected
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("type_field_added") == "modified"
+        assert operation_for_kind("type_field_added_compatible") == "added"
+
     @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
     def test_no_remaining_add_remove_synonym_misses(self, kind):
         """Systematic sweep: every ChangeKind whose name contains an add/
