@@ -809,6 +809,54 @@ def _find_public_pimpl_holders(
     return found
 
 
+def _strip_leading_return_type(head: str) -> str:
+    """Strip a leading return type from a demangled function signature head.
+
+    Only a function template/specialization carries a return type ahead of
+    the qualified name in c++filt's output (e.g.
+    ``"int mylib::Widget::foo<int>"``); an ordinary function's head is
+    already bare (``"mylib::Widget::get"``). The return type is separated
+    from the qualified name by a top-level space — one not nested inside
+    the template argument list's angle brackets, since those may
+    themselves contain spaces (e.g. ``"Foo<int, long>"``) — so take
+    everything after the *last* top-level space rather than naively
+    splitting on the first space.
+    """
+    depth = 0
+    last_space = -1
+    for i, ch in enumerate(head):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        elif ch == " " and depth <= 0:
+            last_space = i
+    return head[last_space + 1 :] if last_space != -1 else head
+
+
+def _holder_of(head: str, holders: set[str]) -> str | None:
+    """Return the entry of *holders* that owns the qualified name in *head*.
+
+    *head* is a function signature with the parameter list already
+    stripped. *holders* may hold either fully-qualified record names or
+    bare/unqualified ones (``RecordType.name`` is not consistently
+    qualified — e.g. a nested class can appear as just ``"descriptor"``),
+    so both the full enclosing-scope name and its last segment are checked
+    against *holders*, mirroring how a record name would be looked up
+    either way.
+    """
+    qualified = _strip_leading_return_type(head)
+    if "::" not in qualified:
+        return None
+    holder = qualified.rsplit("::", 1)[0]
+    if holder in holders:
+        return holder
+    leaf = _last_segment(holder)
+    if leaf in holders:
+        return leaf
+    return None
+
+
 def _inline_accessors_for(
     functions: Iterable[Function],
     holders: set[str],
@@ -835,8 +883,7 @@ def _inline_accessors_for(
 
     out: list[Function] = []
     for fn in already_qualified:
-        holder = fn.name.rsplit("::", 1)[0]
-        if holder in holders or _last_segment(holder) in holders:
+        if _holder_of(fn.name, holders) is not None:
             out.append(fn)
     for fn in needs_demangle:
         text = demangled.get(fn.mangled)
@@ -845,8 +892,7 @@ def _inline_accessors_for(
         head = text.split("(", 1)[0]
         if "::" not in head:
             continue
-        holder = head.rsplit("::", 1)[0]
-        if holder in holders or _last_segment(holder) in holders:
+        if _holder_of(head, holders) is not None:
             out.append(fn)
     return out
 

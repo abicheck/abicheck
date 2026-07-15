@@ -406,6 +406,29 @@ class TestInlineAccessorsFor:
         fn = _fn("mylib::Other::get", "_Zget", is_inline=True)
         assert _inline_accessors_for([fn], {"mylib::Widget"}) == []
 
+    def test_unqualified_holder_matched_via_last_segment(self) -> None:
+        # RecordType.name is not consistently fully-qualified in practice —
+        # a nested/pimpl-holding class can be recorded as just "descriptor"
+        # rather than "mylib::descriptor" — while the demangled function
+        # scope is always fully qualified. The last-segment fallback (not
+        # just an exact-string match) is what makes real case89-style
+        # matching work; a regression here silently drops every real
+        # accessor match (review-driven regression guard).
+        fn = _fn("get_class_count", "_ZNK5mylib10descriptor15get_class_countEv", is_inline=True)
+        out = _inline_accessors_for([fn], {"descriptor"})
+        assert out == [fn]
+
+    def test_templated_accessor_matched_despite_leading_return_type(self) -> None:
+        # c++filt includes a leading return type for a function
+        # template/specialization (e.g. "int mylib::Widget::foo<int>(int)")
+        # that ordinary functions never carry. A naive
+        # ``head.rsplit("::", 1)[0]`` on that text yields "int mylib::Widget"
+        # instead of "mylib::Widget", missing every templated inline
+        # accessor (review finding on the case89 fix).
+        fn = _fn("foo", "_ZN5mylib6Widget3fooIiEEiT_", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
 
 class TestEmitInlineBodyFindings:
     def test_no_pimpl_holder_skips_candidate(self) -> None:
