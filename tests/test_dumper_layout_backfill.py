@@ -233,6 +233,33 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
+    def test_fieldless_virtual_base_only_mismatch_is_never_guessed(self) -> None:
+        """Regression (Codex review): virtual inheritance is stored in
+        RecordType.virtual_bases, not .bases, on both the clang header
+        parser and the DWARF builder. A fieldless class that only inherits
+        virtually (`Foo : virtual PublicBase`) would otherwise leave both
+        `.bases` sets empty and fall through to the "truly trivial" trust
+        path even when the unique DWARF candidate is an unrelated class
+        with a different virtual base (`impl::Foo : virtual InternalBase`)."""
+        header = RecordType(name="Foo", kind="class", fields=[], virtual_bases=["PublicBase"])
+        unrelated = RecordType(
+            name="impl::Foo", kind="class", size_bits=64, fields=[],
+            virtual_bases=["InternalBase"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_fieldless_with_matching_virtual_base_is_trusted(self) -> None:
+        """The legitimate counterpart: same source, so the virtual base name
+        genuinely overlaps even though neither side has data fields or
+        ordinary (non-virtual) bases."""
+        header = RecordType(name="Foo", kind="class", fields=[], virtual_bases=["Base"])
+        dwarf = RecordType(
+            name="Foo", kind="class", size_bits=16, fields=[], virtual_bases=["Base"],
+        )
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 16
+
     def test_fieldless_and_baseless_on_both_sides_is_trusted(self) -> None:
         """A truly trivial record (no fields, no bases on either side) has
         nothing left to disagree on beyond the name match itself — same

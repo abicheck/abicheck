@@ -154,12 +154,17 @@ def backfill_dwarf_layout(
     above: a fieldless ``impl::Foo`` with unrelated *bases* would otherwise
     pass the "both sides fieldless" trust unchallenged). When both sides are
     fieldless, base-class-name overlap is checked as a second corroborating
-    signal before falling back to trusting a truly trivial (no fields, no
-    bases) match on name alone. Vtable entries can't play the same role:
-    the clang header parser never populates ``RecordType.vtable`` itself
-    (only the DWARF side ever does, pre-backfill), so comparing vtable
-    presence would reject every legitimate virtual-only match, not just the
-    unrelated ones.
+    signal — combining ``bases`` *and* ``virtual_bases`` together, since both
+    the clang header parser and the DWARF builder file virtual inheritance
+    under ``virtual_bases`` rather than ``bases`` (Codex review: a
+    virtual-inheritance-only class, e.g. ``Foo : virtual PublicBase``, would
+    otherwise leave both ``.bases`` sets empty and fall straight through to
+    the trivial case below) — before falling back to trusting a truly
+    trivial (no fields, no bases, no virtual bases) match on name alone.
+    Vtable entries can't play the same role: the clang header parser never
+    populates ``RecordType.vtable`` itself (only the DWARF side ever does,
+    pre-backfill), so comparing vtable presence would reject every
+    legitimate virtual-only match, not just the unrelated ones.
     """
     if not dwarf_types:
         return header_types
@@ -192,9 +197,13 @@ def backfill_dwarf_layout(
         # can't serve the same role: the clang header parser never
         # populates RecordType.vtable itself, only DWARF does, so an
         # empty-vs-populated vtable comparison would reject every real
-        # match instead of just the unrelated ones).
-        header_bases = set(header.bases)
-        dwarf_bases = set(dwarf.bases)
+        # match instead of just the unrelated ones). Virtual bases are
+        # stored separately from ordinary bases on both the clang header
+        # parser and the DWARF builder (RecordType.virtual_bases, not
+        # .bases) — a virtual-inheritance-only class would otherwise leave
+        # both .bases sets empty and fall through to the trivial case below.
+        header_bases = set(header.bases) | set(header.virtual_bases)
+        dwarf_bases = set(dwarf.bases) | set(dwarf.virtual_bases)
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         return True  # truly trivial on both sides (no fields, no bases)
