@@ -479,6 +479,51 @@ def test_read_without_recompacting_prefers_fresh_over_stale_compacted(
     assert names == {"foo2", "bar"}
 
 
+def test_read_drops_all_prior_carry_forward_on_lossy_fresh_read(
+    tmp_path: Path,
+) -> None:
+    """A fresh per-TU file that fails to read/parse degrades to a diagnostic
+    (its true tu_id is then unknown), so read_source_facts cannot tell
+    whether it corresponds to some prior-compaction record it would
+    otherwise carry forward as "not rebuilt, still current". Silently
+    carrying every non-matching prior record forward anyway would let a
+    stale record stand in for source that may have actually changed, with
+    only a generic "skipped malformed record" diagnostic and no signal that
+    THIS TU's facts may now be wrong -- a lossy fresh read must drop ALL
+    prior-compaction carry-forward for the read, not just guess which one
+    TU it might affect (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    # Incremental rebuild of foo.cpp lands a truncated/corrupt file -- the
+    # source really may have changed, but the write never completed cleanly.
+    fresh = pack / "source_facts" / facts_filename("src/foo.cpp")
+    fresh.write_text("{not valid json!!", encoding="utf-8")
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    # Neither the corrupt fresh "foo" nor the untouched-but-now-untrusted
+    # prior "bar" survives -- not just the TU whose fresh write failed.
+    assert tus == []
+    assert any("skipped malformed JSON line" in d for d in diagnostics)
+    assert any("no prior-compaction record can be safely carried forward" in d for d in diagnostics)
+
+    report = validate_inputs_pack(pack)
+    assert report.tu_count == 0
+    assert any("skipped malformed JSON line" in w for w in report.warnings)
+
+
 def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> None:
     """A hand-written/older record that never stamped tu_id defaults to
     tu_id="" (SourceAbiTu.tu_id); a single fresh no-tu_id record must not

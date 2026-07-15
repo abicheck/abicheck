@@ -485,9 +485,33 @@ def read_source_facts(
         return read_source_fact_files(files, diagnostics=sink)
 
     fresh_files = [f for f in files if f not in prior_files]
+    # A fresh file that fails to read/parse degrades to a diagnostic (Codex
+    # review above) rather than aborting, but its tu_id is then unknown --
+    # meaning fresh_ids cannot be trusted to be *complete*. If some prior
+    # record's tu_id happens to be the very TU that failed to reparse (e.g.
+    # the rebuild really did change/remove something and the write raced or
+    # truncated), silently carrying that prior record forward as "not
+    # rebuilt, still current" would let stale evidence stand in for source
+    # that actually changed, with only a generic "skipped malformed record"
+    # diagnostic and no indication that specific TU's facts may now be wrong
+    # (Codex review, P2, reproduced empirically). So a lossy fresh read
+    # invalidates ALL prior-compaction carry-forward for this read, not just
+    # the one TU we cannot identify -- matching compact_inputs_pack's own
+    # all-or-nothing fail-closed rule for a lossy read, rather than guessing
+    # which subset of prior records might still be safe.
+    fresh_before = len(sink)
     fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
+    fresh_lossy = len(sink) > fresh_before
     fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}
     prior_tus = read_source_fact_files(prior_files, diagnostics=sink)
+    if fresh_lossy:
+        sink.append(
+            "a fresh source-fact file failed to read/parse; its true tu_id "
+            "is unknown, so no prior-compaction record can be safely "
+            "carried forward as still-current for this read (fix or remove "
+            "the malformed file and retry)"
+        )
+        return fresh_tus
     surviving_prior = [tu for tu in prior_tus if tu.tu_id not in fresh_ids]
     return fresh_tus + surviving_prior
 
