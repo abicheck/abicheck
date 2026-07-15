@@ -39,21 +39,7 @@ _spec.loader.exec_module(sync_gate)
 
 
 def test_usecase_docs_agree_with_registry() -> None:
-    gap_status = sync_gate._load_registry_gap_status()
-    findings = []
-    findings += sync_gate._check_eval_doc_gaps_table(gap_status)
-    findings += sync_gate._check_backlog_table_excludes_done_gaps(
-        gap_status, sync_gate.EVAL_DOC, "## Proposed next steps", "\n## "
-    )
-    findings += sync_gate._check_backlog_table_excludes_done_gaps(
-        gap_status,
-        sync_gate.PLANS_INDEX,
-        "| Gap | Plan | Registry use cases | Effort |",
-        "Initiative plans",
-    )
-    findings += sync_gate._check_completed_table_excludes_open_gaps(
-        gap_status, sync_gate.PLANS_INDEX, "Completed or decided plans are retained"
-    )
+    findings = sync_gate.all_findings()
     assert not findings, (
         "usecase docs drifted from usecase-registry.yaml:\n"
         + "\n".join(f"  - {f}" for f in findings)
