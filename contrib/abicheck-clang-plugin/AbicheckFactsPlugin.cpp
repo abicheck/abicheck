@@ -1425,6 +1425,31 @@ std::string mangledOrScopedName(MangleContext *mc, const NamedDecl *d) {
   return scopedName(d);
 }
 
+// Physical defining file of *d* (ignoring `#line`, matching classify()'s own
+// resolution), independent of any public/private classification — a call or
+// reference target may be private-header or third-party, and this is purely
+// descriptive dst-endpoint provenance for the Python-side fold
+// (source_graph._augment_with_plugin_source_edges), which decides
+// project-internal-ness itself via BuildEvidence's compile-unit sources/
+// private headers (ADR-041 P1 #1 addendum, Codex review: without this, a
+// DECL_CALLS_DECL/DECL_REFERENCES_DECL endpoint that only ever appears as a
+// source_edges target — never independently declared on the L4 public
+// surface — gets no `defined_in_project` marking downstream, so
+// PUBLIC_API_INTERNAL_DEPENDENCY_ADDED misses it). Every ``Decl`` carries its
+// owning ``ASTContext`` (``getASTContext()``), so this needs no
+// ``SourceManager`` threaded in — callable from ``CallRefVisitor``, which (as
+// the comment below notes) has no ASTContext of its own.
+std::string declFile(const Decl *d) {
+  const SourceManager &SM = d->getASTContext().getSourceManager();
+  SourceLocation loc = SM.getExpansionLoc(d->getLocation());
+  if (loc.isInvalid())
+    return "";
+  PresumedLoc pl = SM.getPresumedLoc(loc, /*UseLineDirectives=*/false);
+  if (pl.isInvalid())
+    return "";
+  return pl.getFilename();
+}
+
 // ---------------------------------------------------------------------------
 // Small per-function-body sub-walk collecting DECL_CALLS_DECL/
 // DECL_REFERENCES_DECL edge targets (P1 #17-18). Scoped to one FunctionDecl's
@@ -1441,7 +1466,11 @@ public:
   // MangleContext of its own (it is instantiated fresh per function body with
   // no ASTContext threaded in), and the target AST outlives this sub-walk.
   std::vector<std::pair<const FunctionDecl *, bool>> Calls;
-  std::vector<std::string> References;
+  // (scoped name, defining file) — the file is resolved eagerly here (via the
+  // free declFile(), which needs no ASTContext member of its own) rather than
+  // retaining the raw Decl* the way Calls does, since name resolution for a
+  // reference needs no MangleContext deferral the way a call's does.
+  std::vector<std::pair<std::string, std::string>> References;
 
   bool shouldVisitImplicitCode() const { return false; }
   bool shouldVisitTemplateInstantiations() const { return false; }
@@ -1467,10 +1496,10 @@ public:
       // the plugin's own public-variable scope (emitDataVariable).
       if (varD->isLocalVarDeclOrParm() || varD->getNameAsString().empty())
         return true;
-      References.push_back(scopedName(varD));
+      References.emplace_back(scopedName(varD), declFile(varD));
     } else if (const auto *ecd = dyn_cast<EnumConstantDecl>(vd)) {
       if (!ecd->getNameAsString().empty())
-        References.push_back(scopedName(ecd));
+        References.emplace_back(scopedName(ecd), declFile(ecd));
     }
     return true;
   }
@@ -2049,14 +2078,24 @@ public:
     if (Stmt *body = fd->getBody()) {
       CallRefVisitor crv;
       crv.TraverseStmt(body);
-      for (const auto &call : crv.Calls)
+      for (const auto &call : crv.Calls) {
+        std::map<std::string, std::string> attrs = {
+            {"call_kind", call.second ? "virtual" : "direct"},
+            {"resolution", call.second ? "overapprox" : "exact"}};
+        std::string file = declFile(call.first);
+        if (!file.empty())
+          attrs["dst_file"] = std::move(file);
         addEdge("DECL_CALLS_DECL", key,
                 mangledOrScopedName(Mangler.get(), call.first),
-                call.second ? "reduced" : "high",
-                {{"call_kind", call.second ? "virtual" : "direct"},
-                 {"resolution", call.second ? "overapprox" : "exact"}});
-      for (const std::string &ref : crv.References)
-        addEdge("DECL_REFERENCES_DECL", key, ref, "reduced", {{"role", "ref"}});
+                call.second ? "reduced" : "high", std::move(attrs));
+      }
+      for (const auto &ref : crv.References) {
+        std::map<std::string, std::string> attrs = {{"role", "ref"}};
+        if (!ref.second.empty())
+          attrs["dst_file"] = ref.second;
+        addEdge("DECL_REFERENCES_DECL", key, ref.first, "reduced",
+                std::move(attrs));
+      }
     }
 
     // Gate the whole inline entity on a CompoundStmt being present in the
@@ -2524,14 +2563,24 @@ private:
       if (Stmt *body = fd->getBody()) {
         CallRefVisitor crv;
         crv.TraverseStmt(body);
-        for (const auto &call : crv.Calls)
+        for (const auto &call : crv.Calls) {
+          std::map<std::string, std::string> attrs = {
+              {"call_kind", call.second ? "virtual" : "direct"},
+              {"resolution", call.second ? "overapprox" : "exact"}};
+          std::string file = declFile(call.first);
+          if (!file.empty())
+            attrs["dst_file"] = std::move(file);
           addEdge("DECL_CALLS_DECL", name,
                   mangledOrScopedName(Mangler.get(), call.first),
-                  call.second ? "reduced" : "high",
-                  {{"call_kind", call.second ? "virtual" : "direct"},
-                   {"resolution", call.second ? "overapprox" : "exact"}});
-        for (const std::string &ref : crv.References)
-          addEdge("DECL_REFERENCES_DECL", name, ref, "reduced", {{"role", "ref"}});
+                  call.second ? "reduced" : "high", std::move(attrs));
+        }
+        for (const auto &ref : crv.References) {
+          std::map<std::string, std::string> attrs = {{"role", "ref"}};
+          if (!ref.second.empty())
+            attrs["dst_file"] = ref.second;
+          addEdge("DECL_REFERENCES_DECL", name, ref.first, "reduced",
+                  std::move(attrs));
+        }
       }
     }
   }

@@ -1079,7 +1079,36 @@ there is no equivalent "should this be automatic" question for them.
    compact `referencedDecl` stub by bare name (real Clang never puts
    `mangledName` on that stub), collapsing overloads onto one endpoint; it
    now builds an id-index from the full declarations seen in the same walk,
-   mirroring the fix `type_graph.py` already had.
+   mirroring the fix `type_graph.py` already had. **ADR-038 C.11 closes half
+   of the follow-up above** (Codex review): both `source_edges` producers now
+   carry `dst_file` for `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` — the C++
+   plugin via a new `declFile()` helper (mirroring `classify()`'s own
+   resolution), the Python inline extractor
+   (`clang_source_edges.build_source_edges`) by simply forwarding
+   `CallEdge.callee_file`/`TypeEdge.dst_file`, both of which already resolved
+   it — and `fold_source_edges()` now marks a `dst_file`-matching node
+   `defined_in_project`, mirroring `augment_graph_with_calls`/
+   `augment_graph_with_types`'s identical marker. The inline extractor
+   actually carries `dst_file` for **all five** kinds (`type_graph.py`'s
+   two-pass indexing resolves a type spelling to its declaring file
+   regardless of edge kind); the plugin's three type-edge kinds
+   (`DECL_HAS_TYPE`/`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`) still don't — its
+   `dst` there is a printed type spelling it never attempts to resolve back
+   to a decl/file. `inline._build_inline_graph()` still always runs the
+   separate replay passes regardless (that skip-optimization needs *every*
+   kind covered, not just two of five, to be safe) — this closes the
+   `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`-visibility gap for
+   Flow-2/plugin-only ingestion paths that never run a replay at all
+   (`inputs_pack.ingest_inputs_pack`), not the replay-skip itself. Also
+   fixed alongside: `mark_source_edges_extractor_coverage()` only trusts a
+   `"complete"` coverage state when `surface.source_edges` is actually
+   non-empty (a pre-C.11 `source_abi.json` can carry `"complete"` from
+   `coverage["fact_family_states"]` — which predates the `source_edges`
+   field itself — with no edges to back it, since the old serializer had
+   nowhere to persist them); and `fold_source_edges()` now gates on
+   `DEPENDENCY_EDGE_KINDS` rather than the broader `EDGE_KINDS`, so a
+   forward-incompatible/malformed row can't silently fold as a decl/decl
+   dependency edge.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges

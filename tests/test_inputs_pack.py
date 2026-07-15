@@ -254,6 +254,12 @@ def test_ingest_marks_call_type_graph_coverage_from_complete_source_edges(
     tu = _tu("foo", mangled="_Z3foov")
     tu.fact_set = default_fact_set(producer="p", producer_version="1")
     tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    # "complete" requires entities_present -- non-empty source_edges backs
+    # that claim (a "complete" state with no edges is the legacy-drop
+    # scenario a source_graph.py test guards against separately).
+    tu.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "_Z3foov", "dst": "_Z6helperv"},
+    ]
     pack = _write_inputs_pack(tmp_path, [tu])
     ingested = ingest_inputs_pack(pack)
     graph = ingested.pack.source_graph
@@ -331,6 +337,12 @@ def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
     tu = _tu("foo", mangled="_Z3foov")
     tu.fact_set = default_fact_set(producer="p", producer_version="1")
     tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    # "complete" requires entities_present -- non-empty source_edges backs
+    # that claim (a "complete" state with no edges is the legacy-drop
+    # scenario a source_graph.py test guards against separately).
+    tu.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "_Z3foov", "dst": "_Z6helperv"},
+    ]
     pack = _write_inputs_pack(tmp_path, [tu])  # no exported_symbols -> relink runs
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
     snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))

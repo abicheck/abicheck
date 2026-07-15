@@ -49,7 +49,25 @@ from typing import TYPE_CHECKING, Any
 
 from ..build_context import _extract_flags
 from .adapters.base import source_from_argv
-from .source_graph import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN, GraphEdge, GraphNode
+from .source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    CONF_UNKNOWN,
+    GraphEdge,
+    GraphNode,
+    _file_in_project,
+    project_source_files,
+)
+
+__all__ = ["_file_in_project", "project_source_files"]
+# _file_in_project/project_source_files are defined in source_graph.py (moved
+# there so source_graph.build_source_graph can call project_source_files(build)
+# without a source_graph -> call_graph -> source_graph import cycle — this
+# module already imports several names from source_graph at module level, so
+# importing these two from there instead of defining them here is a free
+# direction, not a new edge). Re-exported by name here for back-compat:
+# type_graph.py's function-local import and inline_graph_fold.py's
+# module-level import both still spell it `from .call_graph import ...`.
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
@@ -365,42 +383,6 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     id_index: dict[str, str] = {}
     _walk_calls(ast, "", "", "", edges, decl_files, id_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
-
-
-def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
-    """Whether *caller_file* is one of the project's own compile-unit sources.
-
-    Build-evidence sources are often repo-relative (``src/foo.cc``) while the
-    clang AST emits an absolute path (``/work/src/foo.cc``); match on a path
-    suffix either way (mirrors ``source_replay._path_matches``). A function whose
-    body is in one of these files is project-defined; one in a third-party/system
-    header (Boost/Abseil/libstdc++) is not.
-    """
-    if not caller_file:
-        return False
-    c = caller_file.replace("\\", "/").lstrip("./")
-    for pf in project_files:
-        n = pf.replace("\\", "/").lstrip("./")
-        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
-            return True
-    return False
-
-
-def project_source_files(build: BuildEvidence) -> frozenset[str]:
-    """Project-internal source files for ``defined_in_project`` provenance.
-
-    Compile-unit sources **plus the targets' private headers** — a function whose
-    body is in a project ``.cc`` *or* a project private header is internal
-    implementation. Public headers are deliberately excluded: an inline function
-    in a public header is consumer-visible public surface, so marking it
-    ``defined_in_project`` (→ internal) would false-positive
-    ``public_to_internal_dependency``. Third-party/system headers (Boost, libc++)
-    are never in either list, so they stay external (Codex review).
-    """
-    files: set[str] = {cu.source for cu in build.compile_units if cu.source}
-    for tgt in build.targets:
-        files.update(h for h in tgt.private_headers if h)
-    return frozenset(files)
 
 
 def extractor_pass_fully_covered(

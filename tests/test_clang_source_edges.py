@@ -61,15 +61,32 @@ def _base(qual_type: str) -> dict:
     return {"type": {"qualType": qual_type}, "writtenAccess": "public"}
 
 
-def _record(name: str, *, bases: list[dict] | None = None) -> dict:
+def _record(
+    name: str,
+    *,
+    bases: list[dict] | None = None,
+    file: str = "",
+) -> dict:
     d: dict = {"kind": "CXXRecordDecl", "name": name, "inner": []}
     if bases is not None:
         d["bases"] = bases
+    if file:
+        d["loc"] = {"file": file}
     return d
 
 
 def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
+
+
+def _func_in(name: str, mangled: str, body: list[dict], file: str) -> dict:
+    return {
+        "kind": "FunctionDecl",
+        "name": name,
+        "mangledName": mangled,
+        "loc": {"file": file, "line": 1},
+        "inner": [{"kind": "CompoundStmt", "inner": body}],
+    }
 
 
 def test_build_source_edges_maps_call_and_type_edges() -> None:
@@ -104,6 +121,53 @@ def test_build_source_edges_maps_call_and_type_edges() -> None:
     assert inherits["src"] == "Derived"
     assert inherits["dst"] == "Base"
     assert inherits["provenance"] == "clang-ast-inline"
+
+
+def test_build_source_edges_preserves_dst_file_for_calls() -> None:
+    # ADR-041 addendum (Codex review): without dst_file,
+    # source_graph.fold_source_edges cannot mark a source-only-visible
+    # callee defined_in_project, so PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    # misses it.
+    ast = _tu(
+        _func_in("helper", "_Zhelper", [], "/work/src/util.cc"),
+        _func_in(
+            "api",
+            "_Zapi",
+            [_direct_call(_ref("FunctionDecl", "helper", "_Zhelper"))],
+            "/work/src/api.cc",
+        ),
+    )
+    edges = build_source_edges(ast, [])
+    call_edge = next(e for e in edges if e["edge"] == "DECL_CALLS_DECL")
+    assert call_edge["attrs"]["dst_file"] == "/work/src/util.cc"
+
+
+def test_build_source_edges_preserves_dst_file_for_type_edges() -> None:
+    # Applies to every type_edges kind (TYPE_INHERITS here), not just
+    # DECL_REFERENCES_DECL -- type_graph.parse_clang_ast_types resolves
+    # dst_file uniformly regardless of kind.
+    ast = _tu(
+        _record("Base", file="src/detail/base.h"),
+        _record("Derived", bases=[_base("Base")]),
+    )
+    edges = build_source_edges(ast, [])
+    inherits = next(e for e in edges if e["edge"] == "TYPE_INHERITS")
+    assert inherits["attrs"]["dst_file"] == "src/detail/base.h"
+
+
+def test_build_source_edges_omits_dst_file_when_unresolved() -> None:
+    # No sibling declaration to resolve the file from -- attrs must not
+    # carry a spurious empty dst_file key.
+    ast = _tu(
+        _func(
+            "caller",
+            "_Zcaller",
+            [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))],
+        ),
+    )
+    edges = build_source_edges(ast, [])
+    call_edge = next(e for e in edges if e["edge"] == "DECL_CALLS_DECL")
+    assert "dst_file" not in call_edge["attrs"]
 
 
 def test_build_source_edges_dedupes_identical_kind_src_dst() -> None:
