@@ -248,6 +248,26 @@ def _artifact_errors(
             if isinstance(row, dict) and row.get("status") is not None
         )
     )
+    if label in {"gcc", "clang", "build_source"}:
+        # tests/validate_examples.py's _summary_counts() layers two reported-only,
+        # non-blocking advisory tallies on top of the per-status counts: rows whose
+        # kinds_strict/category_strict signal is off (a case can be PASS/XFAIL for
+        # its verdict yet still flagged here for expected_kinds drift). Mirror that
+        # so a summary carrying those keys isn't flagged as an artifact mismatch.
+        collapsed = sum(
+            1
+            for row in results
+            if isinstance(row, dict) and row.get("category_strict") == "collapsed"
+        )
+        if collapsed:
+            actual_summary["CATEGORY_COLLAPSED"] = collapsed
+        kinds_mismatch = sum(
+            1
+            for row in results
+            if isinstance(row, dict) and row.get("kinds_strict") == "mismatch"
+        )
+        if kinds_mismatch:
+            actual_summary["KINDS_MISMATCH"] = kinds_mismatch
     if data.get("summary") != actual_summary:
         errors.append(
             f"{label}: summary={data.get('summary')!r}, recomputed {actual_summary!r}"

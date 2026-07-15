@@ -161,6 +161,42 @@ def test_full_matrix_runtime_build_error_is_an_artifact_error() -> None:
     assert errors == ["runtime: failing runner statuses for: case01"]
 
 
+@pytest.mark.parametrize("label", ["gcc", "clang", "build_source"])
+def test_full_matrix_summary_check_tolerates_kinds_mismatch_advisory_key(
+    label: str,
+) -> None:
+    """A PASS row flagged kinds_strict=mismatch adds a KINDS_MISMATCH tally to
+    tests/validate_examples.py's summary alongside the row's own PASS/XFAIL
+    status (see _summary_counts). That is a reported-only advisory signal, not
+    a second status, so it must not be flagged as a summary/results mismatch.
+    """
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01", "case02"}
+    payload = _artifact(matrix, label, cases)
+    payload["summary"] = {"PASS": 2, "KINDS_MISMATCH": 1}
+    payload["results"] = [
+        {"case_id": "case01", "status": "PASS", "kinds_strict": "mismatch"},
+        {"case_id": "case02", "status": "PASS", "kinds_strict": "match"},
+    ]
+    errors = matrix._artifact_errors(label, payload, expected_cases=cases)
+    assert not any("summary=" in error for error in errors)
+
+
+@pytest.mark.parametrize("label", ["gcc", "clang", "build_source"])
+def test_full_matrix_summary_check_still_catches_real_drift(label: str) -> None:
+    """The advisory-key tolerance must not swallow genuine summary/results drift."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01", "case02"}
+    payload = _artifact(matrix, label, cases)
+    payload["summary"] = {"PASS": 2, "KINDS_MISMATCH": 5}
+    payload["results"] = [
+        {"case_id": "case01", "status": "PASS", "kinds_strict": "mismatch"},
+        {"case_id": "case02", "status": "PASS", "kinds_strict": "match"},
+    ]
+    errors = matrix._artifact_errors(label, payload, expected_cases=cases)
+    assert any("summary=" in error for error in errors)
+
+
 def _proof_artifact(matrix: ModuleType) -> dict[str, object]:
     owners = sorted(matrix.SPECIAL_PROOFS)
     return {
