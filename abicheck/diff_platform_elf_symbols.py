@@ -598,9 +598,10 @@ def _check_object_alignment_reduced(
     one: adding an unrelated neighbouring global can shift a symbol's link-time
     address (and therefore its apparent low-bit alignment) with no change to
     its actual declared alignment at all. When DWARF/header evidence is
-    available on both sides (the variable's ``alignment_bits``) and shows the
-    declared alignment did NOT change, that is authoritative and the
-    address-derived drop is placement noise — suppress it (a genuine
+    available on both sides (the variable's ``alignment_bits``), that is
+    authoritative — the address-derived drop only stands if the declared
+    alignment also decreased; an unchanged or *increased* declaration means
+    the drop is placement noise and must be suppressed (a genuine
     declared-alignment change is instead owned by VAR_ALIGNMENT_CHANGED in
     diff_symbols.py). Falls back to the weak address-derived signal only when
     no declared-alignment evidence is available for corroboration (e.g.
@@ -619,7 +620,7 @@ def _check_object_alignment_reduced(
     if (
         declared_old is not None
         and declared_new is not None
-        and declared_old == declared_new
+        and not (declared_new < declared_old)
     ):
         return []
     return [

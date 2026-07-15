@@ -513,6 +513,19 @@ class TestObjectAlignmentReduced:
         )
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
+    def test_declared_alignment_increased_suppresses_address_noise(self):
+        # Declared alignment INCREASED (32 -> 64 bits) while the address-
+        # derived value happened to drop (64 -> 8 bytes) — declared evidence
+        # does not corroborate a reduction, so this is still placement noise
+        # and must not fire, not just the equal-declared case.
+        old = _elf(symbols=[_obj("g_table", alignment=64)])
+        new = _elf(symbols=[_obj("g_table", alignment=8)])
+        r = compare(
+            _snap(old, [_var("g_table", 32)]),
+            _snap(new, [_var("g_table", 64)]),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
     def test_declared_alignment_unknown_falls_back_to_address_heuristic(self):
         # No declared-alignment evidence on either side (e.g. symbols-only /
         # stripped-without-headers) — corroboration is impossible, so the weak
