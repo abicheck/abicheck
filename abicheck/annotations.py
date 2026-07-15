@@ -153,6 +153,9 @@ def _classify_change_by_severity(
     kind_sets: KindSets,
     severity_config: SeverityConfig,
     annotate_additions: bool,
+    *,
+    policy: str | None = None,
+    policy_file: object | None = None,
 ) -> str | None:
     """Return the annotation level driven by *severity_config*, or None to skip.
 
@@ -163,10 +166,22 @@ def _classify_change_by_severity(
     severity level directly; ``info`` only surfaces (as ``::notice``) when
     *annotate_additions* opts into the noisier informational annotations —
     matching the pre-existing opt-in behaviour for additions.
+
+    *policy_file* must be threaded through (not just the pre-baked
+    *kind_sets*) so a frozen-namespace-tagged finding's floor is honoured the
+    same way ``severity.compute_exit_code`` honours it for the actual exit
+    code: ``kind_sets`` alone already moves a policy-overridden *kind* to its
+    new bucket, but the *per-change* frozen-namespace clamp-back (never let an
+    override downgrade a frozen-namespace violation below its raw verdict)
+    only fires when ``policy_file`` itself is passed to
+    ``classify_effective_change`` — omitting it would let this annotation
+    under-report a finding that still fails CI at its raw severity.
     """
     from .severity import SeverityLevel, classify_effective_change
 
-    category = classify_effective_change(change, kind_sets=kind_sets)
+    category = classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
     level = severity_config.level_for(category)
     if level == SeverityLevel.ERROR:
         return "error"
@@ -246,6 +261,7 @@ def collect_annotations(
         if severity_config is not None:
             level = _classify_change_by_severity(
                 change, kind_sets, severity_config, annotate_additions,
+                policy=diff_result.policy, policy_file=diff_result.policy_file,
             )
         else:
             level = _classify_change(

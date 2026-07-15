@@ -625,3 +625,38 @@ class TestSeverityConfigAwareAnnotations:
         cfg = resolve_severity_config("default", addition="error")
         output = emit_github_annotations(result, severity_config=cfg)
         assert output.startswith("::error ")
+
+    def test_frozen_namespace_floor_honoured_under_policy_override(self):
+        """A policy-file override that demotes FUNC_REMOVED to COMPATIBLE must
+        not silently downgrade a finding tagged frozen_namespace_violation —
+        the actual exit code (severity.compute_exit_code, given policy_file)
+        keeps such a finding at its raw BREAKING severity, so the annotation
+        must too, or a build that still fails CI would get no ::error at all.
+        """
+        from abicheck.checker_policy import Verdict as _Verdict
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import compute_exit_code, resolve_severity_config
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: _Verdict.COMPATIBLE})
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so.1",
+            changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+        )
+        cfg = resolve_severity_config("default")  # abi_breaking=error
+
+        # The actual gate: still fails at the frozen finding's raw severity.
+        eff_sets = result._effective_kind_sets()
+        exit_code = compute_exit_code(
+            result.changes, cfg, kind_sets=eff_sets, policy_file=result.policy_file,
+        )
+        assert exit_code == 4
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 0
+        assert line.startswith("::error ")
