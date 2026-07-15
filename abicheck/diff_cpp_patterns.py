@@ -48,6 +48,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -986,8 +987,16 @@ def _extract_soname_major(soname: str) -> int | None:
 
 
 def _cohort_key(library: str) -> str:
-    """Strip version-y suffixes to derive a cohort key for clustering."""
-    name = library
+    """Strip version-y suffixes to derive a cohort key for clustering.
+
+    Vendor-hash-stripped first: an auditwheel/delocate-vendored library's
+    filename carries a content hash that changes on every rebuild
+    (``libfoo-a1b2c3d4.so.1``), which would otherwise put the same logical
+    library into a different cohort every build and silently drop it from
+    skew analysis instead of pairing it (see
+    ``diff_platform_elf_dynamic._diff_elf_dynamic_section``).
+    """
+    name = strip_vendor_hash(library)
     # Drop everything from the first dot onwards: libfoo_core.so.2
     # -> libfoo_core.
     return name.split(".", 1)[0]

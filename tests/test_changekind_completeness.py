@@ -366,6 +366,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # Explicit specifier transitions — exercised in tests/test_explicit_ctor.py
     ChangeKind.CTOR_EXPLICIT_ADDED,
     ChangeKind.CTOR_EXPLICIT_REMOVED,
+    # Constructor-overload-ambiguity risk heuristic — exercised in
+    # tests/test_explicit_ctor.py::TestCtorOverloadAmbiguityRisk
+    ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK,
     # Class `final`-specifier transitions — exercised in
     # tests/test_new_detectors.py::TestTypeFinalityChanged
     ChangeKind.TYPE_BECAME_FINAL,

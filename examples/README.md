@@ -93,16 +93,20 @@ the way it previously did (stale at a 169-case catalog for several releases).
   `tests/validate_examples.py` parses the real compare output's change kinds and checks them
   against `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` and
   summarized as a `KINDS_MISMATCH` count — previously only the final verdict string was asserted,
-  so a case could PASS with the right severity for the wrong detector reason. The latest full-catalog
-  run under this check found 18 (gcc) / 19 (clang) such cases (verdict correct, named detector kind
-  not actually produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
-  `case59_func_became_inline`, `case65_symbol_version_removed`, `case66_language_linkage_changed`,
+  so a case could PASS with the right severity for the wrong detector reason. A full-catalog run
+  under this check (`PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json`)
+  found **22 (gcc) / 24 (clang)** such cases (verdict correct, named detector kind not actually
+  produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
+  `case59_func_became_inline`, (gcc only) `case64_calling_convention_changed`,
+  `case65_symbol_version_removed`, `case66_language_linkage_changed`,
   `case72_covariant_return_changed`, `case74/75/76/77/80_detail_*` (the `internal_type_leaks_via_
   public_api` escalation doesn't fire for any of these detail-namespace-leak cases — its reachability
   check appears to need namespace-qualified symbols that the DWARF-derived struct/type diff doesn't
   currently emit), `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
   `case87_default_template_arg_changed`, `case88_cpo_kind_changed`, `case94_empty_tag_gained_state`,
-  `case116_atomic_qualifier_changed`, and (clang only) `case115_bit_int_width_changed`. Case-level
+  `case98_cxx_standard_floor_raised`, `case105_concept_tightening`, `case116_atomic_qualifier_changed`,
+  `case122_template_signature_uninstantiated`, and (clang only) `case103_toolchain_flag_drift`,
+  `case115_bit_int_width_changed`, `case180_symbol_binding_lost_unique`. Case-level
   membership is toolchain-sensitive even within "gcc"/"clang" (e.g. `case59`/`case141`'s
   `kinds_strict` differ between a gcc 13 and a gcc 14 install), so treat this list as the latest
   CI-authoritative run, not a fixed set. These are real, pre-existing detector gaps this check

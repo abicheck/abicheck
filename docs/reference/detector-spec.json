@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 353,
+  "count": 354,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -405,6 +405,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "ctor_explicit_removed",
+      "examples": ""
+    },
+    {
+      "kind": "ctor_overload_ambiguity_risk",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "ctor_overload_ambiguity_risk",
       "examples": ""
     },
     {

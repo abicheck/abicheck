@@ -813,6 +813,17 @@ REGISTRY = ChangeKindRegistry([
               "conversion paths that previously did not consider this "
               "function now do, potentially selecting a different overload "
               "than before and causing silent behavioral drift."),
+    _E("ctor_overload_ambiguity_risk", _R,
+       impact="A class gained a second (or later) non-explicit, single-"
+              "argument constructor. Any call site whose argument type is "
+              "implicitly convertible to more than one of the class's "
+              "converting constructors becomes ambiguous — it either stops "
+              "compiling or silently resolves to a different constructor "
+              "than before. This cannot be proven from a header/binary "
+              "snapshot alone (it depends on actual call-site argument "
+              "types), so it is reported as a risk to review, not a "
+              "certain break.",
+       description_template="Class '{name}' gained a 2nd+ non-explicit converting constructor: {new}"),
 
     # ── Class `final`-specifier transitions (header/castxml only) ────────
     _E("type_became_final", _A,

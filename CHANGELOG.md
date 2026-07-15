@@ -9,7 +9,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`ctor_overload_ambiguity_risk` (new `ChangeKind`) — best-effort detector
+  for constructor-overload-ambiguity risk.** A class gaining a 2nd+
+  non-explicit, single-required-argument ("converting") constructor is
+  flagged as `COMPATIBLE_WITH_RISK`: any call site whose argument type is
+  implicitly convertible to more than one of the class's converting
+  constructors becomes ambiguous — it either stops compiling or silently
+  resolves to a different constructor than before (the oneTBB
+  `enumerable_thread_specific` pain point documented in
+  `examples/case111_enumerable_thread_specific_lambda_ambiguity`). This
+  cannot be proven from a snapshot alone (real ambiguity depends on the
+  consumer's actual call-site argument types), so it's a conservative
+  heuristic scoped to non-explicit constructors, not a certain break — see
+  `diff_symbols._diff_ctor_overload_ambiguity`. It does not close case111's
+  own gap (both of that case's constructors are `explicit`; its trigger is
+  empty-brace-list direct-initialization ambiguity, which needs real
+  overload-resolution simulation to detect soundly) — see the case's
+  updated README for the honest scope boundary.
+
 ### Fixed
+
+- **Vendored-wheel SONAME/install-name churn reported as spurious
+  `SONAME_CHANGED`/`SONAME_BUMP_UNNECESSARY`/bundle-skew findings.**
+  `auditwheel`/`delocate` rewrite a vendored library's own `DT_SONAME`/
+  `LC_ID_DYLIB` to match its content-hashed filename on every wheel rebuild
+  (`libfoo-<hash>.so.1`), so the raw SONAME differed every build even when
+  the underlying dependency didn't change — despite filename-hash pairing
+  already landing for cross-release library matching. The ELF SONAME diff,
+  Mach-O install-name diff, the SONAME-bump policy check, and the bundle-
+  level SONAME-skew cohort key now all compare on the same vendor-hash-
+  stripped spelling (`binary_utils.strip_vendor_hash`, relocated from
+  `cli_helpers_compare.py` so the leaf diff modules can use it); a genuine
+  SONAME/install-name change still fires normally.
 
 - **`exported_object_alignment_reduced` could false-positive on a purely
   additive change.** The detector derives alignment from a symbol's `st_value`

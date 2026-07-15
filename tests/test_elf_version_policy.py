@@ -371,6 +371,15 @@ class TestSonameBumpUnnecessary:
         result = check_soname_bump_policy(changes, old_elf, new_elf)
         assert result == []
 
+    def test_vendor_hash_only_not_considered_bump(self):
+        """A hash-only auditwheel/delocate rewrite is NOT a real SONAME bump."""
+        old_elf = ElfMetadata(soname="libpng16-a746ad4a.so.16.43.0")
+        new_elf = ElfMetadata(soname="libpng16-b8f31c2e.so.16.43.0")
+        changes = [_compatible_change()]
+
+        result = check_soname_bump_policy(changes, old_elf, new_elf)
+        assert result == []
+
 
 # ===========================================================================
 # Version script missing

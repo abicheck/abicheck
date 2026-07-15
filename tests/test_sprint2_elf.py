@@ -46,6 +46,27 @@ def test_soname_changed() -> None:
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
+def test_soname_changed_vendor_hash_only_is_not_flagged() -> None:
+    # auditwheel/delocate rewrite a vendored library's own SONAME to match its
+    # content-hashed filename on every wheel rebuild — a hash-only rewrite must
+    # not fire SONAME_CHANGED, or every rebuild reports spurious churn.
+    old = _snap(_elf(soname="libpng16-a746ad4a.so.16.43.0"))
+    new = _snap(_elf(soname="libpng16-b8f31c2e.so.16.43.0"))
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.SONAME_CHANGED not in kinds
+
+
+def test_soname_changed_real_bump_still_fires_despite_vendor_hash() -> None:
+    # A genuine SONAME major bump alongside a vendor hash must still surface —
+    # normalization only strips the hash, never masks a real version change.
+    old = _snap(_elf(soname="libpng16-a746ad4a.so.16.43.0"))
+    new = _snap(_elf(soname="libpng16-b8f31c2e.so.17.0.0"))
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.SONAME_CHANGED in kinds
+
+
 def test_soname_missing_reported_as_compatible_quality_issue() -> None:
     old = _snap(_elf(soname=""))
     new = _snap(_elf(soname="libfoo.so.1"))

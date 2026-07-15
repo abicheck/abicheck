@@ -9,7 +9,7 @@ from xml.etree.ElementTree import Element
 from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind, Verdict
 from abicheck.dumper import _CastxmlParser
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
 
 
 def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
@@ -177,3 +177,186 @@ class TestExplicitCtor:
         assert parser._source_line_has_explicit(Element("Location", file="_1", line="1")) is None
         assert parser._source_line_has_explicit(Element("Location", file="_2", line="not-int")) is None
         assert parser._source_line_has_explicit(Element("Location", file="_2", line="1")) is None
+
+
+def _snap_with_types(
+    version: str, functions: list[Function], types: list[RecordType]
+) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version=version,
+        functions=functions,
+        variables=[],
+        types=types,
+    )
+
+
+def _conv_ctor(
+    cls: str, mangled: str, param_type: str, is_explicit: bool | None = False
+) -> Function:
+    # A castxml Constructor's demangled `name` is the bare class name, not
+    # `Class::Class` — C++ forbids any other member from sharing that name,
+    # which is exactly what the detector relies on (diff_symbols
+    # ._converting_ctors_by_class).
+    return Function(
+        name=cls,
+        mangled=mangled,
+        return_type="void",
+        params=[Param(name="x", type=param_type)],
+        visibility=Visibility.PUBLIC,
+        is_explicit=is_explicit,
+    )
+
+
+class TestCtorOverloadAmbiguityRisk:
+    """Tests for CTOR_OVERLOAD_AMBIGUITY_RISK (case111 heuristic)."""
+
+    def test_second_converting_ctor_added_is_risk(self) -> None:
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "int_factory_t"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+        assert ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK in RISK_KINDS
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
+
+    def test_first_converting_ctor_is_not_flagged(self) -> None:
+        """0 -> 1 converting constructor cannot be ambiguous by itself."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types("1.0", [], [cls])
+        new = _snap_with_types(
+            "2.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_new_explicit_ctor_is_not_flagged(self) -> None:
+        """An explicit constructor never participates in implicit conversion."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "double", is_explicit=True),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_new_copy_ctor_is_not_flagged(self) -> None:
+        """The copy constructor is infrastructure, not a converting overload."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "const Widget &"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_unknown_explicitness_is_not_flagged(self) -> None:
+        """Tri-state: unknown is_explicit on the new ctor must not fire."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "double", is_explicit=None),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_already_ambiguous_class_not_reflagged_without_growth(self) -> None:
+        """A class already at 2+ converting ctors that stays at the same count
+        (one removed, a different one added) is not re-flagged — only a net
+        increase across the 1->2+ threshold is reported."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "double"),
+            ],
+            [cls],
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c3", "float"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_brand_new_class_not_flagged(self) -> None:
+        """A class that doesn't exist on the old side is a fresh API decision,
+        not a regression — even if it starts with 2 converting ctors."""
+        new_cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types("1.0", [], [])
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "double"),
+            ],
+            [new_cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_deleted_ctor_not_counted(self) -> None:
+        """A `= delete`d overload can never be called, so it can't create
+        ambiguity."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        deleted = _conv_ctor("Widget", "c2", "double")
+        deleted.is_deleted = True
+        new = _snap_with_types(
+            "2.0", [_conv_ctor("Widget", "c1", "int"), deleted], [cls]
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )

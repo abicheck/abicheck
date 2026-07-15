@@ -163,6 +163,24 @@ class TestSonameChanges:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SONAME_CHANGED in _kinds(r)
 
+    def test_macho_install_name_vendor_hash_only_not_flagged(self):
+        """delocate rewrites a vendored dylib's install name every rebuild — no finding."""
+        old_macho = MachoMetadata(
+            install_name="/DLC/libfoo-a746ad4a.dylib",
+        )
+        new_macho = MachoMetadata(
+            install_name="/DLC/libfoo-b8f31c2e.dylib",
+        )
+        r = compare(_snap(macho=old_macho), _snap(macho=new_macho))
+        assert ChangeKind.SONAME_CHANGED not in _kinds(r)
+
+    def test_macho_install_name_real_change_still_fires(self):
+        """A genuine install-name path change must still surface."""
+        old_macho = MachoMetadata(install_name="/DLC/libfoo-a746ad4a.dylib")
+        new_macho = MachoMetadata(install_name="/DLC/libbar-a746ad4a.dylib")
+        r = compare(_snap(macho=old_macho), _snap(macho=new_macho))
+        assert ChangeKind.SONAME_CHANGED in _kinds(r)
+
 
 class TestRpathRunpathChanged:
     """RPATH/RUNPATH changes (3 refs each)."""

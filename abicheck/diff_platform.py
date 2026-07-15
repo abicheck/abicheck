@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
@@ -500,9 +501,18 @@ def _diff_macho_exports(
 
 
 def _diff_macho_install_name(o: Any, n: Any) -> list[Change]:
-    """Detect install name change (equivalent of SONAME change)."""
+    """Detect install name change (equivalent of SONAME change).
+
+    Compared on the vendor-hash-stripped spelling: delocate rewrites a
+    vendored dylib's own install name to match its content-hashed filename on
+    every wheel rebuild, so the raw string differs every build even when the
+    underlying library didn't change (see the matching ELF SONAME comment in
+    ``diff_platform_elf_dynamic._diff_elf_dynamic_section``).
+    """
     changes: list[Change] = []
-    if o.install_name != n.install_name and (o.install_name or n.install_name):
+    old_stripped = strip_vendor_hash(o.install_name or "")
+    new_stripped = strip_vendor_hash(n.install_name or "")
+    if old_stripped != new_stripped and (o.install_name or n.install_name):
         changes.append(
             make_change(
                 ChangeKind.SONAME_CHANGED,

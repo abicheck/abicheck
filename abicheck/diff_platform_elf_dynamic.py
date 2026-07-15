@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -167,7 +168,16 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     # Emit SONAME_CHANGED only when old library HAD a SONAME (non-empty) and it
     # changed or was removed. Adding a SONAME (empty/None → value) is a compatible
     # improvement and must not be flagged as breaking.
-    if old_elf.soname and old_elf.soname != new_elf.soname:
+    #
+    # Compare on the vendor-hash-stripped spelling: auditwheel/delocate rewrite
+    # a vendored library's own SONAME to match its content-hashed filename on
+    # every wheel rebuild (e.g. libfoo-a1b2c3d4.so.1 -> libfoo-9f8e7d6c.so.1),
+    # so the raw SONAME differs every build even when the underlying library
+    # didn't change. A genuine SONAME bump (e.g. a real major-version change)
+    # has no hyphen-hex segment to strip and still compares unequal.
+    if old_elf.soname and strip_vendor_hash(old_elf.soname) != strip_vendor_hash(
+        new_elf.soname
+    ):
         changes.append(
             make_change(
                 ChangeKind.SONAME_CHANGED,

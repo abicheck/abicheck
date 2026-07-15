@@ -118,6 +118,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "base_class_virtual_changed": "L1",
     "polymorphic_type_non_virtual_dtor": "L1",
     "func_ref_qual_changed": "L2",
+    # is_explicit (like the ref-qualifier above) is castxml header-AST-only —
+    # DWARF carries no equivalent attribute — so the ambiguity heuristic that
+    # reads it needs L2.
+    "ctor_overload_ambiguity_risk": "L2",
     "overload_added": "L0",
     # G23 Phase D — ecosystem detectors (all read symbol-level manifests / names).
     "unnamed_type_in_public_abi": "L0",  # exported mangled symbol names

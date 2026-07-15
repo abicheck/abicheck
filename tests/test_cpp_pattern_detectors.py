@@ -1030,6 +1030,38 @@ class TestBundleSonameSkewDetector:
         ]
         assert detect_bundle_soname_skew(old, new) == []
 
+    def test_vendor_hash_cohort_still_pairs_across_rebuilds(self) -> None:
+        # auditwheel/delocate rewrite every vendored member's filename AND
+        # SONAME with a fresh content hash on every rebuild; the cohort key
+        # must still pair libonedal_thread across builds (real lag detected)
+        # rather than treating the differently-hashed filename as a dropped
+        # member with no counterpart (silent false negative).
+        old = [
+            BundleMember(
+                "libonedal_core-aaaaaaaa.so.1", "libonedal_core-aaaaaaaa.so.1", 1
+            ),
+            BundleMember(
+                "libonedal_thread-bbbbbbbb.so.1", "libonedal_thread-bbbbbbbb.so.1", 1
+            ),
+        ]
+        new = [
+            BundleMember(
+                "libonedal_core-cccccccc.so.2", "libonedal_core-cccccccc.so.2", 2
+            ),
+            BundleMember(
+                "libonedal_thread-dddddddd.so.1",
+                "libonedal_thread-dddddddd.so.1",
+                1,
+            ),  # lagged, but re-hashed on this rebuild too
+        ]
+        findings = detect_bundle_soname_skew(old, new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_SONAME_SKEW
+        assert "libonedal_thread" in (
+            (findings[0].affected_symbols and " ".join(findings[0].affected_symbols))
+            or ""
+        )
+
     def test_no_bump_no_finding(self) -> None:
         old = [
             BundleMember("libfoo.so.1", "libfoo.so.1", 1),
