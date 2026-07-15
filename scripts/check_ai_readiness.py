@@ -427,6 +427,12 @@ def check_doc_count_sync(f: Findings) -> None:
             r"the full \*\*(\d+)-case catalog\*\*",
         ),
         (
+            DOCS / "reference" / "tool-comparison.md",
+            "catalog size (full-catalog benchmark heading)",
+            n_catalog,
+            r"## Full-catalog benchmark \([^,]+, all (\d+) cases\)",
+        ),
+        (
             DOCS / "getting-started.md",
             "catalog size",
             n_catalog,
