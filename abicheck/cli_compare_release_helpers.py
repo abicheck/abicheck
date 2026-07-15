@@ -507,7 +507,9 @@ def _format_release_summary(
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
-        return _format_release_junit(diff_pairs, matrix_result, library_results)
+        return _format_release_junit(
+            diff_pairs, matrix_result, library_results, severity_config=severity_config,
+        )
     if fmt == "json":
         return _format_release_json(
             worst_verdict,
@@ -542,8 +544,18 @@ def _format_release_junit(
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None,
     matrix_result: DiffResult | None,
     library_results: list[dict[str, object]],
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Render the release summary as a JUnit XML report."""
+    """Render the release summary as a JUnit XML report.
+
+    *severity_config*, when given, is forwarded to
+    :func:`to_junit_xml_multi` (Codex review on #549) so a finding a severity
+    config promotes to ``error`` fails its JUnit testcase the same way it
+    contributes to the release's severity-aware exit code — otherwise a CI
+    dashboard reading this JUnit file could show zero failures for a release
+    that just exited non-zero on that exact finding.
+    """
     from .junit_report import to_junit_xml_multi
 
     pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
@@ -554,6 +566,7 @@ def _format_release_junit(
     error_libs = [entry for entry in library_results if entry.get("verdict") == "ERROR"]
     return to_junit_xml_multi(
         pairs,
+        severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
     )
 

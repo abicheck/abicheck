@@ -540,6 +540,30 @@ class TestReleaseSeverityPolicyAndGlobal:
         assert _compute_release_severity_exit_code(
             [entry], "default", None, None, None, None) == 4
 
+    def test_format_release_junit_forwards_severity_config(self):
+        """Codex review on #549: `compare-release --format junit` with a
+        severity config that promotes a compatible finding to `error` must
+        fail that finding's JUnit testcase, or a CI dashboard reading the
+        JUnit file would disagree with the release's severity-aware exit."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release_helpers import _format_release_junit
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        diff = DiffResult(
+            old_version="1", new_version="2", library="libfoo.so",
+            changes=[c], verdict=Verdict.COMPATIBLE,
+        )
+        cfg = resolve_severity_config("default", addition="error")
+
+        xml_without_config = _format_release_junit([(diff, None)], None, [])
+        assert 'failures="0"' in xml_without_config
+
+        xml_with_config = _format_release_junit(
+            [(diff, None)], None, [], severity_config=cfg,
+        )
+        assert 'failures="1"' in xml_with_config
+
     def test_fold_matrix_break_raises_exit(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 
