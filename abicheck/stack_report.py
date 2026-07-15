@@ -29,6 +29,43 @@ _VERDICT_EMOJI = {
     StackVerdict.FAIL: "❌",
 }
 
+# Cap on embedded per-library findings in stack JSON — mirrors
+# `cli_scan_baseline._MAX_BASELINE_FINDINGS`'s rationale: a large diff must
+# not blow up the always-on stack-check output, but a bare count
+# (`abi_breaking: 3`) leaves no way to tell *which* symbols broke without a
+# separate `compare` run.
+_MAX_STACK_FINDINGS_PER_LIBRARY = 10
+
+
+def _stack_finding_dicts(diff: object) -> list[dict[str, object]]:
+    """Project a library's gating findings (breaking/api_break/risk) into
+    small, capped dicts — same shape as `cli_scan_baseline._baseline_finding_dicts`.
+
+    Counts (not already-built dicts) decide the cap so a large diff never
+    builds more dicts than the cap can ever keep.
+    """
+    findings: list[dict[str, object]] = []
+    for bucket_name, bucket_changes in (
+        ("breaking", getattr(diff, "breaking", [])),
+        ("api_break", getattr(diff, "source_breaks", [])),
+        ("risk", getattr(diff, "risk", [])),
+    ):
+        remaining = _MAX_STACK_FINDINGS_PER_LIBRARY - len(findings)
+        if remaining <= 0:
+            break
+        for c in bucket_changes[:remaining]:
+            kind = getattr(c, "kind", None)
+            findings.append(
+                {
+                    "bucket": bucket_name,
+                    "kind": getattr(kind, "value", str(kind)),
+                    "symbol": getattr(c, "symbol", None),
+                    "description": getattr(c, "description", None),
+                    "source_location": getattr(c, "source_location", None),
+                }
+            )
+    return findings
+
 
 def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
     """Render a StackCheckResult as JSON."""
@@ -84,6 +121,18 @@ def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
             # Per-library confidence and evidence tiers
             if sc.abi_diff:
                 diff = sc.abi_diff
+                # Preserve the actual findings (kind/symbol/description/
+                # location), not just their counts — a stack check used to
+                # report e.g. "abi_breaking: 3" for a library with no way to
+                # tell which symbols broke without a separate `compare` run.
+                total_gating = (
+                    len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+                )
+                stack_findings = _stack_finding_dicts(diff)
+                if stack_findings:
+                    sc_dict["findings"] = stack_findings
+                    if total_gating > _MAX_STACK_FINDINGS_PER_LIBRARY:
+                        sc_dict["findings_truncated"] = True
                 conf = getattr(diff, "confidence", None)
                 if conf is not None:
                     sc_dict["confidence"] = conf.value if hasattr(conf, "value") else str(conf)

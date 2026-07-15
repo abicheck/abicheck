@@ -259,7 +259,10 @@ class TestAppCompatResultVerdict:
 # ---------------------------------------------------------------------------
 
 class TestAppCompatReporters:
-    def _make_result(self, *, missing=None, breaking=None, irrelevant=None, verdict=None):
+    def _make_result(
+        self, *, missing=None, breaking=None, irrelevant=None, verdict=None,
+        policy_file=None,
+    ):
         return AppCompatResult(
             app_path="/usr/bin/myapp",
             old_lib_path="libfoo.so.1",
@@ -274,6 +277,7 @@ class TestAppCompatReporters:
                 old_version="1.0",
                 new_version="2.0",
                 library="libfoo",
+                policy_file=policy_file,
             ),
             verdict=verdict or Verdict.COMPATIBLE,
             symbol_coverage=100.0,
@@ -369,6 +373,22 @@ class TestAppCompatReporters:
         result = self._make_result(breaking=[change])
         data = json.loads(appcompat_to_json(result))
         assert data["relevant_changes"][0]["evidence_status"] == "consumer_proven"
+
+    def test_json_relevant_change_severity_honours_policy_file_override(self):
+        """A PolicyFile override on full_diff must be reflected in each
+        relevant_changes[].severity — verified defect: appcompat_to_json
+        never threaded kind_sets/policy_file into _change_to_dict, so a
+        finding's severity here could contradict full_library_verdict
+        (which does honour the override via full_diff.verdict/policy_file)."""
+        from abicheck.policy_file import PolicyFile
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo_init", description="removed",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        result = self._make_result(breaking=[change], policy_file=pf)
+        data = json.loads(appcompat_to_json(result))
+        assert data["relevant_changes"][0]["severity"] == "compatible"
 
     def test_markdown_weak_mode(self):
         result = AppCompatResult(

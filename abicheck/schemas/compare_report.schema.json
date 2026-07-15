@@ -71,7 +71,24 @@
         "total_changes": { "type": "integer", "minimum": 0 }
       }
     },
-    "severity": { "type": "object" },
+    "severity": {
+      "type": "object",
+      "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "additionalProperties": true,
+      "properties": {
+        "config": { "type": "object" },
+        "categories": { "type": "object" },
+        "exit_code": { "type": "integer", "minimum": 0 },
+        "blocking": { "type": "boolean" },
+        "blocking_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["abi_breaking", "potential_breaking", "quality_issues", "addition"]
+          }
+        }
+      }
+    },
     "changes": {
       "type": "array",
       "items": { "$ref": "#/$defs/change" }
@@ -248,7 +265,16 @@
           "items": { "type": "string" }
         },
         "caused_by_type": { "type": "string" },
-        "caused_count": { "type": "integer", "minimum": 0 }
+        "caused_count": { "type": "integer", "minimum": 0 },
+        "operation": {
+          "type": "string",
+          "description": "Structured classification of the finding derived from its kind's own suffix (the same classification --show-only's added/removed/changed tokens use): 'added'/'removed' kinds map directly, everything else (parameter/type/layout changes, renames, etc.) is 'modified'.",
+          "enum": ["added", "removed", "modified"]
+        },
+        "finding_id": {
+          "type": "string",
+          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location, truncated to 16 hex chars) — lets a consumer correlate the same finding across two report runs without relying on array order. Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy."
+        }
       }
     }
   }

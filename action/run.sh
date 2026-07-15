@@ -758,14 +758,23 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
     fi
     echo ""
 
-    # If output was captured (no output-file), include it in summary
+    # If output was captured (no output-file), include it in summary. A
+    # markdown report is embedded as-is so GitHub renders its headings/
+    # tables/bold text in the step summary, instead of being wrapped in a
+    # code fence (which would make it display as literal ``` text). Every
+    # other format (json/sarif/text/review/etc.) is genuinely verbatim
+    # output, so it keeps the fence.
     if [[ -n "$ABICHECK_OUTPUT" ]]; then
       echo "<details>"
       echo "<summary>Full report</summary>"
       echo ""
-      echo '```'
-      echo "$ABICHECK_OUTPUT"
-      echo '```'
+      if [[ "${FORMAT:-markdown}" == "markdown" ]]; then
+        echo "$ABICHECK_OUTPUT"
+      else
+        echo '```'
+        echo "$ABICHECK_OUTPUT"
+        echo '```'
+      fi
       echo "</details>"
     fi
   } >> "$GITHUB_STEP_SUMMARY"

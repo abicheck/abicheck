@@ -140,15 +140,58 @@ def _is_failure(
     return False
 
 
-def _failure_type(change: Change, result: DiffResult, kind_sets: KindSets) -> str:
+_CATEGORY_TO_JUNIT_TYPE: dict[str, str] = {
+    "abi_breaking": "BREAKING",
+    "quality_issues": "QUALITY_ISSUE",
+    "addition": "ADDITION",
+}
+
+
+def _failure_type(
+    change: Change,
+    result: DiffResult,
+    kind_sets: KindSets,
+    severity_config: SeverityConfig | None = None,
+) -> str:
     """Return the ``type`` attribute for a ``<failure>`` element.
 
-    Uses the same canonical per-finding verdict as ``_is_failure`` so the
-    reported type always matches why the finding failed. Takes the caller's
-    precomputed *kind_sets* rather than recomputing them (``_build_testsuite``
-    already builds them once per report; ``DiffResult._effective_verdict_for_change``
-    would otherwise rebuild them per finding).
+    Uses the same canonical per-finding verdict/category as ``_is_failure``
+    so the reported type always matches why the finding failed. Takes the
+    caller's precomputed *kind_sets* rather than recomputing them
+    (``_build_testsuite`` already builds them once per report;
+    ``DiffResult._effective_verdict_for_change`` would otherwise rebuild them
+    per finding).
+
+    When *severity_config* is given, ``_is_failure`` decides pass/fail from
+    the finding's effective *category* (:func:`classify_effective_change`),
+    not its raw verdict — a COMPATIBLE addition promoted to ``error``
+    fails even though its verdict is COMPATIBLE. Without also deriving
+    ``type`` from that same category, such a failure would report
+    ``type="COMPATIBLE"`` (``_VERDICT_TO_JUNIT_TYPE``'s fallback for any
+    verdict it doesn't recognise), contradicting the very reason it failed.
     """
+    if severity_config is not None:
+        from .severity import IssueCategory, classify_effective_change
+
+        category = classify_effective_change(
+            change,
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+        )
+        if category == IssueCategory.POTENTIAL_BREAKING:
+            # IssueCategory doesn't itself distinguish API break from
+            # deployment risk (both fold into POTENTIAL_BREAKING) — recover
+            # that distinction from kind-set membership, mirroring
+            # annotations._title_for_change's analogous split.
+            _, api_break_set, _, risk_set = kind_sets
+            if change.kind in api_break_set:
+                return "API_BREAK"
+            if change.kind in risk_set:
+                return "COMPATIBLE_WITH_RISK"
+            return "POTENTIAL_BREAKING"
+        return _CATEGORY_TO_JUNIT_TYPE.get(category.value, "COMPATIBLE")
+
     from .severity import effective_verdict_for_change
 
     verdict = effective_verdict_for_change(
@@ -284,7 +327,7 @@ def _append_extra_failures(
         if _is_failure(c, result, kind_sets, severity_config):
             for tc in ts:
                 if tc.get("name") == c.symbol:
-                    _add_failure(tc, c, result, kind_sets)
+                    _add_failure(tc, c, result, kind_sets, severity_config)
                     break
 
 
@@ -350,7 +393,7 @@ def _maybe_add_failure(
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure."""
     if _is_failure(change, result, kind_sets, severity_config):
-        _add_failure(tc, change, result, kind_sets)
+        _add_failure(tc, change, result, kind_sets, severity_config)
 
 
 def _add_failure(
@@ -358,9 +401,10 @@ def _add_failure(
     change: Change,
     result: DiffResult,
     kind_sets: KindSets,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """Append a ``<failure>`` element to testcase *tc*."""
-    ftype = _failure_type(change, result, kind_sets)
+    ftype = _failure_type(change, result, kind_sets, severity_config)
     description = change.description or change.kind.value.replace("_", " ")
     message = f"{change.kind.value}: {description}"
 

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, cast
 
@@ -71,6 +72,7 @@ from .reporter_markdown import (
     _section_severity_label as _section_severity_label,
     _to_markdown_leaf as _to_markdown_leaf,
     apply_show_only as apply_show_only,
+    operation_for_kind as operation_for_kind,
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
     to_stat as to_stat,
@@ -625,6 +627,33 @@ def to_json(
     return json.dumps(d, indent=indent)
 
 
+def _finding_id(c: object) -> str:
+    """Stable per-finding fingerprint (schema 2.3, additive).
+
+    Deterministic across repeated runs of the same comparison, so a
+    consumer can tell "is this the same finding" across two report runs
+    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
+    without relying on array order or index — neither of which abicheck
+    guarantees stays stable release to release.
+
+    Derived only from fields that identify the finding's *identity* (kind,
+    symbol, old/new value, source location) — deliberately excluding
+    ``severity``/``evidence_status``, which are policy-derived and would
+    make the same underlying finding hash differently under a different
+    ``--policy``.
+    """
+    key = "\x1f".join(
+        [
+            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+            str(getattr(c, "symbol", None) or ""),
+            str(getattr(c, "old_value", None) or ""),
+            str(getattr(c, "new_value", None) or ""),
+            str(getattr(c, "source_location", None) or ""),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -673,6 +702,9 @@ def _change_to_dict(
         "new_value": getattr(c, "new_value", None),
         "severity": severity,
     }
+    if isinstance(kind, ChangeKind):
+        d["operation"] = operation_for_kind(kind.value)
+        d["finding_id"] = _finding_id(c)
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
     # Impact explanation
@@ -767,10 +799,29 @@ def _build_severity_json(
         policy_file=policy_file,
     )
 
+    # ``blocking``/``blocking_categories`` (schema 2.3, additive): a typed,
+    # auditable gate summary mirroring SARIF's ``severityGate`` block
+    # (``sarif._severity_gate_properties``) — without them, a JSON consumer
+    # had to independently recompute "which category is actually failing the
+    # build" from ``config``/``categories`` itself; this makes that answer a
+    # first-class, versioned part of the report.
+    blocking_categories = [
+        name
+        for name, cat_changes in (
+            ("abi_breaking", categorized.abi_breaking),
+            ("potential_breaking", categorized.potential_breaking),
+            ("quality_issues", categorized.quality_issues),
+            ("addition", categorized.addition),
+        )
+        if cat_changes and config_dict[name] == "error"
+    ]
+
     return {
         "config": config_dict,
         "categories": categories,
         "exit_code": exit_code,
+        "blocking": exit_code != 0,
+        "blocking_categories": blocking_categories,
     }
 
 
@@ -817,10 +868,20 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
         getattr(getattr(result, "full_diff", None), "policy", "strict_abi")
         or "strict_abi"
     )
+    # Thread the full_diff's PolicyFile/effective kind_sets through, mirroring
+    # to_json's _change_to_dict calls (reporter.py _add_changes_block) —
+    # without them, a per-finding severity here falls back to raw-kind
+    # classification and can contradict full_library_verdict below, which
+    # already honours the PolicyFile via full_diff.verdict.
+    _kind_sets_fn = getattr(full_diff, "_effective_kind_sets", None)
+    appcompat_kind_sets = _kind_sets_fn() if callable(_kind_sets_fn) else None
+    appcompat_policy_file = getattr(full_diff, "policy_file", None)
     d["relevant_changes"] = [
         _change_to_dict(
             c,
             policy=appcompat_policy,
+            kind_sets=appcompat_kind_sets,
+            policy_file=appcompat_policy_file,
             evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
         )
         for c in breaking

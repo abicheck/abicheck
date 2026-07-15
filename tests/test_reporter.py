@@ -167,9 +167,79 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
-    def test_report_schema_version_is_2_2(self):
+    def test_report_schema_version_is_2_3(self):
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
-        assert d["report_schema_version"] == "2.2"
+        assert d["report_schema_version"] == "2.3"
+
+    def test_change_operation_field(self):
+        added = Change(ChangeKind.FUNC_ADDED, "s1", "added")
+        removed = Change(ChangeKind.FUNC_REMOVED, "s2", "removed")
+        modified = Change(ChangeKind.FUNC_PARAMS_CHANGED, "s3", "params changed")
+        r = _result(Verdict.BREAKING, changes=[added, removed, modified])
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c["operation"] for c in d["changes"]}
+        assert by_symbol == {"s1": "added", "s2": "removed", "s3": "modified"}
+
+    def test_finding_id_is_stable_and_deterministic(self):
+        """Same underlying finding -> same finding_id across independent runs."""
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r1 = _result(Verdict.BREAKING, changes=[c1])
+        r2 = _result(Verdict.BREAKING, changes=[c2])
+        d1 = json.loads(to_json(r1))
+        d2 = json.loads(to_json(r2))
+        fid1 = d1["changes"][0]["finding_id"]
+        fid2 = d2["changes"][0]["finding_id"]
+        assert fid1 == fid2
+        assert isinstance(fid1, str) and len(fid1) == 16
+
+    def test_finding_id_differs_for_different_findings(self):
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3barv", "removed: bar")
+        r = _result(Verdict.BREAKING, changes=[c1, c2])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["finding_id"] != d["changes"][1]["finding_id"]
+
+    def test_finding_id_unaffected_by_policy(self):
+        """finding_id excludes policy-derived fields — the same underlying
+        finding must hash identically regardless of --policy."""
+        from abicheck.policy_file import PolicyFile
+
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r1 = _result(Verdict.BREAKING, changes=[c1])
+        r2 = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c2], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+        d1 = json.loads(to_json(r1))
+        d2 = json.loads(to_json(r2))
+        assert d1["changes"][0]["finding_id"] == d2["changes"][0]["finding_id"]
+        # Confirm the policy override really did take effect (different
+        # severity), so this is a meaningful same-ID-despite-different-
+        # policy check, not a vacuous one.
+        assert d1["changes"][0]["severity"] != d2["changes"][0]["severity"]
+
+    def test_severity_blocking_fields_present_when_configured(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "s", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        cfg = resolve_severity_config("default", addition="error")
+        d = json.loads(to_json(r, severity_config=cfg))
+        assert d["severity"]["blocking"] is True
+        assert d["severity"]["blocking_categories"] == ["addition"]
+
+    def test_severity_blocking_false_when_no_error_level_findings(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "s", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        cfg = resolve_severity_config("default")
+        d = json.loads(to_json(r, severity_config=cfg))
+        assert d["severity"]["blocking"] is False
+        assert d["severity"]["blocking_categories"] == []
 
     def test_leaf_mode_root_type_change_carries_evidence_status(self):
         # Regression (Codex review): --report-mode leaf serializes root type

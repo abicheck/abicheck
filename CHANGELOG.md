@@ -802,6 +802,83 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   one blank line for the (empty, since that fixture passes no
   `severity_config`) gate-card slot.
 
+- **JUnit's `<failure type=...>` could say `"COMPATIBLE"` for a failure
+  `severity_config` itself caused.** `_is_failure` correctly decides pass/
+  fail from a finding's effective severity *category*, but `_failure_type`
+  still derived `type=` from the raw effective *verdict*
+  (`_VERDICT_TO_JUNIT_TYPE`, which has no `COMPATIBLE` entry and falls back
+  to the string `"COMPATIBLE"`) — so a `COMPATIBLE` addition promoted to
+  `error` both failed and reported `type="COMPATIBLE"`, contradicting the
+  very reason it failed. `_failure_type` (and `_add_failure`) now accept
+  `severity_config` and, when given, derive `type=` from the same effective
+  category `_is_failure` used (`ADDITION`/`QUALITY_ISSUE`/`BREAKING`, or
+  `API_BREAK`/`COMPATIBLE_WITH_RISK` recovered from kind-set membership for
+  the `POTENTIAL_BREAKING` category, which doesn't itself distinguish them).
+
+- **Review digest's "Top impacted symbols" used raw kind-set membership,
+  not each finding's effective verdict.** Every other part of
+  `to_review_digest` (the merge-effect phrase, the counts table) already
+  routes through `DiffResult._effective_verdict_for_change`/the `.breaking`/
+  `.source_breaks` properties; "Top impacted symbols" alone filtered by
+  `c.kind in breaking_set or c.kind in api_break_set` — kind-set membership,
+  which misses a per-finding override (A4 pattern-verdict modulation,
+  frozen-namespace guard) that moves a specific finding's verdict away from
+  (or into) BREAKING/API_BREAK independent of its raw kind. Fixed to filter
+  by `result._effective_verdict_for_change(c)` instead, so the section can
+  no longer list a finding the rest of the same digest reports as
+  compatible, or omit one it reports as breaking.
+
+- **Appcompat JSON's `relevant_changes[].severity` ignored the full
+  diff's `PolicyFile`/effective kind-sets.** `appcompat_to_json` read only
+  `full_diff.policy` (a bare string) and never threaded
+  `full_diff._effective_kind_sets()`/`full_diff.policy_file` into
+  `_change_to_dict`, so a per-finding severity there fell back to raw-kind
+  classification — able to contradict `full_library_verdict` on the very
+  same JSON document, which already honours the `PolicyFile` via
+  `full_diff.verdict`. Now threads both through, matching `to_json`'s own
+  `_change_to_dict` calls (fixed for the same reason in #549).
+
+- **The GitHub Action's job summary always wrapped the report in a code
+  fence, even for the (default) `format: markdown`.** `run.sh` unconditionally
+  wrapped `$ABICHECK_OUTPUT` in a ```` ``` ```` fence for the "Full report"
+  step-summary section, so GitHub rendered a markdown report as literal
+  code instead of formatted headings/tables/bold text. Now only non-markdown
+  formats (json/sarif/text/etc. — genuinely verbatim output) keep the fence.
+  (The action's PR-comment path re-running the comparison with `--format
+  json` when the primary run isn't already unfiltered JSON is unchanged —
+  eliminating that would need a CLI feature to emit multiple formats from
+  one invocation, which is out of scope here; the existing reuse-when-
+  possible check and the guards that skip the rerun entirely when no
+  comment will be posted are confirmed already working correctly.)
+
+- **Stack-check and release JSON were count-centric at the per-library
+  level**, e.g. `"abi_breaking": 3` / `"breaking": 3`, with no way to
+  identify *which* symbols broke without a separate `compare` run or (for
+  releases) the optional `--output-dir` per-library report file —
+  unlike `scan --baseline`'s JSON, already fixed the same way in #549.
+  `stack_report.stack_to_json` and `cli_compare_release`'s per-library
+  entries now embed a capped (10 per library), bucketed `findings` list
+  (kind/symbol/description/source_location) drawn from each library's
+  breaking/source-break/risk changes, with `findings_truncated: true` when
+  a library has more gating findings than the cap.
+
+- **The `compare` JSON schema (bumped 2.2 → 2.3, additive) gained a typed
+  gate summary and stable per-finding identity**, closing the remaining
+  reporting-review gaps that fit the project's own additive-schema
+  convention: each finding now carries `operation` (`added`/`removed`/
+  `modified`, derived from the same kind-suffix rule `--show-only` already
+  uses — extracted to a shared `operation_for_kind` so the two can't drift)
+  and `finding_id` (a stable SHA-256-derived fingerprint of
+  kind/symbol/old_value/new_value/source_location, letting a consumer
+  correlate the same finding across two report runs without relying on
+  array order; deliberately excludes policy-derived fields so it's stable
+  across `--policy`). The top-level `severity` object (present only when
+  `--severity-*` is active) gains `blocking`/`blocking_categories`, mirroring
+  SARIF's `severityGate` block. Not implemented: a per-finding "recommended
+  action" field — the report-level `release_recommendation` already covers
+  this at the release granularity, and a per-finding equivalent has no
+  clear-cut shape yet.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**

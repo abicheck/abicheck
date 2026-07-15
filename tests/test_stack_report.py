@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 from abicheck.binder import BindingStatus, SymbolBinding
+from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.stack_report import stack_to_json, stack_to_markdown
@@ -99,6 +100,51 @@ class TestStackToJson:
         data = json.loads(stack_to_json(result))
         assert "stack_changes" in data
         assert data["stack_changes"][0]["change_type"] == "added"
+
+    def test_stack_change_findings_embedded_not_just_counts(self):
+        """A content-changed library must embed which symbols broke, not just
+        a bare count — verified defect: JSON only had `abi_breaking: N`, with
+        no way to identify the actual findings without a separate `compare`
+        run (mirroring the `scan --baseline` fix)."""
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so",
+            changes=[
+                Change(ChangeKind.FUNC_REMOVED, "foo_init", "removed: foo_init"),
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        result = _make_result(
+            stack_changes=[
+                StackChange(library="libfoo.so", change_type="content_changed", abi_diff=diff),
+            ],
+        )
+        data = json.loads(stack_to_json(result))
+        sc = data["stack_changes"][0]
+        assert sc["abi_breaking"] == 1
+        assert "findings" in sc
+        assert sc["findings"][0]["symbol"] == "foo_init"
+        assert sc["findings"][0]["kind"] == "func_removed"
+        assert sc["findings"][0]["bucket"] == "breaking"
+        assert "findings_truncated" not in sc
+
+    def test_stack_change_findings_capped_and_flagged_truncated(self):
+        changes = [
+            Change(ChangeKind.FUNC_REMOVED, f"foo_{i}", f"removed: foo_{i}")
+            for i in range(15)
+        ]
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so",
+            changes=changes, verdict=Verdict.BREAKING,
+        )
+        result = _make_result(
+            stack_changes=[
+                StackChange(library="libfoo.so", change_type="content_changed", abi_diff=diff),
+            ],
+        )
+        data = json.loads(stack_to_json(result))
+        sc = data["stack_changes"][0]
+        assert len(sc["findings"]) == 10
+        assert sc["findings_truncated"] is True
 
     def test_bindings_summary_in_json(self):
         result = _make_result()

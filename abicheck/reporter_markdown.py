@@ -114,6 +114,33 @@ def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None
 # Show-only filter
 # ---------------------------------------------------------------------------
 
+# Kind-name suffixes that identify an additive vs. a removal finding — shared
+# between ShowOnlyFilter's "added"/"removed"/"changed" action tokens and the
+# JSON report's structured per-finding "operation" field (schema 2.3), so the
+# two never drift apart.
+_ADDED_SUFFIXES = ("_added", "_added_compatible")
+_REMOVED_SUFFIXES = (
+    "_removed",
+    "_deleted",
+    "_elf_only",
+    "_elf_fallback",
+    "_const_overload",
+)
+
+
+def operation_for_kind(kind_val: str) -> str:
+    """Classify a ``ChangeKind.value`` string into "added"/"removed"/"modified".
+
+    A kind is "added"/"removed" when its name ends with one of the
+    corresponding suffixes above; every other kind (parameter/type/layout
+    changes, renames, etc.) is "modified".
+    """
+    if any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
+        return "added"
+    if any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES):
+        return "removed"
+    return "modified"
+
 
 @dataclass(frozen=True)
 class ShowOnlyFilter:
@@ -262,26 +289,13 @@ class ShowOnlyFilter:
         """Return True if *kind_val* matches the action filter."""
         if not actions:
             return True
-        _ADDED_SUFFIXES = ("_added", "_added_compatible")
-        _REMOVED_SUFFIXES = (
-            "_removed",
-            "_deleted",
-            "_elf_only",
-            "_elf_fallback",
-            "_const_overload",
+        op = operation_for_kind(kind_val)
+        # NB: "changed" (the --show-only token) maps to operation "modified".
+        return (
+            (op == "added" and "added" in actions)
+            or (op == "removed" and "removed" in actions)
+            or (op == "modified" and "changed" in actions)
         )
-        if "added" in actions and any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
-            return True
-        if "removed" in actions and any(
-            kind_val.endswith(s) for s in _REMOVED_SUFFIXES
-        ):
-            return True
-        if "changed" in actions and not (
-            any(kind_val.endswith(s) for s in _ADDED_SUFFIXES)
-            or any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES)
-        ):
-            return True
-        return False
 
     def matches(
         self,
@@ -903,10 +917,18 @@ def to_review_digest(
         "",
     ]
 
-    # Top impacted symbols (breaking + API), capped for readability.
-    breaking_set, api_break_set, _, _ = result._effective_kind_sets()
+    # Top impacted symbols (breaking + API), capped for readability. Filters
+    # by each change's *effective* verdict (DiffResult._effective_verdict_for_change)
+    # rather than raw kind-set membership, so a per-finding override (A4
+    # pattern-verdict modulation, frozen-namespace guard) is reflected here
+    # the same way it already is in the counts table and merge-effect phrase
+    # above — otherwise this section could list a finding the rest of the
+    # digest reports as compatible, or omit one it reports as breaking.
     impacted = [
-        c for c in result.changes if c.kind in breaking_set or c.kind in api_break_set
+        c
+        for c in result.changes
+        if result._effective_verdict_for_change(c)
+        in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
     if impacted:
         lines += ["**Top impacted symbols:**", ""]

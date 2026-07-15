@@ -320,6 +320,30 @@ class TestDirVsDir:
         assert data["verdict"] == "NO_CHANGE"
         assert len(data["libraries"]) == 2
 
+    def test_json_output_embeds_findings_not_just_counts(self, tmp_path: Path) -> None:
+        """A breaking library entry must embed which symbols broke, not just
+        a bare count — verified defect: release JSON was count-centric
+        (breaking/source_breaks/risk_changes as ints) with no way to identify
+        the actual findings without a separate `compare` run or
+        `--output-dir` (mirroring the `scan --baseline` / stack-check fix)."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old, new = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code != 0
+        data = json.loads(out)
+        lib = data["libraries"][0]
+        assert lib["breaking"] == 1
+        assert "findings" in lib
+        assert lib["findings"][0]["symbol"] == "_Z3barv"
+        assert lib["findings"][0]["bucket"] == "breaking"
+        assert "findings_truncated" not in lib
+        assert "_diff_result" not in lib
+
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
         old_dir = tmp_path / "old"

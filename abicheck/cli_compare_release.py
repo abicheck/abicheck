@@ -773,6 +773,44 @@ def _validate_suppression_early(
         )
 
 
+# Cap on embedded per-library findings in release JSON — same rationale as
+# `cli_scan_baseline._MAX_BASELINE_FINDINGS` / `stack_report._MAX_STACK_FINDINGS_PER_LIBRARY`:
+# a bare count (``"breaking": 3``) leaves no way to identify which symbols
+# broke without a separate `compare` run, but embedding every finding for
+# every library in a large release could blow up the summary output.
+_MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
+
+
+def _release_finding_dicts(diff: DiffResult) -> list[dict[str, object]]:
+    """Project a library's gating findings into small, capped dicts.
+
+    Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
+    ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
+    decide the cap so a large diff never builds more dicts than the cap can
+    ever keep.
+    """
+    findings: list[dict[str, object]] = []
+    for bucket_name, bucket_changes in (
+        ("breaking", diff.breaking),
+        ("api_break", diff.source_breaks),
+        ("risk", diff.risk),
+    ):
+        remaining = _MAX_RELEASE_FINDINGS_PER_LIBRARY - len(findings)
+        if remaining <= 0:
+            break
+        for c in bucket_changes[:remaining]:
+            findings.append(
+                {
+                    "bucket": bucket_name,
+                    "kind": c.kind.value,
+                    "symbol": c.symbol,
+                    "description": c.description,
+                    "source_location": c.source_location,
+                }
+            )
+    return findings
+
+
 def _strip_diff_results_and_adjust_verdict(
     library_results: list[dict[str, object]],
     removed_keys: list[str],
@@ -780,17 +818,33 @@ def _strip_diff_results_and_adjust_verdict(
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
-    After bundle analysis the stashed :class:`DiffResult` objects are no
-    longer needed.  Stripping them here keeps the summary formatter free of
-    any Python-only objects.  Additionally, if any library was *removed*
-    from the release and the verdict has not already been escalated, the
-    verdict is bumped to at least ``COMPATIBLE_WITH_RISK``.
+    Before the stashed :class:`DiffResult` objects are discarded, each
+    library entry gets a capped ``findings`` list (kind/symbol/description/
+    location) projected from it — otherwise the JSON summary is entirely
+    count-centric (``"breaking": 3``) with no way to identify which symbols
+    broke short of a separate `compare` run or the optional per-library
+    ``--output-dir`` report file. Stripping ``_diff_result`` itself keeps the
+    summary formatter free of any Python-only objects. Additionally, if any
+    library was *removed* from the release and the verdict has not already
+    been escalated, the verdict is bumped to at least
+    ``COMPATIBLE_WITH_RISK``.
 
     Returns the (possibly updated) *worst_verdict* string.
     """
     for entry in library_results:
-        if isinstance(entry, dict):
-            entry.pop("_diff_result", None)
+        if not isinstance(entry, dict):
+            continue
+        diff = entry.get("_diff_result")
+        if isinstance(diff, DiffResult):
+            total_gating = (
+                len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+            )
+            findings = _release_finding_dicts(diff)
+            if findings:
+                entry["findings"] = findings
+                if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
+                    entry["findings_truncated"] = True
+        entry.pop("_diff_result", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):

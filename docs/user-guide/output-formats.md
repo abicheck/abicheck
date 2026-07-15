@@ -310,6 +310,61 @@ stop?" — the two fields *can* disagree, and that's by design.
 }
 ```
 
+### Stable finding IDs and structured operation (`finding_id`, `operation`)
+
+Each finding in `changes[]` also carries:
+
+- **`operation`** — a structured `"added"` / `"removed"` / `"modified"`
+  classification, derived from the same kind-suffix rule `--show-only`'s
+  `added`/`removed`/`changed` tokens already use. Lets a consumer group or
+  filter findings by operation without hand-maintaining its own list of
+  `_added`/`_removed` kind-name suffixes.
+- **`finding_id`** — a stable, deterministic fingerprint (a truncated SHA-256
+  hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`) that
+  identifies *this finding* independent of its position in the `changes[]`
+  array. Two `compare` runs over the same underlying change produce the same
+  `finding_id`, so a consumer can correlate a finding across two report runs
+  (e.g. tracking a waiver, or diffing which findings are new between two CI
+  runs) without relying on array order or index, neither of which abicheck
+  guarantees stays stable release to release. `finding_id` deliberately
+  excludes policy-derived fields (`severity`, `evidence_status`) — the same
+  underlying finding hashes identically regardless of the active `--policy`.
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "operation": "removed",
+  "finding_id": "3f2a9c8b1d4e5f60"
+}
+```
+
+### Typed gate summary (`severity.blocking`, `severity.blocking_categories`)
+
+When `--severity-*` configuration is active, the top-level `severity` object
+gets two additional fields alongside the existing `config`/`categories`/
+`exit_code`:
+
+- **`blocking`** — `true` when the severity-aware exit code is non-zero
+  (equivalent to `exit_code != 0`, provided as a named boolean so a consumer
+  doesn't have to know the exit-code convention).
+- **`blocking_categories`** — the list of category names (`abi_breaking`,
+  `potential_breaking`, `quality_issues`, `addition`) that both have findings
+  *and* are configured `error` — i.e. the categories actually responsible for
+  the non-zero exit code, mirroring SARIF's `properties.severityGate` block.
+
+```json
+{
+  "severity": {
+    "config": {"abi_breaking": "error", "potential_breaking": "warning", "quality_issues": "warning", "addition": "error"},
+    "categories": {"addition": {"severity": "error", "count": 1}},
+    "exit_code": 1,
+    "blocking": true,
+    "blocking_categories": ["addition"]
+  }
+}
+```
+
 ---
 
 ## JSON schema and stability guarantees
