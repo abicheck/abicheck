@@ -1701,7 +1701,7 @@ def _dump_elf(
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
         )
-        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, version=version, language_profile=profile_hint, session=dwarf_session)
+        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, debug_format=debug_format, version=version, language_profile=profile_hint, session=dwarf_session)
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()

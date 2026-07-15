@@ -40,14 +40,19 @@ class TestDwarfLayoutTypesOrEmpty:
     frontend can fall back from castxml to clang internally)."""
 
     @pytest.mark.parametrize(
-        ("is_clang_backend", "has_dwarf", "symbols_only", "debug_presence_only"),
+        ("is_clang_backend", "has_dwarf", "symbols_only", "debug_presence_only", "debug_format"),
         [
-            (False, True, False, False),
-            (True, False, False, False),
-            (True, True, True, False),
-            (True, True, False, True),
+            (False, True, False, False, None),
+            (True, False, False, False, None),
+            (True, True, True, False, None),
+            (True, True, False, True, None),
+            (True, True, False, False, "btf"),
+            (True, True, False, False, "ctf"),
         ],
-        ids=["not-clang-backend", "no-dwarf", "symbols-only", "debug-presence-only"],
+        ids=[
+            "not-clang-backend", "no-dwarf", "symbols-only", "debug-presence-only",
+            "forced-btf", "forced-ctf",
+        ],
     )
     def test_no_op_gates(
         self,
@@ -55,14 +60,22 @@ class TestDwarfLayoutTypesOrEmpty:
         has_dwarf: bool,
         symbols_only: bool,
         debug_presence_only: bool,
+        debug_format: str | None,
     ) -> None:
-        """Each gate is a no-op on its own: wrong backend, no DWARF, or either
-        of the two evidence-skipping modes (CodeRabbit: the original tests
+        """Each gate is a no-op on its own: wrong backend, no DWARF, either of
+        the two evidence-skipping modes (CodeRabbit: the original tests
         didn't cover debug_presence_only, so a regression there could have
-        started building a full DWARF snapshot it never needs)."""
+        started building a full DWARF snapshot it never needs), or a forced
+        BTF/CTF debug format (Codex review: dwarf_meta.has_dwarf is
+        repurposed to mean "has BTF/CTF" for those formats, and no real
+        DwarfSession is opened, so build_snapshot_from_dwarf would otherwise
+        open so_path itself and silently backfill from whatever real DWARF
+        the binary happens to also carry — bypassing the caller's explicit
+        format choice)."""
         result = dwarf_layout_types_or_empty(
             None, None, _dwarf_meta(has_dwarf), None, is_clang_backend,
             symbols_only=symbols_only, debug_presence_only=debug_presence_only,
+            debug_format=debug_format,
             version="1.0", language_profile=None, session=None,
         )
         assert result == []
@@ -86,11 +99,35 @@ class TestDwarfLayoutTypesOrEmpty:
 
         result = dwarf_layout_types_or_empty(
             "libfoo.so", None, _dwarf_meta(True), None, True,
-            symbols_only=False, debug_presence_only=False,
+            symbols_only=False, debug_presence_only=False, debug_format=None,
             version="1.0", language_profile="c++", session=None,
         )
         assert result == expected
         assert calls == [("libfoo.so", "1.0", "c++")]
+
+    def test_extracts_dwarf_types_when_debug_format_is_dwarf(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An explicitly forced debug_format="dwarf" is not treated as a
+        BTF/CTF override — it's the normal real-DWARF path."""
+        import abicheck.dwarf_snapshot as dwarf_snapshot
+
+        expected = [RecordType(name="Point", kind="struct", size_bits=64)]
+
+        class _FakeSnap:
+            types = expected
+
+        monkeypatch.setattr(
+            dwarf_snapshot, "build_snapshot_from_dwarf",
+            lambda *a, **k: _FakeSnap(),
+        )
+
+        result = dwarf_layout_types_or_empty(
+            "libfoo.so", None, _dwarf_meta(True), None, True,
+            symbols_only=False, debug_presence_only=False, debug_format="dwarf",
+            version="1.0", language_profile="c++", session=None,
+        )
+        assert result == expected
 
 
 class TestTopmostScopeSuffix:

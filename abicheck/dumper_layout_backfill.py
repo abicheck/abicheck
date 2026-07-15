@@ -50,6 +50,7 @@ def dwarf_layout_types_or_empty(
     *,
     symbols_only: bool,
     debug_presence_only: bool,
+    debug_format: str | None,
     version: str,
     language_profile: str | None,
     session: DwarfSession | None,
@@ -64,8 +65,29 @@ def dwarf_layout_types_or_empty(
     used, not a static guess from the requested ``--ast-frontend``: on the
     "auto" frontend, an unrecoverable castxml failure makes the parser fall
     back to clang internally, which a pre-resolved guess would miss.
+
+    *debug_format* must also be checked directly, not inferred from
+    ``dwarf_meta.has_dwarf`` alone (Codex review): when the caller forces
+    ``debug_format="btf"``/``"ctf"``, ``_resolve_debug_metadata`` builds
+    ``dwarf_meta`` via ``BtfMetadata.to_dwarf_metadata()``/
+    ``CtfMetadata.to_dwarf_metadata()``, which sets ``has_dwarf`` to the
+    BTF/CTF presence flag (for checker compatibility) rather than leaving it
+    ``False`` — and no real ``DwarfSession`` is opened for that path either
+    (*session* is ``None``). Passing ``session=None`` through to
+    ``build_snapshot_from_dwarf`` would make it open *so_path* itself and
+    walk whatever real ``.debug_info`` the binary happens to also carry,
+    silently backfilling from the DWARF the user explicitly asked to bypass
+    by forcing BTF/CTF — on a binary with both sections present, and the
+    DWARF stale or otherwise not meant to be trusted, that's a real
+    correctness gap, not just missed coverage.
     """
-    if symbols_only or debug_presence_only or not dwarf_meta.has_dwarf or not is_clang_backend:
+    if (
+        symbols_only
+        or debug_presence_only
+        or debug_format in ("btf", "ctf")
+        or not dwarf_meta.has_dwarf
+        or not is_clang_backend
+    ):
         return []
     from .dwarf_snapshot import build_snapshot_from_dwarf
     return list(build_snapshot_from_dwarf(
@@ -224,6 +246,26 @@ def backfill_dwarf_layout(
     reject a namespaced base's legitimate match (Codex review), so both
     sides are reduced to their bare last-``::``-segment before the overlap
     check.
+
+    That normalization is also an accepted, structural limitation, not a
+    corroboration gap this module can close (Codex review, fresh evidence):
+    since DWARF's base resolution is *always* bare, two entirely unrelated
+    types declaring differently-namespaced bases that happen to share the
+    same bare identifier (``api::Base`` vs. ``impl::Base``, both reduced to
+    ``"Base"``) would appear to overlap. Recovering the DWARF base's real
+    scope would need a general "resolve any type DIE to its fully qualified
+    name" capability — this codebase has no such thing anywhere, not just
+    here: ``_compute_type_name`` (used for every field/parameter/return
+    type, not only bases) resolves a ``DW_TAG_structure_type`` reference to
+    its bare ``DW_AT_name`` too, since qualified names are only known during
+    the top-down namespace-scoped traversal that builds each record's own
+    ``.name``, not when resolving an arbitrary reference to one. Adding that
+    capability (an offset-to-qualified-name index built during the main
+    walk) is a real feature, not a corroboration tweak, so it's left as a
+    documented residual: reachable only when the header type's own DWARF
+    counterpart is absent *and* an unrelated type coincidentally shares a
+    bare base name — the same "counterpart missing" precondition every
+    other residual risk in this function already requires.
 
     The one case this still can't distinguish (Codex review, fresh evidence
     after the base-corroboration fix above): a header type with *ordinary*
