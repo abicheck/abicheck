@@ -1,0 +1,4 @@
+# FAIR/citation metadata belongs with a source distribution as well as the forge.
+include CITATION.cff
+include codemeta.json
+include .zenodo.json

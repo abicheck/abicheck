@@ -5,9 +5,11 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'abicheck/schemas/**'
       - 'examples/**'
       - 'mkdocs.yml'
       - 'scripts/gen_examples_docs.py'
+      - 'scripts/publish_schemas.py'
       - '.github/workflows/pages.yml'
       - '.github/workflows/docs-pr.yml'
 
@@ -26,8 +28,10 @@ jobs:
       - name: Install MkDocs + Material theme
         run: pip install mkdocs mkdocs-material mkdocs-redirects
 
-      - name: Check generated examples docs are up to date
-        run: python scripts/gen_examples_docs.py --check
+      - name: Check generated documentation assets are up to date
+        run: |
+          python scripts/gen_examples_docs.py --check
+          python scripts/publish_schemas.py --check
 
       - name: Build docs (strict)
         run: mkdocs build --strict

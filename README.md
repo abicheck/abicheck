@@ -234,6 +234,15 @@ Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comp
 - **Reference:** [Change Kinds](https://abicheck.github.io/abicheck/reference/change-kinds/) · [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/) · [Platforms](https://abicheck.github.io/abicheck/reference/platforms/) · [Tool Comparison](https://abicheck.github.io/abicheck/reference/tool-comparison/)
 - **Troubleshooting:** [Troubleshooting guide](https://abicheck.github.io/abicheck/troubleshooting/)
 
+### Citation and machine-readable metadata
+
+- GitHub renders [CITATION.cff](CITATION.cff) through **Cite this repository**.
+- [CodeMeta](codemeta.json) and [Zenodo deposit metadata](.zenodo.json) expose
+  software identity, licensing, authorship, and dependency metadata.
+- The published [versioned JSON Schemas](https://abicheck.github.io/abicheck/reference/machine-readable-metadata/)
+  describe the machine-readable output contracts. Each schema's canonical `$id`
+  is a resolvable HTTPS URL.
+
 ---
 
 ## Contributing

@@ -1,0 +1,19 @@
+{
+  "title": "abicheck: ABI and API compatibility checker for C/C++ shared libraries",
+  "description": "abicheck compares C/C++ shared-library releases using binary, debug-info, public-header, build-system, and optional source evidence. It detects compatibility breaks and reports what the supplied evidence can establish.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "Apache-2.0",
+  "creators": [
+    {
+      "name": "Petrov, Nikolay"
+    }
+  ],
+  "keywords": [
+    "ABI",
+    "API",
+    "compatibility",
+    "C++",
+    "shared libraries"
+  ]
+}

@@ -38,6 +38,31 @@ jobs:
       - name: Use-case docs sync (registry vs. human scorecard/plan-index drift)
         run: python scripts/check_usecase_docs_sync.py
 
+  fair-metadata:
+    name: FAIR metadata and packaging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install validation and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" build twine
+      - name: Verify FAIR metadata and published schema copies
+        run: |
+          python scripts/publish_schemas.py --check
+          python scripts/check_fair_metadata.py
+      - name: Build distribution artifacts
+        run: python -m build
+      - name: Validate distribution metadata
+        run: |
+          twine check dist/*
+          python scripts/check_distribution_metadata.py
+
   lint-and-types:
     runs-on: ubuntu-latest
     timeout-minutes: 10

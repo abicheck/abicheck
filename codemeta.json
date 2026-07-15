@@ -1,0 +1,41 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "abicheck",
+  "description": "ABI and API compatibility checker for C/C++ shared libraries.",
+  "codeRepository": "https://github.com/abicheck/abicheck",
+  "issueTracker": "https://github.com/abicheck/abicheck/issues",
+  "url": "https://abicheck.github.io/abicheck/",
+  "license": "https://spdx.org/licenses/Apache-2.0.html",
+  "applicationCategory": "DeveloperApplication",
+  "programmingLanguage": "Python",
+  "runtimePlatform": [
+    "Linux",
+    "macOS",
+    "Windows"
+  ],
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Nikolay",
+      "familyName": "Petrov"
+    }
+  ],
+  "keywords": [
+    "ABI",
+    "API",
+    "compatibility",
+    "C++",
+    "shared libraries"
+  ],
+  "softwareRequirements": [
+    "click>=8.0",
+    "rich-click>=1.7",
+    "PyYAML>=6.0",
+    "defusedxml>=0.7.1",
+    "pyelftools>=0.29",
+    "packaging>=21.0",
+    "pefile>=2023.2.7",
+    "macholib>=1.16"
+  ]
+}
