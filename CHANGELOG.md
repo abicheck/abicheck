@@ -29,6 +29,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Canonical fact-set versioning and per-family coverage honesty for the
+  Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
+  the Clang facts plugin and the reference `clang.py` wrapper now carries a
+  `fact_set` identity (`{name, version, producer, producer_version,
+  compiler_family, compiler_version}`) and a per-family `coverage` report
+  (`complete`/`empty-confirmed`/`partial`/`unsupported`/`failed` for
+  functions, variables, types, macros, templates, inline bodies, constexpr
+  values, source edges, and read files) — never a user-selectable collection
+  mode; a family is only ever `unsupported` because a producer structurally
+  doesn't collect it yet. New `abicheck/buildsource/fact_set.py` rolls this
+  up per surface and checks old/new comparison compatibility; `source_diff.py`
+  emits a new `SOURCE_FACT_COVERAGE_INCOMPLETE` (RISK) finding when a
+  mandatory family is incomplete or the two sides' fact sets are
+  incompatible, so a missing L4 finding is never silently read as
+  "unchanged". New `abicheck inputs validate <pack>` command checks manifest
+  validity, fact-set version, duplicate TU identities, coverage
+  completeness, and public-surface emptiness before an authoritative merge.
+
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
   `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,
