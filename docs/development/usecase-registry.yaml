@@ -875,7 +875,7 @@ use_cases:
         - examples/case147_scan_depth_ladder
     next_steps: >
       ADR-035 D8 (G20.1). DONE: the Phase 0 `ground_truth.json` v4 schema
-      (`mode: audit`, `expected_crosscheck_kinds`, `expected_providers`,
+      (`mode: audit`, canonical `expected_kinds`, `provider_assertions`,
       `fixtures`) plus five single-build catalog cases (143-147) reaching a
       verdict from one artifact with no baseline — `exported_not_public`,
       `private_header_leak`, `unversioned_exported_symbol`,

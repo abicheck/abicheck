@@ -158,6 +158,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
 | `examples-readme-sync` | ERROR | `examples/README.md` headline count, verdict distribution, and case-index rows match `ground_truth.json` (catches missing/stale catalog rows) |
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
+| `adr-index-nav-sync` | ERROR | Every `docs/development/adr/*.md` is linked from `adr/index.md` **and** listed in `mkdocs.yml`'s nav (an ADR linked only from `index.md` still isn't published to the site — this is how ADR-041 went missing from nav despite being accepted) |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |

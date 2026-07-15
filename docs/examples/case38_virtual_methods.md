@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case38_virtual_methods/` |
 
 **Category:** C++ Virtual / Deleted | **Verdict:** BREAKING

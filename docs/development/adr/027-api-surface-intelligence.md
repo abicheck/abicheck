@@ -23,6 +23,20 @@
 > **Still deferred by design:** flipping `--pattern-verdicts` to default-on,
 > which the ADR gates on FP-rate + parity stability across a release cycle.
 
+> **Relationship to the L5 graph (ADR-031/ADR-041).** This ADR's substrate
+> (`surface_graph.py`) is a header/declaration-graph view built from a single
+> `AbiSnapshot`, independent of and predating the L5 build/source-integration
+> graph. ADR-031 (2026-06-09) already lists this ADR as a consumer of graph
+> evidence ("feeding ADR-027 surface intelligence"); ADR-041 (2026-07-12) is
+> the roadmap that extends L5's edge production (`TYPE_INHERITS`/
+> `TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`) and its
+> impact-closure roadmap on top of the same source/implementation graph. The
+> two graphs are not merged by this ADR — A3's product surface graph (D3.1)
+> and A4's idiom-aware modulation stay `SurfaceGraph`-only — but a future
+> pass could fold L5 edges into `SurfaceGraph.reachable_types`/`fan_in`/
+> `fan_out` for cross-TU (not just cross-header) reasoning; see ADR-041's P1
+> item 3 (public-entry impact closure) for the closest existing roadmap item.
+
 ---
 
 ## Context

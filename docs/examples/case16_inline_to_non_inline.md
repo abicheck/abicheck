@@ -7,7 +7,7 @@
 | **Category** | Addition (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case16_inline_to_non_inline/` |
 
 **Verdict:** 🟢 COMPATIBLE

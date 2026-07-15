@@ -7,7 +7,7 @@
 | **Category** | Addition (Compatible) |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `union_field_added` |
 | **Source files** | `examples/case26b_union_field_added_compatible/` |
 
 **Verdict:** 🟢 COMPATIBLE

@@ -350,9 +350,10 @@ def _try_match_reserved_field(
     fname: str,
     f_old: TypeField,
     name: str,
-    added_by_offset: dict[int, TypeField],
+    added_by_offset: dict[int, list[TypeField]],
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
+    renamed_type_changed_added: set[str],
 ) -> Change | None:
     """Check if a removed field is a reserved field put into use.
 
@@ -362,16 +363,30 @@ def _try_match_reserved_field(
         return None
 
     candidate: TypeField | None = None
-    # Primary: match by offset + type (when available)
+    # Primary: match by offset + type (when available). Excludes candidates
+    # already consumed by an earlier reserved-field or rename match at this
+    # offset (multiple distinct added fields can share an offset_bits, e.g.
+    # overlapping anonymous-union members) — otherwise two removed fields
+    # could both claim the same added field, hiding that one was genuinely
+    # dropped (caught in review).
     if f_old.offset_bits is not None:
-        c = added_by_offset.get(f_old.offset_bits)
-        if c is not None and f_old.type == c.type:
-            candidate = c
+        candidate = next(
+            (
+                c
+                for c in added_by_offset.get(f_old.offset_bits, [])
+                if (
+                    c.name not in reserved_matched_added
+                    and c.name not in renamed_type_changed_added
+                    and f_old.type == c.type
+                )
+            ),
+            None,
+        )
     # Fallback: match by type when offsets unavailable (DWARF-only)
     if candidate is None and f_old.offset_bits is None:
         candidates = added_by_type.get(f_old.type, [])
         for c in candidates:
-            if c.name not in reserved_matched_added:
+            if c.name not in reserved_matched_added and c.name not in renamed_type_changed_added:
                 candidate = c
                 break
     if candidate is not None and not _RESERVED_FIELD_RE.match(candidate.name):
@@ -390,10 +405,14 @@ def _try_match_reserved_field(
 def _index_added_fields(
     old_fields: dict[str, TypeField],
     new_fields: dict[str, TypeField],
-) -> tuple[dict[int, TypeField], dict[str, list[TypeField]]]:
+) -> tuple[dict[int, list[TypeField]], dict[str, list[TypeField]]]:
     """Index fields present only in new_fields by offset and by type for reserved-field matching."""
-    # Build index of added fields by offset for reserved-field matching.
-    added_by_offset: dict[int, TypeField] = {}
+    # Build index of added fields by offset for reserved-field matching. A
+    # list per offset, not a single value: distinct added fields can share
+    # an offset_bits (e.g. overlapping anonymous-union members), and a plain
+    # ``dict[int, TypeField]`` would silently keep only the last one (caught
+    # in review).
+    added_by_offset: dict[int, list[TypeField]] = {}
     # Also build an ordered list of added non-reserved fields for fallback
     # when offset_bits is unavailable (e.g. DWARF-only mode). Iterate
     # new_fields (insertion == declaration order) rather than a set of names, so
@@ -403,7 +422,7 @@ def _index_added_fields(
         if fname in old_fields:
             continue
         if f.offset_bits is not None:
-            added_by_offset[f.offset_bits] = f
+            added_by_offset.setdefault(f.offset_bits, []).append(f)
         if not _RESERVED_FIELD_RE.match(fname):
             added_by_type.setdefault(f.type, []).append(f)
     return added_by_offset, added_by_type
@@ -420,28 +439,89 @@ def _diff_removed_field(
     name: str,
     fname: str,
     f_old: TypeField,
-    added_by_offset: dict[int, TypeField],
+    added_by_offset: dict[int, list[TypeField]],
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
-) -> Change:
-    """Classify a field missing from the new type as reserved-use, rename+retype, or removal."""
+) -> Change | None:
+    """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
+
+    Returns FIELD_RENAMED directly for a pure rename (same offset, identical
+    type, different name) instead of TYPE_FIELD_REMOVED: emitting a redundant,
+    misleading BREAKING removal for a field that still exists at its offset
+    would overstate the severity. This does not rely on ``_diff_field_renames``
+    independently matching the same pair — that detector keys on the *raw*
+    ``(offset_bits, type)`` tuple while canonical-equal-but-differently-spelled
+    types (e.g. ``struct Foo`` vs ``Foo``) would canonicalize equal here but
+    not raw-match there, which would silently drop the finding entirely rather
+    than just double-report it (caught in review). Emitting the same
+    ``FIELD_RENAMED`` shape here (identical description) is safe either way:
+    when ``_diff_field_renames`` *also* fires for a raw-matching pair, the
+    post-processing dedup pass collapses the duplicate.
+    """
     # Check if this is a reserved field put into use
     matched = _try_match_reserved_field(
-        fname, f_old, name, added_by_offset, added_by_type, reserved_matched_added,
+        fname, f_old, name, added_by_offset, added_by_type,
+        reserved_matched_added, renamed_type_changed_added,
     )
     if matched is not None:
         return matched
     if f_old.offset_bits is not None:
-        f_new = added_by_offset.get(f_old.offset_bits)
-        if (
-            f_new is not None
-            and f_new.name not in reserved_matched_added
-            and not _RESERVED_FIELD_RE.match(fname)
-            and not _RESERVED_FIELD_RE.match(f_new.name)
-            and canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
-            and not cv_qualifiers_only_differ(f_old.type, f_new.type)
-        ):
+        # Excludes candidates already consumed by an earlier reserved-field
+        # or rename match at this offset — distinct added fields can share
+        # an offset_bits (e.g. overlapping anonymous-union members), and
+        # without this two removed fields could both claim the same added
+        # field as their target, hiding that one was genuinely dropped
+        # (caught in review).
+        candidates = [
+            c
+            for c in added_by_offset.get(f_old.offset_bits, [])
+            if (
+                c.name not in reserved_matched_added
+                and c.name not in renamed_type_changed_added
+                and not _RESERVED_FIELD_RE.match(fname)
+                and not _RESERVED_FIELD_RE.match(c.name)
+            )
+        ]
+        # Prefer an exact pure-rename match over an arbitrary first
+        # candidate: when several distinct fields share an offset
+        # (anonymous-union/overlap layouts), the first unconsumed one in
+        # declaration order might be an unrelated retype while a later one
+        # is the true rename target. Picking the retype first would both
+        # report a false TYPE_FIELD_TYPE_CHANGED here *and* leave the true
+        # rename target for the independent `_diff_field_renames` detector
+        # to separately claim as FIELD_RENAMED — two contradictory findings
+        # for the same old field (caught in review).
+        f_new = next(
+            (
+                c
+                for c in candidates
+                if (
+                    canonicalize_type_name(f_old.type) == canonicalize_type_name(c.type)
+                    # A bit-field's width is a layout property the type
+                    # spelling doesn't capture (e.g. two "unsigned int"
+                    # fields can differ in bit width at the same byte
+                    # offset) — require it to also match before treating
+                    # this as a harmless rename, or a real
+                    # FIELD_BITFIELD_CHANGED break gets masked as a bare
+                    # rename (caught in review).
+                    and f_old.is_bitfield == c.is_bitfield
+                    and f_old.bitfield_bits == c.bitfield_bits
+                )
+            ),
+            None,
+        )
+        if f_new is not None:
+            renamed_type_changed_added.add(f_new.name)
+            return make_change(
+                ChangeKind.FIELD_RENAMED,
+                symbol=name,
+                name=name,
+                old=fname,
+                new=f_new.name,
+            )
+        f_new = candidates[0] if candidates else None
+        if f_new is not None and not cv_qualifiers_only_differ(f_old.type, f_new.type):
             renamed_type_changed_added.add(f_new.name)
             return make_change(
                 ChangeKind.TYPE_FIELD_TYPE_CHANGED,
@@ -509,10 +589,12 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
             # Skip trailing FAM removals — handled by _diff_flexible_array_member
             if fname == old_trailing_fam:
                 continue
-            changes.append(_diff_removed_field(
+            removed_change = _diff_removed_field(
                 name, fname, f_old, added_by_offset, added_by_type,
                 reserved_matched_added, renamed_type_changed_added,
-            ))
+            )
+            if removed_change is not None:
+                changes.append(removed_change)
             continue
         # Skip trailing FAM type changes — handled by _diff_flexible_array_member
         if fname == old_trailing_fam and fname == new_trailing_fam:
@@ -1215,8 +1297,23 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         removed = [f for f in t_old.fields if f.name not in new_names]
         added = [f for f in t_new.fields if f.name not in old_names]
 
-        # Match by (offset, type) — a rename is when the same slot has a different name
-        added_by_sig = {(f.offset_bits, f.type): f for f in added if f.offset_bits is not None}
+        # Match by (offset, type, bitfield width) — a rename is when the same
+        # slot has a different name. A bit-field's width is a layout property
+        # the type spelling alone doesn't capture (two "unsigned int"
+        # bit-fields at the same offset can still differ in width), so it
+        # must be part of the match key or a real width change gets masked
+        # as a bare rename (caught in review). A list per signature, not a
+        # single value: distinct added fields can share a signature (e.g.
+        # overlapping anonymous-union members collapsing to one field), and
+        # a plain single-value dict would let every removed field with that
+        # signature claim the same added field as its rename target instead
+        # of just the first (caught in review).
+        added_by_sig: dict[tuple[int, str, bool, int | None], list[TypeField]] = {}
+        for f in added:
+            if f.offset_bits is not None:
+                sig = (f.offset_bits, f.type, f.is_bitfield, f.bitfield_bits)
+                added_by_sig.setdefault(sig, []).append(f)
+        renamed_to: set[str] = set()
         for f_old in removed:
             if f_old.offset_bits is None:
                 continue
@@ -1224,9 +1321,13 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # as USED_RESERVED_FIELD (compatible), not FIELD_RENAMED (API break).
             if _RESERVED_FIELD_RE.match(f_old.name):
                 continue
-            sig = (f_old.offset_bits, f_old.type)
-            f_new = added_by_sig.get(sig)
+            sig = (f_old.offset_bits, f_old.type, f_old.is_bitfield, f_old.bitfield_bits)
+            f_new = next(
+                (c for c in added_by_sig.get(sig, []) if c.name not in renamed_to),
+                None,
+            )
             if f_new is not None:
+                renamed_to.add(f_new.name)
                 changes.append(make_change(
                     ChangeKind.FIELD_RENAMED,
                     symbol=name,

@@ -35,6 +35,8 @@ jobs:
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Use-case docs sync (registry vs. human scorecard/plan-index drift)
+        run: python scripts/check_usecase_docs_sync.py
 
   lint-and-types:
     runs-on: ubuntu-latest

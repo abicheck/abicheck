@@ -116,14 +116,6 @@ def _expected_or_unknown(value: object) -> str:
 EXPECTED: dict[str, str] = {
     k: _expected_or_unknown(v["expected"]) for k, v in _gt_data["verdicts"].items()
 }
-# Per-tool override sourced from ground_truth.json:
-#   expected_abicc — ABICC can't emit NO_CHANGE; NO_CHANGE→COMPATIBLE for scoring
-EXPECTED_ABICC: dict[str, str] = {
-    k: ("COMPATIBLE" if EXPECTED[k] == "NO_CHANGE" else EXPECTED[k])
-    for k, v in _gt_data["verdicts"].items()
-}
-
-
 @dataclass
 class ToolResult:
     verdict: str
@@ -139,7 +131,6 @@ class Tool:
     run_fn: Callable[..., ToolResult]
     col_name: str
     col_width: int = 12
-    expected_key: str = "expected"
     ms_key: str = ""
     label: str = ""
     show_slowest: bool = False
@@ -950,12 +941,12 @@ def run_abidiff_headers(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path 
 
 
 TOOL_REGISTRY: list[Tool] = [
-    Tool("abicheck", run_abicheck, "abicheck", 12, "expected"),
-    Tool("abicheck_full", run_abicheck_full, "ac-full", 12, "expected"),
-    Tool("abidiff", run_abidiff, "abidiff", 12, "expected"),
-    Tool("abidiff_headers", run_abidiff_headers, "abidiff+hdr", 12, "expected"),
-    Tool("abicc_dumper", run_abicc_dumper, "ABICC(dump)", 12, "expected_abicc", show_slowest=True),
-    Tool("abicc_xml", run_abicc_xml, "ABICC(xml)", 12, "expected_abicc", show_slowest=True),
+    Tool("abicheck", run_abicheck, "abicheck"),
+    Tool("abicheck_full", run_abicheck_full, "ac-full"),
+    Tool("abidiff", run_abidiff, "abidiff"),
+    Tool("abidiff_headers", run_abidiff_headers, "abidiff+hdr"),
+    Tool("abicc_dumper", run_abicc_dumper, "ABICC(dump)", show_slowest=True),
+    Tool("abicc_xml", run_abicc_xml, "ABICC(xml)", show_slowest=True),
 ]
 
 
@@ -985,7 +976,7 @@ def _correct(verdict: str, expected: str) -> str:
     return "✅" if verdict == expected else "❌"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark abicheck vs abidiff vs ABICC")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                    help="Timeout per tool call for abicheck/abidiff(+headers) "
@@ -1026,7 +1017,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-frozen", action="store_true",
                    help="Don't merge in previously-frozen competitor data (default: merge "
                         "it in for any tool not actively selected this run).")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 # ── Helpers (module-level) ──────────────────────────────────────────────────
@@ -1096,13 +1087,13 @@ def _try_reuse_prebuilt(
 
 # ── Module-level helpers extracted from main() ────────────────────────────────
 
-def _accuracy(results: list[dict], key: str, expected_key: str = "expected") -> tuple[int, int]:
-    scored = [r for r in results if r.get(expected_key, "?") != "?" and r[key] not in ("SKIP", "ERROR", "TIMEOUT", "NO_SOURCE")]
-    correct = sum(1 for r in scored if r[key] == r[expected_key])
+def _accuracy(results: list[dict], key: str) -> tuple[int, int]:
+    scored = [r for r in results if r.get("expected", "?") != "?" and r[key] not in ("SKIP", "ERROR", "TIMEOUT", "NO_SOURCE")]
+    correct = sum(1 for r in scored if r[key] == r["expected"])
     return correct, len(scored)
 
 
-def _coverage_accuracy(results: list[dict], key: str, expected_key: str = "expected") -> tuple[int, int]:
+def _coverage_accuracy(results: list[dict], key: str) -> tuple[int, int]:
     """Accuracy over the full catalog denominator (every row in *results*).
 
     Unlike :func:`_accuracy`, a SKIP/ERROR/TIMEOUT is *not* excluded from the
@@ -1112,7 +1103,7 @@ def _coverage_accuracy(results: list[dict], key: str, expected_key: str = "expec
     """
     correct = sum(
         1 for r in results
-        if r.get(expected_key, "?") != "?" and r[key] == r[expected_key]
+        if r.get("expected", "?") != "?" and r[key] == r["expected"]
     )
     return correct, len(results)
 
@@ -1140,16 +1131,14 @@ _VERDICT_SEVERITY_RANK: dict[str, int] = {
 }
 
 
-def _fp_fn_counts(
-    results: list[dict], key: str, expected_key: str = "expected",
-) -> tuple[int, int]:
+def _fp_fn_counts(results: list[dict], key: str) -> tuple[int, int]:
     """Count false positives (over-called) and false negatives (under-called
     or simply incapable of scanning the case), scored over the full catalog —
     same denominator philosophy as :func:`_coverage_accuracy`.
     """
     fp = fn = 0
     for r in results:
-        exp_rank = _VERDICT_SEVERITY_RANK.get(r.get(expected_key, "?"))
+        exp_rank = _VERDICT_SEVERITY_RANK.get(r.get("expected", "?"))
         if exp_rank is None:
             continue
         got_rank = _VERDICT_SEVERITY_RANK.get(r[key], -1)
@@ -1281,7 +1270,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
     accuracy: dict[str, dict[str, Any]] = {}
     coverage_accuracy: dict[str, dict[str, Any]] = {}
     for t in active_tools:
-        correct, total = _accuracy(results, t.name, t.expected_key)
+        correct, total = _accuracy(results, t.name)
         accuracy[t.name] = {
             "label": t.label,
             "correct": correct,
@@ -1289,8 +1278,8 @@ def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) 
             "pct": round(100 * correct / total, 1) if total else None,
             "total_ms": round(_total_ms(results, t.ms_key)),
         }
-        cov_correct, cov_total = _coverage_accuracy(results, t.name, t.expected_key)
-        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
+        cov_correct, cov_total = _coverage_accuracy(results, t.name)
+        fp, fn = _fp_fn_counts(results, t.name)
         coverage_accuracy[t.name] = {
             "label": t.label,
             "correct": cov_correct,
@@ -1483,7 +1472,7 @@ def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> N
     """Print per-tool accuracy bars with timing totals."""
     print("  Accuracy vs expected verdicts (scored cases only — SKIP/ERROR/TIMEOUT excluded):")
     for t in active_tools:
-        c, total = _accuracy(results, t.name, t.expected_key)
+        c, total = _accuracy(results, t.name)
         if total > 0:
             pct = 100 * c // total
             bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
@@ -1493,10 +1482,10 @@ def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> N
     print(f"\n  Accuracy vs full catalog ({len(results)} cases — SKIP/ERROR/TIMEOUT/"
           "incapacity all count as misses, not exclusions):")
     for t in active_tools:
-        c, total = _coverage_accuracy(results, t.name, t.expected_key)
+        c, total = _coverage_accuracy(results, t.name)
         pct = 100 * c // total if total else 0
         bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-        fp, fn = _fp_fn_counts(results, t.name, t.expected_key)
+        fp, fn = _fp_fn_counts(results, t.name)
         print(f"    {t.label}: {c:>3}/{total} ({pct:3}%) {bar}  FP={fp:<3} FN={fn:<3}")
 
 
@@ -1658,7 +1647,6 @@ def _build_result_entry(
     entry: dict[str, Any] = {
         "case": name,
         "expected": expected,
-        "expected_abicc": EXPECTED_ABICC.get(name, expected),
     }
     for t in TOOL_REGISTRY:
         tr = tool_results.get(t.name, ToolResult(verdict="SKIP"))
@@ -1788,7 +1776,7 @@ def _run_bundle_case(
     if manifest_file:
         cmd += ["--manifest", str(case_dir / str(manifest_file))]
     bundle_cohort = entry.get("bundle_cohort")
-    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_bundle_kinds") or []):
+    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_kinds") or []):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
         cmd += ["--bundle-cohort", str(bundle_cohort)]
@@ -1961,7 +1949,7 @@ def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
     COMPATIBLE verdict — the cross-check findings a single committed
     ``snapshot.abi.json`` produces (no old-vs-new pair at all). There is no
     verdict to compare, so this reduces to a boolean: did abicheck's
-    run_crosschecks recover every kind ``expected_crosscheck_kinds``
+    run_crosschecks recover every kind ``canonical expected_kinds``
     declares? Reported as the pseudo-verdict "MATCH"/"MISS" so it folds into
     the same accuracy accounting as every other row (paired with
     expected="MATCH" by the caller) — mirrors tests/test_g20_catalog.py.
@@ -1977,7 +1965,7 @@ def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
         snapshot = load_snapshot(snap_path)
         res = run_crosschecks(snapshot)
         emitted = {c.kind.value for c in res.findings}
-        expected_kinds = set(entry.get("expected_crosscheck_kinds") or [])
+        expected_kinds = set(entry.get("expected_kinds") or [])
         verdict = "MATCH" if expected_kinds <= emitted else "MISS"
     except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
         return ToolResult(verdict="ERROR", raw_output=str(exc),
@@ -2010,7 +1998,7 @@ def _try_special_case(
     if entry.get("mode") == "audit":
         tr = _run_g20_audit_case(name, entry)
         note = ("single-artifact audit/cross-source check (no old-vs-new verdict "
-                "concept) scored MATCH/MISS against expected_crosscheck_kinds, "
+                "concept) scored MATCH/MISS against canonical expected_kinds, "
                 "mirroring tests/test_g20_catalog.py — abidiff/ABICC have no mode "
                 "for this at all")
         _record_special_case_row(name, "MATCH", results, note, {"abicheck": tr, "abicheck_full": tr})
@@ -2031,9 +2019,8 @@ def _try_special_case(
         tr = _run_bundle_case(case_dir, name, entry, rdir, args.timeout)
         note = ("multi-library bundle (ADR-023) — no abidiff/ABICC equivalent for "
                 "directory-of-libraries comparison")
-        # Bundle cases carry their expected verdict under expected_bundle_verdict
-        # (the top-level "expected" is None — there is no single-library verdict).
-        bundle_expected = entry.get("expected_bundle_verdict") or expected
+        # Bundle cases use the same canonical case-level expected verdict.
+        bundle_expected = expected
         _record_special_case_row(name, bundle_expected, results, note, {"abicheck": tr, "abicheck_full": tr})
         return True
 
@@ -2268,9 +2255,7 @@ def _run_case_evidence_tiers(case_dir: Path, args: Any) -> dict[str, Any] | None
          compile_db.parent if compile_db else None, enabled=compile_db is not None)
 
     gt_entry = _gt_data["verdicts"].get(name, {})
-    expected_kinds = list(gt_entry.get("expected_kinds", [])) + list(
-        gt_entry.get("expected_bundle_kinds", [])
-    )
+    expected_kinds = list(gt_entry.get("expected_kinds", []))
     min_evidence = gt_entry.get("min_evidence", "?")
     return {
         "case": name,
@@ -2324,7 +2309,7 @@ def _print_evidence_tier_summary(rows: list[dict]) -> None:
               "identical flags in this harness.)")
     # Honesty check: empirical first-detection vs ground_truth min_evidence.
     # (evidence_tiers.detected_at already floors kind-less quiet cases at their
-    # designed tier, so an invisible-change NO_CHANGE like case122 reports a MISS
+    # designed tier, so a shallow missed detection like case122 reports a MISS
     # rather than a spurious L0 match.)
     drift = [
         (r["case"], r["min_evidence"], r["detected_at"])
@@ -2376,13 +2361,18 @@ def _run_evidence_tiers(args: Any) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def main() -> None:
-    args = parse_args()
+def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]]:
+    """Run the selected tools across the selected cases and merge in frozen data.
 
-    if args.evidence_tiers:
-        _run_evidence_tiers(args)
-        return
+    Factored out of :func:`main` so other scripts (e.g.
+    ``generate_benchmark_report.py``) can drive a benchmark run programmatically
+    — via ``parse_args()`` for a compatible ``Namespace`` — without shelling out
+    to a subprocess or duplicating the case-discovery/freeze/merge sequence.
 
+    Returns ``(results, active_tools, selected_tools)``: ``active_tools`` may
+    include tools beyond ``selected_tools`` when frozen data was merged in for
+    a tool not actively run this session.
+    """
     REPORT_DIR.mkdir(exist_ok=True)
     BUILD_DIR.mkdir(exist_ok=True)
 
@@ -2415,6 +2405,18 @@ def main() -> None:
                 print(f"  Merged frozen results for: {', '.join(merged_tools)} "
                       f"(frozen at {frozen.get('frozen_at', '?')}, "
                       f"commit {frozen.get('git_commit', '?')[:12]})\n")
+
+    return results, active_tools, selected_tools
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.evidence_tiers:
+        _run_evidence_tiers(args)
+        return
+
+    results, active_tools, selected_tools = run_suite(args)
 
     # ── Accuracy summary ──────────────────────────────────────────────────────
     _print_accuracy_summary(results, active_tools, selected_tools)

@@ -1,6 +1,6 @@
 # case147 — Depth ladder: the same input answered at three depths
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `private_header_leak` ·
 **Mode:** single-release audit · **Evidence tier:** L2 (→ L5 corroboration)
 
 ## What it demonstrates

@@ -25,11 +25,11 @@ This is an additive ABI change. The old app does not reference the new global, s
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case62_var_added_app case62_var_added_v2
+cmake --build /tmp/abicheck-examples-build --target case61_var_added_app case61_var_added_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case62_var_added/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case62_var_added/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case61_var_added/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case61_var_added/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # version = 2 / get_version() = 2
 ```

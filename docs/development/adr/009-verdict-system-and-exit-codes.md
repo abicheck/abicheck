@@ -140,7 +140,10 @@ Display filtering is cosmetic; exit codes are authoritative.
   crash" (4) without parsing output
 - `COMPATIBLE_WITH_RISK` surfaces deployment concerns that ABICC silently
   ignores
-- Bitwise OR composition enables multi-library aggregate exit codes
+- Worst-verdict-wins composition (§2, `_exit_compare_release()` in
+  `cli_compare_release_helpers.py`) gives multi-library aggregate exit codes a
+  single, unambiguous rule — no bitwise composition is used anywhere in the
+  codebase
 - ABICC migration path preserved through `compat` command's exit code scheme
 - Fail-safe default prevents new detectors from silently passing
 

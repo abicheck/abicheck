@@ -20,12 +20,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 14 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
+| BREAKING | 100 | `BREAKING_KINDS` | 🔴 |
+| API_BREAK | 16 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
-| COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 8 | — | ✅ |
+| COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
+| NO_CHANGE | 5 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -76,17 +76,56 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 169 catalog cases | gcc: 137 PASS / 4 XFAIL / 28 SKIP; clang: 138 PASS / 4 XFAIL / 27 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 169 catalog cases | 76 DEMONSTRATED / 54 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 31 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 169 catalog cases | 137 PASS / 4 XFAIL / 28 SKIP | Informational, FP guard clean |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 169 catalog cases | 132 PASS / 3 FAIL / 6 XFAIL / 28 SKIP | Informational; three reduced-evidence signal-loss backlogs |
-| Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 148 PASS / 1 XFAIL / 32 SKIP; clang: 148 PASS / 2 XFAIL / 31 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 81 DEMONSTRATED / 60 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. 8 BASELINE_SIGNAL cases (case06/42/78/109/110/111/112/141) exit non-zero on the *unmodified* v1 baseline, before any v2 substitution — tracked as a runner-visibility gap, not yet CI-blocking (see "Known validation gaps" below) |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 142 PASS / 37 SKIP / 1 FAIL / 1 XFAIL | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 3 FAIL / 37 SKIP / 3 XFAIL | Informational; reduced-evidence signal-loss backlog (below) |
+| Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
+
+Counts above are from the most recent full catalog run this table was refreshed against; re-run
+the `Examples Validation` workflow and update this table whenever the catalog size or a lane's
+pass/fail/skip mix changes, so it doesn't silently drift out of sync with `ground_truth.json`
+the way it previously did (stale at a 169-case catalog for several releases).
+
+### Known validation gaps
+
+- **`expected_kinds`/`expected_absent_kinds` are checked but not yet blocking.**
+  `tests/validate_examples.py` now parses the real compare output's change kinds and checks them
+  against `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` and
+  summarized as a `KINDS_MISMATCH` count — previously only the final verdict string was asserted,
+  so a case could PASS with the right severity for the wrong detector reason. The first full-catalog
+  run under this check found 19 such cases (verdict correct, named detector kind not actually
+  produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
+  `case59_func_became_inline`, `case65_symbol_version_removed`, `case66_language_linkage_changed`,
+  `case72_covariant_return_changed`, `case74/75/76/77/80_detail_*` (the `internal_type_leaks_via_
+  public_api` escalation doesn't fire for any of these detail-namespace-leak cases — its reachability
+  check appears to need namespace-qualified symbols that the DWARF-derived struct/type diff doesn't
+  currently emit), `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
+  `case87_default_template_arg_changed`, `case88_cpo_kind_changed`, `case94_empty_tag_gained_state`,
+  and `case116_atomic_qualifier_changed`. These are real, pre-existing detector gaps this check
+  newly surfaced, not regressions from this pass — set `ABICHECK_STRICT_KINDS=1` (see
+  `tests/check_validate_results.py`) to make them blocking once triaged and fixed case by case.
+- **`API_BREAK`/`COMPATIBLE` normalization can mask a real regression.** `_normalize_verdict`
+  treats `API_BREAK` and `COMPATIBLE` as equivalent for the default PASS/FAIL gate (a case's
+  `category_strict` field flags — but does not block on — the collapse); CI does not currently
+  set `ABICHECK_STRICT_CATEGORY=1` to make a collapse blocking.
+- **Runtime-smoke `BASELINE_SIGNAL` is visible but not blocking.** See the Runtime smoke row
+  above; the runner's exit code only fails on `BUILD_ERROR`.
+- **Build/source coverage is a 7-case smoke, not full L3–L5 coverage.** The `--artifact-variant
+  build-source` lane exercises a representative subset, not every L3/L4/L5 case in the catalog.
 
 Default/debug skips are not accepted as green coverage. They are cases outside
 the default single-library debug lane: G20 audit/cross-source snapshots, L3/L4/L5
 build/source-only fixtures, bundle/release cases, BTF, or host feature gaps. The
 catalog keeps them in `ground_truth.json`, and dedicated tests cover those
 families.
+
+The repository-wide completion gate is not an individual row above. Follow the
+[full example validation runbook](../docs/development/examples-validation-runbook.md)
+to aggregate compiler, runtime, bundle, and dedicated proof artifacts. Full
+success means one `COVERED` row per current ground-truth entry, with no
+`UNRESOLVED` or `FAILED` rows. Trusted source-smoke fixtures require the explicit
+`ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` opt-in documented there.
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, and `case129_struct_return_convention`.
@@ -158,7 +197,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [32](case32_param_defaults/README.md) | Parameter Default Value Changes (C++) | API Break | 🟠 API_BREAK |
 | [33](case33_pointer_level/README.md) | - Pointer Level Change | Breaking | 🔴 BREAKING |
 | [34](case34_access_level/README.md) | Access Level Changed | API Break | 🟠 API_BREAK |
-| [35](case35_field_rename/README.md) | - Field Rename | Breaking | 🔴 BREAKING |
+| [35](case35_field_rename/README.md) | - Field Rename | API Break | 🟠 API_BREAK |
 | [36](case36_anon_struct/README.md) | - Anonymous Struct/Union Change | Breaking | 🔴 BREAKING |
 | [37](case37_base_class/README.md) | - Base Class Changes | Breaking | 🔴 BREAKING |
 | [38](case38_virtual_methods/README.md) | Virtual Method Changes | Breaking | 🔴 BREAKING |
@@ -221,14 +260,14 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed | Breaking | 🔴 BREAKING |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |
 | [97](case97_api_depends_on_consumer_env/README.md) | public API depends on consumer build environment (RISK) | Breaking | 🔴 BREAKING |
-| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (per-binary: NO_CHANGE) | No Change | ✅ NO_CHANGE |
+| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (build-context risk) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
 | [100](case100_experimental_removed_without_replacement/README.md) | experimental:: removed without replacement (API break) | Breaking | 🔴 BREAKING |
 | [101](case101_inline_namespace_version_bumped/README.md) | inline namespace version bumped (BREAKING) | Breaking | 🔴 BREAKING |
 | [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | 🔴 BREAKING |
 | [103](case103_toolchain_flag_drift/README.md) | Toolchain flag drift (`toolchain_flag_drift`) | Quality | 🟢 COMPATIBLE (bad practice) |
 | [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | Breaking | 🔴 BREAKING (bad practice) |
-| [105](case105_concept_tightening/README.md) | Concept Tightening (C++20) | No Change | ✅ NO_CHANGE |
+| [105](case105_concept_tightening/README.md) | Concept Tightening (C++20) | API Break | 🟠 API_BREAK |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | 🟠 API_BREAK |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (historical ABI break) | Breaking | 🔴 BREAKING |
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (historical ABI break — vtable angle) | Breaking | 🔴 BREAKING |
@@ -245,7 +284,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [119](case119_internal_struct_field_removed_scoped/README.md) | Internal struct loses a field (non-public, scoped) | No Change | ✅ NO_CHANGE |
 | [120](case120_internal_struct_reordered_scoped/README.md) | Internal struct fields reordered (non-public, scoped) | No Change | ✅ NO_CHANGE |
 | [121](case121_kernel_btf_struct_field_added/README.md) | Kernel BTF struct grows a field (out-of-tree module break) | Breaking | 🔴 BREAKING |
-| [122](case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change (documented gap) | No Change | ✅ NO_CHANGE |
+| [122](case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [123](case123_default_argument_removed/README.md) | Default Argument Removed | API Break | 🟠 API_BREAK |
 | [124](case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |
@@ -266,15 +305,15 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [140](case140_empty_base_optimization_lost/README.md) | Empty Base Optimization Lost (base subobject moved) | Breaking | 🔴 BREAKING |
 | [141](case141_versioned_symbol_scheme/README.md) | Versioned-Symbol Scheme (library-wide rename) | Breaking | 🔴 BREAKING (bad practice) |
 | [142](case142_vtable_slot_count_binary_only/README.md) | Vtable Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
-| [143](case143_audit_accidental_export/README.md) | Accidental export (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [144](case144_audit_private_header_leak/README.md) | Private header leak (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [145](case145_audit_unversioned_export/README.md) | Unversioned export under a versioning scheme (audit, pure L0) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [146](case146_audit_rtti_for_internal/README.md) | RTTI exported for an internal type (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [147](case147_scan_depth_ladder/README.md) | Depth ladder: the same input answered at three depths | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [143](case143_audit_accidental_export/README.md) | Accidental export (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [144](case144_audit_private_header_leak/README.md) | Private header leak (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [145](case145_audit_unversioned_export/README.md) | Unversioned export under a versioning scheme (audit, pure L0) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [146](case146_audit_rtti_for_internal/README.md) | RTTI exported for an internal type (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [147](case147_scan_depth_ladder/README.md) | Depth ladder: the same input answered at three depths | Quality | 🟢 COMPATIBLE (bad practice) |
 | [148](case148_xcheck_header_build_mismatch/README.md) | Header build-context mismatch (cross-source flagship) | API Break | 🟠 API_BREAK |
 | [149](case149_xcheck_odr_variant/README.md) | ODR type variant (cross-source, L4 layout ↔ layout) | API Break | 🟠 API_BREAK |
-| [150](case150_xcheck_export_public_pair/README.md) | Bidirectional export ↔ declaration pair | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [151](case151_xcheck_provider_matrix/README.md) | Provider-agreement matrix (corroboration grows with evidence) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [150](case150_xcheck_export_public_pair/README.md) | Bidirectional export ↔ declaration pair | Quality | 🟢 COMPATIBLE (bad practice) |
+| [151](case151_xcheck_provider_matrix/README.md) | Provider-agreement matrix (corroboration grows with evidence) | Quality | 🟢 COMPATIBLE (bad practice) |
 | [152](case152_enum_size_flag_flip/README.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [153](case153_struct_packing_flip/README.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [154](case154_lto_mode_flip/README.md) | _lto_mode_flip — LTO mode flip (`-flto`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
@@ -303,7 +342,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [178](case178_unnamed_type_in_public_abi/README.md) | Unnamed Type Leaks Into the Public ABI | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Quality | 🟢 COMPATIBLE (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

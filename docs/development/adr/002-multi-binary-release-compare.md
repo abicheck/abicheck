@@ -4,6 +4,25 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment:** The standalone `compare-release` subcommand described
+> below was later removed as a user-facing command (ADR-037 D7 — command
+> consolidation). `abicheck compare` now dispatches directories/packages to
+> the same release engine automatically (`_dispatch_release_compare` in
+> `abicheck/cli.py`, which `ctx.invoke`s the unregistered
+> `compare_release_cmd` in `abicheck/cli_compare_release.py`); the syntax in
+> "Proposed UX" below (`abicheck compare-release old/ new/ ...`) is historical
+> — use `abicheck compare old/ new/ ...` instead. Landed vs. not:
+> **implemented** — filename-stem auto-matching (`_discover_files`,
+> `abicheck/cli_compare_release.py`), `--fail-on-removed-library`,
+> `--output-dir` per-library + summary reports, `-j/--jobs` parallel dispatch
+> (`ThreadPoolExecutor`, resolving the "Parallel execution?" open question
+> below as yes). **Never implemented** — the `--map`/`mappings.yaml` mapping
+> file and `--libs-list` glob-file input (Patterns B/C above); matching is
+> filename-stem only, with no SONAME-based secondary strategy (the "SONAME
+> matching?" open question below was never acted on). See
+> `tests/test_compare_release.py` and `tests/test_compare_dispatch.py` for
+> current behavior.
+
 ---
 
 ## Context

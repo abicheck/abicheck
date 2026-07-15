@@ -40,8 +40,21 @@ A Mach-O application contains:
 - **`LC_LOAD_DYLIB`**: dependent dylib paths
 - **Undefined symbols** in symbol table
 
-This is sufficient to determine exactly which library symbols an application
-depends on — no DWARF or headers needed.
+This is sufficient to determine which library symbols an application
+statically imports via `DT_NEEDED`/import-table/`LC_LOAD_DYLIB` — no DWARF or
+headers needed.
+
+> **2026-07 amendment:** This does *not* fully describe an application's
+> runtime dependencies — binary imports only capture the static/dynamic-linker
+> view. Symbols resolved via `dlopen()`/`dlsym()` (plugins, lazily loaded
+> optional dependencies) are invisible to `parse_app_requirements()` since they
+> never appear as `DT_NEEDED`/undefined-symbol entries. The codebase treats
+> this as a distinct, tracked gap (internally "gap G5", see
+> `abicheck/appcompat.py` `PluginHostContractResult` docstring): the
+> `abicheck plugin-check` command (`abicheck/cli_plugin.py`) exists
+> specifically to answer the dlopen-direction question — "does plugin vN+1
+> still satisfy host H's required `dlsym()` entrypoints?" — as a separate
+> check from `appcompat`, not as something `appcompat` itself covers.
 
 ### Reference
 

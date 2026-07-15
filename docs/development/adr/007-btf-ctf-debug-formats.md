@@ -4,6 +4,13 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment:** The `TypeMetadataSource` protocol, `BtfMetadata`
+> (`abicheck/btf_metadata.py`), and `CtfMetadata` (`abicheck/ctf_metadata.py`)
+> all landed as described. CLI surface has drifted from "CLI" below, though:
+> `--btf`/`--ctf`/`--dwarf` are now hidden legacy aliases on `abicheck dump`;
+> the current primary flag is `--debug-format {auto,dwarf,btf,ctf}` (see
+> `abicheck/cli.py`), which supersedes them. `--show-data-sources` is unchanged.
+
 ---
 
 ## Context

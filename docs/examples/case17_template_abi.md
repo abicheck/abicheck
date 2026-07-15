@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case17_template_abi/` |
 
 **Verdict:** 🔴 BREAKING

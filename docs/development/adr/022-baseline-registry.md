@@ -1,7 +1,15 @@
 # ADR-022: Baseline Registry and Snapshot Distribution
 
 **Date:** 2026-03-23
-**Status:** Accepted — implemented
+**Status:** Accepted — **partially implemented**. The `BaselineRegistry` protocol,
+`BaselineKey`/`BaselineMetadata` models, and the filesystem backend are shipped
+(`abicheck/baseline.py`, `abicheck/cli_baseline.py`) — `abicheck baseline
+push/pull/list/delete` default to `file:///path/to/baselines`. The git-native
+backend (default per the original decision below), OCI backend, signing/
+verification, `.abicheck.yml` registry config, auto-detection, and the
+retention/`baseline gc` command remain **not implemented**. Treat the sections
+below as the original design intent, not current behavior — see "Implementation
+status" at the end of this ADR for the as-shipped summary.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -317,3 +325,27 @@ baselines:
 | 10 | Signing support (GPG / sigstore, optional) | 3-5 days |
 | 11 | Retention policy + `baseline gc` command | 2-3 days |
 | 12 | GitHub Action integration updates | 1-2 days |
+
+---
+
+## Implementation status (as shipped)
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | `BaselineRegistry` protocol + `BaselineKey`/`BaselineMetadata` | **Done** |
+| 2 | Filesystem backend | **Done** — the only backend; `abicheck baseline` defaults to it (`file:///path/to/baselines`) |
+| 3 | Git-native backend | Not implemented |
+| 4 | CLI `baseline push/pull/list/delete` | **Done** (against the filesystem backend) |
+| 5 | `--baseline` flag on `compare` | Not implemented — pull then compare explicitly |
+| 6 | SHA-256 checksum generation/verification | **Done** |
+| 7 | `.abicheck.yml` registry config block | Not implemented |
+| 8 | Auto-detection (version/platform) | Not implemented |
+| 9 | OCI backend | Not implemented |
+| 10 | Signing (GPG/sigstore) | Not implemented |
+| 11 | Retention policy / `baseline gc` | Not implemented |
+| 12 | GitHub Action integration | Not implemented |
+
+The git-native-default framing in the Decision/Consequences sections above
+describes the *original* design intent; the shipped default is the filesystem
+backend. Update this table (and flip the top-of-file status line back to
+"implemented") as the remaining phases land.

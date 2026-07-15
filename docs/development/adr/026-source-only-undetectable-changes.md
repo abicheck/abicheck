@@ -1,7 +1,18 @@
 # ADR-026: Source-Only Changes and the Evidence-Tier Boundary
 
 **Date:** 2026-06-06
-**Status:** Accepted
+**Status:** Accepted — **substantially superseded by ADR-028/030/035/038**. This
+ADR's Decision §1 rejected embedding Clang to build a source-AST comparator,
+reasoning it would duplicate `header_aware`/castxml for a thin residual. That
+calculus was later revisited: ADR-030 added an optional L4 source-ABI-replay
+layer with a clang extractor backend, and ADR-035/038 built the full
+source-evidence pipeline (including a Clang plugin) around it. abicheck *does*
+now embed Clang for exactly the "genuinely undetectable" group-2 residual this
+ADR identified (macro constants, inline/template bodies, uninstantiated
+templates) — see `docs/concepts/build-source-data.md` § "Source ABI replay
+findings (L4)". Kept for the historical false-positive-corpus analysis (group 1
+vs. group 2 boundary), which remains accurate; the "we will not embed Clang"
+conclusion does not.
 **Decision maker:** Nikolay Petrov
 
 ---

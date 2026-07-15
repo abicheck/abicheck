@@ -3,23 +3,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🔴 **BREAKING** |
-| **Category** | Breaking |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `field_renamed` |
 | **Source files** | `examples/case35_field_rename/` |
 
-**Verdict:** 🔴 BREAKING (policy escalated source break)
-**abicheck verdict: BREAKING**
+**Verdict:** 🟡 API_BREAK
+**abicheck verdict: API_BREAK**
 
 
 ## Compatibility classification
 
 - **Binary ABI impact:** Compatible (layout and offsets unchanged).
-- **Source compatibility impact:** BREAKING (field identifiers removed/renamed).
-- **Runtime behavior impact:** Existing binaries typically keep working; recompilation fails.
-- **Policy severity:** **BREAKING** in `ground_truth.json` (`source_break` category escalated by policy).
+- **Source compatibility impact:** API_BREAK (field identifiers removed/renamed).
+- **Runtime behavior impact:** Existing binaries keep working; recompilation fails.
+- **Policy severity:** **API_BREAK** in `ground_truth.json`. The dedicated field-rename
+  detector reports `field_renamed` (API_BREAK); the generic field-removed/-added
+  detectors recognize the exact same-offset/same-type rename and no longer also
+  report a redundant `BREAKING` field-removal for it (fixed — previously this case
+  produced both findings and the higher severity won the overall verdict).
 
 ## What changes
 
@@ -79,8 +83,8 @@ rm -f /tmp/app_v2_test.c
 Only the field names changed, which are a compile-time concept. Existing binaries
 are fully compatible.
 
-## Why runtime result may differ from verdict
-Field rename: binary compat (field exists), source break (name changed)
+## Why runtime result differs from source compatibility
+Field rename: binary compat (field exists at the same offset/type), source break (name changed) — exactly what the API_BREAK verdict means.
 
 ## References
 
@@ -99,4 +103,4 @@ Field rename: binary compat (field exists), source break (name changed)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

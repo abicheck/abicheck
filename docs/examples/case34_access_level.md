@@ -7,7 +7,7 @@
 | **Category** | API Break |
 | **Platforms** | Linux, macOS |
 | **Flags** | API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `method_access_changed` |
 | **Source files** | `examples/case34_access_level/` |
 
 **Verdict:** 🟠 API_BREAK

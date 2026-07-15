@@ -42,12 +42,9 @@ def test_every_row_has_a_known_category():
     assert not bad, f"rows with unknown category (unpartitioned?): {bad}"
 
 
-def test_l4_kinds_supply_doc_examples_for_kindless_no_change_cases():
-    # case105/case122 are genuine NO_CHANGE in default mode (expected_kinds:
-    # []), so a reverse-map reading only expected_kinds can never link them —
-    # l4_kinds exists so their L4-only kind still gets a catalog example
-    # (Codex review: concept_tightened/template_body_changed otherwise had
-    # zero examples in the generated spec).
+def test_l4_cases_use_canonical_expected_kinds_for_doc_examples():
+    # case105/case122 have one truth at every depth. L0-L2 may miss it, while
+    # L4 proves the canonical expected kind used by both validation and docs.
     gen = _load_gen()
     examples = gen._examples_by_kind()
     assert "case105_concept_tightening" in examples["concept_tightened"]

@@ -7,9 +7,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L3",
       "doc_slug": "abi_relevant_build_flag_changed",
-      "examples": ""
+      "examples": "case98_cxx_standard_floor_raised"
     },
     {
       "kind": "abi_surface_explosion",
@@ -88,9 +88,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "base_class_position_changed",
-      "examples": ""
+      "examples": "case60_base_class_position_changed"
     },
     {
       "kind": "base_class_virtual_changed",
@@ -529,9 +529,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "enum_last_member_value_changed",
-      "examples": ""
+      "examples": "case41_type_changes"
     },
     {
       "kind": "enum_member_added",
@@ -540,7 +540,7 @@
       "severity": "warning",
       "min_evidence": "L1",
       "doc_slug": "enum_member_added",
-      "examples": "case25_enum_member_added"
+      "examples": "case25_enum_member_added,case41_type_changes"
     },
     {
       "kind": "enum_member_removed",
@@ -621,7 +621,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "executable_stack_removed",
-      "examples": "case136_executable_stack_removed"
+      "examples": "case136_executable_stack_removed,case49_executable_stack"
     },
     {
       "kind": "experimental_graduated",
@@ -792,7 +792,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
     },
     {
       "kind": "func_became_inline",
@@ -918,7 +918,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "func_params_changed",
-      "examples": "case02_param_type_change,case102_frozen_runtime_signature_changed"
+      "examples": "case02_param_type_change,case102_frozen_runtime_signature_changed,case46_pointer_chain_type_change"
     },
     {
       "kind": "func_pure_virtual_added",
@@ -945,7 +945,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed",
-      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case53_namespace_pollution,case59_func_became_inline,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
+      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case41_type_changes,case53_namespace_pollution,case59_func_became_inline,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
     },
     {
       "kind": "func_removed_elf_only",
@@ -963,7 +963,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "func_return_changed",
-      "examples": "case102_frozen_runtime_signature_changed,case10_return_type,case70_flexible_array_member_changed,case72_covariant_return_changed"
+      "examples": "case102_frozen_runtime_signature_changed,case10_return_type,case46_pointer_chain_type_change,case70_flexible_array_member_changed,case72_covariant_return_changed"
     },
     {
       "kind": "func_static_changed",
@@ -1132,9 +1132,9 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "ifunc_introduced",
-      "examples": ""
+      "examples": "case29_ifunc_transition"
     },
     {
       "kind": "ifunc_removed",
@@ -1420,9 +1420,9 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L2",
       "doc_slug": "method_access_changed",
-      "examples": ""
+      "examples": "case34_access_level"
     },
     {
       "kind": "needed_added",
@@ -2016,7 +2016,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "runpath_changed",
-      "examples": "case137_runpath_changed"
+      "examples": "case137_runpath_changed,case52_rpath_leak"
     },
     {
       "kind": "runtime_floor_raised",
@@ -2025,7 +2025,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "runtime_floor_raised",
-      "examples": "case170_env_runtime_floor_raised"
+      "examples": "case15_noexcept_change,case170_env_runtime_floor_raised"
     },
     {
       "kind": "runtime_symbol_provider_changed",
@@ -2095,9 +2095,9 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "soname_changed",
-      "examples": ""
+      "examples": "case50_soname_inconsistent"
     },
     {
       "kind": "soname_missing",
@@ -2383,9 +2383,9 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "symbol_binding_changed",
-      "examples": ""
+      "examples": "case27_symbol_binding_weakened"
     },
     {
       "kind": "symbol_binding_lost_unique",
@@ -2410,9 +2410,9 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "symbol_elf_visibility_changed",
-      "examples": ""
+      "examples": "case51_protected_visibility"
     },
     {
       "kind": "symbol_leaked_from_dependency_changed",
@@ -2491,9 +2491,9 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "symbol_version_defined_added",
-      "examples": ""
+      "examples": "case13_symbol_versioning"
     },
     {
       "kind": "symbol_version_defined_removed",
@@ -2698,9 +2698,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "type_alignment_changed",
-      "examples": ""
+      "examples": "case42_type_alignment_changed"
     },
     {
       "kind": "type_base_changed",
@@ -2736,7 +2736,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_added",
-      "examples": "case94_empty_tag_gained_state"
+      "examples": "case43_base_class_member_added,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_field_added_compatible",
@@ -2754,7 +2754,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_offset_changed",
-      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost"
+      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case43_base_class_member_added"
     },
     {
       "kind": "type_field_removed",
@@ -2770,9 +2770,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "type_field_type_changed",
-      "examples": ""
+      "examples": "case30_field_qualifiers,case45_multi_dim_array_change"
     },
     {
       "kind": "type_kind_changed",
@@ -2799,7 +2799,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_removed",
-      "examples": "case107_task_scheduler_init_removed,case108_task_class_removed,case109_flow_graph_policy_renames,case78_task_arena_attach_tag"
+      "examples": "case107_task_scheduler_init_removed,case108_task_class_removed,case109_flow_graph_policy_renames,case41_type_changes,case78_task_arena_attach_tag"
     },
     {
       "kind": "type_size_changed",
@@ -2808,7 +2808,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case126_sycl_device_impl_ptr,case140_empty_base_optimization_lost,case94_empty_tag_gained_state"
+      "examples": "case07_struct_layout,case117_no_unique_address,case126_sycl_device_impl_ptr,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_visibility_changed",
@@ -2826,7 +2826,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_vtable_changed",
-      "examples": "case09_cpp_vtable,case72_covariant_return_changed"
+      "examples": "case09_cpp_vtable,case38_virtual_methods,case72_covariant_return_changed"
     },
     {
       "kind": "typedef_base_changed",
@@ -2878,9 +2878,9 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "union_field_added",
-      "examples": ""
+      "examples": "case26_union_field_added,case26b_union_field_added_compatible"
     },
     {
       "kind": "union_field_removed",

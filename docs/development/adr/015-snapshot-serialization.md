@@ -55,10 +55,11 @@ class AbiSnapshot:
 ### 2. Integer schema versioning
 
 ```python
-SCHEMA_VERSION: int = 6
+SCHEMA_VERSION: int = 8
 ```
 
-Version history:
+Version history (`abicheck/serialization.py`; kept current — check that module's
+header comment before trusting this table, since it is the source of truth):
 
 | Version | Change | PR |
 |---------|--------|-----|
@@ -67,15 +68,22 @@ Version history:
 | 3 | `pe` and `macho` metadata fields added (multi-format support) | — |
 | 4 | Provenance metadata (`git_commit`, `git_tag`, `created_at`, `build_id`) | — |
 | 5 | `build_mode` capture (compiler/stdlib/std normalization) | — |
-| 6 | Declaration provenance: `source_header` + `origin` on functions/variables/types/enums | — |
+| 6 | Declaration provenance: `source_header` + `origin` on functions/variables/types/enums (ADR-015 §3a) | — |
+| 7 | Optional `evidence_pack` reference (ADR-028; lightweight ref to an out-of-band build/source pack) | — |
+| 8 | Pack-ref key renamed `evidence_pack` → `build_source_pack`, plus an optional inline-embedded `build_source` payload (single-artifact UX). The rename forces a bump: a v7-only reader knows only the old key, so without the bump a v8 snapshot's renamed provenance would be silently dropped instead of triggering the forward-version warning below. | PR #356 |
 
 **Integer versioning** was chosen over semver because:
 
-- Snapshot format changes are always backward-incompatible (new fields change
-  the meaning of existing data)
-- There is no concept of "minor" or "patch" format changes — either the schema
-  is compatible or it isn't
+- There is no concept of "minor" or "patch" format changes — a version bump
+  either happened or it didn't; there is no partial-compatibility signal to encode
 - Monotonic integers are simpler to compare (`if version < 3: migrate(...)`)
+- The bump is a **discipline trigger**, not a guarantee every change is
+  backward-incompatible in practice. Most additions (v3–v7) are purely additive —
+  old readers ignore an unrecognized field and keep working. A version is bumped
+  whenever an *old reader could silently misinterpret* the new data, even if the
+  change is additive on the wire — v8's key rename is the clearest example: it
+  bumped precisely so a v7 reader hits the forward-version warning below instead
+  of quietly ignoring renamed provenance it doesn't recognize.
 
 ### 3. Backward compatibility rules
 

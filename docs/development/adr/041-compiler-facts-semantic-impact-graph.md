@@ -264,6 +264,15 @@ Fixed by generalizing the closure computation:
   or no public closure) makes the check skip rather than flag every
   pre-existing dependency as newly added.
 
+> **Note (docs review, 2026-07):** the "Nth review pass" paragraphs below,
+> through the end of P0 slice 3, are an **implementation changelog** — a
+> chronological record of bugs found and fixed during code review while this
+> slice was landing. They are not additional architectural decisions; the
+> decisions are the bulleted items above each chronology and in "Decision —
+> P0 slice 3". Kept in place as history per repo convention (ADRs are not
+> rewritten), not because each entry is load-bearing for understanding the
+> design.
+
 A review pass (Codex) caught one more instance of the same coverage-honesty
 class of bug: gating on *any* dependency edge kind being present on both sides
 is too coarse once the closure spans five kinds instead of one. A baseline

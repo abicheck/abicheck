@@ -14,6 +14,7 @@ bundle verdict/kinds declared in ``examples/ground_truth.json``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -175,7 +176,7 @@ def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict
     if manifest_file:
         cmd.extend(["--manifest", str(EXAMPLES_DIR / case_name / str(manifest_file))])
     bundle_cohort = entry.get("bundle_cohort")
-    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_bundle_kinds") or []):
+    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_kinds") or []):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
         cmd.extend(["--bundle-cohort", str(bundle_cohort)])
@@ -218,19 +219,19 @@ def _library_name(entry: dict) -> str:
     return ""
 
 
-def _validate_expected_libraries(payload: dict, expected_libraries: dict) -> list[str]:
-    if not expected_libraries:
+def _validate_library_assertions(payload: dict, library_assertions: dict) -> list[str]:
+    if not library_assertions:
         return []
     actual = payload.get("libraries") or payload.get("library_results") or []
     if not isinstance(actual, list):
         return ["payload has no per-library result list"]
 
     errors: list[str] = []
-    for expected_name, expected in expected_libraries.items():
+    for expected_name, expected in library_assertions.items():
         if isinstance(expected, str):
             expected = {"verdict": expected}
         if not isinstance(expected, dict):
-            errors.append(f"{expected_name}: malformed expected_libraries entry")
+            errors.append(f"{expected_name}: malformed library_assertions entry")
             continue
         matches = [
             item for item in actual
@@ -247,8 +248,7 @@ def _validate_expected_libraries(payload: dict, expected_libraries: dict) -> lis
         item = matches[0]
         expected_verdict = expected.get("verdict") or expected.get("expected")
         got_verdict = item.get("verdict")
-        compatible_no_change = expected_verdict == "NO_CHANGE" and got_verdict == "COMPATIBLE"
-        if expected_verdict and got_verdict != expected_verdict and not compatible_no_change:
+        if expected_verdict and got_verdict != expected_verdict:
             errors.append(
                 f"{expected_name}: expected verdict {expected_verdict!r}, "
                 f"got {got_verdict!r}"
@@ -266,8 +266,8 @@ def _validate_expected_libraries(payload: dict, expected_libraries: dict) -> lis
 
 def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
     started = time.perf_counter()
-    expected_verdict = entry.get("expected_bundle_verdict")
-    expected_kinds = set(entry.get("expected_bundle_kinds") or [])
+    expected_verdict = entry.get("expected")
+    expected_kinds = set(entry.get("expected_kinds") or [])
 
     build_err = _build_case(build_dir, case_name, entry)
     if build_err is not None:
@@ -298,7 +298,7 @@ def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
     unexpected = got_kinds - expected_kinds
     if entry.get("allow_extra_bundle_kinds", True):
         unexpected = set()
-    library_errors = _validate_expected_libraries(payload, entry.get("expected_libraries") or {})
+    library_errors = _validate_library_assertions(payload, entry.get("library_assertions") or {})
     if got_verdict == expected_verdict and not missing and not unexpected and not library_errors:
         status = "PASS"
         message = ""
@@ -341,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "runner": "validation/scripts/run_bundle_examples.py",
+            "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
             "summary": {"SKIP": 1},
             "results": [
                 {
@@ -373,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/run_bundle_examples.py",
+        "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": "linux",
         "ground_truth_cases": len(cases),
         "selected_cases": len(cases),

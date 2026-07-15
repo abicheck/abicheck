@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_101 case(s)._ [← back to all examples](../index.md)
+_100 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -29,7 +29,6 @@ _101 case(s)._ [← back to all examples](../index.md)
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
 | [case33_pointer_level](../case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
-| [case35_field_rename](../case35_field_rename.md) | - Field Rename | 🔴 BREAKING | Breaking |
 | [case36_anon_struct](../case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
 | [case37_base_class](../case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](../case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |

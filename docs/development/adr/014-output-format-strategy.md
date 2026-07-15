@@ -1,7 +1,25 @@
 # ADR-014: Output Format Strategy
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. Amendment (2026-07-14): the "no
+information loss" / "no format-specific data loss" claims below are too
+strong and were superseded by ADR-036 (Report view-model and canonical
+report severity), which documents that formats deliberately diverge on
+*classification axis* (SARIF uses a finer per-kind severity, ABICC-compat
+HTML uses ABICC's own HIGH/MEDIUM/LOW) and, as verified directly against the
+formatter code for this amendment, on *field coverage* too: JSON carries the
+full `DiffResult` (including `detectors[]` coverage-gap info and the
+`suppressed_changes[]` list — see `abicheck/reporter.py`); SARIF and HTML
+carry per-change `old_value`/`new_value`/`affected_symbols` as structured
+fields (`abicheck/sarif.py`, `abicheck/html_report.py`) but no detector
+list; JUnit XML (`abicheck/junit_report.py`) embeds old/new values as
+free-text inside the `<failure>` body rather than structured attributes, and
+has no equivalent of the suppressed-changes section at all (verified: no
+`suppress*` reference anywhere in `junit_report.py`). What *is* still
+guaranteed across all native channels (JSON, Markdown/text, JUnit) is the
+breaking-boundary and override-propagation invariant from ADR-036 — read
+that ADR for the authoritative cross-channel contract instead of the
+paragraph below.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -58,8 +76,9 @@ comments, CI log viewers, README files — without requiring special rendering.
 - Library metadata: path, SHA-256 hash, file size
 - Detector results: name, changes count, enabled status, coverage gaps
 
-JSON output uses the same `DiffResult` data as all other formats — no
-format-specific data loss.
+JSON output uses the same `DiffResult` data as the other formats and is the
+highest-fidelity format (see the amendment note above for the per-format
+field-coverage differences verified against the formatter code).
 
 ### SARIF 2.1.0
 
@@ -127,10 +146,12 @@ regardless of the output filename.
 
 ### Information preservation
 
-All five formats are generated from the same `DiffResult` object. No
-format-specific information is added or lost — switching formats changes
-presentation only, not content. Verdict and exit code computation is
-independent of output format.
+All five formats are generated from the same `DiffResult` object, and
+verdict and exit code computation is independent of output format. See the
+amendment note at the top of this ADR and ADR-036 for the precise,
+verified cross-channel contract — formats are not byte-for-byte
+interchangeable projections of identical fields (SARIF/JUnit/HTML each omit
+or reshape some `DiffResult` fields relative to JSON).
 
 ---
 
@@ -142,7 +163,9 @@ independent of output format.
 - GitHub Code Scanning integration via standard SARIF — no custom tooling
 - Self-contained HTML enables offline report archival
 - Markdown default works everywhere with zero configuration
-- No information loss between formats
+- JSON/SARIF preserve enough structured detail for automation; see the
+  amendment note above and ADR-036 for what each format actually carries
+  (it is not uniform across formats)
 
 ### Negative
 
@@ -160,3 +183,6 @@ independent of output format.
 - `abicheck/html_report.py` — HTML report generation
 - `abicheck/junit_report.py` — JUnit XML output
 - `abicheck/cli.py` — `--format` flag and output file handling
+- ADR-036 — Report view-model and canonical report severity; the
+  authoritative cross-channel contract superseding the "no information
+  loss" claims in this ADR

@@ -3,16 +3,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | ✅ **NO_CHANGE** |
-| **Category** | No Change |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Platforms** | Linux, macOS |
-| **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Flags** | API break |
+| **Detected `ChangeKind`s** | `concept_tightened` |
 | **Source files** | `examples/case105_concept_tightening/` |
 
-**Category:** Subtle source break / regression suite | **Verdict:** 🟢 NO_CHANGE by
-default (object/DWARF/castxml) — 🔵 API_BREAK (`concept_tightened`) when built
-with `--sources` (L4 source-ABI replay).
+**Category:** Subtle source break / regression suite | **Ground truth:** 🔵
+API_BREAK (`concept_tightened`). Object/DWARF/castxml lanes return NO_CHANGE,
+but that is an L0–L2 missed detection; L4 source-ABI replay proves the one
+canonical verdict.
 
 ## What breaks
 
@@ -125,4 +126,4 @@ g++ -std=c++20 -I. app.cpp -L. -lv2 -o app
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

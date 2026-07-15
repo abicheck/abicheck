@@ -152,8 +152,16 @@ Use `abicheck compare --format json` for precise machine-readable `API_BREAK` ve
 ## Inline / Header-Only Code
 
 Functions defined entirely in headers (inline, `constexpr`, template) may not appear
-in the `.so` symbol table. `abicheck` analyzes the public exported ABI — header-only
-changes that don't affect exported symbols will not be detected.
+in the `.so` symbol table. By **default** (binary + headers only, no `--sources`),
+abicheck analyzes the public exported ABI — header-only changes that don't affect
+exported symbols will not be detected.
+
+With **L4 source ABI replay** (`--sources`/`--source-abi`, ADR-030), this gap is
+substantially closed: inline/template **body** changes, macro constants, default
+arguments, and `constexpr` values are recovered even though they never become a
+symbol. See [Source & Build Data](build-source-data.md#source-abi-replay-findings-l4)
+for the full list of L4-only change kinds, and the next section for the residual
+that even L4 cannot see.
 
 ---
 
@@ -178,27 +186,35 @@ everywhere else in the docs (see
 | `L1` | `dwarf_aware` | DWARF/PDB (needs `-g` / `/Zi`) | struct layout, field offsets, enum values, calling convention, struct packing |
 | `L2` | `header_aware` | public headers via castxml | source-level qualifiers — `final`, access, ref-qualifiers, `inline`, `noexcept`, `explicit`, **default-argument values**, **`const`/`constexpr` constant values** |
 
-So whether a change is detectable depends on the evidence code you give abicheck:
+So whether a change is detectable depends on the evidence you give abicheck. The
+first three columns are the **artifact tiers** (L0–L2, no source parsing); the
+fourth is abicheck's own **L4 source ABI replay** (`--sources`/`--source-abi`,
+ADR-030) — not a separate external tool:
 
-| Change | object/DWARF | header (castxml) | source-AST tool |
+| Change | object/DWARF | header (castxml) | abicheck L4 (`--sources`) |
 |--------|:---:|:---:|:---:|
 | Class gains `final` ([`case125`](../examples/case125_class_became_final.md)) | ❌ invisible | ✅ `type_became_final` | ✅ |
 | Method access narrowed ([`case34`](../examples/case34_access_level.md)) | ❌ invisible | ✅ `method_access_changed` | ✅ |
 | Ref-qualifier change (`& → &&`) | ❌ (DWARF has no ref-qual) | ✅ `func_ref_qual_changed` | ✅ |
-| Default argument removed/changed ([`case123`](../examples/case123_default_argument_removed.md), [`case32`](../examples/case32_param_defaults.md)) | ❌ invisible | ✅ `param_default_value_removed` / `_changed` | ✅ |
-| `const`/`constexpr` constant value changed ([`case124`](../examples/case124_header_constant_value_changed.md)) | ❌ invisible (internal linkage, no symbol) | ✅ `constant_changed` | ✅ |
-| `#define` macro constant changed | ❌ invisible | ❌ (castxml emits no macros) | ✅ |
-| Inline/`constexpr`/template function *body* change (signature unchanged) | ❌ invisible | ❌ (declaration only; body not modelled) | ✅ |
-| Uninstantiated template signature ([`case122`](../examples/case122_template_signature_uninstantiated.md)) | ❌ invisible | ❌ (castxml omits uninstantiated templates) | ✅ |
+| Default argument removed/changed ([`case123`](../examples/case123_default_argument_removed.md), [`case32`](../examples/case32_param_defaults.md)) | ❌ invisible | ✅ `param_default_value_removed` / `_changed` | ✅ `default_argument_changed` |
+| `const`/`constexpr` constant value changed ([`case124`](../examples/case124_header_constant_value_changed.md)) | ❌ invisible (internal linkage, no symbol) | ✅ `constant_changed` | ✅ `constexpr_value_changed` |
+| `#define` macro constant changed ([`case156`](../examples/case156_public_macro_removed.md)) | ❌ invisible | ❌ (castxml emits no macros) | ✅ `public_macro_value_changed`/`_removed` |
+| Inline/`constexpr`/template function *body* change (signature unchanged) | ❌ invisible | ❌ (declaration only; body not modelled) | ✅ `inline_body_changed`/`template_body_changed` |
+| Public header-only inline function *removed* entirely ([`case157`](../examples/case157_inline_function_removed.md)) | ❌ invisible | ❌ (no exported symbol to compare) | ✅ `inline_function_removed` |
+| Uninstantiated template signature/body changed ([`case122`](../examples/case122_template_signature_uninstantiated.md)) | ❌ invisible | ❌ (castxml omits uninstantiated templates) | ✅ `template_body_changed` (a template that disappears entirely is `uninstantiated_template_removed`) |
 
-The upper rows are recovered by **supplying public headers** (header mode) — note
-that several (default-argument values, `const`/`constexpr` constant values) leave
-*no symbol at all* in the binary, so only header analysis can reach them. The
-lower three rows are the hard boundary: code that never becomes a symbol *and* is
-not modelled by castxml (`#define` macros, inline/template **bodies**,
-uninstantiated templates) is invisible to any artifact-based comparison. Only a
-pure source-AST tool that diffs the headers directly can observe those; binary
-and header analysis are complementary, not substitutes.
+The upper rows are recovered by **supplying public headers** (L2/`header_aware`)
+— note that several (default-argument values, `const`/`constexpr` constant
+values) leave *no symbol at all* in the binary, so only header analysis can reach
+them. The lower three rows are code that never becomes a symbol *and* is not
+modelled by castxml (`#define` macros, inline/template **bodies**, uninstantiated
+templates); these require the **L4 source ABI replay** layer (needs clang, or
+castxml for the declaration subset) — see [Source ABI replay findings
+(L4)](build-source-data.md#source-abi-replay-findings-l4) for the full change-kind
+list and its evidence-tier caveats (L4 findings are `API_BREAK`/risk, never
+`breaking`, per the authority rule). Without `--sources`, these rows are genuinely
+invisible to abicheck; with it, they are not — binary, header, and source-replay
+analysis are complementary layers of the same tool, not a tool-vs.-tool boundary.
 
 > Constant extraction is deliberately scoped to the **user-provided public
 > headers** — `const`/`constexpr` values pulled in transitively from system or
@@ -401,10 +417,13 @@ in those public headers via castxml. This is **best-effort**:
   and MinGW-built exports match by plain name and scope correctly.
 
 Reachability-based public-surface filtering (keeping only the symbols and types reachable
-from the public API, with an auditable trail of what was filtered and why) is available as
-an **opt-in** mode: pass `--scope-public-headers` (add `--show-filtered` to print the audit
-ledger) to `abicheck compare`. Findings about symbols/types not reachable from the
-public-header-declared exported API are recorded as *filtered* rather than reported, while
-internal-type *leaks* are never hidden. Full source-header provenance (distinguishing a
-privately-included header from a public one independently of reachability) remains future
-work. See [ADR-024](../development/adr/024-public-abi-surface-resolution.md).
+from the public API, with an auditable trail of what was filtered and why) is **on by
+default** (`--scope-public-headers`, add `--show-filtered` to print the audit ledger;
+opt out with `--no-scope-public-headers`). Findings about symbols/types not reachable from
+the public-header-declared exported API are recorded as *filtered* rather than reported, while
+internal-type *leaks* are never hidden. Source-header provenance (distinguishing a
+privately-included header from a public one independently of reachability) is implemented
+across castxml, DWARF, and PDB (ADR-024 Phase 1); the one residual gap is MSVC C++ name
+mangling on PE, where castxml can't match a mangled export and the surface falls back to
+the export table with a `mangling-fallback` confidence note. See
+[ADR-024](../development/adr/024-public-abi-surface-resolution.md).

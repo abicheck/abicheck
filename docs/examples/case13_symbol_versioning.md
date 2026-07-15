@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `symbol_version_defined_added` |
 | **Source files** | `examples/case13_symbol_versioning/` |
 
 **Category:** ELF/Linker  

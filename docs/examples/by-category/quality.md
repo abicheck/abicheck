@@ -3,7 +3,7 @@
 
 Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks.
 
-_13 case(s)._ [← back to all examples](../index.md)
+_21 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -20,3 +20,11 @@ _13 case(s)._ [← back to all examples](../index.md)
 | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case137_runpath_changed](../case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case138_needed_added](../case138_needed_added.md) | DT_NEEDED Added | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case143_audit_accidental_export](../case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case144_audit_private_header_leak](../case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case145_audit_unversioned_export](../case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case146_audit_rtti_for_internal](../case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |

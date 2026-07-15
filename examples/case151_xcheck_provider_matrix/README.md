@@ -1,6 +1,6 @@
 # case151 — Provider-agreement matrix (corroboration grows with evidence)
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `private_header_leak` ·
 **Mode:** single-release audit · **Evidence tier:** L2
 
 ## What it demonstrates

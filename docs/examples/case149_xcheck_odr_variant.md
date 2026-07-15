@@ -7,7 +7,7 @@
 | **Category** | API Break |
 | **Platforms** | Linux |
 | **Flags** | API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `odr_type_variant` |
 | **Source files** | `examples/case149_xcheck_odr_variant/` |
 
 **Verdict:** 🟠 API_BREAK · **Cross-check:** `odr_type_variant` ·

@@ -22,6 +22,7 @@ from tests.validate_examples import (  # noqa: E402
     ARTIFACT_VARIANTS,
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
+    _build_info_applies,
     _build_info_path,
     _build_with_cmake,
     _check_case_preconditions,
@@ -29,7 +30,6 @@ from tests.validate_examples import (  # noqa: E402
     _evaluate_verdict,
     _gap_applies,
     _json_payload,
-    _normalize_verdict,
     _result_to_json,
     _run_source_smoke,
     _selected_variants,
@@ -85,39 +85,15 @@ def test_source_smoke_run_mode_executes_with_trusted_env(
     assert mock_run.call_args.kwargs["allow_run"] is True
 
 
-# ── _normalize_verdict ────────────────────────────────────────────────────
+def test_different_verdict_is_not_accepted_as_equivalent() -> None:
+    result = _evaluate_verdict(
+        "case103",
+        "COMPATIBLE",
+        "COMPATIBLE_WITH_RISK",
+        None,
+    )
 
-
-class TestNormalizeVerdict:
-    """_normalize_verdict normalizes verdicts for cross-check comparison.
-
-    API_BREAK and COMPATIBLE are treated as equivalent (both normalize to
-    COMPATIBLE) because the checker may return either depending on header
-    availability. All other verdicts are preserved as-is.
-    """
-
-    _EXPECTED_NORMALIZED = {
-        "API_BREAK": "COMPATIBLE",
-        "BREAKING": "BREAKING",
-        "COMPATIBLE": "COMPATIBLE",
-        "COMPATIBLE_WITH_RISK": "COMPATIBLE_WITH_RISK",
-        "NO_CHANGE": "NO_CHANGE",
-    }
-
-    @pytest.mark.parametrize("verdict", sorted(_VALID_VERDICTS))
-    def test_normalizes_verdict(self, verdict: str) -> None:
-        assert _normalize_verdict(verdict) == self._EXPECTED_NORMALIZED[verdict]
-
-    def test_quality_risk_can_satisfy_compatible_expected(self) -> None:
-        result = _evaluate_verdict(
-            "case103",
-            "COMPATIBLE",
-            "COMPATIBLE_WITH_RISK",
-            None,
-            allow_risk_for_compatible=True,
-        )
-
-        assert result.status == "PASS"
+    assert result.status == "FAIL"
 
 
 # ── ground_truth.json structural integrity ────────────────────────────────
@@ -156,6 +132,12 @@ class TestKnownGapToolchainScope:
         with patch.object(ve, "CURRENT_PLATFORM", "linux"):
             assert _gap_applies({"known_gap_platforms": ["macos"]}, True) is False
 
+    def test_variant_scoped_gap_only_at_that_evidence_depth(self):
+        entry = {"known_gap_variants": ["release-headers", "stripped-headers"]}
+        assert _gap_applies(entry, True, "release-headers") is True
+        assert _gap_applies(entry, True, "stripped-headers") is True
+        assert _gap_applies(entry, True, "build-source") is False
+
     def test_toolchain_and_platform_scopes_both_apply(self):
         entry = {
             "known_gap_toolchains": ["clang"],
@@ -181,6 +163,26 @@ class TestKnownGapToolchainScope:
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
+        case98 = gt["case98_cxx_standard_floor_raised"]
+        assert case98["expected"] == "COMPATIBLE_WITH_RISK"
+        assert case98["build_info_variants"] == ["build-source"]
+        assert set(case98["known_gap_variants"]) == {
+            "debug-headers",
+            "release-headers",
+            "stripped-headers",
+        }
+
+
+class TestBuildInfoVariantScope:
+    def test_unscoped_build_info_applies_to_every_variant(self):
+        entry = {"build_info": True}
+        assert _build_info_applies(entry, "debug-headers") is True
+        assert _build_info_applies(entry, "build-source") is True
+
+    def test_scoped_build_info_only_applies_to_declared_variants(self):
+        entry = {"build_info": True, "build_info_variants": ["build-source"]}
+        assert _build_info_applies(entry, "debug-headers") is False
+        assert _build_info_applies(entry, "build-source") is True
 
 
 class TestRunSourceSmoke:
@@ -736,3 +738,18 @@ class TestArtifactVariants:
         assert payload["ground_truth_cases"] == 129
         assert payload["artifact_variants"] == ["debug-headers"]
         assert payload["summary"] == {"FAIL": 1}
+
+
+def test_case_work_dir_shortens_windows_cmake_path(tmp_path: Path) -> None:
+    long_name = "case98_cxx_standard_floor_raised"
+
+    linux_path = ve._case_work_dir(
+        tmp_path, long_name, "build-source", platform_name="posix"
+    )
+    windows_path = ve._case_work_dir(
+        tmp_path, long_name, "build-source", platform_name="nt"
+    )
+
+    assert linux_path.name == f"{long_name}__build-source"
+    assert windows_path.name.startswith("case-")
+    assert len(windows_path.name) == 17

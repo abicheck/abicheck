@@ -1,4 +1,4 @@
-# G23 — Linux ABI/API detection gap closure
+# G24 — Linux ABI/API detection gap closure
 
 **Origin:** ABI/API break-coverage evaluation (July 2026) — a sweep of the full
 break universe against the `ChangeKind` catalog. The catalog has full

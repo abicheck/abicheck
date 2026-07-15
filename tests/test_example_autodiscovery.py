@@ -144,11 +144,11 @@ SCOPE_PUBLIC_HEADERS: dict[str, bool] = {
     k: bool(v.get("scope_public_headers", False))
     for k, v in _gt_data["verdicts"].items()
 }
-# pattern_verdicts: case_name → bool. When true the case is compared with
+# pattern_analysis: case_name → bool. When true the case is compared with
 # ADR-027 pattern-aware verdicts enabled (opt-in analysis mode); the case's
 # expected verdict depends on an idiom/anti-pattern finding.
 PATTERN_VERDICTS: dict[str, bool] = {
-    k: bool(v.get("pattern_verdicts", False))
+    k: bool(v.get("pattern_analysis", False))
     for k, v in _gt_data["verdicts"].items()
 }
 # build_info: cases that ship per-side compile_commands.json and assert an L3
@@ -520,11 +520,6 @@ def _build_libs_for_case(
     return _build_direct_or_skip(case_name, case_dir, tmp_path, v1_src, v2_src)
 
 
-def _normalize_verdict(v: str) -> str:
-    """Normalize verdict for comparison."""
-    return "COMPATIBLE" if v in ("API_BREAK", "COMPATIBLE") else v
-
-
 def _dump_and_compare(
     case_name: str,
     v1_lib: Path,
@@ -589,10 +584,10 @@ def _assert_verdict(
 ) -> None:
     """Assert that the verdict matches, handling known gaps as xfail."""
     if case_name in KNOWN_GAPS and _gap_applies(case_name, is_cpp):
-        if _normalize_verdict(got) != _normalize_verdict(expected_verdict):
+        if got != expected_verdict:
             pytest.xfail(KNOWN_GAPS[case_name])
 
-    assert _normalize_verdict(got) == _normalize_verdict(expected_verdict), (
+    assert got == expected_verdict, (
         f"{case_name}: expected={expected_verdict!r}, got={got!r}\n"
         f"Changes:\n" +
         "\n".join(f"  {c.kind.value}: {c.description}" for c in changes)
@@ -755,7 +750,9 @@ def test_example_build_evidence(case_name: str, tmp_path: Path) -> None:
         pytest.skip("castxml not found in PATH")
 
     ve = _load_validate_examples()
-    result = ve.run_case(case_name, entry, tmp_path)
+    variants = entry.get("build_info_variants")
+    variant = variants[0] if variants else ve.DEFAULT_ARTIFACT_VARIANT
+    result = ve.run_case(case_name, entry, tmp_path, variant=variant)
 
     if result.status == "SKIP":
         pytest.skip(f"{case_name}: {result.message}")

@@ -57,7 +57,6 @@ def test_every_used_changekind_is_mapped() -> None:
     used: set[str] = set()
     for info in _VERDICTS.values():
         used.update(info.get("expected_kinds", []))
-        used.update(info.get("expected_bundle_kinds", []))
     unmapped = sorted(k for k in used if k not in evidence_tiers.EVIDENCE_TIER_BY_KIND)
     assert not unmapped, f"ChangeKinds used in ground_truth but unmapped: {unmapped}"
 
@@ -72,7 +71,7 @@ def test_kindless_overrides_are_real_cases() -> None:
     for case in evidence_tiers.KINDLESS_CASE_TIER:
         assert case in _VERDICTS, f"KINDLESS_CASE_TIER references unknown case {case!r}"
         info = _VERDICTS[case]
-        kinds = info.get("expected_kinds", []) + info.get("expected_bundle_kinds", [])
+        kinds = info.get("expected_kinds", [])
         assert not kinds, (
             f"{case} has kinds {kinds}; remove its KINDLESS_CASE_TIER entry"
         )
@@ -115,8 +114,7 @@ def test_detected_at_kinded_quiet_requires_the_kind() -> None:
 
 
 def test_detected_at_kindless_quiet_floored_at_min_evidence() -> None:
-    """An invisible-change NO_CHANGE (case122-style, min L4) is NOT credited at
-    L0 just because the stripped binary also returns NO_CHANGE."""
+    """A kindless quiet baseline with a declared L4 floor is not credited at L0."""
     got = evidence_tiers.detected_at(
         _verdicts("NO_CHANGE", "NO_CHANGE", "ERROR"),
         {"L0": [], "L1": [], "L2": []},

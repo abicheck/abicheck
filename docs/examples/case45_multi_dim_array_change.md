@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `type_field_type_changed`, `type_size_changed` |
 | **Source files** | `examples/case45_multi_dim_array_change/` |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING

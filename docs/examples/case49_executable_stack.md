@@ -7,7 +7,7 @@
 | **Category** | Quality (Compatible) |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | — |
+| **Detected `ChangeKind`s** | `executable_stack_removed` |
 | **Source files** | `examples/case49_executable_stack/` |
 
 **Category:** ELF / Security | **Verdict:** BAD PRACTICE
@@ -105,12 +105,12 @@ looks otherwise compatible.
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case50_executable_stack_v1 case50_executable_stack_v2
+cmake --build /tmp/abicheck-examples-build --target case49_executable_stack_v1 case49_executable_stack_v2
 
-readelf -W -l /tmp/abicheck-examples-build/case50_executable_stack/libv1.so | grep GNU_STACK
+readelf -W -l /tmp/abicheck-examples-build/case49_executable_stack/libv1.so | grep GNU_STACK
 # GNU_STACK ... RWE
 
-readelf -W -l /tmp/abicheck-examples-build/case50_executable_stack/libv2.so | grep GNU_STACK
+readelf -W -l /tmp/abicheck-examples-build/case49_executable_stack/libv2.so | grep GNU_STACK
 # GNU_STACK ... RW
 ```
 

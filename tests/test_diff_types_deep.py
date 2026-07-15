@@ -213,6 +213,109 @@ class TestFieldRenamed:
                                    TypeField("vertical", "int", 32)])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_RENAMED in _kinds(r)
+        # A pure rename must not ALSO surface as a field removal/addition —
+        # that would overstate a source-only break as BREAKING (case35).
+        assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
+        assert ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE not in _kinds(r)
+        assert r.verdict == Verdict.API_BREAK
+
+    def test_field_renamed_reports_severity_not_verdict_breaking(self):
+        """A rename-only diff resolves to API_BREAK, never BREAKING."""
+        t_old = RecordType(name="Point", kind="struct", size_bits=64,
+                           fields=[TypeField("x", "int", 0),
+                                   TypeField("y", "int", 32)])
+        t_new = RecordType(name="Point", kind="struct", size_bits=64,
+                           fields=[TypeField("col", "int", 0),
+                                   TypeField("row", "int", 32)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        assert r.verdict == Verdict.API_BREAK
+
+    def test_field_renamed_with_differently_spelled_equal_type(self):
+        """A rename is still reported even when the two sides spell the
+        (canonically identical) field type differently.
+
+        ``_diff_field_renames`` keys on the *raw* ``(offset, type)`` tuple, so
+        it alone would not match "struct Foo" against "Foo" for the same
+        field. The generic field-removed/-added path must report the rename
+        itself rather than assuming the dedicated detector already covers
+        it — otherwise the finding is silently dropped instead of merely
+        duplicated (regression guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Widget", kind="struct", size_bits=64,
+                           fields=[TypeField("handle", "struct Foo *", 0)])
+        t_new = RecordType(name="Widget", kind="struct", size_bits=64,
+                           fields=[TypeField("ref", "Foo *", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED not in kinds
+
+    def test_bitfield_width_change_is_not_masked_as_a_bare_rename(self) -> None:
+        """A bit-field's width is a layout property the type spelling alone
+        doesn't capture — two "unsigned int" bit-fields at the same offset
+        can still differ in width. Renaming *and* widening a bit-field in
+        the same edit must not collapse to a bare FIELD_RENAMED (regression
+        guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Flags", kind="struct", size_bits=32,
+                           fields=[TypeField("flag_a", "unsigned int", 0,
+                                             is_bitfield=True, bitfield_bits=1)])
+        t_new = RecordType(name="Flags", kind="struct", size_bits=32,
+                           fields=[TypeField("flag_b", "unsigned int", 0,
+                                             is_bitfield=True, bitfield_bits=4)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+
+    def test_two_same_offset_fields_collapsing_to_one_do_not_both_rename(
+        self,
+    ) -> None:
+        """Two old fields sharing an offset (e.g. overlapping anonymous-union
+        members) collapsing to a single new field at that offset must not
+        both be reported as FIELD_RENAMED to the same target — only the
+        first can genuinely be "the same field renamed"; the other was
+        really removed. Without tracking which added field a rename has
+        already consumed, both would silently claim it, hiding the real
+        removal (regression guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("a", "int", 0),
+                                   TypeField("b", "int", 0)])
+        t_new = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("x", "int", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        removals = [c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_REMOVED]
+        assert len(renames) == 1
+        assert len(removals) == 1
+        assert renames[0].new_value == "x"
+
+    def test_exact_type_candidate_preferred_over_first_same_offset_candidate(
+        self,
+    ) -> None:
+        """When several distinct added fields share an offset (anonymous-
+        union/overlap layout), the exact-type rename candidate must be
+        preferred over an arbitrary first-in-order one, even if that first
+        one is a different, unrelated type. Old ``a: int`` becoming new
+        ``x: float, y: int`` (both at offset 0) is really "a renamed to y";
+        picking "x" first would report a false TYPE_FIELD_TYPE_CHANGED for
+        "a" *and* leave the independent `_diff_field_renames` detector free
+        to separately claim "y" as FIELD_RENAMED — two contradictory
+        findings about the same old field (review finding on the
+        collapsing-duplicate-rename fix).
+        """
+        t_old = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("a", "int", 0)])
+        t_new = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("x", "float", 0),
+                                   TypeField("y", "int", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        assert len(renames) == 1
+        assert renames[0].old_value == "a"
+        assert renames[0].new_value == "y"
 
 
 # ── enum_member_renamed (source-level break) ─────────────────────────────

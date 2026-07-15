@@ -1,6 +1,6 @@
 # case145 — Unversioned export under a versioning scheme (audit, pure L0)
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `unversioned_exported_symbol` ·
+**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `unversioned_exported_symbol` ·
 **Mode:** single-release audit · **Evidence tier:** L0
 
 ## What it demonstrates

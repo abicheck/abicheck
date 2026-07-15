@@ -6,6 +6,12 @@
 reference, CLI surface, coverage reporting, and baseline-registry pack storage).
 **Amended 2026-06-12** for the source-tree-centric input model and embedded
 single-artifact storage (see the Amendment at the end of this ADR).
+**Forward pointer (ADR-038, 2026-07-01):** ADR-038 formalizes the "working
+with sources" story this ADR only sketched in D6 — three interchangeable
+producer flows (full scan / wrapper injection / plugin injection) that all
+converge on the `SourceAbiTu` contract and this ADR's D3 authority rule
+(cited there as "ADR-028 D3/D6") — see
+[038-build-integrated-fact-collection-variants.md](038-build-integrated-fact-collection-variants.md).
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -208,8 +214,8 @@ abicheck collect \
   --binary build/libfoo.so \
   --headers include/ \
   --build-dir build/ \
-  --cmake \
-  --ninja \
+  --from cmake \
+  --from ninja \
   --output libfoo.evidence/
 
 # Attach an evidence pack to a snapshot.
@@ -235,6 +241,10 @@ collection; its values are the CI modes defined in ADR-033 D2
 (`off | build | source-changed | source-target | graph-summary | graph-full`).
 The standalone `collect` command is the only other entry point —
 no additional `--collect` style flags are introduced.
+(ADR-037 D3 later unifies this vocabulary onto one `--depth`/`--max` dial —
+`--collect-mode` still works but is now a deprecated alias resolved
+internally to the same layer set, `collection_for_ci_mode()`; see ADR-033's
+Amendment.)
 
 `collect` must never run arbitrary build commands by default. It
 may inspect existing build outputs, generated metadata, and build-system
