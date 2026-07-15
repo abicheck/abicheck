@@ -194,6 +194,26 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
+    def test_nonempty_header_against_dwarf_empty_with_different_bases_is_never_guessed(
+        self,
+    ) -> None:
+        """Regression (Codex review): the anonymous-aggregate exception above
+        used to trust *any* header-has-fields/dwarf-empty match unconditionally,
+        even when the header type declares bases that don't overlap the unique
+        DWARF candidate's — e.g. a public `struct Foo : PublicBase { int x; }`
+        matched against an unrelated, genuinely fieldless `impl::Foo :
+        InternalBase {}` that merely shares the bare suffix. Base-class overlap
+        is now checked here too, not just in the "both fieldless" case."""
+        header = RecordType(
+            name="Foo", kind="struct", bases=["PublicBase"],
+            fields=[TypeField(name="x", type="int")],
+        )
+        unrelated = RecordType(
+            name="impl::Foo", kind="struct", size_bits=8, bases=["InternalBase"], fields=[],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
     def test_empty_header_against_nonempty_dwarf_is_never_guessed(self) -> None:
         """Regression (Codex review): the anonymous-aggregate exception only
         justifies trusting a one-sided-empty match in the header-has-fields,

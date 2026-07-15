@@ -150,28 +150,39 @@ def backfill_dwarf_layout(
     such as ``struct Foo {};`` with no DWARF emission of its own could
     otherwise silently match a unique but unrelated internal ``impl::Foo {
     int x; }`` via the bare-name suffix, backfilling the public empty type's
-    layout from a type that isn't actually the same declaration. Both sides
-    empty (a genuine fieldless tag type) is still trusted; header-empty with
-    dwarf-non-empty is not.
+    layout from a type that isn't actually the same declaration.
 
     A C++ record's ABI surface is not only its data fields, though: an empty
     *derived* class, or one with only virtual methods, has no fields on
-    either side yet still carries real layout via its base classes or
-    vtable (Codex review — fresh evidence after the field-emptiness fix
-    above: a fieldless ``impl::Foo`` with unrelated *bases* would otherwise
-    pass the "both sides fieldless" trust unchallenged). When both sides are
-    fieldless, base-class-name overlap is checked as a second corroborating
-    signal — combining ``bases`` *and* ``virtual_bases`` together, since both
-    the clang header parser and the DWARF builder file virtual inheritance
-    under ``virtual_bases`` rather than ``bases`` (Codex review: a
-    virtual-inheritance-only class, e.g. ``Foo : virtual PublicBase``, would
-    otherwise leave both ``.bases`` sets empty and fall straight through to
-    the trivial case below) — before falling back to trusting a truly
-    trivial (no fields, no bases, no virtual bases) match on name alone.
-    Vtable entries can't play the same role: the clang header parser never
-    populates ``RecordType.vtable`` itself (only the DWARF side ever does,
-    pre-backfill), so comparing vtable presence would reject every
-    legitimate virtual-only match, not just the unrelated ones.
+    either side yet still carries real layout via its base classes (Codex
+    review — a fieldless ``impl::Foo`` with unrelated *bases* would
+    otherwise pass an empty-vs-empty trust unchallenged). Whenever DWARF's
+    field list is empty — both the "genuinely fieldless on both sides" case
+    and the anonymous-aggregate case above, since field names alone can't
+    tell a real same-declaration match from a coincidentally-fieldless
+    unrelated type in either — base-class-name overlap is checked as a
+    second corroborating signal, combining ``bases`` *and* ``virtual_bases``
+    together (both the clang header parser and the DWARF builder file
+    virtual inheritance under ``virtual_bases`` rather than ``bases`` —
+    Codex review: a virtual-inheritance-only class, e.g. ``Foo : virtual
+    PublicBase``, would otherwise leave both ``.bases`` sets empty and fall
+    straight through unchallenged). Vtable entries can't play the same
+    role: the clang header parser never populates ``RecordType.vtable``
+    itself (only the DWARF side ever does, pre-backfill), so comparing
+    vtable presence would reject every legitimate virtual-only match, not
+    just the unrelated ones.
+
+    The one case this still can't distinguish (Codex review, fresh evidence
+    after the base-corroboration fix above): a header type with real fields
+    matched against a *totally unrelated* DWARF candidate that happens to
+    have zero fields *and* zero bases — e.g. public ``struct Foo { int x;
+    }`` next to an unrelated, genuinely empty ``impl::Foo {};``. There is no
+    remaining signal on the DWARF side to disagree with (no fields, no
+    bases), so it is still trusted; the residual risk is accepted because a
+    baseless, fieldless DWARF type carries a trivial, near-fixed layout
+    (typically 1 byte) regardless of identity, bounding how wrong a
+    misattribution here can be — unlike the non-empty-vs-non-empty or
+    differing-bases cases above, which are rejected outright.
     """
     if not dwarf_types:
         return header_types
@@ -185,35 +196,31 @@ def backfill_dwarf_layout(
         return candidates[0] if len(candidates) == 1 else None
 
     def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
-        if not header.fields:
+        if header.fields and dwarf.fields:
+            return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
+        if not header.fields and dwarf.fields:
             # An empty header type (tag type) can't corroborate against a
             # DWARF candidate that DOES have fields — that's exactly the
             # unrelated-internal-type risk this check exists to catch, not
-            # the anonymous-aggregate asymmetry below. Only trust it when
-            # DWARF is empty too (both sides genuinely fieldless).
-            if dwarf.fields:
-                return False
-        elif not dwarf.fields:
-            return True  # anonymous-aggregate asymmetry: header flattens, DWARF doesn't
-        else:
-            return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
-        # Both sides have no data fields. A C++ record's ABI surface can
-        # still be bases/vtable-only (an empty derived class, or one with
-        # only virtual methods) — fall back to base-class-name overlap
-        # before trusting a fieldless-both match on name alone (vtable
-        # can't serve the same role: the clang header parser never
-        # populates RecordType.vtable itself, only DWARF does, so an
-        # empty-vs-populated vtable comparison would reject every real
-        # match instead of just the unrelated ones). Virtual bases are
-        # stored separately from ordinary bases on both the clang header
-        # parser and the DWARF builder (RecordType.virtual_bases, not
-        # .bases) — a virtual-inheritance-only class would otherwise leave
-        # both .bases sets empty and fall through to the trivial case below.
+            # the anonymous-aggregate asymmetry handled below.
+            return False
+        # dwarf.fields is empty here — either both sides are genuinely
+        # fieldless, or the header side has real fields that DWARF's
+        # anonymous-aggregate asymmetry flattened away. Field names alone
+        # can't tell those apart from a coincidentally-fieldless unrelated
+        # type in either case, so fall back to base-class-name overlap as a
+        # second corroborating signal before trusting the match. Virtual
+        # bases are stored separately from ordinary bases on both the clang
+        # header parser and the DWARF builder (RecordType.virtual_bases,
+        # not .bases) — a virtual-inheritance-only class would otherwise
+        # leave both .bases sets empty and fall through unchallenged.
         header_bases = set(header.bases) | set(header.virtual_bases)
         dwarf_bases = set(dwarf.bases) | set(dwarf.virtual_bases)
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
-        return True  # truly trivial on both sides (no fields, no bases)
+        # Truly nothing left to disagree on: no fields (or asymmetrically
+        # flattened away) and no bases on either side.
+        return True
 
     out: list[RecordType] = []
     for t in header_types:
