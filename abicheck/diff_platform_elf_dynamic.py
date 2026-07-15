@@ -197,8 +197,16 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
                 new_value=new_elf.soname,
             )
         )
-    changes.extend(_diff_needed_libraries(old_elf.needed, new_elf.needed))
-    changes.extend(_diff_needed_order(old_elf.needed, new_elf.needed))
+    # Same vendor-hash normalization as SONAME above: auditwheel/delocate also
+    # rewrite a repaired wheel's DT_NEEDED entries to reference the vendored
+    # DSO's content-hashed filename, so a dependency can rename across a
+    # rebuild (libfoo-a1b2c3d4.so.1 -> libfoo-9f8e7d6c.so.1) with no real
+    # dependency change. Compare/report the needed lists on their
+    # hash-stripped spelling so this doesn't read as NEEDED_ADDED/REMOVED.
+    old_needed_stripped = [strip_vendor_hash(lib) for lib in old_elf.needed]
+    new_needed_stripped = [strip_vendor_hash(lib) for lib in new_elf.needed]
+    changes.extend(_diff_needed_libraries(old_needed_stripped, new_needed_stripped))
+    changes.extend(_diff_needed_order(old_needed_stripped, new_needed_stripped))
 
     # DT_RPATH ↔ DT_RUNPATH type flip (ld --enable-new-dtags default drift).
     # The two tags carry different lookup semantics (subtree vs direct deps,

@@ -394,6 +394,26 @@ class TestNeededChanges:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.NEEDED_REMOVED in _kinds(r)
 
+    def test_needed_vendor_hash_only_not_flagged(self):
+        """auditwheel/delocate rewrite a vendored dependency's content-hashed
+        filename on every wheel rebuild — a hash-only rename must not read as
+        a dependency add/remove (Codex P2)."""
+        old_elf = ElfMetadata(needed=["libc.so.6", "libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libc.so.6", "libfoo-b8f31c2e.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED not in kinds
+        assert ChangeKind.NEEDED_REMOVED not in kinds
+
+    def test_needed_real_rename_still_fires(self):
+        """A genuine dependency rename (not just a hash suffix) must still surface."""
+        old_elf = ElfMetadata(needed=["libc.so.6", "libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libc.so.6", "libbar-a746ad4a.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED in kinds
+        assert ChangeKind.NEEDED_REMOVED in kinds
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DWARF Layout Cross-Check

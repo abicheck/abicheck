@@ -78,9 +78,28 @@ def doctor_command(binary: Path | None, headers: tuple[Path, ...]) -> None:
     )
 
     click.echo("== AST frontend ==")
-    resolved_backend = _resolve_header_backend(os.environ.get("ABICHECK_AST_FRONTEND"))
+    # Resolve via the same `auto`/None path a real `dump`/`compare` call takes
+    # (no explicit --ast-frontend flag here) rather than feeding the raw env
+    # value in as an explicit override: `_resolve_header_backend` raises on an
+    # unrecognized *explicit* request, which would crash `doctor` before it
+    # printed anything — precisely when a misconfigured env var is the thing
+    # the user is trying to diagnose. The auto path already reads
+    # ABICHECK_AST_FRONTEND itself and silently falls back to castxml on an
+    # unrecognized value, so this only ever prints, never raises.
+    env_frontend = os.environ.get("ABICHECK_AST_FRONTEND", "")
+    resolved_backend = _resolve_header_backend(None)
+    if env_frontend and env_frontend.strip().lower() not in (
+        "castxml",
+        "clang",
+        "auto",
+        "",
+    ):
+        click.echo(
+            f"  WARNING: ABICHECK_AST_FRONTEND={env_frontend!r} is not recognized "
+            f"(expected one of {('auto', 'castxml', 'clang')}); ignored, falling back to auto."
+        )
     click.echo(
-        f"  selected: {resolved_backend} (ABICHECK_AST_FRONTEND={os.environ.get('ABICHECK_AST_FRONTEND') or '(unset)'})"
+        f"  selected: {resolved_backend} (ABICHECK_AST_FRONTEND={env_frontend or '(unset)'})"
     )
     click.echo(f"  {_tool_status('castxml')}")
     if _castxml_available():

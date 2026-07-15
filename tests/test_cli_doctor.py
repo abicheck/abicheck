@@ -57,6 +57,31 @@ class TestDoctorEnvironmentOnly:
             assert result.exit_code == 0, result.output
             assert "== data sources" not in result.output
 
+    def test_tolerates_invalid_ast_frontend_env(self, monkeypatch) -> None:
+        """A misspelled ABICHECK_AST_FRONTEND must not crash `doctor` before
+        it can print diagnostics — that's exactly the misconfiguration the
+        command exists to help find (Codex P2)."""
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxmll")
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["doctor"])
+            assert result.exit_code == 0, result.output
+            assert "== AST frontend ==" in result.output
+            assert (
+                "WARNING: ABICHECK_AST_FRONTEND='castxmll' is not recognized"
+                in result.output
+            )
+            assert "selected: castxml" in result.output
+
+    def test_valid_ast_frontend_env_no_warning(self, monkeypatch) -> None:
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["doctor"])
+            assert result.exit_code == 0, result.output
+            assert "WARNING: ABICHECK_AST_FRONTEND" not in result.output
+            assert "selected: clang" in result.output
+
 
 class TestDoctorWithBinary:
     def test_missing_binary_is_usage_error(self) -> None:

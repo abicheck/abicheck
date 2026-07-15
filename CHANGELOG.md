@@ -86,7 +86,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   level SONAME-skew cohort key now all compare on the same vendor-hash-
   stripped spelling (`binary_utils.strip_vendor_hash`, relocated from
   `cli_helpers_compare.py` so the leaf diff modules can use it); a genuine
-  SONAME/install-name change still fires normally.
+  SONAME/install-name change still fires normally. The same normalization now
+  also applies to `DT_NEEDED` dependency-list diffing
+  (`diff_platform_elf_dynamic._diff_elf_dynamic_section`): a repaired wheel's
+  dependency reference to another vendored DSO gets rewritten the same way
+  (`libfoo-<hash>.so.1` -> a different hash), which previously still reported
+  as a spurious `NEEDED_ADDED`/`NEEDED_REMOVED` pair even after the SONAME fix
+  above (Codex review).
+
+- **`abicheck doctor` crashed instead of printing diagnostics when
+  `ABICHECK_AST_FRONTEND` held an unrecognized value.** It passed the raw env
+  value into `_resolve_header_backend` as an explicit override, which raises
+  `ValidationError` on anything other than `auto`/`castxml`/`clang` — exactly
+  the misconfiguration `doctor` exists to help find. It now resolves via the
+  normal `auto` path (which reads the env var itself and silently falls back
+  to `castxml` on an unrecognized value) and prints a `WARNING` line naming
+  the bad value instead of crashing (Codex review).
 
 - **`exported_object_alignment_reduced` could false-positive on a purely
   additive change.** The detector derives alignment from a symbol's `st_value`
