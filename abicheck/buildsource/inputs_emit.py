@@ -50,7 +50,7 @@ from .inputs_pack import (
     InputsManifest,
     _iter_source_fact_files,
     load_inputs_manifest,
-    read_source_facts,
+    read_source_fact_files,
 )
 from .source_abi import SourceAbiTu
 
@@ -152,6 +152,11 @@ def append_source_facts(
     root = Path(root)
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
+    # Infer compression from a caller-supplied ".gz" filename too: a mismatch
+    # (compress=False with a ".gz"-named file) would silently write plaintext
+    # under a name read_source_facts() later tries to gunzip (CodeRabbit
+    # review, P2).
+    compress = compress or filename.endswith(".gz")
     if compress and not filename.endswith(".gz"):
         filename = f"{filename}.gz"
     path = facts_dir / filename
@@ -243,35 +248,61 @@ def compact_inputs_pack(
     leave thousands of tiny files in a large pack, expensive to transfer/store
     afterwards. This is a **post-build** step (run once the build has
     finished, never mid-build): it re-reads every discovered source-fact file
-    the same way :func:`~.inputs_pack.ingest_inputs_pack` would
-    (:func:`~.inputs_pack.read_source_facts` — a malformed record degrades to
-    a diagnostic, never an abort), re-serializes each TU with the same
-    canonical ``json.dumps(tu.to_dict(), sort_keys=True)`` form the writers
-    already use, and concatenates the result into one file.
+    (a malformed record degrades to a diagnostic, never an abort), re-
+    serializes each TU with the same canonical
+    ``json.dumps(tu.to_dict(), sort_keys=True)`` form the writers already
+    use, and concatenates the result into one file.
 
     **Decoded facts an ingest sees are unchanged** (P1 #25 invariance) —
     compaction (and *compress*, gzipping the merged file) only changes file
     layout/size on disk, never the fact content ``ingest_inputs_pack`` folds.
+    One exception, both deliberate: a *rerun* of compaction (the pack already
+    has a prior compaction's output file, plus fresh per-TU files a later
+    incremental build emitted for since-rebuilt TUs) prefers each fresh
+    per-TU record over the prior output's now-stale record for the same
+    ``tu_id`` — the prior output's records for TUs *not* rebuilt since are
+    still carried forward, never dropped (Codex review, P2). And a read that
+    produces new diagnostics (a malformed/unreadable original) still writes
+    the merged output best-effort, but leaves *every* original in place
+    rather than deleting evidence of a lossy compaction (CodeRabbit review,
+    P2) — check *diagnostics* after the call.
 
     *remove_originals* deletes the per-TU files that were merged once the
-    merged file is written, so a later ingest cannot double-count TUs by
-    reading both the merged file and its stale sources. A manifest that names
-    explicit ``source_facts`` entries is repointed at the single merged file;
-    the default (auto-scan of ``source_facts/``) needs no manifest change —
-    the new file already lives where the scan looks.
+    merged file is written (skipped when the read above was lossy, see
+    above), so a later ingest cannot double-count TUs by reading both the
+    merged file and its stale sources. A manifest that names explicit
+    ``source_facts`` entries is repointed at the single merged file; the
+    default (auto-scan of ``source_facts/``) needs no manifest change — the
+    new file already lives where the scan looks.
     """
     _reject_escaping_filename(output_filename)
     root = Path(root)
     manifest = load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
-    originals = _iter_source_fact_files(root, manifest, sink)
-    tus = read_source_facts(root, manifest, diagnostics=sink)
 
+    # Infer compression from a caller-supplied ".gz" output_filename too, same
+    # as append_source_facts (CodeRabbit review, P2). Resolved before reading
+    # so the output path is known when partitioning discovered files below.
+    compress = compress or output_filename.endswith(".gz")
     if compress and not output_filename.endswith(".gz"):
         output_filename = f"{output_filename}.gz"
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename
+
+    originals = _iter_source_fact_files(root, manifest, sink)
+    prior_output_files = [
+        f for f in originals if f.resolve() == output_path.resolve()
+    ]
+    fresh_files = [f for f in originals if f.resolve() != output_path.resolve()]
+
+    before_diag_count = len(sink)
+    prior_tus = read_source_fact_files(prior_output_files, diagnostics=sink)
+    fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
+    lossy_read = len(sink) > before_diag_count
+
+    fresh_ids = {tu.tu_id for tu in fresh_tus}
+    tus = [tu for tu in prior_tus if tu.tu_id not in fresh_ids] + fresh_tus
 
     # Temp file + atomic rename so a concurrent reader never observes a
     # partially-written merge (same discipline as _write_manifest).
@@ -291,12 +322,17 @@ def compact_inputs_pack(
             os.unlink(tmp)
         raise
 
-    if remove_originals:
-        for f in originals:
-            if f.resolve() == output_path.resolve():
-                continue  # re-running compaction onto the same output name
+    if lossy_read:
+        sink.append(
+            "compaction read produced new diagnostics (a malformed/unreadable "
+            "original); originals were kept, not deleted, so the raw evidence "
+            "survives for inspection"
+        )
+    elif remove_originals:
+        for f in fresh_files:
             with contextlib.suppress(OSError):
                 f.unlink()
+        # prior_output_files (if any) was already replaced in place above.
 
     if manifest.source_facts:
         manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]

@@ -43,6 +43,8 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/GlobalDecl.h"
+#include "clang/AST/Mangle.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/ASTDumperUtils.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -1376,6 +1378,50 @@ std::string scopedName(const NamedDecl *d) {
   return out;
 }
 
+// scopedName() alone collapses distinct overloads (and any same-named decl in
+// the same scope that differs only by signature) onto one string; used as a
+// source_edges endpoint identity, that lets the (kind, src, dst) dedup in
+// addEdge() conflate e.g. `foo(int)` and `foo(double)` into a single node, so
+// an edge belonging to one overload can read as belonging to the other. This
+// mirrors the mangled-or-scoped-name `key` scheme entity ids already use
+// (emitFunctionFacts's `key = mangled.empty() ? name : mangled`) — same
+// identity scheme this decl's own `key` would get if FactsVisitor visited it.
+//
+// This is NOT full parity with the Python clang.py/call_graph.py extractor's
+// `_identity()` (also mangled-name-or-name): that extractor resolves a call's
+// callee from `-ast-dump=json`'s compact `referencedDecl` stub, which clang
+// never populates with `mangledName` (verified empirically — only a
+// fully-dumped decl node carries it), so Flow B's call edges stay name-only
+// for an overloaded callee regardless of this fix. Operating on the live
+// `FunctionDecl*` instead of clang's JSON text, this plugin (Flow C) can do
+// better here than Flow B currently does; a future fold step that merges
+// call-graph nodes across both producers by identity string would need to
+// account for that asymmetry (out of scope for this pass).
+//
+// Constructors/destructors are excluded and fall back to scopedName():
+// clang::GlobalDecl's single-FunctionDecl constructor asserts on a bare
+// ctor/dtor (it requires an explicit CXXCtorType/CXXDtorType, and a single
+// declaration mangles to multiple ABI symbols — complete/base/deleting
+// object), so disambiguating those would need call-site-specific variant
+// selection this pass does not attempt; overload collisions among a class's
+// own constructors remain a known imprecision (CodeRabbit review, P2).
+std::string mangledOrScopedName(MangleContext *mc, const NamedDecl *d) {
+  if (mc) {
+    if (const auto *fd = dyn_cast_or_null<FunctionDecl>(d)) {
+      if (!isa<CXXConstructorDecl>(fd) && !isa<CXXDestructorDecl>(fd) &&
+          mc->shouldMangleDeclName(fd)) {
+        std::string buf;
+        llvm::raw_string_ostream os(buf);
+        mc->mangleName(GlobalDecl(fd), os);
+        os.flush();
+        if (!buf.empty())
+          return buf;
+      }
+    }
+  }
+  return scopedName(d);
+}
+
 // ---------------------------------------------------------------------------
 // Small per-function-body sub-walk collecting DECL_CALLS_DECL/
 // DECL_REFERENCES_DECL edge targets (P1 #17-18). Scoped to one FunctionDecl's
@@ -1386,8 +1432,12 @@ std::string scopedName(const NamedDecl *d) {
 // ---------------------------------------------------------------------------
 class CallRefVisitor : public RecursiveASTVisitor<CallRefVisitor> {
 public:
-  // (target scoped name, resolution is "virtual-overapprox" when true)
-  std::vector<std::pair<std::string, bool>> Calls;
+  // (target decl, resolution is "virtual-overapprox" when true). Keeps the
+  // raw decl rather than a pre-computed scopedName() string so the caller can
+  // resolve it through mangledOrScopedName() — this visitor has no
+  // MangleContext of its own (it is instantiated fresh per function body with
+  // no ASTContext threaded in), and the target AST outlives this sub-walk.
+  std::vector<std::pair<const FunctionDecl *, bool>> Calls;
   std::vector<std::string> References;
 
   bool shouldVisitImplicitCode() const { return false; }
@@ -1402,7 +1452,7 @@ public:
       if (const auto *method = dyn_cast<CXXMethodDecl>(callee))
         isVirtual = method->isVirtual();
     }
-    Calls.emplace_back(scopedName(callee), isVirtual);
+    Calls.emplace_back(callee, isVirtual);
     return true;
   }
 
@@ -1932,7 +1982,7 @@ public:
         Functions(functions), Variables(variables), Types(types),
         Templates(templates), InlineBodies(inlineBodies),
         ConstexprValues(constexprValues), Diags(diags), Edges(edges),
-        InferredRoots(inferredRoots) {}
+        InferredRoots(inferredRoots), Mangler(ctx.createMangleContext()) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1981,24 +2031,29 @@ public:
     // P1 #17-18: source-graph edges captured in the SAME AST walk, no second
     // frontend pass. DECL_HAS_TYPE for the return type and each parameter;
     // DECL_CALLS_DECL/DECL_REFERENCES_DECL from a bounded sub-walk of this
-    // function's own body (CallRefVisitor).
-    addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP), "high",
+    // function's own body (CallRefVisitor). Edges are keyed by `key`
+    // (mangled-or-scoped-name), not the bare `name`/scopedName() — two
+    // overloads share one `name`, and using it as the edge src would let the
+    // (kind, src, dst) dedup conflate `foo(int)`'s edges with `foo(double)`'s
+    // (CodeRabbit review, P2; see mangledOrScopedName()).
+    addEdge("DECL_HAS_TYPE", key, fd->getReturnType().getAsString(PP), "high",
             {{"role", "return"}});
     for (const ParmVarDecl *p : fd->parameters()) {
       std::string ptype = p->getType().getAsString(PP);
       if (!ptype.empty())
-        addEdge("DECL_HAS_TYPE", name, ptype, "high", {{"role", "param"}});
+        addEdge("DECL_HAS_TYPE", key, ptype, "high", {{"role", "param"}});
     }
     if (Stmt *body = fd->getBody()) {
       CallRefVisitor crv;
       crv.TraverseStmt(body);
       for (const auto &call : crv.Calls)
-        addEdge("DECL_CALLS_DECL", name, call.first,
+        addEdge("DECL_CALLS_DECL", key,
+                mangledOrScopedName(Mangler.get(), call.first),
                 call.second ? "reduced" : "high",
                 {{"call_kind", call.second ? "virtual" : "direct"},
                  {"resolution", call.second ? "overapprox" : "exact"}});
       for (const std::string &ref : crv.References)
-        addEdge("DECL_REFERENCES_DECL", name, ref, "reduced", {{"role", "ref"}});
+        addEdge("DECL_REFERENCES_DECL", key, ref, "reduced", {{"role", "ref"}});
     }
 
     // Gate the whole inline entity on a CompoundStmt being present in the
@@ -2458,6 +2513,12 @@ private:
   // Mutable: updated from the const `classify` gate while walking the AST.
   mutable size_t RejectedHeaderDecls = 0;
   mutable std::string ExampleRejectedHeader;
+  // Owning; ASTContext::createMangleContext() returns a raw pointer the
+  // caller must free. Built once per TU and reused for every
+  // mangledOrScopedName() call (edge endpoints only — entity `key`s keep
+  // reading their mangled name from clang's own JSON dump, unchanged) rather
+  // than re-mangling on every call expression.
+  std::unique_ptr<MangleContext> Mangler;
 
   // Deterministic edge identity (P1 #18): kind + source entity identity +
   // target entity identity. Silently drops a self-edge or an edge with an
@@ -2771,9 +2832,16 @@ private:
         jsonStr(CLANG_VERSION_STRING) + "}";
 
     std::map<std::string, std::string> coverageMap = {
-        {"functions", familyCoverageState(
-                          !functions.empty(),
-                          anyDiagContains(diags, {"function facts unavailable"}))},
+        // Class-template member patterns (emitClassTemplateMemberPatterns)
+        // also push into `functions`, so a JSON-dump failure there must
+        // count toward this family's diagnostic check too, or an all-failed
+        // batch of template members with no other free function in the TU
+        // reports empty-confirmed instead of failed (CodeRabbit review, P2).
+        {"functions",
+         familyCoverageState(
+             !functions.empty(),
+             anyDiagContains(diags, {"function facts unavailable",
+                                     "class-template member facts unavailable"}))},
         {"variables", familyCoverageState(
                           !variables.empty(),
                           anyDiagContains(diags, {"variable facts unavailable"}))},

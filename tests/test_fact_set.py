@@ -192,6 +192,31 @@ def test_rollup_coverage_omits_families_never_reported() -> None:
     assert "macros" not in rolled
 
 
+def test_rollup_coverage_missing_family_on_c8_tu_is_not_ignored() -> None:
+    """A TU that declares the canonical fact_set (participates in C.8) but is
+    missing a mandatory family's coverage entry must not let other TUs that
+    did report it roll up as clean (Codex review, P2)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [
+        _tu(fact_set=fs, coverage={"functions": "complete", "macros": "complete"}),
+        # This TU never reported "macros" at all, though it does participate
+        # in C.8 (has a fact_set) -- its silence must drag the rollup down.
+        _tu(fact_set=dict(fs), coverage={"functions": "complete"}),
+    ]
+    rolled = rollup_coverage(tus)
+    assert rolled["functions"] == "complete"
+    assert rolled["macros"] == "failed"
+
+
+def test_rollup_coverage_missing_family_on_pre_c8_tu_still_omitted() -> None:
+    # A TU with no fact_set at all (pre-C.8 producer) missing a family entry
+    # must not manufacture a "failed" state -- preserves the existing
+    # forward-compat behavior for old baselines/fixtures.
+    tus = [_tu(coverage={"functions": "complete"})]  # no fact_set
+    rolled = rollup_coverage(tus)
+    assert "macros" not in rolled
+
+
 # -- incomplete_families ------------------------------------------------------
 
 

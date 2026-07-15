@@ -370,6 +370,30 @@ def _read_text_maybe_gz(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def read_source_fact_files(
+    paths: Iterable[Path], *, diagnostics: list[str] | None = None
+) -> list[SourceAbiTu]:
+    """Read+parse an explicit list of source-fact files.
+
+    The per-file half of :func:`read_source_facts`, split out so a caller
+    that needs to control file resolution/order itself — e.g.
+    :func:`~.inputs_emit.compact_inputs_pack` reading a stale prior-
+    compaction output separately from fresh per-TU files so it can prefer
+    the fresher record for a duplicate ``tu_id`` — reuses the same parsing
+    without re-deriving the file list (Codex review, P2).
+    """
+    sink = diagnostics if diagnostics is not None else []
+    tus: list[SourceAbiTu] = []
+    for path in paths:
+        try:
+            text = _read_text_maybe_gz(path)
+        except OSError as exc:
+            sink.append(f"{path.name}: could not read/decompress ({exc})")
+            continue
+        tus.extend(_parse_tu_records(text, path.name, sink))
+    return tus
+
+
 def read_source_facts(
     root: Path | str,
     manifest: InputsManifest | None = None,
@@ -385,15 +409,9 @@ def read_source_facts(
     root = Path(root)
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
-    tus: list[SourceAbiTu] = []
-    for path in _iter_source_fact_files(root, manifest, sink):
-        try:
-            text = _read_text_maybe_gz(path)
-        except OSError as exc:
-            sink.append(f"{path.name}: could not read/decompress ({exc})")
-            continue
-        tus.extend(_parse_tu_records(text, path.name, sink))
-    return tus
+    return read_source_fact_files(
+        _iter_source_fact_files(root, manifest, sink), diagnostics=sink
+    )
 
 
 def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list[str]) -> BuildEvidence | None:

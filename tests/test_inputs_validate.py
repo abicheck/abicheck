@@ -26,7 +26,7 @@ from click.testing import CliRunner
 from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.inputs_pack import ABICHECK_INPUTS_VERSION, INPUTS_KIND
 from abicheck.buildsource.inputs_validate import validate_inputs_pack
-from abicheck.buildsource.source_abi import default_fact_set
+from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
 from abicheck.cli import main
 
 
@@ -53,6 +53,22 @@ def _tu(
         fact_set=fact_set or {},
         coverage=coverage or {},
     )
+
+
+def _full_coverage(**overrides: str) -> dict[str, str]:
+    """All ``FACT_FAMILIES`` reported ``complete``, minus any *overrides*.
+
+    A real C.8 producer's ``coverageMap`` always reports every mandatory
+    family (see ``AbicheckFactsPlugin.cpp``'s ``coverageMap`` literal); a
+    fixture that mentions only the family under test would now roll up every
+    *other* family as "failed" too (rollup_coverage treats a fact_set-bearing
+    TU's missing entry as unknown/incomplete, not silently omitted — Codex
+    review, P2), so a "clean pack" fixture must be fully populated to stay
+    clean.
+    """
+    cov = {family: "complete" for family in FACT_FAMILIES}
+    cov.update(overrides)
+    return cov
 
 
 def _write_pack(
@@ -196,7 +212,7 @@ def test_manifest_level_fact_set_used_when_no_tu_ever_stamped_one(
 
 def test_incomplete_mandatory_family_warns(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
-    tu = _tu("a", fact_set=fs, coverage={"functions": "complete", "macros": "partial"})
+    tu = _tu("a", fact_set=fs, coverage=_full_coverage(macros="partial"))
     pack = _write_pack(tmp_path, [tu])
     report = validate_inputs_pack(pack)
     assert report.ok
@@ -275,7 +291,7 @@ def test_report_to_dict_round_trips_shape(tmp_path: Path) -> None:
 def test_cli_validate_clean_pack_exits_zero(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage={"functions": "complete"})]
+        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
     )
     result = CliRunner().invoke(main, ["inputs", "validate", str(pack)])
     assert result.exit_code == 0, result.output
@@ -306,7 +322,7 @@ def test_cli_validate_bad_path_exits_usage_error(tmp_path: Path) -> None:
 def test_cli_validate_json_format(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage={"functions": "complete"})]
+        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
     )
     result = CliRunner().invoke(
         main, ["inputs", "validate", str(pack), "--format", "json"]
@@ -320,7 +336,7 @@ def test_cli_validate_json_format(tmp_path: Path) -> None:
 def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage={"functions": "complete"})]
+        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
     )
     out = tmp_path / "report.txt"
     result = CliRunner().invoke(main, ["inputs", "validate", str(pack), "-o", str(out)])

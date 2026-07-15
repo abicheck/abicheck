@@ -33,20 +33,27 @@ def build_source_edges(
 ) -> list[dict[str, Any]]:
     """Return deduplicated ``source_edges`` dicts for *ast_root*.
 
-    Best-effort: any parse failure is recorded in *diags* (feeding the
-    ``source_edges`` coverage state to ``partial``/``failed``) and yields an
-    empty list rather than raising — a graph-edge failure must never abort
-    the TU's other facts (ADR-028 D7 "extractor failures ... never abort").
+    Best-effort: a parse failure is recorded in *diags* (feeding the
+    ``source_edges`` coverage state to ``partial``/``failed``) rather than
+    raising — a graph-edge failure must never abort the TU's other facts
+    (ADR-028 D7 "extractor failures ... never abort"). The call and type
+    parsers are caught independently, so a failure in one does not discard
+    the other's successful edges (CodeRabbit review, P2).
     """
-    try:
-        from ..call_graph import CallEdge, parse_clang_ast_calls
-        from ..type_graph import TypeEdge, parse_clang_ast_types
+    from ..call_graph import CallEdge, parse_clang_ast_calls
+    from ..type_graph import TypeEdge, parse_clang_ast_types
 
-        call_edges: list[CallEdge] = parse_clang_ast_calls(ast_root)
-        type_edges: list[TypeEdge] = parse_clang_ast_types(ast_root)
+    call_edges: list[CallEdge] = []
+    try:
+        call_edges = parse_clang_ast_calls(ast_root)
     except Exception as exc:  # noqa: BLE001 - never abort the TU over edges
-        diags.append(f"source_edges unavailable: {exc}")
-        return []
+        diags.append(f"source_edges unavailable: call parser failed: {exc}")
+
+    type_edges: list[TypeEdge] = []
+    try:
+        type_edges = parse_clang_ast_types(ast_root)
+    except Exception as exc:  # noqa: BLE001 - never abort the TU over edges
+        diags.append(f"source_edges unavailable: type parser failed: {exc}")
 
     edges: list[dict[str, Any]] = []
     for ce in call_edges:

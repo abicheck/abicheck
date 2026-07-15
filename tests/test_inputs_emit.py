@@ -18,6 +18,7 @@ that round-trips through ``ingest_inputs_pack`` — no compiler is run here."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -175,6 +176,25 @@ def test_append_source_facts_compress_supports_incremental_appends(
     assert {"foo", "bar"} <= names
 
 
+def test_append_source_facts_infers_compression_from_gz_filename(
+    tmp_path: Path,
+) -> None:
+    # compress=False (the default) with a caller-supplied ".gz" filename must
+    # still be written compressed, not silently as plaintext under a
+    # misleading name that read_source_facts() would then fail to decompress
+    # (CodeRabbit review, P2).
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    path = append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename="custom.jsonl.gz"
+    )
+    assert path.name == "custom.jsonl.gz"
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        fh.read()  # must decompress cleanly -- would raise on plaintext
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+
+
 # -- post-build compaction (P1 #21) -------------------------------------------
 
 
@@ -220,6 +240,85 @@ def test_compact_compress_round_trips(tmp_path: Path) -> None:
     assert out.name == "compacted.jsonl.gz"
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 1
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names
+
+
+def test_compact_infers_compression_from_gz_output_filename(tmp_path: Path) -> None:
+    # compress=False (the default) with a caller-supplied ".gz" output_filename
+    # must still write compressed (CodeRabbit review, P2).
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    out = compact_inputs_pack(pack, output_filename="merged.jsonl.gz")
+    assert out.name == "merged.jsonl.gz"
+    with gzip.open(out, "rt", encoding="utf-8") as fh:
+        fh.read()
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+
+
+def test_compact_rerun_prefers_fresh_record_over_stale_prior_output(
+    tmp_path: Path,
+) -> None:
+    # Simulates an incremental rebuild between two compactions: only foo.cpp
+    # is recompiled (fresh per-TU file, new content); bar.cpp's only
+    # surviving record lives in the first compaction's output. The fresh foo
+    # record must win and bar must not be dropped (Codex review, P2).
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    # Incremental rebuild: foo.cpp's per-TU file is rewritten with new
+    # content (same tu_id, since tu_id derives from source path).
+    append_source_facts(
+        pack,
+        [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2  # foo (fresh) + bar (carried from prior), not 3
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo2", "bar"}  # fresh "foo2" wins over stale "foo"
+
+
+def test_compact_preserves_originals_on_lossy_read(tmp_path: Path) -> None:
+    # A malformed sibling source-fact file makes this compaction "lossy"
+    # (read_source_fact_files reports a diagnostic for it); every original
+    # must survive so the raw evidence isn't deleted (CodeRabbit review, P2).
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    (pack / "source_facts" / "bad.jsonl").write_text(
+        "{not valid json\n", encoding="utf-8"
+    )
+
+    diagnostics: list[str] = []
+    compact_inputs_pack(pack, diagnostics=diagnostics)
+
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert "bad.jsonl" in remaining  # not deleted despite the lossy read
+    assert len(remaining) == 3  # good original + bad original + merged output
+    assert any("kept, not deleted" in d for d in diagnostics)
+
+    # The good TU's facts still made it into the best-effort compacted output.
+    ingested = ingest_inputs_pack(pack)
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
     assert "foo" in names
 

@@ -74,15 +74,22 @@ def rollup_coverage(tus: list[SourceAbiTu]) -> dict[str, str]:
     """Worst-of-across-TUs coverage state per fact family.
 
     Families absent from every TU's ``coverage`` (an older/hand-edited
-    producer) are omitted rather than guessed at.
+    producer) are omitted rather than guessed at. But a TU that *does*
+    declare the canonical ``fact_set`` (so it participates in the C.8
+    protocol) and still has no entry for a mandatory family is not "silent"
+    the way a pre-C.8 producer's TU is — that missing entry is treated as
+    the worst state so it cannot be averaged away by other TUs in the same
+    pack that did report the family (Codex review, P2).
     """
     out: dict[str, str] = {}
     for family in FACT_FAMILIES:
-        seen: list[str] = [
-            tu.coverage[family]
-            for tu in tus
-            if isinstance(tu.coverage, dict) and family in tu.coverage
-        ]
+        seen: list[str] = []
+        for tu in tus:
+            cov = tu.coverage if isinstance(tu.coverage, dict) else {}
+            if family in cov:
+                seen.append(cov[family])
+            elif tu.fact_set:
+                seen.append("failed")
         if not seen:
             continue
         out[family] = min(seen, key=lambda s: _STATE_RANK.get(s, -1))

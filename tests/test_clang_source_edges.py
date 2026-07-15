@@ -20,6 +20,8 @@ Hand-built ``clang -ast-dump=json`` trees so no compiler is required."""
 
 from __future__ import annotations
 
+import pytest
+
 import abicheck.buildsource.call_graph as call_graph
 import abicheck.buildsource.type_graph as type_graph
 from abicheck.buildsource.source_extractors.clang_source_edges import (
@@ -123,29 +125,57 @@ def test_build_source_edges_empty_ast_yields_no_edges() -> None:
     assert build_source_edges(_tu(), []) == []
 
 
-def test_build_source_edges_records_diagnostic_on_parser_failure(
-    monkeypatch,  # type: ignore[no-untyped-def]
+def test_build_source_edges_call_failure_preserves_type_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A call-parser failure must not discard the type parser's successful
+    # edges (CodeRabbit review, P2): each parser is caught independently.
+    def _boom(ast_root: dict) -> list:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(call_graph, "parse_clang_ast_calls", _boom)
+    ast = _tu(_record("Base"), _record("Derived", bases=[_base("Base")]))
+    diags: list[str] = []
+    edges = build_source_edges(ast, diags)
+    assert any(e["edge"] == "TYPE_INHERITS" for e in edges)
+    assert not any(e["edge"] == "DECL_CALLS_DECL" for e in edges)
+    assert len(diags) == 1
+    assert diags[0].startswith("source_edges unavailable: call parser failed:")
+
+
+def test_build_source_edges_type_failure_preserves_call_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A type-parser failure must not discard the call parser's successful
+    # edges (CodeRabbit review, P2): each parser is caught independently.
+    def _boom(ast_root: dict) -> list:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(type_graph, "parse_clang_ast_types", _boom)
+    ast = _tu(
+        _func(
+            "caller",
+            "_Zcaller",
+            [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))],
+        )
+    )
+    diags: list[str] = []
+    edges = build_source_edges(ast, diags)
+    assert any(e["edge"] == "DECL_CALLS_DECL" for e in edges)
+    assert not any(e["edge"] == "TYPE_INHERITS" for e in edges)
+    assert len(diags) == 1
+    assert diags[0].startswith("source_edges unavailable: type parser failed:")
+
+
+def test_build_source_edges_both_parsers_fail_yields_two_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _boom(ast_root: dict) -> list:
         raise ValueError("boom")
 
     monkeypatch.setattr(call_graph, "parse_clang_ast_calls", _boom)
-    diags: list[str] = []
-    edges = build_source_edges(_tu(), diags)
-    assert edges == []
-    assert len(diags) == 1
-    assert diags[0].startswith("source_edges unavailable:")
-
-
-def test_build_source_edges_records_diagnostic_on_type_parser_failure(
-    monkeypatch,  # type: ignore[no-untyped-def]
-) -> None:
-    def _boom(ast_root: dict) -> list:
-        raise ValueError("boom")
-
     monkeypatch.setattr(type_graph, "parse_clang_ast_types", _boom)
     diags: list[str] = []
     edges = build_source_edges(_tu(), diags)
     assert edges == []
-    assert len(diags) == 1
-    assert diags[0].startswith("source_edges unavailable:")
+    assert len(diags) == 2
