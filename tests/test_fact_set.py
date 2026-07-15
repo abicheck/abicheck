@@ -516,6 +516,26 @@ def test_diff_flags_unrecognized_family_coverage_state_as_incomplete() -> None:
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in {c.kind for c in changes}
 
 
+def test_diff_degrades_on_unhashable_family_coverage_state() -> None:
+    """SourceAbiSurface.from_dict copies coverage with a shallow dict(...)
+    (unlike SourceAbiTu.from_dict, which string-coerces every value), so a
+    hand-written/forward-versioned source_abi.json can carry a non-string
+    family-state value -- a JSON array or object. Checking
+    `state in COVERAGE_STATES` (a frozenset[str]) hashes state first, and a
+    list/dict is unhashable, raising TypeError before it could even be
+    coerced -- crashing diff_source_abi() instead of degrading like every
+    other malformed-coverage case (Codex review, P2)."""
+    fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.5")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {"functions": ["bad"]}}
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {"functions": {"x": 1}}}
+    )
+    changes = diff_source_abi(old, new)  # must not raise
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in {c.kind for c in changes}
+
+
 def test_source_fact_coverage_incomplete_is_risk_kind() -> None:
     from abicheck.checker_policy import RISK_KINDS
 

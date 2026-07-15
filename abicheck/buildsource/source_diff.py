@@ -118,7 +118,7 @@ def _richer(candidate: SourceEntity, current: SourceEntity) -> bool:
     return _score(candidate) > _score(current)
 
 
-def _coerce_coverage_states(family_states: dict[str, str]) -> dict[str, str]:
+def _coerce_coverage_states(family_states: dict[str, object]) -> dict[str, str]:
     """Coerce an unrecognized per-family coverage state to ``"failed"``.
 
     Mirrors :func:`~.fact_set.rollup_coverage`'s own coercion (Codex review,
@@ -126,9 +126,23 @@ def _coerce_coverage_states(family_states: dict[str, str]) -> dict[str, str]:
     a hand-written/forward-versioned producer's newer vocabulary — cannot
     read as an implicitly "fine" state just because it isn't a *known*
     incomplete one either.
+
+    ``SourceAbiSurface.from_dict`` copies ``coverage`` with a shallow
+    ``dict(...)`` (unlike ``SourceAbiTu.from_dict``, which string-coerces
+    every value via ``_string_dict``), so a hand-written/forward-versioned
+    ``source_abi.json`` can carry a non-string family-state value — a JSON
+    array or object. Checking ``state in COVERAGE_STATES`` (a
+    ``frozenset[str]``) hashes *state* first, and a list/dict is unhashable,
+    raising ``TypeError`` before this could even coerce it — crashing
+    ``diff_source_abi()`` instead of degrading (Codex review, P2). The
+    ``isinstance`` check short-circuits before the membership test so a
+    non-string value coerces to ``"failed"`` like any other unrecognized
+    state, never reaching ``in`` at all.
     """
     return {
-        family: state if state in COVERAGE_STATES else "failed"
+        family: state
+        if isinstance(state, str) and state in COVERAGE_STATES
+        else "failed"
         for family, state in family_states.items()
     }
 
