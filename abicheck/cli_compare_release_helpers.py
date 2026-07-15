@@ -352,9 +352,14 @@ def _compute_release_severity_exit_code(
     Returns ``None`` when no ``--severity-*`` option was supplied (callers
     keep the legacy verdict-based exit). Otherwise returns the worst
     :func:`compute_exit_code` over the per-library changes. Each library is
-    classified with *its own* ``DiffResult._effective_kind_sets()`` so that
-    per-library ``--policy-file`` kind overrides (e.g. escalating a kind to
-    BREAKING) are honored in the exit code, not just in the report.
+    classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
+    ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
+    per-finding frozen-namespace floor — Codex review on #549: without
+    ``policy_file`` here, a policy override that downgrades a kind could still
+    silently exit 0 for a finding tagged ``frozen_namespace_violation``, even
+    though that same finding's annotation, via ``collect_annotations``, does
+    honour the floor and emits ``::error``) so per-library overrides are
+    honored in the exit code exactly as they are in the report.
 
     This only covers per-library findings and must run before ``_diff_result``
     entries are stripped; release-global bundle/matrix findings are folded in
@@ -379,7 +384,9 @@ def _compute_release_severity_exit_code(
             code = compute_exit_code(
                 diff.changes,
                 resolved_config,
+                policy=diff.policy,
                 kind_sets=diff._effective_kind_sets(),
+                policy_file=diff.policy_file,
             )
             worst = max(worst, code)
     return worst
@@ -427,7 +434,9 @@ def _fold_release_global_severity(
             compute_exit_code(
                 matrix_result.changes,
                 config,
+                policy=matrix_result.policy,
                 kind_sets=matrix_result._effective_kind_sets(),
+                policy_file=matrix_result.policy_file,
             ),
         )
     return worst
