@@ -81,6 +81,17 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     assert calls[0]["scope_to_public_surface"] is False
     assert calls[1]["scope_to_public_surface"] is True
     assert hard_l0 in calls[1]["extra_changes"]
+    # The breaking finding itself is preserved, not just its count (a failing
+    # `scan --baseline` must name what broke, not just report "breaking=1").
+    assert summary["findings"] == [
+        {
+            "bucket": "breaking",
+            "kind": "func_removed_elf_only",
+            "symbol": None,
+            "description": None,
+            "source_location": None,
+        }
+    ]
 
 
 def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch) -> None:
@@ -129,4 +140,56 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
 
     assert verdict == "NO_CHANGE"
     assert exit_code == 0
+    # No findings key at all when there is nothing to report (back-compat with
+    # consumers that only ever read the four counts).
     assert summary == {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0}
+    assert "findings" not in summary
+
+
+def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> None:
+    """A large baseline diff caps embedded findings and flags the truncation."""
+    from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
+
+    old_snap = SimpleNamespace(build_source=None)
+    new_snap = SimpleNamespace(build_source=None)
+    many_breaks = [
+        SimpleNamespace(
+            kind=SimpleNamespace(value="func_removed"),
+            symbol=f"sym{i}",
+            description=f"removed sym{i}",
+            source_location=None,
+        )
+        for i in range(_MAX_BASELINE_FINDINGS + 5)
+    ]
+
+    def fake_resolve_input(*args, **kwargs):  # noqa: ANN002, ANN003
+        return old_snap
+
+    def fake_prepare_embedded_build_source(
+        old, new, collect_mode, extra_changes, *args  # noqa: ANN001, ANN002
+    ):
+        return list(extra_changes), [], {}, None
+
+    def fake_compare_snapshots(old, new, *, extra_changes, scope_to_public_surface):  # noqa: ANN001
+        return SimpleNamespace(
+            breaking=many_breaks,
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            verdict=_Verdict("BREAKING"),
+        )
+
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.prepare_embedded_build_source",
+        fake_prepare_embedded_build_source,
+    )
+
+    _, _, summary = _run_baseline_compare(
+        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+    )
+
+    assert summary["breaking"] == len(many_breaks)
+    assert len(summary["findings"]) == _MAX_BASELINE_FINDINGS
+    assert summary["findings_truncated"] is True

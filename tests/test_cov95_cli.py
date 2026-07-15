@@ -1856,7 +1856,7 @@ class TestMaybeEmitAnnotationsInCI:
         monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
         monkeypatch.setattr(
             "abicheck.annotations.collect_annotations",
-            lambda result, annotate_additions=False: ["a1"],
+            lambda result, annotate_additions=False, severity_config=None: ["a1"],
         )
         monkeypatch.setattr(
             "abicheck.annotations.format_annotations",
@@ -1865,7 +1865,7 @@ class TestMaybeEmitAnnotationsInCI:
         emitted = {}
         monkeypatch.setattr(
             "abicheck.annotations.emit_github_step_summary",
-            lambda result: emitted.setdefault("summary", True),
+            lambda result, severity_config=None: emitted.setdefault("summary", True),
         )
         result = DiffResult(old_version="1", new_version="2", library="x")
         cli_mod._maybe_emit_annotations(

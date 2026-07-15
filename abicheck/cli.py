@@ -794,6 +794,7 @@ def _maybe_emit_annotations(
     annotate: bool,
     annotate_additions: bool,
     write_step_summary: bool = True,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """Emit GitHub annotations to stderr if --annotate is set and running in CI."""
     if not annotate:
@@ -809,13 +810,15 @@ def _maybe_emit_annotations(
     if not is_github_actions():
         return
 
-    annotations = collect_annotations(result, annotate_additions=annotate_additions)
+    annotations = collect_annotations(
+        result, annotate_additions=annotate_additions, severity_config=severity_config,
+    )
     text = format_annotations(annotations)
     if text:
         click.echo(text, err=True)
 
     if write_step_summary:
-        emit_github_step_summary(result)
+        emit_github_step_summary(result, severity_config=severity_config)
 
 
 def _write_release_step_summary(text: str, fmt: str) -> None:
@@ -947,6 +950,7 @@ def _finalize_compare_result(
     *,
     show_redundant: bool, show_filtered: bool,
     annotate: bool, annotate_additions: bool,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression/annotation output."""
     result.old_metadata = _collect_metadata(old_input)
@@ -973,7 +977,8 @@ def _finalize_compare_result(
 
     _warn_all_suppressed(result)
     _maybe_emit_annotations(
-        result, annotate=annotate, annotate_additions=annotate_additions
+        result, annotate=annotate, annotate_additions=annotate_additions,
+        severity_config=severity_config,
     )
 
 

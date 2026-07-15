@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from abicheck.html_report import generate_html_report, write_html_report
 
 # ---------------------------------------------------------------------------
@@ -131,6 +133,69 @@ def test_added_section_present_when_additions_exist() -> None:
     out = generate_html_report(r)
     assert "id='added'" in out
     assert "Added Symbols" in out
+
+
+def test_breaking_field_addition_not_in_green_added_section() -> None:
+    """A structurally-additive but ABI-breaking finding (type_field_added -
+    appending a field to a non-final/polymorphic type can break binary
+    layout) must not render under the green Added section, or it reads as
+    safe when it is not. Verified defect (source assessment): confirmed
+    ChangeKind.TYPE_FIELD_ADDED is in both ADDED_KINDS and BREAKING_KINDS."""
+    r = _result(verdict="BREAKING", changes=[_ch("type_field_added", "Config")])
+    out = generate_html_report(r)
+    assert "id='added'" not in out
+    assert "id='changed'" in out
+
+
+def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None:
+    """A policy-file override that demotes a removal to COMPATIBLE must not
+    leave the page reporting "0.0% binary compatibility" next to a
+    COMPATIBLE verdict banner — verified defect (source assessment): the
+    binary-compatibility % previously counted breaking_count by raw kind
+    membership, ignoring the policy override the verdict itself honours."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.policy_file import PolicyFile
+
+    c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+    )
+    out = generate_html_report(result)
+    assert "Verdict: COMPATIBLE" in out
+    assert "Binary Compatibility: <strong>100.0%</strong>" in out
+    assert "Binary Compatibility: <strong>0.0%</strong>" not in out
+    assert "(0 breaking change(s))" in out
+
+
+@pytest.mark.parametrize(
+    "escalated_verdict",
+    ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK"],
+)
+def test_policy_escalated_addition_not_in_green_added_section(escalated_verdict: str) -> None:
+    """Codex review on #549 (two rounds): a policy file that escalates an
+    inherently additive kind away from COMPATIBLE — to BREAKING, API_BREAK,
+    *or* COMPATIBLE_WITH_RISK — must not leave the finding in the green
+    "Added" section. `_change_bucket`'s canonical `BREAKING_KINDS`
+    membership check can never see a policy-file escalation since it only
+    looks at the kind's own default classification. The first fix only
+    diverted the `== Verdict.BREAKING` case; a non-BREAKING escalation
+    (API_BREAK, COMPATIBLE_WITH_RISK) still rendered under "Added" even
+    though it needs review/recompilation like any other non-COMPATIBLE
+    finding — the guard must check "not COMPATIBLE", not "is BREAKING"."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.policy_file import PolicyFile
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "new function: bar")
+    pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict[escalated_verdict]})
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict[escalated_verdict], policy_file=pf,
+    )
+    out = generate_html_report(result)
+    assert "id='added'" not in out
+    assert "id='changed'" in out
 
 
 def test_changed_section_present_for_changed_kinds() -> None:

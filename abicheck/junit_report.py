@@ -104,16 +104,20 @@ def _is_failure(
     escalation guards — so the JUnit file can never disagree with the JSON
     report or the severity-aware exit code.
 
-    BREAKING and API_BREAK verdicts always fail. COMPATIBLE_WITH_RISK fails
-    only when its per-kind severity is ``"error"`` (currently all RISK_KINDS
-    default to ``"warning"``, so they pass), unless *severity_config* (from
-    ``--severity-preset`` or ``--severity-*`` overrides) escalates the
-    finding's effective category to error — which also applies to a plain
-    COMPATIBLE verdict (e.g. under ``--severity-preset strict``).
+    When *severity_config* is given (from ``--severity-preset`` or
+    ``--severity-*`` overrides), it is the sole source of truth — a finding
+    fails only when its effective category's configured level is
+    ``"error"`` — mirroring :func:`abicheck.severity.compute_exit_code`
+    exactly, so the JUnit file can never disagree with the severity-aware
+    exit code. A demoted preset (e.g. ``--severity-preset info-only``) must
+    make even a BREAKING/API_BREAK verdict pass here, just as it does for
+    the exit code.
+
+    Without a *severity_config* (legacy verdict-based scheme): BREAKING and
+    API_BREAK verdicts always fail. COMPATIBLE_WITH_RISK fails only when its
+    per-kind severity is ``"error"`` (currently all RISK_KINDS default to
+    ``"warning"``, so they pass).
     """
-    verdict = result._effective_verdict_for_change(change)
-    if verdict in (Verdict.BREAKING, Verdict.API_BREAK):
-        return True
     if severity_config is not None:
         from .severity import SeverityLevel, classify_effective_change
 
@@ -124,6 +128,9 @@ def _is_failure(
             policy_file=result.policy_file,
         )
         return severity_config.level_for(cat) == SeverityLevel.ERROR
+    verdict = result._effective_verdict_for_change(change)
+    if verdict in (Verdict.BREAKING, Verdict.API_BREAK):
+        return True
     # COMPATIBLE_WITH_RISK never fails without a severity_config: all
     # RISK_KINDS default to severity "warning" in the policy registry. This
     # must NOT consult policy_for(change.kind) directly — for a demoted

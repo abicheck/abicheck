@@ -771,6 +771,7 @@ def run_compare(
         result, old_input, new_input,
         show_redundant=show_redundant, show_filtered=show_filtered,
         annotate=annotate, annotate_additions=annotate_additions,
+        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
     )
 
     text = _render_output(

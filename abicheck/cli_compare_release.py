@@ -320,6 +320,23 @@ def _suppress_lockstep_soname_findings(
     return suppressed
 
 
+def _drop_lockstep_soname_finding(result: DiffResult) -> None:
+    """Mirror ``_suppress_lockstep_soname_findings``'s per-result filter.
+
+    Called on the independent re-run :func:`_collect_release_extras` performs
+    for JUnit/annotations, only when the caller has already confirmed
+    ``worst_verdict == "BREAKING"`` (the same release-level condition
+    ``_suppress_lockstep_soname_findings`` gates on) — so this stays a no-op
+    unless the primary pass would also have suppressed the finding.
+    """
+    from .checker_policy import ChangeKind
+
+    if any(c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes):
+        result.changes = [
+            c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
+        ]
+
+
 def _compare_release_libraries(
     matched_keys: list[str],
     old_map: dict[str, Path],
@@ -344,6 +361,7 @@ def _compare_release_libraries(
     annotate_additions: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
+    severity_config: SeverityConfig | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -447,6 +465,8 @@ def _compare_release_libraries(
             collect_diff_results=collect_diff_results,
             annotate=annotate,
             scope_to_public_surface=scope_to_public_surface,
+            severity_config=severity_config,
+            worst_verdict=worst_verdict,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -528,8 +548,19 @@ def _collect_release_extras(
     collect_diff_results: bool,
     annotate: bool,
     scope_to_public_surface: bool = True,
+    severity_config: SeverityConfig | None = None,
+    worst_verdict: str = "NO_CHANGE",
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
-    """Collect optional re-run artifacts for JUnit and annotations."""
+    """Collect optional re-run artifacts for JUnit and annotations.
+
+    *worst_verdict* mirrors the condition ``_suppress_lockstep_soname_findings``
+    uses on the primary per-library pass. This function re-runs comparison
+    independently (see its docstring), so a coordinated-release SONAME bump
+    that pass judged intentional and dropped must be dropped here too — else
+    JUnit/annotations disagree with the primary report and can surface (or
+    even gate on, under a severity config) a finding the release-level report
+    no longer shows at all.
+    """
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
     annotations: list[tuple[int, str]] = []
     for key in matched_keys:
@@ -561,6 +592,8 @@ def _collect_release_extras(
                 err=True,
             )
             continue
+        if worst_verdict == "BREAKING":
+            _drop_lockstep_soname_finding(result)
         if collect_diff_results:
             diff_pairs.append((result, old_snap))
         if annotate:
@@ -568,7 +601,11 @@ def _collect_release_extras(
 
             if is_github_actions():
                 annotations.extend(
-                    collect_annotations(result, annotate_additions=annotate_additions),
+                    collect_annotations(
+                        result,
+                        annotate_additions=annotate_additions,
+                        severity_config=severity_config,
+                    ),
                 )
     return diff_pairs, annotations
 
@@ -1086,6 +1123,41 @@ def compare_release_cmd(
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolved before the compare pass (its inputs are plain CLI values, no
+        # dependency on compare results) so --annotate's GitHub annotations —
+        # collected inside _compare_release_libraries, same pass as the
+        # per-library JUnit re-run — reflect the same severity-aware gate as
+        # the exit code below, instead of the legacy kind-set mapping. Returns
+        # None when no --severity-* option was supplied, or when compare's
+        # resolved config pins the legacy scheme for set inputs.
+        severity_config = _resolve_release_severity_config(
+            severity_preset,
+            severity_abi_breaking,
+            severity_potential_breaking,
+            severity_quality_issues,
+            severity_addition,
+        )
+        if release_exit_code_scheme == "severity" and severity_config is None:
+            # The resolved scheme is "severity" (e.g. .abicheck.yml's
+            # exit_code_scheme: severity with no severity: block at all) but
+            # no --severity-* flag was ever set, so the raw-args resolution
+            # above returned None. The single-file compare path never hits
+            # this: its resolved_cfg.severity is unconditionally populated
+            # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
+            # re-derived from raw flags. Mirror that here — including
+            # reassigning severity_preset so the two downstream helpers below
+            # that independently re-resolve from these same raw args
+            # (_compute_release_severity_exit_code, _fold_release_global_severity)
+            # agree with it, instead of also silently resolving None and
+            # falling back to the legacy verdict-based exit (Codex review on
+            # #549).
+            from .severity import PRESET_DEFAULT
+
+            severity_config = PRESET_DEFAULT
+            severity_preset = "default"
+        if release_exit_code_scheme == "legacy":
+            severity_config = None
+
         # JUnit still re-runs pairs in _collect_release_extras because it
         # needs old AbiSnapshot too. Bundle analysis reuses the
         # _diff_result stashed in each library entry from the first pass.
@@ -1112,19 +1184,11 @@ def compare_release_cmd(
             annotate_additions=annotate_additions,
             jobs=jobs,
             scope_to_public_surface=scope_public_headers,
+            severity_config=severity_config,
         )
 
         # Compute the severity-aware exit code while per-library DiffResults
         # are still stashed (before _strip_diff_results_and_adjust_verdict).
-        # Returns None when no --severity-* option was supplied, or when
-        # compare's resolved config pins the legacy scheme for set inputs.
-        severity_config = _resolve_release_severity_config(
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
         severity_exit_code = (
             None
             if release_exit_code_scheme == "legacy"
@@ -1137,8 +1201,6 @@ def compare_release_cmd(
                 severity_addition,
             )
         )
-        if release_exit_code_scheme == "legacy":
-            severity_config = None
 
         bundle_result: BundleDiffResult | None = None
         if not no_bundle_analysis:

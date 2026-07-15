@@ -352,9 +352,14 @@ def _compute_release_severity_exit_code(
     Returns ``None`` when no ``--severity-*`` option was supplied (callers
     keep the legacy verdict-based exit). Otherwise returns the worst
     :func:`compute_exit_code` over the per-library changes. Each library is
-    classified with *its own* ``DiffResult._effective_kind_sets()`` so that
-    per-library ``--policy-file`` kind overrides (e.g. escalating a kind to
-    BREAKING) are honored in the exit code, not just in the report.
+    classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
+    ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
+    per-finding frozen-namespace floor — Codex review on #549: without
+    ``policy_file`` here, a policy override that downgrades a kind could still
+    silently exit 0 for a finding tagged ``frozen_namespace_violation``, even
+    though that same finding's annotation, via ``collect_annotations``, does
+    honour the floor and emits ``::error``) so per-library overrides are
+    honored in the exit code exactly as they are in the report.
 
     This only covers per-library findings and must run before ``_diff_result``
     entries are stripped; release-global bundle/matrix findings are folded in
@@ -379,7 +384,9 @@ def _compute_release_severity_exit_code(
             code = compute_exit_code(
                 diff.changes,
                 resolved_config,
+                policy=diff.policy,
                 kind_sets=diff._effective_kind_sets(),
+                policy_file=diff.policy_file,
             )
             worst = max(worst, code)
     return worst
@@ -427,7 +434,9 @@ def _fold_release_global_severity(
             compute_exit_code(
                 matrix_result.changes,
                 config,
+                policy=matrix_result.policy,
                 kind_sets=matrix_result._effective_kind_sets(),
+                policy_file=matrix_result.policy_file,
             ),
         )
     return worst
@@ -498,7 +507,9 @@ def _format_release_summary(
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
-        return _format_release_junit(diff_pairs, matrix_result, library_results)
+        return _format_release_junit(
+            diff_pairs, matrix_result, library_results, severity_config=severity_config,
+        )
     if fmt == "json":
         return _format_release_json(
             worst_verdict,
@@ -533,8 +544,18 @@ def _format_release_junit(
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None,
     matrix_result: DiffResult | None,
     library_results: list[dict[str, object]],
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Render the release summary as a JUnit XML report."""
+    """Render the release summary as a JUnit XML report.
+
+    *severity_config*, when given, is forwarded to
+    :func:`to_junit_xml_multi` (Codex review on #549) so a finding a severity
+    config promotes to ``error`` fails its JUnit testcase the same way it
+    contributes to the release's severity-aware exit code — otherwise a CI
+    dashboard reading this JUnit file could show zero failures for a release
+    that just exited non-zero on that exact finding.
+    """
     from .junit_report import to_junit_xml_multi
 
     pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
@@ -545,6 +566,7 @@ def _format_release_junit(
     error_libs = [entry for entry in library_results if entry.get("verdict") == "ERROR"]
     return to_junit_xml_multi(
         pairs,
+        severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
     )
 

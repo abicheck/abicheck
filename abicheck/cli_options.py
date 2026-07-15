@@ -1550,4 +1550,10 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     "report_mode": "--report-mode",
     "show_impact": "--show-impact",
     "stat": "--stat",
+    # severity-aware exit-code scheme
+    "severity_preset": "--severity-preset",
+    "severity_abi_breaking": "--severity-abi-breaking",
+    "severity_potential_breaking": "--severity-potential-breaking",
+    "severity_quality_issues": "--severity-quality-issues",
+    "severity_addition": "--severity-addition",
 }

@@ -515,6 +515,55 @@ class TestReleaseSeverityPolicyAndGlobal:
         assert _compute_release_severity_exit_code(
             [entry], "default", None, None, None, None) == 0
 
+    def test_per_library_honours_frozen_namespace_floor(self):
+        """Codex review on #549: a policy-file override that demotes a kind
+        must not silently drop a frozen-namespace-tagged finding below its raw
+        severity — this is the same floor collect_annotations() now honours
+        (via result.policy_file), so the release exit code must match it."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release import _compute_release_severity_exit_code
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+        )
+        entry = {"_diff_result": diff}
+        # default preset: abi_breaking == error. Without the policy_file floor
+        # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
+        # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
+        assert _compute_release_severity_exit_code(
+            [entry], "default", None, None, None, None) == 4
+
+    def test_format_release_junit_forwards_severity_config(self):
+        """Codex review on #549: `compare-release --format junit` with a
+        severity config that promotes a compatible finding to `error` must
+        fail that finding's JUnit testcase, or a CI dashboard reading the
+        JUnit file would disagree with the release's severity-aware exit."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release_helpers import _format_release_junit
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        diff = DiffResult(
+            old_version="1", new_version="2", library="libfoo.so",
+            changes=[c], verdict=Verdict.COMPATIBLE,
+        )
+        cfg = resolve_severity_config("default", addition="error")
+
+        xml_without_config = _format_release_junit([(diff, None)], None, [])
+        assert 'failures="0"' in xml_without_config
+
+        xml_with_config = _format_release_junit(
+            [(diff, None)], None, [], severity_config=cfg,
+        )
+        assert 'failures="1"' in xml_with_config
+
     def test_fold_matrix_break_raises_exit(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 

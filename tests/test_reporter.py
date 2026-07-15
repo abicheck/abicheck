@@ -46,6 +46,52 @@ class TestReviewDigest:
         assert "`sym12`" not in out
 
 
+class TestReviewDigestSeverityAware:
+    """Without severity_config, the merge-effect phrase is inferred purely
+    from the compatibility verdict — which can misreport the actual CI gate
+    once severity configuration is in play (compatibility and "blocks CI" are
+    independent decisions). These guard the fix."""
+
+    def test_compatible_addition_configured_as_error_is_not_safe_to_merge(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, changes=[c])
+
+        # Legacy (no severity_config): the old, misleading claim.
+        legacy = to_review_digest(result)
+        assert "safe to merge" in legacy
+
+        cfg = resolve_severity_config("default", addition="error")
+        out = to_review_digest(result, severity_config=cfg)
+        assert "safe to merge" not in out
+        assert "blocked by severity policy" in out
+
+    def test_breaking_demoted_to_non_error_is_not_reported_as_blocking(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, changes=[c])
+
+        # Legacy (no severity_config): claims it blocks merge under a strict gate.
+        legacy = to_review_digest(result)
+        assert "blocks merge" in legacy
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        out = to_review_digest(result, severity_config=cfg)
+        assert "blocks merge" not in out
+        assert "safe to merge" in out
+
+    def test_severity_config_confirms_a_real_block(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, changes=[c])
+        cfg = resolve_severity_config("default")  # default: abi_breaking=error
+        out = to_review_digest(result, severity_config=cfg)
+        assert "blocked by severity policy" in out
+
+
 def _result(verdict: Verdict, changes=None) -> DiffResult:
     return DiffResult(
         old_version="1.0", new_version="2.0",
@@ -69,6 +115,18 @@ class TestJsonReporter:
         assert d["verdict"] == "BREAKING"
         assert d["summary"]["breaking"] == 1
         assert d["changes"][0]["kind"] == "func_removed"
+
+    def test_stat_forwards_severity_config(self):
+        """Codex review: to_json(stat=True, severity_config=...) returned
+        before forwarding severity_config to to_stat_json, so a caller going
+        through to_json directly (not service.render_output) silently lost
+        the severity block/exit code in stat JSON output."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, stat=True, severity_config=PRESET_DEFAULT))
+        assert "severity" in d
 
 
 class TestEvidenceStatusInJson:
@@ -124,6 +182,67 @@ class TestEvidenceStatusInJson:
         # And the top-level `changes` union (leaf_changes + non_type_changes,
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
+
+    def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
+        """Codex review on #549: a policy-file override that demotes a root
+        type kind (type_size_changed) to COMPATIBLE must not silently drop a
+        frozen_namespace_violation-tagged finding below its raw severity in
+        leaf_changes — the top-level `severity` block already honours
+        policy_file (via _build_severity_json), so leaf_changes reading
+        "compatible" for the same finding would be a direct contradiction."""
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE})
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.policy_file = pf
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert d["leaf_changes"][0]["severity"] == "breaking"
+        assert d["severity"]["exit_code"] == 4
+
+    def test_leaf_mode_non_type_change_honours_frozen_namespace_floor(self):
+        """Codex review on #549 (follow-on to the root-type leaf-entry fix):
+        the adjacent non_type_changes path in the same leaf-mode function
+        called _change_to_dict without policy_file, so a non-root-type kind
+        (func_removed) demoted by a policy override, but tagged
+        frozen_namespace_violation, read "compatible" in non_type_changes
+        (and the backward-compat changes union) while the top-level severity
+        block correctly reported exit_code=4 for the same finding."""
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.policy_file = pf
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert d["non_type_changes"][0]["severity"] == "breaking"
+        assert d["changes"][0]["severity"] == "breaking"
+        assert d["severity"]["exit_code"] == 4
+
+    def test_leaf_mode_carries_severity_block(self):
+        """report_mode="leaf" returned before the severity block was ever
+        built, so a caller passing severity_config silently got no severity
+        information at all — unlike full-mode JSON."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert "severity" in d
+        assert d["severity"]["categories"]["addition"]["count"] == 1
+
+    def test_leaf_mode_without_severity_config_has_no_severity_block(self):
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert "severity" not in d
 
 
 class TestMarkdownReporter:

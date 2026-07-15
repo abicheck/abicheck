@@ -302,6 +302,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Review digest, GitHub annotations, and `scan --baseline` could misreport
+  the actual CI gate once severity configuration is in play.** Compatibility
+  (`Verdict`) and "blocks CI" (`SeverityConfig`) are independent decisions —
+  an addition configured `error` blocks the build despite a `COMPATIBLE`
+  verdict, and a breaking kind configured below `error` does not block it
+  despite a `BREAKING` verdict. `to_review_digest()` hard-coded its
+  merge-effect phrase from the raw verdict (always "safe to merge" for
+  `COMPATIBLE`), and `collect_annotations()`/`emit_github_annotations()`
+  derived `::error`/`::warning`/`::notice` purely from fixed kind-set
+  membership — both ignored `SeverityConfig` entirely, so an annotation could
+  be silently absent for a finding that fails the build, or emitted as
+  `::error` for one that does not gate at all. Both now accept an optional
+  `severity_config` and reflect the actual severity-aware gate; wired through
+  on the primary `compare` command's `--format review` and `--annotate`
+  paths. Separately, `scan --baseline` computed a real `DiffResult` but
+  discarded it down to four bucket counts (`breaking=1 api_break=2 ...`),
+  leaving a failing scan with no way to name the broken symbol without a
+  separate `compare` run; the baseline compare now embeds the actual
+  findings (kind/symbol/description/source location, capped and flagged
+  when truncated) and the scan report renders them.
+
 - **`case35_field_rename` reported `BREAKING` instead of `API_BREAK`.** A pure
   field rename (same offset + type, name only) fell through the generic
   field-removed/-added detectors to a plain `TYPE_FIELD_REMOVED`/

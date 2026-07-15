@@ -60,6 +60,20 @@ def test_compatibility_metrics_without_old_symbol_count_uses_change_ratio() -> N
     assert metrics.affected_pct == 0.0
 
 
+def test_compatibility_metrics_honours_named_policy_without_kind_sets() -> None:
+    """Codex review on #549: a caller passing only `policy` (e.g. the HTML
+    report's fallback for a duck-typed result without _effective_kind_sets())
+    must still route through the effective-verdict path — plugin_abi
+    downgrades CALLING_CONVENTION_CHANGED from breaking to compatible, so
+    counting it via raw ChangeKind membership would wrongly report it (and
+    show a contradictory <100% binary compatibility) despite the effective
+    verdict being compatible."""
+    c = Change(ChangeKind.CALLING_CONVENTION_CHANGED, "cb", "calling convention changed")
+    metrics = compatibility_metrics([c], old_symbol_count=10, policy="plugin_abi")
+    assert metrics.breaking_count == 0
+    assert metrics.binary_compatibility_pct == 100.0
+
+
 def test_policy_for_unknown_kind_falls_back_to_breaking() -> None:
     class _UnknownKind:
         value = "unknown_kind"
