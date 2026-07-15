@@ -112,6 +112,20 @@ def backfill_dwarf_layout(
     types sharing a bare name or suffix (e.g. two different namespaces both
     declaring ``Foo``, or a global ``Foo`` alongside a namespaced one) are
     both left unmatched rather than guessed.
+
+    A *unique* bare-name candidate still is not necessarily the *right* one:
+    if the header type's own DWARF counterpart is absent for any reason (e.g.
+    declared in a broad public header but not actually instantiated by this
+    particular binary), an unrelated internal helper that merely happens to
+    share the bare name (``impl::Foo`` for a public ``Foo``) would be the
+    only entry under that key and get accepted with no other type to
+    disambiguate against (Codex review). Field-name overlap is the
+    corroborating signal: two independent record definitions coincidentally
+    sharing both a bare name *and* at least one member name is implausible,
+    while the same source's header/DWARF views of one real type always
+    share theirs. No overlap (and at least one side has fields) means
+    "unrelated type, not just unqualified" — left unmatched rather than
+    trusted on name alone.
     """
     if not dwarf_types:
         return header_types
@@ -124,13 +138,18 @@ def backfill_dwarf_layout(
         candidates = dwarf_candidates.get(name, [])
         return candidates[0] if len(candidates) == 1 else None
 
+    def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
+        if not header.fields and not dwarf.fields:
+            return True  # both empty (e.g. a tag type) — nothing to disagree on
+        return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
+
     out: list[RecordType] = []
     for t in header_types:
         if t.size_bits is not None or t.is_opaque or t.is_template_pattern:
             out.append(t)
             continue
         dwarf_t = _dwarf_match(t.name)
-        if dwarf_t is None:
+        if dwarf_t is None or not _fields_corroborate(t, dwarf_t):
             out.append(t)
             continue
         dwarf_fields_by_name = {f.name: f for f in dwarf_t.fields}

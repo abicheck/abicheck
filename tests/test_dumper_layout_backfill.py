@@ -134,6 +134,48 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 64
 
+    def test_unique_bare_name_without_field_overlap_is_not_trusted(self) -> None:
+        """A unique bare-name candidate is not necessarily the *right* one:
+        if the public header type's own DWARF counterpart is simply absent
+        (e.g. declared in a broad header but not instantiated by this
+        binary), an unrelated internal helper coincidentally sharing the
+        bare name (`impl::Foo` for public `Foo`) would otherwise be accepted
+        as the sole candidate with nothing to disambiguate against (Codex
+        review). Field-name overlap is required as corroboration."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="public_field", type="int")],
+        )
+        unrelated = RecordType(
+            name="impl::Foo", kind="struct", size_bits=999,
+            fields=[TypeField(name="internal_thing", type="void *")],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_unique_bare_name_with_field_overlap_is_trusted(self) -> None:
+        """The common, legitimate case: same source, so fields genuinely
+        overlap — corroboration passes and the match is used."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="x", type="int")],
+        )
+        dwarf = RecordType(
+            name="Foo", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 32
+
+    def test_both_sides_empty_fields_is_trusted(self) -> None:
+        """Two empty tag types have no fields to disagree on; the name match
+        alone is trusted (matches the pre-corroboration behavior for this
+        case, e.g. case94_empty_tag_gained_state before a field is added)."""
+        header = RecordType(name="Tag", kind="struct")
+        dwarf = RecordType(name="Tag", kind="struct", size_bits=8)
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 8
+
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)
