@@ -2637,7 +2637,8 @@
    "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)",
    "expected": "BREAKING",
    "expected_kinds": [
-    "func_removed"
+    "func_removed_elf_only",
+    "func_visibility_changed"
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -2739,10 +2740,10 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time (SYMBOL_VERSION_DEFINED_REMOVED)",
+   "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time. The more specific SYMBOL_VERSION_NODE_REMOVED wins cross-detector dedup over the simpler SYMBOL_VERSION_DEFINED_REMOVED (see diff_platform.py).",
    "expected": "BREAKING",
    "expected_kinds": [
-    "symbol_version_defined_removed"
+    "symbol_version_node_removed"
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -2956,10 +2957,10 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Verifies the leak reachability walker follows template-instantiation edges into detail::.",
+   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Detected by the dedicated template-leak detector (diff_templates.py), which emits INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API for this pattern (not the generic INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API).",
    "expected": "BREAKING",
    "expected_kinds": [
-    "internal_type_leaks_via_public_api"
+    "internal_template_leaks_via_public_api"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -3317,11 +3318,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. Detected by the existing type_size_changed / type_field_added pair.",
+   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. A field addition to a non-polymorphic struct is intentionally classified TYPE_FIELD_ADDED_COMPATIBLE (see diff_types.py _new_field_change_kind), not the generic TYPE_FIELD_ADDED; the overall verdict stays BREAKING via the co-emitted TYPE_SIZE_CHANGED.",
    "expected": "BREAKING",
    "expected_kinds": [
     "type_size_changed",
-    "type_field_added"
+    "type_field_added_compatible"
    ],
    "min_evidence": "L1",
    "platforms": [

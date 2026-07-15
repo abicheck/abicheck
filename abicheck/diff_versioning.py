@@ -20,6 +20,7 @@ diffing, SONAME bump recommendations, and version-script-missing detection.
 
 from __future__ import annotations
 
+from .binary_utils import strip_vendor_hash
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -443,9 +444,15 @@ def check_soname_bump_policy(
 
     # A SONAME is considered "bumped" only when both old and new have a
     # non-empty SONAME and they differ.  If the new SONAME is empty the
-    # library *dropped* its SONAME — that is not a bump.
+    # library *dropped* its SONAME — that is not a bump. Compared on the
+    # vendor-hash-stripped spelling so a hash-only wheel rebuild (auditwheel/
+    # delocate rewrite the SONAME to match the content-hashed filename on
+    # every build) is not mistaken for a deliberate SONAME bump — see
+    # ``diff_platform_elf_dynamic._diff_elf_dynamic_section``.
     both_have_soname = bool(old_elf.soname) and bool(new_elf.soname)
-    soname_bumped = both_have_soname and old_elf.soname != new_elf.soname
+    soname_bumped = both_have_soname and strip_vendor_hash(
+        old_elf.soname
+    ) != strip_vendor_hash(new_elf.soname)
 
     result: list[Change] = []
 

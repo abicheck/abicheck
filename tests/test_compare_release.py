@@ -134,6 +134,20 @@ class TestStripVendorHash:
     def test_16char_hash_stripped(self) -> None:
         assert strip_vendor_hash("libsodium-1234567890abcdef.so.23.3.0") == "libsodium.so.23.3.0"
 
+    def test_purely_decimal_suffix_untouched(self) -> None:
+        # A purely-decimal 6-16-digit hyphenated suffix is a plausible real
+        # embedded build/version number (e.g. libfoo-100200.so.1), not a
+        # content hash — real auditwheel/delocate hashes are hex digest
+        # fragments and essentially never come out purely decimal. Stripping
+        # this would collapse two libraries with genuinely different version
+        # suffixes to the same key, silently hiding a real SONAME/dependency
+        # change (self-review finding, was a false negative before the
+        # at-least-one-hex-letter lookahead was added).
+        assert strip_vendor_hash("libfoo-100200.so.1") == "libfoo-100200.so.1"
+        different = strip_vendor_hash("libfoo-100300.so.1")
+        assert different == "libfoo-100300.so.1"
+        assert different != strip_vendor_hash("libfoo-100200.so.1")
+
     def test_no_hyphen_untouched(self) -> None:
         # Real-world names with no hyphen at all — nothing to strip.
         assert strip_vendor_hash("libwebpdemux.so.2.0.14") == "libwebpdemux.so.2.0.14"
@@ -171,7 +185,12 @@ class TestVersionSortKey:
         # Codex (PR #551): an auditwheel/delocate content hash embedded in the
         # filename must not out-rank the real SONAME version tokens — the
         # hex hash's own digits/letters would otherwise corrupt the ordering.
-        older = _version_sort_key(Path("libfoo-000000.so.1"), "libfoo.so")
+        # Uses hex-letter-bearing hashes (real auditwheel/delocate hashes are
+        # hex digest fragments, never purely decimal) so strip_vendor_hash's
+        # at-least-one-hex-letter requirement (self-review finding: a purely
+        # decimal 6-16-digit run is a plausible real version/build number,
+        # not a hash) still recognizes both as vendor hashes.
+        older = _version_sort_key(Path("libfoo-a00000.so.1"), "libfoo.so")
         newer = _version_sort_key(Path("libfoo-ffffff.so.2"), "libfoo.so")
         assert older < newer, "hash content must not outrank the .so version"
 
@@ -181,7 +200,7 @@ class TestBuildMatchMapVendorHash:
         # Same underlying bug as TestVersionSortKey.
         # test_vendor_hash_does_not_perturb_version_order, exercised at the
         # _build_match_map level that compare-release actually calls.
-        old = tmp_path / "libfoo-000000.so.1"
+        old = tmp_path / "libfoo-a00000.so.1"
         new = tmp_path / "libfoo-ffffff.so.2"
         old.write_bytes(b"\x7fELF")
         new.write_bytes(b"\x7fELF")

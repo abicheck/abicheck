@@ -567,8 +567,14 @@ def _check_func_visibility_protected(
     ]
 
 
+def _declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
+    """Return the DWARF/header-declared alignment (bits) for a variable, if known."""
+    var = snap.var_by_mangled(sym_name)
+    return var.alignment_bits if var is not None else None
+
+
 def _check_object_alignment_reduced(
-    sym_name: str, s_old: Any, s_new: Any
+    old: AbiSnapshot, new: AbiSnapshot, sym_name: str, s_old: Any, s_new: Any
 ) -> list[Change]:
     """Detect exported data objects whose address alignment dropped.
 
@@ -587,6 +593,19 @@ def _check_object_alignment_reduced(
     alignment, so a "reduction" there is noise rather than an ABI hazard. This
     mirrors _check_symbol_size_change, which excludes the same four prefixes as
     not ABI-meaningful (their real shape changes are owned by diff_elf_layout).
+
+    st_value-derived alignment is address-placement evidence, not a declared
+    one: adding an unrelated neighbouring global can shift a symbol's link-time
+    address (and therefore its apparent low-bit alignment) with no change to
+    its actual declared alignment at all. When DWARF/header evidence is
+    available on both sides (the variable's ``alignment_bits``), that is
+    authoritative — the address-derived drop only stands if the declared
+    alignment also decreased; an unchanged or *increased* declaration means
+    the drop is placement noise and must be suppressed (a genuine
+    declared-alignment change is instead owned by VAR_ALIGNMENT_CHANGED in
+    diff_symbols.py). Falls back to the weak address-derived signal only when
+    no declared-alignment evidence is available for corroboration (e.g.
+    symbols-only / stripped-without-headers snapshots).
     """
     if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
         return []
@@ -595,6 +614,14 @@ def _check_object_alignment_reduced(
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)
     if not (old_align > 0 and new_align > 0 and new_align < old_align):
+        return []
+    declared_old = _declared_alignment_bits(old, sym_name)
+    declared_new = _declared_alignment_bits(new, sym_name)
+    if (
+        declared_old is not None
+        and declared_new is not None
+        and not (declared_new < declared_old)
+    ):
         return []
     return [
         make_change(
@@ -620,7 +647,7 @@ def _diff_elf_symbol_pair(
     changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
     changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
     changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
-    changes.extend(_check_object_alignment_reduced(sym_name, s_old, s_new))
+    changes.extend(_check_object_alignment_reduced(old, new, sym_name, s_old, s_new))
     return changes
 
 

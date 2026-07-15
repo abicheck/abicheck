@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
-| **Detected `ChangeKind`s** | `symbol_version_defined_removed` |
+| **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `examples/case65_symbol_version_removed/` |
 
 **Category:** Symbol Versioning | **Verdict:** BREAKING

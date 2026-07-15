@@ -439,6 +439,29 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
     assert kept is None and kept_bi is None and called["n"] == 0
 
 
+def test_header_graph_rejected_with_raw_sources(tmp_path: Path) -> None:
+    """--header-graph is rejected (not silently dropped) alongside a raw
+    --old-sources tree: the inline-dump path it triggers goes through
+    dump_cmd, which has no header_graph wiring — the graph would otherwise
+    be silently absent from the report (Codex review)."""
+    old, new = _breaking_pair()
+    old_f = _write_snap(tmp_path / "old.json", old)
+    new_f = _write_snap(tmp_path / "new.json", new)
+    tree = tmp_path / "src"
+    tree.mkdir()  # no manifest.json → looks like a raw source checkout
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_f), str(new_f),
+            "--sources", "old=" + str(tree),
+            "--header-graph",
+        ],
+    )
+    out = (result.output or "") + (result.stderr or "")
+    assert result.exit_code != 0
+    assert "--header-graph" in out and "not supported" in out
+
+
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
     """A raw --old-sources tree on a snapshot input can't be embedded (you can't
     re-dump a snapshot), so compare warns and still produces a verdict."""
@@ -697,6 +720,8 @@ class TestCompareDispatch:
             ("--depth", "source", False),
             ("--sources", "old=src", True),
             ("--build-info", "new=build", True),
+            ("--header-graph", None, False),
+            ("--header-graph-includes", None, False),
         ],
     )
     def test_evidence_flags_rejected_on_set_inputs(

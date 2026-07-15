@@ -66,6 +66,26 @@ closing this gap; it would need the same castxml header-AST capture
 path used for case105's concept-tightening detector to reason about
 call-site resolvability.
 
+**Update:** abicheck has a `ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK`
+best-effort heuristic (`diff_symbols._diff_ctor_overload_ambiguity`)
+that flags a class gaining a 2nd+ non-explicit converting constructor —
+the classic *implicit-conversion* ambiguity pattern. **It does not close
+this case's gap.** Both of this case's constructors are declared
+`explicit` (see `v1.h`/`v2.h`), and this case's own `source_smoke`
+proof is triggered by empty-brace-list direct-initialization
+(`ets({})`), not implicit conversion — direct-initialization performs
+overload resolution over explicit constructors too, and an empty
+braced-init-list value-initializes almost any scalar/pointer parameter
+type, so it collides across *both* new and old overloads regardless of
+`explicit`. Soundly detecting that would need a general call-site
+overload-resolution simulation (which argument shapes are viable
+against which parameter types), not a snapshot-level heuristic — still
+future work. The heuristic was deliberately scoped to the narrower,
+lower-false-positive non-explicit case rather than widened to cover
+this scenario, since widening to any 2nd single-scalar-argument
+constructor (explicit or not) would fire on most multi-constructor
+classes.
+
 ## Code diff
 
 | v1 | v2 |

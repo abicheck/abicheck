@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 353,
+  "count": 354,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -405,6 +405,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "ctor_explicit_removed",
+      "examples": ""
+    },
+    {
+      "kind": "ctor_overload_ambiguity_risk",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "ctor_overload_ambiguity_risk",
       "examples": ""
     },
     {
@@ -945,7 +954,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed",
-      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case41_type_changes,case53_namespace_pollution,case59_func_became_inline,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
+      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case41_type_changes,case53_namespace_pollution,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
     },
     {
       "kind": "func_removed_elf_only",
@@ -954,7 +963,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed_elf_only",
-      "examples": "case97_api_depends_on_consumer_env"
+      "examples": "case59_func_became_inline,case97_api_depends_on_consumer_env"
     },
     {
       "kind": "func_return_changed",
@@ -1026,7 +1035,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_visibility_changed",
-      "examples": "case06_visibility"
+      "examples": "case06_visibility,case59_func_became_inline"
     },
     {
       "kind": "func_visibility_protected_changed",
@@ -1242,7 +1251,7 @@
       "severity": "error",
       "min_evidence": "L2",
       "doc_slug": "internal_template_leaks_via_public_api",
-      "examples": "case85_internal_template_signature_changed"
+      "examples": "case77_detail_templated_base_changed,case85_internal_template_signature_changed"
     },
     {
       "kind": "internal_type_leaks_via_public_api",
@@ -1251,7 +1260,7 @@
       "severity": "error",
       "min_evidence": "L2",
       "doc_slug": "internal_type_leaks_via_public_api",
-      "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique"
+      "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case80_pimpl_shared_to_unique"
     },
     {
       "kind": "interpreter_changed",
@@ -2511,7 +2520,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "symbol_version_defined_removed",
-      "examples": "case65_symbol_version_removed"
+      "examples": ""
     },
     {
       "kind": "symbol_version_node_removed",
@@ -2520,7 +2529,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "symbol_version_node_removed",
-      "examples": "case139_symbol_version_node_removed"
+      "examples": "case139_symbol_version_node_removed,case65_symbol_version_removed"
     },
     {
       "kind": "symbol_version_required_added",
@@ -2745,16 +2754,16 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_added",
-      "examples": "case43_base_class_member_added,case94_empty_tag_gained_state"
+      "examples": "case43_base_class_member_added"
     },
     {
       "kind": "type_field_added_compatible",
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "type_field_added_compatible",
-      "examples": ""
+      "examples": "case94_empty_tag_gained_state"
     },
     {
       "kind": "type_field_offset_changed",

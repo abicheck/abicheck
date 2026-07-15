@@ -163,6 +163,24 @@ class TestSonameChanges:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SONAME_CHANGED in _kinds(r)
 
+    def test_macho_install_name_vendor_hash_only_not_flagged(self):
+        """delocate rewrites a vendored dylib's install name every rebuild — no finding."""
+        old_macho = MachoMetadata(
+            install_name="/DLC/libfoo-a746ad4a.dylib",
+        )
+        new_macho = MachoMetadata(
+            install_name="/DLC/libfoo-b8f31c2e.dylib",
+        )
+        r = compare(_snap(macho=old_macho), _snap(macho=new_macho))
+        assert ChangeKind.SONAME_CHANGED not in _kinds(r)
+
+    def test_macho_install_name_real_change_still_fires(self):
+        """A genuine install-name path change must still surface."""
+        old_macho = MachoMetadata(install_name="/DLC/libfoo-a746ad4a.dylib")
+        new_macho = MachoMetadata(install_name="/DLC/libbar-a746ad4a.dylib")
+        r = compare(_snap(macho=old_macho), _snap(macho=new_macho))
+        assert ChangeKind.SONAME_CHANGED in _kinds(r)
+
 
 class TestRpathRunpathChanged:
     """RPATH/RUNPATH changes (3 refs each)."""
@@ -375,6 +393,39 @@ class TestNeededChanges:
         new_elf = ElfMetadata(needed=["libc.so.6"])
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.NEEDED_REMOVED in _kinds(r)
+
+    def test_needed_vendor_hash_only_not_flagged(self):
+        """auditwheel/delocate rewrite a vendored dependency's content-hashed
+        filename on every wheel rebuild — a hash-only rename must not read as
+        a dependency add/remove (Codex P2)."""
+        old_elf = ElfMetadata(needed=["libc.so.6", "libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libc.so.6", "libfoo-b8f31c2e.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED not in kinds
+        assert ChangeKind.NEEDED_REMOVED not in kinds
+
+    def test_needed_real_rename_still_fires(self):
+        """A genuine dependency rename (not just a hash suffix) must still surface."""
+        old_elf = ElfMetadata(needed=["libc.so.6", "libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libc.so.6", "libbar-a746ad4a.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED in kinds
+        assert ChangeKind.NEEDED_REMOVED in kinds
+
+    def test_needed_real_rename_reports_unstripped_filenames(self):
+        """A genuine rename's finding must show the real hashed filename, not
+        the vendor-hash-stripped comparison key — the stripped spelling
+        alone loses exactly the detail a user debugging a real dependency
+        change needs to see (self-review finding)."""
+        old_elf = ElfMetadata(needed=["libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libbar-b8f31c2e.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        added = next(c for c in r.changes if c.kind == ChangeKind.NEEDED_ADDED)
+        removed = next(c for c in r.changes if c.kind == ChangeKind.NEEDED_REMOVED)
+        assert added.new_value == "libbar-b8f31c2e.so.1"
+        assert removed.old_value == "libfoo-a746ad4a.so.1"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

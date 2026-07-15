@@ -1300,6 +1300,19 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
+@click.option("--header-graph", is_flag=True, default=False,
+              help="Build and embed the L2 header-only semantic graph (ADR-041 addendum) "
+                   "for both sides from the parsed header AST alone (no build system "
+                   "needed); the existing build-source-pack graph diff picks it up "
+                   "automatically, so declaration reachability / internal-dependency "
+                   "risk findings become available on an ordinary binary+headers compare, "
+                   "not just L3-L5 build-integrated runs. Degrades to declaration-visibility "
+                   "nodes only (no type/call edges) when clang is unavailable.")
+@click.option("--header-graph-includes", is_flag=True, default=False,
+              help="With --header-graph, additionally run a per-header 'clang -M' pass to "
+                   "add include-file edges from each top-level header to everything it "
+                   "transitively includes. One extra clang invocation per top-level header, "
+                   "so opt-in separately from --header-graph. Ignored without --header-graph.")
 @click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "
@@ -1513,12 +1526,34 @@ main.add_command(compat_group)
 # Sub-command modules. Imported for side-effect so their @main.command(...)
 # decorators register the commands on the Click group above. They sit in
 # sibling files to keep this module under the AI-readiness file-size limit.
+#
+# When this file is run directly (``python -m abicheck.cli``, distinct from
+# the documented ``python -m abicheck`` entry point in __main__.py but still
+# a common thing to type), Python executes it as the ``__main__`` module —
+# under a DIFFERENT sys.modules key than ``abicheck.cli``. Every sibling
+# module below does ``from .cli import main``, a fresh relative import that
+# would otherwise re-execute this file a second time under the real
+# ``abicheck.cli`` key, producing a second, empty ``main`` Click group; every
+# ``@main.command(...)`` decorator then attaches to that second group, not
+# the one actually running, so `python -m abicheck.cli --help` silently
+# listed only the handful of commands defined directly in this file (dump/
+# compare/compat) and omitted every sibling-registered one (config, doctor,
+# scan, appcompat, ...). Alias the already-running module under its real
+# package name first, so the relative import below reuses it instead
+# (Codex review).
 # ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import sys
+
+    sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
+
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
+    cli_config,  # noqa: F401  — registers init, config (validate, show-effective)
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_doctor,  # noqa: F401  — registers doctor
     cli_graph,  # noqa: F401  — registers graph (compare, explain)
     cli_inputs,  # noqa: F401  — registers inputs (validate)
     cli_plugin,  # noqa: F401  — registers plugin-check

@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
-| **Detected `ChangeKind`s** | `func_removed` |
+| **Detected `ChangeKind`s** | `func_removed_elf_only`, `func_visibility_changed` |
 | **Source files** | `examples/case59_func_became_inline/` |
 
 **Category:** Symbol API | **Verdict:** BREAKING (API_BREAK)

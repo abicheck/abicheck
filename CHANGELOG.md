@@ -9,6 +9,220 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`compare --header-graph` / `--header-graph-includes` — the L2 header-only
+  semantic graph is now reachable from a plain `compare` run.**
+  `service.run_dump` could already build this graph (declaration reachability
+  / include edges from the header AST alone, no build system needed), but
+  nothing in the CLI exposed it — `resolve_input`/`_resolve_input`/
+  `_resolve_compare_snapshots` didn't forward it, so it only fired from
+  bespoke test/internal call sites. `--header-graph` now threads through that
+  whole chain into `resolve_input`, which already routes to `run_dump` for
+  every binary format (ELF/PE/Mach-O) uniformly; the existing build-source-
+  pack graph diff (`cli_buildsource_helpers.diff_embedded_build_source`)
+  picks it up automatically once either side carries a `build_source` (no new
+  diff pass needed — it already treats an L2 header-only pack and an L3-L5
+  build-integrated one the same way). `--header-graph-includes` additionally
+  collects per-header include-file edges. Two new `COMPARE_FLAG_BUDGET_RAISES`
+  ledger entries. **Scope note:** this exposes the graph on an ordinary
+  binary+headers `compare`; it does not add support for comparing a
+  header-only library with *no* binary at all (`UC-ARCH-header-only` / gap G4
+  remains open — that needs a new no-binary snapshot-building path plus
+  `CompareRequest`/`InputSpec` changes, deliberately out of scope here since
+  the maintainers already looked at that larger wiring and deferred it in
+  ADR-041 pending `cli.py`/`dumper.py` file-size headroom). Two follow-up
+  correctness fixes on the same feature (Codex review): `--header-graph`/
+  `--header-graph-includes` are now rejected (not silently dropped) on
+  directory/package (release fan-out) `compare` operands, same as the other
+  single-pair-only evidence flags; and `service.resolve_input` now forwards
+  both flags through its GNU-ld-linker-script-following recursive call, so a
+  direct `resolve_input(script, header_graph=True)` caller still gets the L2
+  graph on the real target the script resolves to. A third gap (Codex review):
+  `--header-graph` combined with a raw `--old/new-sources` tree or raw
+  `--old/new-build-info` triggers `compare`'s inline-dump path
+  (`_embed_inline_source_side` → `ctx.invoke(dump_cmd, ...)`), which has no
+  `header_graph` wiring of its own — threading it through `dump_cmd`/
+  `perform_elf_dump`/`handle_non_elf_dump` was out of scope for this bounded
+  slice, so that combination is now rejected with a `click.UsageError`
+  instead of silently building no graph.
+- **Contract test locking the composite Action's `action.yml` ↔ `run.sh`
+  input wiring.** The whole action↔CLI bridge is stringly-typed by
+  construction (a YAML input name → an `INPUT_*` env var name → a bash
+  variable read) and nothing in GitHub Actions itself checks the three
+  spellings stay in sync — a renamed/typo'd input silently stops reaching
+  `run.sh` (no error, the flag is just never set). `tests/
+  test_action_run_contract.py` now asserts every declared `inputs:` entry is
+  forwarded to `run.sh` (or is a documented other-step exception:
+  `python-version`/`install-deps`/`upload-sarif`), every env-block entry maps
+  to a real declared input, and every `INPUT_*` `run.sh` reads is actually
+  set — no drift found today, but any future rename/typo now fails CI
+  immediately instead of silently doing nothing at runtime.
+
+- **`abicheck init` / `abicheck config validate` / `abicheck config
+  show-effective` / `abicheck doctor` — new diagnostic commands.** Closes a
+  recurring adoption-friction gap: `.abicheck.yml` had no scaffolding, no
+  structured validation (an unknown key only ever warned via
+  `warnings.warn`, easy to miss or suppress), and no way to see what the
+  CLI-flag/config-file/default precedence actually resolved to short of
+  reading source.
+  - `init` scaffolds a starter `.abicheck.yml` with every key documented and
+    commented out (`--force` to overwrite).
+  - `config validate [PATH]` reports every unknown top-level/block key as a
+    structured, always-visible finding (exit 1), distinct from the loader's
+    lenient forward-compat warning.
+  - `config show-effective [PATH]` renders the resolved severity/scope/
+    suppression/exit-code settings a `compare` invocation would use, one row
+    per setting with its source (cli/config/default) — using the same
+    `click.get_current_context().get_parameter_source` provenance primitive
+    `compare` itself uses internally (`cli_compare_helpers._cli_flag`).
+  - `doctor [BINARY]` reports the selected AST frontend and its version,
+    external tool availability (castxml/clang/gcc/g++/debuginfod), and the
+    discovered project config; given a binary, also runs the same
+    debug-artifact/header-match diagnostic as `dump --show-data-sources`.
+
+- **`ctor_overload_ambiguity_risk` (new `ChangeKind`) — best-effort detector
+  for constructor-overload-ambiguity risk.** A class gaining a 2nd+
+  non-explicit, single-required-argument ("converting") constructor is
+  flagged as `COMPATIBLE_WITH_RISK`: any call site whose argument type is
+  implicitly convertible to more than one of the class's converting
+  constructors becomes ambiguous — it either stops compiling or silently
+  resolves to a different constructor than before (the oneTBB
+  `enumerable_thread_specific` pain point documented in
+  `examples/case111_enumerable_thread_specific_lambda_ambiguity`). This
+  cannot be proven from a snapshot alone (real ambiguity depends on the
+  consumer's actual call-site argument types), so it's a conservative
+  heuristic scoped to non-explicit constructors, not a certain break — see
+  `diff_symbols._diff_ctor_overload_ambiguity`. It does not close case111's
+  own gap (both of that case's constructors are `explicit`; its trigger is
+  empty-brace-list direct-initialization ambiguity, which needs real
+  overload-resolution simulation to detect soundly) — see the case's
+  updated README for the honest scope boundary.
+
+### Fixed
+
+- **`abicheck config validate` reported OK on a config with a wrong-type
+  block or subkey.** `severity: strict` (a scalar where `BuildConfig.from_dict`
+  expects a mapping) and `scope: {public: "false"}` (a string where a
+  boolean subkey is expected) are both silently coerced to an empty/unset
+  default by the real loader's `isinstance` guards — `validate` only checked
+  unknown keys and enum `ValueError`s, so it reported OK on both while
+  `compare`/`config show-effective` would silently ignore the user's
+  setting. `validate` now reports both shapes as findings (Codex review) —
+  extended in two follow-up passes to also cover string subkeys
+  (`debug.debuginfod_url: 456`), list-of-string subkeys
+  (`sources.public_headers: 123`), and recognized top-level *scalars* that
+  aren't block keys (`exit_code_scheme: 123`, `version: "1"`) — the value
+  shapes `BuildConfig.from_dict` silently coerces one level up from the
+  block subkeys (fresh Codex review evidence after each prior pass). A
+  third follow-up closes the last gap: a list-subkey's *container* type was
+  checked, but not its elements — `sources.public_headers: [123]` passed
+  validation even though `_strs()` coerces each element with `str(x)`
+  rather than rejecting a non-string one.
+
+- **`strip_vendor_hash` (vendor-hash normalization for wheel-repaired
+  libraries) over-matched purely-decimal suffixes, causing a false negative
+  on a real version change.** The regex required 6-16 hex characters but
+  never checked for an actual non-decimal hex *letter*, so a legitimate
+  embedded build/version number like `libfoo-100200.so.1` and
+  `libfoo-100300.so.1` collapsed to the same normalized key as if they were
+  the same library with two different content-hash rebuilds — silently
+  hiding a real `SONAME_CHANGED`/`NEEDED_ADDED`/`NEEDED_REMOVED` behind the
+  same noise-suppression this PR added for genuine hash-only rebuilds. Real
+  auditwheel/delocate hashes are hex digest fragments and essentially never
+  come out purely decimal, so the regex now requires at least one `a`-`f`
+  letter in the matched run (self-review finding).
+
+- **`python -m abicheck.cli` (distinct from the documented `python -m
+  abicheck` entry point, but a common thing to type) silently registered
+  only `dump`/`compare`/`compat` and omitted every sibling-module command
+  (`config`, `doctor`, `scan`, `appcompat`, ...).** Running `cli.py` directly
+  as `__main__` and then having a sibling module `from .cli import main`
+  re-executes `cli.py` a second time under the real `abicheck.cli`
+  sys.modules key, producing a second, empty Click group that every
+  `@main.command(...)` decorator attached to instead of the one actually
+  running. `cli.py` now aliases the running `__main__` module under its real
+  package name before the sibling-module imports run, so both entry points
+  register every command (Codex review).
+
+- **`NEEDED_ADDED`/`NEEDED_REMOVED`/`MACHO_REEXPORT_CHANGED` findings on a
+  genuine (non-hash-only) change to a vendor-hashed dependency reported the
+  vendor-hash-stripped comparison key instead of the real filename** — a
+  diagnostic-fidelity regression from the vendor-hash normalization added
+  earlier in this PR: the ELF DT_NEEDED diff and the Mach-O dependency/
+  re-export diffs fed the stripped lists straight into the reporting
+  helpers. They now compare on the stripped identity internally but report
+  the real, unstripped filename, so a user debugging a genuine dependency
+  change on a wheel-vendored library still sees the actual hashed name
+  (self-review finding).
+
+- **`abicheck doctor`'s invalid-`ABICHECK_AST_FRONTEND` warning said
+  "falling back to auto" immediately next to "selected: castxml"**, reading
+  as self-contradictory to a user trying to diagnose exactly this
+  misconfiguration. The warning now names the concrete backend it actually
+  falls back to (self-review finding).
+
+- **`abicheck config show-effective` crashed with a raw Python traceback on
+  an invalid config value**, instead of the usage/config error `compare`/
+  `config validate` produce for the same input — it called
+  `load_build_config` directly with no exception handling. Now wraps the
+  call and raises a `click.ClickException` (Codex review).
+
+- **`ctor_overload_ambiguity_risk`'s CV-qualifier stripping could corrupt a
+  class name that merely contains "const"/"volatile" as a substring** (e.g.
+  `myconst`), via blind `str.replace("const", "")`. A copy/move constructor's
+  self-type exclusion check then compared against the corrupted name, missed
+  the match, and miscounted the copy ctor as a second converting overload —
+  a spurious risk finding on an unrelated change. Now strips only whole-word
+  `const`/`volatile` tokens via a word-boundary regex
+  (`diff_symbols._CV_QUALIFIER_RE`) (Codex review).
+
+- **Vendored-wheel SONAME/install-name churn reported as spurious
+  `SONAME_CHANGED`/`SONAME_BUMP_UNNECESSARY`/bundle-skew findings.**
+  `auditwheel`/`delocate` rewrite a vendored library's own `DT_SONAME`/
+  `LC_ID_DYLIB` to match its content-hashed filename on every wheel rebuild
+  (`libfoo-<hash>.so.1`), so the raw SONAME differed every build even when
+  the underlying dependency didn't change — despite filename-hash pairing
+  already landing for cross-release library matching. The ELF SONAME diff,
+  Mach-O install-name diff, the SONAME-bump policy check, and the bundle-
+  level SONAME-skew cohort key now all compare on the same vendor-hash-
+  stripped spelling (`binary_utils.strip_vendor_hash`, relocated from
+  `cli_helpers_compare.py` so the leaf diff modules can use it); a genuine
+  SONAME/install-name change still fires normally. The same normalization now
+  also applies to `DT_NEEDED` dependency-list diffing
+  (`diff_platform_elf_dynamic._diff_elf_dynamic_section`): a repaired wheel's
+  dependency reference to another vendored DSO gets rewritten the same way
+  (`libfoo-<hash>.so.1` -> a different hash), which previously still reported
+  as a spurious `NEEDED_ADDED`/`NEEDED_REMOVED` pair even after the SONAME fix
+  above (Codex review). Mach-O's dependency (`LC_LOAD_DYLIB`) and re-export
+  (`LC_REEXPORT_DYLIB`) list diffs (`diff_platform._diff_macho_dependencies`/
+  `_diff_macho_reexports`) get the same treatment: a delocate rebuild
+  rewriting a re-exported/depended-on vendored dylib's hashed filename
+  previously still read as dependency churn or a re-export repoint even
+  though the install-name fix already suppressed the matching
+  `SONAME_CHANGED` (Codex review).
+
+- **`abicheck doctor` crashed instead of printing diagnostics when
+  `ABICHECK_AST_FRONTEND` held an unrecognized value.** It passed the raw env
+  value into `_resolve_header_backend` as an explicit override, which raises
+  `ValidationError` on anything other than `auto`/`castxml`/`clang` — exactly
+  the misconfiguration `doctor` exists to help find. It now resolves via the
+  normal `auto` path (which reads the env var itself and silently falls back
+  to `castxml` on an unrecognized value) and prints a `WARNING` line naming
+  the bad value instead of crashing (Codex review).
+
+- **`exported_object_alignment_reduced` could false-positive on a purely
+  additive change.** The detector derives alignment from a symbol's `st_value`
+  (link-time address) as a power-of-two factor — adding an unrelated
+  neighbouring global can shift that apparent alignment with no change to the
+  variable's actual declared alignment at all. When DWARF/header evidence is
+  available on both sides (`Variable.alignment_bits`) and shows the declared
+  alignment did NOT change, the address-derived drop is now recognized as
+  linker-placement noise and suppressed; a genuine declared-alignment
+  reduction still fires (corroborated), and the weak address-only heuristic
+  is kept as a fallback when no declared-alignment evidence exists (symbols
+  -only / stripped-without-headers snapshots).
+
 ### Removed
 
 - **`collect --call-graph`/`--include-graph` flags — dropped outright, no

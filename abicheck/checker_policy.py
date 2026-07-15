@@ -444,6 +444,15 @@ class ChangeKind(str, Enum):
     # behavioral drift. Neither change alters the mangled name.
     CTOR_EXPLICIT_ADDED = "ctor_explicit_added"
     CTOR_EXPLICIT_REMOVED = "ctor_explicit_removed"
+    # A class gained a 2nd+ non-explicit single-argument (converting)
+    # constructor. This cannot be proven a break from a snapshot alone (that
+    # needs the consumer's actual call-site context — see
+    # examples/case111_enumerable_thread_specific_lambda_ambiguity), so it is
+    # a best-effort RISK heuristic, not a certain API_BREAK: a call site with
+    # an argument type convertible to more than one of the class's converting
+    # constructors becomes ambiguous and stops compiling, or silently resolves
+    # to a different constructor than before. → RISK
+    CTOR_OVERLOAD_AMBIGUITY_RISK = "ctor_overload_ambiguity_risk"
 
     # ── Namespace-shape patterns (oneDPL / header-only follow-up) ────────
     # See examples/case99_experimental_graduated/README.md

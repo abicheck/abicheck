@@ -125,3 +125,37 @@ def detect_archive(path: str | Path) -> bool:
     except OSError:
         return False
     return magic in _ARCHIVE_MAGICS
+
+
+#: `auditwheel` (Linux) and `delocate` (macOS) rewrite each vendored library to
+#: ``lib<name>-<hex>.so.<ver>`` / ``lib<name>-<hex>.dylib`` and rewrite its
+#: SONAME/install-name to match, so the hash changes on every rebuild even
+#: though the underlying dependency didn't. Restricted to a hyphen + 6-16 hex
+#: chars immediately before ``.so``/``.dylib`` (or a numeric version
+#: component leading to one) so ordinary hyphenated names — e.g.
+#: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
+#: are never touched (G9, ADR: docs/development/plans/g9-wheel-vendored-matching.md).
+#: The lookahead ``(?=[0-9a-f]*[a-f])`` requires at least one non-decimal hex
+#: letter in the run: without it, a purely-decimal 6-16-digit suffix (a
+#: legitimate embedded build/version number, e.g. ``libfoo-100200.so.1`` vs.
+#: ``libfoo-100300.so.1``) also matched and stripped to the same key,
+#: silently hiding a real SONAME/dependency change as vendor-hash noise —
+#: the exact false-negative an ABI-breaking-change detector must not produce
+#: (self-review finding).
+_VENDOR_HASH_RE = re.compile(
+    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)"
+)
+
+
+def strip_vendor_hash(name: str) -> str:
+    """Strip an auditwheel/delocate content-hash suffix from a library name.
+
+    Pairing on the unhashed stem lets ``compare-release`` diff two wheels'
+    vendored libraries directly instead of reporting every one as
+    removed+added noise every rebuild (G9), and lets SONAME/install-name
+    diffing treat a hash-only rebuild as unchanged rather than a spurious
+    ``SONAME_CHANGED``. A genuinely changed vendored dependency (e.g. a
+    SONAME major bump) still surfaces as a real break — this only normalizes
+    the filename/SONAME spelling, never the content.
+    """
+    return _VENDOR_HASH_RE.sub("", name)

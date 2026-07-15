@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
+| **Detected `ChangeKind`s** | `internal_template_leaks_via_public_api` |
 | **Source files** | `examples/case77_detail_templated_base_changed/` |
 
 **Category:** Internal-leak | **Verdict:** BREAKING

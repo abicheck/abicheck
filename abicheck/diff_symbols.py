@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import bisect
+import re
 from typing import Any
 
 from .checker_policy import ChangeKind
@@ -69,6 +70,7 @@ from .elf_symbol_filter import (
 )
 from .model import (
     AbiSnapshot,
+    AccessLevel,
     Function,
     Param,
     Variable,
@@ -939,6 +941,103 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # by mangled name across the FULL function map (not just public).
     changes.extend(_diff_inline_hidden_friends(old_all, new_all_map))
 
+    return changes
+
+
+# Word-boundary-anchored so a class whose own name merely *contains* "const"/
+# "volatile" (e.g. ``myconst``) is not corrupted by the strip — a blind
+# substring .replace() previously turned ``myconst`` into ``my`` and made the
+# copy/move constructor look like a converting overload (Codex review).
+_CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
+
+
+def _converting_ctors_by_class(
+    snap: AbiSnapshot, class_names: set[str]
+) -> dict[str, dict[tuple[str, ...], Function]]:
+    """Group each class's non-explicit, single-required-argument constructors.
+
+    A castxml/DWARF Constructor's demangled ``name`` is the bare class name
+    (C++ forbids any other member from sharing it), so ``f.name in
+    class_names`` reliably identifies constructors without needing a real
+    Itanium mangled name — public overloaded constructors that castxml never
+    ODR-uses may have none (see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``).
+
+    "Converting constructor" here means: public (a private/protected
+    constructor isn't callable at an ordinary consumer call site, so it
+    cannot create the implicit-conversion collision this heuristic looks
+    for), not deleted, definitively non-explicit (``is_explicit is False`` —
+    ``None`` is unknown evidence and skipped, same tri-state convention as
+    ``_check_explicit_change``), and callable with exactly one argument — at
+    most one *required* parameter (everything after it defaulted), and at
+    least one parameter total (excludes the zero-arg default constructor). A
+    leading defaulted parameter still makes the constructor
+    single-argument-callable (``Widget(int x = 0)`` accepts ``Widget w =
+    5;`` the same as ``Widget(int x)`` would), so the exclusion check below
+    binds to the *first* parameter regardless of whether it has a default,
+    not to the (possibly empty) required-parameter list. That first
+    parameter's type is checked against the class's own type to exclude
+    copy/move constructors. Keyed by the full parameter-type tuple so two
+    overloads are distinguished even when both qualify.
+
+    Caveat shared with ``diff_cxx_rules._resolve_owner_type``: ``class_names``
+    is unqualified/leaf, so two distinct classes sharing a bare name in
+    different namespaces are not disambiguated here.
+    """
+    by_class: dict[str, dict[tuple[str, ...], Function]] = {}
+    for f in snap.functions:
+        if f.name not in class_names or f.is_deleted or f.is_explicit is not False:
+            continue
+        if f.access != AccessLevel.PUBLIC:
+            continue
+        if not f.params:
+            continue
+        required = [p for p in f.params if p.default is None]
+        if len(required) > 1:
+            continue
+        arg_type = " ".join(
+            _CV_QUALIFIER_RE.sub("", f.params[0].type).replace("&", "").split()
+        )
+        if arg_type == f.name:
+            continue
+        sig = tuple(p.type for p in f.params)
+        by_class.setdefault(f.name, {})[sig] = f
+    return by_class
+
+
+@registry.detector("ctor_overload_ambiguity")
+def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a class gaining a 2nd+ non-explicit converting constructor.
+
+    Best-effort RISK heuristic (case111): a real ambiguity depends on the
+    consumer's actual call-site argument types, which no snapshot-level
+    detector can see — only *count crossing from at most one converting
+    constructor to two or more* is checked here, on classes present on both
+    sides (a brand-new class starting with 2+ is a fresh API decision, not a
+    regression). This is deliberately conservative: it will miss ambiguities
+    that don't cross this threshold and, rarely, flag an addition that never
+    collides with a real call site — see ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK.
+    """
+    common_classes = {t.name for t in old.types} & {t.name for t in new.types}
+    if not common_classes:
+        return []
+    old_ctors = _converting_ctors_by_class(old, common_classes)
+    new_ctors = _converting_ctors_by_class(new, common_classes)
+    changes: list[Change] = []
+    for cls in sorted(new_ctors):
+        old_sigs = old_ctors.get(cls, {})
+        new_sigs = new_ctors[cls]
+        if len(new_sigs) < 2 or len(new_sigs) <= len(old_sigs):
+            continue
+        for sig in sorted(set(new_sigs) - set(old_sigs)):
+            f = new_sigs[sig]
+            changes.append(
+                make_change(
+                    ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK,
+                    symbol=f.mangled,
+                    name=cls,
+                    new=f"{cls}({', '.join(sig)})",
+                )
+            )
     return changes
 
 

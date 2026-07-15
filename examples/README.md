@@ -93,24 +93,58 @@ the way it previously did (stale at a 169-case catalog for several releases).
   `tests/validate_examples.py` parses the real compare output's change kinds and checks them
   against `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` and
   summarized as a `KINDS_MISMATCH` count — previously only the final verdict string was asserted,
-  so a case could PASS with the right severity for the wrong detector reason. The latest full-catalog
-  run under this check found 18 (gcc) / 19 (clang) such cases (verdict correct, named detector kind
-  not actually produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
-  `case59_func_became_inline`, `case65_symbol_version_removed`, `case66_language_linkage_changed`,
-  `case72_covariant_return_changed`, `case74/75/76/77/80_detail_*` (the `internal_type_leaks_via_
-  public_api` escalation doesn't fire for any of these detail-namespace-leak cases — its reachability
-  check appears to need namespace-qualified symbols that the DWARF-derived struct/type diff doesn't
-  currently emit), `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
-  `case87_default_template_arg_changed`, `case88_cpo_kind_changed`, `case94_empty_tag_gained_state`,
-  `case116_atomic_qualifier_changed`, and (clang only) `case115_bit_int_width_changed`. Case-level
-  membership is toolchain-sensitive even within "gcc"/"clang" (e.g. `case59`/`case141`'s
-  `kinds_strict` differ between a gcc 13 and a gcc 14 install), so treat this list as the latest
-  CI-authoritative run, not a fixed set. These are real, pre-existing detector gaps this check
-  surfaces, not regressions from this pass — set `ABICHECK_STRICT_KINDS=1` (see
-  `tests/check_validate_results.py`) to make them blocking once triaged and fixed case by case.
-  The full example matrix (`validation/scripts/collect_full_example_matrix.py`) now surfaces each
-  covered case's winning-lane `kinds_strict` and rolls up a `kind_mismatch_cases` list at the
-  matrix level, so this triage backlog is machine-readable instead of living only in this prose.
+  so a case could PASS with the right severity for the wrong detector reason. A first full-catalog
+  run under this check found 22 (gcc) / 24 (clang) such cases; triaging each individually (see
+  below) closed 8/9 of them, leaving **14 (gcc) / 15 (clang)** — set `ABICHECK_STRICT_KINDS=1`
+  (see `tests/check_validate_results.py`) to make the remainder blocking once fixed case by case.
+  Case-level membership is toolchain-sensitive even within "gcc"/"clang" (e.g. a gcc 13 vs. gcc 14
+  install), so treat the counts as the latest CI-authoritative run, not a fixed set. The full
+  example matrix (`validation/scripts/collect_full_example_matrix.py`) surfaces each covered case's
+  winning-lane `kinds_strict` and rolls up a `kind_mismatch_cases` list at the matrix level, so
+  this triage backlog is machine-readable instead of living only in this prose.
+
+  Of the original 22/24, triage sorted every case into one of three buckets:
+  - **4 had a stale `expected_kinds` entry** — the detector already fires correctly, just under a
+    newer/more specific kind than the ground truth recorded (each corroborated by an existing code
+    comment documenting the more-specific kind as intentional). Fixed by updating
+    `ground_truth.json`: `case59_func_became_inline` (`func_removed` →
+    `func_removed_elf_only`+`func_visibility_changed`), `case65_symbol_version_removed`
+    (`symbol_version_defined_removed` → `symbol_version_node_removed`, which wins cross-detector
+    dedup — see `diff_platform.py`), `case77_detail_templated_base_changed`
+    (`internal_type_leaks_via_public_api` → `internal_template_leaks_via_public_api`, the dedicated
+    template-leak detector in `diff_templates.py`), `case94_empty_tag_gained_state`
+    (`type_field_added` → `type_field_added_compatible`, per `diff_types.py`'s
+    `_new_field_change_kind` — a field added to a non-polymorphic struct is intentionally the
+    "compatible" variant; the verdict still stays BREAKING via the co-emitted `type_size_changed`).
+  - **6 already had an accurate `known_gap`/`known_gap_toolchains`/`known_gap_variants`** in
+    `ground_truth.json` — the top-level PASS/XFAIL verdict already accounted for them, but
+    `_kinds_strict_signal()` never consulted that field, so a documented, honest gap *also*
+    surfaced as an undifferentiated mismatch. Fixed by wiring the same known-gap check into
+    `_kinds_strict_signal()` that `_evaluate_verdict()` already used: `case64_calling_convention_changed`
+    (gcc; needs Clang for `DW_AT_calling_convention` on `ms_abi`), `case98_cxx_standard_floor_raised`
+    (both toolchains; needs L3 build context), `case103_toolchain_flag_drift` (clang; needs
+    `-grecord-command-line`), `case105_concept_tightening` and `case122_template_signature_uninstantiated`
+    (both toolchains; need L4 source-ABI replay), `case180_symbol_binding_lost_unique` (clang;
+    clang never emits the GCC-specific `STB_GNU_UNIQUE` extension).
+  - **The remaining 14 (gcc) / 15 (clang) are real detector gaps**, root-caused but not yet fixed:
+    `case23_pure_virtual_added`, `case39_var_const`, `case66_language_linkage_changed`,
+    `case72_covariant_return_changed`, `case79_missing_template_instantiation`,
+    `case82_sycl_overload_set_removed`, `case87_default_template_arg_changed`,
+    `case88_cpo_kind_changed`, `case116_atomic_qualifier_changed`, and (clang only)
+    `case115_bit_int_width_changed`. Six of these — `case74/75/76/80_detail_*` (internal-namespace
+    leak via a `detail::`-qualified type) and `case82_sycl_overload_set_removed` (a `sycl::queue`
+    parameter-type pattern match) — trace to **one systemic root cause**: `dumper_castxml.py`'s
+    `_type_name()`/`_build_record_type()` resolve `Struct`/`Class`/`Union` type references to their
+    bare, unqualified name (discarding namespace context), breaking any detector that pattern-matches
+    on a qualified name. `case79_missing_template_instantiation`/`case87_default_template_arg_changed`
+    independently trace to `Function.name` never carrying template arguments (only `Function.mangled`
+    does). `case06_visibility` is a related but distinct **harness** gap, not a detector gap: its
+    README's documented repro passes `-H bad.c`/`-H good.c` directly (castxml can parse a `.c` file
+    as a header), but `validate_examples.py`'s `_hdr()` only recognizes a dedicated `.h`/`.hpp` file,
+    so the automated run compares without header evidence and can't distinguish
+    `func_visibility_changed` from a plain removal. Left unfixed here — broadening `_hdr()` to also
+    accept `.c`/`.cpp` would change header-scoping behavior for every case using that helper, too
+    wide a blast radius to land alongside an unrelated documentation pass.
 - **`API_BREAK`/`COMPATIBLE` normalization can mask a real regression.** `_normalize_verdict`
   treats `API_BREAK` and `COMPATIBLE` as equivalent for the default PASS/FAIL gate (a case's
   `category_strict` field flags — but does not block on — the collapse); CI does not currently

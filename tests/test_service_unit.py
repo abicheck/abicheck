@@ -154,6 +154,56 @@ class TestResolveInput:
         assert result is snap
         mock.assert_called_once()
 
+    def test_header_graph_forwarded_to_run_dump_elf_fast_path(self, tmp_path):
+        # ADR-041 addendum wiring: header_graph/header_graph_includes must
+        # reach run_dump on the is_elf=True fast path, not just the
+        # binary-format-detection path below it.
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p, is_elf=True, header_graph=True, header_graph_includes=True)
+        _, kwargs = mock.call_args
+        assert kwargs["header_graph"] is True
+        assert kwargs["header_graph_includes"] is True
+
+    def test_header_graph_forwarded_to_run_dump_detected_format_path(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p, header_graph=True, header_graph_includes=True)
+        _, kwargs = mock.call_args
+        assert kwargs["header_graph"] is True
+        assert kwargs["header_graph_includes"] is True
+
+    def test_header_graph_defaults_false(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p, is_elf=True)
+        _, kwargs = mock.call_args
+        assert kwargs["header_graph"] is False
+        assert kwargs["header_graph_includes"] is False
+
+    def test_header_graph_forwarded_through_linker_script(self, tmp_path):
+        # A caller resolving `libfoo.so` (the dev-symlink-shaped GNU ld
+        # script) with header_graph=True must still get the L2 graph on the
+        # real target it follows to — the recursive resolve_input() call
+        # used to drop header_graph/header_graph_includes back to False
+        # (Codex review).
+        target = tmp_path / "libfoo.so.1"
+        target.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        script = tmp_path / "libfoo.so"
+        script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(script, header_graph=True, header_graph_includes=True)
+        _, kwargs = mock.call_args
+        assert kwargs["header_graph"] is True
+        assert kwargs["header_graph_includes"] is True
+
     def test_binary_detection_elf(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
