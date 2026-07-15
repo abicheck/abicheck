@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _PLUGIN_DIR = (
     Path(__file__).resolve().parent.parent / "contrib" / "abicheck-clang-plugin"
 )
@@ -50,21 +52,21 @@ def test_plugin_source_present() -> None:
     assert _PLUGIN_CPP.is_file()
 
 
-def test_no_fact_family_mode_flags_in_plugin_source() -> None:
+@pytest.mark.parametrize("token", _BANNED_MODE_TOKENS)
+def test_no_fact_family_mode_flags_in_plugin_source(token: str) -> None:
     text = _PLUGIN_CPP.read_text(encoding="utf-8")
-    for token in _BANNED_MODE_TOKENS:
-        assert token not in text, (
-            f"AbicheckFactsPlugin.cpp mentions {token!r} — ADR-038 C.8 / recommendation "
-            "P0 #1 forbids user-selectable fact-family collection modes. Coverage "
-            "reporting (complete/empty-confirmed/partial/unsupported/failed) is "
-            "allowed; a flag that narrows what is collected is not."
-        )
+    assert token not in text, (
+        f"AbicheckFactsPlugin.cpp mentions {token!r} — ADR-038 C.8 / recommendation "
+        "P0 #1 forbids user-selectable fact-family collection modes. Coverage "
+        "reporting (complete/empty-confirmed/partial/unsupported/failed) is "
+        "allowed; a flag that narrows what is collected is not."
+    )
 
 
-def test_no_fact_family_mode_flags_in_cmake() -> None:
+@pytest.mark.parametrize("token", _BANNED_MODE_TOKENS)
+def test_no_fact_family_mode_flags_in_cmake(token: str) -> None:
     text = _CMAKE.read_text(encoding="utf-8")
-    for token in _BANNED_MODE_TOKENS:
-        assert token not in text
+    assert token not in text
 
 
 def test_only_one_fact_set_version_constant() -> None:

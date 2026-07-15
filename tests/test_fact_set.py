@@ -18,6 +18,8 @@ source-replay finding."""
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.buildsource import (
     SourceAbiSurface,
     SourceAbiTu,
@@ -43,31 +45,24 @@ from abicheck.checker_policy import ChangeKind
 # -- coverage_state_for_family decision table --------------------------------
 
 
-def test_coverage_state_complete() -> None:
+@pytest.mark.parametrize(
+    ("entities_present", "family_diagnostics_seen", "expected"),
+    [
+        (True, False, "complete"),
+        (False, False, "empty-confirmed"),
+        (True, True, "partial"),
+        (False, True, "failed"),
+    ],
+)
+def test_coverage_state_for_family(
+    entities_present: bool, family_diagnostics_seen: bool, expected: str
+) -> None:
     assert (
-        coverage_state_for_family(entities_present=True, family_diagnostics_seen=False)
-        == "complete"
-    )
-
-
-def test_coverage_state_empty_confirmed() -> None:
-    assert (
-        coverage_state_for_family(entities_present=False, family_diagnostics_seen=False)
-        == "empty-confirmed"
-    )
-
-
-def test_coverage_state_partial() -> None:
-    assert (
-        coverage_state_for_family(entities_present=True, family_diagnostics_seen=True)
-        == "partial"
-    )
-
-
-def test_coverage_state_failed() -> None:
-    assert (
-        coverage_state_for_family(entities_present=False, family_diagnostics_seen=True)
-        == "failed"
+        coverage_state_for_family(
+            entities_present=entities_present,
+            family_diagnostics_seen=family_diagnostics_seen,
+        )
+        == expected
     )
 
 
@@ -127,6 +122,16 @@ def test_source_abi_tu_fact_set_coverage_default_empty_on_older_pack() -> None:
     tu = SourceAbiTu.from_dict({"id": "x", "tu_id": "cu://a.cpp"})
     assert tu.fact_set == {}
     assert tu.coverage == {}
+
+
+def test_source_abi_tu_fact_set_malformed_type_does_not_raise() -> None:
+    """A hand-edited/corrupt pack carrying a non-mapping ``fact_set`` (a string,
+    a list) must not crash the parser — defensive ``.get()`` parsing, same
+    forward-compat convention as every other field (CodeRabbit review)."""
+    tu = SourceAbiTu.from_dict({"id": "x", "tu_id": "cu://a.cpp", "fact_set": "clang"})
+    assert tu.fact_set == {}
+    tu2 = SourceAbiTu.from_dict({"id": "x", "tu_id": "cu://a.cpp", "fact_set": [1, 2]})
+    assert tu2.fact_set == {}
 
 
 # -- rollup_fact_set / rollup_coverage ---------------------------------------
@@ -328,6 +333,8 @@ def test_compatibility_compiler_family_mismatch_is_warning() -> None:
 def test_fact_set_issue_is_frozen() -> None:
     issue = FactSetIssue("warning", "r", "m")
     assert issue.severity == "warning"
+    with pytest.raises(AttributeError):
+        issue.severity = "error"  # type: ignore[misc]
 
 
 # -- link_source_abi rollup ---------------------------------------------------

@@ -395,6 +395,8 @@ class SourceAbiTu:
         read_files = (
             [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
         )
+        fs_raw = d.get("fact_set")
+        fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
 
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_ABI_VERSION)),
@@ -415,7 +417,7 @@ class SourceAbiTu:
             source_edges=list(d.get("source_edges", [])),
             diagnostics=list(d.get("diagnostics", [])),
             read_files=read_files,
-            fact_set=dict(d.get("fact_set") or {}),
+            fact_set=fact_set,
             coverage=_string_dict(d.get("coverage")),
         )
 
