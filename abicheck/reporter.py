@@ -278,15 +278,18 @@ def _to_json_leaf(
             "severity": _effective_severity_label(
                 c, eff_sets, policy=result.policy, policy_file=result.policy_file,
             ),
-            # Schema 2.3 fields (Codex review on #557): _leaf_entry builds its
-            # own dict rather than routing through _change_to_dict, so root
-            # type changes in leaf_changes[]/changes[] were missing
-            # operation/finding_id even though non-type leaf entries (via
-            # _change_to_dict below) and full-mode entries both have them —
-            # breaking a consumer relying on finding_id correlation across
-            # --report-mode leaf and full-mode reports.
+            # Schema 2.3/2.4 fields (Codex review on #557): _leaf_entry builds
+            # its own dict rather than routing through _change_to_dict, so
+            # root type changes in leaf_changes[]/changes[] were missing
+            # operation/finding_id/recommended_action even though non-type
+            # leaf entries (via _change_to_dict below) and full-mode entries
+            # all have them — breaking a consumer relying on finding_id
+            # correlation across --report-mode leaf and full-mode reports.
             "operation": operation_for_kind(c.kind.value),
             "finding_id": _finding_id(c),
+            "recommended_action": _recommended_action_for_change(
+                c, policy=result.policy, kind_sets=eff_sets, policy_file=result.policy_file,
+            ),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
             "caused_count": c.caused_count,
@@ -663,6 +666,53 @@ def _finding_id(c: object) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+_VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
+    Verdict.BREAKING: "recompile_and_relink_required",
+    Verdict.API_BREAK: "recompile_required",
+    Verdict.COMPATIBLE_WITH_RISK: "verify_deployment_compatibility",
+}
+
+
+def _recommended_action_for_change(
+    c: object,
+    *,
+    policy: str | None,
+    kind_sets: KindSets | None,
+    policy_file: object | None,
+) -> str:
+    """Return a structured, machine-readable next step for *c* (schema 2.4).
+
+    Derived from the same effective verdict/category resolution
+    ``severity``/``operation``/``finding_id`` already use, so it can never
+    disagree with them for the same finding:
+
+    - ``BREAKING`` → ``recompile_and_relink_required`` (binary ABI break)
+    - ``API_BREAK`` → ``recompile_required`` (source-level break only)
+    - ``COMPATIBLE_WITH_RISK`` → ``verify_deployment_compatibility``
+    - ``COMPATIBLE`` additions → ``no_action_required``
+    - ``COMPATIBLE`` non-additions (quality issues) → ``review_recommended``
+    """
+    from .severity import (
+        IssueCategory,
+        classify_effective_change,
+        effective_verdict_for_change,
+    )
+
+    verdict = effective_verdict_for_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    action = _VERDICT_TO_RECOMMENDED_ACTION.get(verdict)
+    if action is not None:
+        return action
+    # COMPATIBLE: distinguish a genuine addition (nothing to do) from a
+    # quality issue (compatible, but worth a look) via the same category
+    # classification the severity JSON block uses.
+    category = classify_effective_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    return "no_action_required" if category == IssueCategory.ADDITION else "review_recommended"
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -714,6 +764,9 @@ def _change_to_dict(
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
+        d["recommended_action"] = _recommended_action_for_change(
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
     # Impact explanation

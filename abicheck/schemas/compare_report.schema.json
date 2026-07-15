@@ -274,6 +274,17 @@
         "finding_id": {
           "type": "string",
           "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location, truncated to 16 hex chars) — lets a consumer correlate the same finding across two report runs without relying on array order. Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy."
+        },
+        "recommended_action": {
+          "type": "string",
+          "description": "Structured, machine-readable next step, derived from the same effective verdict/category resolution 'severity'/'operation' already use.",
+          "enum": [
+            "recompile_and_relink_required",
+            "recompile_required",
+            "verify_deployment_compatibility",
+            "review_recommended",
+            "no_action_required"
+          ]
         }
       }
     }

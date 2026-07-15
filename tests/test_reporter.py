@@ -167,9 +167,9 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
-    def test_report_schema_version_is_2_3(self):
+    def test_report_schema_version_is_2_4(self):
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
-        assert d["report_schema_version"] == "2.3"
+        assert d["report_schema_version"] == "2.4"
 
     def test_change_operation_field(self):
         added = Change(ChangeKind.FUNC_ADDED, "s1", "added")
@@ -179,6 +179,43 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         by_symbol = {c["symbol"]: c["operation"] for c in d["changes"]}
         assert by_symbol == {"s1": "added", "s2": "removed", "s3": "modified"}
+
+    def test_change_recommended_action_field(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
+        api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
+        risk = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added")
+        quality = Change(ChangeKind.VISIBILITY_LEAK, "s4", "visibility leak")
+        addition = Change(ChangeKind.FUNC_ADDED, "s5", "added")
+        r = _result(
+            Verdict.BREAKING,
+            changes=[breaking, api_break, risk, quality, addition],
+        )
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c["recommended_action"] for c in d["changes"]}
+        assert by_symbol == {
+            "s1": "recompile_and_relink_required",
+            "s2": "recompile_required",
+            "s3": "verify_deployment_compatibility",
+            "s4": "review_recommended",
+            "s5": "no_action_required",
+        }
+
+    def test_recommended_action_honours_policy_file_override(self):
+        """recommended_action must reflect the *effective* verdict (honouring
+        a PolicyFile override), not the kind's raw default verdict — same
+        resolver `severity`/`operation`/`finding_id` already use."""
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(ChangeKind.FUNC_REMOVED, "s", "removed")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+        d = json.loads(to_json(r))
+        # func_removed is not itself an addition kind -> quality issue, not
+        # "no action required".
+        assert d["changes"][0]["recommended_action"] == "review_recommended"
 
     def test_finding_id_is_stable_and_deterministic(self):
         """Same underlying finding -> same finding_id across independent runs."""
@@ -295,6 +332,13 @@ class TestEvidenceStatusInJson:
         # the fingerprint must not depend on which report mode built it.
         full_d = json.loads(to_json(_result(Verdict.BREAKING, changes=[c])))
         assert full_d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+
+    def test_leaf_mode_root_type_change_carries_recommended_action(self):
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["recommended_action"] == "recompile_and_relink_required"
+        assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
     def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a root

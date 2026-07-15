@@ -67,7 +67,15 @@ from typing import Any
 #:       mirroring SARIF's ``severityGate`` block, so a consumer no longer
 #:       has to independently recompute "what's actually failing the build"
 #:       from ``config``/``categories``.
-REPORT_SCHEMA_VERSION = "2.3"
+#: 2.4 — added the optional per-finding ``recommended_action`` key: a
+#:       structured, machine-readable next step derived from the same
+#:       effective verdict/category resolution ``severity``/``operation``
+#:       already use — ``recompile_and_relink_required`` (BREAKING),
+#:       ``recompile_required`` (API_BREAK), ``verify_deployment_compatibility``
+#:       (COMPATIBLE_WITH_RISK), ``review_recommended`` (COMPATIBLE quality
+#:       issue), or ``no_action_required`` (COMPATIBLE addition). Additive
+#:       optional key.
+REPORT_SCHEMA_VERSION = "2.4"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

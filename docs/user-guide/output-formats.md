@@ -339,6 +339,29 @@ Each finding in `changes[]` also carries:
 }
 ```
 
+### Recommended action per finding (`recommended_action`)
+
+Each finding also carries a structured, machine-readable next step, derived
+from the same effective verdict/category resolution `severity`/`operation`
+already use — so it can never disagree with them for the same finding:
+
+| `recommended_action` | When | Meaning |
+|---|---|---|
+| `recompile_and_relink_required` | verdict `BREAKING` | Binary ABI break — existing compiled consumers must be recompiled *and* relinked against the new library. |
+| `recompile_required` | verdict `API_BREAK` | Source-level break only — existing compiled binaries keep working, but source recompiling against the new headers will fail. |
+| `verify_deployment_compatibility` | verdict `COMPATIBLE_WITH_RISK` | Binary-compatible, but may fail to load in some deployment environments — needs manual verification, not a recompile. |
+| `review_recommended` | verdict `COMPATIBLE`, not an addition | A quality issue (e.g. an STL type exposed by value, missing SONAME) — compatible, but worth a look. |
+| `no_action_required` | verdict `COMPATIBLE`, an addition | New public API surface — purely additive, nothing to do. |
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "severity": "breaking",
+  "recommended_action": "recompile_and_relink_required"
+}
+```
+
 ### Typed gate summary (`severity.blocking`, `severity.blocking_categories`)
 
 When `--severity-*` configuration is active, the top-level `severity` object

@@ -287,6 +287,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   change to either type; JSON/SARIF output shapes are byte-for-byte
   unchanged.
 
+- **Per-finding `recommended_action` in the `compare` JSON schema (2.3 → 2.4,
+  additive).** Each finding now carries a structured, machine-readable next
+  step derived from the same effective verdict/category resolution
+  `severity`/`operation`/`finding_id` already use:
+  `recompile_and_relink_required` (BREAKING), `recompile_required`
+  (API_BREAK), `verify_deployment_compatibility` (COMPATIBLE_WITH_RISK),
+  `review_recommended` (a COMPATIBLE quality issue), or `no_action_required`
+  (a COMPATIBLE addition) — closing the last remaining gap from the
+  post-#549/#551 reporting review's schema-2.3 ask ("structured operation
+  and recommended-action fields"). Set in both `_change_to_dict` and
+  `_leaf_entry` (the latter learned this the same way it learned
+  `operation`/`finding_id` — see the entry above from earlier this cycle).
+
 - **Canonical fact-set versioning and per-family coverage honesty for the
   Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
   the Clang facts plugin and the reference `clang.py` wrapper now carries a
