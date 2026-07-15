@@ -787,6 +787,50 @@ def test_compact_adds_merged_ref_when_no_directory_entry_covers_source_facts_dir
     report = validate_inputs_pack(pack)
     assert report.ok
     assert report.tu_count == 1
+    # A successful, fully-complete compaction must not itself produce a
+    # "resolved to no readable fact files" warning about the directory it
+    # just legitimately drained -- that would falsely tell the operator this
+    # complete pack is suspect (Codex review, P2).
+    assert not any("resolved to no readable fact files" in w for w in report.warnings)
+
+
+def test_compact_preserved_directory_entry_is_rerunnable(tmp_path: Path) -> None:
+    """The directory entry compact_inputs_pack preserves for future
+    rediscoverability (the sibling test above) is, by construction, left
+    empty by a successful merge with the default remove_originals=True --
+    nothing ever repopulates it on its own. A second compact() call on the
+    same pack must not treat that now-permanently-empty directory as a
+    pack-integrity problem and fail closed forever; only a genuinely
+    unresolvable entry (missing file/dir) should still do that (Codex
+    review, P2, reproduced empirically: before the fix a second compact()
+    call always returned None)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    other_dir = pack / "extra_facts"
+    other_dir.mkdir()
+    (other_dir / "a.jsonl").write_text(
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict())
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["extra_facts"]
+    _write_manifest(pack, manifest)
+    compact_inputs_pack(pack)
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is not None
+    assert diagnostics == []
+
+    # A genuinely unresolvable entry is still flagged and still fails closed.
+    manifest2 = load_inputs_manifest(pack)
+    manifest2.source_facts = [*manifest2.source_facts, "typo_missing.jsonl"]
+    _write_manifest(pack, manifest2)
+    diagnostics2: list[str] = []
+    out2 = compact_inputs_pack(pack, diagnostics=diagnostics2)
+    assert out2 is None
+    assert any("resolved to no readable fact files" in d for d in diagnostics2)
 
 
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:

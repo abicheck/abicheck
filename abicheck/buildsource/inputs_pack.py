@@ -282,7 +282,8 @@ def _iter_source_fact_files(
         if target is None:
             continue
         before = len(files)
-        if target.is_dir():
+        is_existing_dir = target.is_dir()
+        if is_existing_dir:
             # ``.jsonl`` is the canonical form; a ``.json`` array file is also
             # accepted so a producer that cannot stream lines still ingests.
             # A gzip-compressed sibling of either (P1 #22: post-build
@@ -294,10 +295,22 @@ def _iter_source_fact_files(
             files.extend(target.glob("*.json.gz"))
         elif target.is_file():
             files.append(target)
-        # An *explicitly named* entry that resolves to nothing (typo, empty or
-        # missing dir) must not vanish quietly and leave an L3-only baseline
-        # claiming L4 facts (Codex review). The default auto-scan may be empty.
-        if explicit and len(files) == before:
+        # An *explicitly named* entry that resolves to nothing at all (typo,
+        # missing file/dir) must not vanish quietly and leave an L3-only
+        # baseline claiming L4 facts (Codex review). The default auto-scan
+        # may be empty. An *existing* directory currently holding zero
+        # matching files is deliberately NOT flagged the same way: compaction
+        # preserves a directory entry (besides SOURCE_FACTS_DIR itself, where
+        # the merged file always lands) purely for future rediscoverability,
+        # and remove_originals legitimately drains every file that WAS in it
+        # on a successful merge -- flagging that as "resolved to nothing"
+        # turned a fully successful, complete compaction into a spurious
+        # validate warning (and CLI exit 1), and made a second compact() call
+        # on the same pack fail closed forever, since that directory can
+        # never repopulate itself (Codex review, P2, reproduced empirically
+        # both ways). The pack-wide "zero readable TU records" diagnostic
+        # still catches a genuinely fact-less pack.
+        if explicit and len(files) == before and not is_existing_dir:
             sink.append(f"source_facts entry resolved to no readable fact files: {entry}")
     # Re-validate each discovered file on its *resolved* path: a file inside an
     # in-pack directory can itself be a symlink pointing outside the pack, which
