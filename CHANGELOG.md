@@ -909,6 +909,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   breaking `finding_id` correlation for leaf-mode reports specifically.
   `_leaf_entry` now sets both fields the same way `_change_to_dict` does.
 
+- **`compare-release --format json`'s per-library `findings` list ignored
+  severity-gated additions/quality issues.** It only ever walked the three
+  legacy verdict buckets (breaking/api_break/risk), so
+  `--severity-addition error` (or `--severity-quality-issues error`)
+  promoting a library's only findings to `error` produced
+  `severity.exit_code != 0` on that library with an empty `findings` list —
+  no way to tell which addition/quality-issue actually blocked the release.
+  `_release_finding_dicts` (via a new shared `_release_gating_buckets`
+  helper, also used for the truncation-cap count) now walks the four
+  severity categories instead, whenever a severity-aware exit-code scheme
+  is active, matching whichever categories are actually configured `error`.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**

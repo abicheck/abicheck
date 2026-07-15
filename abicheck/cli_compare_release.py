@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 import click
 
 from .bundle import BundleDiffResult
-from .checker import DiffResult
+from .checker import Change, DiffResult
 from .cli import (
     _build_match_map,
     _collect_release_inputs,
@@ -781,20 +781,63 @@ def _validate_suppression_early(
 _MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
 
 
-def _release_finding_dicts(diff: DiffResult) -> list[dict[str, object]]:
+def _release_gating_buckets(
+    diff: DiffResult,
+    severity_config: SeverityConfig | None,
+) -> list[tuple[str, list[Change]]]:
+    """Return the named (bucket, changes) groups that gate *diff*'s exit code.
+
+    Without *severity_config* (the legacy verdict-based exit-code scheme),
+    only the three verdict buckets that ever gate the legacy exit code are
+    used. With *severity_config* active, the release can instead exit
+    non-zero because a category that's normally compatible (additions,
+    quality issues) was promoted to ``error`` — e.g. ``--severity-addition
+    error`` — so every category the active config gates to ``error`` is
+    used instead (Codex review on #557: walking only the legacy buckets left
+    a library reporting ``severity.exit_code: 1`` with an empty ``findings``
+    list even though a specific addition/quality-issue finding was exactly
+    what blocked the release).
+    """
+    if severity_config is not None:
+        from .severity import SeverityLevel, categorize_changes
+
+        categorized = categorize_changes(
+            diff.changes,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),
+            policy_file=diff.policy_file,
+        )
+        return [
+            (name, cat_changes)
+            for name, cat_changes in (
+                ("abi_breaking", categorized.abi_breaking),
+                ("potential_breaking", categorized.potential_breaking),
+                ("quality_issues", categorized.quality_issues),
+                ("addition", categorized.addition),
+            )
+            if getattr(severity_config, name) == SeverityLevel.ERROR
+        ]
+    return [
+        ("breaking", diff.breaking),
+        ("api_break", diff.source_breaks),
+        ("risk", diff.risk),
+    ]
+
+
+def _release_finding_dicts(
+    diff: DiffResult,
+    severity_config: SeverityConfig | None = None,
+) -> list[dict[str, object]]:
     """Project a library's gating findings into small, capped dicts.
 
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
     ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
     decide the cap so a large diff never builds more dicts than the cap can
-    ever keep.
+    ever keep. See :func:`_release_gating_buckets` for which findings this
+    walks under a legacy vs. severity-aware exit-code scheme.
     """
     findings: list[dict[str, object]] = []
-    for bucket_name, bucket_changes in (
-        ("breaking", diff.breaking),
-        ("api_break", diff.source_breaks),
-        ("risk", diff.risk),
-    ):
+    for bucket_name, bucket_changes in _release_gating_buckets(diff, severity_config):
         remaining = _MAX_RELEASE_FINDINGS_PER_LIBRARY - len(findings)
         if remaining <= 0:
             break
@@ -815,6 +858,7 @@ def _strip_diff_results_and_adjust_verdict(
     library_results: list[dict[str, object]],
     removed_keys: list[str],
     worst_verdict: str,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -823,11 +867,15 @@ def _strip_diff_results_and_adjust_verdict(
     location) projected from it — otherwise the JSON summary is entirely
     count-centric (``"breaking": 3``) with no way to identify which symbols
     broke short of a separate `compare` run or the optional per-library
-    ``--output-dir`` report file. Stripping ``_diff_result`` itself keeps the
-    summary formatter free of any Python-only objects. Additionally, if any
-    library was *removed* from the release and the verdict has not already
-    been escalated, the verdict is bumped to at least
-    ``COMPATIBLE_WITH_RISK``.
+    ``--output-dir`` report file. *severity_config*, when the release's exit
+    code is severity-aware, is forwarded to :func:`_release_finding_dicts` so
+    a library gated by a promoted addition/quality-issue category (not one of
+    the legacy breaking/api_break/risk buckets) still gets a matching
+    finding, not an empty list next to a nonzero ``severity.exit_code``.
+    Stripping ``_diff_result`` itself keeps the summary formatter free of any
+    Python-only objects. Additionally, if any library was *removed* from the
+    release and the verdict has not already been escalated, the verdict is
+    bumped to at least ``COMPATIBLE_WITH_RISK``.
 
     Returns the (possibly updated) *worst_verdict* string.
     """
@@ -836,10 +884,11 @@ def _strip_diff_results_and_adjust_verdict(
             continue
         diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
-            total_gating = (
-                len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+            total_gating = sum(
+                len(cat_changes)
+                for _, cat_changes in _release_gating_buckets(diff, severity_config)
             )
-            findings = _release_finding_dicts(diff)
+            findings = _release_finding_dicts(diff, severity_config)
             if findings:
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
@@ -1270,7 +1319,7 @@ def compare_release_cmd(
 
         # Strip _diff_result from entries and bump verdict for removed libraries.
         worst_verdict = _strip_diff_results_and_adjust_verdict(
-            library_results, removed_keys, worst_verdict
+            library_results, removed_keys, worst_verdict, severity_config
         )
 
         # Build-configuration matrix findings (G2: probe -> compare-release).
