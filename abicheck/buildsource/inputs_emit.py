@@ -371,11 +371,29 @@ def compact_inputs_pack(
         record per tu_id -- append order within/between files, never a
         timestamp comparison. A no-tu_id record is never deduped ("" cannot
         be treated as a real shared identity between otherwise-unrelated TUs,
-        Codex review, P2)."""
+        Codex review, P2).
+
+        A non-empty tu_id seen more than once *within this bucket* (as
+        opposed to a fresh record correctly superseding a stale prior-
+        compaction record, handled separately by the caller) is a genuine
+        pack-integrity problem -- inputs_validate.py's own duplicate_tu_ids
+        check already flags this as an ERROR before compaction. Silently
+        picking one via last-wins would make compaction delete the losing
+        record's file (remove_originals) and erase the very duplicate the
+        validator would otherwise catch, discarding one TU's facts with no
+        trace (Codex review, P2). So this counts as lossy instead, same as
+        any other malformed/ambiguous original.
+        """
         by_id: dict[str, SourceAbiTu] = {}
         no_id: list[SourceAbiTu] = []
         for tu in read_source_fact_files(files, diagnostics=sink):
             if tu.tu_id:
+                if tu.tu_id in by_id:
+                    sink.append(
+                        f"duplicate tu_id across source-fact files: {tu.tu_id!r} "
+                        "(a race-free per-TU filename should make this "
+                        "impossible)"
+                    )
                 by_id[tu.tu_id] = tu
             else:
                 no_id.append(tu)

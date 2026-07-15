@@ -41,6 +41,7 @@ from abicheck.buildsource.inputs_emit import (
     facts_filename,
 )
 from abicheck.buildsource.inputs_pack import load_inputs_manifest
+from abicheck.buildsource.inputs_validate import validate_inputs_pack
 from abicheck.cc_wrapper import (
     compile_unit_from_command,
     compile_units_from_command,
@@ -523,6 +524,52 @@ def test_compact_skips_on_explicit_missing_source_facts_entry(
         "source_facts",
         "typo_missing.jsonl",
     ]  # manifest not repointed
+
+
+def test_compact_skips_on_duplicate_fresh_tu_id(tmp_path: Path) -> None:
+    """Two different files sharing a non-empty tu_id is already an ERROR
+    inputs_validate.py's duplicate_tu_ids check catches before compaction.
+    Silently applying last-record-wins here (as if this were a fresh record
+    correctly superseding a stale prior-compaction one) would let
+    remove_originals delete the losing file, erasing that TU's facts and
+    the very duplicate the validator would otherwise catch -- an
+    ambiguous/corrupt pack silently made to look clean (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/x.cpp")], filename="a.jsonl"
+    )
+    # A hand-written/buggy producer: a second file claims the SAME tu_id
+    # (facts_filename() derives it from the source path, so a race-free
+    # producer can't collide here in practice -- this models a hand-edited
+    # or third-party pack instead).
+    other = SourceAbiTu(
+        tu_id="cu://src/x.cpp",
+        target_id="target://libfoo",
+        functions=[
+            SourceEntity(
+                id="decl://bar", kind="function", qualified_name="bar",
+                mangled_name="_Z3barv", signature_hash="sig1",
+                source_location=SourceLocation(
+                    path="include/bar.h", line=3, origin="PUBLIC_HEADER"
+                ),
+                visibility="public_header",
+            )
+        ],
+    )
+    append_source_facts(pack, [other], filename="b.jsonl")
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is None
+
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert remaining == ["a.jsonl", "b.jsonl"]  # both survive, nothing deleted
+    assert any("duplicate tu_id" in d for d in diagnostics)
+
+    # inputs validate still catches the duplicate -- not silently erased.
+    report = validate_inputs_pack(pack)
+    assert any("duplicate tu_id" in e for e in report.errors)
 
 
 def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
