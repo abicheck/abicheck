@@ -173,6 +173,30 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     # dedicated addition-kind carve-out and is unaffected by this override
     # (it doesn't end in plain "_added"). (Codex review, PR #557.)
     "type_field_added": "modified",
+    # More of the same trait-gained-by-a-persisting-entity pattern, found on
+    # a second audit pass (Codex review, PR #557): a constructor/conversion
+    # operator gaining `explicit` (`ctor_explicit_added`), a template
+    # parameter that was defaulted/deduced becoming mandatory
+    # (`mandatory_template_param_added`), a Python-visible function gaining
+    # a new *required* parameter (`python_api_parameter_added`), and a
+    # function gaining a semantic contract attribute like nonnull/noreturn
+    # (`func_contract_attribute_added`) all describe an already-existing
+    # callable/template's signature or contract changing, not a new one
+    # appearing. None of these four is in ADDITION_KINDS either.
+    "ctor_explicit_added": "modified",
+    "mandatory_template_param_added": "modified",
+    "python_api_parameter_added": "modified",
+    "func_contract_attribute_added": "modified",
+    # Removed-side counterparts of the trait-change pattern: these end in
+    # plain "_removed" (so the suffix rule alone reports "removed"), but
+    # each names a trait *lost by* an entity that still exists — mirroring
+    # `func_noexcept_added`/`func_variadic_added`/etc. above, just the
+    # opposite direction of the same specifier gain/loss (Codex review, PR
+    # #557).
+    "func_noexcept_removed": "modified",
+    "func_variadic_removed": "modified",
+    "func_contract_attribute_removed": "modified",
+    "ctor_explicit_removed": "modified",
 }
 
 

@@ -795,7 +795,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   None of these five is in `ADDITION_KINDS`. All five now classify as
   `"modified"` via `_OPERATION_OVERRIDES`, affecting both the JSON
   `operation` field and `--show-only=added`/`--show-only=changed` (the two
-  share the same classifier by design).
+  share the same classifier by design). A follow-up audit pass (Codex
+  review, PR #557) found eight more: `ctor_explicit_added`,
+  `mandatory_template_param_added`, `python_api_parameter_added`, and
+  `func_contract_attribute_added` describe an existing constructor/
+  template/function's signature or contract changing, not a new one
+  appearing; `func_noexcept_removed`, `func_variadic_removed`,
+  `func_contract_attribute_removed`, and `ctor_explicit_removed` are the
+  removed-side counterpart — a trait *lost by* a persisting entity, which
+  the plain `"_removed"` suffix rule alone misread as an entity
+  disappearing. All eight now classify as `"modified"` too.
 
 - **Self-review polish on the `GateDecision`/`--secondary-format` work above
   (PR #557):** the native HTML report's "CI Gate" card computed pass/fail

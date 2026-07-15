@@ -402,6 +402,31 @@ class TestOperationForKind:
         assert operation_for_kind("type_field_added") == "modified"
         assert operation_for_kind("type_field_added_compatible") == "added"
 
+    def test_added_suffix_signature_or_contract_change_is_modified(self):
+        """A second audit pass (Codex review, PR #557): a constructor gaining
+        `explicit`, a template parameter becoming mandatory, a Python
+        function gaining a required parameter, and a function gaining a
+        contract attribute all describe an already-existing callable/
+        template's signature or contract changing — not a new one
+        appearing. None is in ADDITION_KINDS."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("ctor_explicit_added") == "modified"
+        assert operation_for_kind("mandatory_template_param_added") == "modified"
+        assert operation_for_kind("python_api_parameter_added") == "modified"
+        assert operation_for_kind("func_contract_attribute_added") == "modified"
+
+    def test_removed_suffix_trait_loss_on_persisting_entity_is_modified(self):
+        """The removed-side counterpart: these end in plain "_removed" (so
+        the suffix rule alone reports "removed"), but each names a trait
+        *lost by* an entity that still exists (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_noexcept_removed") == "modified"
+        assert operation_for_kind("func_variadic_removed") == "modified"
+        assert operation_for_kind("func_contract_attribute_removed") == "modified"
+        assert operation_for_kind("ctor_explicit_removed") == "modified"
+
     @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
     def test_no_remaining_add_remove_synonym_misses(self, kind):
         """Systematic sweep: every ChangeKind whose name contains an add/
