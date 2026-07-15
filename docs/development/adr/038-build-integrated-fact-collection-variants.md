@@ -702,20 +702,35 @@ to remove. This is now closed:
   an edge collected this way lands on the same graph node a separate replay
   pass would have created — `add_edge`'s `(src, dst, kind)` de-dup key
   reconciles the two for free, first-writer-wins.
-- **The separate replay passes are skipped when redundant.**
-  `inline._build_inline_graph()` now checks whether the rolled-up
-  `source_edges` fact family is `complete`/`empty-confirmed` for a *full*
-  (unnarrowed) L4 replay scope; when so, `fold_call_graph()`/
-  `fold_type_graph()` are skipped entirely (their edges are already present
-  via `fold_source_edges`), and `SourceGraphSummary.extractor_passes` is
-  stamped as if they had run, so `crosscheck.py`'s decl-dependency checks see
-  confirmed coverage. A *narrowed* L4 scope (`changed_paths`/headers-only)
-  never skips the replay — narrowed `source_edges` collection only proves
-  completeness for the TUs L4 actually parsed, the identical reasoning
-  `extractor_pass_fully_covered()` already applies to distinguish full from
-  narrowed coverage. `fold_include_graph()` (a different edge kind,
-  `COMPILE_UNIT_INCLUDES_FILE`) is never gated by this — it is unrelated to
-  `source_edges`.
+- **The separate replay passes are still always run — not yet skipped.** An
+  earlier revision of this fix skipped `fold_call_graph()`/`fold_type_graph()`
+  once the rolled-up `source_edges` fact family was `complete`/
+  `empty-confirmed` for a full (unnarrowed) L4 replay scope, on the theory
+  that their edges were already present via `fold_source_edges`. A review of
+  that revision found the flaw: the raw `source_edges` wire format
+  (`{edge, src, dst, provenance, confidence, attrs}`) carries only bare
+  endpoint identities, never the `dst_file`/project-file provenance
+  `fold_call_graph`/`fold_type_graph` attach via `project_files`
+  (`GraphNode.attrs["defined_in_project"]`). `source_graph.
+  is_internal_dependency_node()` (shared with `crosscheck.py`'s
+  `public_to_internal_dependency`) requires that provenance — or the L4
+  surface's own `decl_to_file` mapping, which only covers *public* reachable
+  declarations — to classify an unannotated node as project-internal. A
+  private helper/type only ever reached via `source_edges` (never itself
+  part of the public surface) would therefore stay unclassified, silently
+  suppressing a real `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`/crosscheck
+  finding. The skip is reverted: both replay passes run unconditionally
+  whenever `with_call_graph` is set, exactly as before this ADR's edges-fold
+  work; `fold_source_edges` still runs (always, via `build_source_graph()`)
+  and reconciles with the replay's edges via the same `(src, dst, kind)`
+  de-dup key, so it remains a net addition (it can supply edges when a
+  narrower/cheaper collection ran without a full replay, e.g. a Plugin
+  injection-only pack with no `clang++` on the merge host) — it is just not
+  (yet) a substitute for the replay's provenance. Making `source_edges`
+  itself carry equivalent `dst_file`/`caller_file` provenance end-to-end (in
+  both the plugin's wire format and `clang_source_edges.build_source_edges()`)
+  is the natural follow-up that would let this optimization return safely;
+  tracked as future work, not bundled into this fix.
 
 **Identity normalization (the second half of the same review finding).**
 Even with the fold wired up, the Clang JSON-AST replay's callee identity was

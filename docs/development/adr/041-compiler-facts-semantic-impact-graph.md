@@ -1066,20 +1066,20 @@ there is no equivalent "should this be automatic" question for them.
    the JSON AST it already parsed (ADR-038 C.8). What ADR-038 C.10 closes on
    top of that collection: `source_graph.fold_source_edges()` now actually
    folds these into the L5 graph (previously serialized-but-unused —
-   `SourceAbiSurface` had no edge field at all), and
-   `inline._build_inline_graph()` skips the separate `call_graph`/
-   `type_graph` replay passes when a full-scope `source_edges` collection is
-   already confirmed complete, per-TU/full-vs-narrowed the same way
-   `extractor_pass_fully_covered()` already gates `SourceGraphSummary.
-   extractor_passes`. A narrowed L4 scope still runs the replay passes
-   (narrowed `source_edges` only proves completeness for the TUs L4 actually
-   parsed), and `fold_include_graph()` (a different edge kind) is never
-   gated by this. ADR-038 C.10 also fixed the callee-identity resolution bug
-   this depended on: `call_graph.py`'s JSON-AST replay used to resolve an
-   overloaded callee's compact `referencedDecl` stub by bare name (real
-   Clang never puts `mangledName` on that stub), collapsing overloads onto
-   one endpoint; it now builds an id-index from the full declarations seen
-   in the same walk, mirroring the fix `type_graph.py` already had.
+   `SourceAbiSurface` had no edge field at all). It does **not** (yet) let
+   `inline._build_inline_graph()` skip the separate `call_graph`/
+   `type_graph` replay passes: a first attempt at that optimization was
+   reverted after a review found the raw `source_edges` wire format carries
+   no `dst_file`/project-file provenance, which `crosscheck.
+   public_to_internal_dependency` needs to classify an unannotated node as
+   internal — see ADR-038 C.10's "still always run" note for the full
+   reasoning and the follow-up this leaves open. ADR-038 C.10 did fix the
+   callee-identity resolution bug the edges depend on regardless:
+   `call_graph.py`'s JSON-AST replay used to resolve an overloaded callee's
+   compact `referencedDecl` stub by bare name (real Clang never puts
+   `mangledName` on that stub), collapsing overloads onto one endpoint; it
+   now builds an id-index from the full declarations seen in the same walk,
+   mirroring the fix `type_graph.py` already had.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges

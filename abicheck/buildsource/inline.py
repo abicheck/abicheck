@@ -1554,29 +1554,6 @@ def _make_source_extractor(
 # ── L5: source graph ──────────────────────────────────────────────────────────
 
 
-def _source_edges_confirmed(surface: SourceAbiSurface | None) -> bool:
-    """Whether *surface*'s rolled-up ``source_edges`` fact family is confirmed
-    complete or legitimately empty (ADR-038 C.9 / latest-main Clang plugin
-    review, PR1).
-
-    When true, the L4 frontend invocation already walked the AST for call/
-    type relationships (folded into the graph by
-    ``source_graph.fold_source_edges`` inside ``build_source_graph``), so a
-    *full-scope* separate call/type-graph replay pass would just re-parse the
-    same TUs for edges already present -- see the caller's ``broad_pass``
-    check for why a narrowed scope is never skipped this way.
-    ``partial``/``failed``/``unsupported`` (a producer that has not, or never
-    will, adopt the C.9 protocol) and a surface with no fact_set at all both
-    return ``False``, leaving the replay passes as the fallback.
-    """
-    if surface is None:
-        return False
-    states = surface.coverage.get("fact_family_states")
-    if not isinstance(states, dict):
-        return False
-    return states.get("source_edges") in ("complete", "empty-confirmed")
-
-
 def _build_inline_graph(
     merged: BuildEvidence,
     surface: SourceAbiSurface | None,
@@ -1621,34 +1598,34 @@ def _build_inline_graph(
             fold_type_graph,
         )
 
-        # A full/target-scope call+type-graph pass is redundant once the L4
-        # frontend invocation already produced complete source_edges for this
-        # same broad scope (ADR-038 C.9 / PR1) -- build_source_graph() above
-        # already folded them in via fold_source_edges. A narrowed scope
-        # (changed_paths / call_graph_units) is never skipped: narrowed
-        # source_edges only proves completeness for the TUs L4 actually
-        # parsed, same as extractor_pass_fully_covered's full/narrowed split.
-        broad_pass = not changed_paths and call_graph_units is None
-        if broad_pass and _source_edges_confirmed(surface):
-            graph.extractor_passes["call_graph"] = True
-            graph.extractor_passes["type_graph"] = True
-        else:
-            fold_call_graph(
-                graph,
-                merged,
-                clang_bin,
-                extractors,
-                changed_paths,
-                scoped_units=call_graph_units,
-            )
-            fold_type_graph(
-                graph,
-                merged,
-                clang_bin,
-                extractors,
-                changed_paths,
-                scoped_units=call_graph_units,
-            )
+        # NOTE: this always runs the replay passes even when `surface`'s
+        # source_edges are already confirmed complete (build_source_graph()
+        # above already folded those in via fold_source_edges) -- an earlier
+        # revision skipped the replay in that case, but the raw source_edges
+        # wire format carries only bare endpoint identities, not the
+        # dst_file/project-file provenance fold_call_graph/fold_type_graph
+        # attach via `project_files` (`defined_in_project`). Without that
+        # provenance, `crosscheck.public_to_internal_dependency` cannot
+        # classify an unannotated callee/referenced node as internal, so a
+        # public-to-internal dependency addition would silently go
+        # undetected (Codex review). The replay stays unconditional until
+        # source_edges carries equivalent provenance end-to-end.
+        fold_call_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=call_graph_units,
+        )
+        fold_type_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=call_graph_units,
+        )
         fold_include_graph(
             graph,
             merged,
