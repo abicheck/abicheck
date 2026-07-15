@@ -51,6 +51,7 @@ from abicheck.diff_cpp_patterns import (
 )
 from abicheck.model import (
     AbiSnapshot,
+    AccessLevel,
     Function,
     RecordType,
     TypeField,
@@ -66,6 +67,7 @@ def _fn(
     mangled: str | None = None,
     *,
     is_inline: bool = False,
+    access: AccessLevel = AccessLevel.PUBLIC,
 ) -> Function:
     return Function(
         name=name,
@@ -73,6 +75,7 @@ def _fn(
         return_type="void",
         params=[],
         is_inline=is_inline,
+        access=access,
     )
 
 
@@ -404,6 +407,21 @@ class TestInlineAccessorsFor:
     def test_holder_not_in_set_skipped(self) -> None:
         # Qualified inline fn but enclosing class not a holder (line 849).
         fn = _fn("mylib::Other::get", "_Zget", is_inline=True)
+        assert _inline_accessors_for([fn], {"mylib::Widget"}) == []
+
+    def test_private_inline_helper_skipped(self) -> None:
+        # A private/protected inline helper that happens to reach into the
+        # pimpl isn't callable by consumer code, so it can't bake a stale
+        # name into a consumer binary the way a public accessor's inline
+        # body can — treating it as accessor evidence would be a false
+        # API_BREAK for an internal-only rename (review finding on the
+        # case89 fix).
+        fn = _fn(
+            "mylib::Widget::get",
+            "_Zget",
+            is_inline=True,
+            access=AccessLevel.PRIVATE,
+        )
         assert _inline_accessors_for([fn], {"mylib::Widget"}) == []
 
     def test_unqualified_holder_matched_via_last_segment(self) -> None:

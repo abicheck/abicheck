@@ -69,6 +69,7 @@ from .diff_templates import (  # noqa: F401
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
+from .model import AccessLevel
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType
@@ -913,11 +914,22 @@ def _inline_accessors_for(
     missed every real accessor. Recover the enclosing scope from the mangled
     name via a single batched demangle instead (functions without ``::`` in
     ``name`` are the common case, not the exception).
+
+    Requires ``access == PUBLIC``: a private/protected inline helper that
+    happens to reach into the pimpl is not something a consumer's own code
+    can call, so its stale-name inline body cannot be baked into consumer
+    binaries the way a public accessor's can — treating it as evidence of a
+    reachable break would be a false API_BREAK for an internal-only rename
+    (caught in review).
     """
     from .demangle import demangle_batch
 
     fns = list(functions)
-    inline_fns = [fn for fn in fns if getattr(fn, "is_inline", False)]
+    inline_fns = [
+        fn
+        for fn in fns
+        if getattr(fn, "is_inline", False) and getattr(fn, "access", None) == AccessLevel.PUBLIC
+    ]
     if not inline_fns:
         return []
 

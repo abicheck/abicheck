@@ -267,6 +267,29 @@ class TestFieldRenamed:
         kinds = _kinds(r)
         assert ChangeKind.FIELD_RENAMED not in kinds
 
+    def test_two_same_offset_fields_collapsing_to_one_do_not_both_rename(
+        self,
+    ) -> None:
+        """Two old fields sharing an offset (e.g. overlapping anonymous-union
+        members) collapsing to a single new field at that offset must not
+        both be reported as FIELD_RENAMED to the same target — only the
+        first can genuinely be "the same field renamed"; the other was
+        really removed. Without tracking which added field a rename has
+        already consumed, both would silently claim it, hiding the real
+        removal (regression guard for a review finding on the case35 fix).
+        """
+        t_old = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("a", "int", 0),
+                                   TypeField("b", "int", 0)])
+        t_new = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("x", "int", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        removals = [c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_REMOVED]
+        assert len(renames) == 1
+        assert len(removals) == 1
+        assert renames[0].new_value == "x"
+
 
 # ── enum_member_renamed (source-level break) ─────────────────────────────
 

@@ -1487,6 +1487,13 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 continue
             added_by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
         reserved_matched: set[str] = set()
+        # Tracks candidates already consumed by a pure-rename match below, so
+        # a second removed field at the same offset (e.g. two overlapping
+        # anonymous-union members collapsing to one field) can't also claim
+        # it — without this, both would report FIELD_RENAMED to the same
+        # target and the fact that one of them was genuinely dropped would
+        # be silently hidden (caught in review).
+        rename_matched: set[str] = set()
 
         for fname in removed_names:
             old_f = old_fields[fname]
@@ -1495,7 +1502,7 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                     (
                         c
                         for c in added_by_offset.get(old_f.byte_offset, [])
-                        if old_f.type_name == c.type_name
+                        if c.name not in rename_matched and old_f.type_name == c.type_name
                     ),
                     None,
                 )
@@ -1551,13 +1558,20 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 # each removed bit-field must find *its own* matching
                 # candidate by bit position/width, not whichever one a
                 # single-value dict happened to keep (caught in review —
-                # four times now).
+                # four times now). And a matched candidate must be excluded
+                # from further matches (`rename_matched`) — otherwise two
+                # removed fields with identical layout at the same offset
+                # (overlapping anonymous-union members collapsing to one
+                # field) would both claim the same new field as their
+                # rename target, hiding that one of them was genuinely
+                # dropped (caught in review — five times now).
                 candidate = next(
                     (
                         c
                         for c in added_by_offset.get(old_f.byte_offset, [])
                         if (
                             c.name not in reserved_matched
+                            and c.name not in rename_matched
                             and old_f.type_name == c.type_name
                             and old_f.byte_size == c.byte_size
                             and old_f.bit_offset == c.bit_offset
@@ -1567,6 +1581,7 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                     None,
                 )
                 if candidate is not None:
+                    rename_matched.add(candidate.name)
                     changes.append(
                         make_change(
                             ChangeKind.FIELD_RENAMED,

@@ -615,6 +615,39 @@ class TestDwarfStructFieldRenamed:
         renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
         assert {(c.old_value, c.new_value) for c in renames} == {("a", "x"), ("b", "y")}
 
+    def test_two_same_layout_fields_collapsing_to_one_do_not_both_rename(
+        self,
+    ) -> None:
+        """Two old fields with identical layout (offset, type, size,
+        bit position) collapsing to a single new field must not both be
+        reported as FIELD_RENAMED to the same target — only the first can
+        genuinely be "the same field renamed"; the other was really
+        removed. Without tracking which added field a rename has already
+        consumed, both would silently claim it, hiding the real removal
+        (review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Overlay": StructLayout(
+                name="Overlay", byte_size=4,
+                fields=[
+                    FieldInfo("a", "int", 0, 4),
+                    FieldInfo("b", "int", 0, 4),
+                ])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Overlay": StructLayout(
+                name="Overlay", byte_size=4,
+                fields=[FieldInfo("x", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        removals = [c for c in r.changes if c.kind == ChangeKind.STRUCT_FIELD_REMOVED]
+        assert len(renames) == 1
+        assert len(removals) == 1
+        assert renames[0].new_value == "x"
+
 
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""
