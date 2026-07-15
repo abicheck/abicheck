@@ -85,6 +85,38 @@ def test_no_import_cycles(car):
     assert f.errors == [], f"Import cycles detected: {f.errors}"
 
 
+def test_adr_index_and_nav_sync_holds(car):
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == [], f"ADR index/nav drift: {f.errors}"
+
+
+def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeypatch):
+    """Regression test for the real bug this check exists to catch: ADR-041
+    was accepted and linked from index.md but never added to mkdocs.yml, so
+    it was never published to the site nav."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text("# ADR-001\n", encoding="utf-8")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("mkdocs.yml nav" in msg for _, msg in f.errors), (
+        f"expected a missing-from-nav error, got: {f.errors}"
+    )
+
+
 def test_no_hard_file_size_violations(car):
     """Files over ERROR_LINES must be in LARGE_FILE_ALLOWLIST."""
     f = car.Findings()
@@ -110,7 +142,14 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
       ``main()`` wires up the run and exits 0.
     """
     rc = car.main(
-        ["--skip", "mypy-baseline", "--skip", "import-cycles", "--skip", "banned-imports"]
+        [
+            "--skip",
+            "mypy-baseline",
+            "--skip",
+            "import-cycles",
+            "--skip",
+            "banned-imports",
+        ]
     )
     assert rc == 0, capsys.readouterr().out
 

@@ -1118,6 +1118,51 @@ def check_mkdocs_nav_coverage(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: every ADR is in both index.md and mkdocs.yml nav
+# ---------------------------------------------------------------------------
+
+#: Matches an ADR filename's leading number, e.g. "020" from
+#: "020-build-context-capture.md". Two files may legitimately share a number
+#: (020a/020b, 021a/021b are sibling sub-ADRs) — this check is per-file, not
+#: per-number, so that's not flagged here.
+_ADR_FILE_RE = re.compile(r"^\d{3}-.+\.md$")
+
+
+def check_adr_index_and_nav_sync(f: Findings) -> None:
+    """Every docs/development/adr/*.md file must be linked from index.md and
+    listed in mkdocs.yml's nav.
+
+    This is an ERROR, not a WARN under mkdocs-nav-coverage, because an ADR
+    reachable only via index.md's link (satisfying that orphan check) but
+    missing from nav is a real bug that happened in practice: ADR-041 was
+    accepted and linked from index.md but never added to mkdocs.yml, so it
+    was never published to the site nav despite being a real, current ADR.
+    """
+    adr_dir = DOCS / "development" / "adr"
+    if not adr_dir.is_dir():
+        return
+    index_text = _read(adr_dir / "index.md")
+    nav_refs = _collect_mkdocs_nav_refs()
+    for md in sorted(adr_dir.glob("*.md")):
+        if md.name == "index.md" or not _ADR_FILE_RE.match(md.name):
+            continue
+        if md.name not in index_text:
+            f.err(
+                "adr-index-nav-sync",
+                f"docs/development/adr/{md.name}: not linked from "
+                f"docs/development/adr/index.md",
+            )
+        nav_target = f"development/adr/{md.name}"
+        if nav_refs and nav_target not in nav_refs:
+            f.err(
+                "adr-index-nav-sync",
+                f"docs/development/adr/{md.name}: not listed in mkdocs.yml nav "
+                f"(published pages must be reachable from the ADR nav group, "
+                f"not just linked from index.md)",
+            )
+
+
+# ---------------------------------------------------------------------------
 # Check: banned imports / API misuse
 # ---------------------------------------------------------------------------
 
@@ -1705,6 +1750,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "examples-ground-truth": check_examples_ground_truth,
     "examples-readme-sync": check_examples_readme_sync,
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
+    "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
     "license-header": check_license_header,
