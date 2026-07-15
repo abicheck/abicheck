@@ -2182,20 +2182,32 @@ def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no
 def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    # The compiler-version lookup (ADR-038 C.8 fact_set) is process-lifetime
+    # cached by clang_bin, so a prior test in this session may have already
+    # warmed it — clear it so this test's call count is deterministic
+    # regardless of execution order.
+    _clang_compiler_version.cache_clear()
+
     calls: list[list[str]] = []
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         calls.append(cmd)
         if "-ast-dump=json" in cmd:
             return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
-    assert len(calls) == 2  # AST pass + macro pass
+    # AST pass + macro pass + the (cached-per-binary) compiler-version lookup.
+    assert len(calls) == 3
     assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
+    assert tu.fact_set["compiler_version"] == "18.1.3"
 
 
 def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type: ignore[no-untyped-def]

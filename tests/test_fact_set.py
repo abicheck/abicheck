@@ -154,6 +154,15 @@ def test_rollup_fact_set_all_empty() -> None:
     assert rollup_fact_set([_tu(), _tu()]) == {}
 
 
+def test_rollup_fact_set_mixed_present_and_missing_returns_empty() -> None:
+    """A pack mixing a current TU record and a stale/pre-C.8 TU (no fact_set at
+    all) must not report the non-empty subset's fact_set as the pack's common
+    identity — the missing TU's coverage is simply unknown (Codex review)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs)), _tu()]
+    assert rollup_fact_set(tus) == {}
+
+
 def test_rollup_coverage_worst_of_wins() -> None:
     tus = [
         _tu(coverage={"functions": "complete", "macros": "complete"}),
@@ -238,6 +247,29 @@ def test_compatibility_producer_mismatch_is_warning() -> None:
     rules = {i.rule for i in issues}
     assert "producer_mismatch" in rules
     assert all(i.severity == "warning" for i in issues if i.rule == "producer_mismatch")
+
+
+def test_compatibility_same_producer_different_version_is_warning() -> None:
+    """A producer release can change its canonicalization/hashing recipe
+    without bumping fact_set.version — flag it so opaque body/template hashes
+    are not silently trusted as comparable (Codex review)."""
+    old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.3")
+    new = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    issues = check_fact_set_compatibility(old, new)
+    rules = {i.rule for i in issues}
+    assert "producer_version_mismatch" in rules
+    assert "producer_mismatch" not in rules
+    assert all(
+        i.severity == "warning" for i in issues if i.rule == "producer_version_mismatch"
+    )
+
+
+def test_compatibility_same_producer_same_version_no_producer_issue() -> None:
+    fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    issues = check_fact_set_compatibility(fs, dict(fs))
+    assert not any(
+        i.rule in ("producer_mismatch", "producer_version_mismatch") for i in issues
+    )
 
 
 def test_compatibility_compiler_family_mismatch_is_warning() -> None:

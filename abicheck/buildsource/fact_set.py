@@ -27,9 +27,12 @@ consults before trusting an old/new pair's L4 evidence:
 2. Old and new baselines should normally use the same producer family
    (``compiler_family``).
 3. Opaque body/template hashes are only comparable when producer recipes
-   match — approximated here by requiring the same ``producer`` id, since a
-   different producer's subtree-hash algorithm is not guaranteed byte-stable
-   (ADR-038 C.7's own documented residual).
+   match — approximated here by requiring the same ``producer`` id *and*
+   ``producer_version``, since a producer release can change its
+   canonicalization/hashing recipe without bumping the mandatory-family
+   ``fact_set.version`` (a different producer's subtree-hash algorithm is not
+   guaranteed byte-stable even across its own versions; ADR-038 C.7's own
+   documented residual).
 4. A missing mandatory fact family (``partial``/``failed`` coverage) must not
    be read as "unchanged" — surfaced via :func:`incomplete_families`.
 
@@ -90,13 +93,23 @@ def rollup_fact_set(tus: list[SourceAbiTu]) -> dict[str, Any]:
 
     A mixed-producer pack (rare — normally one build uses one producer) has no
     single fact_set to report; callers should treat that itself as a
-    comparison-compatibility concern rather than silently picking one.
+    comparison-compatibility concern rather than silently picking one. A pack
+    that mixes TUs *with* a fact_set and TUs *without* one (e.g. a stale
+    pre-C.8 record alongside current ones) is exactly that concern too: some
+    TUs' mandatory-family coverage is simply unknown, so this must not report
+    the non-empty subset's fact_set as if it described the whole pack (Codex
+    review). Only "every TU agrees" or "every TU is silent" roll up to
+    something other than ``{}``.
     """
-    sets = [dict(tu.fact_set) for tu in tus if tu.fact_set]
-    if not sets:
+    if not tus:
         return {}
-    first = sets[0]
-    if all(s == first for s in sets[1:]):
+    non_empty = [dict(tu.fact_set) for tu in tus if tu.fact_set]
+    if not non_empty:
+        return {}
+    if len(non_empty) != len(tus):
+        return {}
+    first = non_empty[0]
+    if all(s == first for s in non_empty[1:]):
         return first
     return {}
 
@@ -172,5 +185,26 @@ def check_fact_set_compatibility(
                 "compiler-neutral structured facts remain comparable.",
             )
         )
+    else:
+        # Same producer, but a different producer_version: the recipe can
+        # still have changed (a canonicalization/hashing fix, say) without the
+        # mandatory-family fact_set.version moving, so opaque hashes are not
+        # guaranteed comparable even here (Codex review).
+        old_producer_version = old_fact_set.get("producer_version")
+        new_producer_version = new_fact_set.get("producer_version")
+        if old_producer_version != new_producer_version:
+            issues.append(
+                FactSetIssue(
+                    "warning",
+                    "producer_version_mismatch",
+                    f"old baseline producer_version={old_producer_version!r}, new "
+                    f"baseline producer_version={new_producer_version!r} — the "
+                    f"same producer ({old_producer!r}) may have changed its "
+                    "canonicalization/hashing recipe between versions; opaque "
+                    "body/template hashes (inline_body_changed, "
+                    "template_body_changed) are not guaranteed comparable across "
+                    "producer versions.",
+                )
+            )
 
     return issues
