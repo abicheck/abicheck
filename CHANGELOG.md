@@ -344,6 +344,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   that isn't a return-type separator) — both are now handled by a shared
   `_holder_of` helper.
 
+- **`Examples Validation`'s "Full example matrix" job failed on every push to
+  `main`.** `validation/scripts/collect_full_example_matrix.py` recomputed
+  each gcc/clang/build-source artifact's `summary` as a plain `Counter` over
+  each result's `status`, but `tests/validate_examples.py`'s
+  `_summary_counts()` layers two reported-only advisory tallies
+  (`KINDS_MISMATCH`, `CATEGORY_COLLAPSED`) on top of a case's own
+  `PASS`/`XFAIL`/`SKIP` status. The expanded `expected_kinds` scoping above
+  surfaced non-zero `KINDS_MISMATCH` counts for the first time, so the
+  recomputed summary diverged from the artifact's and the job failed with an
+  `ARTIFACT ERROR` despite every case lane actually passing. The recompute
+  now mirrors the same advisory-tally logic for those three lanes.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**
