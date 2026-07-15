@@ -46,6 +46,7 @@ module produces the source-side L3/L4/L5 pack that ``merge`` folds against it.
 from __future__ import annotations
 
 import datetime as _dt
+import gzip
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -251,8 +252,13 @@ def _iter_source_fact_files(
         if target.is_dir():
             # ``.jsonl`` is the canonical form; a ``.json`` array file is also
             # accepted so a producer that cannot stream lines still ingests.
+            # A gzip-compressed sibling of either (P1 #22: post-build
+            # compaction can gzip the merged file to shrink pack transfer
+            # size) is read transparently — same decoded facts either way.
             files.extend(target.glob("*.jsonl"))
+            files.extend(target.glob("*.jsonl.gz"))
             files.extend(target.glob("*.json"))
+            files.extend(target.glob("*.json.gz"))
         elif target.is_file():
             files.append(target)
         # An *explicitly named* entry that resolves to nothing (typo, empty or
@@ -342,6 +348,20 @@ def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[So
     return tus
 
 
+def _read_text_maybe_gz(path: Path) -> str:
+    """Read *path* as UTF-8 text, transparently decompressing a ``.gz`` file.
+
+    Compression is execution policy, not fact content (P1 #22/#25): a gzip'd
+    ``source_facts`` file decodes to the exact same JSON text a plain one
+    would, so this is the only place a caller needs to know the file might be
+    compressed.
+    """
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return fh.read()
+    return path.read_text(encoding="utf-8")
+
+
 def read_source_facts(
     root: Path | str,
     manifest: InputsManifest | None = None,
@@ -359,7 +379,12 @@ def read_source_facts(
     sink = diagnostics if diagnostics is not None else []
     tus: list[SourceAbiTu] = []
     for path in _iter_source_fact_files(root, manifest, sink):
-        tus.extend(_parse_tu_records(path.read_text(encoding="utf-8"), path.name, sink))
+        try:
+            text = _read_text_maybe_gz(path)
+        except OSError as exc:
+            sink.append(f"{path.name}: could not read/decompress ({exc})")
+            continue
+        tus.extend(_parse_tu_records(text, path.name, sink))
     return tus
 
 

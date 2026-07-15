@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import gzip
 import json
 import os
 import shutil
@@ -47,6 +48,9 @@ from .inputs_pack import (
     INPUTS_MANIFEST_NAME,
     SOURCE_FACTS_DIR,
     InputsManifest,
+    _iter_source_fact_files,
+    load_inputs_manifest,
+    read_source_facts,
 )
 from .source_abi import SourceAbiTu
 
@@ -128,19 +132,36 @@ def append_source_facts(
     tus: Iterable[SourceAbiTu],
     *,
     filename: str = DEFAULT_FACTS_FILE,
+    compress: bool = False,
 ) -> Path:
     """Append per-TU dumps as JSON-Lines to ``source_facts/<filename>``.
 
     One compact, key-sorted JSON object per line (the canonical Flow-2 form).
     Returns the file written. The caller is responsible for having created the
-    manifest (see :func:`init_inputs_pack`)."""
+    manifest (see :func:`init_inputs_pack`).
+
+    *compress* (P1 #22) gzips the file (a ``.gz`` suffix is appended to
+    *filename* if not already present) — pure execution policy, never changes
+    the decoded facts a reader gets back (``inputs_pack.read_source_facts``
+    decompresses transparently). Gzip append semantics differ from plain-text
+    append (each ``gzip.open(..., "ab")`` call writes an independent member,
+    which decompresses back to the concatenation of their contents — exactly
+    what JSON-Lines needs), so this still supports the same incremental
+    per-TU-invocation usage as the uncompressed path.
+    """
     root = Path(root)
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
+    if compress and not filename.endswith(".gz"):
+        filename = f"{filename}.gz"
     path = facts_dir / filename
-    with path.open("a", encoding="utf-8", newline="\n") as fh:
-        for tu in tus:
-            fh.write(json.dumps(tu.to_dict(), sort_keys=True) + "\n")
+    lines = "".join(json.dumps(tu.to_dict(), sort_keys=True) + "\n" for tu in tus)
+    if compress:
+        with gzip.open(path, "ab") as fh:
+            fh.write(lines.encode("utf-8"))
+    else:
+        with path.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(lines)
     return path
 
 
@@ -155,12 +176,14 @@ def write_inputs_pack(
     exported_symbols: Iterable[str] = (),
     binary: str = "",
     headers: Iterable[str] = (),
+    compress: bool = False,
 ) -> Path:
     """Write a complete Flow-2 pack in one call; return the pack root.
 
     Materializes ``manifest.json`` + ``source_facts/facts.jsonl`` and, when
     *compile_db* is given, copies it to ``build/compile_commands.json`` and
     records it in the manifest. Round-trips through ``ingest_inputs_pack``.
+    *compress* gzips the facts file (P1 #22); see :func:`append_source_facts`.
     """
     root = Path(root)
     (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -173,7 +196,7 @@ def write_inputs_pack(
         binary=binary,
         headers=list(headers),
     )
-    append_source_facts(root, tus, filename=DEFAULT_FACTS_FILE)
+    append_source_facts(root, tus, filename=DEFAULT_FACTS_FILE, compress=compress)
     if compile_db is not None:
         dst = root / DEFAULT_COMPILE_DB_REL
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -181,3 +204,84 @@ def write_inputs_pack(
         manifest.compile_db = DEFAULT_COMPILE_DB_REL
     _write_manifest(root, manifest)
     return root
+
+
+#: Default output filename for post-build compaction (P1 #21).
+DEFAULT_COMPACTED_FACTS_FILE = "compacted.jsonl"
+
+
+def compact_inputs_pack(
+    root: Path | str,
+    *,
+    output_filename: str = DEFAULT_COMPACTED_FACTS_FILE,
+    compress: bool = False,
+    remove_originals: bool = True,
+    diagnostics: list[str] | None = None,
+) -> Path:
+    """Merge a pack's many per-TU ``source_facts/*.jsonl`` files into one (P1 #21).
+
+    The race-free incremental writer (:func:`append_source_facts`, fed by
+    :func:`facts_filename`) gives every parallel compile its own file so
+    concurrent TUs never race on one fd — correct during a build, but it can
+    leave thousands of tiny files in a large pack, expensive to transfer/store
+    afterwards. This is a **post-build** step (run once the build has
+    finished, never mid-build): it re-reads every discovered source-fact file
+    the same way :func:`~.inputs_pack.ingest_inputs_pack` would
+    (:func:`~.inputs_pack.read_source_facts` — a malformed record degrades to
+    a diagnostic, never an abort), re-serializes each TU with the same
+    canonical ``json.dumps(tu.to_dict(), sort_keys=True)`` form the writers
+    already use, and concatenates the result into one file.
+
+    **Decoded facts an ingest sees are unchanged** (P1 #25 invariance) —
+    compaction (and *compress*, gzipping the merged file) only changes file
+    layout/size on disk, never the fact content ``ingest_inputs_pack`` folds.
+
+    *remove_originals* deletes the per-TU files that were merged once the
+    merged file is written, so a later ingest cannot double-count TUs by
+    reading both the merged file and its stale sources. A manifest that names
+    explicit ``source_facts`` entries is repointed at the single merged file;
+    the default (auto-scan of ``source_facts/``) needs no manifest change —
+    the new file already lives where the scan looks.
+    """
+    root = Path(root)
+    manifest = load_inputs_manifest(root)
+    sink = diagnostics if diagnostics is not None else []
+    originals = _iter_source_fact_files(root, manifest, sink)
+    tus = read_source_facts(root, manifest, diagnostics=sink)
+
+    if compress and not output_filename.endswith(".gz"):
+        output_filename = f"{output_filename}.gz"
+    facts_dir = root / SOURCE_FACTS_DIR
+    facts_dir.mkdir(parents=True, exist_ok=True)
+    output_path = facts_dir / output_filename
+
+    # Temp file + atomic rename so a concurrent reader never observes a
+    # partially-written merge (same discipline as _write_manifest).
+    fd, tmp = tempfile.mkstemp(dir=str(facts_dir), prefix=".compact.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            writer = gzip.GzipFile(fileobj=raw, mode="wb") if compress else raw
+            for tu in tus:
+                writer.write(
+                    (json.dumps(tu.to_dict(), sort_keys=True) + "\n").encode("utf-8")
+                )
+            if compress:
+                writer.close()
+        os.replace(tmp, output_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+    if remove_originals:
+        for f in originals:
+            if f.resolve() == output_path.resolve():
+                continue  # re-running compaction onto the same output name
+            with contextlib.suppress(OSError):
+                f.unlink()
+
+    if manifest.source_facts:
+        manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]
+        _write_manifest(root, manifest)
+
+    return output_path

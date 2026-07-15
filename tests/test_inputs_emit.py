@@ -31,7 +31,7 @@ from abicheck.buildsource import (
     init_inputs_pack,
     write_inputs_pack,
 )
-from abicheck.buildsource.inputs_emit import facts_filename
+from abicheck.buildsource.inputs_emit import compact_inputs_pack, facts_filename
 from abicheck.cc_wrapper import (
     compile_unit_from_command,
     compile_units_from_command,
@@ -126,6 +126,130 @@ def test_facts_filename_deterministic_and_collision_resistant() -> None:
     # Same basename, different dir → different file.
     assert facts_filename("a/foo.cpp") != facts_filename("b/foo.cpp")
     assert facts_filename("src/foo.cpp").endswith(".jsonl")
+
+
+# -- compression (P1 #22) -----------------------------------------------------
+
+
+def test_write_inputs_pack_compress_round_trips_through_ingest(tmp_path: Path) -> None:
+    root = write_inputs_pack(
+        tmp_path / "abicheck_inputs",
+        library="libfoo.so",
+        version="1.0",
+        created_by="test",
+        tus=[_tu("foo", mangled="_Z3foov")],
+        compress=True,
+    )
+    facts = list((root / "source_facts").glob("*.jsonl.gz"))
+    assert len(facts) == 1
+    ingested = ingest_inputs_pack(root)
+    assert ingested.tu_count == 1
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names
+
+
+def test_append_source_facts_compress_supports_incremental_appends(
+    tmp_path: Path,
+) -> None:
+    # Compression is execution policy: two separate compressed appends (as
+    # parallel wrapper invocations sharing one file would do) must still
+    # decode to both TUs, exactly like the uncompressed incremental path.
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename="shared.jsonl", compress=True
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename="shared.jsonl",
+        compress=True,
+    )
+    assert not (pack / "source_facts" / "shared.jsonl").exists()
+    assert (pack / "source_facts" / "shared.jsonl.gz").is_file()
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert {"foo", "bar"} <= names
+
+
+# -- post-build compaction (P1 #21) -------------------------------------------
+
+
+def test_compact_merges_per_tu_files_and_removes_originals(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    before = ingest_inputs_pack(pack)
+    before_names = {
+        e.qualified_name for e in before.pack.source_abi.reachable_declarations
+    }
+
+    out = compact_inputs_pack(pack)
+    assert out.name == "compacted.jsonl"
+    # The two per-TU originals are gone; only the merged file remains.
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert remaining == ["compacted.jsonl"]
+
+    after = ingest_inputs_pack(pack)
+    after_names = {
+        e.qualified_name for e in after.pack.source_abi.reachable_declarations
+    }
+    # P1 #25 invariance: compaction changes file layout, never decoded facts.
+    assert after_names == before_names == {"foo", "bar"}
+    assert after.tu_count == before.tu_count == 2
+
+
+def test_compact_compress_round_trips(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+
+    out = compact_inputs_pack(pack, compress=True)
+    assert out.name == "compacted.jsonl.gz"
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names
+
+
+def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+
+    compact_inputs_pack(pack, remove_originals=False)
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert "compacted.jsonl" in remaining
+    assert len(remaining) == 2  # original + merged both present
+
+    # Ingest now double-reads the same TU from both files -- exactly the
+    # hazard remove_originals=True exists to avoid; the caller opted into it.
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2
+
+
+def test_compact_is_idempotent_when_rerun_on_same_output(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    compact_inputs_pack(pack)
+    compact_inputs_pack(pack)  # rerun onto the same merged filename
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
 
 
 # -- compile_unit_from_command -----------------------------------------------

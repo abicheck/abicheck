@@ -47,6 +47,31 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   validity, fact-set version, duplicate TU identities, coverage
   completeness, and public-surface emptiness before an authoritative merge.
 
+- **Clang facts plugin: `source_edges`/`read_files` collection, post-build
+  pack compaction/compression, and a dedicated profiling channel (ADR-038
+  C.9).** The plugin and the reference `clang.py` wrapper extractor now
+  populate `source_edges` (`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/
+  `DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`) and `read_files`
+  during the same AST walk/compile as every other fact family — both
+  families move from `unsupported` to `complete`/`empty-confirmed` coverage;
+  no second frontend pass. `check_fact_set_compatibility()` and
+  `inputs validate` now also compare/validate `fact_set.name` (not just
+  `version`) — two surfaces whose fact-set version numbers happen to match
+  but whose name differs are a different canonical contract and are now
+  flagged. New `abicheck inputs compact <pack>` command
+  (`buildsource/inputs_emit.compact_inputs_pack()`) merges a pack's many
+  per-TU `source_facts/*.jsonl` files into one, with `--compress` to gzip
+  it and `--keep-originals` to skip deleting the per-TU files — a post-build
+  size/transfer optimization that never changes the decoded facts a later
+  `merge`/`inputs validate` sees. `append_source_facts()`/
+  `write_inputs_pack()` gained a matching `compress=` option, and
+  `read_source_facts()` decompresses `.jsonl.gz`/`.json.gz` transparently.
+  The plugin's profiling telemetry (`ABICHECK_PLUGIN_PROFILE=1`) can now be
+  routed to a file via `ABICHECK_PLUGIN_PROFILE_LOG=<path>` instead of
+  stderr, useful once many parallel compiles would otherwise interleave the
+  summaries unreadably — the choice of sink never touches `source_facts`
+  output (execution-policy invariance).
+
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
   `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,

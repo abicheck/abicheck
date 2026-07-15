@@ -2343,6 +2343,55 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
     assert any(e.qualified_name == "ns::add" for e in tu.functions)
 
 
+def test_extract_populates_source_edges_and_coverage(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    # source_edges (P1 #17-18) is derived from the same AST dict extract()
+    # already parsed -- no second clang invocation, no separate mock needed.
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Base",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [],
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Widget",
+                "loc": {"line": 2},
+                "bases": [{"type": {"qualType": "Base"}, "writtenAccess": "public"}],
+                "inner": [],
+            },
+        ],
+    }
+
+    extractor = ClangSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):
+            out.write(json.dumps(ast).encode("utf-8"))
+            return _Result(0, "", "")
+        return _Result(0, "")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
+    tu = extractor.extract(
+        cu, public_header_roots=["include/foo.h"], target_id="target://x"
+    )
+    assert tu.source_edges
+    assert all(e.get("provenance") == "clang-ast-inline" for e in tu.source_edges)
+    assert any(e["edge"] == "TYPE_INHERITS" for e in tu.source_edges)
+    assert tu.coverage["source_edges"] == "complete"
+
+
 def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from abicheck.buildsource.source_extractors import clang as clang_mod
 

@@ -233,6 +233,18 @@ def test_compatibility_matching_fact_sets_no_issues() -> None:
     assert check_fact_set_compatibility(fs, dict(fs)) == []
 
 
+def test_compatibility_name_mismatch_is_error() -> None:
+    """Two surfaces with different fact_set names must not pass silently just
+    because their version numbers happen to match (Codex review)."""
+    old = default_fact_set(producer="p", producer_version="1")
+    new = dict(old)
+    new["name"] = "some-other-fact-set"
+    issues = check_fact_set_compatibility(old, new)
+    assert any(
+        i.rule == "fact_set_name_mismatch" and i.severity == "error" for i in issues
+    )
+
+
 def test_compatibility_version_mismatch_is_error() -> None:
     old = default_fact_set(producer="p", producer_version="1")
     new = dict(old)

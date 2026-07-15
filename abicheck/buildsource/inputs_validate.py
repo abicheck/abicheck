@@ -38,7 +38,11 @@ from .inputs_pack import (
     load_inputs_manifest,
     read_source_facts,
 )
-from .source_abi import SOURCE_ABI_FACT_SET_VERSION, SourceAbiTu
+from .source_abi import (
+    SOURCE_ABI_FACT_SET_NAME,
+    SOURCE_ABI_FACT_SET_VERSION,
+    SourceAbiTu,
+)
 from .source_link import link_source_abi
 
 
@@ -157,6 +161,15 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
                 "producers inconsistently."
             )
     else:
+        name = fact_set.get("name")
+        if name != SOURCE_ABI_FACT_SET_NAME:
+            report.errors.append(
+                f"pack fact_set name is {name!r}; this abicheck build expects "
+                f"{SOURCE_ABI_FACT_SET_NAME!r} — a different name is a different "
+                "canonical fact-set contract even if the version number matches, "
+                "so mandatory fact families may differ from what downstream "
+                "comparison assumes."
+            )
         version = fact_set.get("version")
         if version != SOURCE_ABI_FACT_SET_VERSION:
             report.errors.append(

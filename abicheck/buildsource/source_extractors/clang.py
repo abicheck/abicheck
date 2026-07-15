@@ -102,12 +102,17 @@ from .clang_public_roots import (  # noqa: F401
     _root_spelling,
     _strip_leading_sample_dir,
 )
+from .clang_source_edges import build_source_edges
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
 #: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
-#: from an older recipe. 0.6: emit external-linkage ``variables``.
-CLANG_EXTRACTOR_VERSION = "0.6"
+#: from an older recipe. 0.6: emit external-linkage ``variables``. 0.7: stamp
+#: ``fact_set``/``coverage`` (ADR-038 C.8) and populate ``source_edges``
+#: (P1 #17-18) from the already-parsed AST — bumped so a ``--cache-dir``
+#: populated by 0.6 is invalidated rather than silently reused with the new
+#: fields defaulting to empty (Codex review).
+CLANG_EXTRACTOR_VERSION = "0.7"
 
 
 @functools.lru_cache(maxsize=8)
@@ -1792,6 +1797,10 @@ class ClangSourceExtractor:
             target_id,
             diagnostics=diags,
         )
+        # P1 #17-18: source-graph edges from the SAME already-parsed AST dict —
+        # parse_clang_ast_calls()/parse_clang_ast_types() are pure dict-walking
+        # functions (no subprocess), so this adds no second frontend pass.
+        self._attach_source_edges(tu, ast_root, diags)
         # Drop the large AST tree before the macro pass spawns another subprocess,
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root
@@ -1799,11 +1808,19 @@ class ClangSourceExtractor:
         self._stamp_fact_set_and_coverage(tu)
         return tu
 
+    def _attach_source_edges(
+        self, tu: SourceAbiTu, ast_root: dict[str, Any], diags: list[str]
+    ) -> None:
+        """Populate ``tu.source_edges`` from the in-memory clang AST (P1 #17-18).
+
+        Thin wrapper: the actual parsing lives in ``clang_source_edges.py``
+        (split out to keep this module under the AI-readiness line-count cap).
+        """
+        tu.source_edges = build_source_edges(ast_root, diags)
+
     def _stamp_fact_set_and_coverage(self, tu: SourceAbiTu) -> None:
         """ADR-038 C.8: record this TU's canonical fact-set identity + per-family
-        coverage. Always attempts every family (no user-selectable mode) — a
-        family is ``unsupported`` only when this extractor structurally never
-        collects it (``source_edges``), never because of a flag.
+        coverage. Always attempts every family (no user-selectable mode).
         """
         # A non-zero *recovered* AST exit is TU-wide (clang.py has no per-family
         # granularity, unlike the plugin's per-decl JSON-dump diagnostics), so it
@@ -1827,10 +1844,11 @@ class ClangSourceExtractor:
         coverage["macros"] = coverage_state_for_family(
             entities_present=bool(tu.macros), family_diagnostics_seen=macro_diag
         )
-        # source_edges: this extractor never populates them (no second AST-walk
-        # for call/type edges yet) — a structural producer limitation, not a mode.
+        edges_diag = any(
+            d.startswith("source_edges unavailable") for d in tu.diagnostics
+        )
         coverage["source_edges"] = coverage_state_for_family(
-            entities_present=False, family_diagnostics_seen=False, unsupported=True
+            entities_present=bool(tu.source_edges), family_diagnostics_seen=edges_diag
         )
         coverage["read_files"] = coverage_state_for_family(
             entities_present=bool(tu.read_files), family_diagnostics_seen=False

@@ -54,9 +54,12 @@ family (`functions`, `variables`, `types`, `macros`, `templates`,
 `inline_bodies`, `constexpr_values`, `source_edges`, `read_files`). This is
 **not** a collection mode: every family is always attempted; the state only
 records what happened, derived from the same per-declaration "JSON dump
-failed" diagnostics already described below. `source_edges`/`read_files` are
-`unsupported` — this plugin does not collect them yet (a structural
-limitation, not a flag).
+failed" diagnostics already described below. `source_edges`
+(`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/
+`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`) and `read_files` are collected during
+the same AST walk/compile as every other family (a small `CallRefVisitor`
+sub-walk per function body, and `SourceManager::fileinfo_begin()/end()`
+respectively) — no second frontend pass.
 
 `abicheck merge` compares `fact_set`/`coverage` across the old/new baselines
 (`buildsource/fact_set.py`) and emits `SOURCE_FACT_COVERAGE_INCOMPLETE`
@@ -128,7 +131,11 @@ only a linear character skip. Measured on a from-scratch LLVM 18.1.3
 `LLVMSupport`+`LLVMDemangle` build (143 TUs, 4 cores): the plugin's compile-time
 overhead dropped from **3.44× → 2.39×** (tax 82 s → 47 s) with byte-for-byte
 identical `source_facts` and a green C.6 gate. Set `ABICHECK_PLUGIN_PROFILE=1` to
-print the per-TU dump/parse/canonicalize split to stderr.
+print the per-TU dump/parse/canonicalize split to stderr; set
+`ABICHECK_PLUGIN_PROFILE_LOG=<path>` alongside it to append that line to a
+file instead (useful once many parallel compiles would otherwise interleave
+the summaries unreadably on stderr) — the choice of sink never touches
+`source_facts` output (execution-policy invariance, ADR-038 C.9).
 
 The one documented residual is a **floating-point literal's textual value inside
 a hashed subtree** (`pyFloat`): clang's JSON emits an approximate numeric value

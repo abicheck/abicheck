@@ -145,6 +145,20 @@ def check_fact_set_compatibility(
         )
         return issues
 
+    old_name = old_fact_set.get("name")
+    new_name = new_fact_set.get("name")
+    if old_name != new_name:
+        issues.append(
+            FactSetIssue(
+                "error",
+                "fact_set_name_mismatch",
+                f"old baseline used fact_set name {old_name!r}, new baseline "
+                f"used {new_name!r} — these are different canonical fact-set "
+                "contracts even if their version numbers happen to match, so "
+                "family coverage and opaque hashes are not comparable.",
+            )
+        )
+
     old_version = old_fact_set.get("version")
     new_version = new_fact_set.get("version")
     if old_version != new_version:

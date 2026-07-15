@@ -139,6 +139,16 @@ def test_mismatched_fact_set_version_is_an_error(tmp_path: Path) -> None:
     assert any("fact_set version is 999" in e for e in report.errors)
 
 
+def test_mismatched_fact_set_name_is_an_error(tmp_path: Path) -> None:
+    bad_fs = default_fact_set(producer="p", producer_version="1")
+    bad_fs["name"] = "some-other-fact-set"
+    tu = _tu("a", fact_set=bad_fs)
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("fact_set name is 'some-other-fact-set'" in e for e in report.errors)
+
+
 def test_manifest_level_fact_set_used_when_present(tmp_path: Path) -> None:
     fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
     tu = _tu("a")  # no per-TU fact_set

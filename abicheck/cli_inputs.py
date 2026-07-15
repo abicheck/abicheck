@@ -19,6 +19,11 @@
 validity, fact-set version, duplicate TU identities, and per-family coverage
 completeness — before the pack is folded into an authoritative baseline.
 
+``inputs compact`` merges a pack's many per-TU ``source_facts/*.jsonl`` files
+into one, optionally gzip-compressed (ADR-038 C.9, recommendation P1 #21-22)
+— a post-build size/transfer optimization that never changes the decoded
+facts a later ``merge``/``inputs validate`` sees.
+
 Split out of :mod:`abicheck.cli` to keep that module under the AI-readiness
 file-size limit; imported for side-effect at the bottom of :mod:`abicheck.cli`
 so the ``@main.group(...)`` decorator registers the command.
@@ -110,3 +115,67 @@ def validate_cmd(pack: Path, fmt: str, output: Path | None) -> None:
         sys.exit(2)
     if report.warnings:
         sys.exit(1)
+
+
+@inputs_group.command("compact")
+@click.argument("pack", type=click.Path(path_type=Path))
+@click.option(
+    "--output-filename",
+    default="compacted.jsonl",
+    show_default=True,
+    help="Merged source-fact filename, written under PACK/source_facts/.",
+)
+@click.option(
+    "--compress/--no-compress",
+    default=False,
+    help="Gzip the merged file (a .gz suffix is added if not already present).",
+)
+@click.option(
+    "--keep-originals",
+    is_flag=True,
+    default=False,
+    help=(
+        "Keep the per-TU files that were merged instead of deleting them "
+        "(default: delete, since keeping both means a later ingest double-"
+        "counts every TU)."
+    ),
+)
+def compact_cmd(
+    pack: Path, output_filename: str, compress: bool, keep_originals: bool
+) -> None:
+    """Merge PACK's many per-TU ``source_facts/*.jsonl`` files into one.
+
+    \b
+    PACK is a directory produced by a build (the ``abicheck-cc`` wrapper, the
+    Clang facts plugin, or a hand-written producer) — the directory containing
+    ``manifest.json`` and ``source_facts/``.
+
+    A post-build step only (a still-writing parallel compile could race a
+    mid-build merge): run it once the build has finished, before shipping the
+    pack. Re-serializes every discovered TU through the same canonical JSON
+    form the writers already use, so a later ``merge``/``inputs validate``
+    decodes the exact same facts either way (ADR-038 C.9 execution-policy
+    invariance) — only the on-disk file count/size changes.
+
+    \b
+    Exit codes: 0 success, 64 PACK is not a readable Flow-2 pack.
+    """
+    from .buildsource.inputs_emit import compact_inputs_pack
+    from .buildsource.inputs_pack import load_inputs_manifest
+
+    try:
+        load_inputs_manifest(pack)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from None
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(
+        pack,
+        output_filename=output_filename,
+        compress=compress,
+        remove_originals=not keep_originals,
+        diagnostics=diagnostics,
+    )
+    click.echo(f"Compacted source facts written to {out}")
+    for diag in diagnostics:
+        click.echo(f"  note: {diag}")

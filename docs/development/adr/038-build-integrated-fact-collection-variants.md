@@ -547,7 +547,7 @@ it the same way:
   "functions": "complete", "variables": "complete", "types": "complete",
   "macros": "complete", "templates": "complete", "inline_bodies": "complete",
   "constexpr_values": "complete",
-  "source_edges": "unsupported", "read_files": "unsupported"
+  "source_edges": "complete", "read_files": "complete"
 }
 ```
 
@@ -556,11 +556,18 @@ failed" diagnostics (no new state threading through the visitor): a family
 with such a diagnostic and at least one collected entity is `partial`; with
 the diagnostic and zero entities, `failed`; otherwise `complete` (entities
 present) or `empty-confirmed` (none — collection still ran). `source_edges`
-and `read_files` are `unsupported` for the plugin (neither is collected yet)
-but `read_files` is `complete`/`empty-confirmed` for the `clang.py` wrapper
-(which already resolves every read file, D8) — an honest, producer-specific
-capability difference rather than an empty array that looks identical to
-"nothing changed here".
+(`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/
+`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`) and `read_files` are populated by both
+producers during the same AST walk/compile the rest of the record comes from
+(recommendation P1 #15-18) — the plugin via a small `CallRefVisitor` sub-walk
+per function body plus `SourceManager::fileinfo_begin()/end()`, the `clang.py`
+wrapper via `clang_source_edges.build_source_edges()` reusing
+`call_graph.py`'s/`type_graph.py`'s existing pure AST parsers on the JSON AST
+it already parsed. Edge identity is `(kind, src, dst)`, deduplicated per TU;
+each producer's edges are self-consistent but not required to be
+byte-identical across producers (same D0 philosophy as C.6 entity
+equivalence — compared for *coverage*, not byte-for-byte parity, since C.6
+does not compare `source_edges`/`read_files`).
 
 `buildsource/fact_set.py` implements the comparison-compatibility rules over
 these fields: `rollup_fact_set()`/`rollup_coverage()` fold per-TU records up
@@ -578,10 +585,57 @@ so existing baselines and hand-built fixtures are unaffected.
 
 `abicheck inputs validate <pack>` (`buildsource/inputs_validate.py`) runs the
 same checks **before** an authoritative merge: manifest validity, fact-set
-version, duplicate TU identities, incomplete mandatory-family coverage, and
-empty-public-surface detection — 0 clean / 1 warnings / 2 errors / 64 not a
-readable pack, so a CI evidence-production job can fail closed on a
-mis-collected pack instead of a much-later confusing missing finding.
+**name and** version, duplicate TU identities, incomplete mandatory-family
+coverage, and empty-public-surface detection — 0 clean / 1 warnings / 2
+errors / 64 not a readable pack, so a CI evidence-production job can fail
+closed on a mis-collected pack instead of a much-later confusing missing
+finding. `check_fact_set_compatibility()` (`buildsource/fact_set.py`) checks
+`name` too: two surfaces whose `fact_set.version` numbers happen to match but
+whose `name` differs are a different canonical contract, not a compatible
+pair — flagged the same as a version mismatch (error), not silently passed.
+
+### C.9 — Post-build pack ergonomics (recommendation P1 #21-25)
+
+A large parallel build emits one `source_facts/*.jsonl` file per TU (C.4's
+race-free-by-construction naming) — correct during the build, but expensive
+to transfer/store afterwards for a pack with thousands of TUs. Three
+independent, composable, opt-in post-build knobs address this without
+touching what gets collected (still C.8's "one canonical fact set, never a
+narrower mode") or what a consumer decodes:
+
+- **Compaction** (`inputs_emit.compact_inputs_pack()`, #21) merges every
+  discovered `source_facts/` file into one, re-serializing each TU through
+  the same canonical `json.dumps(tu.to_dict(), sort_keys=True)` form the
+  writers already use. A post-build step only — never run mid-build, since
+  a still-writing parallel compile could race the merge. `remove_originals`
+  (default `True`) deletes the per-TU files once the merge is durable, so a
+  later ingest cannot double-count TUs from both the merged file and its
+  stale sources.
+- **Compression** (`inputs_emit.append_source_facts(..., compress=True)` /
+  `write_inputs_pack(..., compress=True)` / `compact_inputs_pack(...,
+  compress=True)`, #22) gzips the facts file (stdlib `gzip` — no new
+  dependency). `inputs_pack.read_source_facts()` decompresses `.jsonl.gz`/
+  `.json.gz` transparently, so an ingester never needs to know a pack was
+  compressed.
+- **Profiling to a separate channel** (`ABICHECK_PLUGIN_PROFILE_LOG=<path>`,
+  #24) redirects the plugin's per-TU `ABICHECK_PLUGIN_PROFILE=1` summary line
+  from stderr (the default — unreadable once many parallel compiles
+  interleave, and often swallowed by a build system that only surfaces
+  stderr on failure) to an append-only log file, one process-wide sink shared
+  across the parallel TUs the same way the facts pack itself is.
+
+**Execution-policy invariance (#25):** none of the three change the decoded
+facts a consumer sees — only where/how many bytes sit on disk before ingest,
+or where telemetry that isn't a fact at all gets written. Enforced by:
+`test_inputs_emit.py`'s compaction/compression tests decode the same TU set
+before and after (`test_compact_merges_per_tu_files_and_removes_originals`
+compares the linked surface's declaration names pre/post-compaction), and
+`test_clang_plugin_profiling.py` statically guards that `emitProfileLine()`
+(the profiling sink) never references the facts-output stream and that the
+facts file write always precedes the profiling emission textually. The
+existing per-TU replay cache (`source_replay.SourceAbiCache`,
+`ABICHECK_L4_CACHE_DIR`, D8) was already covered by this invariance —
+caching serializes/deserializes the same `SourceAbiTu` records verbatim.
 
 ---
 

@@ -208,6 +208,20 @@ into an authoritative baseline.
 
 ---
 
+## `abicheck inputs compact`
+
+Merges a Flow-2 `abicheck_inputs/` pack's many per-TU `source_facts/*.jsonl`
+files into one, optionally gzip-compressed (ADR-038 C.9). A post-build size/
+transfer optimization; never changes the decoded facts a later `merge`/
+`inputs validate` sees.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Success |
+| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
+
+---
+
 ## `abicheck debian-symbols`
 
 ### `debian-symbols generate`
