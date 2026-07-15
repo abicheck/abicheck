@@ -27,12 +27,13 @@ consults before trusting an old/new pair's L4 evidence:
 2. Old and new baselines should normally use the same producer family
    (``compiler_family``).
 3. Opaque body/template hashes are only comparable when producer recipes
-   match — approximated here by requiring the same ``producer`` id *and*
-   ``producer_version``, since a producer release can change its
-   canonicalization/hashing recipe without bumping the mandatory-family
-   ``fact_set.version`` (a different producer's subtree-hash algorithm is not
-   guaranteed byte-stable even across its own versions; ADR-038 C.7's own
-   documented residual).
+   match — approximated here by requiring the same ``producer`` id, the same
+   ``producer_version``, *and* the same ``compiler_version``, since a
+   producer release can change its canonicalization/hashing recipe without
+   bumping the mandatory-family ``fact_set.version``, and the clang-family
+   producers' hash recipe ports the *compiler's own* JSON AST dump (ADR-038
+   C.2/C.7) — not guaranteed byte-stable across compiler versions even for
+   the same abicheck producer release.
 4. A missing mandatory fact family (``partial``/``failed`` coverage) must not
    be read as "unchanged" — surfaced via :func:`incomplete_families`.
 
@@ -206,5 +207,28 @@ def check_fact_set_compatibility(
                     "producer versions.",
                 )
             )
+        else:
+            # Same producer AND producer_version, but a different
+            # compiler_version: the plugin/clang-extractor hash recipe ports
+            # clang's own JSON AST dump (ADR-038 C.2/C.7), so opaque body/
+            # template hashes are not guaranteed byte-stable across the
+            # *compiler's* version even when the abicheck producer release
+            # didn't change (Codex review).
+            old_compiler_version = old_fact_set.get("compiler_version")
+            new_compiler_version = new_fact_set.get("compiler_version")
+            if old_compiler_version != new_compiler_version:
+                issues.append(
+                    FactSetIssue(
+                        "warning",
+                        "compiler_version_mismatch",
+                        f"old baseline compiler_version={old_compiler_version!r}, "
+                        f"new baseline compiler_version={new_compiler_version!r} "
+                        f"— the same producer ({old_producer!r} "
+                        f"{old_producer_version!r}) was loaded by a different "
+                        "compiler version; opaque body/template hashes "
+                        "(inline_body_changed, template_body_changed) are not "
+                        "guaranteed comparable across compiler versions.",
+                    )
+                )
 
     return issues

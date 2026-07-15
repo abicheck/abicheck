@@ -272,6 +272,51 @@ def test_compatibility_same_producer_same_version_no_producer_issue() -> None:
     )
 
 
+def test_compatibility_same_producer_and_version_different_compiler_version_is_warning() -> (
+    None
+):
+    """Same abicheck producer release, but loaded by a different compiler
+    version (e.g. clang 16 vs clang 18) — the hash recipe ports the
+    compiler's own JSON AST dump, so opaque hashes are not guaranteed
+    byte-stable across compiler versions even here (Codex review)."""
+    old = default_fact_set(
+        producer="abicheck-clang-plugin",
+        producer_version="0.4",
+        compiler_version="16.0.0",
+    )
+    new = default_fact_set(
+        producer="abicheck-clang-plugin",
+        producer_version="0.4",
+        compiler_version="18.1.3",
+    )
+    issues = check_fact_set_compatibility(old, new)
+    rules = {i.rule for i in issues}
+    assert "compiler_version_mismatch" in rules
+    assert "producer_mismatch" not in rules
+    assert "producer_version_mismatch" not in rules
+    assert all(
+        i.severity == "warning" for i in issues if i.rule == "compiler_version_mismatch"
+    )
+
+
+def test_compatibility_same_producer_version_and_compiler_version_no_issue() -> None:
+    fs = default_fact_set(
+        producer="abicheck-clang-plugin",
+        producer_version="0.4",
+        compiler_version="18.1.3",
+    )
+    issues = check_fact_set_compatibility(fs, dict(fs))
+    assert not any(
+        i.rule
+        in (
+            "producer_mismatch",
+            "producer_version_mismatch",
+            "compiler_version_mismatch",
+        )
+        for i in issues
+    )
+
+
 def test_compatibility_compiler_family_mismatch_is_warning() -> None:
     old = default_fact_set(producer="p", producer_version="1")
     new = dict(old)
