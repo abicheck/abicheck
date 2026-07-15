@@ -34,8 +34,10 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+ACTION_YML = Path(__file__).resolve().parents[1] / "action.yml"
 
 # add_flag "--x" / add_single_flag "--x"  and  CMD+=(--x ...)
 _ADD_FLAG_RE = re.compile(r'add(?:_single)?_flag\s+"(--[a-z0-9-]+)"')
@@ -115,4 +117,80 @@ def test_action_flags_are_real_cli_options(subcommand: str) -> None:
         f"action/run.sh passes {sorted(unknown)} to `abicheck {subcommand}`, "
         f"which does not accept them (would exit 64). Valid options include: "
         f"{sorted(valid)[:12]}…"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# action.yml `inputs:` ↔ "Run abicheck" step env ↔ run.sh `INPUT_*` wiring
+#
+# The whole action↔CLI bridge is stringly-typed by construction (a YAML
+# input name → an env var name → a bash variable read), and nothing in
+# GitHub Actions itself checks that the three spellings stay in sync: a
+# renamed/typo'd input silently stops reaching run.sh (the flag is just
+# never set, no error), and a stale INPUT_* read in run.sh silently never
+# fires. Three inputs (python-version, install-deps, upload-sarif) are
+# legitimately consumed by *other* steps in action.yml, not by run.sh — they
+# are the documented exception, not a gap.
+# ─────────────────────────────────────────────────────────────────────────
+
+_ENV_TO_INPUT_RE = re.compile(
+    r"^\s*(INPUT_[A-Z0-9_]+|GH_TOKEN):\s*\$\{\{\s*inputs\.([a-zA-Z0-9_-]+)\s*\}\}",
+    re.MULTILINE,
+)
+# Declared inputs consumed by a step other than "Run abicheck" (setup-python,
+# the conditional install-deps.sh step, the conditional upload-sarif step) —
+# these have no INPUT_* counterpart in run.sh by design.
+_NON_RUN_SH_INPUTS = {"python-version", "install-deps", "upload-sarif"}
+
+
+def _action_yml_inputs() -> set[str]:
+    with ACTION_YML.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return set(data["inputs"].keys())
+
+
+def _action_yml_env_mapping() -> dict[str, str]:
+    """{ENV_VAR_NAME: dashed-input-name} from the "Run abicheck" step's env block."""
+    text = ACTION_YML.read_text(encoding="utf-8")
+    return {var: inp for var, inp in _ENV_TO_INPUT_RE.findall(text)}
+
+
+def test_every_action_input_is_wired_to_run_sh() -> None:
+    """A declared action.yml input must reach run.sh (or be a documented
+    other-step exception) — otherwise setting it from a workflow is a silent
+    no-op."""
+    declared = _action_yml_inputs()
+    mapped = set(_action_yml_env_mapping().values())
+    unwired = declared - mapped - _NON_RUN_SH_INPUTS
+    assert not unwired, (
+        f'action.yml declares {sorted(unwired)} but the "Run abicheck" step\'s '
+        f"env block never forwards them (INPUT_X: ${{{{ inputs.x }}}}) — setting "
+        f"them from a workflow would silently do nothing. Add the env line, or "
+        f"add to _NON_RUN_SH_INPUTS if another step legitimately consumes it."
+    )
+
+
+def test_no_stale_action_yml_env_entries() -> None:
+    """Every env var the "Run abicheck" step sets must map to a real declared
+    input — catches a stale/renamed entry left behind after an input rename."""
+    declared = _action_yml_inputs()
+    mapping = _action_yml_env_mapping()
+    stale = {var: inp for var, inp in mapping.items() if inp not in declared}
+    assert not stale, (
+        f"action.yml's env block references undeclared input(s): {stale} — "
+        f"likely a leftover from a renamed/removed `inputs:` entry."
+    )
+
+
+def test_every_run_sh_input_var_is_set_by_action_yml() -> None:
+    """Every INPUT_* run.sh actually reads must be set by action.yml's env
+    block — catches a typo'd env var name (silently reads unset/empty)."""
+    env_vars = set(_action_yml_env_mapping().keys()) - {"GH_TOKEN"}
+    run_sh_text = RUN_SH.read_text(encoding="utf-8")
+    used = set(re.findall(r"INPUT_[A-Z0-9_]+", run_sh_text))
+    unset = used - env_vars
+    assert not unset, (
+        f"action/run.sh reads {sorted(unset)}, which action.yml's \"Run "
+        f'abicheck" step never sets — these always read as unset/empty '
+        f"(likely a typo against the declared env var name)."
     )

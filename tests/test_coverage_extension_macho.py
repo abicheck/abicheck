@@ -185,6 +185,48 @@ class TestReexportRepoint:
         assert ChangeKind.NEEDED_ADDED in _kinds(r)
         assert ChangeKind.MACHO_REEXPORT_CHANGED not in _kinds(r)
 
+    def test_vendor_hash_only_repoint_not_flagged(self):
+        """delocate rewrites a re-exported vendored dylib's content-hashed
+        filename on every wheel rebuild — a hash-only rename must not read
+        as a re-export repoint or dependency churn (Codex P2)."""
+        old = _macho(reexported_libs=["/DLC/libfoo-a746ad4a.dylib"])
+        new = _macho(reexported_libs=["/DLC/libfoo-b8f31c2e.dylib"])
+        r = compare(_snap(old), _snap(new))
+        kinds = _kinds(r)
+        assert ChangeKind.MACHO_REEXPORT_CHANGED not in kinds
+        assert ChangeKind.NEEDED_ADDED not in kinds
+        assert ChangeKind.NEEDED_REMOVED not in kinds
+
+    def test_real_repoint_still_flagged(self):
+        """A genuine re-export repoint (different library, not just a hash
+        suffix) must still surface."""
+        old = _macho(reexported_libs=["/DLC/libfoo-a746ad4a.dylib"])
+        new = _macho(reexported_libs=["/DLC/libbar-a746ad4a.dylib"])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.MACHO_REEXPORT_CHANGED in _kinds(r)
+
+
+class TestMachoDependenciesVendorHash:
+    def test_vendor_hash_only_dependency_not_flagged(self):
+        """delocate rewrites a repaired wheel's LC_LOAD_DYLIB references to
+        other vendored dylibs on every rebuild — a hash-only rename must not
+        read as a dependency add/remove (Codex P2)."""
+        old = _macho(dependent_libs=["/DLC/libfoo-a746ad4a.dylib"])
+        new = _macho(dependent_libs=["/DLC/libfoo-b8f31c2e.dylib"])
+        r = compare(_snap(old), _snap(new))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED not in kinds
+        assert ChangeKind.NEEDED_REMOVED not in kinds
+
+    def test_real_dependency_rename_still_flagged(self):
+        """A genuine dependency rename (not just a hash suffix) must still surface."""
+        old = _macho(dependent_libs=["/DLC/libfoo-a746ad4a.dylib"])
+        new = _macho(dependent_libs=["/DLC/libbar-a746ad4a.dylib"])
+        r = compare(_snap(old), _snap(new))
+        kinds = _kinds(r)
+        assert ChangeKind.NEEDED_ADDED in kinds
+        assert ChangeKind.NEEDED_REMOVED in kinds
+
 
 # ── Weak↔strong export flips ─────────────────────────────────────────────────
 

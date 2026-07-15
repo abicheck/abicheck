@@ -38,7 +38,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   single-pair-only evidence flags; and `service.resolve_input` now forwards
   both flags through its GNU-ld-linker-script-following recursive call, so a
   direct `resolve_input(script, header_graph=True)` caller still gets the L2
-  graph on the real target the script resolves to.
+  graph on the real target the script resolves to. A third gap (Codex review):
+  `--header-graph` combined with a raw `--old/new-sources` tree or raw
+  `--old/new-build-info` triggers `compare`'s inline-dump path
+  (`_embed_inline_source_side` → `ctx.invoke(dump_cmd, ...)`), which has no
+  `header_graph` wiring of its own — threading it through `dump_cmd`/
+  `perform_elf_dump`/`handle_non_elf_dump` was out of scope for this bounded
+  slice, so that combination is now rejected with a `click.UsageError`
+  instead of silently building no graph.
+- **Contract test locking the composite Action's `action.yml` ↔ `run.sh`
+  input wiring.** The whole action↔CLI bridge is stringly-typed by
+  construction (a YAML input name → an `INPUT_*` env var name → a bash
+  variable read) and nothing in GitHub Actions itself checks the three
+  spellings stay in sync — a renamed/typo'd input silently stops reaching
+  `run.sh` (no error, the flag is just never set). `tests/
+  test_action_run_contract.py` now asserts every declared `inputs:` entry is
+  forwarded to `run.sh` (or is a documented other-step exception:
+  `python-version`/`install-deps`/`upload-sarif`), every env-block entry maps
+  to a real declared input, and every `INPUT_*` `run.sh` reads is actually
+  set — no drift found today, but any future rename/typo now fails CI
+  immediately instead of silently doing nothing at runtime.
 
 - **`abicheck init` / `abicheck config validate` / `abicheck config
   show-effective` / `abicheck doctor` — new diagnostic commands.** Closes a
@@ -99,7 +118,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dependency reference to another vendored DSO gets rewritten the same way
   (`libfoo-<hash>.so.1` -> a different hash), which previously still reported
   as a spurious `NEEDED_ADDED`/`NEEDED_REMOVED` pair even after the SONAME fix
-  above (Codex review).
+  above (Codex review). Mach-O's dependency (`LC_LOAD_DYLIB`) and re-export
+  (`LC_REEXPORT_DYLIB`) list diffs (`diff_platform._diff_macho_dependencies`/
+  `_diff_macho_reexports`) get the same treatment: a delocate rebuild
+  rewriting a re-exported/depended-on vendored dylib's hashed filename
+  previously still read as dependency churn or a re-export repoint even
+  though the install-name fix already suppressed the matching
+  `SONAME_CHANGED` (Codex review).
 
 - **`abicheck doctor` crashed instead of printing diagnostics when
   `ABICHECK_AST_FRONTEND` held an unrecognized value.** It passed the raw env

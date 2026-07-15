@@ -620,6 +620,25 @@ def run_compare(
     # the standalone deep-compare command used to. Pre-built packs fall through
     # unchanged to prepare_embedded_build_source below.
     if _needs_inline_embed(old_sources, new_sources, old_build_info, new_build_info):
+        if header_graph:
+            # The inline dump below runs through `dump_cmd`, which has no
+            # header_graph/header_graph_includes parameter of its own (the L2
+            # graph is only wired into compare's own resolve_input calls, not
+            # this internal ctx.invoke(dump_cmd, ...) path) — threading it
+            # through would mean adding the flag to dump_cmd/perform_elf_dump/
+            # handle_non_elf_dump too, deliberately out of scope for this
+            # bounded slice (same ADR-041-deferred wiring noted on
+            # --header-graph itself). Reject loudly rather than silently
+            # dropping the requested graph (Codex review).
+            raise click.UsageError(
+                "--header-graph/--header-graph-includes is not supported "
+                "together with a raw --old-sources/--new-sources tree or a "
+                "raw --old-build-info/--new-build-info (build dir / "
+                "compile_commands.json): that combination is dumped inline "
+                "via a path that does not build the L2 graph, so it would be "
+                "silently dropped. Compare the binary directly (with -H/-I "
+                "instead of --sources/--build-info) to use --header-graph."
+            )
         import shutil
         import tempfile
 

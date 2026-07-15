@@ -572,10 +572,17 @@ def _diff_macho_compat_version(o: Any, n: Any) -> list[Change]:
 
 
 def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
-    """Detect dependency changes."""
+    """Detect dependency changes.
+
+    Vendor-hash-stripped like the install-name diff above: delocate rewrites
+    a repaired wheel's own ``LC_LOAD_DYLIB`` references to other vendored
+    dylibs on every rebuild (``libfoo-<hash>.dylib``), so an unnormalized
+    diff reported dependency churn even after the install-name fix above
+    suppressed the matching ``SONAME_CHANGED`` (Codex review).
+    """
     changes: list[Change] = []
-    old_deps = set(o.dependent_libs)
-    new_deps = set(n.dependent_libs)
+    old_deps = {strip_vendor_hash(d) for d in o.dependent_libs}
+    new_deps = {strip_vendor_hash(d) for d in n.dependent_libs}
     for dep in sorted(old_deps - new_deps):
         changes.append(
             make_change(
@@ -596,13 +603,18 @@ def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
 
 
 def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
-    """Detect re-exported dylib changes (LC_REEXPORT_DYLIB)."""
+    """Detect re-exported dylib changes (LC_REEXPORT_DYLIB).
+
+    Vendor-hash-stripped for the same reason as ``_diff_macho_dependencies``
+    above (Codex review): a delocate rebuild rewrites a re-exported vendored
+    dylib's hashed filename with no real re-export change.
+    """
     # A single removed+added pair is a *repoint* — the umbrella's surface is
     # now sourced from a different dylib — reported as its own kind rather
     # than an unrelated-looking remove/add pair.
     changes: list[Change] = []
-    old_reexports = set(o.reexported_libs)
-    new_reexports = set(n.reexported_libs)
+    old_reexports = {strip_vendor_hash(d) for d in o.reexported_libs}
+    new_reexports = {strip_vendor_hash(d) for d in n.reexported_libs}
     removed_re = sorted(old_reexports - new_reexports)
     added_re = sorted(new_reexports - old_reexports)
     if len(removed_re) == 1 and len(added_re) == 1:
