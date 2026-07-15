@@ -1486,6 +1486,32 @@ class TestDwarfSnapshotFallbacks:
         result = builder._process_field(die, cu)
         assert result == []
 
+    def test_process_field_skips_artificial_vptr_member(self):
+        """Regression (Codex review): gcc/clang emit a compiler-injected,
+        named DW_TAG_member (e.g. "_vptr.Foo") for the implicit vtable
+        pointer of a polymorphic class, marked DW_AT_artificial. Left
+        unfiltered, a fieldless-but-polymorphic public class's DWARF-derived
+        RecordType would carry a non-empty `fields` list purely from this
+        artifact, making the clang+DWARF layout backfill treat an exact
+        name match as "unrelated" (header.fields=[] vs dwarf.fields=[_vptr])
+        and skip backfilling size_bits/vtable/vptr_offset_bits entirely —
+        verified directly against real g++ DWARF output before this fix."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        die = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_name": MockAttr("_vptr.Foo"),
+                "DW_AT_data_member_location": MockAttr(0),
+                "DW_AT_artificial": MockAttr(1),
+            },
+        )
+        cu = MockCU()
+        assert builder._process_field(die, cu) == []
+
     def test_process_field_flattens_anonymous_union_member(self):
         """An unnamed member whose type is a genuinely anonymous union is
         flattened into its own named fields (mirrors the clang header

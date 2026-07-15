@@ -928,6 +928,20 @@ class _DwarfSnapshotBuilder:
         name = _attr_str(die, "DW_AT_name")
         if not name:
             return self._flatten_anonymous_member(die, CU)
+        if _attr_bool(die, "DW_AT_artificial"):
+            # Compiler-injected, not a real user-visible member — e.g. the
+            # implicit vtable pointer, which gcc names "_vptr.Foo" and
+            # clang spells differently, a documented cross-compiler false-
+            # positive source (test_cross_compiler_fp.py). It's already
+            # represented separately via RecordType.vtable/vptr_offset_bits,
+            # so surfacing it again as an ordinary field is both redundant
+            # and, for a fieldless-but-polymorphic class specifically,
+            # actively harmful: the clang header parser never emits it (no
+            # data members at all), so it made every such class's non-empty
+            # dwarf.fields look "unrelated" to the header's empty one and
+            # block backfill outright, even for an exact name match (Codex
+            # review).
+            return []
 
         type_name = "?"
         if "DW_AT_type" in die.attributes:
