@@ -340,6 +340,75 @@ class TestApplyShowOnly:
         assert apply_show_only([c], "compatible") == [c]
 
 
+class TestOperationForKind:
+    """Codex review on #557: operation_for_kind() (shared by --show-only's
+    added/removed/changed tokens and the JSON `operation` field, schema 2.3)
+    only matched a fixed suffix list, misclassifying kinds that are still
+    semantically an addition/removal but spelled differently."""
+
+    def test_ordinary_added_removed_modified(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_added") == "added"
+        assert operation_for_kind("func_removed") == "removed"
+        assert operation_for_kind("func_params_changed") == "modified"
+
+    def test_non_suffix_addition_kind(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("symbol_version_required_added_compat") == "added"
+
+    def test_non_suffix_removal_kinds(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("experimental_removed_without_replacement") == "removed"
+        assert operation_for_kind("func_deleted_dwarf") == "removed"
+        assert operation_for_kind("cpu_dispatch_isa_dropped") == "removed"
+
+    def test_trait_change_on_persisting_entity_is_modified_not_removed(self):
+        """A '_lost_*'/'_introduced' kind describes a property gained/lost on
+        an entity that still exists — that's "modified", not "added"/
+        "removed" (which name the entity itself appearing/disappearing)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("field_lost_const") == "modified"
+        assert operation_for_kind("func_lost_inline") == "modified"
+        assert operation_for_kind("vptr_introduced") == "modified"
+        assert operation_for_kind("static_tls_introduced") == "modified"
+
+    def test_no_remaining_add_remove_synonym_misses(self):
+        """Systematic sweep: every ChangeKind whose name contains an add/
+        remove synonym must classify as "added"/"removed", unless it is a
+        known trait-change-on-persisting-entity exception (see the
+        docstring on _OPERATION_OVERRIDES)."""
+        import re
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.reporter_markdown import operation_for_kind
+
+        trait_change_exceptions = {"python_abi3_dropped"}
+        synonym = re.compile(
+            r"drop|excis|eliminat|vanish|disappear|revok|discontinu"
+            r"|withdraw|retract|purge|delet|remov"
+            r"|gain|introduc|new_|appear|creat"
+        )
+        for kind in ChangeKind:
+            v = kind.value
+            # "_lost_*"/"_introduced" name a trait gained/lost on an entity
+            # that still exists, not the entity itself appearing/
+            # disappearing — see the docstring on _OPERATION_OVERRIDES.
+            if v in trait_change_exceptions or "_lost_" in v or v.endswith("_introduced"):
+                continue
+            if synonym.search(v) and "_added" not in v and "_removed" not in v:
+                # Not already covered by the plain suffix rule — must be a
+                # deliberate override, not a silent "modified" miss.
+                op = operation_for_kind(v)
+                assert op in ("added", "removed"), (
+                    f"{v!r} looks like an add/remove kind but "
+                    f"operation_for_kind() returned {op!r}"
+                )
+
+
 # ---------------------------------------------------------------------------
 # Stat mode tests
 # ---------------------------------------------------------------------------

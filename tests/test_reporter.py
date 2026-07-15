@@ -241,6 +241,29 @@ class TestEvidenceStatusInJson:
         assert d["severity"]["blocking"] is False
         assert d["severity"]["blocking_categories"] == []
 
+    def test_blocking_categories_survives_show_only_hiding_the_blocker(self):
+        """Verified defect (Codex review on #557): blocking_categories was
+        derived from the *display* changes (post-show_only), while exit_code
+        already correctly used the unfiltered set. Hiding the one finding
+        that's actually blocking the build via --show-only must not make
+        blocking_categories silently empty out from under a still-nonzero
+        exit_code/blocking=true."""
+        from abicheck.severity import resolve_severity_config
+
+        addition = Change(ChangeKind.FUNC_ADDED, "s1", "added")
+        breaking = Change(ChangeKind.FUNC_REMOVED, "s2", "removed")
+        r = _result(Verdict.BREAKING, changes=[addition, breaking])
+        cfg = resolve_severity_config("default", addition="error")
+        # --show-only=breaking hides the ADDITION finding from `changes[]`,
+        # but it must not hide it from the gate summary: the addition is
+        # still what's configured to fail the build.
+        d = json.loads(to_json(r, show_only="breaking", severity_config=cfg))
+        assert d["severity"]["blocking"] is True
+        assert set(d["severity"]["blocking_categories"]) == {"abi_breaking", "addition"}
+        # The addition finding itself is correctly hidden from the display
+        # `changes[]` by --show-only — only the gate summary must see it.
+        assert len(d["changes"]) == 1
+
     def test_leaf_mode_root_type_change_carries_evidence_status(self):
         # Regression (Codex review): --report-mode leaf serializes root type
         # changes via a separate _leaf_entry() path, not _change_to_dict() —

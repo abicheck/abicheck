@@ -917,6 +917,24 @@ class TestSeverityConfig:
         risk_xml = _parse(to_junit_xml(risk_result, severity_config=cfg))
         assert risk_xml.find(".//failure").get("type") == "COMPATIBLE_WITH_RISK"
 
+    def test_failure_type_potential_breaking_fallback_for_non_conforming_kind(
+        self,
+    ) -> None:
+        """Defensive fallback: a per-change `effective_verdict` override (A4)
+        can classify a finding as POTENTIAL_BREAKING without its *kind* being
+        a member of either api_break_set or risk_set (kind_sets is unaffected
+        by a per-change override, unlike a PolicyFile kind-level override) —
+        `_failure_type` must still return something, not raise/return None."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+        c.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        result = _make_result([c], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        cfg = resolve_severity_config("default", potential_breaking="error")
+        xml = to_junit_xml(result, severity_config=cfg)
+        fail = _parse(xml).find(".//failure")
+        assert fail.get("type") == "POTENTIAL_BREAKING"
+
 
 # ---------------------------------------------------------------------------
 # Error libraries in multi-suite

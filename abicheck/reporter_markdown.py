@@ -127,14 +127,39 @@ _REMOVED_SUFFIXES = (
     "_const_overload",
 )
 
+# Kinds whose name doesn't end in one of the suffixes above but still name a
+# concrete symbol/entity appearing or disappearing (Codex review on #557:
+# operation_for_kind() reported these as "modified"). Checked before the
+# suffix rule. Deliberately does NOT include kinds naming a *property*
+# gained/lost on an entity that still exists — e.g. the "*_lost_*" family
+# (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family
+# (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes
+# on a persisting entity, which is what "modified" means here, not an
+# addition/removal of the entity itself.
+_OPERATION_OVERRIDES: dict[str, str] = {
+    # Ends in "_added_compat", not "_added"/"_added_compatible".
+    "symbol_version_required_added_compat": "added",
+    # Ends in "_removed_without_replacement", not "_removed".
+    "experimental_removed_without_replacement": "removed",
+    # Ends in "_deleted_dwarf", not "_deleted".
+    "func_deleted_dwarf": "removed",
+    # A whole ISA-dispatch family's concrete symbols vanish (case83), not a
+    # property change on a persisting symbol.
+    "cpu_dispatch_isa_dropped": "removed",
+}
+
 
 def operation_for_kind(kind_val: str) -> str:
     """Classify a ``ChangeKind.value`` string into "added"/"removed"/"modified".
 
-    A kind is "added"/"removed" when its name ends with one of the
-    corresponding suffixes above; every other kind (parameter/type/layout
-    changes, renames, etc.) is "modified".
+    A kind is "added"/"removed" when it is listed in ``_OPERATION_OVERRIDES``
+    or its name ends with one of the corresponding suffixes above; every
+    other kind (parameter/type/layout changes, renames, trait gained/lost on
+    a persisting entity, etc.) is "modified".
     """
+    override = _OPERATION_OVERRIDES.get(kind_val)
+    if override is not None:
+        return override
     if any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
         return "added"
     if any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES):

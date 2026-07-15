@@ -344,6 +344,27 @@ class TestDirVsDir:
         assert "findings_truncated" not in lib
         assert "_diff_result" not in lib
 
+    def test_json_output_findings_capped_and_flagged_truncated(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_funcs = [
+            Function(name=f"foo{i}", mangled=f"_Z4foo{i}v", return_type="int",
+                      visibility=Visibility.PUBLIC)
+            for i in range(15)
+        ]
+        old = _snap("1.0", old_funcs, library="libfoo.so")
+        new = _snap("2.0", [], library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code != 0
+        lib = json.loads(out)["libraries"][0]
+        assert lib["breaking"] == 15
+        assert len(lib["findings"]) == 10
+        assert lib["findings_truncated"] is True
+
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
         old_dir = tmp_path / "old"

@@ -805,13 +805,28 @@ def _build_severity_json(
     # had to independently recompute "which category is actually failing the
     # build" from ``config``/``categories`` itself; this makes that answer a
     # first-class, versioned part of the report.
+    #
+    # Must be derived from *exit_changes* (the unfiltered gate set), not
+    # ``categorized`` above (built from the possibly --show-only-filtered
+    # *display* ``changes``) — otherwise hiding the one category that's
+    # actually failing the build (e.g. ``--show-only=breaking`` when an
+    # addition promoted to ``error`` is what's blocking) would report
+    # ``blocking: true`` alongside ``blocking_categories: []`` (Codex review
+    # on #557).
+    gate_categorized = (
+        categorized
+        if exit_changes is changes
+        else categorize_changes(
+            exit_changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
+    )
     blocking_categories = [
         name
         for name, cat_changes in (
-            ("abi_breaking", categorized.abi_breaking),
-            ("potential_breaking", categorized.potential_breaking),
-            ("quality_issues", categorized.quality_issues),
-            ("addition", categorized.addition),
+            ("abi_breaking", gate_categorized.abi_breaking),
+            ("potential_breaking", gate_categorized.potential_breaking),
+            ("quality_issues", gate_categorized.quality_issues),
+            ("addition", gate_categorized.addition),
         )
         if cat_changes and config_dict[name] == "error"
     ]

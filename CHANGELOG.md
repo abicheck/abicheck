@@ -879,6 +879,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   this at the release granularity, and a per-finding equivalent has no
   clear-cut shape yet.
 
+- **Two Codex-review findings on the schema 2.3 additions above.**
+  `operation_for_kind()` classified purely by kind-name suffix, missing
+  several kinds that are semantically an addition/removal but spelled
+  differently (`symbol_version_required_added_compat` ends in
+  `_added_compat`, not `_added`; `experimental_removed_without_replacement`
+  and `func_deleted_dwarf` don't end in `_removed`/`_deleted`;
+  `cpu_dispatch_isa_dropped` — a whole ISA-dispatch family's concrete
+  symbols vanishing, case83 — ends in `_dropped`) — these now resolve via
+  an explicit `_OPERATION_OVERRIDES` table, checked before the suffix rule.
+  Deliberately excludes the `"*_lost_*"`/`"*_introduced"` families
+  (`field_lost_const`, `vptr_introduced`, ...): those name a trait
+  gained/lost on a persisting entity, which is "modified", not the entity
+  itself appearing/disappearing. Separately, JSON's `blocking_categories`
+  was derived from the possibly `--show-only`-filtered *display* `changes`
+  rather than the unfiltered gate set `exit_code` already uses — hiding the
+  one category actually responsible for a nonzero exit code (e.g.
+  `--show-only=breaking` while an addition promoted to `error` is what's
+  blocking) reported `blocking: true` alongside `blocking_categories: []`.
+  Now derived from the same unfiltered set as `exit_code`, matching how
+  SARIF's own `_severity_gate_properties` was already doing it correctly.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**
