@@ -452,29 +452,48 @@ def compact_inputs_pack(
         # replaced in place above, not deleted here (fresh_files excludes it).
 
     # A manifest that names explicit individual files is repointed at the
-    # single merged file (those originals are gone). But a manifest whose
-    # "explicit" entry is just a directory reference to SOURCE_FACTS_DIR
-    # itself — what the Clang facts plugin's ensureManifest() always writes,
-    # and what a bare default manifest effectively means too — must NOT be
-    # narrowed to the merged filename: ensureManifest() never rewrites an
-    # existing manifest.json, so a narrowed single-file entry would
-    # permanently hide every per-TU file a later incremental build writes
-    # into that same directory from every subsequent ingest/compact/validate
-    # (Codex review, P2). The merged file already lives inside
-    # SOURCE_FACTS_DIR, so leaving the directory reference in place keeps
-    # discovering it — and any future sibling files — via the existing scan.
-    # Compared as normalized Path objects, not raw strings: _iter_source_
-    # fact_files (via pathlib) treats "source_facts", "source_facts/", and
-    # "./source_facts" as the exact same directory reference, so a byte-
-    # exact string comparison would miss those equivalent spellings and
-    # narrow them anyway (Codex review, P2).
-    is_plain_directory_scan = len(manifest.source_facts) == 1 and Path(
-        manifest.source_facts[0]
-    ) == Path(SOURCE_FACTS_DIR)
+    # single merged file (those originals are gone). But any entry that is
+    # itself a *directory* reference (SOURCE_FACTS_DIR itself — what the
+    # Clang facts plugin's ensureManifest() always writes, and what a bare
+    # default manifest effectively means too — or another sibling facts
+    # directory in a hand-written mixed manifest) must NOT be dropped:
+    # ensureManifest() never rewrites an existing manifest.json, so losing a
+    # directory reference would permanently hide every per-TU file a later
+    # incremental build writes into that directory from every subsequent
+    # ingest/compact/validate (Codex review, P2 — both the single-entry case
+    # and this generalization to a manifest that lists a directory alongside
+    # other entries, since the original single-entry check collapsed the
+    # *whole* list, directory entries included, the moment there was more
+    # than one). The merged file already lives inside SOURCE_FACTS_DIR, so a
+    # preserved SOURCE_FACTS_DIR entry keeps discovering it — and any future
+    # sibling files — via the existing scan, with no separate file entry
+    # needed. Directory-ness (not a byte-exact string/SOURCE_FACTS_DIR
+    # comparison) is checked against a scratch diagnostics list, not *sink*,
+    # so this classification pass — which re-resolves entries already
+    # validated once during discovery above — cannot itself flip the
+    # already-decided lossy_read outcome or duplicate diagnostics in the
+    # caller-visible result.
+    _scratch: list[str] = []
+    directory_entries = [
+        entry
+        for entry in manifest.source_facts
+        if (target := _safe_pack_path(root, entry, _scratch)) is not None
+        and target.is_dir()
+    ]
+    has_file_entry = len(directory_entries) != len(manifest.source_facts)
     manifest_changed = False
-    if manifest.source_facts and not is_plain_directory_scan:
-        manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]
-        manifest_changed = True
+    if manifest.source_facts and has_file_entry:
+        merged_ref = f"{SOURCE_FACTS_DIR}/{output_filename}"
+        covered = any(
+            Path(merged_ref).is_relative_to(Path(d)) for d in directory_entries
+        )
+        new_source_facts = list(directory_entries) if covered else [
+            *directory_entries,
+            merged_ref,
+        ]
+        if new_source_facts != manifest.source_facts:
+            manifest.source_facts = new_source_facts
+            manifest_changed = True
 
     # Record this run's output as the pack's new "last compaction", so a
     # later rerun recognizes it as stale (see prior_files above) regardless

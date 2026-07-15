@@ -696,6 +696,52 @@ def test_compact_directory_scan_manifest_recognized_across_spellings(
     assert names == {"foo", "bar"}
 
 
+def test_compact_preserves_directory_entry_in_mixed_manifest(
+    tmp_path: Path,
+) -> None:
+    """A manifest that names SOURCE_FACTS_DIR *alongside* another explicit
+    facts directory (a hand-written mixed manifest, not the plugin's
+    single-entry ["source_facts"] case the sibling test above covers) must
+    still preserve the directory reference after compaction, not just when
+    it is the manifest's *only* entry -- the original fix collapsed the
+    whole list, directory entries included, the moment there was more than
+    one entry, hiding every per-TU file a later incremental build writes
+    back into that directory (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    other_dir = pack / "extra_facts"
+    other_dir.mkdir()
+    (other_dir / "extra.jsonl").write_text(
+        json.dumps(
+            _tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict()
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["source_facts", "extra_facts"]
+    _write_manifest(pack, manifest)
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    # Both directory entries survive -- neither was collapsed into a single
+    # explicit merged-file entry.
+    assert load_inputs_manifest(pack).source_facts == ["source_facts", "extra_facts"]
+
+    # A later incremental build's fresh per-TU file lands in source_facts/;
+    # it must still be discovered, and extra_facts/ is untouched.
+    append_source_facts(
+        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo", "bar", "extra"}
+
+
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
