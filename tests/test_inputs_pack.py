@@ -342,6 +342,12 @@ def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
     assert graph is not None
     assert graph.extractor_passes.get("call_graph") is True
     assert graph.extractor_passes.get("type_graph") is True
+    # build_source_graph() already called finalize() once before the
+    # coverage marking ran; the rebuild must re-finalize so the serialized
+    # coverage summary (not just the extractor_passes flag) reflects it too
+    # (Codex review).
+    assert graph.coverage["call_edges"]["collected"] is True
+    assert graph.coverage["type_edges"]["collected"] is True
 
 
 def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
