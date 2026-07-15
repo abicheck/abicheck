@@ -379,8 +379,19 @@ def is_github_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def emit_github_step_summary(diff_result: DiffResult) -> str | None:
+def emit_github_step_summary(
+    diff_result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> str | None:
     """Write a Markdown job summary to $GITHUB_STEP_SUMMARY if available.
+
+    *severity_config*, when given, is forwarded to :func:`abicheck.reporter.to_markdown`
+    so the step summary carries the same "Severity Configuration" section the
+    inline annotations are already gated on — without it, `--severity-addition
+    error` (for example) could fail the annotations/exit code while the step
+    summary still rendered the legacy compatible report with no severity gate
+    section, contradicting the actual gate on the same PR.
 
     Returns the summary path if written, None otherwise.
     """
@@ -390,7 +401,7 @@ def emit_github_step_summary(diff_result: DiffResult) -> str | None:
 
     from .reporter import to_markdown
 
-    md = to_markdown(diff_result)
+    md = to_markdown(diff_result, severity_config=severity_config)
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write(md)
         f.write("\n")

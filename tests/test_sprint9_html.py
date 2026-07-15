@@ -167,6 +167,28 @@ def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None
     assert "(0 breaking change(s))" in out
 
 
+def test_policy_escalated_addition_not_in_green_added_section() -> None:
+    """Codex review on #549: a policy file that escalates an inherently
+    additive kind (e.g. `func_added: BREAKING`) must not leave the finding
+    in the green "Added" section — `_change_bucket`'s canonical
+    `BREAKING_KINDS` membership check can never see a policy-file escalation
+    since it only looks at the kind's own default classification, so the
+    page could show a breaking compatibility metric while navigation/summary
+    still said "Added"."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.policy_file import PolicyFile
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "new function: bar")
+    pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict.BREAKING})
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+    )
+    out = generate_html_report(result)
+    assert "id='added'" not in out
+    assert "id='changed'" in out
+
+
 def test_changed_section_present_for_changed_kinds() -> None:
     r = _result(verdict="BREAKING", changes=[_ch("func_return_changed", "myfunc")])
     out = generate_html_report(r)

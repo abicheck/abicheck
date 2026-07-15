@@ -818,7 +818,7 @@ def _maybe_emit_annotations(
         click.echo(text, err=True)
 
     if write_step_summary:
-        emit_github_step_summary(result)
+        emit_github_step_summary(result, severity_config=severity_config)
 
 
 def _write_release_step_summary(text: str, fmt: str) -> None:

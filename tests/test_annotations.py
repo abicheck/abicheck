@@ -520,6 +520,25 @@ class TestEmitGitHubStepSummary:
         assert content.startswith("existing content\n")
         assert "NO_CHANGE" in content
 
+    def test_forwards_severity_config_to_markdown(self, tmp_path):
+        """Codex review on #549: `_maybe_emit_annotations` (cli.py) makes the
+        inline GitHub annotations severity-aware, but still called
+        `emit_github_step_summary(result)` without `severity_config` — so
+        e.g. `--severity-addition error` could fail the annotations/exit code
+        while the step summary rendered the legacy compatible report with no
+        severity gate section, contradicting the actual gate on the same
+        PR."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        summary_file = tmp_path / "summary.md"
+        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+            result = _result(Verdict.COMPATIBLE, [
+                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added: bar"),
+            ])
+            emit_github_step_summary(result, severity_config=PRESET_DEFAULT)
+        content = summary_file.read_text(encoding="utf-8")
+        assert "Severity Configuration" in content
+
 
 # ---------------------------------------------------------------------------
 # collect_annotations / format_annotations
