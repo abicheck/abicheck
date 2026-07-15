@@ -519,9 +519,11 @@ def compile_context_options(func: F) -> F:
         type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
         help="C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
         "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-        "bundled frontend chokes). auto = castxml if present, else clang, with an "
-        "automatic clang fallback on a castxml toolchain-version error. Env: "
-        "ABICHECK_AST_FRONTEND.",
+        "bundled frontend chokes). auto resolves to castxml (or the "
+        "ABICHECK_AST_FRONTEND pin) and does NOT fall back merely because "
+        "castxml is absent; it only falls back to clang for two narrow castxml "
+        "runtime failures (a toolchain-version mismatch or a direct-include "
+        "#error guard). Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func
 

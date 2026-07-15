@@ -25,10 +25,10 @@ in a 5-tier policy model, **181 calibrated example cases** (134 binary shared-li
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
-five `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
+four `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
 header-only/inline-only analysis (G4), auditwheel vendored-library pairing (G9),
-manylinux glibc-floor checks (G10), single-binary audit/lint mode (G11), and
-cross-architecture guardrails (G13) — plus six **partial**/`modeled` items with
+manylinux glibc-floor checks (G10), and single-binary audit/lint mode (G11) —
+plus six **partial**/`modeled` items with
 some shipped work already: inline-namespace version-stamp normalization (G15),
 header-scoped source-mode toolchain robustness (G16, diagnostics and the
 `castxml --version` floor probe have shipped), a real-world validation corpus
@@ -42,8 +42,9 @@ Several formerly broad gaps are now closed and should no longer be treated as
 open roadmap work: native PE/Mach-O compare validation (G1), build-config matrix
 integration (G2), workflow/report coverage (G3), plugin host↔plugin checking
 (G5), BTF/CTF and SYCL workflows (G6), release recommendations (G7), static
-library stance (G8), security-hardening drift (G12), and CPython `abi3`
-import-contract checking (G14).
+library stance (G8), security-hardening drift (G12), cross-architecture
+comparison guardrails (G13), and CPython `abi3` import-contract checking
+(G14).
 
 ---
 
@@ -111,7 +112,7 @@ A real invocation is a point in this space:
 | **G10** | planned | manylinux glibc-floor / platform-baseline checks. |
 | **G11** | planned | Single-binary ABI audit/lint mode. |
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
-| **G13** | planned | Cross-architecture mismatch guardrail. |
+| **G13** | ✅ closed | ELF snapshot captures `e_machine`/`EI_CLASS`/endianness; a mismatch is a hard guard (`ELF_MACHINE_CHANGED`/`ELF_CLASS_CHANGED`, `BREAKING_KINDS`) rather than a false-green `COMPATIBLE_WITH_RISK` verdict. |
 | **G14** | ✅ closed | CPython Limited-API / `abi3` import-contract conformance — extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit. |
 | **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
 | **G17** | partial | Real-world upstream-library validation corpus (`eval/manifest.yaml` + `runner.py`, conda-forge fetch + `dump`/`compare`) — reproducible but not continuously run in CI; complements the synthetic `examples/case*` fixtures. |
@@ -136,7 +137,6 @@ planned row from drifting away from its plan.
 | Medium | G11 — single-binary audit/lint | [g11](plans/g11-single-binary-audit.md) |
 | Medium | G15 — inline-namespace version stamp | [g15](plans/g15-inline-namespace-version.md) |
 | Small | G10 — glibc-floor check | [g10](plans/g10-glibc-floor-check.md) |
-| Small | G13 — cross-architecture guardrail | [g13](plans/g13-arch-mismatch-guard.md) |
 | Medium | G16 — header-scope toolchain robustness | [g16](plans/g16-header-scope-toolchain-robustness.md) |
 | Medium | G17 — real-world validation corpus | [g17](plans/g17-real-world-corpus.md) |
 | Medium | G18 — Bazel build-evidence | [g18](plans/g18-bazel-build-evidence.md) |

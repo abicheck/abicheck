@@ -272,16 +272,19 @@ use_cases:
   - id: UC-PLAT-arch-guard
     axis: platform
     name: Cross-architecture comparison guardrail (ELF e_machine)
-    status: planned
-    gap: G13
-    plan: docs/development/plans/g13-arch-mismatch-guard.md
-    next_steps: >
-      Capture ELF e_machine / EI_CLASS / endianness into the snapshot (PE and
-      Mach-O already carry a machine field) and treat a machine mismatch in
-      compare/compare-release as a hard ARCHITECTURE_MISMATCH guard instead of a
-      false-green COMPATIBLE_WITH_RISK verdict. Confirmed by empirical scanning:
-      x86-64 vs aarch64 of the same version currently reports 100%
-      binary-compatible.
+    status: complete
+    note: >
+      G13 closed. The ELF snapshot captures e_machine, EI_CLASS, and
+      endianness (PE/Mach-O already carried an equivalent machine field); a
+      mismatch is a hard guard rather than a false-green
+      COMPATIBLE_WITH_RISK verdict — ELF_MACHINE_CHANGED and
+      ELF_CLASS_CHANGED dominate the verdict (BREAKING_KINDS), with
+      ELF_ENDIANNESS_CHANGED and ELF_ABI_FLAGS_CHANGED covering byte-order and
+      decoded float-ABI/EABI drift. Same-architecture comparisons are
+      unaffected.
+    evidence:
+      modules: [abicheck/elf_metadata.py, abicheck/checker_policy.py, abicheck/diff_platform_elf_dynamic.py]
+      tests: [tests/test_g23_elf_facts.py, tests/test_changekind_completeness.py]
 
   # ── workflow ──────────────────────────────────────────────────────────────
   - id: UC-WF-compare

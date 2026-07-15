@@ -98,12 +98,16 @@ selects which:
 
 | Value | Uses |
 |-------|------|
-| `auto` *(default)* | castxml if present, else clang |
-| `castxml` | castxml (the default L2 backend) |
-| `clang` | `clang -ast-dump=json` — **set this on a clang-only host** where castxml is not installed |
+| `auto` *(default)* | the most-capable **available** backend: clang if present, else castxml |
+| `castxml` | castxml (the default L2 backend) — declarations/types/const values only; an unavailable castxml is **not** upgraded to clang (that would silently change extractor semantics) — extraction is disabled instead |
+| `clang` | `clang -ast-dump=json` — richest source facts (also inline/template/constexpr bodies, macros, constructor mangling); falls back to castxml if clang is unavailable |
 
-On a host without castxml, `auto` already falls back to clang; set
-`ABICHECK_CC_EXTRACTOR=clang` explicitly when you want to pin it.
+`auto` prefers clang over castxml when both are present, because clang observes
+strictly more source facts (see the capability table in
+[Build Info & Sources](../concepts/build-source-data.md)); this is the opposite
+precedence from `--ast-frontend auto` (header-only L2 parsing), which always
+prefers castxml and never falls back merely because it is absent. Set
+`ABICHECK_CC_EXTRACTOR=castxml` explicitly to pin the L2-consistent backend.
 
 !!! warning "Extraction concurrency is bound by your build's `-jN`, not by `ABICHECK_L4_JOBS`"
     Each `abicheck-cc` invocation extracts its source TUs synchronously, so a
