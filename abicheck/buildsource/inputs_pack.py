@@ -331,11 +331,16 @@ def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[So
 
         ``SourceAbiTu.from_dict`` / ``SourceEntity.from_dict`` require some keys
         (e.g. an entity ``id``), so a valid-JSON-but-schema-invalid record raises
-        ``KeyError``. Treat that like a malformed line — one bad TU must not
-        reject an otherwise usable pack (Codex review)."""
+        ``KeyError``. A bucket like ``"functions": "bad"`` (a string instead of
+        a list of entity objects) is iterated character-by-character and each
+        character reaches ``SourceEntity.from_dict``'s ``d.get(...)`` calls,
+        raising ``AttributeError`` (``str`` has no ``.get``) instead — also
+        schema-invalid, not a code bug (Codex review, P2). Treat all of these
+        like a malformed line — one bad TU must not reject an otherwise usable
+        pack (Codex review)."""
         try:
             return SourceAbiTu.from_dict(obj)
-        except (KeyError, ValueError, TypeError) as exc:
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
             diagnostics.append(f"{where}: skipped schema-invalid TU record ({exc})")
             return None
 

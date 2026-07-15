@@ -508,6 +508,24 @@ def test_ingest_skips_schema_invalid_tu_record(tmp_path: Path) -> None:
     assert any("schema-invalid TU" in d for d in ingested.diagnostics)
 
 
+def test_ingest_skips_tu_record_with_malformed_entity_bucket(tmp_path: Path) -> None:
+    # A hand-written/third-party record with a bucket like "functions": "bad"
+    # (a string instead of a list of entity objects) is iterated character by
+    # character; each character then reaches SourceEntity.from_dict's
+    # d.get(...) calls and raises AttributeError ('str' has no '.get'), not
+    # the KeyError/ValueError/TypeError the schema-invalid-TU path already
+    # handled. That must degrade to a diagnostic like every other malformed
+    # record here, not crash the whole ingest (Codex review, P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    facts = pack / "source_facts" / "libfoo.jsonl"
+    bad = json.dumps({"tu_id": "cu://bad", "functions": "bad"})
+    facts.write_text(facts.read_text(encoding="utf-8") + bad + "\n", encoding="utf-8")
+    ingested = ingest_inputs_pack(pack)  # must not raise
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names  # the good record survived
+    assert any("schema-invalid TU" in d for d in ingested.diagnostics)
+
+
 def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
     # An explicitly named source_facts entry that resolves to nothing must be
     # reported (not a silent L3-only baseline) and downgrade the record.
