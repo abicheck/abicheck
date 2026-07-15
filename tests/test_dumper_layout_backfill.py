@@ -194,6 +194,22 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
+    def test_empty_header_against_nonempty_dwarf_is_never_guessed(self) -> None:
+        """Regression (Codex review): the anonymous-aggregate exception only
+        justifies trusting a one-sided-empty match in the header-has-fields,
+        dwarf-empty direction. The reverse — an empty header tag type (e.g.
+        `struct Foo {};`, never itself emitted in DWARF) matched to a unique
+        but unrelated internal `impl::Foo { int x; }` via bare-name suffix —
+        must NOT be trusted: that would silently backfill the public empty
+        type's layout from a type that isn't actually the same declaration."""
+        header = RecordType(name="Foo", kind="struct", fields=[])
+        unrelated = RecordType(
+            name="impl::Foo", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int")],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)

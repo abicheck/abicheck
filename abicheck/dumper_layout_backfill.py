@@ -127,19 +127,25 @@ def backfill_dwarf_layout(
     type, not just unqualified" — left unmatched rather than trusted on name
     alone.
 
-    An empty DWARF field list, though, is not itself a sign of "unrelated": a
-    record whose members are all injected from an anonymous struct/union
-    (``struct Foo { union { int i; float f; }; };``) is flattened onto the
-    header side by ``dumper_clang.py`` (so ``header.fields`` lists ``i``/``f``
-    directly) but the DWARF builder does not flatten it the same way, leaving
+    An empty DWARF field list, though, is not itself a sign of "unrelated" —
+    but only when the *header* side is the one with fields. A record whose
+    members are all injected from an anonymous struct/union (``struct Foo {
+    union { int i; float f; }; };``) is flattened onto the header side by
+    ``dumper_clang.py`` (so ``header.fields`` lists ``i``/``f`` directly) but
+    the DWARF builder does not flatten it the same way, leaving
     ``dwarf.fields`` empty even though DWARF *does* carry the record's real
     ``size_bits`` — rejecting that on "no overlap" would make every such
     struct permanently layout-blind under the clang backend (Codex review),
-    which is a real, common C pattern, not a hypothetical. The residual risk
-    (an unrelated same-bare-name type that also happens to have zero DWARF
-    fields) is accepted: a fieldless type's layout is trivial regardless of
-    identity, so a wrong match there is low-consequence, unlike the
-    non-empty-vs-non-empty case above.
+    which is a real, common C pattern, not a hypothetical.
+
+    The reverse — an empty *header* type matched against a DWARF candidate
+    that DOES have fields — gets no such exception (Codex review): a header
+    such as ``struct Foo {};`` with no DWARF emission of its own could
+    otherwise silently match a unique but unrelated internal ``impl::Foo {
+    int x; }`` via the bare-name suffix, backfilling the public empty type's
+    layout from a type that isn't actually the same declaration. Both sides
+    empty (a genuine fieldless tag type) is still trusted; header-empty with
+    dwarf-non-empty is not.
     """
     if not dwarf_types:
         return header_types
@@ -153,8 +159,15 @@ def backfill_dwarf_layout(
         return candidates[0] if len(candidates) == 1 else None
 
     def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
-        if not header.fields or not dwarf.fields:
-            return True  # nothing on one side to disagree with the other
+        if not header.fields:
+            # An empty header type (tag type) can't corroborate against a
+            # DWARF candidate that DOES have fields — that's exactly the
+            # unrelated-internal-type risk this check exists to catch, not
+            # the anonymous-aggregate asymmetry below. Only trust it when
+            # DWARF is empty too (both sides genuinely fieldless).
+            return not dwarf.fields
+        if not dwarf.fields:
+            return True  # anonymous-aggregate asymmetry: header flattens, DWARF doesn't
         return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
 
     out: list[RecordType] = []
