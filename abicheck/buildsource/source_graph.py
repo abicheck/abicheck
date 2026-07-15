@@ -1198,10 +1198,15 @@ def fold_source_edges(
     note flags as outstanding for the ``source_edges`` wire format). Which
     rows carry ``dst_file`` depends on the producer: the Python inline
     extractor (``clang_source_edges.py``) resolves it for every edge kind;
-    the ADR-038 C.8 clang plugin only resolves it for
-    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` -- its three type-edge kinds
-    carry a printed type spelling for ``dst``, not a resolved decl, and the
-    plugin does not attempt spelling-to-decl resolution. Applied whether the
+    the ADR-038 C.8 clang plugin resolves it for all five kinds too as of
+    ADR-038 C.13 (a ``typeDeclFile(QualType)`` helper unwraps
+    pointer/reference/array sugar and resolves a typedef alias to its own
+    declaring file, or a record/enum ``TagDecl`` otherwise) -- though its
+    ``DECL_HAS_TYPE`` still never covers a variable's own type or a
+    typedef's underlying type (only function return/parameter types), so
+    ``mark_source_edges_extractor_coverage()`` still degrades the whole
+    family for the plugin producer rather than trusting it, per that
+    function's docstring. Applied whether the
     node is created fresh here or already existed from an earlier edge in
     this same call (backfilled, unless it already carries a ``visibility``
     attr -- real L4 evidence, never overridden by this best-effort marker),

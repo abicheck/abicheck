@@ -1450,6 +1450,57 @@ std::string declFile(const Decl *d) {
   return pl.getFilename();
 }
 
+// Resolve *qt* to the declaring file of the record/enum/typedef decl it
+// names, if any -- the type-edge counterpart of declFile() (ADR-041 P1 #1
+// addendum, Codex review): TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE's
+// dst is a *printed* type spelling (getAsString(PP)), which this never
+// touches -- it operates on the real QualType the spelling was derived
+// from, so it needs no re-parsing/name lookup. A pointer/reference/array is
+// unwrapped down to its pointee/element first (the printed spelling of
+// `Impl *` still names `Impl`); a typedef is resolved to the *alias*
+// itself, not what it desugars to, matching the pretty-printer's default
+// sugar-preserving spelling (`Handle` stays `Handle`, not `detail::Impl *`)
+// -- checked before the pointer/reference unwrap since isPointerType()/
+// isReferenceType() desugar through a typedef to inspect the aliased type,
+// which would skip straight past a `using Handle = Impl*` alias to `Impl`
+// and resolve the wrong decl. A dependent/template-parameter type or a
+// builtin has no such decl and yields "" (best-effort, no diagnostic --
+// mirrors declFile()'s own silent-empty contract for an unresolvable
+// location).
+std::string typeDeclFile(QualType qt) {
+  for (;;) {
+    const Type *t = qt.getTypePtrOrNull();
+    if (!t)
+      return "";
+    if (const auto *tdt = t->getAs<TypedefType>())
+      return declFile(tdt->getDecl());
+    if (t->isPointerType() || t->isReferenceType()) {
+      qt = t->getPointeeType();
+      continue;
+    }
+    if (const ArrayType *at = t->getAsArrayTypeUnsafe()) {
+      qt = at->getElementType();
+      continue;
+    }
+    break;
+  }
+  if (const TagDecl *tag = qt->getAsTagDecl())
+    return declFile(tag);
+  return "";
+}
+
+// {"role": role} + "dst_file" (via typeDeclFile()) when resolvable -- shared
+// by every DECL_HAS_TYPE/TYPE_INHERITS/TYPE_HAS_FIELD_TYPE addEdge() call
+// site (Codex review: none of the three attempted dst_file resolution at
+// all before this).
+std::map<std::string, std::string> typeEdgeAttrs(const char *role, QualType qt) {
+  std::map<std::string, std::string> attrs = {{"role", role}};
+  std::string file = typeDeclFile(qt);
+  if (!file.empty())
+    attrs["dst_file"] = std::move(file);
+  return attrs;
+}
+
 // ---------------------------------------------------------------------------
 // Small per-function-body sub-walk collecting DECL_CALLS_DECL/
 // DECL_REFERENCES_DECL edge targets (P1 #17-18). Scoped to one FunctionDecl's
@@ -2069,11 +2120,12 @@ public:
     // (kind, src, dst) dedup conflate `foo(int)`'s edges with `foo(double)`'s
     // (CodeRabbit review, P2; see mangledOrScopedName()).
     addEdge("DECL_HAS_TYPE", key, fd->getReturnType().getAsString(PP), "high",
-            {{"role", "return"}});
+            typeEdgeAttrs("return", fd->getReturnType()));
     for (const ParmVarDecl *p : fd->parameters()) {
       std::string ptype = p->getType().getAsString(PP);
       if (!ptype.empty())
-        addEdge("DECL_HAS_TYPE", key, ptype, "high", {{"role", "param"}});
+        addEdge("DECL_HAS_TYPE", key, ptype, "high",
+                typeEdgeAttrs("param", p->getType()));
     }
     if (Stmt *body = fd->getBody()) {
       CallRefVisitor crv;
@@ -2140,12 +2192,14 @@ public:
     for (const CXXBaseSpecifier &base : rd->bases()) {
       std::string baseName = base.getType().getAsString(PP);
       if (!baseName.empty())
-        addEdge("TYPE_INHERITS", name, baseName, "high", {{"role", "base"}});
+        addEdge("TYPE_INHERITS", name, baseName, "high",
+                typeEdgeAttrs("base", base.getType()));
     }
     for (const FieldDecl *field : rd->fields()) {
       std::string ftype = field->getType().getAsString(PP);
       if (!ftype.empty())
-        addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high", {{"role", "field"}});
+        addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high",
+                typeEdgeAttrs("field", field->getType()));
     }
     return true;
   }
@@ -2554,11 +2608,12 @@ private:
       // keyed by the same qualified `name` used for this entity's own
       // identity above.
       addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP),
-              "high", {{"role", "return"}});
+              "high", typeEdgeAttrs("return", fd->getReturnType()));
       for (const ParmVarDecl *p : fd->parameters()) {
         std::string ptype = p->getType().getAsString(PP);
         if (!ptype.empty())
-          addEdge("DECL_HAS_TYPE", name, ptype, "high", {{"role", "param"}});
+          addEdge("DECL_HAS_TYPE", name, ptype, "high",
+                  typeEdgeAttrs("param", p->getType()));
       }
       if (Stmt *body = fd->getBody()) {
         CallRefVisitor crv;

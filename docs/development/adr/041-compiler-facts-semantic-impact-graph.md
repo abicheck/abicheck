@@ -1104,16 +1104,42 @@ there is no equivalent "should this be automatic" question for them.
    poorer first row silently won and the richer one was discarded. Now
    merges a missing `dst_file` into the surviving row from any later
    duplicate that has one (additive only — never clobbers an
-   already-resolved `dst_file`). The inline extractor actually carries
-   `dst_file` for **all five** kinds
-   (`type_graph.py`'s
-   two-pass indexing resolves a type spelling to its declaring file
-   regardless of edge kind); the plugin's three type-edge kinds
-   (`DECL_HAS_TYPE`/`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`) still don't — its
-   `dst` there is a printed type spelling it never attempts to resolve back
-   to a decl/file. `inline._build_inline_graph()` still always runs the
-   separate replay passes regardless (that skip-optimization needs *every*
-   kind covered, not just two of five, to be safe) — this closes the
+   already-resolved `dst_file`). The inline extractor already carried
+   `dst_file` for **all five** kinds (`type_graph.py`'s two-pass indexing
+   resolves a type spelling to its declaring file regardless of edge kind).
+   **ADR-038 C.13 closes the matching gap on the plugin side:** its three
+   type-edge kinds (`DECL_HAS_TYPE`'s return/parameter roles,
+   `TYPE_INHERITS`, `TYPE_HAS_FIELD_TYPE`) previously never attempted to
+   resolve `dst` — a printed type spelling (`getAsString(PP)`) — back to a
+   decl/file at all. A new `typeDeclFile(QualType)` helper (alongside
+   `declFile(const Decl*)`) unwraps a pointer/reference/array down to its
+   pointee/element, then resolves a `TypedefType` to the alias's *own*
+   declaring file (checked before the pointer/reference unwrap, since
+   `isPointerType()`/`isReferenceType()` desugar through a typedef to the
+   type it names — stripping first would resolve `using Handle = Impl*`'s
+   `dst_file` to wherever `Impl` is declared instead of where `Handle`
+   itself is, diverging from what the printed spelling actually names) or a
+   `TagDecl` (record/enum) otherwise; a dependent/template-parameter type or
+   a builtin yields `""`, matching `declFile()`'s own silent-empty contract.
+   Verified against a real Clang 18 build (`cmake`/`make` against
+   `llvm-18-dev`/`libclang-18-dev`): compiled fixtures exercising a
+   public struct's base class and field type declared in a private header
+   (both resolve `dst_file` to that header) and a pointer/reference typedef
+   alias declared in a *different* header than its underlying type (resolves
+   to the alias's own file, confirming the desugar-order fix); the plugin's
+   own C.6 differential-conformance, scan-flow, and public-roots-diagnostic
+   test suites all still pass unmodified (this only adds `attrs`, never
+   changes an edge's `(kind, src, dst)` identity or count). `inline.
+   _build_inline_graph()` still always runs the separate replay passes
+   regardless (that skip-optimization needs *every* kind covered with equal
+   *breadth*, not just `dst_file` resolution, to be safe — C.12's
+   `mark_source_edges_extractor_coverage()` producer gate is exactly this
+   distinction: the plugin's `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE` now
+   resolve `dst_file` correctly for every public record it walks, but its
+   `DECL_HAS_TYPE` still never covers a variable's type or a typedef's own
+   underlying type, so the *family* remains degraded even though two of its
+   three kinds are now individually reliable — a finer per-kind trust split
+   is a candidate follow-up, not attempted here) — this closes the
    `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`-visibility gap for
    Flow-2/plugin-only ingestion paths that never run a replay at all
    (`inputs_pack.ingest_inputs_pack`), not the replay-skip itself. Also
