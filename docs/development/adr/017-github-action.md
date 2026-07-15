@@ -1,7 +1,13 @@
 # ADR-017: GitHub Action Design
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** the composite-action
+architecture below still holds, but `action.yml` has grown substantially
+since this ADR was written — several modes (`compare-release`, `scan`,
+`merge`, `appcompat`) and their inputs were added later. The "Key inputs" /
+"Output variables" tables below are illustrative, not exhaustive — treat
+`action.yml` at the repo root as the authoritative, current input/output
+contract.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -43,7 +49,7 @@ is a supported alternative.
 ### Action flow
 
 ```text
-1. Set up Python (actions/setup-python@v5)
+1. Set up Python (actions/setup-python@v6)
 2. Install system dependencies (castxml, gcc) — conditional on install-deps flag
 3. Install abicheck (pip install from action path)
 4. Run abicheck via action/run.sh with inputs as environment variables
@@ -96,7 +102,7 @@ pre-install castxml yourself or use snapshot-based comparison.
 When `format: sarif` and `upload-sarif: 'true'`:
 
 ```yaml
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@v4
   with:
     sarif_file: ${{ steps.abicheck.outputs.report-path }}
 ```
@@ -136,7 +142,8 @@ migrating to abicheck.
 
 ## References
 
-- `action.yml` — Action definition (260 lines)
+- `action.yml` — Action definition (authoritative input/output contract;
+  has grown well beyond this ADR's original scope — see amendment above)
 - `action/run.sh` — Action execution script
 - `action/install-deps.sh` — System dependency installation
 - ADR-009 — Verdict system and exit code contract (verdict output values)

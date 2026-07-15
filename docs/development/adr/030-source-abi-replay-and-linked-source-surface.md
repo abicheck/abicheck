@@ -5,6 +5,13 @@
 macro noise), #3 (typedef/alias modeling) and #4 (include-graph scope selection)
 resolved, #1 partially (pure-Python validation corpus committed). **Amended
 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
+**Forward pointer (ADR-038, 2026-07-01):** the D3/Phase-5 clang backend
+described below (`source_extractors/clang.py`) is now one of three
+interchangeable producers of this ADR's `SourceAbiTu` contract — ADR-038
+specs the other two (the `abicheck-cc` wrapper and the Clang plugin) and, in
+its C.2 table, pins the exact hashing/mangled-name/visibility recipe the
+clang extractor implements, which the plugin must match byte-for-byte. See
+[038-build-integrated-fact-collection-variants.md](038-build-integrated-fact-collection-variants.md).
 **Decision maker:** Nikolay Petrov
 
 ---

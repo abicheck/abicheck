@@ -84,6 +84,17 @@ useful.
 | Debug resolution (`--debuginfod`, `--debuginfod-url`, `--debug-format`, `--dwarf-only`) | `debug:` (new) | hidden + config-read (still overrides config); the coarse per-run `--debug-root` stays a **visible** override. |
 | Public-surface scoping (`--show-redundant`) | `scope:` (already exists — `show_redundant` key) | hidden + config-read; `--scope-public-headers` **retained visible** (everyday on/off switch), `--show-filtered` debugging view kept. |
 
+> **Amendment note (docs review, 2026-07):** the flag counts in this ADR
+> (79, 62, 57, ~20, …) are point-in-time snapshots of the reduction as it
+> landed, not a living count. Verified against the code at the time of this
+> note: `COMPARE_FLAG_BUDGET_BASE == 57` and the live `compare` command
+> exposes 61 visible flags (`BASE` + `COMPARE_FLAG_BUDGET_RAISES`), matching
+> the Phase D end-state below — no drift found. `abicheck/cli_options.py`
+> (`COMPARE_FLAG_BUDGET_BASE`/`_RAISES`/`_BUDGET`) is the machine-checked
+> source of truth going forward; run `abicheck compare --help` or
+> `tests/test_config_rebalance.py::TestFlagBudget` for the current number
+> instead of trusting a number in this prose.
+
 As implemented (the constraint-aware subset chosen for this PR), demotion follows
 the established **hide-then-config** cadence used by the severity/suppression
 families: the demoted flags are marked `hidden` and read their default from the

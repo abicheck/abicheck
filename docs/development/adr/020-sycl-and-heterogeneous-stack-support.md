@@ -1,7 +1,11 @@
 # ADR-020b: SYCL and Heterogeneous Computing Stack Support
 
 **Date:** 2026-03-22
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** the schema-version and
+change-kind counts below reflect this ADR's original implementation and have
+since drifted — the snapshot `SCHEMA_VERSION` (see `abicheck/serialization.py`)
+is now 8, not 4, and there are 10 `sycl_*` ChangeKinds today (a
+`sycl_overload_set_removed` kind was added after this ADR), not 9.
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -1,7 +1,12 @@
 # ADR-018: Cross-Platform Binary Format Support
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** for the current
+parser-unit-test vs. native-E2E vs. blocking-vs-experimental-CI maturity
+breakdown per platform, see the "Validation status" and "Windows Toolchain
+Support Matrix" sections of
+[Platform Support](../../reference/platforms.md#windows-toolchain-support-matrix)
+rather than treating this ADR's platform tables as current status.
 **Decision maker:** Nikolay Petrov
 
 ---

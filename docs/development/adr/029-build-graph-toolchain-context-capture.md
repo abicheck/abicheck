@@ -147,10 +147,14 @@ File API reply directory and optionally reads `compile_commands.json`:
 ```bash
 abicheck collect \
   --build-dir build \
-  --cmake-file-api \
+  --from cmake \
   --compile-db build/compile_commands.json \
   --output evidence/
 ```
+
+(Current flag: the CMake File API adapter is selected via `--from cmake`
+alongside `--build-dir`, not a dedicated `--cmake-file-api` switch — see the
+`--from` option on `abicheck collect --help`.)
 
 Collected CMake facts:
 
@@ -279,8 +283,13 @@ fallback tier:
 
 ```bash
 abicheck collect --compile-db compile_commands.json --build-system make
-abicheck collect --make-dry-run "make -n libfoo.so" --confidence reduced
+abicheck collect --from make=make-dry-run.txt --output evidence/
 ```
+
+(Current flag: a Make dry-run transcript is supplied as a pre-captured
+`--from make=<transcript>` adapter input, not a standalone `--make-dry-run`/
+`--confidence` pair — the adapter records the reduced-confidence provenance
+itself.)
 
 ### D8. Capture compiler-recorded metadata when available
 
@@ -319,10 +328,13 @@ packs and classifies the drift. High-priority ABI/API-affecting options:
 - LTO/thin-LTO and whole-program devirtualization toggles;
 - toolchain version bumps: compiler, stdlib, sysroot, or SDK changes.
 
-Proposed `ChangeKind` entries (each placed in exactly one partition set per
-ADR-011 and the CLAUDE.md ChangeKind rules):
+Implemented `ChangeKind` entries (each placed in exactly one partition set per
+ADR-011 and the CLAUDE.md ChangeKind rules; see the full current L3 finding
+table, including several added after this ADR shipped, in
+[docs/concepts/build-source-data.md](../../concepts/build-source-data.md)
+§"Build-evidence findings (L3)"):
 
-| Proposed kind | Partition | Meaning |
+| Kind | Partition | Meaning |
 |---|---|---|
 | `build_context_changed` | `COMPATIBLE_KINDS` (quality) | Non-ABI-relevant build metadata changed |
 | `abi_relevant_build_flag_changed` | `RISK_KINDS` | ABI-affecting option changed; the artifact diff decides whether anything actually broke |

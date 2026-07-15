@@ -1,7 +1,11 @@
 # ADR-020a: Build-Context Aware Header Extraction
 
 **Date:** 2026-03-23
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. **Amendment:** ADR-029 (Build Graph and
+Toolchain Context Capture) generalizes this ADR's `compile_commands.json`
+ingestion into the normalized L3 `BuildEvidence` model, extending the
+`build_context.py` parser this ADR introduced rather than replacing it —
+see ADR-029 for the current build-context architecture.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -368,4 +372,6 @@ scope filtering can layer on top once build context is reliable.
 - ADR-003 — Data Source Architecture (L0/L1/L2 pipeline, `--show-data-sources`)
 - ADR-021a — Debug Artifact Resolution (unified `--cache-dir` strategy; split DWARF
   flags in compile_commands.json produce artifacts resolved by ADR-021a)
+- ADR-029 — Build Graph and Toolchain Context Capture (generalizes this ADR's
+  compile-database ingestion into the L3 `BuildEvidence` model)
 - Clang JSON Compilation Database specification

@@ -4,6 +4,31 @@
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
+> **2026-07 amendment (verified against current code):**
+>
+> - **"Single source of truth" needs a caveat.** `policy_kind_sets()` in
+>   `checker_policy.py` remains the sole source of truth for the **verdict
+>   axis** (BREAKING/API_BREAK/COMPATIBLE/RISK, which drives exit codes) — that
+>   part still holds. But ADR-036 (report view-model) later formalized that
+>   report *presentation* has two more, deliberately independent classification
+>   axes that do NOT derive from `policy_kind_sets()`: display severity
+>   (HIGH/MEDIUM/LOW, hardcoded in `report_classifications.py` as
+>   `HIGH_SEVERITY_KINDS`/`MEDIUM_SEVERITY_KINDS` for ABICC-compat output) and
+>   origin (rtti/internal/public, in `report_summary.py`). See ADR-036 for why
+>   these are kept separate rather than collapsed into policy.
+> - **Unknown-ChangeKind-slug handling was wrong.** §3 below claims "Unknown
+>   ChangeKind slugs or severity values are rejected at load time." In
+>   `policy_file.py`'s `_parse_overrides()`, unknown **severity** values do
+>   raise `PolicyError` (as stated) — but unknown **ChangeKind slugs** are only
+>   logged as a warning and silently skipped, not rejected.
+> - **"Unknown policy names silently fall back to `strict_abi`" is stale for
+>   the CLI.** `policy_kind_sets(policy)` itself still has that fallback
+>   internally, but it's unreachable from the documented CLI surface today:
+>   `--policy` is a `click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"])`
+>   and `--policy-file` uses `PolicyFileParam`, both of which raise a clear
+>   CLI error (`click.BadParameter`/usage error) on an unrecognized name rather
+>   than falling back silently.
+
 ---
 
 ## Context

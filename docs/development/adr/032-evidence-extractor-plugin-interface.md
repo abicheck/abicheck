@@ -3,9 +3,20 @@
 **Date:** 2026-06-09
 **Status:** Accepted — implemented (D1–D10). The extractor interface, capability
 model, action-permission ceiling, external-CLI manifest, collection modes, and
-reproducibility ledger ship in `abicheck/evidence/extractor.py` +
-`extractor_manifest.py`, wired into `collect`
+reproducibility ledger ship in `abicheck/buildsource/extractor.py` +
+`extractor_manifest.py` (the package was renamed `evidence/`→`buildsource/`
+alongside the `EvidencePack`→`BuildSourcePack` rename, ADR-028 amendment),
+wired into `collect`
 (`--extractor-manifest` / `--allow-build-query` / `--collection-mode`). **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
+**Scope note (see ADR-038):** the D1–D10 model here governs *executing*
+extractors — adapters and external CLI tools that run under the D5 action
+ceiling. It predates and does not cover the `abicheck_inputs/` pack family
+ADR-035 D5/ADR-038 later added: `merge`'s ingestion of a wrapper- or
+plugin-emitted pack (`ingest_inputs_pack()`) is **non-executing** (pure
+parsing, no compiler invocation, no D5 action to permission) and is not an
+"extractor" in this ADR's sense — see ADR-038's "shared consumer" section
+(`abicheck_inputs/` and `merge`) for the executing/non-executing split
+spelled out explicitly.
 **Decision maker:** Nikolay Petrov
 
 ---

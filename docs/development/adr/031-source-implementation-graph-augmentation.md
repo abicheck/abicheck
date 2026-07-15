@@ -4,11 +4,21 @@
 **Status:** Accepted — implemented (phases 1–7). The graph schema +
 build-evidence graph + L4 public-reachability/source↔binary graph + Clang
 call (D4) and `-MM` include (D3) graphs + Kythe/CodeQL pre-captured backends
-(D5) are all collected via `collect`; `compare-graph` and the verdict
-pipeline emit all six D6 findings; `explain-finding` localizes a finding
-through the graph (D8). The compact single-file `source_graph_summary.json`
-plus `external_graph_refs` is the storage model (D7) — chunked SQLite/Parquet
-remains an optional future scaling optimization, not a capability gap.
+(D5) are all collected via `collect`; `graph compare` and the verdict
+pipeline emit all six D6 findings; `graph explain` localizes a finding
+through the graph (D8). (The command names below were renamed from the
+original `compare-graph`/`explain-finding` to the `graph compare`/
+`graph explain` subcommand group — see D8.) The compact single-file
+`source_graph_summary.json` plus `external_graph_refs` is the storage model
+(D7) — chunked SQLite/Parquet remains an optional future scaling
+optimization, not a capability gap.
+**Extended by ADR-041 (2026-07-12):** ADR-041 is the roadmap (with P0 slices
+already shipped) that populates the four edge kinds this ADR's schema
+reserved but left empty (`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/
+`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`), adds `graph explain` proof paths per
+finding, and correlates an L4 body/type-hash change with a new L5 edge in one
+finding — see
+[041-compiler-facts-semantic-impact-graph.md](041-compiler-facts-semantic-impact-graph.md).
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -133,10 +143,14 @@ graph summary remains abicheck-owned.
 
 ### D6. Graph diffs for explanation, scoping, and triage
 
-Graph-to-graph comparison produces secondary findings. Proposed
-`ChangeKind` entries (partitioned per ADR-011):
+Graph-to-graph comparison produces secondary findings. Implemented
+`ChangeKind` entries (partitioned per ADR-011; see the current, larger L5
+finding table — including entries added after this ADR shipped, e.g. by
+ADR-035 D4/ADR-041 — in
+[docs/concepts/build-source-data.md](../../concepts/build-source-data.md)
+§"Source graph findings (L5)"):
 
-| Proposed kind | Partition | Meaning |
+| Kind | Partition | Meaning |
 |---|---|---|
 | `public_reachability_changed` | `RISK_KINDS` | Entity entered/left the public-API reachability closure |
 | `source_to_binary_mapping_changed` | `RISK_KINDS` | Declaration↔symbol mapping changed without a clear ABI diff |
@@ -187,17 +201,25 @@ core ABI snapshots.
 # Collect a compact graph summary.
 abicheck collect --source-graph summary --build-dir build --output evidence/
 
-# Use an external backend.
-abicheck collect --source-graph kythe --kythe-kzip merged.kzip --output evidence/
-abicheck collect --source-graph codeql --codeql-db codeql-db/ --output evidence/
+# Fold in a pre-captured external backend (non-executing ingest).
+abicheck collect --source-graph summary --kythe-entries kythe-entries.json --output evidence/
+abicheck collect --source-graph summary --codeql-results codeql-results.json --output evidence/
 
 # Explain one finding through graph evidence.
-abicheck explain-finding report.json --finding-id F123 --sources evidence/
+abicheck graph explain report.json --finding-id F123 --sources evidence/
 
 # Compare graph summaries directly.
-abicheck compare-graph old.evidence/graph/source_graph_summary.json \
+abicheck graph compare old.evidence/graph/source_graph_summary.json \
                        new.evidence/graph/source_graph_summary.json
 ```
+
+(As implemented, `--source-graph` itself only takes `off|summary`; an
+external Kythe/CodeQL backend is folded in via the separate
+`--kythe-entries`/`--codeql-results` pre-captured-file flags, both
+non-executing per ADR-032 D5/ADR-038 D0 — not `--source-graph kythe|codeql`
+or a `--kythe-kzip`/`--codeql-db` flag. The query/explain commands are the
+`graph compare`/`graph explain` subcommands, not the original
+`compare-graph`/`explain-finding` top-level names.)
 
 ### D9. Confidence and approximation must be visible
 
@@ -243,13 +265,13 @@ proves it. Prefer "known static callers" or "observed graph edges".
 
 | Phase | Scope | Output | Status |
 |---|---|---|---|
-| 1 | Define node/edge schema and graph summary storage | Empty/metadata graph summaries | **Done** — `evidence/source_graph.py` (`SourceGraphSummary`/`GraphNode`/`GraphEdge`, content-addressed `graph_id`, coverage block, indexes); stored as `graph/source_graph_summary.json` and round-tripped by `EvidencePack` |
+| 1 | Define node/edge schema and graph summary storage | Empty/metadata graph summaries | **Done** — `buildsource/source_graph.py` (`SourceGraphSummary`/`GraphNode`/`GraphEdge`, content-addressed `graph_id`, coverage block, indexes); stored as `graph/source_graph_summary.json` and round-tripped by `BuildSourcePack` (renamed from `EvidencePack`, ADR-028 amendment) |
 | 2 | Build graph edges from ADR-029 `BuildEvidence` | target/source/header/output graph | **Done** — `build_source_graph()`; `collect --source-graph summary` collects it and flips the L5 coverage row to PRESENT |
 | 3 | Header/type/declaration graph from L2/L4 | public reachability graph | **Done** — `build_source_graph(build, source_abi=…)` folds an ADR-030 `SourceAbiSurface` into `source_decl`/`record_type`/`enum_type`/`typedef`/`macro` nodes linked to their declaring public header via `SOURCE_DECLARES` |
 | 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | **Done** — `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, and `BINARY_EXPORTS_SYMBOL` edges from the surface mappings, completing the target → header → decl → exported-symbol closure |
-| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit all six D6 `ChangeKind`s, surfaced by `compare-graph` and folded into the `compare --build-info` verdict pipeline; `localize_symbol()` + the `explain-finding` command localize a finding through the graph (D8) |
-| 6 | Optional Clang direct-call extractor | direct call graph summary | **Done** — `evidence/call_graph.py`: `parse_clang_ast_calls()` (pure AST-JSON parser, unit-tested) + `ClangCallGraphExtractor` (live `clang -ast-dump=json`, integration-only) emit `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` (D4); `collect --call-graph` collects them and the `call_graph_public_entry_reachability_changed` finding consumes them |
-| 7 | Kythe/CodeQL adapters | external graph backend summaries | **Done** — `evidence/graph_backends.py`: `ingest_kythe_entries()` (Kythe entries → `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) and `ingest_codeql_call_results()` (CodeQL BQRS→JSON → `DECL_CALLS_DECL`), wired via `collect --kythe-entries`/`--codeql-results`; non-executing (pre-captured exports), with the store noted in `external_graph_refs`. Compile-unit include edges (D3) land via `evidence/include_graph.py` (`clang -MM`) |
+| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit all six D6 `ChangeKind`s, surfaced by `graph compare` and folded into the `compare --build-info` verdict pipeline; `localize_symbol()` + the `graph explain` command localize a finding through the graph (D8) |
+| 6 | Optional Clang direct-call extractor | direct call graph summary | **Done** — `buildsource/call_graph.py`: `parse_clang_ast_calls()` (pure AST-JSON parser, unit-tested) + `ClangCallGraphExtractor` (live `clang -ast-dump=json`, integration-only) emit `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` (D4); `collect --call-graph` collects them and the `call_graph_public_entry_reachability_changed` finding consumes them |
+| 7 | Kythe/CodeQL adapters | external graph backend summaries | **Done** — `buildsource/graph_backends.py`: `ingest_kythe_entries()` (Kythe entries → `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) and `ingest_codeql_call_results()` (CodeQL BQRS→JSON → `DECL_CALLS_DECL`), wired via `collect --kythe-entries`/`--codeql-results`; non-executing (pre-captured exports), with the store noted in `external_graph_refs`. Compile-unit include edges (D3) land via `buildsource/include_graph.py` (`clang -MM`) |
 
 ---
 
