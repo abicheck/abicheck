@@ -46,7 +46,9 @@ module produces the source-side L3/L4/L5 pack that ``merge`` folds against it.
 from __future__ import annotations
 
 import datetime as _dt
+import gzip
 import json
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,6 +138,19 @@ class InputsManifest:
     #: Exported (mangled) symbols the build already knows, if any. When empty the
     #: surface is relinked against the artifact side's exports during ``merge``.
     exported_symbols: list[str] = field(default_factory=list)
+    #: Pack-level canonical fact-set identity (ADR-038 C.8), when the producer
+    #: declares one at the manifest level (the Clang plugin does; a producer
+    #: that only stamps per-TU records leaves this ``{}`` and
+    #: ``inputs validate`` falls back to the TU records).
+    fact_set: dict[str, Any] = field(default_factory=dict)
+    #: Pack-relative path to the most recent ``inputs compact`` output, if any
+    #: ("" before the first compaction). Lets a later rerun recognize that
+    #: file as stale regardless of *this* run's --output-filename/--compress
+    #: choice, without comparing file mtimes -- a rebuild's freshly-rewritten
+    #: per-TU file and the previous compaction's write can land in the same
+    #: filesystem timestamp tick, which an mtime-based "which is newer" check
+    #: cannot break correctly (Codex review, P2).
+    last_compacted: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,6 +165,8 @@ class InputsManifest:
             "compile_db": self.compile_db,
             "source_facts": list(self.source_facts),
             "exported_symbols": list(self.exported_symbols),
+            "fact_set": dict(self.fact_set),
+            "last_compacted": self.last_compacted,
         }
 
     @classmethod
@@ -157,6 +174,14 @@ class InputsManifest:
         def _str_list(key: str) -> list[str]:
             raw = d.get(key)
             return [str(x) for x in raw if x] if isinstance(raw, list) else []
+
+        # A hand-written/third-party manifest's fact_set might not be a
+        # mapping at all (e.g. a string) — dict(fs_raw) would raise before
+        # `inputs validate` could produce a report, even though a malformed
+        # optional field is supposed to degrade gracefully like everything
+        # else here (Codex review, P2).
+        fs_raw = d.get("fact_set")
+        fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
 
         return cls(
             kind=_opt_str(d.get("kind"), INPUTS_KIND),
@@ -172,6 +197,8 @@ class InputsManifest:
             compile_db=_opt_str(d.get("compile_db")),
             source_facts=_str_list("source_facts"),
             exported_symbols=_str_list("exported_symbols"),
+            fact_set=fact_set,
+            last_compacted=_opt_str(d.get("last_compacted")),
         )
 
 
@@ -206,7 +233,16 @@ def is_inputs_pack(path: Path | str) -> bool:
 
 
 def load_inputs_manifest(root: Path | str) -> InputsManifest:
-    """Load and parse the pack manifest. Raises ``FileNotFoundError`` if absent."""
+    """Load and parse the pack manifest.
+
+    Raises ``FileNotFoundError`` if absent, ``ValueError`` if *root* carries a
+    manifest.json but it does not declare ``kind: abicheck_inputs`` (e.g. a
+    :class:`~.pack.BuildSourcePack` directory, which uses a different manifest
+    schema entirely) — without this check, ``InputsManifest.from_dict()``'s
+    forward-compat ``kind`` default would silently accept it as a Flow-2 pack,
+    letting a write path like :func:`~.inputs_emit.compact_inputs_pack`
+    corrupt an unrelated directory's manifest (Codex review, P2).
+    """
     root = Path(root)
     manifest_path = root / INPUTS_MANIFEST_NAME
     if not manifest_path.is_file():
@@ -218,6 +254,11 @@ def load_inputs_manifest(root: Path | str) -> InputsManifest:
         data = json.load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{manifest_path} must contain a JSON object.")
+    if data.get("kind") != INPUTS_KIND:
+        raise ValueError(
+            f"{manifest_path} does not declare kind: {INPUTS_KIND} — not a "
+            "Flow-2 abicheck_inputs pack."
+        )
     return InputsManifest.from_dict(data)
 
 
@@ -236,22 +277,68 @@ def _iter_source_fact_files(
     explicit = bool(manifest.source_facts)
     entries = manifest.source_facts or [SOURCE_FACTS_DIR]
     files: list[Path] = []
+    # A directory-scan entry that IS (or contains) the pack root -- e.g. a
+    # hand-written manifest using source_facts: ["."] -- would otherwise
+    # sweep the pack's own manifest.json into the "*.json" glob below as if
+    # it were a (harmless-looking, empty) TU record: SourceAbiTu.from_dict()
+    # never raises for it (none of its keys match SourceAbiTu's fields), so
+    # it reads as silently valid. compact_inputs_pack's default
+    # remove_originals=True then deletes it as a merged "original" --
+    # destroying the pack's own manifest (Codex review, P2, reproduced
+    # empirically: is_inputs_pack() returned False immediately after
+    # compaction). Excluded by resolved identity, not name alone, so a
+    # legitimately different file that merely happens to be named
+    # "manifest.json" inside a *sub*directory the manifest never points a
+    # scan at is unaffected.
+    manifest_path_resolved = (root / INPUTS_MANIFEST_NAME).resolve()
     for entry in entries:
         target = _safe_pack_path(root, entry, sink)
         if target is None:
             continue
         before = len(files)
-        if target.is_dir():
+        is_existing_dir = target.is_dir()
+        if is_existing_dir:
             # ``.jsonl`` is the canonical form; a ``.json`` array file is also
             # accepted so a producer that cannot stream lines still ingests.
-            files.extend(target.glob("*.jsonl"))
-            files.extend(target.glob("*.json"))
+            # A gzip-compressed sibling of either (P1 #22: post-build
+            # compaction can gzip the merged file to shrink pack transfer
+            # size) is read transparently — same decoded facts either way.
+            found: list[Path] = []
+            found.extend(target.glob("*.jsonl"))
+            found.extend(target.glob("*.jsonl.gz"))
+            found.extend(target.glob("*.json"))
+            found.extend(target.glob("*.json.gz"))
+            files.extend(f for f in found if f.resolve() != manifest_path_resolved)
         elif target.is_file():
-            files.append(target)
-        # An *explicitly named* entry that resolves to nothing (typo, empty or
-        # missing dir) must not vanish quietly and leave an L3-only baseline
-        # claiming L4 facts (Codex review). The default auto-scan may be empty.
-        if explicit and len(files) == before:
+            # An *explicitly* named file entry pointing at the manifest
+            # itself (or a symlink resolving to it) is the same hazard as
+            # the directory-scan case above, just via a different entry
+            # shape -- only the glob results were filtered before, so this
+            # branch still fell through unfiltered. Deliberately not
+            # appended (rather than silently accepted): this leaves
+            # len(files) == before below, which fires the existing
+            # "resolved to no readable fact files" diagnostic and makes
+            # compact_inputs_pack fail closed instead of unlinking the
+            # pack's own manifest (Codex review, P2, reproduced
+            # empirically).
+            if target.resolve() != manifest_path_resolved:
+                files.append(target)
+        # An *explicitly named* entry that resolves to nothing at all (typo,
+        # missing file/dir) must not vanish quietly and leave an L3-only
+        # baseline claiming L4 facts (Codex review). The default auto-scan
+        # may be empty. An *existing* directory currently holding zero
+        # matching files is deliberately NOT flagged the same way: compaction
+        # preserves a directory entry (besides SOURCE_FACTS_DIR itself, where
+        # the merged file always lands) purely for future rediscoverability,
+        # and remove_originals legitimately drains every file that WAS in it
+        # on a successful merge -- flagging that as "resolved to nothing"
+        # turned a fully successful, complete compaction into a spurious
+        # validate warning (and CLI exit 1), and made a second compact() call
+        # on the same pack fail closed forever, since that directory can
+        # never repopulate itself (Codex review, P2, reproduced empirically
+        # both ways). The pack-wide "zero readable TU records" diagnostic
+        # still catches a genuinely fact-less pack.
+        if explicit and len(files) == before and not is_existing_dir:
             sink.append(f"source_facts entry resolved to no readable fact files: {entry}")
     # Re-validate each discovered file on its *resolved* path: a file inside an
     # in-pack directory can itself be a symlink pointing outside the pack, which
@@ -285,11 +372,16 @@ def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[So
 
         ``SourceAbiTu.from_dict`` / ``SourceEntity.from_dict`` require some keys
         (e.g. an entity ``id``), so a valid-JSON-but-schema-invalid record raises
-        ``KeyError``. Treat that like a malformed line — one bad TU must not
-        reject an otherwise usable pack (Codex review)."""
+        ``KeyError``. A bucket like ``"functions": "bad"`` (a string instead of
+        a list of entity objects) is iterated character-by-character and each
+        character reaches ``SourceEntity.from_dict``'s ``d.get(...)`` calls,
+        raising ``AttributeError`` (``str`` has no ``.get``) instead — also
+        schema-invalid, not a code bug (Codex review, P2). Treat all of these
+        like a malformed line — one bad TU must not reject an otherwise usable
+        pack (Codex review)."""
         try:
             return SourceAbiTu.from_dict(obj)
-        except (KeyError, ValueError, TypeError) as exc:
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
             diagnostics.append(f"{where}: skipped schema-invalid TU record ({exc})")
             return None
 
@@ -335,6 +427,50 @@ def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[So
     return tus
 
 
+def _read_text_maybe_gz(path: Path) -> str:
+    """Read *path* as UTF-8 text, transparently decompressing a ``.gz`` file.
+
+    Compression is execution policy, not fact content (P1 #22/#25): a gzip'd
+    ``source_facts`` file decodes to the exact same JSON text a plain one
+    would, so this is the only place a caller needs to know the file might be
+    compressed.
+    """
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return fh.read()
+    return path.read_text(encoding="utf-8")
+
+
+def read_source_fact_files(
+    paths: Iterable[Path], *, diagnostics: list[str] | None = None
+) -> list[SourceAbiTu]:
+    """Read+parse an explicit list of source-fact files.
+
+    The per-file half of :func:`read_source_facts`, split out so a caller
+    that needs to control file resolution/order itself — e.g.
+    :func:`~.inputs_emit.compact_inputs_pack` reading a stale prior-
+    compaction output separately from fresh per-TU files so it can prefer
+    the fresher record for a duplicate ``tu_id`` — reuses the same parsing
+    without re-deriving the file list (Codex review, P2).
+    """
+    sink = diagnostics if diagnostics is not None else []
+    tus: list[SourceAbiTu] = []
+    for path in paths:
+        try:
+            text = _read_text_maybe_gz(path)
+        # A truncated/corrupt .gz raises EOFError or zlib.error (decompression
+        # failures), neither an OSError subclass; invalid-UTF-8 bytes (plain
+        # or decompressed) raise UnicodeDecodeError, a ValueError subclass.
+        # Each previously escaped this handler and aborted the whole read
+        # pass instead of degrading to a per-file diagnostic like every other
+        # malformed-input case here (CodeRabbit review, P2).
+        except (OSError, EOFError, zlib.error, UnicodeDecodeError) as exc:
+            sink.append(f"{path.name}: could not read/decompress ({exc})")
+            continue
+        tus.extend(_parse_tu_records(text, path.name, sink))
+    return tus
+
+
 def read_source_facts(
     root: Path | str,
     manifest: InputsManifest | None = None,
@@ -346,14 +482,76 @@ def read_source_facts(
     When a *diagnostics* sink is supplied, per-record parse warnings (malformed
     or non-object lines that were skipped) are appended to it, so a caller can
     surface them instead of silently dropping bad TUs (Codex review).
+
+    A directory-scan pack that was compacted and then reused for an
+    incremental rebuild ends up with *both* the prior compaction's output
+    (``manifest.last_compacted``, intentionally preserved — compaction only
+    deletes the per-TU originals it merged, never its own prior output) and
+    the freshly rebuilt per-TU files for since-changed TUs in
+    ``source_facts/``. Without resolution every reader of this function
+    (``validate``/``ingest``/``merge``) would see the same ``tu_id`` twice —
+    once from the now-stale prior-compaction record, once from the fresh
+    rebuild — and either misreport it as a pack-integrity duplicate or fold
+    both the stale and fresh facts into one surface. Apply the same
+    prior-vs-fresh supersession :func:`~.inputs_emit.compact_inputs_pack`
+    applies at compaction time: a fresh record for a ``tu_id`` drops the
+    prior compaction's record for that same ``tu_id``; prior records for
+    TUs not since rebuilt are still carried forward (Codex review, P2).
     """
     root = Path(root)
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
-    tus: list[SourceAbiTu] = []
-    for path in _iter_source_fact_files(root, manifest, sink):
-        tus.extend(_parse_tu_records(path.read_text(encoding="utf-8"), path.name, sink))
-    return tus
+    # Captured before ANY discovery/read step below (mirrors
+    # compact_inputs_pack's before_diag_count) -- _iter_source_fact_files()
+    # itself can append a diagnostic (an explicitly-named source_facts entry
+    # that resolves to no readable files, or an escaping/unsafe path) for
+    # what may well be one of the *fresh* per-TU entries below. If that
+    # diagnostic is not counted here, a rebuilt/removed TU whose fresh file
+    # corresponds to the unresolved entry never shows up as "lossy" -- its
+    # stale last_compacted record then survives untouched, hiding a real
+    # discovery problem behind what looks like a clean carry-forward (Codex
+    # review).
+    fresh_before = len(sink)
+    files = _iter_source_fact_files(root, manifest, sink)
+
+    prior_files: list[Path] = []
+    if manifest.last_compacted:
+        candidate = _safe_pack_path(root, manifest.last_compacted, sink)
+        if candidate is not None:
+            candidate = candidate.resolve()
+            prior_files = [f for f in files if f.resolve() == candidate]
+    if not prior_files:
+        return read_source_fact_files(files, diagnostics=sink)
+
+    fresh_files = [f for f in files if f not in prior_files]
+    # A fresh file that fails to read/parse degrades to a diagnostic (Codex
+    # review above) rather than aborting, but its tu_id is then unknown --
+    # meaning fresh_ids cannot be trusted to be *complete*. If some prior
+    # record's tu_id happens to be the very TU that failed to reparse (e.g.
+    # the rebuild really did change/remove something and the write raced or
+    # truncated), silently carrying that prior record forward as "not
+    # rebuilt, still current" would let stale evidence stand in for source
+    # that actually changed, with only a generic "skipped malformed record"
+    # diagnostic and no indication that specific TU's facts may now be wrong
+    # (Codex review, P2, reproduced empirically). So a lossy fresh read
+    # invalidates ALL prior-compaction carry-forward for this read, not just
+    # the one TU we cannot identify -- matching compact_inputs_pack's own
+    # all-or-nothing fail-closed rule for a lossy read, rather than guessing
+    # which subset of prior records might still be safe.
+    fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
+    fresh_lossy = len(sink) > fresh_before
+    fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}
+    prior_tus = read_source_fact_files(prior_files, diagnostics=sink)
+    if fresh_lossy:
+        sink.append(
+            "a fresh source-fact file failed to read/parse; its true tu_id "
+            "is unknown, so no prior-compaction record can be safely "
+            "carried forward as still-current for this read (fix or remove "
+            "the malformed file and retry)"
+        )
+        return fresh_tus
+    surviving_prior = [tu for tu in prior_tus if tu.tu_id not in fresh_ids]
+    return fresh_tus + surviving_prior
 
 
 def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list[str]) -> BuildEvidence | None:

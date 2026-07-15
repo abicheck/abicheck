@@ -50,6 +50,7 @@ shells out (integration-marked).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -63,7 +64,13 @@ from typing import Any
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
-from ..source_abi import SourceAbiTu, SourceEntity, SourceLocation
+from ..source_abi import (
+    SourceAbiTu,
+    SourceEntity,
+    SourceLocation,
+    coverage_state_for_family,
+    default_fact_set,
+)
 from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
@@ -95,12 +102,38 @@ from .clang_public_roots import (  # noqa: F401
     _root_spelling,
     _strip_leading_sample_dir,
 )
+from .clang_source_edges import build_source_edges
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
 #: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
-#: from an older recipe. 0.6: emit external-linkage ``variables``.
-CLANG_EXTRACTOR_VERSION = "0.6"
+#: from an older recipe. 0.6: emit external-linkage ``variables``. 0.7: stamp
+#: ``fact_set``/``coverage`` (ADR-038 C.8) and populate ``source_edges``
+#: (P1 #17-18) from the already-parsed AST — bumped so a ``--cache-dir``
+#: populated by 0.6 is invalidated rather than silently reused with the new
+#: fields defaulting to empty (Codex review).
+CLANG_EXTRACTOR_VERSION = "0.7"
+
+
+@functools.lru_cache(maxsize=8)
+def _clang_compiler_version(clang_bin: str) -> str:
+    """``clang -dumpversion`` for *clang_bin*, cached (ADR-038 C.8 fact_set).
+
+    Cached per binary path so a many-TU build pays this subprocess once, not
+    once per compile unit. Best-effort: any failure yields ``""`` rather than
+    aborting extraction (compiler_version is provenance, not required input).
+    """
+    try:
+        r = subprocess.run(
+            [clang_bin, "-dumpversion"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -1764,11 +1797,80 @@ class ClangSourceExtractor:
             target_id,
             diagnostics=diags,
         )
+        # P1 #17-18: source-graph edges from the SAME already-parsed AST dict —
+        # parse_clang_ast_calls()/parse_clang_ast_types() are pure dict-walking
+        # functions (no subprocess), so this adds no second frontend pass.
+        # Append onto tu.diagnostics directly, not the now-disconnected `diags`
+        # list: source_abi_from_clang_ast() above already copied `diags` into
+        # tu.diagnostics (list(diagnostics or [])), so a diagnostic appended to
+        # `diags` after that point would never reach _stamp_fact_set_and_coverage()
+        # below, which reads tu.diagnostics — silently reporting source_edges as
+        # empty-confirmed instead of failed on a parser error (Codex review, P2).
+        self._attach_source_edges(tu, ast_root, tu.diagnostics)
         # Drop the large AST tree before the macro pass spawns another subprocess,
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root
         self._attach_macros(tu, compile_unit, source, directory, effective_public_roots)
+        self._stamp_fact_set_and_coverage(tu)
         return tu
+
+    def _attach_source_edges(
+        self, tu: SourceAbiTu, ast_root: dict[str, Any], diags: list[str]
+    ) -> None:
+        """Populate ``tu.source_edges`` from the in-memory clang AST (P1 #17-18).
+
+        Thin wrapper: the actual parsing lives in ``clang_source_edges.py``
+        (split out to keep this module under the AI-readiness line-count cap).
+        """
+        tu.source_edges = build_source_edges(ast_root, diags)
+
+    def _stamp_fact_set_and_coverage(self, tu: SourceAbiTu) -> None:
+        """ADR-038 C.8: record this TU's canonical fact-set identity + per-family
+        coverage. Always attempts every family (no user-selectable mode).
+        """
+        # A non-zero *recovered* AST exit is TU-wide (clang.py has no per-family
+        # granularity, unlike the plugin's per-decl JSON-dump diagnostics), so it
+        # marks every AST-derived family as partial/failed rather than only the
+        # families that happen to be empty.
+        ast_recovered = any(d.startswith("clang exited") for d in tu.diagnostics)
+        coverage: dict[str, str] = {
+            family: coverage_state_for_family(
+                entities_present=bool(entities), family_diagnostics_seen=ast_recovered
+            )
+            for family, entities in (
+                ("functions", tu.functions),
+                ("variables", tu.variables),
+                ("types", tu.types),
+                ("templates", tu.templates),
+                ("inline_bodies", tu.inline_bodies),
+                ("constexpr_values", tu.constexpr_values),
+            )
+        }
+        macro_diag = any(d.startswith("macro pass") for d in tu.diagnostics)
+        coverage["macros"] = coverage_state_for_family(
+            entities_present=bool(tu.macros), family_diagnostics_seen=macro_diag
+        )
+        # Both families are derived from the same (possibly ast_recovered
+        # -truncated) AST dict the AST-derived families above already
+        # account for -- a recovered parse with no edge-parser exception of
+        # its own must still downgrade these two, or a partially-collected
+        # AST could advertise them as complete/empty-confirmed (Codex
+        # review, P2).
+        edges_diag = ast_recovered or any(
+            d.startswith("source_edges unavailable") for d in tu.diagnostics
+        )
+        coverage["source_edges"] = coverage_state_for_family(
+            entities_present=bool(tu.source_edges), family_diagnostics_seen=edges_diag
+        )
+        coverage["read_files"] = coverage_state_for_family(
+            entities_present=bool(tu.read_files), family_diagnostics_seen=ast_recovered
+        )
+        tu.coverage = coverage
+        tu.fact_set = default_fact_set(
+            producer="abicheck-cc-clang-extractor",
+            producer_version=CLANG_EXTRACTOR_VERSION,
+            compiler_version=_clang_compiler_version(self.clang_bin),
+        )
 
     def _run(
         self, cmd: list[str], directory: str, source_label: str

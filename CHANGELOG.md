@@ -57,6 +57,49 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Canonical fact-set versioning and per-family coverage honesty for the
+  Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
+  the Clang facts plugin and the reference `clang.py` wrapper now carries a
+  `fact_set` identity (`{name, version, producer, producer_version,
+  compiler_family, compiler_version}`) and a per-family `coverage` report
+  (`complete`/`empty-confirmed`/`partial`/`unsupported`/`failed` for
+  functions, variables, types, macros, templates, inline bodies, constexpr
+  values, source edges, and read files) — never a user-selectable collection
+  mode; a family is only ever `unsupported` because a producer structurally
+  doesn't collect it yet. New `abicheck/buildsource/fact_set.py` rolls this
+  up per surface and checks old/new comparison compatibility; `source_diff.py`
+  emits a new `SOURCE_FACT_COVERAGE_INCOMPLETE` (RISK) finding when a
+  mandatory family is incomplete or the two sides' fact sets are
+  incompatible, so a missing L4 finding is never silently read as
+  "unchanged". New `abicheck inputs validate <pack>` command checks manifest
+  validity, fact-set version, duplicate TU identities, coverage
+  completeness, and public-surface emptiness before an authoritative merge.
+
+- **Clang facts plugin: `source_edges`/`read_files` collection, post-build
+  pack compaction/compression, and a dedicated profiling channel (ADR-038
+  C.9).** The plugin and the reference `clang.py` wrapper extractor now
+  populate `source_edges` (`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/
+  `DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`) and `read_files`
+  during the same AST walk/compile as every other fact family — both
+  families move from `unsupported` to `complete`/`empty-confirmed` coverage;
+  no second frontend pass. `check_fact_set_compatibility()` and
+  `inputs validate` now also compare/validate `fact_set.name` (not just
+  `version`) — two surfaces whose fact-set version numbers happen to match
+  but whose name differs are a different canonical contract and are now
+  flagged. New `abicheck inputs compact <pack>` command
+  (`buildsource/inputs_emit.compact_inputs_pack()`) merges a pack's many
+  per-TU `source_facts/*.jsonl` files into one, with `--compress` to gzip
+  it and `--keep-originals` to skip deleting the per-TU files — a post-build
+  size/transfer optimization that never changes the decoded facts a later
+  `merge`/`inputs validate` sees. `append_source_facts()`/
+  `write_inputs_pack()` gained a matching `compress=` option, and
+  `read_source_facts()` decompresses `.jsonl.gz`/`.json.gz` transparently.
+  The plugin's profiling telemetry (`ABICHECK_PLUGIN_PROFILE=1`) can now be
+  routed to a file via `ABICHECK_PLUGIN_PROFILE_LOG=<path>` instead of
+  stderr, useful once many parallel compiles would otherwise interleave the
+  summaries unreadably — the choice of sink never touches `source_facts`
+  output (execution-policy invariance).
+
 - **Header-only (L2) semantic graph — the ADR-041 dependency graph now works
   with zero build integration.** New `abicheck/buildsource/header_graph.py`
   (`build_header_only_graph`) builds a smaller, build-free alternative to the

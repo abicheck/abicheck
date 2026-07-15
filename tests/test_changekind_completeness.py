@@ -110,6 +110,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PUBLIC_MACRO_REMOVED,
     ChangeKind.INLINE_FUNCTION_REMOVED,
     ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+    # ADR-038 C.8 fact-set/coverage — tests/test_fact_set.py.
+    ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
     # Source graph (ADR-031 D6) — exercised in tests/test_source_graph.py.
     ChangeKind.PUBLIC_REACHABILITY_CHANGED,
     ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,

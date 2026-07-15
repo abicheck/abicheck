@@ -317,6 +317,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "inline_function_removed": "L4",
     "public_typedef_removed": "L4",
     "concept_tightened": "L4",
+    # Fact-set/coverage compatibility of the L4 evidence itself (ADR-038 C.8):
+    # only meaningful once L4 source-fact records carry fact_set/coverage.
+    "source_fact_coverage_incomplete": "L4",
     # An uninstantiated function template's body/signature change (ADR-026):
     # no symbol is ever emitted and castxml doesn't parse the body, so only
     # L4 source-ABI replay observes it (see case122's known_gap).

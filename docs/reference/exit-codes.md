@@ -194,6 +194,37 @@ exit 0
 
 ---
 
+## `abicheck inputs validate`
+
+Validates a Flow-2 `abicheck_inputs/` pack (ADR-038 C.8) before it is folded
+into an authoritative baseline.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Clean — no issues found |
+| `1` | Warnings only (e.g. an incomplete mandatory fact family, no fact-set identity reported) |
+| `2` | Validation errors (e.g. a fact-set version mismatch, duplicate TU identities) |
+| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
+
+---
+
+## `abicheck inputs compact`
+
+Merges a Flow-2 `abicheck_inputs/` pack's many per-TU `source_facts/*.jsonl`
+files into one, optionally gzip-compressed (ADR-038 C.9). A post-build size/
+transfer optimization; never changes the decoded facts a later `merge`/
+`inputs validate` sees. A malformed or unreadable source-fact file anywhere
+in the pack skips compaction entirely (no partial merge published) rather
+than risk duplicating TUs on the next scan — the pack is left unchanged.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Success |
+| `1` | Compaction skipped — a lossy read (see the printed notes); pack unchanged |
+| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
+
+---
+
 ## `abicheck debian-symbols`
 
 ### `debian-symbols generate`

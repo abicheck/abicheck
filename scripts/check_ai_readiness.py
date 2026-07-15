@@ -620,6 +620,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_debian_symbols"}),
         frozenset({"cli", "cli_buildsource"}),
         frozenset({"cli", "cli_graph"}),
+        frozenset({"cli", "cli_inputs"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
@@ -688,6 +689,13 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # introduces no new *runtime* edge (`service_scan` re-imports
         # `_public_provenance_set` from it function-locally).
         #
+        # `cli_inputs` joins the same SCC (ADR-038 C.8): its `inputs validate`
+        # command reuses the shared `-o/--format` pair via
+        # `cli_options.output_options` (module-load import), and `cli_options`
+        # is already a member of this cluster — so `cli -> cli_inputs ->
+        # cli_options -> ... -> cli` closes through already-member modules,
+        # not a new dependency direction. No init deadlock.
+        #
         # `scan_engine` joins the same SCC (ADR-037 D1 dependency-direction fix):
         # the scan engine core (classify → always-on tier → level → compare,
         # `run_scan_core`) was split out of `cli_scan.py` into `scan_engine.py` so
@@ -718,6 +726,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_dump_helpers",
                 "cli_helpers_compare",
+                "cli_inputs",
                 "cli_options",
                 "cli_plugin",
                 "cli_pr_comment",

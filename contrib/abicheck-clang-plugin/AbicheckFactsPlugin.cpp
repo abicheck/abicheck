@@ -43,6 +43,8 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/GlobalDecl.h"
+#include "clang/AST/Mangle.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/ASTDumperUtils.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -51,6 +53,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
+#include "clang/Basic/Version.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 #include "clang/Index/USRGeneration.h"
@@ -90,6 +93,7 @@
 #include <regex>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace clang;
@@ -97,13 +101,35 @@ using namespace clang;
 namespace {
 
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
-// field. Bump on any change to the emitted-record recipe.
-constexpr const char *kPluginVersion = "0.4";
+// field. Bump on any change to the emitted-record recipe. 0.5: populate
+// read_files (P1 #15-16) and source_edges (P1 #17-18) during the existing AST
+// walk instead of reporting them `unsupported`.
+constexpr const char *kPluginVersion = "0.5";
+
+// ADR-038 C.8: the canonical fact-set identity every SourceAbiTu producer
+// stamps (abicheck.buildsource.source_abi.SOURCE_ABI_FACT_SET_NAME/VERSION —
+// keep these two literals in sync with that module). There is exactly one
+// fact-set version this plugin can emit: it always collects the complete
+// mandatory family list for that version. A build that wants LESS evidence
+// simply does not load this plugin (ADR-038's own "optional, not modal"
+// deployment story) — there is no in-plugin flag that narrows collection.
+constexpr const char *kFactSetName = "abicheck-clang-canonical";
+constexpr int kFactSetVersion = 1;
 
 // ---------------------------------------------------------------------------
 // Optional profiling (ABICHECK_PLUGIN_PROFILE=1): attribute subtree-hash cost
 // to its phases (clang JSON dump / json::parse / canonicalize) so the hot loop
 // can be optimized on evidence. Zero cost when disabled.
+//
+// P1 #24: by default the per-TU summary line goes to stderr (llvm::errs()),
+// which for a build with many parallel compiles interleaves unreadably and
+// gets swallowed by build systems that only surface stderr on failure. When
+// ABICHECK_PLUGIN_PROFILE_LOG=<path> is also set, the line is appended to
+// that file instead (one process-wide sink shared across the parallel TUs
+// via O_APPEND, same "many writers, one file" pattern as the facts pack
+// itself) — never written to *both*, so nothing about the emitted
+// source_facts/*.jsonl content changes either way (P1 #25 invariance: the
+// choice of profiling sink is execution policy, not decoded-fact content).
 // ---------------------------------------------------------------------------
 struct ProfileCounters {
   bool enabled = false;
@@ -119,6 +145,27 @@ inline ProfileCounters &prof() {
     return c;
   }();
   return p;
+}
+inline const std::string &profileLogPath() {
+  static std::string path = [] {
+    const char *e = std::getenv("ABICHECK_PLUGIN_PROFILE_LOG");
+    return e ? std::string(e) : std::string();
+  }();
+  return path;
+}
+// Append *line* (already newline-terminated) to the configured profiling
+// channel: the log file when ABICHECK_PLUGIN_PROFILE_LOG is set, else stderr.
+inline void emitProfileLine(const std::string &line) {
+  const std::string &path = profileLogPath();
+  if (path.empty()) {
+    llvm::errs() << line;
+    return;
+  }
+  std::ofstream log(path, std::ios::app);
+  if (log)
+    log << line;
+  else
+    llvm::errs() << line; // fall back rather than silently drop telemetry
 }
 using ProfClock = std::chrono::steady_clock;
 inline uint64_t nowNs() {
@@ -231,6 +278,37 @@ std::string jsonStrMap(const std::map<std::string, std::string> &items) {
   }
   out += "}";
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// ADR-038 C.8 coverage: one of complete/empty-confirmed/partial/unsupported/
+// failed per fact family, mirroring
+// abicheck.buildsource.source_abi.coverage_state_for_family()'s decision
+// table exactly so every producer reports coverage the same way. This is
+// NOT a user-selectable mode: every family is always attempted; the state
+// only records what happened.
+std::string familyCoverageState(bool entitiesPresent, bool diagnosticsSeen,
+                                 bool unsupported = false) {
+  if (unsupported)
+    return "unsupported";
+  if (diagnosticsSeen)
+    return entitiesPresent ? "partial" : "failed";
+  return entitiesPresent ? "complete" : "empty-confirmed";
+}
+
+// Whether any diagnostic in `diags` contains one of `substrs` — the plugin's
+// existing per-family "JSON dump failed" diagnostics (emitted where an
+// individual declaration's dump/canonicalization failed, see
+// VisitFunctionDecl/emitConstexprVar/emitDataVariable/emitType/emitTemplate/
+// emitClassTemplateMemberPatterns) double as the coverage signal, so no new
+// state has to be threaded through the visitor.
+bool anyDiagContains(const std::set<std::string> &diags,
+                     std::initializer_list<const char *> substrs) {
+  for (const std::string &d : diags)
+    for (const char *s : substrs)
+      if (d.find(s) != std::string::npos)
+        return true;
+  return false;
 }
 
 // ===========================================================================
@@ -1227,6 +1305,174 @@ struct Entity {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Emitted source-graph edge (ADR-031 D2, P1 #17-18). Shape mirrors
+// buildsource.source_graph.GraphEdge.to_dict() (edge/src/dst/provenance/
+// confidence/attrs) so a future fold step can ingest these directly. Captured
+// during the SAME AST walk FactsVisitor already runs for entities — no second
+// frontend pass.
+// ---------------------------------------------------------------------------
+struct SourceEdge {
+  std::string kind; // one of DECL_CALLS_DECL/DECL_REFERENCES_DECL/
+                    // DECL_HAS_TYPE/TYPE_HAS_FIELD_TYPE/TYPE_INHERITS
+  std::string src;
+  std::string dst;
+  std::string confidence = "high";
+  std::map<std::string, std::string> attrs;
+
+  std::string to_json() const {
+    return "{\"edge\":" + jsonStr(kind) + ",\"src\":" + jsonStr(src) +
+           ",\"dst\":" + jsonStr(dst) +
+           ",\"provenance\":\"clang-plugin-inline\",\"confidence\":" +
+           jsonStr(confidence) + ",\"attrs\":" + jsonStrMap(attrs) + "}";
+  }
+};
+
+// Build the qualified name the way clang.py does: join only the *named*
+// enclosing namespace and record/tag scopes (its _SCOPE_NODE_KINDS, which
+// does NOT include functions), then the decl's own simple name. This
+// deliberately differs from getQualifiedNameAsString(), which prepends
+// function scopes ("n::f()::Local") for a body-local type and
+// "(anonymous namespace)::" for an unnamed-namespace decl — spellings
+// clang.py's scope stack never produces. Since qualified_name feeds the
+// entity id (types/typedefs/constexpr/templates) and identity(), matching
+// clang.py here keeps ids equal to the clang backend for those cases rather
+// than reading as simultaneous add+remove (Codex review).
+//
+// A free function (not a FactsVisitor member) because it touches no visitor
+// state — CallRefVisitor's per-function-body edge sub-walk reuses it too
+// (P1 #17-18), so the two visitors stay on one qualified-name convention
+// instead of drifting apart (Codex review would otherwise flag the
+// duplicate).
+std::string scopedName(const NamedDecl *d) {
+  std::vector<std::string> scopes;
+  // Walk the LEXICAL context chain, not the semantic one: clang.py builds the
+  // scope from JSON AST nesting (where the decl is written), so an out-of-line
+  // qualified definition (`int n::f(){}` written at TU scope, esp. extern "C"
+  // where the mangled name is suppressed and identity falls back to the
+  // qualified name) is named `f`, not `n::f`. getLexicalDeclContext mirrors
+  // that; for the common in-place declaration lexical == semantic (Codex review).
+  for (const DeclContext *dc = d->getLexicalDeclContext(); dc;
+       dc = dc->getLexicalParent()) {
+    if (const auto *ns = dyn_cast<NamespaceDecl>(dc)) {
+      if (!ns->isAnonymousNamespace() && !ns->getName().empty())
+        scopes.push_back(ns->getNameAsString());
+    } else if (const auto *rd = dyn_cast<RecordDecl>(dc)) {
+      // clang.py's JSON kind for an explicit/partial class-template
+      // specialization is ClassTemplateSpecializationDecl /
+      // ClassTemplatePartialSpecializationDecl, which are NOT in
+      // _SCOPE_NODE_KINDS, so it never adds them as a scope segment. They
+      // derive from CXXRecordDecl, so exclude them explicitly — otherwise a
+      // type nested in `template<> struct S<int>{ struct N{}; }` would be
+      // named `ns::S::N` here but `ns::N` by the backend (Codex/review).
+      if (!isa<ClassTemplateSpecializationDecl>(rd) && !rd->getName().empty())
+        scopes.push_back(rd->getNameAsString());
+    }
+    // FunctionDecl / LinkageSpecDecl / the TU contribute nothing to the
+    // name, exactly like clang.py's _child_scope.
+  }
+  std::string out;
+  for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
+    out += *it + "::";
+  out += d->getNameAsString();
+  return out;
+}
+
+// scopedName() alone collapses distinct overloads (and any same-named decl in
+// the same scope that differs only by signature) onto one string; used as a
+// source_edges endpoint identity, that lets the (kind, src, dst) dedup in
+// addEdge() conflate e.g. `foo(int)` and `foo(double)` into a single node, so
+// an edge belonging to one overload can read as belonging to the other. This
+// mirrors the mangled-or-scoped-name `key` scheme entity ids already use
+// (emitFunctionFacts's `key = mangled.empty() ? name : mangled`) — same
+// identity scheme this decl's own `key` would get if FactsVisitor visited it.
+//
+// This is NOT full parity with the Python clang.py/call_graph.py extractor's
+// `_identity()` (also mangled-name-or-name): that extractor resolves a call's
+// callee from `-ast-dump=json`'s compact `referencedDecl` stub, which clang
+// never populates with `mangledName` (verified empirically — only a
+// fully-dumped decl node carries it), so Flow B's call edges stay name-only
+// for an overloaded callee regardless of this fix. Operating on the live
+// `FunctionDecl*` instead of clang's JSON text, this plugin (Flow C) can do
+// better here than Flow B currently does; a future fold step that merges
+// call-graph nodes across both producers by identity string would need to
+// account for that asymmetry (out of scope for this pass).
+//
+// Constructors/destructors are excluded and fall back to scopedName():
+// clang::GlobalDecl's single-FunctionDecl constructor asserts on a bare
+// ctor/dtor (it requires an explicit CXXCtorType/CXXDtorType, and a single
+// declaration mangles to multiple ABI symbols — complete/base/deleting
+// object), so disambiguating those would need call-site-specific variant
+// selection this pass does not attempt; overload collisions among a class's
+// own constructors remain a known imprecision (CodeRabbit review, P2).
+std::string mangledOrScopedName(MangleContext *mc, const NamedDecl *d) {
+  if (mc) {
+    if (const auto *fd = dyn_cast_or_null<FunctionDecl>(d)) {
+      if (!isa<CXXConstructorDecl>(fd) && !isa<CXXDestructorDecl>(fd) &&
+          mc->shouldMangleDeclName(fd)) {
+        std::string buf;
+        llvm::raw_string_ostream os(buf);
+        mc->mangleName(GlobalDecl(fd), os);
+        os.flush();
+        if (!buf.empty())
+          return buf;
+      }
+    }
+  }
+  return scopedName(d);
+}
+
+// ---------------------------------------------------------------------------
+// Small per-function-body sub-walk collecting DECL_CALLS_DECL/
+// DECL_REFERENCES_DECL edge targets (P1 #17-18). Scoped to one FunctionDecl's
+// body so it needs no "current enclosing function" state threaded through the
+// main FactsVisitor traversal — FactsVisitor invokes one of these per public
+// function body it already visits, so this is still the SAME AST walk, not a
+// second frontend pass.
+// ---------------------------------------------------------------------------
+class CallRefVisitor : public RecursiveASTVisitor<CallRefVisitor> {
+public:
+  // (target decl, resolution is "virtual-overapprox" when true). Keeps the
+  // raw decl rather than a pre-computed scopedName() string so the caller can
+  // resolve it through mangledOrScopedName() — this visitor has no
+  // MangleContext of its own (it is instantiated fresh per function body with
+  // no ASTContext threaded in), and the target AST outlives this sub-walk.
+  std::vector<std::pair<const FunctionDecl *, bool>> Calls;
+  std::vector<std::string> References;
+
+  bool shouldVisitImplicitCode() const { return false; }
+  bool shouldVisitTemplateInstantiations() const { return false; }
+
+  bool VisitCallExpr(CallExpr *ce) {
+    const FunctionDecl *callee = ce->getDirectCallee();
+    if (!callee || callee->getNameAsString().empty())
+      return true; // function-pointer/unresolved call: unknown static target
+    bool isVirtual = false;
+    if (isa<CXXMemberCallExpr>(ce)) {
+      if (const auto *method = dyn_cast<CXXMethodDecl>(callee))
+        isVirtual = method->isVirtual();
+    }
+    Calls.emplace_back(callee, isVirtual);
+    return true;
+  }
+
+  bool VisitDeclRefExpr(DeclRefExpr *dre) {
+    const ValueDecl *vd = dre->getDecl();
+    if (const auto *varD = dyn_cast<VarDecl>(vd)) {
+      // Locals/parameters are not ABI-relevant dependency targets; keep only
+      // references to namespace/file-scope or static-member data, mirroring
+      // the plugin's own public-variable scope (emitDataVariable).
+      if (varD->isLocalVarDeclOrParm() || varD->getNameAsString().empty())
+        return true;
+      References.push_back(scopedName(varD));
+    } else if (const auto *ecd = dyn_cast<EnumConstantDecl>(vd)) {
+      if (!ecd->getNameAsString().empty())
+        References.push_back(scopedName(ecd));
+    }
+    return true;
+  }
+};
+
 std::string usrForDecl(const Decl *d) {
   if (!d)
     return "";
@@ -1731,12 +1977,12 @@ public:
                std::vector<Entity> &types, std::vector<Entity> &templates,
                std::vector<Entity> &inlineBodies,
                std::vector<Entity> &constexprValues, std::set<std::string> &diags,
-               bool inferredRoots = false)
+               std::vector<SourceEdge> &edges, bool inferredRoots = false)
       : SM(ctx.getSourceManager()), PP(ctx.getPrintingPolicy()), Roots(roots),
         Functions(functions), Variables(variables), Types(types),
         Templates(templates), InlineBodies(inlineBodies),
-        ConstexprValues(constexprValues), Diags(diags),
-        InferredRoots(inferredRoots) {}
+        ConstexprValues(constexprValues), Diags(diags), Edges(edges),
+        InferredRoots(inferredRoots), Mangler(ctx.createMangleContext()) {}
 
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -1782,6 +2028,34 @@ public:
     stampDeclEvidence(e, fd);
     Functions.push_back(e);
 
+    // P1 #17-18: source-graph edges captured in the SAME AST walk, no second
+    // frontend pass. DECL_HAS_TYPE for the return type and each parameter;
+    // DECL_CALLS_DECL/DECL_REFERENCES_DECL from a bounded sub-walk of this
+    // function's own body (CallRefVisitor). Edges are keyed by `key`
+    // (mangled-or-scoped-name), not the bare `name`/scopedName() — two
+    // overloads share one `name`, and using it as the edge src would let the
+    // (kind, src, dst) dedup conflate `foo(int)`'s edges with `foo(double)`'s
+    // (CodeRabbit review, P2; see mangledOrScopedName()).
+    addEdge("DECL_HAS_TYPE", key, fd->getReturnType().getAsString(PP), "high",
+            {{"role", "return"}});
+    for (const ParmVarDecl *p : fd->parameters()) {
+      std::string ptype = p->getType().getAsString(PP);
+      if (!ptype.empty())
+        addEdge("DECL_HAS_TYPE", key, ptype, "high", {{"role", "param"}});
+    }
+    if (Stmt *body = fd->getBody()) {
+      CallRefVisitor crv;
+      crv.TraverseStmt(body);
+      for (const auto &call : crv.Calls)
+        addEdge("DECL_CALLS_DECL", key,
+                mangledOrScopedName(Mangler.get(), call.first),
+                call.second ? "reduced" : "high",
+                {{"call_kind", call.second ? "virtual" : "direct"},
+                 {"resolution", call.second ? "overapprox" : "exact"}});
+      for (const std::string &ref : crv.References)
+        addEdge("DECL_REFERENCES_DECL", key, ref, "reduced", {{"role", "ref"}});
+    }
+
     // Gate the whole inline entity on a CompoundStmt being present in the
     // dumped JSON (clang.py::_has_body), NOT on the AST body predicate. Because
     // this runs post-codegen (AddAfterMainAction), an implicit/defaulted
@@ -1814,7 +2088,23 @@ public:
       return true;
     if (!rd->isThisDeclarationADefinition())
       return true;
-    emitType(rd, scopedName(rd), "record");
+    std::string name = scopedName(rd);
+    if (!emitType(rd, name, "record"))
+      return true;
+    // P1 #17-18: TYPE_INHERITS / TYPE_HAS_FIELD_TYPE, same AST walk. Only for
+    // a record whose type entity was itself just emitted (public, non-empty
+    // JSON dump) — bounds edge capture to exactly the public surface
+    // FactsVisitor already walks.
+    for (const CXXBaseSpecifier &base : rd->bases()) {
+      std::string baseName = base.getType().getAsString(PP);
+      if (!baseName.empty())
+        addEdge("TYPE_INHERITS", name, baseName, "high", {{"role", "base"}});
+    }
+    for (const FieldDecl *field : rd->fields()) {
+      std::string ftype = field->getType().getAsString(PP);
+      if (!ftype.empty())
+        addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high", {{"role", "field"}});
+    }
     return true;
   }
 
@@ -2033,50 +2323,6 @@ private:
     return true;
   }
 
-  // Build the qualified name the way clang.py does: join only the *named*
-  // enclosing namespace and record/tag scopes (its _SCOPE_NODE_KINDS, which
-  // does NOT include functions), then the decl's own simple name. This
-  // deliberately differs from getQualifiedNameAsString(), which prepends
-  // function scopes ("n::f()::Local") for a body-local type and
-  // "(anonymous namespace)::" for an unnamed-namespace decl — spellings
-  // clang.py's scope stack never produces. Since qualified_name feeds the
-  // entity id (types/typedefs/constexpr/templates) and identity(), matching
-  // clang.py here keeps ids equal to the clang backend for those cases rather
-  // than reading as simultaneous add+remove (Codex review).
-  std::string scopedName(const NamedDecl *d) const {
-    std::vector<std::string> scopes;
-    // Walk the LEXICAL context chain, not the semantic one: clang.py builds the
-    // scope from JSON AST nesting (where the decl is written), so an out-of-line
-    // qualified definition (`int n::f(){}` written at TU scope, esp. extern "C"
-    // where the mangled name is suppressed and identity falls back to the
-    // qualified name) is named `f`, not `n::f`. getLexicalDeclContext mirrors
-    // that; for the common in-place declaration lexical == semantic (Codex review).
-    for (const DeclContext *dc = d->getLexicalDeclContext(); dc;
-         dc = dc->getLexicalParent()) {
-      if (const auto *ns = dyn_cast<NamespaceDecl>(dc)) {
-        if (!ns->isAnonymousNamespace() && !ns->getName().empty())
-          scopes.push_back(ns->getNameAsString());
-      } else if (const auto *rd = dyn_cast<RecordDecl>(dc)) {
-        // clang.py's JSON kind for an explicit/partial class-template
-        // specialization is ClassTemplateSpecializationDecl /
-        // ClassTemplatePartialSpecializationDecl, which are NOT in
-        // _SCOPE_NODE_KINDS, so it never adds them as a scope segment. They
-        // derive from CXXRecordDecl, so exclude them explicitly — otherwise a
-        // type nested in `template<> struct S<int>{ struct N{}; }` would be
-        // named `ns::S::N` here but `ns::N` by the backend (Codex/review).
-        if (!isa<ClassTemplateSpecializationDecl>(rd) && !rd->getName().empty())
-          scopes.push_back(rd->getNameAsString());
-      }
-      // FunctionDecl / LinkageSpecDecl / the TU contribute nothing to the
-      // name, exactly like clang.py's _child_scope.
-    }
-    std::string out;
-    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
-      out += *it + "::";
-    out += d->getNameAsString();
-    return out;
-  }
-
   int presumedLine(const Decl *d) const {
     // UseLineDirectives=false → the physical line, ignoring `#line`, matching
     // clang's JSON dumper (and clang.py, which reads that JSON loc).
@@ -2136,19 +2382,22 @@ public:
   }
 
 private:
-  void emitType(const TagDecl *td, const std::string &name,
+  // Returns whether a type Entity was actually emitted, so a caller (P1
+  // #17-18's edge capture) can bound its own emission to exactly the public
+  // surface this function accepted.
+  bool emitType(const TagDecl *td, const std::string &name,
                 const std::string &kind) {
     // Anonymous records/enums have an empty qualified name; clang.py only treats
     // named type nodes as entities (bool(name)), so skip them — otherwise every
     // anonymous tag collides on H({"type", ""}).
     if (name.empty() || !isAccessible(td))
-      return;
+      return false;
     std::string file, origin, visibility;
     if (!classify(td, file, origin, visibility))
-      return;
+      return false;
     std::optional<Value> json = dumpDeclJson(td);
     if (!jsonTypeHasMembers(json))
-      return;
+      return false;
     Entity e;
     e.id = H({"type", name});
     e.kind = kind;
@@ -2163,6 +2412,7 @@ private:
     e.visibility = visibility;
     stampDeclEvidence(e, td);
     Types.push_back(e);
+    return true;
   }
 
   void emitTemplate(const TemplateDecl *td) {
@@ -2239,6 +2489,36 @@ private:
       e.relations["declaration_role"] = "class_template_member_pattern";
       stampDeclEvidence(e, fd);
       Functions.push_back(e);
+
+      // P1 #17-18 parity with VisitFunctionDecl: without this, a call/
+      // reference inside a class-template member body was silently absent
+      // from source_edges with no diagnostic at all (dumpDeclJson succeeds
+      // normally here), so source_edges coverage could read complete/
+      // empty-confirmed while calls from every class-template member body
+      // in the TU were unconditionally missing (Codex review, P2). No
+      // mangled name applies to an uninstantiated template member pattern
+      // (unlike VisitFunctionDecl's `key`, which prefers one), so edges are
+      // keyed by the same qualified `name` used for this entity's own
+      // identity above.
+      addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP),
+              "high", {{"role", "return"}});
+      for (const ParmVarDecl *p : fd->parameters()) {
+        std::string ptype = p->getType().getAsString(PP);
+        if (!ptype.empty())
+          addEdge("DECL_HAS_TYPE", name, ptype, "high", {{"role", "param"}});
+      }
+      if (Stmt *body = fd->getBody()) {
+        CallRefVisitor crv;
+        crv.TraverseStmt(body);
+        for (const auto &call : crv.Calls)
+          addEdge("DECL_CALLS_DECL", name,
+                  mangledOrScopedName(Mangler.get(), call.first),
+                  call.second ? "reduced" : "high",
+                  {{"call_kind", call.second ? "virtual" : "direct"},
+                   {"resolution", call.second ? "overapprox" : "exact"}});
+        for (const std::string &ref : crv.References)
+          addEdge("DECL_REFERENCES_DECL", name, ref, "reduced", {{"role", "ref"}});
+      }
     }
   }
 
@@ -2252,6 +2532,10 @@ private:
   std::vector<Entity> &InlineBodies;
   std::vector<Entity> &ConstexprValues;
   std::set<std::string> &Diags;
+  std::vector<SourceEdge> &Edges;
+  // Per-TU edge dedup key: (kind, src, dst) — "Deduplicate identical edges
+  // per TU" (P1 #18). Not a reference: purely this visitor's own bookkeeping.
+  std::set<std::tuple<std::string, std::string, std::string>> SeenEdgeKeys;
   //: True when Roots were auto-derived (no explicit public-roots=); gates the
   //: source-file exclusion so an inferred `-I.` root does not pull `.cpp` decls
   //: onto the public surface.
@@ -2259,6 +2543,31 @@ private:
   // Mutable: updated from the const `classify` gate while walking the AST.
   mutable size_t RejectedHeaderDecls = 0;
   mutable std::string ExampleRejectedHeader;
+  // Owning; ASTContext::createMangleContext() returns a raw pointer the
+  // caller must free. Built once per TU and reused for every
+  // mangledOrScopedName() call (edge endpoints only — entity `key`s keep
+  // reading their mangled name from clang's own JSON dump, unchanged) rather
+  // than re-mangling on every call expression.
+  std::unique_ptr<MangleContext> Mangler;
+
+  // Deterministic edge identity (P1 #18): kind + source entity identity +
+  // target entity identity. Silently drops a self-edge or an edge with an
+  // unresolved (empty) endpoint rather than emitting a useless/noisy one.
+  void addEdge(const std::string &kind, const std::string &src,
+               const std::string &dst, const std::string &confidence,
+               std::map<std::string, std::string> attrs = {}) {
+    if (src.empty() || dst.empty() || src == dst)
+      return;
+    if (!SeenEdgeKeys.insert(std::make_tuple(kind, src, dst)).second)
+      return;
+    SourceEdge e;
+    e.kind = kind;
+    e.src = src;
+    e.dst = dst;
+    e.confidence = confidence;
+    e.attrs = std::move(attrs);
+    Edges.push_back(std::move(e));
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -2282,9 +2591,10 @@ public:
 
     std::vector<Entity> functions, variables, types, templates, inlineBodies,
         constexprValues;
+    std::vector<SourceEdge> edges;
     std::set<std::string> diags;
     FactsVisitor visitor(ctx, Roots, functions, variables, types, templates,
-                         inlineBodies, constexprValues, diags,
+                         inlineBodies, constexprValues, diags, edges,
                          InferredRootCount > 0);
     visitor.TraverseDecl(ctx.getTranslationUnitDecl());
 
@@ -2303,8 +2613,13 @@ public:
     std::string tuId = "cu://" + source + "#cfg:" + cfg;
     std::string targetId = Library.empty() ? "" : "target://" + Library;
 
+    // P1 #15-16: every file the preprocessor actually opened for this TU —
+    // captured from the SourceManager it already built, not a second pass.
+    std::vector<std::string> readFiles = collectReadFiles(sm);
+
     if (!writeTu(source, tuId, targetId, ctxHash, functions, variables, types,
-                 templates, inlineBodies, constexprValues, macros, diags))
+                 templates, inlineBodies, constexprValues, macros, diags,
+                 edges, readFiles))
       llvm::errs() << "abicheck-facts: could not write source facts to " << OutDir
                    << "\n";
   }
@@ -2406,6 +2721,38 @@ private:
     return source;
   }
 
+  // P1 #15-16: every file the preprocessor actually opened while building
+  // this TU — the main source plus every transitively included header
+  // (public, private, generated, forced), straight from the SourceManager
+  // this compile already populated. Deduplicated and sorted deterministically
+  // (recommendation #16). Absolute paths, matching resolveMainSource() so a
+  // relative -I doesn't make two same-spelled builds collide.
+  //
+  // SourceManager::fileinfo_begin()/end() iterate a map whose *key* type
+  // changed across the LLVM majors this plugin supports (C.5): `FileEntryRef`
+  // from LLVM 18, `const FileEntry *` on LLVM 16/17 (confirmed by the C.6 CI
+  // matrix — a `FileEntryRef fe = it->first;` here fails to compile on 17).
+  // The two overloads below dispatch on whichever key type the installed
+  // clang headers actually declare, so this file builds unmodified against
+  // every matrix leg without an `#if CLANG_VERSION_MAJOR` guard.
+  static llvm::StringRef fileEntryKeyName(const FileEntry *fe) {
+    return fe->getName();
+  }
+  static llvm::StringRef fileEntryKeyName(FileEntryRef fe) {
+    return fe.getName();
+  }
+  std::vector<std::string> collectReadFiles(SourceManager &sm) const {
+    std::vector<std::string> files;
+    for (auto it = sm.fileinfo_begin(), e = sm.fileinfo_end(); it != e; ++it) {
+      llvm::SmallString<256> abs(fileEntryKeyName(it->first));
+      llvm::sys::fs::make_absolute(abs);
+      files.push_back(std::string(abs.str()));
+    }
+    std::sort(files.begin(), files.end());
+    files.erase(std::unique(files.begin(), files.end()), files.end());
+    return files;
+  }
+
   std::vector<Entity> collectMacros(std::set<std::string> &diags) {
     std::vector<Entity> out;
     bool any = false;
@@ -2477,7 +2824,9 @@ private:
                const std::vector<Entity> &inlineBodies,
                const std::vector<Entity> &constexprValues,
                const std::vector<Entity> &macros,
-               const std::set<std::string> &diags) {
+               const std::set<std::string> &diags,
+               const std::vector<SourceEdge> &edges,
+               const std::vector<std::string> &readFiles) {
     std::string factsDir = OutDir + "/source_facts";
     if (llvm::sys::fs::create_directories(factsDir))
       return false;
@@ -2490,10 +2839,83 @@ private:
         items.push_back(e.to_json());
       return jsonRawArray(items);
     };
+    auto edgeArr = [](const std::vector<SourceEdge> &v) {
+      std::vector<std::string> items;
+      items.reserve(v.size());
+      for (const SourceEdge &e : v)
+        items.push_back(e.to_json());
+      return jsonRawArray(items);
+    };
 
     std::string extractor = "{\"name\":\"abicheck-clang-plugin\",\"version\":" +
                             jsonStr(kPluginVersion) + "}";
     std::vector<std::string> diagVec(diags.begin(), diags.end());
+
+    // ADR-038 C.8: fact-set identity + per-family coverage, always computed —
+    // never behind a flag. See familyCoverageState()/anyDiagContains() above.
+    std::string factSet =
+        "{\"name\":" + jsonStr(kFactSetName) +
+        ",\"version\":" + std::to_string(kFactSetVersion) +
+        ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
+        jsonStr(kPluginVersion) +
+        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
+        jsonStr(CLANG_VERSION_STRING) + "}";
+
+    std::map<std::string, std::string> coverageMap = {
+        // Class-template member patterns (emitClassTemplateMemberPatterns)
+        // also push into `functions`, so a JSON-dump failure there must
+        // count toward this family's diagnostic check too, or an all-failed
+        // batch of template members with no other free function in the TU
+        // reports empty-confirmed instead of failed (CodeRabbit review, P2).
+        {"functions",
+         familyCoverageState(
+             !functions.empty(),
+             anyDiagContains(diags, {"function facts unavailable",
+                                     "class-template member facts unavailable"}))},
+        {"variables", familyCoverageState(
+                          !variables.empty(),
+                          anyDiagContains(diags, {"variable facts unavailable"}))},
+        {"types", familyCoverageState(
+                      !types.empty(),
+                      anyDiagContains(diags, {"record/enum type_hash unavailable"}))},
+        {"macros", familyCoverageState(!macros.empty(), /*diagnosticsSeen=*/false)},
+        // "class-template member facts unavailable" deliberately excluded
+        // here: emitClassTemplateMemberPatterns() pushes a failed member's
+        // entity into `functions` (it IS a function), never `templates` —
+        // counting it here would mark templates coverage partial/failed even
+        // when every actual Template entity in the TU was captured cleanly
+        // (review finding).
+        {"templates",
+         familyCoverageState(
+             !templates.empty(),
+             anyDiagContains(diags, {"template body_hash unavailable"}))},
+        {"inline_bodies",
+         familyCoverageState(
+             !inlineBodies.empty(),
+             anyDiagContains(diags, {"function facts unavailable"}))},
+        {"constexpr_values",
+         familyCoverageState(
+             !constexprValues.empty(),
+             anyDiagContains(diags, {"constexpr value unavailable"}))},
+        // P1 #15-18: always attempted now (this producer's SourceManager walk
+        // and per-function-body sub-walk), so "found nothing" is a real
+        // empty-confirmed result, not an unsupported family -- EXCEPT when a
+        // function's dumpDeclJson() failed: VisitFunctionDecl returns before
+        // ever running the CallRefVisitor sub-walk that adds this function's
+        // DECL_CALLS_DECL/DECL_REFERENCES_DECL edges, so every edge from that
+        // function's body was silently skipped, not "confirmed absent". A
+        // hardcoded diagnosticsSeen=false let source_edges report
+        // complete/empty-confirmed in that failure mode, so `inputs validate`
+        // and comparisons could trust an absence of source-edge findings that
+        // was actually just missing evidence (Codex review, P2).
+        {"source_edges",
+         familyCoverageState(
+             !edges.empty(),
+             anyDiagContains(diags, {"function facts unavailable",
+                                     "class-template member facts unavailable"}))},
+        {"read_files", familyCoverageState(!readFiles.empty(), /*diagnosticsSeen=*/false)},
+    };
+    std::string coverage = jsonStrMap(coverageMap);
 
     std::string tu =
         "{\"schema_version\":1,\"tu_id\":" + jsonStr(tuId) +
@@ -2506,8 +2928,10 @@ private:
         ",\"templates\":" + arr(templates) +
         ",\"inline_bodies\":" + arr(inlineBodies) +
         ",\"constexpr_values\":" + arr(constexprValues) +
-        ",\"source_edges\":[],\"diagnostics\":" + jsonStrArray(diagVec) +
-        ",\"read_files\":[]}";
+        ",\"source_edges\":" + edgeArr(edges) +
+        ",\"diagnostics\":" + jsonStrArray(diagVec) +
+        ",\"read_files\":" + jsonStrArray(readFiles) + ",\"fact_set\":" + factSet +
+        ",\"coverage\":" + coverage + "}";
 
     // Per-TU, deterministic filename keyed by source path AND compile context.
     // Including the context hash keeps distinct ABI-relevant compile variants of
@@ -2530,12 +2954,16 @@ private:
     if (prof().enabled) {
       auto &p = prof();
       auto ms = [](uint64_t ns) { return ns / 1e6; };
-      llvm::errs() << "abicheck-facts PROFILE " << stem << ": dump="
-                   << llvm::format("%.1f", ms(p.dumpNs)) << "ms parse="
-                   << llvm::format("%.1f", ms(p.parseNs)) << "ms canonicalize="
-                   << llvm::format("%.1f", ms(p.canonNs)) << "ms  (dumps="
-                   << p.dumpCalls << " canon=" << p.canonCalls << " jsonMB="
-                   << llvm::format("%.1f", p.dumpBytes / 1e6) << ")\n";
+      std::string line;
+      llvm::raw_string_ostream os(line);
+      os << "abicheck-facts PROFILE " << stem << ": dump="
+         << llvm::format("%.1f", ms(p.dumpNs)) << "ms parse="
+         << llvm::format("%.1f", ms(p.parseNs)) << "ms canonicalize="
+         << llvm::format("%.1f", ms(p.canonNs)) << "ms  (dumps="
+         << p.dumpCalls << " canon=" << p.canonCalls << " jsonMB="
+         << llvm::format("%.1f", p.dumpBytes / 1e6) << ")\n";
+      os.flush();
+      emitProfileLine(line);
     }
     return true;
   }
@@ -2588,11 +3016,22 @@ private:
       return;
     std::string createdBy =
         std::string("abicheck-clang-plugin ") + kPluginVersion;
+    // ADR-038 C.8: the pack-level fact_set mirrors every TU record's — one
+    // canonical fact set per pack, never per-TU variance (this plugin instance
+    // only ever emits one fact-set version for its whole run).
+    std::string factSet =
+        "{\"name\":" + jsonStr(kFactSetName) +
+        ",\"version\":" + std::to_string(kFactSetVersion) +
+        ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
+        jsonStr(kPluginVersion) +
+        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
+        jsonStr(CLANG_VERSION_STRING) + "}";
     std::string manifest =
         "{\n  \"abicheck_inputs_version\": 1,\n  \"binary\": \"\",\n"
         "  \"compile_db\": \"\",\n  \"created_at\": " +
         jsonStr(nowIso8601Utc()) + ",\n  \"created_by\": " + jsonStr(createdBy) +
-        ",\n  \"exported_symbols\": [],\n  \"headers\": [],\n"
+        ",\n  \"exported_symbols\": [],\n  \"fact_set\": " + factSet +
+        ",\n  \"headers\": [],\n"
         "  \"kind\": \"abicheck_inputs\",\n  \"library\": " + jsonStr(Library) +
         ",\n  \"source_facts\": [\"source_facts\"],\n  \"version\": " + jsonStr(Version) +
         "\n}\n";

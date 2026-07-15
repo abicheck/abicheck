@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (353 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -242,6 +242,7 @@ One row per `ChangeKind` (352 total). Columns fuse the verdict partition (`check
 | `soname_missing` | quality | `COMPATIBLE` | `warning` | L0 | `soname_missing` | [case05](../examples/case05_soname.md) |
 | `source_binary_provenance_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_binary_provenance_mismatch` | — |
 | `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` | — |
+| `source_fact_coverage_incomplete` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_fact_coverage_incomplete` | — |
 | `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` | — |
 | `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` | — |
 | `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` | [case135](../examples/case135_stack_canary_removed.md) |

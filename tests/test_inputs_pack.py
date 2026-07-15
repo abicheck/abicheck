@@ -22,9 +22,11 @@ non-executing fixture pattern.
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource import (
@@ -156,6 +158,7 @@ def test_manifest_round_trip_preserves_fields() -> None:
         compile_db="build/compile_commands.json",
         headers=["include/foo.h"],
         exported_symbols=["_Z3foov"],
+        last_compacted="source_facts/compacted.jsonl",
     )
     back = InputsManifest.from_dict(m.to_dict())
     assert back == m
@@ -181,6 +184,18 @@ def test_manifest_null_optional_strings_become_empty_not_none_literal() -> None:
     assert m.library == ""
     assert m.compile_db == ""
     assert m.created_by == ""
+
+
+@pytest.mark.parametrize("bad_fact_set", ["not-a-mapping", 7, ["a", "b"], True])
+def test_manifest_non_mapping_fact_set_degrades_to_empty(bad_fact_set: object) -> None:
+    # Codex review (P2): a hand-written/third-party manifest's fact_set might
+    # not be a mapping (e.g. a string) -- dict(fs_raw) would raise before
+    # `inputs validate` could produce a report, even though a malformed
+    # optional field is supposed to degrade like every other field here.
+    m = InputsManifest.from_dict(
+        {"kind": INPUTS_KIND, "library": "l", "fact_set": bad_fact_set}
+    )
+    assert m.fact_set == {}
 
 
 def test_ingest_with_null_compile_db_still_finds_default(tmp_path: Path) -> None:
@@ -378,6 +393,102 @@ def test_read_source_facts_skips_malformed_lines(tmp_path: Path) -> None:
     assert len(tus) == 1
 
 
+def test_read_source_facts_excludes_manifest_from_root_directory_scan(
+    tmp_path: Path,
+) -> None:
+    """A hand-written manifest using source_facts: ["."] (root-level JSONL
+    facts, no source_facts/ subdirectory) would otherwise sweep the pack's
+    own manifest.json into the "*.json" glob as if it were a TU record:
+    SourceAbiTu.from_dict() never raises for it (none of its keys match
+    SourceAbiTu's fields), so it silently reads as an empty-but-valid TU.
+    compact_inputs_pack's default remove_originals=True then deletes it as
+    a merged "original" -- destroying the pack's own manifest (Codex
+    review, P2)."""
+    pack = _write_inputs_pack(
+        tmp_path, [_tu("foo", mangled="_Z3foov")], manifest_extra={"source_facts": ["."]}
+    )
+    # Root-level fact file, matching a producer that used "." as its
+    # source_facts directory instead of the default source_facts/ subdir.
+    (pack / "root.jsonl").write_text(
+        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict()) + "\n",
+        encoding="utf-8",
+    )
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    tu_ids = {tu.tu_id for tu in tus}
+    # manifest.json must not appear as a (spurious, empty-tu_id) record.
+    assert "" not in tu_ids
+    assert tu_ids == {"cu://src/bar.cpp#cfg:abc"}
+
+
+def test_read_source_facts_excludes_manifest_from_explicit_file_entry(
+    tmp_path: Path,
+) -> None:
+    """The directory-scan exclusion above only filters glob() results; an
+    *explicitly* named file entry pointing at the manifest itself (e.g. a
+    hand-written source_facts: ["manifest.json"]) is a different code path
+    (the `elif target.is_file()` branch) and fell through unfiltered.
+    SourceAbiTu.from_dict() never raises for it, so it silently read as an
+    empty-but-valid TU, and compact_inputs_pack's default
+    remove_originals=True then deleted it as a merged "original" --
+    destroying the pack's own manifest (Codex review, P2)."""
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"source_facts": ["source_facts", "manifest.json"]},
+    )
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    tu_ids = {tu.tu_id for tu in tus}
+    # manifest.json must not appear as a (spurious, empty-tu_id) record --
+    # explicitly naming it must be flagged, not silently accepted.
+    assert "" not in tu_ids
+    assert any("resolved to no readable fact files" in d for d in diagnostics)
+    # The co-located valid TU (from the "source_facts" directory entry) must
+    # still be ingested despite the excluded manifest.json entry -- the fix
+    # must not collaterally drop legitimate facts from the same read.
+    assert tu_ids == {"cu://src/foo.cpp#cfg:abc"}
+
+
+def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    # UnicodeDecodeError is a ValueError subclass, not an OSError -- it
+    # previously escaped read_source_fact_files's `except OSError` and
+    # aborted the whole read pass instead of degrading to a per-file
+    # diagnostic like every other malformed-input case (CodeRabbit review,
+    # P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    (pack / "source_facts" / "bad.jsonl").write_bytes(b"\xff\xfe{\"tu_id\":1}")
+    diags: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diags)
+    assert len(tus) == 1  # the good record still ingests
+    assert any("could not read/decompress" in d for d in diags)
+
+
+def test_read_source_facts_degrades_on_corrupt_gzip_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    # A truncated/corrupt .gz raises EOFError or zlib.error during
+    # decompression -- neither an OSError subclass -- which previously
+    # escaped the same handler and crashed the read (CodeRabbit review, P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    good = pack / "source_facts" / "good.jsonl.gz"
+    with gzip.open(good, "wb") as fh:
+        fh.write(b'{"tu_id": "cu://src/bar.cpp"}\n')
+    truncated = pack / "source_facts" / "truncated.jsonl.gz"
+    truncated.write_bytes(good.read_bytes()[:5])  # valid header, no body
+    corrupt = pack / "source_facts" / "corrupt.jsonl.gz"
+    corrupt.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data")
+
+    diags: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diags)
+    assert len(tus) == 2  # foo (original) + bar (good.jsonl.gz) still ingest
+    assert sum("could not read/decompress" in d for d in diags) == 2
+
+
 def test_read_source_facts_threads_diagnostics_sink(tmp_path: Path) -> None:
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     facts = pack / "source_facts" / "libfoo.jsonl"
@@ -456,6 +567,24 @@ def test_ingest_skips_schema_invalid_tu_record(tmp_path: Path) -> None:
     assert any("schema-invalid TU" in d for d in ingested.diagnostics)
 
 
+def test_ingest_skips_tu_record_with_malformed_entity_bucket(tmp_path: Path) -> None:
+    # A hand-written/third-party record with a bucket like "functions": "bad"
+    # (a string instead of a list of entity objects) is iterated character by
+    # character; each character then reaches SourceEntity.from_dict's
+    # d.get(...) calls and raises AttributeError ('str' has no '.get'), not
+    # the KeyError/ValueError/TypeError the schema-invalid-TU path already
+    # handled. That must degrade to a diagnostic like every other malformed
+    # record here, not crash the whole ingest (Codex review, P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    facts = pack / "source_facts" / "libfoo.jsonl"
+    bad = json.dumps({"tu_id": "cu://bad", "functions": "bad"})
+    facts.write_text(facts.read_text(encoding="utf-8") + bad + "\n", encoding="utf-8")
+    ingested = ingest_inputs_pack(pack)  # must not raise
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names  # the good record survived
+    assert any("schema-invalid TU" in d for d in ingested.diagnostics)
+
+
 def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
     # An explicitly named source_facts entry that resolves to nothing must be
     # reported (not a silent L3-only baseline) and downgrade the record.
@@ -472,6 +601,44 @@ def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
         e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs"
     )
     assert rec.status == "partial"
+
+
+def test_read_source_facts_fails_closed_when_fresh_discovery_is_lossy(
+    tmp_path: Path,
+) -> None:
+    """A manifest listing ``last_compacted`` plus an explicit fresh entry that
+    fails to resolve (e.g. a rebuilt TU's file went missing/typo'd) must not
+    silently serve the stale ``last_compacted`` record for that TU.
+    ``_iter_source_fact_files()``'s "resolved to no readable fact files"
+    discovery diagnostic fires before ``read_source_facts()``'s own
+    fresh-vs-prior split, so it must be counted toward "was this a lossy
+    fresh read" the same way a fresh file that fails to *parse* already is —
+    otherwise the discovery-time diagnostic is silently absorbed and the
+    stale prior-compaction record for the missing TU is carried forward as
+    if nothing were wrong (Codex review)."""
+    pack = tmp_path / "abicheck_inputs"
+    (pack / "source_facts").mkdir(parents=True)
+    stale = _tu("a", mangled="_Z1av")
+    (pack / "source_facts" / "compacted.jsonl").write_text(
+        json.dumps(stale.to_dict()) + "\n", encoding="utf-8"
+    )
+    manifest = {
+        "kind": INPUTS_KIND,
+        "abicheck_inputs_version": ABICHECK_INPUTS_VERSION,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "created_by": "abicheck-clang-plugin 0.1",
+        "source_facts": ["source_facts/compacted.jsonl", "source_facts/a.new.jsonl"],
+        "last_compacted": "source_facts/compacted.jsonl",
+    }
+    (pack / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    assert any("resolved to no readable fact files" in d for d in diagnostics)
+    # Fails closed: the stale prior-compaction record for "a" must not be
+    # silently served once an explicit fresh entry couldn't be found.
+    assert tus == []
 
 
 def test_ingest_diagnoses_explicit_missing_compile_db(tmp_path: Path) -> None:
@@ -647,3 +814,16 @@ def test_load_inputs_manifest_round_trips_on_disk(tmp_path: Path) -> None:
     assert m.kind == INPUTS_KIND
     assert m.library == "libfoo.so"
     assert m.created_by == "abicheck-clang-plugin 0.1"
+
+
+def test_load_inputs_manifest_rejects_wrong_kind(tmp_path: Path) -> None:
+    """A directory whose manifest.json declares a different (or no) `kind`
+    -- e.g. a BuildSourcePack -- must be rejected, not silently accepted via
+    InputsManifest.from_dict()'s forward-compat kind default. Otherwise a
+    write path like compact_inputs_pack() could corrupt an unrelated pack
+    (Codex review, P2)."""
+    bsp = tmp_path / "pack"
+    bsp.mkdir()
+    (bsp / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
+    with pytest.raises(ValueError, match="does not declare kind"):
+        load_inputs_manifest(bsp)

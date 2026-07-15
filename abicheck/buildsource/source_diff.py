@@ -33,7 +33,13 @@ import re
 
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
-from .source_abi import EVIDENCE_TIER_L4, SourceAbiSurface, SourceEntity
+from .fact_set import check_fact_set_compatibility, incomplete_families
+from .source_abi import (
+    COVERAGE_STATES,
+    EVIDENCE_TIER_L4,
+    SourceAbiSurface,
+    SourceEntity,
+)
 
 
 def _header_basename(path: str) -> str:
@@ -112,6 +118,121 @@ def _richer(candidate: SourceEntity, current: SourceEntity) -> bool:
     return _score(candidate) > _score(current)
 
 
+def _coerce_coverage_states(family_states: dict[str, object]) -> dict[str, str]:
+    """Coerce an unrecognized per-family coverage state to ``"failed"``.
+
+    Mirrors :func:`~.fact_set.rollup_coverage`'s own coercion (Codex review,
+    P2) so a value outside :data:`~.source_abi.COVERAGE_STATES` — a typo, or
+    a hand-written/forward-versioned producer's newer vocabulary — cannot
+    read as an implicitly "fine" state just because it isn't a *known*
+    incomplete one either.
+
+    ``SourceAbiSurface.from_dict`` copies ``coverage`` with a shallow
+    ``dict(...)`` (unlike ``SourceAbiTu.from_dict``, which string-coerces
+    every value via ``_string_dict``), so a hand-written/forward-versioned
+    ``source_abi.json`` can carry a non-string family-state value — a JSON
+    array or object. Checking ``state in COVERAGE_STATES`` (a
+    ``frozenset[str]``) hashes *state* first, and a list/dict is unhashable,
+    raising ``TypeError`` before this could even coerce it — crashing
+    ``diff_source_abi()`` instead of degrading (Codex review, P2). The
+    ``isinstance`` check short-circuits before the membership test so a
+    non-string value coerces to ``"failed"`` like any other unrecognized
+    state, never reaching ``in`` at all.
+    """
+    return {
+        family: state
+        if isinstance(state, str) and state in COVERAGE_STATES
+        else "failed"
+        for family, state in family_states.items()
+    }
+
+
+def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+    """ADR-038 C.8: flag incompatible or incomplete L4 fact-set evidence.
+
+    Fires only when there is something to report: at least one side carries a
+    ``fact_set`` identity or a per-family coverage rollup (``link_source_abi``
+    rolls both up from the per-TU records), or a mandatory family was rolled
+    up as ``partial``/``failed``. Silent when neither side has ever populated
+    this metadata (a producer that predates ADR-038 C.8, or hand-built test
+    fixtures), matching the existing forward-compat convention rather than
+    manufacturing noise for a producer that never claimed to report coverage.
+
+    Checking ``fact_family_states`` too (not just ``fact_set``) matters for a
+    mixed pack: ``rollup_fact_set`` deliberately returns ``{}`` when some TUs
+    carry a fact_set and others don't (an inconsistency, not "unknown"), but
+    ``rollup_coverage`` can still carry non-empty family states from the TUs
+    that *did* report — that combination must still route through
+    :func:`check_fact_set_compatibility` so its ``fact_set_unknown`` warning
+    fires instead of being silently skipped (Codex review).
+    """
+    old_cov = old.coverage if isinstance(old.coverage, dict) else {}
+    new_cov = new.coverage if isinstance(new.coverage, dict) else {}
+    # A hand-written/newer source_abi.json's nested coverage metadata might
+    # not be a mapping at all (e.g. a string) -- `x or {}` alone doesn't
+    # catch that (a non-empty non-dict value is still truthy), and passing
+    # it through to check_fact_set_compatibility()/incomplete_families()
+    # (which call .get()/.items() on it) would raise AttributeError instead
+    # of degrading gracefully, unlike every other optional field here
+    # (Codex review, P2).
+    old_fact_set_raw = old_cov.get("fact_set")
+    new_fact_set_raw = new_cov.get("fact_set")
+    old_families_raw = old_cov.get("fact_family_states")
+    new_families_raw = new_cov.get("fact_family_states")
+    old_fact_set = old_fact_set_raw if isinstance(old_fact_set_raw, dict) else {}
+    new_fact_set = new_fact_set_raw if isinstance(new_fact_set_raw, dict) else {}
+    old_families = old_families_raw if isinstance(old_families_raw, dict) else {}
+    new_families = new_families_raw if isinstance(new_families_raw, dict) else {}
+
+    has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
+    issues = (
+        check_fact_set_compatibility(old_fact_set, new_fact_set) if has_signal else []
+    )
+    # A serialized surface's fact_family_states can come from a hand-written
+    # or forward-versioned source_abi.json, not just rollup_coverage()'s own
+    # output -- so its per-family values are not guaranteed to already be one
+    # of COVERAGE_STATES the way rollup_coverage()'s coercion (Codex review,
+    # P2) guarantees for its own callers. incomplete_families() only matches
+    # documented incomplete states, so an unrecognized value like "bad" or
+    # "complete-ish" (a typo, or a newer vocabulary this build predates)
+    # would otherwise never be flagged as incomplete, silently suppressing
+    # SOURCE_FACT_COVERAGE_INCOMPLETE for malformed/forward-versioned
+    # coverage metadata this comparison cannot actually trust (Codex review,
+    # P2). Coerce it to the same worst-known-state fallback here too.
+    old_incomplete = incomplete_families(_coerce_coverage_states(old_families))
+    new_incomplete = incomplete_families(_coerce_coverage_states(new_families))
+    if not issues and not old_incomplete and not new_incomplete:
+        return []
+
+    parts = [f"{issue.rule}: {issue.message}" for issue in issues]
+    if old_incomplete:
+        parts.append(
+            f"old side mandatory family/families incomplete: {', '.join(old_incomplete)}"
+        )
+    if new_incomplete:
+        parts.append(
+            f"new side mandatory family/families incomplete: {', '.join(new_incomplete)}"
+        )
+
+    return [
+        Change(
+            kind=ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
+            symbol="",
+            description=(
+                "L4 source-fact evidence for this comparison is incomplete or used "
+                "incompatible producers/fact-set versions: "
+                + "; ".join(parts)
+                + ". Per ADR-038 C.8, treat this pair's other source-replay "
+                "findings as unreliable until re-collected with a consistent, "
+                "complete fact set."
+            ),
+            old_value=str(old_fact_set or old_incomplete or ""),
+            new_value=str(new_fact_set or new_incomplete or ""),
+            source_location=f"[{EVIDENCE_TIER_L4}]",
+        )
+    ]
+
+
 def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     """Return source-replay findings for the old→new source-surface transition.
 
@@ -119,6 +240,7 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     a ``DiffResult`` and run through the existing verdict/policy pipeline.
     """
     changes: list[Change] = []
+    changes.extend(_diff_fact_coverage(old, new))
     changes.extend(_diff_generated(old, new))
     changes.extend(_diff_typedefs(old, new))
     changes.extend(_diff_macros(old, new))

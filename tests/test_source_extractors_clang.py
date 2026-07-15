@@ -2182,20 +2182,32 @@ def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no
 def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    # The compiler-version lookup (ADR-038 C.8 fact_set) is process-lifetime
+    # cached by clang_bin, so a prior test in this session may have already
+    # warmed it — clear it so this test's call count is deterministic
+    # regardless of execution order.
+    _clang_compiler_version.cache_clear()
+
     calls: list[list[str]] = []
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         calls.append(cmd)
         if "-ast-dump=json" in cmd:
             return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
-    assert len(calls) == 2  # AST pass + macro pass
+    # AST pass + macro pass + the (cached-per-binary) compiler-version lookup.
+    assert len(calls) == 3
     assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
+    assert tu.fact_set["compiler_version"] == "18.1.3"
 
 
 def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -2210,6 +2222,33 @@ def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type:
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert tu.macros == []
     assert any("macro pass" in d for d in tu.diagnostics)
+
+
+def test_extract_recovered_ast_exit_downgrades_edges_and_read_files_coverage(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """source_edges/read_files are derived from the same (possibly
+    ast_recovered-truncated) AST dict as the AST-derived families above --
+    a recovered parse must downgrade their coverage too, not just report
+    complete/empty-confirmed because build_source_edges/resolve_read_files
+    themselves raised no exception on the partial AST (Codex review, P2)."""
+    import json
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(
+                kw,
+                json.dumps(_ast()),
+                1,
+                "fatal error: 'llvm/IR/Attributes.inc' file not found",
+            )
+        return _Result(0, "")
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert any("recovered" in d for d in tu.diagnostics)
+    assert tu.coverage["source_edges"] in {"partial", "failed"}
+    assert tu.coverage["read_files"] in {"partial", "failed"}
 
 
 def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -2329,6 +2368,91 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
     )
     assert captured["cwd"] == str(tmp_path)
     assert any(e.qualified_name == "ns::add" for e in tu.functions)
+
+
+def test_extract_populates_source_edges_and_coverage(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    # source_edges (P1 #17-18) is derived from the same AST dict extract()
+    # already parsed -- no second clang invocation, no separate mock needed.
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Base",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "inner": [],
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Widget",
+                "loc": {"line": 2},
+                "bases": [{"type": {"qualType": "Base"}, "writtenAccess": "public"}],
+                "inner": [],
+            },
+        ],
+    }
+
+    extractor = ClangSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):
+            out.write(json.dumps(ast).encode("utf-8"))
+            return _Result(0, "", "")
+        return _Result(0, "")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
+    tu = extractor.extract(
+        cu, public_header_roots=["include/foo.h"], target_id="target://x"
+    )
+    assert tu.source_edges
+    assert all(e.get("provenance") == "clang-ast-inline" for e in tu.source_edges)
+    assert any(e["edge"] == "TYPE_INHERITS" for e in tu.source_edges)
+    assert tu.coverage["source_edges"] == "complete"
+
+
+def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    # Regression guard (Codex review, P2): a diagnostic appended by
+    # build_source_edges() must land in tu.diagnostics (not a disconnected
+    # copy), so _stamp_fact_set_and_coverage() reports source_edges as
+    # failed/partial rather than silently empty-confirmed.
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    def _boom(ast_root, diags):  # type: ignore[no-untyped-def]
+        diags.append("source_edges unavailable: boom")
+        return []
+
+    monkeypatch.setattr(clang_mod, "build_source_edges", _boom)
+
+    extractor = ClangSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):
+            out.write(json.dumps(_ast()).encode("utf-8"))
+            return _Result(0, "", "")
+        return _Result(0, "")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
+    tu = extractor.extract(
+        cu, public_header_roots=["include/foo.h"], target_id="target://x"
+    )
+    assert "source_edges unavailable: boom" in tu.diagnostics
+    assert tu.coverage["source_edges"] == "failed"
 
 
 def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]

@@ -46,6 +46,96 @@ SOURCE_ABI_VERSION: int = 1
 #: shipped-binary ABI break and feed the evidence-coverage report (ADR-028 D7).
 EVIDENCE_TIER_L4 = "L4_SOURCE_ABI"
 
+#: Canonical fact-set identity (ADR-038 C.8). Every producer of ``SourceAbiTu``
+#: records that emit this same *semantic* fact family (functions/methods,
+#: mangled names/signatures, external-linkage variables, records/enums/
+#: typedefs, default arguments, inline/template body hashes, constexpr
+#: values, public macro values, source locations, visibility/ownership
+#: evidence, USR identity, compile-context hash, diagnostics) stamps
+#: ``fact_set.name``/``fact_set.version`` with these constants. There is
+#: deliberately no lesser/optional variant — a producer either implements
+#: this complete fact-set version or declares a family ``unsupported`` in its
+#: ``coverage`` (never omits the family silently). Bump
+#: ``SOURCE_ABI_FACT_SET_VERSION`` only when the *mandatory* family list
+#: changes; producer/performance changes bump a producer's own version
+#: instead (``SourceAbiTu.fact_set["producer_version"]``).
+SOURCE_ABI_FACT_SET_NAME = "abicheck-clang-canonical"
+SOURCE_ABI_FACT_SET_VERSION = 1
+
+#: The mandatory fact families every canonical-fact-set producer must report
+#: coverage for (ADR-038 C.8). ``source_edges``/``read_files`` are mandatory
+#: to *report on* (state may legitimately be ``unsupported``) even though not
+#: every producer collects them yet.
+FACT_FAMILIES: tuple[str, ...] = (
+    "functions",
+    "variables",
+    "types",
+    "macros",
+    "templates",
+    "inline_bodies",
+    "constexpr_values",
+    "source_edges",
+    "read_files",
+)
+
+#: Per-family collection-completeness states (ADR-038 C.8). Coverage
+#: describes what happened during collection; it is never a user-selectable
+#: request to collect less.
+COVERAGE_STATES = frozenset(
+    {"complete", "empty-confirmed", "partial", "unsupported", "failed"}
+)
+
+#: States that mean a mandatory family's absence must NOT be read as proof
+#: nothing changed (recommendation P0 #6) -- an *unexpected* collection
+#: problem on an otherwise-supported family. Deliberately excludes
+#: ``unsupported``: unlike ``partial``/``failed`` (a family this producer
+#: normally collects failed to this time), ``unsupported`` is a producer's
+#: permanent, declared limitation (e.g. the Clang plugin never collects
+#: ``read_files``) -- visible in the coverage report itself so it is never
+#: a *silent* gap, but not a per-comparison anomaly worth a
+#: SOURCE_FACT_COVERAGE_INCOMPLETE RISK finding on literally every
+#: comparison that producer is ever used in (Codex review; see
+#: test_incomplete_families for the intentional contract this asserts).
+INCOMPLETE_COVERAGE_STATES = frozenset({"partial", "failed"})
+
+
+def coverage_state_for_family(
+    *, entities_present: bool, family_diagnostics_seen: bool, unsupported: bool = False
+) -> str:
+    """Derive one of :data:`COVERAGE_STATES` for a fact family (ADR-038 C.8).
+
+    Pure decision table so every producer (the reference clang extractor, the
+    Clang plugin, a future GCC/MSVC producer) reports coverage the same way
+    rather than inventing its own states:
+
+    - *unsupported*: the producer never attempts this family.
+    - *family_diagnostics_seen*: collection was attempted but a recorded
+      diagnostic shows it did not finish cleanly for at least one entity ->
+      ``partial`` (something was still collected) or ``failed`` (nothing
+      was).
+    - otherwise: ``complete`` when at least one entity was collected,
+      ``empty-confirmed`` when collection ran and legitimately found none.
+    """
+    if unsupported:
+        return "unsupported"
+    if family_diagnostics_seen:
+        return "partial" if entities_present else "failed"
+    return "complete" if entities_present else "empty-confirmed"
+
+
+def default_fact_set(
+    *, producer: str, producer_version: str, compiler_version: str = ""
+) -> dict[str, Any]:
+    """Build a canonical ``fact_set`` block (ADR-038 C.8) for a clang-family producer."""
+    return {
+        "name": SOURCE_ABI_FACT_SET_NAME,
+        "version": SOURCE_ABI_FACT_SET_VERSION,
+        "producer": producer,
+        "producer_version": producer_version,
+        "compiler_family": "clang",
+        "compiler_version": compiler_version,
+    }
+
 
 def _confidence(raw: Any) -> LayerConfidence:
     try:
@@ -250,6 +340,15 @@ class SourceAbiTu:
     #: per-TU cache (ADR-030 D8) hashes these so an edit to *any* included header
     #: invalidates a stale dump, not just an edit to the configured public roots.
     read_files: list[str] = field(default_factory=list)
+    #: Canonical fact-set identity (ADR-038 C.8): ``{name, version, producer,
+    #: producer_version, compiler_family, compiler_version}``. Empty on a pack
+    #: from an older/hand-edited producer (forward-compat) — comparison code
+    #: must treat an empty ``fact_set`` as "unknown", never as "matches".
+    fact_set: dict[str, Any] = field(default_factory=dict)
+    #: Per-family collection-completeness state (one of ``COVERAGE_STATES``),
+    #: keyed by the families in ``FACT_FAMILIES`` (ADR-038 C.8). Empty on a
+    #: pack from a producer that predates coverage reporting.
+    coverage: dict[str, str] = field(default_factory=dict)
 
     def all_entities(self) -> list[SourceEntity]:
         """Flatten every entity list, preserving the per-kind grouping order."""
@@ -287,6 +386,8 @@ class SourceAbiTu:
             "source_edges": list(self.source_edges),
             "diagnostics": list(self.diagnostics),
             "read_files": list(self.read_files),
+            "fact_set": dict(self.fact_set),
+            "coverage": dict(self.coverage),
         }
 
     @classmethod
@@ -302,6 +403,8 @@ class SourceAbiTu:
         read_files = (
             [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
         )
+        fs_raw = d.get("fact_set")
+        fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
 
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_ABI_VERSION)),
@@ -322,6 +425,8 @@ class SourceAbiTu:
             source_edges=list(d.get("source_edges", [])),
             diagnostics=list(d.get("diagnostics", [])),
             read_files=read_files,
+            fact_set=fact_set,
+            coverage=_string_dict(d.get("coverage")),
         )
 
 
