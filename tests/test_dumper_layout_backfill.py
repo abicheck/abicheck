@@ -257,6 +257,18 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
+    def test_fieldless_matching_base_with_namespace_asymmetry_is_trusted(self) -> None:
+        """Regression (Codex review): the clang header parser stores each
+        base's full `qualType` (e.g. "api::Base"), while the DWARF builder's
+        base resolution only ever reads DW_AT_name (always bare, "Base",
+        never scope-qualified). Comparing the raw strings would reject this
+        legitimate same-declaration match; both sides must be reduced to
+        their bare suffix before checking overlap."""
+        header = RecordType(name="Foo", kind="class", fields=[], bases=["api::Base"])
+        dwarf = RecordType(name="Foo", kind="class", size_bits=8, fields=[], bases=["Base"])
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 8
+
     def test_fieldless_virtual_base_only_mismatch_is_never_guessed(self) -> None:
         """Regression (Codex review): virtual inheritance is stored in
         RecordType.virtual_bases, not .bases, on both the clang header

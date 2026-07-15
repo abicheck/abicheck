@@ -172,6 +172,15 @@ def backfill_dwarf_layout(
     vtable presence would reject every legitimate virtual-only match, not
     just the unrelated ones.
 
+    Base names, like record names, need normalizing before comparison: the
+    clang header parser stores each base's full ``qualType`` (e.g.
+    ``"api::Base"``), while the DWARF builder's base resolution only ever
+    reads ``DW_AT_name`` (always bare — ``"Base"``, never scope-qualified,
+    unlike a DWARF *record's* own name). Comparing the raw strings would
+    reject a namespaced base's legitimate match (Codex review), so both
+    sides are reduced to their bare last-``::``-segment before the overlap
+    check.
+
     The one case this still can't distinguish (Codex review, fresh evidence
     after the base-corroboration fix above): a header type matched against a
     *totally unrelated* DWARF candidate that happens to have zero fields
@@ -217,9 +226,15 @@ def backfill_dwarf_layout(
         # bases are stored separately from ordinary bases on both the clang
         # header parser and the DWARF builder (RecordType.virtual_bases,
         # not .bases) — a virtual-inheritance-only class would otherwise
-        # leave both .bases sets empty and fall through unchallenged.
-        header_bases = set(header.bases) | set(header.virtual_bases)
-        dwarf_bases = set(dwarf.bases) | set(dwarf.virtual_bases)
+        # leave both .bases sets empty and fall through unchallenged. Base
+        # names also need the same bare-suffix normalization record names
+        # get: the clang header parser stores each base's full `qualType`
+        # (e.g. "api::Base"), while the DWARF builder's base resolution
+        # only ever reads DW_AT_name (always bare, e.g. "Base", never
+        # scope-qualified) — comparing the raw strings would reject a
+        # namespaced base's own correct match (Codex review).
+        header_bases = {b.rsplit("::", 1)[-1] for b in header.bases + header.virtual_bases}
+        dwarf_bases = {b.rsplit("::", 1)[-1] for b in dwarf.bases + dwarf.virtual_bases}
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         # Truly nothing left to disagree on: no fields (or asymmetrically
