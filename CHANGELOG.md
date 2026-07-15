@@ -72,6 +72,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   for every top-level header even when it declares nothing itself (a pure
   `#include`-only umbrella header is still a real public entry point).
 
+- **Header-only graph's structural edges no longer need clang at all.**
+  `build_header_only_graph` now derives `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE` directly from the already-parsed `AbiSnapshot`
+  (`RecordType.bases`/`.fields`, `Function.return_type`/`.params`,
+  `Variable.type`) when no clang AST is supplied — every L2 backend (castxml,
+  the default, or clang) populates these fields identically, so a project
+  that dumps with castxml (or whose headers don't parse cleanly under a bare
+  `clang++` invocation) now gets real structural edges instead of
+  declaration-visibility nodes only, at zero extra compiler-invocation cost.
+  Resolution is capped at `unique_candidate` confidence (never the AST path's
+  `scope` tier) since the flat model has no namespace/scope information to
+  disambiguate two same-named types. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  remain clang-AST-only (no backend records function bodies in the flat
+  model). See the ADR-041 header-only-graph addendum's flat-model-structural-
+  edges follow-up.
+
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
   `vtable_thunk_offset_changed`, `vtt_slot_count_changed`,

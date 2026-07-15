@@ -942,6 +942,58 @@ public constant could therefore get mistaken for a record/enum/typedef and
 seeded as a bogus `record_type` node; fixed by filtering to exactly the
 qualified names `name_index` (the type-only index) actually collected.
 
+**Follow-up: flat-model structural edges (castxml-generalized, no AST at
+all).** Every edge above still needed a *second*, independent `clang
+-ast-dump=json` invocation over the header aggregate — a real cost when the
+main dump used castxml (the default L2 backend), and a project whose headers
+don't parse cleanly under a bare `clang++` invocation (GCC-specific
+attributes, an MSVC-only codebase, etc.) got no structural edges at all, only
+declaration-visibility nodes. But `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+`DECL_HAS_TYPE` don't actually need an AST walk: every L2 backend (castxml or
+clang) already populates `RecordType.bases`/`.fields`, `Function.
+return_type`/`.params`, and `Variable.type` on the flat `AbiSnapshot` itself.
+`build_header_only_graph` now derives these three structural edge kinds
+directly from the snapshot when no `ast_root` is supplied
+(`_flat_structural_type_edges`), reusing `augment_graph_with_types` unchanged
+— no second compiler invocation, no clang dependency, works identically for
+any backend. The tradeoff is resolution confidence: the flat model records
+only a bare, unqualified type name (no enclosing-namespace/scope information
+survives dumping), so a bare-name lookup against the snapshot's own
+declared-type set can only ever reach `RESOLUTION_UNIQUE_CANDIDATE` (the name
+is unique across the whole snapshot) or `RESOLUTION_UNRESOLVED` (zero or more
+than one same-named declaration) — never the AST path's `RESOLUTION_SCOPE`
+tier, and always `CONF_REDUCED`. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+remain clang-AST-only in every case: the flat model never records a function
+body, so there is nothing to derive them from regardless of backend; the flat
+path therefore only ever stamps `HEADER_TYPE_GRAPH_PASS`, never
+`HEADER_CALL_GRAPH_PASS`. The AST path (when `ast_root` is available) is
+unchanged and still takes priority — the two are mutually exclusive per
+`build_header_only_graph` call, not layered, since the AST path's qualified
+node ids and the flat path's bare-name node ids are different id spellings
+for the same real-world type and would otherwise create parallel,
+non-deduplicated node sets for one build.
+
+Two further fixes landed alongside this addendum, both from post-merge Codex
+review: (1) `source_graph_findings._common_dependency_edge_kinds`'s per-kind
+fallback trusted a header-only side's raw edge *presence* for a
+body-dependent kind even after `_pass_trusted_kinds` correctly capped
+*confirmation*-based trust — a header-only baseline that happened to fold one
+real in-header call edge (an inline function calling another inline function,
+both visible in headers) made `DECL_CALLS_DECL` "common" against a
+build-integrated candidate, so a pre-existing out-of-line call the baseline
+structurally could never have seen surfaced as a false
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the moment collection improved from
+header-only to build-integrated; fixed by gating `old_present` on whether the
+graph's *only* confirmation for that pass is the header-only alias, for
+every kind outside `_HEADER_FULL_VISIBILITY_KINDS`. (2) The include-graph pass
+(`ClangHeaderIncludeExtractor`) always constructed itself with the default
+`clang_bin="clang++"`, ignoring `CompileContext.gcc_path`/`gcc_prefix` even
+though the AST pass just above honors them — a hermetic/cross toolchain
+selected via those flags could silently lose every
+`COMPILE_UNIT_INCLUDES_FILE` edge (or resolve them against the host's clang
+instead); fixed by resolving the same clang driver (`dumper._resolve_clang_bin`)
+for both passes.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work
