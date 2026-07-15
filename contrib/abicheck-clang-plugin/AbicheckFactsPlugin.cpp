@@ -2489,6 +2489,36 @@ private:
       e.relations["declaration_role"] = "class_template_member_pattern";
       stampDeclEvidence(e, fd);
       Functions.push_back(e);
+
+      // P1 #17-18 parity with VisitFunctionDecl: without this, a call/
+      // reference inside a class-template member body was silently absent
+      // from source_edges with no diagnostic at all (dumpDeclJson succeeds
+      // normally here), so source_edges coverage could read complete/
+      // empty-confirmed while calls from every class-template member body
+      // in the TU were unconditionally missing (Codex review, P2). No
+      // mangled name applies to an uninstantiated template member pattern
+      // (unlike VisitFunctionDecl's `key`, which prefers one), so edges are
+      // keyed by the same qualified `name` used for this entity's own
+      // identity above.
+      addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP),
+              "high", {{"role", "return"}});
+      for (const ParmVarDecl *p : fd->parameters()) {
+        std::string ptype = p->getType().getAsString(PP);
+        if (!ptype.empty())
+          addEdge("DECL_HAS_TYPE", name, ptype, "high", {{"role", "param"}});
+      }
+      if (Stmt *body = fd->getBody()) {
+        CallRefVisitor crv;
+        crv.TraverseStmt(body);
+        for (const auto &call : crv.Calls)
+          addEdge("DECL_CALLS_DECL", name,
+                  mangledOrScopedName(Mangler.get(), call.first),
+                  call.second ? "reduced" : "high",
+                  {{"call_kind", call.second ? "virtual" : "direct"},
+                   {"resolution", call.second ? "overapprox" : "exact"}});
+        for (const std::string &ref : crv.References)
+          addEdge("DECL_REFERENCES_DECL", name, ref, "reduced", {{"role", "ref"}});
+      }
     }
   }
 
