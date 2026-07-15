@@ -812,6 +812,23 @@ def _find_public_pimpl_holders(
 _OPERATOR_MARKER_RE = re.compile(r"::operator(?![A-Za-z0-9_])")
 
 
+def _last_top_level_space(text: str) -> int:
+    """Return the index of the last top-level (non-template-nested) space
+    in *text*, or -1 if none. "Top-level" excludes spaces nested inside a
+    template argument list's angle brackets, since those may themselves
+    contain spaces (e.g. ``"Foo<int, long>"``)."""
+    depth = 0
+    last_space = -1
+    for i, ch in enumerate(text):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        elif ch == " " and depth <= 0:
+            last_space = i
+    return last_space
+
+
 def _strip_leading_return_type(head: str) -> str:
     """Strip a leading return type from a demangled function signature head.
 
@@ -819,11 +836,8 @@ def _strip_leading_return_type(head: str) -> str:
     the qualified name in c++filt's output (e.g.
     ``"int mylib::Widget::foo<int>"``); an ordinary function's head is
     already bare (``"mylib::Widget::get"``). The return type is separated
-    from the qualified name by a top-level space — one not nested inside
-    the template argument list's angle brackets, since those may
-    themselves contain spaces (e.g. ``"Foo<int, long>"``) — so take
-    everything after the *last* top-level space rather than naively
-    splitting on the first space.
+    from the qualified name by a top-level space, so take everything after
+    the last one rather than naively splitting on the first space.
 
     Callers must route anything matching ``_OPERATOR_MARKER_RE`` through
     ``_holder_of``'s operator special case instead — an operator's own name
@@ -832,15 +846,7 @@ def _strip_leading_return_type(head: str) -> str:
     target, ``"operator ns::Type"``), neither of which this generic
     space/`::`-based split can tell apart from a real return-type boundary.
     """
-    depth = 0
-    last_space = -1
-    for i, ch in enumerate(head):
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth -= 1
-        elif ch == " " and depth <= 0:
-            last_space = i
+    last_space = _last_top_level_space(head)
     if last_space == -1:
         return head
     suffix = head[last_space + 1 :]
@@ -865,11 +871,21 @@ def _holder_of(head: str, holders: set[str]) -> str | None:
     otherwise defeats both the return-type-stripping heuristic and a plain
     trailing ``rsplit("::", 1)``. The enclosing scope is unambiguous
     regardless of what the operator's own name contains: everything before
-    the last ``"::operator"`` marker.
+    the last ``"::operator"`` marker. That prefix can itself still carry a
+    leading return type when the operator is a function template/
+    specialization (``"int mylib::Widget::operator+<int>"`` for
+    ``operator+<int>``) — stripped the same way, but *without* the
+    ``"::"``-in-suffix guard the generic path needs: this prefix is known
+    to end exactly at a qualified-name boundary (right before
+    ``"::operator"``), so any top-level space within it can only be a
+    return-type separator, never operator-name punctuation.
     """
     operator_matches = list(_OPERATOR_MARKER_RE.finditer(head))
     if operator_matches:
         holder = head[: operator_matches[-1].start()]
+        last_space = _last_top_level_space(holder)
+        if last_space != -1:
+            holder = holder[last_space + 1 :]
     else:
         qualified = _strip_leading_return_type(head)
         if "::" not in qualified:

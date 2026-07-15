@@ -453,6 +453,20 @@ class TestInlineAccessorsFor:
         out = _inline_accessors_for([fn], {"mylib::Widget"})
         assert out == [fn]
 
+    def test_templated_operator_accessor_matched_despite_leading_return_type(
+        self,
+    ) -> None:
+        # A templated operator overload (e.g. `operator+<int>`) gets the
+        # same leading-return-type treatment from c++filt as any other
+        # function template/specialization: "int mylib::Widget::operator+
+        # <int>(int) const". The "::operator" special case must still
+        # strip that leading "int " before comparing against holders, not
+        # just locate the marker (review finding on the
+        # qualified-conversion-operator fix).
+        fn = _fn("operator+", "_ZNK5mylib6WidgetplIiEEiT_", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
     def test_templated_accessor_matched_despite_leading_return_type(self) -> None:
         # c++filt includes a leading return type for a function
         # template/specialization (e.g. "int mylib::Widget::foo<int>(int)")
