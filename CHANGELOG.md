@@ -140,6 +140,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   package name before the sibling-module imports run, so both entry points
   register every command (Codex review).
 
+- **`NEEDED_ADDED`/`NEEDED_REMOVED`/`MACHO_REEXPORT_CHANGED` findings on a
+  genuine (non-hash-only) change to a vendor-hashed dependency reported the
+  vendor-hash-stripped comparison key instead of the real filename** — a
+  diagnostic-fidelity regression from the vendor-hash normalization added
+  earlier in this PR: the ELF DT_NEEDED diff and the Mach-O dependency/
+  re-export diffs fed the stripped lists straight into the reporting
+  helpers. They now compare on the stripped identity internally but report
+  the real, unstripped filename, so a user debugging a genuine dependency
+  change on a wheel-vendored library still sees the actual hashed name
+  (self-review finding).
+
+- **`abicheck doctor`'s invalid-`ABICHECK_AST_FRONTEND` warning said
+  "falling back to auto" immediately next to "selected: castxml"**, reading
+  as self-contradictory to a user trying to diagnose exactly this
+  misconfiguration. The warning now names the concrete backend it actually
+  falls back to (self-review finding).
+
 - **`abicheck config show-effective` crashed with a raw Python traceback on
   an invalid config value**, instead of the usage/config error `compare`/
   `config validate` produce for the same input — it called

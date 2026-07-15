@@ -205,6 +205,18 @@ class TestReexportRepoint:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.MACHO_REEXPORT_CHANGED in _kinds(r)
 
+    def test_real_repoint_reports_unstripped_filenames(self):
+        """A genuine repoint's finding must show the real hashed filename,
+        not the vendor-hash-stripped comparison key (self-review finding)."""
+        old = _macho(reexported_libs=["/DLC/libfoo-a746ad4a.dylib"])
+        new = _macho(reexported_libs=["/DLC/libbar-b8f31c2e.dylib"])
+        r = compare(_snap(old), _snap(new))
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.MACHO_REEXPORT_CHANGED
+        )
+        assert change.old_value == "/DLC/libfoo-a746ad4a.dylib"
+        assert change.new_value == "/DLC/libbar-b8f31c2e.dylib"
+
 
 class TestMachoDependenciesVendorHash:
     def test_vendor_hash_only_dependency_not_flagged(self):

@@ -574,16 +574,23 @@ def _diff_macho_compat_version(o: Any, n: Any) -> list[Change]:
 def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
     """Detect dependency changes.
 
-    Vendor-hash-stripped like the install-name diff above: delocate rewrites
-    a repaired wheel's own ``LC_LOAD_DYLIB`` references to other vendored
-    dylibs on every rebuild (``libfoo-<hash>.dylib``), so an unnormalized
-    diff reported dependency churn even after the install-name fix above
-    suppressed the matching ``SONAME_CHANGED`` (Codex review).
+    Compares on ``strip_vendor_hash``-normalized identity like the
+    install-name diff above: delocate rewrites a repaired wheel's own
+    ``LC_LOAD_DYLIB`` references to other vendored dylibs on every rebuild
+    (``libfoo-<hash>.dylib``), so an unnormalized diff reported dependency
+    churn even after the install-name fix above suppressed the matching
+    ``SONAME_CHANGED`` (Codex review). Reports the real, unstripped filename
+    in the finding — using the stripped spelling directly would lose the
+    actual hashed filename a user debugging a real dependency change needs
+    to see (self-review finding).
     """
     changes: list[Change] = []
-    old_deps = {strip_vendor_hash(d) for d in o.dependent_libs}
-    new_deps = {strip_vendor_hash(d) for d in n.dependent_libs}
-    for dep in sorted(old_deps - new_deps):
+    old_by_key = {strip_vendor_hash(d): d for d in o.dependent_libs}
+    new_by_key = {strip_vendor_hash(d): d for d in n.dependent_libs}
+    old_keys = set(old_by_key)
+    new_keys = set(new_by_key)
+    for key in sorted(old_keys - new_keys):
+        dep = old_by_key[key]
         changes.append(
             make_change(
                 ChangeKind.NEEDED_REMOVED,
@@ -591,7 +598,8 @@ def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
                 description=f"dependency removed: {dep}",
             )
         )
-    for dep in sorted(new_deps - old_deps):
+    for key in sorted(new_keys - old_keys):
+        dep = new_by_key[key]
         changes.append(
             make_change(
                 ChangeKind.NEEDED_ADDED,
@@ -605,31 +613,38 @@ def _diff_macho_dependencies(o: Any, n: Any) -> list[Change]:
 def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
     """Detect re-exported dylib changes (LC_REEXPORT_DYLIB).
 
-    Vendor-hash-stripped for the same reason as ``_diff_macho_dependencies``
-    above (Codex review): a delocate rebuild rewrites a re-exported vendored
-    dylib's hashed filename with no real re-export change.
+    Compares on vendor-hash-normalized identity for the same reason as
+    ``_diff_macho_dependencies`` above (Codex review): a delocate rebuild
+    rewrites a re-exported vendored dylib's hashed filename with no real
+    re-export change. Reports the real, unstripped filename (self-review
+    finding — same reasoning as ``_diff_macho_dependencies``).
     """
     # A single removed+added pair is a *repoint* — the umbrella's surface is
     # now sourced from a different dylib — reported as its own kind rather
     # than an unrelated-looking remove/add pair.
     changes: list[Change] = []
-    old_reexports = {strip_vendor_hash(d) for d in o.reexported_libs}
-    new_reexports = {strip_vendor_hash(d) for d in n.reexported_libs}
-    removed_re = sorted(old_reexports - new_reexports)
-    added_re = sorted(new_reexports - old_reexports)
-    if len(removed_re) == 1 and len(added_re) == 1:
+    old_by_key = {strip_vendor_hash(d): d for d in o.reexported_libs}
+    new_by_key = {strip_vendor_hash(d): d for d in n.reexported_libs}
+    old_keys = set(old_by_key)
+    new_keys = set(new_by_key)
+    removed_keys = sorted(old_keys - new_keys)
+    added_keys = sorted(new_keys - old_keys)
+    if len(removed_keys) == 1 and len(added_keys) == 1:
+        old_lib = old_by_key[removed_keys[0]]
+        new_lib = new_by_key[added_keys[0]]
         changes.append(
             make_change(
                 ChangeKind.MACHO_REEXPORT_CHANGED,
                 symbol="LC_REEXPORT_DYLIB",
-                old=removed_re[0],
-                new=added_re[0],
-                old_value=removed_re[0],
-                new_value=added_re[0],
+                old=old_lib,
+                new=new_lib,
+                old_value=old_lib,
+                new_value=new_lib,
             )
         )
     else:
-        for lib in removed_re:
+        for key in removed_keys:
+            lib = old_by_key[key]
             changes.append(
                 make_change(
                     ChangeKind.NEEDED_REMOVED,
@@ -637,7 +652,8 @@ def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
                     description=f"re-exported dylib removed: {lib}",
                 )
             )
-        for lib in added_re:
+        for key in added_keys:
+            lib = new_by_key[key]
             changes.append(
                 make_change(
                     ChangeKind.NEEDED_ADDED,

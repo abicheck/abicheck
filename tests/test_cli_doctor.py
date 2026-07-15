@@ -71,6 +71,11 @@ class TestDoctorEnvironmentOnly:
                 "WARNING: ABICHECK_AST_FRONTEND='castxmll' is not recognized"
                 in result.output
             )
+            # The warning must name the concrete backend it actually falls
+            # back to, not literally "auto" — "falling back to auto"
+            # immediately next to "selected: castxml" read as self-
+            # contradictory (self-review finding).
+            assert "falling back to 'castxml'" in result.output
             assert "selected: castxml" in result.output
 
     def test_valid_ast_frontend_env_no_warning(self, monkeypatch) -> None:

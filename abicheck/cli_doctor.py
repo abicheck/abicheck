@@ -96,7 +96,8 @@ def doctor_command(binary: Path | None, headers: tuple[Path, ...]) -> None:
     ):
         click.echo(
             f"  WARNING: ABICHECK_AST_FRONTEND={env_frontend!r} is not recognized "
-            f"(expected one of {('auto', 'castxml', 'clang')}); ignored, falling back to auto."
+            f"(expected one of {('auto', 'castxml', 'clang')}); ignored, falling "
+            f"back to {resolved_backend!r} (the 'auto' default)."
         )
     click.echo(
         f"  selected: {resolved_backend} (ABICHECK_AST_FRONTEND={env_frontend or '(unset)'})"

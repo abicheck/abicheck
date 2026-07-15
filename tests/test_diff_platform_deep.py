@@ -414,6 +414,19 @@ class TestNeededChanges:
         assert ChangeKind.NEEDED_ADDED in kinds
         assert ChangeKind.NEEDED_REMOVED in kinds
 
+    def test_needed_real_rename_reports_unstripped_filenames(self):
+        """A genuine rename's finding must show the real hashed filename, not
+        the vendor-hash-stripped comparison key — the stripped spelling
+        alone loses exactly the detail a user debugging a real dependency
+        change needs to see (self-review finding)."""
+        old_elf = ElfMetadata(needed=["libfoo-a746ad4a.so.1"])
+        new_elf = ElfMetadata(needed=["libbar-b8f31c2e.so.1"])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        added = next(c for c in r.changes if c.kind == ChangeKind.NEEDED_ADDED)
+        removed = next(c for c in r.changes if c.kind == ChangeKind.NEEDED_REMOVED)
+        assert added.new_value == "libbar-b8f31c2e.so.1"
+        assert removed.old_value == "libfoo-a746ad4a.so.1"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DWARF Layout Cross-Check

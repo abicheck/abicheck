@@ -201,12 +201,13 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     # rewrite a repaired wheel's DT_NEEDED entries to reference the vendored
     # DSO's content-hashed filename, so a dependency can rename across a
     # rebuild (libfoo-a1b2c3d4.so.1 -> libfoo-9f8e7d6c.so.1) with no real
-    # dependency change. Compare/report the needed lists on their
-    # hash-stripped spelling so this doesn't read as NEEDED_ADDED/REMOVED.
-    old_needed_stripped = [strip_vendor_hash(lib) for lib in old_elf.needed]
-    new_needed_stripped = [strip_vendor_hash(lib) for lib in new_elf.needed]
-    changes.extend(_diff_needed_libraries(old_needed_stripped, new_needed_stripped))
-    changes.extend(_diff_needed_order(old_needed_stripped, new_needed_stripped))
+    # dependency change. _diff_needed_libraries/_diff_needed_order compare on
+    # the hash-stripped identity internally but report the real filename
+    # (self-review finding: reporting the stripped spelling directly lost
+    # the actual hashed filename a user debugging a real dependency change
+    # needs to see) — pass the original, unstripped lists here.
+    changes.extend(_diff_needed_libraries(old_elf.needed, new_elf.needed))
+    changes.extend(_diff_needed_order(old_elf.needed, new_elf.needed))
 
     # DT_RPATH ↔ DT_RUNPATH type flip (ld --enable-new-dtags default drift).
     # The two tags carry different lookup semantics (subtree vs direct deps,
@@ -889,10 +890,22 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
 def _diff_needed_libraries(
     old_needed: list[str], new_needed: list[str]
 ) -> list[Change]:
+    """Detect DT_NEEDED dependency add/remove.
+
+    Compares on ``strip_vendor_hash``-normalized identity (a wheel-repair
+    hash-only rebuild of a vendored dependency must not read as an
+    add+remove pair) but reports the real, unstripped filename in the
+    finding — using the stripped spelling directly in the message would lose
+    the actual hashed filename a user debugging a real dependency change
+    needs to see (self-review finding).
+    """
     changes: list[Change] = []
-    old_set = set(old_needed)
-    new_set = set(new_needed)
-    for lib in sorted(new_set - old_set):
+    old_by_key = {strip_vendor_hash(lib): lib for lib in old_needed}
+    new_by_key = {strip_vendor_hash(lib): lib for lib in new_needed}
+    old_keys = set(old_by_key)
+    new_keys = set(new_by_key)
+    for key in sorted(new_keys - old_keys):
+        lib = new_by_key[key]
         changes.append(
             make_change(
                 ChangeKind.NEEDED_ADDED,
@@ -901,7 +914,8 @@ def _diff_needed_libraries(
                 new_value=lib,
             )
         )
-    for lib in sorted(old_set - new_set):
+    for key in sorted(old_keys - new_keys):
+        lib = old_by_key[key]
         changes.append(
             make_change(
                 ChangeKind.NEEDED_REMOVED,
@@ -922,8 +936,12 @@ def _diff_needed_order(old_needed: list[str], new_needed: list[str]) -> list[Cha
     Only fires when the *set* is identical — an add/remove is already
     reported by ``_diff_needed_libraries`` and reordering on top of that
     would just be noise describing the same underlying change twice.
+    Compares on vendor-hash-stripped identity/order (same reasoning as
+    ``_diff_needed_libraries``) but reports the real, unstripped filenames.
     """
-    if old_needed == new_needed or set(old_needed) != set(new_needed):
+    old_stripped = [strip_vendor_hash(lib) for lib in old_needed]
+    new_stripped = [strip_vendor_hash(lib) for lib in new_needed]
+    if old_stripped == new_stripped or set(old_stripped) != set(new_stripped):
         return []
     return [
         make_change(
