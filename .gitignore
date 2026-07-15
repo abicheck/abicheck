@@ -11,7 +11,7 @@ examples/**/*.so
 logs/
 compat_reports/
 benchmark_reports/
-results/
+/results/
 dist/
 build/
 site/
