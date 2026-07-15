@@ -77,6 +77,7 @@ from .dumper_debug import (
     _is_kernel_binary as _is_kernel_binary,
     _resolve_debug_metadata as _resolve_debug_metadata,
 )
+from .dumper_layout_backfill import backfill_dwarf_layout, dwarf_layout_types_or_empty
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
@@ -1689,6 +1690,7 @@ def _dump_elf(
                 exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
                 dwarf_only_types, profile_hint,
             )
+        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, _resolve_header_backend(header_backend), symbols_only=symbols_only, debug_presence_only=debug_presence_only, version=version, language_profile=profile_hint, session=dwarf_session)  # DWARF layout backfill for a layout-blind header backend; see dumper_layout_backfill
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()
@@ -1714,7 +1716,7 @@ def _dump_elf(
         source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
-        types=parser.parse_types(),
+        types=backfill_dwarf_layout(parser.parse_types(), dwarf_layout_types),
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
         constants=parser.parse_constants(),

@@ -1,0 +1,125 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Backfill header-parsed record layout from DWARF (clang L2 backend support).
+
+The clang L2 header backend (:mod:`abicheck.dumper_clang`) is a syntactic AST
+dump — it never computes ``size_bits``/``alignment_bits``/field
+``offset_bits``/``vtable``. When the binary being dumped also carries DWARF
+debug info (the common debug-headers case), :mod:`abicheck.dumper` calls
+:func:`backfill_dwarf_layout` to fill in that missing layout from the
+same compiled binary's DWARF, so layout-dependent detectors are not blind
+under the clang backend. Split out of ``dumper.py`` to keep that module under
+the AI-readiness file-size cap.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
+from .model import RecordType
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .dwarf_advanced import AdvancedDwarfMetadata
+    from .dwarf_metadata import DwarfMetadata
+    from .dwarf_unified import DwarfSession
+    from .elf_metadata import ElfMetadata
+
+
+def dwarf_layout_types_or_empty(
+    so_path: Path,
+    elf_meta: ElfMetadata,
+    dwarf_meta: DwarfMetadata,
+    dwarf_adv: AdvancedDwarfMetadata,
+    resolved_header_backend: str,
+    *,
+    symbols_only: bool,
+    debug_presence_only: bool,
+    version: str,
+    language_profile: str | None,
+    session: DwarfSession | None,
+) -> list[RecordType]:
+    """DWARF-derived ``RecordType``\\ s of *so_path*, for ``backfill_dwarf_layout``.
+
+    ``[]`` (no-op for the caller) unless the L2 header backend in play is
+    layout-blind (clang) and DWARF is actually present — folding that check
+    in here lets ``dumper._dump_elf`` call this unconditionally instead of
+    guarding it with a separate branch just to decide whether to bother.
+    """
+    if symbols_only or debug_presence_only or not dwarf_meta.has_dwarf or resolved_header_backend != "clang":
+        return []
+    from .dwarf_snapshot import build_snapshot_from_dwarf
+    return list(build_snapshot_from_dwarf(
+        so_path, elf_meta, dwarf_meta, dwarf_adv,
+        version=version, language_profile=language_profile, session=session,
+    ).types)
+
+
+def backfill_dwarf_layout(
+    header_types: list[RecordType],
+    dwarf_types: list[RecordType],
+) -> list[RecordType]:
+    """Fill in missing struct/class layout on header-parsed types from DWARF.
+
+    Matched by name — both come from the same source, so a name match is
+    exact (no cross-version renaming ambiguity: this backfills a single
+    snapshot from its own binary, never merges across old/new). castxml
+    already computes real layout itself, so any type that already carries a
+    ``size_bits`` is left untouched — purely additive for a layout-blind
+    header backend, a no-op otherwise. An opaque (forward-declared-only)
+    header type is also left alone: its blank layout is a meaningful "this
+    header only forward-declares it" signal, not a gap to paper over with an
+    unrelated full definition DWARF happens to carry.
+    """
+    if not dwarf_types:
+        return header_types
+    dwarf_by_name = {t.name: t for t in dwarf_types}
+    out: list[RecordType] = []
+    for t in header_types:
+        if t.size_bits is not None or t.is_opaque:
+            out.append(t)
+            continue
+        dwarf_t = dwarf_by_name.get(t.name)
+        if dwarf_t is None:
+            out.append(t)
+            continue
+        dwarf_fields_by_name = {f.name: f for f in dwarf_t.fields}
+        new_fields = []
+        for f in t.fields:
+            df = dwarf_fields_by_name.get(f.name)
+            if f.offset_bits is not None or df is None:
+                new_fields.append(f)
+                continue
+            new_fields.append(replace(
+                f,
+                offset_bits=df.offset_bits,
+                is_bitfield=df.is_bitfield,
+                bitfield_bits=df.bitfield_bits,
+            ))
+        out.append(replace(
+            t,
+            size_bits=dwarf_t.size_bits,
+            alignment_bits=dwarf_t.alignment_bits,
+            fields=new_fields,
+            vtable=t.vtable or dwarf_t.vtable,
+            vptr_offset_bits=(
+                t.vptr_offset_bits if t.vptr_offset_bits is not None else dwarf_t.vptr_offset_bits
+            ),
+            base_offsets=t.base_offsets or dwarf_t.base_offsets,
+        ))
+    return out

@@ -266,6 +266,20 @@ def _clang_exception_spec(quals: str) -> str:
     return f"throw({inner})"
 
 
+def _clang_record_is_final(node: dict[str, Any]) -> bool:
+    """Whether a ``CXXRecordDecl`` carries the ``final`` class-virt-specifier.
+
+    Unlike castxml (which exposes ``final`` as a plain XML attribute), clang's
+    ``-ast-dump=json`` signals it as a child ``FinalAttr`` node under
+    ``"inner"`` rather than a boolean field on the record itself — there is no
+    ``node["final"]`` key to read.
+    """
+    return any(
+        isinstance(child, dict) and child.get("kind") == "FinalAttr"
+        for child in node.get("inner", []) or []
+    )
+
+
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
     """Explicit alignment (bits) from an AlignedAttr, when evaluable."""
     for child in node.get("inner", []) or []:
@@ -721,7 +735,7 @@ class _ClangAstParser:
             vtable=[],
             is_union=kind == "union",
             is_opaque=False,
-            is_final=bool(node.get("final")),
+            is_final=_clang_record_is_final(node),
             source_location=self._source_location(entry),
         )
 
