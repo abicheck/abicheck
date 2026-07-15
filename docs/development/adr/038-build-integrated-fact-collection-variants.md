@@ -522,7 +522,7 @@ Every `SourceAbiTu` record (and the plugin's `manifest.json`) carries:
   "name": "abicheck-clang-canonical",
   "version": 1,
   "producer": "abicheck-clang-plugin",
-  "producer_version": "0.4",
+  "producer_version": "0.5",
   "compiler_family": "clang",
   "compiler_version": "18.1.3"
 }

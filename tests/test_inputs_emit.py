@@ -34,7 +34,12 @@ from abicheck.buildsource import (
     init_inputs_pack,
     write_inputs_pack,
 )
-from abicheck.buildsource.inputs_emit import compact_inputs_pack, facts_filename
+from abicheck.buildsource.inputs_emit import (
+    _write_manifest,
+    compact_inputs_pack,
+    facts_filename,
+)
+from abicheck.buildsource.inputs_pack import load_inputs_manifest
 from abicheck.cc_wrapper import (
     compile_unit_from_command,
     compile_units_from_command,
@@ -321,6 +326,42 @@ def test_compact_preserves_originals_on_lossy_read(tmp_path: Path) -> None:
     ingested = ingest_inputs_pack(pack)
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
     assert "foo" in names
+
+
+def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
+    tmp_path: Path,
+) -> None:
+    """A manifest whose "explicit" source_facts entry is just a directory
+    reference (what the Clang facts plugin's ensureManifest() always writes:
+    ``source_facts: ["source_facts"]``) must not be narrowed to the single
+    compacted filename -- ensureManifest() never rewrites an existing
+    manifest.json, so a narrowed entry would permanently hide every per-TU
+    file a later incremental build writes into that directory (Codex review,
+    P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-clang-plugin")
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["source_facts"]  # mirrors ensureManifest()
+    _write_manifest(pack, manifest)
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    # manifest.json is left alone by ensureManifest() on a "rebuild" (it only
+    # acts when the file is absent) -- still a directory reference here.
+    assert load_inputs_manifest(pack).source_facts == ["source_facts"]
+
+    # A later incremental build's fresh per-TU file lands in the same
+    # directory; it must still be discovered.
+    append_source_facts(
+        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo", "bar"}
 
 
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:

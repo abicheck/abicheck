@@ -334,7 +334,19 @@ def compact_inputs_pack(
                 f.unlink()
         # prior_output_files (if any) was already replaced in place above.
 
-    if manifest.source_facts:
+    # A manifest that names explicit individual files is repointed at the
+    # single merged file (those originals are gone). But a manifest whose
+    # "explicit" entry is just a directory reference to SOURCE_FACTS_DIR
+    # itself — what the Clang facts plugin's ensureManifest() always writes,
+    # and what a bare default manifest effectively means too — must NOT be
+    # narrowed to the merged filename: ensureManifest() never rewrites an
+    # existing manifest.json, so a narrowed single-file entry would
+    # permanently hide every per-TU file a later incremental build writes
+    # into that same directory from every subsequent ingest/compact/validate
+    # (Codex review, P2). The merged file already lives inside
+    # SOURCE_FACTS_DIR, so leaving the directory reference in place keeps
+    # discovering it — and any future sibling files — via the existing scan.
+    if manifest.source_facts and manifest.source_facts != [SOURCE_FACTS_DIR]:
         manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]
         _write_manifest(root, manifest)
 

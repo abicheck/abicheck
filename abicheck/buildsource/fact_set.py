@@ -46,7 +46,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .source_abi import FACT_FAMILIES, INCOMPLETE_COVERAGE_STATES, SourceAbiTu
+from .source_abi import (
+    COVERAGE_STATES,
+    FACT_FAMILIES,
+    INCOMPLETE_COVERAGE_STATES,
+    SourceAbiTu,
+)
 
 #: Worst-first precedence for rolling up one family's coverage across TUs: the
 #: least-trustworthy state observed anywhere wins, so one bad TU cannot be
@@ -87,12 +92,20 @@ def rollup_coverage(tus: list[SourceAbiTu]) -> dict[str, str]:
         for tu in tus:
             cov = tu.coverage if isinstance(tu.coverage, dict) else {}
             if family in cov:
-                seen.append(cov[family])
+                # A hand-written/third-party producer's unrecognized state
+                # string (typo, or a value from a newer/incompatible
+                # coverage vocabulary) must not slip through as-is: it isn't
+                # in COVERAGE_STATES, so incomplete_families() (which only
+                # matches known states) would never flag it, silently
+                # reading malformed coverage as clean. Coerce it to the
+                # worst known state instead (Codex review, P2).
+                state = cov[family]
+                seen.append(state if state in COVERAGE_STATES else "failed")
             elif tu.fact_set:
                 seen.append("failed")
         if not seen:
             continue
-        out[family] = min(seen, key=lambda s: _STATE_RANK.get(s, -1))
+        out[family] = min(seen, key=lambda s: _STATE_RANK[s])
     return out
 
 

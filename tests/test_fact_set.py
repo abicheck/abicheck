@@ -217,6 +217,19 @@ def test_rollup_coverage_missing_family_on_pre_c8_tu_still_omitted() -> None:
     assert "macros" not in rolled
 
 
+def test_rollup_coverage_unrecognized_state_coerces_to_failed() -> None:
+    """A hand-written/third-party producer's misspelled or otherwise unknown
+    coverage state (not in COVERAGE_STATES) must roll up as "failed", not
+    pass through verbatim -- incomplete_families() only recognizes the
+    documented states, so an unrecognized value slipping through untouched
+    would make a malformed pack read as clean (Codex review, P2)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs, coverage={"functions": "totally-not-a-real-state"})]
+    rolled = rollup_coverage(tus)
+    assert rolled["functions"] == "failed"
+    assert "functions" in incomplete_families(rolled)
+
+
 # -- incomplete_families ------------------------------------------------------
 
 

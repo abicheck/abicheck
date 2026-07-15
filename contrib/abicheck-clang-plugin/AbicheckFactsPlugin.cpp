@@ -2849,11 +2849,16 @@ private:
                       !types.empty(),
                       anyDiagContains(diags, {"record/enum type_hash unavailable"}))},
         {"macros", familyCoverageState(!macros.empty(), /*diagnosticsSeen=*/false)},
+        // "class-template member facts unavailable" deliberately excluded
+        // here: emitClassTemplateMemberPatterns() pushes a failed member's
+        // entity into `functions` (it IS a function), never `templates` —
+        // counting it here would mark templates coverage partial/failed even
+        // when every actual Template entity in the TU was captured cleanly
+        // (review finding).
         {"templates",
          familyCoverageState(
              !templates.empty(),
-             anyDiagContains(diags, {"template body_hash unavailable",
-                                     "class-template member facts unavailable"}))},
+             anyDiagContains(diags, {"template body_hash unavailable"}))},
         {"inline_bodies",
          familyCoverageState(
              !inlineBodies.empty(),
