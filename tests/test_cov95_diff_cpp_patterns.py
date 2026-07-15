@@ -418,6 +418,17 @@ class TestInlineAccessorsFor:
         out = _inline_accessors_for([fn], {"descriptor"})
         assert out == [fn]
 
+    def test_conversion_operator_accessor_matched_despite_internal_space(self) -> None:
+        # A conversion operator demangles with a space *inside its own
+        # name* ("mylib::Widget::operator int") and carries no leading
+        # return type at all, unlike a templated function. Stripping on the
+        # last top-level space unconditionally would discard the real
+        # qualified prefix and leave just "int", losing the "::" needed to
+        # find a holder (review finding on the templated-accessor fix).
+        fn = _fn("operator int", "_ZNK5mylib6WidgetcviEv", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
     def test_templated_accessor_matched_despite_leading_return_type(self) -> None:
         # c++filt includes a leading return type for a function
         # template/specialization (e.g. "int mylib::Widget::foo<int>(int)")

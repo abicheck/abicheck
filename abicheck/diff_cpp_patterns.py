@@ -821,6 +821,18 @@ def _strip_leading_return_type(head: str) -> str:
     themselves contain spaces (e.g. ``"Foo<int, long>"``) — so take
     everything after the *last* top-level space rather than naively
     splitting on the first space.
+
+    A conversion operator or ``operator new``/``operator delete`` also
+    contains a top-level space in its own name (``"operator int"``,
+    ``"operator new"``) with no leading return type at all, so splitting
+    there would discard the real qualified prefix. Guard against that: only
+    strip when the text after the split still looks like a qualified name
+    (contains ``"::"``) — an operator's own space never does, since the
+    class/namespace qualification always precedes it (e.g.
+    ``"mylib::Widget::operator int"``), so leaving the head untouched there
+    still lets ``_holder_of``'s trailing ``rsplit("::", 1)`` recover the
+    correct holder with ``"operator int"`` folded into the leftover method
+    segment.
     """
     depth = 0
     last_space = -1
@@ -831,7 +843,10 @@ def _strip_leading_return_type(head: str) -> str:
             depth -= 1
         elif ch == " " and depth <= 0:
             last_space = i
-    return head[last_space + 1 :] if last_space != -1 else head
+    if last_space == -1:
+        return head
+    suffix = head[last_space + 1 :]
+    return suffix if "::" in suffix else head
 
 
 def _holder_of(head: str, holders: set[str]) -> str | None:
