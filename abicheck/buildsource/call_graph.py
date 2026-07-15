@@ -173,13 +173,48 @@ def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _resolve_ref_callee_identity(
+    ref: dict[str, Any], id_index: Mapping[str, str]
+) -> str:
+    """Resolve a ``referencedDecl``/``referencedMemberDecl`` stub to its real identity.
+
+    clang's compact ``referencedDecl`` never carries ``mangledName`` even when
+    the full declaration elsewhere in the same TU does — verified against a
+    real Clang 17/18 ``-ast-dump=json`` for an overloaded ``int f(int)``/
+    ``double f(double)`` pair: both call sites' stubs are
+    ``{"kind": "FunctionDecl", "name": "f", "type": {"qualType": ...}}`` with
+    no ``mangledName``, differing only in ``id`` and ``type.qualType``
+    (latest-main Clang plugin review, PR1b — the plugin itself already
+    resolves callees from the live ``FunctionDecl*``, so this asymmetry was
+    Flow B/the JSON-AST replay's alone). Keying solely off the stub's own
+    identity therefore collapses every overload/constructor/destructor onto
+    one bare name.
+
+    *id_index* is built during the same AST walk from every full
+    ``FunctionDecl``/``CXXMethodDecl``/... node seen (keyed by clang's own
+    per-node ``id``, mirroring ``type_graph._resolve_ref_identity``'s
+    established id-index pattern), so a stub's ``id`` — always present, even
+    on an otherwise-incomplete stub — resolves to the real mangled identity
+    recorded when that same declaration was visited in full elsewhere in the
+    TU (its prototype or definition, whichever textually precedes this call
+    per C/C++ declare-before-use). Falls back to the stub's own (almost
+    always name-only) identity when its ``id`` was not indexed — a forward
+    reference to a declaration this walk has not (yet) seen in full, or a
+    hand-built/malformed AST fixture; a known, best-effort limitation,
+    identical in spirit to ``type_graph``'s documented ADR-041 P1 gap.
+    """
+    node_id = str(ref.get("id") or "")
+    indexed = id_index.get(node_id, "")
+    return indexed or _identity(ref)
+
+
 def _classify_call(
-    call_node: dict[str, Any], ref: dict[str, Any] | None
+    call_node: dict[str, Any], ref: dict[str, Any] | None, id_index: Mapping[str, str]
 ) -> tuple[str, str, str]:
     """Return ``(callee_identity, call_kind, resolution)`` for one call site."""
     if ref is None:
         return "", CALL_KIND_UNKNOWN, RESOLUTION_UNKNOWN
-    callee = _identity(ref)
+    callee = _resolve_ref_callee_identity(ref, id_index)
     ref_kind = str(ref.get("kind", ""))
     if not callee:
         return "", CALL_KIND_UNKNOWN, RESOLUTION_UNKNOWN
@@ -221,6 +256,7 @@ def _enter_function_scope(
     caller_file: str,
     cur_file: str,
     decl_files: dict[str, str],
+    id_index: dict[str, str],
 ) -> tuple[str, str]:
     """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
     ident = _identity(node) or caller
@@ -230,15 +266,29 @@ def _enter_function_scope(
     # Record the definition file so a callee-only leaf helper resolves it.
     if ident and _has_function_body(node):
         decl_files[ident] = cur_file
+    # Index this full declaration by clang's own per-node id so a later call
+    # site's compact referencedDecl stub (which never carries mangledName,
+    # see _resolve_ref_callee_identity) can resolve back to the real
+    # identity. Every FunctionDecl/CXXMethodDecl/... node is indexed, not
+    # only ones with a body, so a pure prototype still resolves callers of
+    # a not-yet-defined declaration.
+    node_id = str(node.get("id") or "")
+    real_ident = _identity(node)
+    if node_id and real_ident:
+        id_index.setdefault(node_id, real_ident)
     return caller, caller_file
 
 
 def _append_call_edge(
-    node: dict[str, Any], caller: str, caller_file: str, edges: list[CallEdge]
+    node: dict[str, Any],
+    caller: str,
+    caller_file: str,
+    edges: list[CallEdge],
+    id_index: dict[str, str],
 ) -> None:
     """Resolve one call expression's callee and append the edge (unresolved/self calls dropped)."""
     ref = _find_referenced_decl(node)
-    callee, call_kind, resolution = _classify_call(node, ref)
+    callee, call_kind, resolution = _classify_call(node, ref, id_index)
     if callee and callee != caller:
         edges.append(CallEdge(caller, callee, call_kind, resolution, caller_file))
 
@@ -250,6 +300,7 @@ def _walk_calls(
     cur_file: str,
     edges: list[CallEdge],
     decl_files: dict[str, str],
+    id_index: dict[str, str],
 ) -> None:
     """Recursive AST walk tracking the nearest enclosing function as the *caller*."""
     if not isinstance(node, dict):
@@ -260,12 +311,12 @@ def _walk_calls(
     kind = str(node.get("kind", ""))
     if kind in _FUNCTION_DECL_KINDS:
         caller, caller_file = _enter_function_scope(
-            node, caller, caller_file, cur_file, decl_files
+            node, caller, caller_file, cur_file, decl_files, id_index
         )
     if kind in _CALL_EXPR_KINDS and caller:
-        _append_call_edge(node, caller, caller_file, edges)
+        _append_call_edge(node, caller, caller_file, edges, id_index)
     for child in node.get("inner", []) or []:
-        _walk_calls(child, caller, caller_file, cur_file, edges, decl_files)
+        _walk_calls(child, caller, caller_file, cur_file, edges, decl_files, id_index)
 
 
 def _fill_callee_files(
@@ -307,7 +358,12 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
     # this map after the walk, not from the reference node (Codex review).
     decl_files: dict[str, str] = {}
-    _walk_calls(ast, "", "", "", edges, decl_files)
+    # clang AST node id -> mangled-or-bare identity, built from every full
+    # FunctionDecl/CXXMethodDecl/... node seen, so a call site's compact
+    # referencedDecl stub can resolve its real (mangled, overload-distinct)
+    # identity instead of the stub's own name-only fallback (PR1b).
+    id_index: dict[str, str] = {}
+    _walk_calls(ast, "", "", "", edges, decl_files, id_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
 
 

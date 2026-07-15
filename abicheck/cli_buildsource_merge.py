@@ -235,7 +235,10 @@ def _relink_combined_against_exports(
     ):
         from .buildsource.build_evidence import BuildEvidence
         from .buildsource.inline import build_inline_coverage
-        from .buildsource.source_graph import build_source_graph
+        from .buildsource.source_graph import (
+            build_source_graph,
+            mark_source_edges_extractor_coverage,
+        )
         from .buildsource.source_link import relink_surface_exports
 
         relink_surface_exports(combined.source_abi, base_exports)
@@ -245,6 +248,23 @@ def _relink_combined_against_exports(
                 combined.build_evidence or BuildEvidence(),
                 source_abi=combined.source_abi,
             )
+            # This rebuild starts a fresh graph with no extractor_passes of its
+            # own (a Flow-2 ingest's own call to this helper doesn't survive a
+            # rebuild) -- reapply it so a confirmed-complete source_edges
+            # rollup still reads as coverage here, not just at initial ingest
+            # (Codex review).
+            mark_source_edges_extractor_coverage(
+                combined.source_graph, combined.source_abi
+            )
+            # build_source_graph() already called finalize() once (computing
+            # graph.coverage's call_edges/type_edges/reference_edges
+            # "collected" flags from extractor_passes as of that moment);
+            # mark_source_edges_extractor_coverage() above mutates
+            # extractor_passes afterward, so finalize() must re-run or the
+            # serialized coverage summary still says "collected: false" even
+            # though the pass flags are now true (Codex review; mirrors
+            # ingest_inputs_pack's own re-finalize after the same call).
+            combined.source_graph.finalize()
         extractors = tuple(combined.manifest.extractors)
         has_build = combined.build_evidence is not None and bool(
             combined.build_evidence.compile_units or combined.build_evidence.targets

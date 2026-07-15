@@ -240,6 +240,45 @@ def test_ingest_links_source_facts_into_l4_surface(tmp_path: Path) -> None:
     assert "foo" in names
 
 
+def test_ingest_marks_call_type_graph_coverage_from_complete_source_edges(
+    tmp_path: Path,
+) -> None:
+    """No call/type-graph replay ever runs for an ingested Flow-2 pack (pure
+    parsing) -- a confirmed-complete source_edges rollup must still translate
+    into extractor_passes coverage, or a decl-dependency crosscheck would read
+    the graph as "no pass ever ran" and suppress a real
+    PUBLIC_API_INTERNAL_DEPENDENCY_ADDED finding as a coverage artifact
+    (Codex review)."""
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    pack = _write_inputs_pack(tmp_path, [tu])
+    ingested = ingest_inputs_pack(pack)
+    graph = ingested.pack.source_graph
+    assert graph is not None
+    assert graph.extractor_passes.get("call_graph") is True
+    assert graph.extractor_passes.get("type_graph") is True
+
+
+def test_ingest_does_not_mark_coverage_when_source_edges_incomplete(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    tu.coverage["source_edges"] = "partial"
+    pack = _write_inputs_pack(tmp_path, [tu])
+    ingested = ingest_inputs_pack(pack)
+    graph = ingested.pack.source_graph
+    assert graph is not None
+    assert not graph.extractor_passes.get("call_graph")
+    assert not graph.extractor_passes.get("type_graph")
+
+
 def test_ingest_with_explicit_exports_maps_decl_to_symbol(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,
@@ -273,6 +312,42 @@ def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None
     assert "_Z3foov" in surface.roots.get("exported_symbols", [])
     assert surface.coverage.get("matched_symbols", 0) >= 1
     assert surface.coverage.get("unmatched_symbols", 1) == 0
+
+
+def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
+    tmp_path: Path,
+) -> None:
+    """embed_inputs_pack's export-relink rebuilds the L5 graph from scratch
+    (source-only packs carry no exported_symbols root) -- that rebuild must
+    reapply mark_source_edges_extractor_coverage(), or a confirmed-complete
+    source_edges rollup's call_graph/type_graph coverage -- correctly set at
+    ingest time -- is silently dropped and a real
+    PUBLIC_API_INTERNAL_DEPENDENCY_ADDED finding could be suppressed as a
+    coverage artifact downstream (Codex review)."""
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+    from abicheck.cli_buildsource_merge import embed_inputs_pack
+    from abicheck.model import AbiSnapshot, Function
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    pack = _write_inputs_pack(tmp_path, [tu])  # no exported_symbols -> relink runs
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+
+    embed_inputs_pack(snap, pack, tmp_path / "out.json")
+
+    assert snap.build_source is not None
+    graph = snap.build_source.source_graph
+    assert graph is not None
+    assert graph.extractor_passes.get("call_graph") is True
+    assert graph.extractor_passes.get("type_graph") is True
+    # build_source_graph() already called finalize() once before the
+    # coverage marking ran; the rebuild must re-finalize so the serialized
+    # coverage summary (not just the extractor_passes flag) reflects it too
+    # (Codex review).
+    assert graph.coverage["call_edges"]["collected"] is True
+    assert graph.coverage["type_edges"]["collected"] is True
 
 
 def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
@@ -405,12 +480,15 @@ def test_read_source_facts_excludes_manifest_from_root_directory_scan(
     a merged "original" -- destroying the pack's own manifest (Codex
     review, P2)."""
     pack = _write_inputs_pack(
-        tmp_path, [_tu("foo", mangled="_Z3foov")], manifest_extra={"source_facts": ["."]}
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"source_facts": ["."]},
     )
     # Root-level fact file, matching a producer that used "." as its
     # source_facts directory instead of the default source_facts/ subdir.
     (pack / "root.jsonl").write_text(
-        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict()) + "\n",
+        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict())
+        + "\n",
         encoding="utf-8",
     )
 
@@ -461,7 +539,7 @@ def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
     # diagnostic like every other malformed-input case (CodeRabbit review,
     # P2).
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
-    (pack / "source_facts" / "bad.jsonl").write_bytes(b"\xff\xfe{\"tu_id\":1}")
+    (pack / "source_facts" / "bad.jsonl").write_bytes(b'\xff\xfe{"tu_id":1}')
     diags: list[str] = []
     tus = read_source_facts(pack, diagnostics=diags)
     assert len(tus) == 1  # the good record still ingests
@@ -481,7 +559,9 @@ def test_read_source_facts_degrades_on_corrupt_gzip_instead_of_crashing(
     truncated = pack / "source_facts" / "truncated.jsonl.gz"
     truncated.write_bytes(good.read_bytes()[:5])  # valid header, no body
     corrupt = pack / "source_facts" / "corrupt.jsonl.gz"
-    corrupt.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data")
+    corrupt.write_bytes(
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data"
+    )
 
     diags: list[str] = []
     tus = read_source_facts(pack, diagnostics=diags)

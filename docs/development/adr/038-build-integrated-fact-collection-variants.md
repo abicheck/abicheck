@@ -442,9 +442,42 @@ library *with the plugin active* (one build both links the `.so` and drops
 `abicheck_inputs/` beside it), then drives the real user pipeline — `abicheck
 dump` the binary (L0/L1), `abicheck merge` the plugin pack into the baseline
 (asserting the L4 source-ABI and L5 graph layers were ingested with a non-empty
-entity set), and `abicheck compare` the merged baseline against itself (asserting
-a clean verdict). This proves a plugin-emitted pack is *consumable by the
-ordinary scan*, not merely entity-equivalent to the clang backend.
+entity set, **and** that the specific `DECL_CALLS_DECL` edges the fixture's
+calls produce are present in the embedded L5 graph — not merely that L4 entity
+counts are non-zero), and `abicheck compare` the merged baseline against itself
+(asserting a clean verdict). This proves a plugin-emitted pack is *consumable
+by the ordinary scan*, not merely entity-equivalent to the clang backend.
+
+**Side channels beyond entity equivalence.** The entity comparison above
+proves the L4 *entity* contract; it says nothing about `source_edges`,
+`read_files`, `fact_set`, or per-family `coverage` — the exact gap a review of
+an earlier revision of this ADR's implementation flagged (the "does not cover
+the newly mandatory channels" finding). `conformance.py` now also asserts:
+
+- **`source_edges` parity for a planted overload regression.** The fixture
+  (`widget.hpp`/`widget.cpp`) declares `overload(int)`/`overload(double)` and
+  two callers, one per overload — exactly the shape whose
+  `referencedDecl` resolution C.6's original scope did not exercise (see
+  C.10). Both producers' `(edge, src, dst)` triples for these two calls are
+  required to match (an error if either is missing); any *other* divergence
+  in the edge set (e.g. compiler-implicit builtin-typedef edges the two
+  producers are not guaranteed to walk identically) is reported but not
+  gated — reconciling that is the broader, still-open concern C.10 tracks,
+  not this regression target.
+- **`read_files`** — both producers must have read the fixture's own primary
+  source and header (a required subset, not exact equality: the two
+  collection mechanisms are not guaranteed to enumerate transitively-included
+  system headers identically).
+- **`fact_set`** — both producers must declare the same canonical
+  `name`/`version`/`compiler_family` (the fields
+  `check_fact_set_compatibility()` keys comparison-compatibility on, C.8).
+- **`coverage`** — informational: neither producer should report
+  `partial`/`failed` for a mandatory family on this clean fixture.
+
+This is still not full parity coverage of every C.6 field (source locations,
+`names`/`relations`/`ownership` are not compared), but it closes the specific
+gap the review named: the LLVM 16/17/18 green matrix now also exercises the
+edge/read-file/fact-set contract the entity comparison alone left unproven.
 
 ### C.7 — Non-goals / limitations
 
@@ -566,10 +599,11 @@ per function body plus `SourceManager::fileinfo_begin()/end()`, the `clang.py`
 wrapper via `clang_source_edges.build_source_edges()` reusing
 `call_graph.py`'s/`type_graph.py`'s existing pure AST parsers on the JSON AST
 it already parsed. Edge identity is `(kind, src, dst)`, deduplicated per TU;
-each producer's edges are self-consistent but not required to be
-byte-identical across producers (same D0 philosophy as C.6 entity
-equivalence — compared for *coverage*, not byte-for-byte parity, since C.6
-does not compare `source_edges`/`read_files`).
+each producer's edges are self-consistent. C.6 now compares a targeted,
+planted-regression subset of `source_edges` (an overload-call fixture) rather
+than the full set byte-for-byte — see C.6 and C.10 for why full parity is not
+yet asserted end-to-end, and C.10 for where these edges go once collected
+(folded into the L5 graph, not merely serialized).
 
 `buildsource/fact_set.py` implements the comparison-compatibility rules over
 these fields: `rollup_fact_set()`/`rollup_coverage()` fold per-TU records up
@@ -638,6 +672,243 @@ facts file write always precedes the profiling emission textually. The
 existing per-TU replay cache (`source_replay.SourceAbiCache`,
 `ABICHECK_L4_CACHE_DIR`, D8) was already covered by this invariance —
 caching serializes/deserializes the same `SourceAbiTu` records verbatim.
+
+### C.10 — `source_edges` reach the L5 graph, not just the pack
+
+C.8 (#15-18) made both producers *collect* `source_edges` during their
+existing frontend pass. A subsequent review of an earlier revision of this
+ADR's implementation found the gap that collection left open: `SourceAbiTu.
+source_edges` was serialized and round-tripped, but `SourceAbiSurface` — the
+linked, per-library object `build_source_graph()` actually reads — had no
+edge field at all, so nothing ever folded them into the L5 graph. The
+separate `call_graph`/`type_graph` Clang AST replay passes remained the only
+producer of `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE`/
+`TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS` edges end-to-end — a second, separate
+frontend invocation over the same TUs, exactly the cost this feature exists
+to remove. This is now closed:
+
+- **`SourceAbiSurface.source_edges`** (`source_abi.py`) is a new field in the
+  same `{edge, src, dst, provenance, confidence, attrs}` shape as
+  `SourceAbiTu.source_edges` (which itself mirrors `GraphEdge.to_dict()`).
+  `source_link.link_source_abi()` folds every linked TU's `source_edges` into
+  it, deduplicating by `(edge, src, dst)` across TUs that share a public
+  header — the same dedup precedent already applied to entities.
+- **`source_graph.fold_source_edges()`** consumes
+  `SourceAbiSurface.source_edges` from inside `build_source_graph()` (always,
+  not behind a flag — the graph is already built whenever a source surface
+  exists). Endpoint identities are mapped onto the identical `decl://`/
+  `type://` node-id scheme `call_graph.augment_graph_with_calls()`/
+  `type_graph.augment_graph_with_types()` already use for the replay path, so
+  an edge collected this way lands on the same graph node a separate replay
+  pass would have created — `add_edge`'s `(src, dst, kind)` de-dup key
+  reconciles the two for free, first-writer-wins.
+- **The separate replay passes are still always run — not yet skipped.** An
+  earlier revision of this fix skipped `fold_call_graph()`/`fold_type_graph()`
+  once the rolled-up `source_edges` fact family was `complete`/
+  `empty-confirmed` for a full (unnarrowed) L4 replay scope, on the theory
+  that their edges were already present via `fold_source_edges`. A review of
+  that revision found the flaw: the raw `source_edges` wire format
+  (`{edge, src, dst, provenance, confidence, attrs}`) carries only bare
+  endpoint identities, never the `dst_file`/project-file provenance
+  `fold_call_graph`/`fold_type_graph` attach via `project_files`
+  (`GraphNode.attrs["defined_in_project"]`). `source_graph.
+  is_internal_dependency_node()` (shared with `crosscheck.py`'s
+  `public_to_internal_dependency`) requires that provenance — or the L4
+  surface's own `decl_to_file` mapping, which only covers *public* reachable
+  declarations — to classify an unannotated node as project-internal. A
+  private helper/type only ever reached via `source_edges` (never itself
+  part of the public surface) would therefore stay unclassified, silently
+  suppressing a real `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`/crosscheck
+  finding. The skip is reverted: both replay passes run unconditionally
+  whenever `with_call_graph` is set, exactly as before this ADR's edges-fold
+  work; `fold_source_edges` still runs (always, via `build_source_graph()`)
+  and reconciles with the replay's edges via the same `(src, dst, kind)`
+  de-dup key, so it remains a net addition (it can supply edges when a
+  narrower/cheaper collection ran without a full replay, e.g. a Plugin
+  injection-only pack with no `clang++` on the merge host) — it is just not
+  (yet) a substitute for the replay's provenance. Making `source_edges`
+  itself carry equivalent `dst_file`/`caller_file` provenance end-to-end (in
+  both the plugin's wire format and `clang_source_edges.build_source_edges()`)
+  is the natural follow-up that would let this optimization return safely;
+  tracked as future work, not bundled into this fix.
+- **The Flow-2 ingestion path (`inputs_pack.ingest_inputs_pack`) has no
+  replay fallback at all, so the provenance gap above is not just an
+  optimization risk there — it is the only edge source.** A follow-up review
+  found that a Flow-2-ingested pack's graph never marked `extractor_passes`
+  for `call_graph`/`type_graph` at all (`fold_source_edges` never touches
+  it), so `source_graph_findings._common_dependency_edge_kinds()` treated a
+  genuinely complete-but-zero-edge family as "never examined" and suppressed
+  a real finding as a coverage artifact. `source_graph.
+  mark_source_edges_extractor_coverage()` closes that half — applied only at
+  `ingest_inputs_pack` and the export-relink graph rebuild in
+  `cli_buildsource_merge.py` (the two call sites that never run a replay
+  afterward; `inline._build_inline_graph`/`cli_buildsource_helpers` already
+  track this precisely via the replay itself and must not call it, since a
+  bare `source_edges` rollup can't tell full-scope from narrowed). But this
+  only fixes the *pass-coverage* gate (`_dependency_kinds_covered`) — it does
+  **not** fix the separate *node-classification* gate
+  `is_internal_dependency_node()` still applies per-node: a Flow-2-ingested
+  node from `fold_source_edges` alone still carries no `defined_in_project`
+  attr and, being genuinely private, is never covered by the L4 surface's own
+  `decl_to_file` (which only maps *public* reachable declarations). Both
+  gates must pass for `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` to fire on such
+  a node, so for a Flow-2-only pack (no compile DB / no replay ever
+  possible), a public-API-to-private-helper dependency collected only via
+  `source_edges` still cannot be detected end-to-end. Closing this
+  fully requires the same producer-side wire-format change described above
+  (both the plugin and `clang_source_edges.build_source_edges()` emitting
+  `dst_file`); until then this is a known, accepted limitation of the
+  ingestion-only path specifically (Codex review).
+
+**Identity normalization (the second half of the same review finding).**
+Even with the fold wired up, the Clang JSON-AST replay's callee identity was
+unreliable: `call_graph._identity()` read `referencedDecl.get("mangledName")
+or .get("name")`, but a real Clang 17/18 `-ast-dump=json`'s compact
+`referencedDecl` stub for an overloaded callee never carries `mangledName` —
+verified against a live compile of `int f(int)`/`double f(double)` (both
+call sites' stubs are `{"kind": "FunctionDecl", "name": "f", "type": {...}}`,
+differing only in `id` and `type.qualType`). Keying solely off the stub
+therefore collapsed every overload (and, by the same mechanism,
+distinguishably-named constructors/destructors) onto one bare-name endpoint —
+producer-dependent and silently wrong, since the plugin's own callee
+resolution (over the live `FunctionDecl*`) does not share this limitation.
+`type_graph.py` had already solved the identical problem for its own
+`DECL_REFERENCES_DECL`/`DECL_HAS_TYPE` edges (`_resolve_ref_identity()`, an
+earlier review) but `call_graph.py` never received the equivalent fix. It now
+does: `parse_clang_ast_calls()` builds an `id_index: dict[str, str]` from
+every full `FunctionDecl`/`CXXMethodDecl`/`CXXConstructorDecl`/
+`CXXDestructorDecl`/`CXXConversionDecl` node seen during the same walk (keyed
+by clang's own per-node `id`, present even on an otherwise-incomplete
+`referencedDecl` stub), and `_resolve_ref_callee_identity()` resolves a call
+site's stub through that index before falling back to the stub's own
+(name-only) identity. Verified end-to-end against a live Clang 18 compile of
+the `overload(int)`/`overload(double)` pair now planted in the C.6 fixture
+(`widget.hpp`/`widget.cpp`) — see C.6.
+
+**Still open:** a forward reference to a declaration this walk has not yet
+seen in full (rare — C/C++ requires a visible declaration before a call) and
+constructors/destructors reached through a route the id-index does not cover
+remain a documented best-effort limitation, matching `type_graph.py`'s own
+documented gap in the same spirit. Fully general resolution needs a stable
+scope-qualified identity for every declaration, not just ones an `id` happens
+to disambiguate — tracked as future work, not blocking this fix.
+
+### C.11 — Gating opaque-hash comparability on producer/version agreement
+
+C.8's `check_fact_set_compatibility()` already *reported* — via
+`SOURCE_FACT_COVERAGE_INCOMPLETE` — that a producer/producer-version/
+compiler-version mismatch makes opaque body/template hashes unreliable. But
+`source_diff.diff_source_abi()` emitted that finding and then **unconditionally**
+ran `_diff_inline_bodies()`/`_diff_templates()`'s hash comparisons anyway, so a
+comparison could report both "these hashes may be unreliable" and a concrete
+`INLINE_BODY_CHANGED`/`TEMPLATE_BODY_CHANGED` computed from the very hashes
+just flagged as unreliable — the second finding still feeding reports,
+policies, and gates.
+
+`buildsource/fact_set.py` now exposes a structured verdict,
+`FactCompatibility` (`check_fact_compatibility()`), wrapping
+`check_fact_set_compatibility()`'s issue list into three booleans:
+`structured_facts_comparable` (false only on a `fact_set` name/version
+mismatch — the mandatory-family contract itself), `opaque_hashes_comparable`,
+and `source_edges_comparable` (both false on a `producer`/`producer_version`/
+`compiler_version` mismatch too, since the canonicalization recipe can change
+independently of `fact_set.version`). `diff_source_abi()` computes this once
+per comparison and threads it into `_diff_inline_bodies()`/`_diff_templates()`,
+which skip their hash-diff branch (not their existence/removal branch —
+`INLINE_FUNCTION_REMOVED`/`UNINSTANTIATED_TEMPLATE_REMOVED` are not
+hash-derived and are never suppressed) when `opaque_hashes_comparable` is
+false. `_diff_fact_coverage()`'s `SOURCE_FACT_COVERAGE_INCOMPLETE` finding now
+says explicitly, in that case, that the hash findings were suppressed and why.
+
+**`hash_recipe_id`** (`fact_set.hash_recipe_id()`) is the escape hatch the
+review asked for: two fact-sets declaring the *same* explicit
+`"hash_recipe_id"` are treated as opaque-hash-comparable regardless of a
+`producer`/`producer_version`/`compiler_version` mismatch — a differential
+conformance run (C.6) proving two differently-named producers emit
+byte-comparable hashes is more precise than treating any producer-identity
+difference as inherently incompatible. Absent an explicit field, the fallback
+recipe id is the `producer`/`producer_version`/`compiler_version` triple
+`check_fact_set_compatibility()` already keys its rule on, so old fact-sets
+recorded before this field existed keep comparing exactly as before. A
+`fact_set.name`/`version` mismatch is never overridable this way — that is
+the mandatory-family contract itself, not a hashing-recipe detail.
+
+### C.12 — Target/pack isolation
+
+The plugin's per-TU fact filename was keyed on source path + compile-context
+hash only, and `ensureManifest()`/the wrapper's `init_inputs_pack()` were
+first-writer-wins: an existing `manifest.json` was loaded and returned
+unchanged with no check that the current invocation's library/version
+agreed. Two different libraries built from a shared object file
+(`common.cpp` compiled into both `libA`/`libB`) into one shared `out=`
+directory would therefore silently collide — same filename, same manifest,
+whichever compile ran last winning, with nothing downstream able to tell.
+
+- **Filenames and `tu_id` now include the target/library identity.** The
+  plugin's per-TU fact filename folds a hash of `library + "\x1f" + source`
+  (falling back to source-path-only when no `library=` is configured) instead
+  of the source path alone; `tu_id` gains a `#target:<library>` suffix when a
+  library is configured. The `inputs_emit.facts_filename()`/`cc_wrapper.py`
+  path (the non-plugin producer) gets the identical fix — the same bug
+  existed independently in both producers' filename schemes.
+- **An existing manifest is validated, not silently trusted.** The plugin's
+  `ensureManifest()` now reads an existing `manifest.json` and prints a loud
+  (never build-aborting — this runs inside a real compile invocation)
+  stderr warning when its `library`/`version` disagree with the current
+  invocation's. `inputs_emit.init_inputs_pack()` (the batch/wrapper path,
+  which is not embedded in an active compile and can afford to be stricter)
+  raises `ValueError` on the same disagreement instead — idempotent only for
+  a repeated call naming the *same* library/version, never a silently
+  different one.
+- **`abicheck inputs validate` rejects pack-level target inconsistency.**
+  `inputs_validate.py` now errors when a pack's TU records name more than one
+  distinct non-empty `target_id`, or when a TU's `target_id` disagrees with
+  `target://<manifest.library>` — the exact same-source/two-library collision
+  surfaced as a validation error instead of a silent merge-time ambiguity. It
+  also promotes a `fact_set` **name/version** mismatch *within one pack's* TU
+  records from `rollup_fact_set()`'s existing soft "TUs disagree" warning to
+  an error (routine `producer`/`producer_version` drift across TUs stays a
+  warning; only a hard mandatory-family-contract mismatch is promoted).
+- **A related, narrower fix to `compact_inputs_pack()`'s rollback.** The
+  compactor's "was this output path pre-existing" check used to be a bare
+  `Path.exists()`, which could not distinguish a genuine prior compaction
+  (`manifest.last_compacted`) from an operator's `--output-filename`
+  coincidentally colliding with an ordinary pre-existing file — silently
+  letting the merge overwrite that unrelated file, and (on a subsequent
+  manifest-write failure) leaving the clobbered replacement in place because
+  the rollback branch treated "pre-existing" as "leave it alone." The check
+  is now tied to the resolved identity of `manifest.last_compacted`; a
+  collision with anything else is rejected outright (a `ValueError`) before
+  any write happens — simpler and safer than trying to back up and restore
+  an arbitrary file's prior content.
+- **Also closed:** a public typedef whose JSON-dump-derived underlying type
+  could not be determined was silently dropped with no diagnostic, and
+  `types` coverage only watched for the unrelated "record/enum type_hash
+  unavailable" diagnostic — so a batch of failed typedefs alongside one
+  successfully-collected record/enum still reported `types: complete`. The
+  plugin now records a `"typedef facts unavailable"` diagnostic on this path,
+  folded into the same family coverage check.
+- **Still open, deliberately not addressed here:** the standardized
+  `abicheck_inputs/<target>/<configuration>/<architecture>/` directory layout
+  the review sketched as the fuller structural fix. The validation above
+  makes a collision loud and rejected rather than silent, which is the
+  correctness-critical half; standardizing the on-disk layout is a larger,
+  purely-organizational change better done once real deployments show what
+  layout convention they actually need, and is left for a follow-up ADR
+  amendment rather than bundled into this correctness fix.
+
+**Performance re-measurement — explicitly not done here.** A prior review of
+the plugin (`README.md`'s published 143-TU/four-core LLVM benchmark) measured
+an earlier, narrower collector; the current collector additionally performs
+per-function call/reference sub-walks, type-relationship collection,
+read-file enumeration, and richer serialization, none of which that
+benchmark's 2.39× figure reflects. Re-running it is explicitly out of scope
+for this change: it requires an instrumented LLVM build and controlled
+wall-clock/RSS measurement this environment cannot perform, and fabricating a
+number would be worse than stating the gap plainly. Treat the published
+figure as **historical evidence for the pruned parser it measured, not a
+verified measurement of the current collector** until someone re-runs the
+same benchmark end-to-end and updates `README.md`.
 
 ---
 

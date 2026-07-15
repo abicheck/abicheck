@@ -25,7 +25,10 @@ from click.testing import CliRunner
 
 from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.inputs_pack import ABICHECK_INPUTS_VERSION, INPUTS_KIND
-from abicheck.buildsource.inputs_validate import validate_inputs_pack
+from abicheck.buildsource.inputs_validate import (
+    _fact_set_recipe_issues,
+    validate_inputs_pack,
+)
 from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
 from abicheck.cli import main
 
@@ -81,7 +84,10 @@ def _write_pack(
     manifest = {
         "kind": INPUTS_KIND,
         "abicheck_inputs_version": ABICHECK_INPUTS_VERSION,
-        "library": "libfoo.so",
+        # Matches _tu()'s/this file's fixture target_id ("target://libfoo") so
+        # the PR3 target-isolation check (target_id == target://<library>)
+        # does not false-positive on every fixture in this file.
+        "library": "libfoo",
         "version": "1.0",
         "created_by": "abicheck-clang-plugin 0.4",
     }
@@ -138,6 +144,108 @@ def test_duplicate_tu_id_is_an_error(tmp_path: Path) -> None:
     assert any("duplicate tu_id" in e for e in report.errors)
 
 
+def test_tus_with_no_tu_id_are_never_treated_as_duplicates(tmp_path: Path) -> None:
+    """A TU with no tu_id at all (an empty string is never a real shared
+    identity between otherwise-unrelated TUs) must not be flagged as a
+    duplicate of another equally id-less TU."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=fs)
+    tu1.tu_id = ""
+    tu2.tu_id = ""
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert report.duplicate_tu_ids == []
+
+
+def test_multiple_target_ids_is_an_error(tmp_path: Path) -> None:
+    """PR3 target isolation (latest-main Clang plugin review): two different
+    libraries' TUs sharing one pack is exactly the same-source/two-library
+    collision the plugin's first-writer-wins manifest/filename allowed."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=fs)
+    tu2.target_id = "target://libbar"
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("mixes more than one target_id" in e for e in report.errors)
+
+
+def test_target_id_disagreeing_with_manifest_library_is_an_error(
+    tmp_path: Path,
+) -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu = _tu("a", fact_set=fs)
+    tu.target_id = "target://not-libfoo"
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("does not agree on which target" in e for e in report.errors)
+
+
+def test_target_id_matching_manifest_library_is_clean(tmp_path: Path) -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
+    report = validate_inputs_pack(pack)
+    assert not any("target_id" in e for e in report.errors)
+
+
+def test_no_manifest_library_skips_target_id_agreement_check(tmp_path: Path) -> None:
+    """When the manifest itself names no library, there is nothing to check a
+    TU's target_id against -- the agreement check is a no-op, not an error."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu = _tu("a", fact_set=fs)
+    pack = _write_pack(tmp_path, [tu], manifest_extra={"library": ""})
+    report = validate_inputs_pack(pack)
+    assert not any("does not agree on which target" in e for e in report.errors)
+
+
+def test_missing_target_id_is_not_flagged(tmp_path: Path) -> None:
+    """A pre-target-isolation producer's TUs (no target_id at all) must not
+    be flagged -- this is additive validation, not a new hard requirement."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    tu = _tu("a", fact_set=fs)
+    tu.target_id = ""
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not any("target_id" in e for e in report.errors)
+
+
+def test_inconsistent_fact_set_recipe_within_pack_is_an_error(tmp_path: Path) -> None:
+    """A fact_set *name*/*version* mismatch between two TUs in the same pack
+    is a hard contract disagreement, not routine producer/version drift --
+    promoted to an error, not just rollup_fact_set's existing soft warning
+    (latest-main Clang plugin review, PR3)."""
+    fs_a = default_fact_set(producer="p", producer_version="1")
+    fs_b = dict(fs_a)
+    fs_b["version"] = 999
+    tu1 = _tu("a", fact_set=fs_a)
+    tu2 = _tu("b", fact_set=fs_b)
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not report.ok
+    assert any("fact_set_version_mismatch" in e for e in report.errors)
+
+
+def test_same_producer_different_producer_version_within_pack_is_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """Routine producer-version drift across TUs stays a warning (via the
+    existing rollup_fact_set "TUs disagree" path) -- only a name/version
+    contract mismatch is promoted to an error."""
+    fs_a = default_fact_set(producer="p", producer_version="1")
+    fs_b = default_fact_set(producer="p", producer_version="2")
+    tu1 = _tu("a", fact_set=fs_a)
+    tu2 = _tu("b", fact_set=fs_b)
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)
+    assert not any(
+        "fact_set_version_mismatch" in e or "fact_set_name_mismatch" in e
+        for e in report.errors
+    )
+
+
 def test_no_fact_set_anywhere_warns_not_errors(tmp_path: Path) -> None:
     pack = _write_pack(tmp_path, [_tu("a")])
     report = validate_inputs_pack(pack)
@@ -163,6 +271,40 @@ def test_mismatched_fact_set_name_is_an_error(tmp_path: Path) -> None:
     report = validate_inputs_pack(pack)
     assert not report.ok
     assert any("fact_set name is 'some-other-fact-set'" in e for e in report.errors)
+
+
+def test_fact_set_recipe_issues_tolerates_unhashable_nested_values() -> None:
+    """The dedup step must use dict equality, not hashing, so a nested
+    list/dict value in fact_set can't crash it (Codex review); a genuine
+    name-mismatch error must still surface."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    fs["extra_field"] = {"nested": ["values"]}
+    other_fs = dict(fs)
+    other_fs["name"] = "some-other-fact-set"
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=other_fs)
+    issues = _fact_set_recipe_issues([tu1, tu2])  # must not raise
+    assert any("fact_set_name_mismatch" in i for i in issues)
+
+
+def test_fact_set_recipe_check_tolerates_unhashable_nested_values(
+    tmp_path: Path,
+) -> None:
+    """A forward-versioned fact_set may carry a nested list/dict value (e.g. a
+    structured hash_recipe_id or capability list); deduplicating candidate
+    fact_sets must not crash trying to hash one (Codex review)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    fs["extra_field"] = ["nested", "list"]
+    other_fs = dict(fs)
+    other_fs["producer_version"] = "2"
+    other_fs["extra_field"] = ["nested", "list"]
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=other_fs)
+    pack = _write_pack(tmp_path, [tu1, tu2])
+    report = validate_inputs_pack(pack)  # must not raise
+    assert any(
+        "do not agree on a single fact_set identity" in w for w in report.warnings
+    )
 
 
 def test_manifest_level_fact_set_used_when_present(tmp_path: Path) -> None:
@@ -212,9 +354,7 @@ def test_manifest_level_fact_set_used_when_no_tu_ever_stamped_one(
     # anywhere" pack), but no TU record actually backs mandatory-family
     # coverage completeness — that gap must still be surfaced, not silently
     # swallowed by the identity check passing (Codex review).
-    assert any(
-        "no TU record" in w and "coverage" in w for w in report.warnings
-    )
+    assert any("no TU record" in w and "coverage" in w for w in report.warnings)
 
 
 def test_incomplete_mandatory_family_warns(tmp_path: Path) -> None:
@@ -297,9 +437,7 @@ def test_report_to_dict_round_trips_shape(tmp_path: Path) -> None:
 
 def test_cli_validate_clean_pack_exits_zero(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
-    pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
-    )
+    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
     result = CliRunner().invoke(main, ["inputs", "validate", str(pack)])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
@@ -328,9 +466,7 @@ def test_cli_validate_bad_path_exits_usage_error(tmp_path: Path) -> None:
 
 def test_cli_validate_json_format(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
-    pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
-    )
+    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
     result = CliRunner().invoke(
         main, ["inputs", "validate", str(pack), "--format", "json"]
     )
@@ -342,9 +478,7 @@ def test_cli_validate_json_format(tmp_path: Path) -> None:
 
 def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
-    pack = _write_pack(
-        tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())]
-    )
+    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
     out = tmp_path / "report.txt"
     result = CliRunner().invoke(main, ["inputs", "validate", str(pack), "-o", str(out)])
     assert result.exit_code == 0, result.output

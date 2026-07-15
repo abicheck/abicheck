@@ -27,8 +27,11 @@ from abicheck.buildsource import (
     link_source_abi,
 )
 from abicheck.buildsource.fact_set import (
+    FactCompatibility,
     FactSetIssue,
+    check_fact_compatibility,
     check_fact_set_compatibility,
+    hash_recipe_id,
     incomplete_families,
     rollup_coverage,
     rollup_fact_set,
@@ -489,7 +492,9 @@ def test_diff_degrades_on_non_dict_nested_coverage_metadata() -> None:
     alone doesn't catch that (a non-empty non-dict value is still truthy),
     so this must not raise AttributeError, matching the defensive handling
     every other optional field here already gets (Codex review, P2)."""
-    old = _surface(coverage={"fact_set": "not-a-dict", "fact_family_states": "also-bad"})
+    old = _surface(
+        coverage={"fact_set": "not-a-dict", "fact_family_states": "also-bad"}
+    )
     new = _surface(coverage={"fact_set": ["also", "not", "a", "dict"]})
     changes = diff_source_abi(old, new)  # must not raise
     assert isinstance(changes, list)
@@ -540,3 +545,428 @@ def test_source_fact_coverage_incomplete_is_risk_kind() -> None:
     from abicheck.checker_policy import RISK_KINDS
 
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in RISK_KINDS
+
+
+# -- hash_recipe_id / check_fact_compatibility (PR2 gating) ------------------
+
+
+def test_hash_recipe_id_explicit_field_wins() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    assert hash_recipe_id(fs) == "clang-json-canonical-v3"
+
+
+def test_hash_recipe_id_falls_back_to_producer_quadruple() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    assert hash_recipe_id(fs) == "p|1|clang|18"
+
+
+def test_hash_recipe_id_fallback_differs_across_compiler_families() -> None:
+    """A gcc and a clang fact_set with otherwise-identical producer/
+    producer_version/compiler_version must never collide on the same
+    fallback recipe id -- their canonicalization/mangling differs."""
+    clang_fs = default_fact_set(
+        producer="p", producer_version="1", compiler_version="18"
+    )
+    gcc_fs = dict(clang_fs)
+    gcc_fs["compiler_family"] = "gcc"
+    assert hash_recipe_id(clang_fs) != hash_recipe_id(gcc_fs)
+
+
+def test_check_fact_compatibility_matching_fact_sets_all_comparable() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    compat = check_fact_compatibility(fs, dict(fs))
+    assert compat.structured_facts_comparable
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+    assert compat.issues == ()
+
+
+def test_check_fact_compatibility_producer_mismatch_blocks_opaque_and_edges_only() -> (
+    None
+):
+    old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    compat = check_fact_compatibility(old, new)
+    assert compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert any(i.rule == "producer_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_compiler_family_mismatch_blocks_opaque_and_edges_only() -> (
+    None
+):
+    """A gcc-vs-clang pair must not be treated as byte-comparable: different
+    compiler families mangle/canonicalize differently even when the
+    abicheck producer identity and version otherwise match."""
+    old = default_fact_set(producer="p", producer_version="1")
+    new = dict(old)
+    new["compiler_family"] = "gcc"
+    compat = check_fact_compatibility(old, new)
+    assert compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert any(i.rule == "compiler_family_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_name_mismatch_blocks_everything() -> None:
+    old = default_fact_set(producer="p", producer_version="1")
+    new = dict(old)
+    new["name"] = "some-other-fact-set"
+    compat = check_fact_compatibility(old, new)
+    assert not compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+
+
+def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch() -> (
+    None
+):
+    """A differential conformance run (ADR-038 C.6) can prove two differently
+    named producers emit byte-comparable opaque hashes; declaring the same
+    hash_recipe_id on both sides should override the producer-mismatch gate
+    rather than forcing every future comparison to suppress unnecessarily."""
+    old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    old["hash_recipe_id"] = "clang-json-canonical-v3"
+    new = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    new["hash_recipe_id"] = "clang-json-canonical-v3"
+    compat = check_fact_compatibility(old, new)
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+    # The producer_mismatch issue is still reported for visibility even though
+    # it's overridden -- callers that want the raw prose still see it.
+    assert any(i.rule == "producer_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_one_side_empty_stays_comparable() -> None:
+    """A pre-C.8 producer (no fact_set at all) must not gate anything -- only
+    the informational fact_set_unknown warning fires (forward-compat)."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, {})
+    assert compat.structured_facts_comparable
+    assert compat.opaque_hashes_comparable
+    assert compat.source_edges_comparable
+
+
+def test_fact_compatibility_is_frozen() -> None:
+    compat = FactCompatibility(True, True, True, ())
+    with pytest.raises(AttributeError):
+        compat.opaque_hashes_comparable = False  # type: ignore[misc]
+
+
+# -- diff_source_abi: gating INLINE_BODY_CHANGED/TEMPLATE_BODY_CHANGED ------
+
+
+def _inline_entity(body_hash: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id="f",
+        kind="inline",
+        qualified_name="ns::f",
+        mangled_name="_Z1fv",
+        body_hash=body_hash,
+    )
+
+
+def _template_entity(body_hash: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id="T",
+        kind="template",
+        qualified_name="ns::T",
+        signature_hash="sig",
+        body_hash=body_hash,
+    )
+
+
+def test_diff_suppresses_inline_body_changed_on_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED not in {c.kind for c in changes}
+    coverage_finding = next(
+        c for c in changes if c.kind == ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE
+    )
+    assert "suppressed" in coverage_finding.description
+
+
+def test_diff_suppresses_template_body_changed_on_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.TEMPLATE_BODY_CHANGED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_body_changed_when_compatible() -> None:
+    fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_function_removed_on_producer_mismatch() -> None:
+    """Removal is an existence check, not a hash comparison -- it must not be
+    suppressed by an opaque-hash incompatibility (only *_BODY_CHANGED is)."""
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    # An unrelated declaration keeps _surface_has_facts(new) True (L4 ran on
+    # the new side too) without resurrecting the removed inline function.
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[SourceEntity(id="g", qualified_name="ns::g")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_FUNCTION_REMOVED in {c.kind for c in changes}
+
+
+def test_diff_matching_recipe_id_keeps_hash_diffs_despite_producer_mismatch() -> None:
+    old_fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    old_fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    new_fs = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
+    new_fs["hash_recipe_id"] = "clang-json-canonical-v3"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-b")],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_BODY_CHANGED in {c.kind for c in changes}
+
+
+# -- diff_source_abi: gating removal detection on structured_facts_comparable -
+
+
+def _macro_entity(qualified_name: str, value: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id=qualified_name, kind="macro", qualified_name=qualified_name, value=value
+    )
+
+
+def _typedef_entity(qualified_name: str, type_hash: str, value: str = "int") -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id=qualified_name,
+        kind="typedef",
+        qualified_name=qualified_name,
+        type_hash=type_hash,
+        value=value,
+    )
+
+
+def _generated_entity(qualified_name: str, value: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity, SourceLocation
+
+    return SourceEntity(
+        id=qualified_name,
+        kind="constexpr",
+        qualified_name=qualified_name,
+        value=value,
+        visibility="generated",
+        source_location=SourceLocation(path="gen/cfg.h", line=1, origin="GENERATED"),
+    )
+
+
+def _unrelated_entity() -> object:
+    """A decl unrelated to the removal under test, keeping
+    ``_surface_has_facts(new)`` true so the removal-suppression assertion is
+    isolated to the fact-set-mismatch gate, not the separate no-facts-at-all
+    gate (mirrors the existing inline-body-removal test's own convention)."""
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(id="decl://keep", kind="function", qualified_name="keep")
+
+
+def test_diff_suppresses_macro_removed_on_fact_set_name_mismatch() -> None:
+    """A fact_set NAME mismatch means the two sides don't agree on the
+    mandatory-family contract, so a macro's absence may only reflect the old
+    contract never collecting macros -- not a real removal (Codex review)."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+    )
+    # An unrelated declaration keeps _surface_has_facts(new) True (L4 ran on
+    # the new side too) without resurrecting the removed macro.
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.PUBLIC_MACRO_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_typedef_removed_on_fact_set_version_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["version"] = 999
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.PUBLIC_TYPEDEF_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_generated_header_removal_on_fact_set_name_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_declarations=[_generated_entity("cfg::KMax", "64")],
+    )
+    new = _surface(coverage={"fact_set": new_fs, "fact_family_states": {}})
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.GENERATED_HEADER_CHANGED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
+    """Removal detection is suppressed on a contract mismatch, but a content
+    comparison for an identity present on *both* sides stays meaningful
+    regardless -- a type_hash/value means the same thing under any
+    mandatory-family contract."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED in kinds
+
+
+def test_diff_still_reports_removals_when_fact_sets_match() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_REMOVED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_REMOVED in kinds
+
+
+def test_diff_suppresses_inline_function_removed_on_fact_set_name_mismatch() -> None:
+    """Same reasoning as the macro/typedef/generated-header removal gates: a
+    fact_set NAME mismatch means an inline function's absence may only
+    reflect the old contract never collecting the inline-bodies family, not a
+    real removal (Codex review -- this gate previously only covered
+    generated/typedef/macro removals, leaving inline/template removals
+    ungated)."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_FUNCTION_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_template_removed_on_fact_set_version_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["version"] = 999
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_and_template_removals_when_fact_sets_match() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+        reachable_templates=[_template_entity("hash-b")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.INLINE_FUNCTION_REMOVED in kinds
+    assert ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED in kinds

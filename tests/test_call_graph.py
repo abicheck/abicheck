@@ -83,6 +83,106 @@ def _func(name: str, mangled: str, body: list[dict]) -> dict:
 # ── parser ──────────────────────────────────────────────────────────────────
 
 
+def _real_ref(node_id: str, name: str, qualtype: str) -> dict:
+    """A *realistic* compact ``referencedDecl`` stub -- no ``mangledName``,
+    matching real Clang 17/18 ``-ast-dump=json`` output (verified against a
+    live compile of an overloaded ``int f(int)``/``double f(double)`` pair,
+    latest-main Clang plugin review PR1b). Unlike ``_ref()`` (used by the
+    other parser tests), this never attaches a mangled name, so it exercises
+    the id-index fallback rather than the stub's own identity."""
+    return {"kind": "FunctionDecl", "id": node_id, "name": name, "type": {"qualType": qualtype}}
+
+
+def _call_via_ref(ref: dict) -> dict:
+    return {
+        "kind": "CallExpr",
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "inner": [{"kind": "DeclRefExpr", "referencedDecl": ref}],
+            }
+        ],
+    }
+
+
+def test_parse_resolves_overloaded_callee_via_id_index() -> None:
+    """A real (mangledName-less) referencedDecl stub must resolve to the
+    correct overload's mangled identity via the id-index built from the full
+    FunctionDecl nodes elsewhere in the AST, not collapse both overloads onto
+    the shared bare name "f" (PR1b)."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "id": "0x1",
+                "name": "f",
+                "mangledName": "_Z1fi",
+                "type": {"qualType": "int (int)"},
+            },
+            {
+                "kind": "FunctionDecl",
+                "id": "0x2",
+                "name": "f",
+                "mangledName": "_Z1fd",
+                "type": {"qualType": "double (double)"},
+            },
+            _func(
+                "g",
+                "_Z1gv",
+                [
+                    _call_via_ref(_real_ref("0x1", "f", "int (int)")),
+                    _call_via_ref(_real_ref("0x2", "f", "double (double)")),
+                ],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert {e.callee for e in edges} == {"_Z1fi", "_Z1fd"}
+
+
+def test_parse_resolves_via_prototype_seen_before_definition() -> None:
+    """The id-index must resolve through a pure prototype (no body), not only
+    a full definition -- a forward-declared function called before its own
+    definition appears later in the TU."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "id": "0x1",
+                "name": "helper",
+                "mangledName": "_Z6helperi",
+                "type": {"qualType": "int (int)"},
+            },  # prototype only, no CompoundStmt
+            _func(
+                "caller", "_Zcaller", [_call_via_ref(_real_ref("0x1", "helper", "int (int)"))]
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [CallEdge("_Zcaller", "_Z6helperi")]
+
+
+def test_parse_falls_back_to_bare_name_when_id_unindexed() -> None:
+    """A referencedDecl whose id was never seen elsewhere in this AST (e.g. a
+    system/library declaration clang did not include in full) still resolves
+    to *something* -- the documented best-effort fallback -- rather than
+    silently dropping the edge."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "caller",
+                "_Zcaller",
+                [_call_via_ref(_real_ref("0xdeadbeef", "puts", "int (const char *)"))],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [CallEdge("_Zcaller", "puts")]
+
+
 def test_parse_direct_call() -> None:
     ast = {
         "kind": "TranslationUnitDecl",

@@ -169,6 +169,17 @@ def _string_dict(raw: Any) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items()}
 
 
+def _edge_list(raw: Any) -> list[dict[str, Any]]:
+    """Defensive parse for a ``source_edges`` field (CodeRabbit review):
+    ``list(None)`` raises and ``list("...")`` yields character entries, so a
+    malformed/forward-versioned persisted value must not abort loading or
+    poison the graph with junk entries -- only well-formed dict rows survive.
+    """
+    if not isinstance(raw, list):
+        return []
+    return [dict(edge) for edge in raw if isinstance(edge, dict)]
+
+
 @dataclass
 class SourceLocation:
     """Where a source entity was declared, with provenance origin (ADR-030 D4)."""
@@ -400,9 +411,7 @@ class SourceAbiTu:
         # would poison cache dependency tracking (CodeRabbit review). Coerce to a
         # clean list of non-empty strings.
         rf_raw = d.get("read_files")
-        read_files = (
-            [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
-        )
+        read_files = [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
         fs_raw = d.get("fact_set")
         fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
 
@@ -422,7 +431,7 @@ class SourceAbiTu:
             templates=_ents("templates"),
             inline_bodies=_ents("inline_bodies"),
             constexpr_values=_ents("constexpr_values"),
-            source_edges=list(d.get("source_edges", [])),
+            source_edges=_edge_list(d.get("source_edges")),
             diagnostics=list(d.get("diagnostics", [])),
             read_files=read_files,
             fact_set=fact_set,
@@ -457,6 +466,15 @@ class SourceAbiSurface:
     reachable_macros: list[SourceEntity] = field(default_factory=list)
     reachable_templates: list[SourceEntity] = field(default_factory=list)
     reachable_inline_bodies: list[SourceEntity] = field(default_factory=list)
+    #: Deduplicated ``source_edges`` folded across every linked TU (ADR-038
+    #: C.9 / latest-main Clang plugin review, PR1): call/reference/type-shape
+    #: relationships collected during the *same* L4 frontend invocation that
+    #: produced the entities above, in the same ``{edge, src, dst, provenance,
+    #: confidence, attrs}`` shape as ``SourceAbiTu.source_edges`` (which itself
+    #: mirrors ``source_graph.GraphEdge.to_dict()``). ``build_source_graph``
+    #: folds these into the L5 graph so a plugin/replay producer's edges are
+    #: no longer serialized-but-unused dead data.
+    source_edges: list[dict[str, Any]] = field(default_factory=list)
     #: decl_to_binary_symbol maps qualified_name -> exported symbol ("" when the
     #: declaration has no exported symbol, i.e. a public decl that is not shipped)
     mappings: dict[str, Any] = field(
@@ -495,6 +513,7 @@ class SourceAbiSurface:
                 name: [e.to_dict() for e in bucket]
                 for name, bucket in self.reachable_buckets().items()
             },
+            "source_edges": list(self.source_edges),
             "mappings": {
                 "source_decl_to_binary_symbol": dict(
                     self.mappings.get("source_decl_to_binary_symbol", {})
@@ -577,6 +596,7 @@ class SourceAbiSurface:
             reachable_macros=_ents("macros"),
             reachable_templates=_ents("templates"),
             reachable_inline_bodies=_ents("inline_bodies"),
+            source_edges=_edge_list(d.get("source_edges")),
             mappings=mappings,
             odr_conflicts=list(d.get("odr_conflicts", [])),
             unmatched=unmatched,

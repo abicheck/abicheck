@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .fact_set import rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
@@ -1148,7 +1149,31 @@ def link_source_abi(
     state = _LinkState()
     state.export_index = _build_export_index(exported)
     state.exact_index = _build_exact_index(exported)
+    seen_edge_keys: set[tuple[str, str, str]] = set()
+    source_edges: list[dict[str, Any]] = []
     for tu in tus:
+        for edge in tu.source_edges:
+            if not isinstance(edge, dict):
+                continue
+            edge_name, edge_src, edge_dst = (
+                edge.get("edge"),
+                edge.get("src"),
+                edge.get("dst"),
+            )
+            if not (
+                isinstance(edge_name, str)
+                and edge_name
+                and isinstance(edge_src, str)
+                and edge_src
+                and isinstance(edge_dst, str)
+                and edge_dst
+            ):
+                continue
+            edge_key = (edge_name, edge_src, edge_dst)
+            if edge_key in seen_edge_keys:
+                continue
+            seen_edge_keys.add(edge_key)
+            source_edges.append(edge)
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (
                 tu.target_id or target_id
@@ -1180,6 +1205,11 @@ def link_source_abi(
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
 
+    # ADR-038 C.9 / PR1: fold every TU's collected graph-edge facts up to the
+    # surface (deduplicated above by (edge, src, dst) across TUs that share a
+    # public header), so build_source_graph() can consume them directly instead
+    # of them being serialized-but-unused dead data.
+    surface.source_edges = source_edges
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
     # Second-tier: rescue decls whose mangled name differs textually from the
     # export (ABI-tag / substitution drift) via demangled identity.

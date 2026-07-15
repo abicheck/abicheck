@@ -33,7 +33,7 @@ import re
 
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
-from .fact_set import check_fact_set_compatibility, incomplete_families
+from .fact_set import FactCompatibility, check_fact_compatibility, incomplete_families
 from .source_abi import (
     COVERAGE_STATES,
     EVIDENCE_TIER_L4,
@@ -147,7 +147,16 @@ def _coerce_coverage_states(family_states: dict[str, object]) -> dict[str, str]:
     }
 
 
-def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _surface_fact_set(surface: SourceAbiSurface) -> dict[str, object]:
+    """The rolled-up ``fact_set`` a surface's ``coverage`` carries, or ``{}``."""
+    cov = surface.coverage if isinstance(surface.coverage, dict) else {}
+    raw = cov.get("fact_set")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _diff_fact_coverage(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     """ADR-038 C.8: flag incompatible or incomplete L4 fact-set evidence.
 
     Fires only when there is something to report: at least one side carries a
@@ -185,9 +194,7 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     new_families = new_families_raw if isinstance(new_families_raw, dict) else {}
 
     has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
-    issues = (
-        check_fact_set_compatibility(old_fact_set, new_fact_set) if has_signal else []
-    )
+    issues = list(compat.issues) if has_signal else []
     # A serialized surface's fact_family_states can come from a hand-written
     # or forward-versioned source_abi.json, not just rollup_coverage()'s own
     # output -- so its per-family values are not guaranteed to already be one
@@ -214,6 +221,33 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
             f"new side mandatory family/families incomplete: {', '.join(new_incomplete)}"
         )
 
+    suppression = ""
+    if has_signal and not compat.opaque_hashes_comparable:
+        suppression = (
+            " Opaque body/template hash findings (inline_body_changed, "
+            "template_body_changed) are suppressed for this comparison because "
+            "the fact-set compatibility verdict does not establish "
+            "byte-comparable recipes (a name/version mismatch, or a "
+            "producer/producer_version/compiler_version/compiler_family "
+            "difference with no matching hash_recipe_id declared on both "
+            "sides)."
+        )
+    if has_signal and not compat.source_edges_comparable:
+        suppression += (
+            " source_edges reconciliation is skipped because endpoint "
+            "identities are not comparable across the two sides."
+        )
+    if has_signal and not compat.structured_facts_comparable:
+        suppression += (
+            " generated_header_changed/public_typedef_removed/public_macro_removed/"
+            "inline_function_removed/uninstantiated_template_removed removal "
+            "detection is suppressed for this comparison because the fact_set "
+            "name/version mismatch means an entity's absence may only reflect "
+            "the old contract never collecting its family, not an actual "
+            "removal; content-change findings for entities present on both "
+            "sides are unaffected."
+        )
+
     return [
         Change(
             kind=ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
@@ -224,7 +258,7 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
                 + "; ".join(parts)
                 + ". Per ADR-038 C.8, treat this pair's other source-replay "
                 "findings as unreliable until re-collected with a consistent, "
-                "complete fact set."
+                "complete fact set." + suppression
             ),
             old_value=str(old_fact_set or old_incomplete or ""),
             new_value=str(new_fact_set or new_incomplete or ""),
@@ -239,15 +273,16 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     The result is an ordinary list of :class:`Change` objects ready to fold into
     a ``DiffResult`` and run through the existing verdict/policy pipeline.
     """
+    compat = check_fact_compatibility(_surface_fact_set(old), _surface_fact_set(new))
     changes: list[Change] = []
-    changes.extend(_diff_fact_coverage(old, new))
-    changes.extend(_diff_generated(old, new))
-    changes.extend(_diff_typedefs(old, new))
-    changes.extend(_diff_macros(old, new))
+    changes.extend(_diff_fact_coverage(old, new, compat))
+    changes.extend(_diff_generated(old, new, compat))
+    changes.extend(_diff_typedefs(old, new, compat))
+    changes.extend(_diff_macros(old, new, compat))
     changes.extend(_diff_concepts(old, new))
     changes.extend(_diff_declarations(old, new))
-    changes.extend(_diff_inline_bodies(old, new))
-    changes.extend(_diff_templates(old, new))
+    changes.extend(_diff_inline_bodies(old, new, compat))
+    changes.extend(_diff_templates(old, new, compat))
     changes.extend(_diff_mappings(old, new))
     changes.extend(_diff_provenance(old, new))
     changes.extend(_diff_odr(old, new))
@@ -361,7 +396,9 @@ def _diff_provenance(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Chang
 # -- generated headers -------------------------------------------------------
 
 
-def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _diff_generated(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     """Flag any generated public entity whose content changed (ADR-030 D6).
 
     Generated declarations land in ``reachable_declarations`` while generated
@@ -376,7 +413,12 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     the normal declaration diff intentionally skips generated entities and there
     is no removal diff for ``reachable_types``, so without the removal pass a
     generated config header dropping a public record/enum/typedef/decl would
-    produce no L4 finding at all.
+    produce no L4 finding at all. The removal loop is additionally skipped when
+    ``compat.structured_facts_comparable`` is false (a fact_set name/version
+    mismatch): an entity's absence there may only mean the old contract never
+    mandated collecting its family, not that it was actually removed (Codex
+    review). Content-change detection is not gated -- an identity present on
+    both sides means the same thing regardless of contract version.
     """
     changes: list[Change] = []
     for old_bucket, new_bucket in (
@@ -408,7 +450,11 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
                         source_location=_loc(nv),
                     )
                 )
-        for key in sorted(set(old_b) - set(new_b)):
+        for key in (
+            sorted(set(old_b) - set(new_b))
+            if compat.structured_facts_comparable
+            else ()
+        ):
             ov = old_b[key]
             if _is_generated(ov):
                 name = ov.qualified_name
@@ -432,7 +478,9 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
 # -- typedefs / aliases ------------------------------------------------------
 
 
-def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _diff_typedefs(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     """Flag a public typedef/alias whose underlying type changed (ADR-030 D6).
 
     Typedef entities ride in ``reachable_types`` (kind ``typedef``); a bare
@@ -469,10 +517,15 @@ def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
     # Removal: a public typedef present old, gone new. A bare typedef emits no
     # symbol, so the artifact diff is blind; consumer source that named the alias
     # no longer compiles (a source/API break). Generated typedefs are reported as
-    # generated_header_changed by _diff_generated, so skip them here. Skip
-    # entirely when the new surface carries no facts (L4 extraction failed) so
-    # evidence absence is not read as removal.
-    for key in sorted(set(old_t) - set(new_t)) if _surface_has_facts(new) else []:
+    # generated_header_changed by _diff_generated, so skip them here. Skipped
+    # entirely when the new surface carries no facts (L4 extraction failed) or
+    # the two sides used incompatible fact-set contracts (Codex review) so
+    # evidence absence is not read as removal in either case.
+    for key in (
+        sorted(set(old_t) - set(new_t))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    ):
         ov = old_t[key]
         if _is_generated(ov):
             continue
@@ -497,7 +550,9 @@ def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
 # -- macros ------------------------------------------------------------------
 
 
-def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _diff_macros(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     old_m = _by_identity(old.reachable_macros)
     new_m = _by_identity(new.reachable_macros)
     changes: list[Change] = []
@@ -523,8 +578,13 @@ def _diff_macros(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     # one. Macros never reach the binary, so no artifact layer sees the removal —
     # only the source-replay surface does. Source that referenced it no longer
     # compiles (a source/API break). Skipped when the new surface carries no
-    # facts (L4 extraction failed) so evidence absence is not read as removal.
-    for key in sorted(set(old_m) - set(new_m)) if _surface_has_facts(new) else []:
+    # facts (L4 extraction failed) or the two sides used incompatible fact-set
+    # contracts (Codex review) so evidence absence is not read as removal.
+    for key in (
+        sorted(set(old_m) - set(new_m))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    ):
         ov = old_m[key]
         name = ov.qualified_name
         changes.append(
@@ -660,11 +720,18 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
 # -- inline bodies -----------------------------------------------------------
 
 
-def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _diff_inline_bodies(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     old_i = _by_identity(old.reachable_inline_bodies)
     new_i = _by_identity(new.reachable_inline_bodies)
     changes: list[Change] = []
-    for key in sorted(set(old_i) & set(new_i)):
+    # Existence (removal) is not hash-derived, so it is gated separately below
+    # (structured_facts_comparable), not by opaque_hashes_comparable which only
+    # covers this loop's body-hash comparison.
+    for key in (
+        sorted(set(old_i) & set(new_i)) if compat.opaque_hashes_comparable else ()
+    ):
         ov, nv = old_i[key], new_i[key]
         name = nv.qualified_name
         if ov.body_hash != nv.body_hash:
@@ -700,7 +767,16 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     # diff's job to report (ADR-028 D3 authority rule: L3-L5 never duplicates an
     # artifact-proven break) — skip it here.
     old_exports = set(old.roots.get("exported_symbols", []))
-    inline_removals = sorted(set(old_i) - set(new_i)) if _surface_has_facts(new) else []
+    # Skipped entirely when the new surface carries no facts (L4 extraction
+    # failed) or the two sides used incompatible fact-set contracts: an entity's
+    # absence there may only reflect the old contract never mandating collection
+    # of the inline-bodies family, not an actual removal (Codex review, mirrors
+    # the same gate on _diff_generated/_diff_typedefs/_diff_macros).
+    inline_removals = (
+        sorted(set(old_i) - set(new_i))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    )
     for key in inline_removals:
         ov = old_i[key]
         if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
@@ -728,11 +804,24 @@ def _diff_inline_bodies(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
 # -- templates ---------------------------------------------------------------
 
 
-def _diff_templates(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def _diff_templates(
+    old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
+) -> list[Change]:
     old_t = _by_identity(old.reachable_templates)
     new_t = _by_identity(new.reachable_templates)
     changes: list[Change] = []
-    for key in sorted(set(old_t) - set(new_t)):
+    # Removal is skipped when the new surface carries no facts (L4 extraction
+    # failed) or the two sides used incompatible fact-set contracts: an
+    # entity's absence there may only reflect the old contract never mandating
+    # collection of the templates family, not an actual removal (Codex
+    # review, mirrors the same gate on
+    # _diff_generated/_diff_typedefs/_diff_macros/_diff_inline_bodies).
+    template_removals = (
+        sorted(set(old_t) - set(new_t))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    )
+    for key in template_removals:
         ov = old_t[key]
         name = ov.qualified_name
         changes.append(
@@ -747,7 +836,11 @@ def _diff_templates(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
                 source_location=_loc(ov),
             )
         )
-    for key in sorted(set(old_t) & set(new_t)):
+    # Body-hash comparison is gated separately (opaque_hashes_comparable);
+    # existence (removal, above) is gated by structured_facts_comparable instead.
+    for key in (
+        sorted(set(old_t) & set(new_t)) if compat.opaque_hashes_comparable else ()
+    ):
         ov, nv = old_t[key], new_t[key]
         name = nv.qualified_name
         if ov.body_hash != nv.body_hash:

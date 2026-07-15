@@ -59,12 +59,17 @@ def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:
         qualified_name=name,
         mangled_name=mangled,
         signature_hash="sig1",
-        source_location=SourceLocation(path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"),
+        source_location=SourceLocation(
+            path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"
+        ),
         visibility="public_header",
     )
     return SourceAbiTu(
-        tu_id=f"cu://{source}", target_id="target://libfoo", source=source,
-        public_header_roots=[f"include/{name}.h"], functions=[ent],
+        tu_id=f"cu://{source}",
+        target_id="target://libfoo.so",
+        source=source,
+        public_header_roots=[f"include/{name}.h"],
+        functions=[ent],
     )
 
 
@@ -73,14 +78,24 @@ def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:
 
 def test_write_inputs_pack_round_trips_through_ingest(tmp_path: Path) -> None:
     cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(json.dumps([
-        {"directory": str(tmp_path), "file": "src/foo.cpp",
-         "arguments": ["c++", "-std=c++17", "-c", "src/foo.cpp"]}
-    ]))
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "src/foo.cpp",
+                    "arguments": ["c++", "-std=c++17", "-c", "src/foo.cpp"],
+                }
+            ]
+        )
+    )
     root = write_inputs_pack(
         tmp_path / "abicheck_inputs",
-        library="libfoo.so", version="1.0", created_by="test",
-        tus=[_tu("foo", mangled="_Z3foov")], compile_db=cdb,
+        library="libfoo.so",
+        version="1.0",
+        created_by="test",
+        tus=[_tu("foo", mangled="_Z3foov")],
+        compile_db=cdb,
     )
     ingested = ingest_inputs_pack(root)
     assert ingested.tu_count == 1
@@ -94,9 +109,14 @@ def test_incremental_init_then_append_round_trips(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", version="1.0", created_by="abicheck-cc")
     # Two per-TU appends, as a wrapper would do across two compile invocations.
-    append_source_facts(pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp"))
-    append_source_facts(pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
-                        filename=facts_filename("src/bar.cpp"))
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 2
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
@@ -116,7 +136,9 @@ def test_init_recovers_from_partial_manifest(tmp_path: Path) -> None:
     # not raise (which would lose this TU's facts in the wrapper's best-effort path).
     pack = tmp_path / "abicheck_inputs"
     (pack / "source_facts").mkdir(parents=True)
-    (pack / "manifest.json").write_text('{"kind": "abicheck_inputs"', encoding="utf-8")  # truncated JSON
+    (pack / "manifest.json").write_text(
+        '{"kind": "abicheck_inputs"', encoding="utf-8"
+    )  # truncated JSON
     m = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     assert m.library == "libfoo.so"
     # Manifest is now valid and round-trips.
@@ -126,10 +148,111 @@ def test_init_recovers_from_partial_manifest(tmp_path: Path) -> None:
 def test_init_inputs_pack_is_idempotent(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     m1 = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
-    m2 = init_inputs_pack(pack, library="OTHER", created_by="OTHER")
-    # Second call loads the existing manifest, does not clobber it.
+    # A repeated call naming the *same* library (created_by may vary -- not
+    # part of the target-isolation identity) loads the existing manifest.
+    m2 = init_inputs_pack(pack, library="libfoo.so", created_by="OTHER")
     assert m2.library == m1.library == "libfoo.so"
     assert m2.created_by == "abicheck-cc"
+
+
+def test_init_inputs_pack_rejects_conflicting_library(tmp_path: Path) -> None:
+    """PR3 target isolation (latest-main Clang plugin review): a second
+    invocation naming a *different* library against the same pack root is
+    exactly the same-source/two-library collision the prior first-writer-
+    wins manifest allowed -- raise instead of silently keeping the first
+    library's identity."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    with pytest.raises(ValueError, match="library"):
+        init_inputs_pack(pack, library="libbar.so", created_by="abicheck-cc")
+    # The pack must be untouched by the rejected call.
+    assert json.loads((pack / "manifest.json").read_text())["library"] == "libfoo.so"
+
+
+def test_init_inputs_pack_rejects_conflicting_version(tmp_path: Path) -> None:
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", version="1.0", created_by="abicheck-cc")
+    with pytest.raises(ValueError, match="version"):
+        init_inputs_pack(
+            pack, library="libfoo.so", version="2.0", created_by="abicheck-cc"
+        )
+
+
+def test_init_inputs_pack_allows_unspecified_library_or_version(tmp_path: Path) -> None:
+    """Omitting library/version (the default "") is never treated as a
+    conflict either way -- only two *different* non-empty values collide."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", version="1.0", created_by="abicheck-cc")
+    m = init_inputs_pack(pack, created_by="abicheck-cc")  # no library/version passed
+    assert m.library == "libfoo.so"
+    assert m.version == "1.0"
+
+
+def test_init_inputs_pack_race_loser_validates_against_winner(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two racing first-TU invocations for *different* libraries sharing one
+    out= directory must not let the second one silently win: simulate the
+    exists()-then-write TOCTOU by making this call's os.link() lose to a
+    manifest a "concurrent" process publishes in between -- the loser must
+    re-read and validate against it (raising on the library conflict), not
+    blindly overwrite it (Codex review)."""
+    import os as os_module
+
+    pack = tmp_path / "abicheck_inputs"
+    real_link = os_module.link
+
+    def _racing_link(src, dst, *a, **k):
+        # Simulate a concurrent winner publishing its own manifest for a
+        # *different* library right before our os.link() call runs.
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_text(
+            json.dumps(
+                {
+                    "kind": "abicheck_inputs",
+                    "abicheck_inputs_version": 1,
+                    "library": "libbar.so",
+                    "version": "",
+                }
+            )
+        )
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(os_module, "link", _racing_link)
+    with pytest.raises(ValueError, match="library"):
+        init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    monkeypatch.setattr(os_module, "link", real_link)
+    # The "winner"'s manifest must be exactly what it published -- our losing
+    # call must never have overwritten it.
+    assert json.loads((pack / "manifest.json").read_text())["library"] == "libbar.so"
+
+
+def test_init_inputs_pack_race_loser_agreeing_target_succeeds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The same race, but the concurrent winner named the *same* library --
+    the loser must load and return it cleanly instead of raising."""
+    import os as os_module
+
+    pack = tmp_path / "abicheck_inputs"
+
+    def _racing_link(src, dst, *a, **k):
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_text(
+            json.dumps(
+                {
+                    "kind": "abicheck_inputs",
+                    "abicheck_inputs_version": 1,
+                    "library": "libfoo.so",
+                    "version": "",
+                }
+            )
+        )
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(os_module, "link", _racing_link)
+    m = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    assert m.library == "libfoo.so"
 
 
 def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
@@ -387,7 +510,8 @@ def test_compact_root_directory_scan_does_not_destroy_manifest(
     manifest.source_facts = ["."]
     _write_manifest(pack, manifest)
     (pack / "root.jsonl").write_text(
-        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict()) + "\n",
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict())
+        + "\n",
         encoding="utf-8",
     )
 
@@ -425,7 +549,8 @@ def test_compact_ancestor_directory_entry_does_not_lose_merged_facts(
     manifest.source_facts = ["."]
     _write_manifest(pack, manifest)
     (pack / "root.jsonl").write_text(
-        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict()) + "\n",
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict())
+        + "\n",
         encoding="utf-8",
     )
 
@@ -522,8 +647,7 @@ def test_compact_rerun_recognizes_stale_output_across_a_filename_change(
     assert second_out != first_out
     assert not first_out.exists()  # merged away by remove_originals
     assert (
-        load_inputs_manifest(pack).last_compacted
-        == "source_facts/compacted.jsonl.gz"
+        load_inputs_manifest(pack).last_compacted == "source_facts/compacted.jsonl.gz"
     )
 
     ingested = ingest_inputs_pack(pack)
@@ -669,7 +793,10 @@ def test_read_drops_all_prior_carry_forward_on_lossy_fresh_read(
     # prior "bar" survives -- not just the TU whose fresh write failed.
     assert tus == []
     assert any("skipped malformed JSON line" in d for d in diagnostics)
-    assert any("no prior-compaction record can be safely carried forward" in d for d in diagnostics)
+    assert any(
+        "no prior-compaction record can be safely carried forward" in d
+        for d in diagnostics
+    )
 
     report = validate_inputs_pack(pack)
     assert report.tu_count == 0
@@ -686,14 +813,17 @@ def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> No
 
     def _no_id_tu(name: str, mangled: str) -> SourceAbiTu:
         ent = SourceEntity(
-            id=f"decl://{name}", kind="function", qualified_name=name,
-            mangled_name=mangled, signature_hash="sig1",
+            id=f"decl://{name}",
+            kind="function",
+            qualified_name=name,
+            mangled_name=mangled,
+            signature_hash="sig1",
             source_location=SourceLocation(
                 path=f"include/{name}.h", line=3, origin="PUBLIC_HEADER"
             ),
             visibility="public_header",
         )
-        return SourceAbiTu(tu_id="", target_id="target://libfoo", functions=[ent])
+        return SourceAbiTu(tu_id="", target_id="target://libfoo.so", functions=[ent])
 
     append_source_facts(
         pack, [_no_id_tu("foo", "_Z3foov")], filename=facts_filename("foo")
@@ -738,7 +868,9 @@ def test_compact_skips_entirely_on_lossy_read(tmp_path: Path) -> None:
     assert out is None
 
     remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
-    assert remaining == sorted(["bad.jsonl", facts_filename("src/foo.cpp")])  # unchanged
+    assert remaining == sorted(
+        ["bad.jsonl", facts_filename("src/foo.cpp")]
+    )  # unchanged
     assert any("compaction was skipped entirely" in d for d in diagnostics)
 
     # The good TU's facts are still readable directly (no merge happened,
@@ -800,11 +932,14 @@ def test_compact_skips_on_duplicate_fresh_tu_id(tmp_path: Path) -> None:
     # or third-party pack instead).
     other = SourceAbiTu(
         tu_id="cu://src/x.cpp",
-        target_id="target://libfoo",
+        target_id="target://libfoo.so",
         functions=[
             SourceEntity(
-                id="decl://bar", kind="function", qualified_name="bar",
-                mangled_name="_Z3barv", signature_hash="sig1",
+                id="decl://bar",
+                kind="function",
+                qualified_name="bar",
+                mangled_name="_Z3barv",
+                signature_hash="sig1",
                 source_location=SourceLocation(
                     path="include/bar.h", line=3, origin="PUBLIC_HEADER"
                 ),
@@ -843,7 +978,8 @@ def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
     manifest.source_facts = ["source_facts"]  # mirrors ensureManifest()
     _write_manifest(pack, manifest)
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
     compact_inputs_pack(pack)
@@ -855,7 +991,8 @@ def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
     # A later incremental build's fresh per-TU file lands in the same
     # directory; it must still be discovered.
     append_source_facts(
-        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
         filename=facts_filename("src/bar.cpp"),
     )
     ingested = ingest_inputs_pack(pack)
@@ -878,14 +1015,16 @@ def test_compact_directory_scan_manifest_recognized_across_spellings(
     manifest.source_facts = [spelling]
     _write_manifest(pack, manifest)
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
     compact_inputs_pack(pack)
     assert load_inputs_manifest(pack).source_facts == [spelling]
 
     append_source_facts(
-        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
         filename=facts_filename("src/bar.cpp"),
     )
     ingested = ingest_inputs_pack(pack)
@@ -909,9 +1048,7 @@ def test_compact_preserves_directory_entry_in_mixed_manifest(
     other_dir = pack / "extra_facts"
     other_dir.mkdir()
     (other_dir / "extra.jsonl").write_text(
-        json.dumps(
-            _tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict()
-        )
+        json.dumps(_tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict())
         + "\n",
         encoding="utf-8",
     )
@@ -919,7 +1056,8 @@ def test_compact_preserves_directory_entry_in_mixed_manifest(
     manifest.source_facts = ["source_facts", "extra_facts"]
     _write_manifest(pack, manifest)
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
     compact_inputs_pack(pack)
@@ -931,7 +1069,8 @@ def test_compact_preserves_directory_entry_in_mixed_manifest(
     # A later incremental build's fresh per-TU file lands in source_facts/;
     # it must still be discovered, and extra_facts/ is untouched.
     append_source_facts(
-        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
         filename=facts_filename("src/bar.cpp"),
     )
     ingested = ingest_inputs_pack(pack)
@@ -1050,7 +1189,8 @@ def test_compact_preserves_originals_when_manifest_write_fails(
     manifest.source_facts = [f"source_facts/{facts_filename('src/foo.cpp')}"]
     _write_manifest(pack, manifest)
     original = append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
 
@@ -1091,7 +1231,8 @@ def test_compact_rolls_back_merged_output_when_manifest_write_fails(
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
 
@@ -1134,11 +1275,13 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
     append_source_facts(
-        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
         filename=facts_filename("src/bar.cpp"),
     )
     first_out = compact_inputs_pack(pack)
@@ -1156,9 +1299,7 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     # to rewrite the manifest, unrelated to last_compacted/prior-vs-fresh
     # dedup), so the failure path under test is actually exercised.
     (pack / "extra.jsonl").write_text(
-        json.dumps(
-            _tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict()
-        )
+        json.dumps(_tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict())
         + "\n",
         encoding="utf-8",
     )
@@ -1166,7 +1307,8 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     manifest.source_facts = ["source_facts", "extra.jsonl"]
     _write_manifest(pack, manifest)
     append_source_facts(
-        pack, [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
+        pack,
+        [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
     import abicheck.buildsource.inputs_emit as inputs_emit_module
@@ -1186,8 +1328,7 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     # reconstruct the right answer -- that would pass even if first_out
     # had been rolled back to its pre-rerun contents (CodeRabbit review).
     merged_records = [
-        json.loads(line)
-        for line in first_out.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in first_out.read_text(encoding="utf-8").splitlines()
     ]
     merged_names = {
         function["mangled_name"]
@@ -1200,6 +1341,56 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     # fresh foo2 wins, bar carried forward, extra merged in from its
     # explicit file entry -- none lost despite the manifest write failure.
     assert names == {"_Z4foo2v", "_Z3barv", "_Z5extrav"}
+
+
+def test_compact_rejects_output_filename_colliding_with_unrelated_file(
+    tmp_path: Path,
+) -> None:
+    """PR4 (latest-main Clang plugin review): an operator's --output-filename
+    coincidentally matching an ordinary pre-existing file (here, an untouched
+    per-TU original from a normal build -- never a published compaction
+    result manifest.last_compacted points at) must be rejected outright
+    rather than silently overwritten by the merge. A bare
+    `output_path.exists()` check used to treat this as "a legitimate prior
+    compaction rerun," letting os.replace() clobber the unrelated file, and
+    a later manifest-write failure would then leave that clobbered
+    replacement in place (rollback skips deletion for anything
+    "pre-existing")."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    # An ordinary per-TU original that happens to share its name with the
+    # --output-filename this call will request. manifest.last_compacted is
+    # unset (compaction has never run), so this file is definitely not a
+    # recognized prior compaction output.
+    collision_name = "collide.jsonl"
+    append_source_facts(pack, [_tu("foo", mangled="_Z3foov")], filename=collision_name)
+    original_bytes = (pack / "source_facts" / collision_name).read_bytes()
+
+    with pytest.raises(ValueError, match="already exists"):
+        compact_inputs_pack(pack, output_filename=collision_name)
+
+    # The collision must be rejected before any write -- the original file's
+    # content survives untouched, and the manifest is not repointed.
+    assert (pack / "source_facts" / collision_name).read_bytes() == original_bytes
+    assert load_inputs_manifest(pack).last_compacted == ""
+
+
+def test_compact_reruns_with_recognized_prior_output_without_raising(
+    tmp_path: Path,
+) -> None:
+    """The rejection above must not regress the legitimate rerun case: reusing
+    the SAME output_filename as a real prior compaction (recognized via
+    manifest.last_compacted) is not a collision."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    first = compact_inputs_pack(pack, output_filename="merged.jsonl")
+    assert first is not None
+    # Rerunning with the identical output_filename must not raise.
+    second = compact_inputs_pack(pack, output_filename="merged.jsonl")
+    assert second == first
 
 
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
@@ -1281,7 +1472,12 @@ def test_compile_unit_from_command_parses_flags(tmp_path: Path) -> None:
 
 
 def test_compile_unit_from_command_none_for_link_or_no_source(tmp_path: Path) -> None:
-    assert compile_unit_from_command(["c++", "-shared", "foo.o", "-o", "libfoo.so"], tmp_path) is None
+    assert (
+        compile_unit_from_command(
+            ["c++", "-shared", "foo.o", "-o", "libfoo.so"], tmp_path
+        )
+        is None
+    )
     assert compile_unit_from_command(["c++"], tmp_path) is None
 
 
@@ -1350,7 +1546,9 @@ def test_wrapper_swallows_extraction_errors() -> None:
         raise RuntimeError("extractor blew up")
 
     # A fact-extraction failure must never change the compiler's exit code.
-    rc = run_cc_wrapper(["c++", "-c", "src/foo.cpp"], runner=lambda c: _Proc(0), env={}, emit=boom)
+    rc = run_cc_wrapper(
+        ["c++", "-c", "src/foo.cpp"], runner=lambda c: _Proc(0), env={}, emit=boom
+    )
     assert rc == 0
 
 
@@ -1385,8 +1583,10 @@ def test_emit_appends_extracted_tu(tmp_path: Path, monkeypatch) -> None:
     )
     pack = tmp_path / "abicheck_inputs"
     tu = emit_facts_for_command(
-        ["c++", "-c", "src/foo.cpp"], tmp_path,
-        inputs_dir=pack, library="libfoo.so",
+        ["c++", "-c", "src/foo.cpp"],
+        tmp_path,
+        inputs_dir=pack,
+        library="libfoo.so",
     )
     assert tu is captured
     ingested = ingest_inputs_pack(pack)
@@ -1394,7 +1594,9 @@ def test_emit_appends_extracted_tu(tmp_path: Path, monkeypatch) -> None:
     assert ingested.manifest.created_by == "abicheck-cc"
 
 
-def test_emit_captures_all_sources_in_multi_source_compile(tmp_path: Path, monkeypatch) -> None:
+def test_emit_captures_all_sources_in_multi_source_compile(
+    tmp_path: Path, monkeypatch
+) -> None:
     # `gcc -c a.cpp b.cpp` builds both objects; both must contribute facts.
     def _extract(cu, *, public_header_roots, target_id=""):
         stem = Path(cu.source).stem
@@ -1409,8 +1611,10 @@ def test_emit_captures_all_sources_in_multi_source_compile(tmp_path: Path, monke
     )
     pack = tmp_path / "abicheck_inputs"
     emit_facts_for_command(
-        ["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"], tmp_path,
-        inputs_dir=pack, library="libfoo.so",
+        ["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"],
+        tmp_path,
+        inputs_dir=pack,
+        library="libfoo.so",
     )
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 2
@@ -1421,12 +1625,16 @@ def test_emit_captures_all_sources_in_multi_source_compile(tmp_path: Path, monke
 def test_compile_units_capture_forced_language_source(tmp_path: Path) -> None:
     # `clang++ -x c++ -c generated` builds a real TU with no source extension;
     # forced-language discovery must still capture it.
-    units = compile_units_from_command(["clang++", "-x", "c++", "-c", "generated"], tmp_path)
+    units = compile_units_from_command(
+        ["clang++", "-x", "c++", "-c", "generated"], tmp_path
+    )
     assert [u.source for u in units] == ["generated"]
     assert units[0].language == "CXX"
 
 
-def test_emit_continues_after_per_tu_extraction_failure(tmp_path: Path, monkeypatch) -> None:
+def test_emit_continues_after_per_tu_extraction_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     # In `g++ -c a.cpp b.cpp`, a backend that raises on a.cpp must not drop b.cpp.
     def _extract(cu, *, public_header_roots, target_id=""):
         if Path(cu.source).stem == "a":
@@ -1443,7 +1651,10 @@ def test_emit_continues_after_per_tu_extraction_failure(tmp_path: Path, monkeypa
     )
     pack = tmp_path / "abicheck_inputs"
     emit_facts_for_command(
-        ["g++", "-c", "a.cpp", "b.cpp"], tmp_path, inputs_dir=pack, library="libfoo.so",
+        ["g++", "-c", "a.cpp", "b.cpp"],
+        tmp_path,
+        inputs_dir=pack,
+        library="libfoo.so",
     )
     ingested = ingest_inputs_pack(pack)
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
@@ -1455,5 +1666,7 @@ def test_emit_none_when_no_backend(tmp_path: Path, monkeypatch) -> None:
         "abicheck.buildsource.source_extractors.resolver.select_source_backend",
         lambda extractor, **kw: (None, None),
     )
-    out = emit_facts_for_command(["c++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk")
+    out = emit_facts_for_command(
+        ["c++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
     assert out is None

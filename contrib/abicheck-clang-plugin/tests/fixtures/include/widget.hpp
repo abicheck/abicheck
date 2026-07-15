@@ -65,6 +65,14 @@ const int gConstInternal = 3;          // namespace const w/o extern: internal -
 int add(int a, int b = 1);             // default arg (literal int)
 bool toggle(bool on = true);           // default arg (literal bool)
 
+// ADR-038 C.6 PR1b regression fixture: overload(int)/overload(double) share a
+// bare name; callOverloadInt/callOverloadDouble each call one of them so both
+// producers' source_edges must resolve the correct overload (see widget.cpp).
+int overload(int x);
+double overload(double x);
+int callOverloadInt();
+double callOverloadDouble();
+
 inline int square(int n) { return n * n; }  // inline body -> body hash
 
 // A PUBLIC inline function whose body declares a local type. Both producers

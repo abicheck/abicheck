@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -87,17 +88,25 @@ def _write_manifest(root: Path, manifest: InputsManifest) -> None:
         raise
 
 
-def facts_filename(source: str) -> str:
+def facts_filename(source: str, *, library: str = "") -> str:
     """Deterministic, collision-resistant ``source_facts`` filename for a TU.
 
     ``<stem>.<short-hash>.jsonl`` — the stem keeps it human-readable, the hash of
     the full source path keeps two same-named TUs in different directories from
     colliding (and lets parallel wrapper invocations each own a file).
-    """
-    import hashlib
 
+    *library* — the owning target's identity (``init_inputs_pack``'s
+    ``library=``) — is folded into the hash alongside the source path when
+    given, so the *same* source file compiled into two different libraries
+    that share one ``abicheck_inputs/`` pack root gets two distinct files
+    instead of the second compile silently overwriting the first's facts
+    (latest-main Clang plugin review, PR3 target isolation). Omitting
+    *library* keeps the pre-existing, library-blind filename for a caller
+    that only ever emits one target into a given pack root.
+    """
     stem = Path(source).name or "tu"
-    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+    digest_input = f"{library}\0{source}" if library else source
+    digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:12]
     return f"{stem}.{digest}.jsonl"
 
 
@@ -110,8 +119,11 @@ def init_inputs_pack(
 ) -> InputsManifest:
     """Create the pack directory + manifest if absent; return the manifest.
 
-    Idempotent: if a manifest already exists it is loaded and returned unchanged,
-    so repeated per-TU wrapper invocations share one pack without clobbering it.
+    Idempotent for repeated calls naming the **same** target: if a manifest
+    already exists and its ``library``/``version`` agree with (or leave
+    unspecified) the ones passed here, it is loaded and returned unchanged, so
+    repeated per-TU wrapper invocations across one build share one pack
+    without clobbering it.
 
     Raises ``ValueError`` if an existing manifest.json does not declare
     ``kind: abicheck_inputs`` — e.g. a :class:`~.pack.BuildSourcePack`
@@ -122,33 +134,94 @@ def init_inputs_pack(
     directory (CodeRabbit review, P2) — this is the very first point of
     contact for a build's pack, so the check matters more here than anywhere
     downstream.
+
+    Also raises ``ValueError`` when an existing manifest names a *different*
+    non-empty ``library`` or ``version`` than this call (latest-main Clang
+    plugin review, PR3): the manifest is otherwise first-writer-wins, so two
+    different targets/versions built into one shared ``out=``/pack directory
+    would silently inherit whichever one ran first — an operational
+    correctness risk, not a legitimate shared-pack scenario (which always
+    names the *same* target across its per-TU invocations). A caller that
+    omits ``library``/``version`` (leaves it ``""``) is never treated as a
+    conflict either way, preserving callers that do not always know it yet.
+
+    The very first creation is claimed atomically (write-temp + ``os.link``):
+    an ``is_file()``-then-write TOCTOU let two racing first-TU invocations for
+    two *different* targets sharing one out= directory both observe no
+    manifest yet, both skip the library/version agreement check above, and
+    have the second writer silently win with neither call ever raising
+    (Codex review; same fix shape as the Clang plugin's ``ensureManifest``).
+    ``os.link`` is all-or-nothing — it fails with ``FileExistsError`` without
+    ever creating a partial file at the destination if it already exists — so
+    the loser always re-reads a fully-written manifest, never a torn one.
     """
     root = Path(root)
     mpath = root / INPUTS_MANIFEST_NAME
-    if mpath.is_file():
+    # Only `root` itself -- not source_facts/ -- so a rejected wrong-kind
+    # pack below is still left with no new files of ours (CodeRabbit review,
+    # P2); tempfile.mkstemp(dir=root) below needs root to already exist.
+    root.mkdir(parents=True, exist_ok=True)
+
+    if not mpath.is_file():
+        # Best-effort: skip the claim attempt when a manifest is already
+        # visible (the common case after the pack's first TU) -- the
+        # exclusivity guarantee is os.link() below, not this check.
+        new_manifest = InputsManifest(
+            library=library, version=version, created_by=created_by, created_at=_now()
+        )
+        manifest_json = (
+            json.dumps(new_manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+        )
+        fd, tmp = tempfile.mkstemp(dir=str(root), prefix=".manifest.", suffix=".tmp")
         try:
-            data = json.loads(mpath.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            data = None
-        if isinstance(data, dict):
-            if data.get("kind") != INPUTS_KIND:
-                # A syntactically valid manifest naming a different (or no)
-                # kind names a real, different pack (e.g. a BuildSourcePack
-                # directory a build was mistakenly pointed at) -- not a
-                # "malformed" one, so it is not swallowed the way the
-                # fallback below swallows a truncated/corrupted manifest.
-                # Raised BEFORE any write to root (mkdir included below) so
-                # an unrelated/wrong-kind pack is left completely untouched,
-                # not just its manifest (CodeRabbit review, P2).
-                raise ValueError(
-                    f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
-                    "Flow-2 abicheck_inputs pack."
-                )
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(manifest_json)
+            os.link(tmp, mpath)
+        except FileExistsError:
+            pass  # lost the race -- fall through and validate the winner's manifest
+        else:
             (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
-            return InputsManifest.from_dict(data)
-        # Defensive: a manifest left partial/malformed by a non-atomic writer
-        # on an old pack (our writes are atomic) re-initializes rather than
-        # raising and losing this TU's facts.
+            return new_manifest
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+    try:
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        data = None
+    if isinstance(data, dict):
+        if data.get("kind") != INPUTS_KIND:
+            # A syntactically valid manifest naming a different (or no)
+            # kind names a real, different pack (e.g. a BuildSourcePack
+            # directory a build was mistakenly pointed at) -- not a
+            # "malformed" one, so it is not swallowed the way the
+            # fallback below swallows a truncated/corrupted manifest.
+            raise ValueError(
+                f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
+                "Flow-2 abicheck_inputs pack."
+            )
+        existing_library = str(data.get("library") or "")
+        if library and existing_library and library != existing_library:
+            raise ValueError(
+                f"{mpath} already names library {existing_library!r}; this "
+                f"call named {library!r}. Two different targets must not "
+                "share one abicheck_inputs pack directory -- use a separate "
+                "out= directory per target/configuration/architecture."
+            )
+        existing_version = str(data.get("version") or "")
+        if version and existing_version and version != existing_version:
+            raise ValueError(
+                f"{mpath} already names version {existing_version!r}; this "
+                f"call named {version!r}. Two different versions must not "
+                "share one abicheck_inputs pack directory -- use a fresh "
+                "out= directory per build."
+            )
+        (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
+        return InputsManifest.from_dict(data)
+    # Defensive: a manifest left partial/malformed by a non-atomic writer
+    # on an old pack (our writes are atomic) re-initializes rather than
+    # raising and losing this TU's facts.
     (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
     manifest = InputsManifest(
         library=library, version=version, created_by=created_by, created_at=_now()
@@ -350,20 +423,17 @@ def compact_inputs_pack(
     # case). Normalize to the canonical .jsonl extension before the
     # optional .gz suffix, matching every other producer in this codebase,
     # unless the caller already used a recognized extension.
-    base = output_filename[: -len(".gz")] if output_filename.endswith(".gz") else output_filename
+    base = (
+        output_filename[: -len(".gz")]
+        if output_filename.endswith(".gz")
+        else output_filename
+    )
     if not (base.endswith(".jsonl") or base.endswith(".json")):
         base = f"{base}.jsonl"
     output_filename = f"{base}.gz" if compress else base
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename
-    # Whether output_path already held a (valid, from a prior successful
-    # compaction) merge before this run's os.replace() below -- needed to
-    # decide, on a later manifest-write failure, whether cleaning it up
-    # would discard only this run's not-yet-published output or also a
-    # legitimate prior compaction's result a rerun happened to overwrite in
-    # place (same output_filename as last time).
-    output_path_preexisted = output_path.exists()
 
     # Captured before ANY discovery/read step below, not just the per-file
     # record reads -- _iter_source_fact_files() itself can append a
@@ -391,11 +461,41 @@ def compact_inputs_pack(
     # -- both findings, the second reproduced empirically by a regression
     # test on some filesystems).
     prior_files: list[Path] = []
+    recognized_prior_path: Path | None = None
     if manifest.last_compacted:
         candidate = _safe_pack_path(root, manifest.last_compacted, sink)
         if candidate is not None:
             candidate = candidate.resolve()
+            recognized_prior_path = candidate
             prior_files = [f for f in originals if f.resolve() == candidate]
+
+    # output_path already existing is legitimate ONLY when it IS the
+    # recognized prior compaction's own file (a rerun reusing the same
+    # --output-filename/--compress as last time) -- not merely "some file
+    # happens to already sit at this path". A bare `output_path.exists()`
+    # check used to treat an operator's --output-filename colliding with an
+    # ordinary pre-existing file (an untouched per-TU original, a hand-placed
+    # file, any stray leftover manifest.last_compacted does not point at) as
+    # if it were a legitimate previous compaction -- so the os.replace()
+    # below silently overwrote that unrelated file with this run's merge,
+    # and a subsequent manifest-write failure then left the clobbered
+    # replacement in place (rollback skips deletion for anything
+    # "pre-existing") while the caller only saw an exception implying no
+    # lasting effect (latest-main Clang plugin review, PR4). Reject the
+    # collision outright instead of trying to back up and restore an
+    # arbitrary file's prior content -- simpler and safer, per the review's
+    # own recommendation.
+    output_path_preexisted = (
+        recognized_prior_path is not None
+        and output_path.resolve() == recognized_prior_path
+    )
+    if output_path.exists() and not output_path_preexisted:
+        raise ValueError(
+            f"{output_path} already exists and is not this pack's recognized "
+            "prior compaction output (manifest.last_compacted) -- refusing to "
+            "overwrite an unrelated file. Choose a different --output-filename "
+            "or remove the conflicting file first."
+        )
 
     def _last_record_wins(
         files: list[Path],

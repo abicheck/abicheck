@@ -169,7 +169,9 @@ def emit_facts_for_command(
         except Exception as exc:
             click.echo(f"abicheck-cc: skipped facts for {cu.source}: {exc}", err=True)
             continue
-        append_source_facts(inputs_dir, [tu], filename=facts_filename(cu.source))
+        append_source_facts(
+            inputs_dir, [tu], filename=facts_filename(cu.source, library=library)
+        )
         if first is None:
             first = tu
     return first

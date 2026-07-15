@@ -29,8 +29,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from .fact_set import incomplete_families, rollup_coverage, rollup_fact_set
+from .fact_set import (
+    check_fact_set_compatibility,
+    incomplete_families,
+    rollup_coverage,
+    rollup_fact_set,
+)
 from .inputs_pack import (
     INPUTS_KIND,
     InputsManifest,
@@ -87,6 +93,78 @@ def _duplicate_tu_ids(tus: list[SourceAbiTu]) -> list[str]:
     return sorted(dupes)
 
 
+def _target_id_issues(tus: list[SourceAbiTu], manifest: InputsManifest) -> list[str]:
+    """Target/library isolation errors (latest-main Clang plugin review, PR3).
+
+    A pack is one target/configuration/architecture's evidence; nothing here
+    checks that today, so two targets built into one shared ``out=``
+    directory silently mix TUs with no signal a downstream ``merge``/
+    ``compare`` could ever detect. Two checks:
+
+    - More than one distinct non-empty ``tu.target_id`` in the same pack —
+      the exact same-source/two-library collision the plugin's first-writer-
+      wins ``ensureManifest``/``facts_filename`` allowed.
+    - A TU's ``target_id`` disagreeing with ``target://<manifest.library>``
+      when the manifest names a library — a producer stamping a different
+      target than the pack it was told to write into.
+
+    TUs with no ``target_id`` at all (a pre-target-isolation producer) are
+    not flagged either way — this is additive validation, not a new
+    hard requirement on every producer.
+    """
+    issues: list[str] = []
+    target_ids = sorted({tu.target_id for tu in tus if tu.target_id})
+    if len(target_ids) > 1:
+        issues.append(
+            "pack mixes more than one target_id across its TU records: "
+            f"{', '.join(target_ids)} — two different targets/libraries must "
+            "not share one abicheck_inputs pack; use a separate out= "
+            "directory per target/configuration/architecture."
+        )
+    expected = f"target://{manifest.library}" if manifest.library else ""
+    if expected:
+        mismatched = sorted(
+            {tu.target_id for tu in tus if tu.target_id and tu.target_id != expected}
+        )
+        if mismatched:
+            issues.append(
+                f"pack manifest names library {manifest.library!r} (expected "
+                f"target_id {expected!r}) but TU record(s) name a different "
+                f"target_id: {', '.join(mismatched)} — this pack's evidence does "
+                "not agree on which target it describes."
+            )
+    return issues
+
+
+def _fact_set_recipe_issues(tus: list[SourceAbiTu]) -> list[str]:
+    """Hard fact-set-contract mismatches *within one pack's* TU records.
+
+    ``rollup_fact_set`` already reports "TUs disagree" as a soft warning
+    (mixed producer/producer_version is routine — different TUs replayed at
+    different times). A ``fact_set`` **name** or **version** mismatch between
+    two TUs in the *same* pack is stronger: it means the pack literally does
+    not agree on what mandatory-family contract it collected under, which
+    ``check_fact_set_compatibility``'s rule 1/2 already treats as an "error"
+    for an old/new comparison — the same severity applies just as much within
+    one pack (latest-main Clang plugin review, PR3).
+    """
+    fact_sets: list[dict[str, Any]] = []
+    for tu in tus:
+        if tu.fact_set and tu.fact_set not in fact_sets:
+            fact_sets.append(dict(tu.fact_set))
+    if len(fact_sets) < 2:
+        return []
+    seen_rules: set[str] = set()
+    issues: list[str] = []
+    for i, a in enumerate(fact_sets):
+        for b in fact_sets[i + 1 :]:
+            for issue in check_fact_set_compatibility(a, b):
+                if issue.severity == "error" and issue.rule not in seen_rules:
+                    seen_rules.add(issue.rule)
+                    issues.append(f"{issue.rule}: {issue.message}")
+    return issues
+
+
 def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
     """Validate one ``abicheck_inputs/`` pack directory; never raises for a
     structurally-readable pack — problems are reported, not thrown. Raises
@@ -132,6 +210,9 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
             f"{len(dupes)} duplicate tu_id(s) across source-fact files (a race-free "
             f"per-TU filename should make this impossible): {', '.join(dupes)}"
         )
+
+    report.errors.extend(_target_id_issues(tus, manifest))
+    report.errors.extend(_fact_set_recipe_issues(tus))
 
     # Prefer the per-TU rollup over the manifest-declared fact_set: a plugin
     # that stamps manifest.json up front cannot know whether every TU later

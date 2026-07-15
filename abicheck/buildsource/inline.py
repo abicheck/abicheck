@@ -1598,6 +1598,18 @@ def _build_inline_graph(
             fold_type_graph,
         )
 
+        # NOTE: this always runs the replay passes even when `surface`'s
+        # source_edges are already confirmed complete (build_source_graph()
+        # above already folded those in via fold_source_edges) -- an earlier
+        # revision skipped the replay in that case, but the raw source_edges
+        # wire format carries only bare endpoint identities, not the
+        # dst_file/project-file provenance fold_call_graph/fold_type_graph
+        # attach via `project_files` (`defined_in_project`). Without that
+        # provenance, `crosscheck.public_to_internal_dependency` cannot
+        # classify an unannotated callee/referenced node as internal, so a
+        # public-to-internal dependency addition would silently go
+        # undetected (Codex review). The replay stays unconditional until
+        # source_edges carries equivalent provenance end-to-end.
         fold_call_graph(
             graph,
             merged,

@@ -16,7 +16,13 @@
 #      dependency in the plugin CI lane);
 #   3. `abicheck merge`s the plugin-emitted pack into the binary baseline (the
 #      real ingest path, no re-parse) and asserts the L4 source-ABI + L5 graph
-#      layers were folded in with a non-empty set of source entities;
+#      layers were folded in with a non-empty set of source entities, AND that
+#      the specific DECL_CALLS_DECL edges the fixture's overload(int)/
+#      overload(double) calls produce are actually present in the embedded L5
+#      graph (latest-main Clang plugin review, PR1: previously only L4 entity
+#      counts were asserted here, so this test could pass even if
+#      source_edges never reached the graph at all — the exact gap that
+#      review found);
 #   4. `abicheck compare`s the merged baseline against itself and asserts a
 #      clean (exit 0) verdict — proving the folded baseline is a valid, stable
 #      comparison input.
@@ -71,6 +77,40 @@ def _count_entities(obj: object) -> int:
         for item in obj:
             total += _count_entities(item)
     return total
+
+
+#: The embedded L5 graph edges the fixture's overload(int)/overload(double)
+#: calls (widget.cpp/hpp) must produce -- source_graph.fold_source_edges maps
+#: a DECL_CALLS_DECL row's raw src/dst identity onto a `decl://<identity>`
+#: graph node id (the same scheme call_graph.augment_graph_with_calls uses).
+#: Asserting these are present in the *graph*, not merely that L4 entity
+#: counts are non-zero, is what the latest-main Clang plugin review's PR1
+#: finding asked for: "coverage['source_edges'] == 'complete' describes
+#: collection success, not end-to-end availability."
+_REQUIRED_GRAPH_EDGES = frozenset(
+    {
+        (
+            "DECL_CALLS_DECL",
+            "decl://_ZN4demo15callOverloadIntEv",
+            "decl://_ZN4demo8overloadEi",
+        ),
+        (
+            "DECL_CALLS_DECL",
+            "decl://_ZN4demo18callOverloadDoubleEv",
+            "decl://_ZN4demo8overloadEd",
+        ),
+    }
+)
+
+
+def _graph_edge_keys(build_source: dict) -> set[tuple[str, str, str]]:
+    edges = (build_source.get("source_graph") or {}).get("edges") or []
+    keys: set[tuple[str, str, str]] = set()
+    for e in edges:
+        if not isinstance(e, dict):
+            continue
+        keys.add((str(e.get("edge", "")), str(e.get("src", "")), str(e.get("dst", ""))))
+    return keys
 
 
 def _compile_shared_lib_with_plugin(work: Path, plugin: Path, clangxx: str) -> Path:
@@ -145,6 +185,17 @@ def main(argv: list[str] | None = None) -> int:
         if folded <= 0:
             raise SystemExit("merged baseline folded zero source entities from the pack")
 
+        # PR1: a non-empty L4 entity count alone does not prove source_edges
+        # ever reached the L5 graph -- assert the specific edges the
+        # fixture's overload calls must produce are actually present.
+        graph_edges = _graph_edge_keys(build_source)
+        missing_edges = sorted(_REQUIRED_GRAPH_EDGES - graph_edges)
+        if missing_edges:
+            raise SystemExit(
+                "merged baseline's embedded L5 graph is missing required "
+                f"DECL_CALLS_DECL edge(s) from source_edges: {missing_edges}"
+            )
+
         # 4. The merged baseline must be a valid comparison input (self-compare
         #    is compatible → exit 0 under the legacy verdict scheme).
         _run(
@@ -153,7 +204,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"\nPlugin injection scan validation PASSED: plugin pack ingested via merge "
-            f"({folded} source entities folded) and the baseline compares clean."
+            f"({folded} source entities folded, {len(graph_edges)} L5 graph edges "
+            "including the required DECL_CALLS_DECL overload edges) and the "
+            "baseline compares clean."
         )
         return 0
     finally:
