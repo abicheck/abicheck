@@ -264,7 +264,7 @@ def _ctor_dtor_structural(symbol: str) -> str:
     # export table (`macho_metadata`) already strips one underscore (`_ZN…`) while
     # the Clang plugin emits the raw `__ZN…` mangled name. Restoring the prefix
     # would keep those in different key spaces and the clones would never match on
-    # macOS Flow-C (Codex review). A folded ctor/dtor key is only a *grouping*
+    # macOS Plugin injection (Codex review). A folded ctor/dtor key is only a *grouping*
     # key, so normalizing the spelling is safe; the actual matched symbols keep
     # their real names. Non-ctor symbols still fall through to `return original`
     # (their original spelling) for exact matching.

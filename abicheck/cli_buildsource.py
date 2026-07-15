@@ -48,8 +48,6 @@ from .buildsource.source_replay import REPLAY_SCOPES
 from .cli import main
 from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stability / tests)
     _build_coverage as _build_coverage,
-    _collect_call_graph as _collect_call_graph,
-    _collect_include_graph as _collect_include_graph,
     _collect_source_graph as _collect_source_graph,
     _detect_coverage_asymmetry as _detect_coverage_asymmetry,
     _echo_capabilities as _echo_capabilities,
@@ -226,24 +224,12 @@ if TYPE_CHECKING:
     type=click.Choice(["off", "summary"], case_sensitive=False),
     help="Collect an L5 source graph (ADR-031). 'summary' folds the L3 "
     "build evidence into a compact target/source/header/option graph "
-    "for graph-to-graph comparison and finding localization.",
-)
-@click.option(
-    "--call-graph",
-    "call_graph",
-    is_flag=True,
-    default=False,
-    help="Add approximate direct-call edges to the L5 source graph via "
-    "clang AST (ADR-031 D4, phase 6). REQUIRES clang++; without it "
-    "the graph is collected without call edges. Implies --source-graph summary.",
-)
-@click.option(
-    "--include-graph",
-    "include_graph",
-    is_flag=True,
-    default=False,
-    help="Add compile-unit include edges to the L5 graph via `clang -M` "
-    "(ADR-031 D3). REQUIRES clang++. Implies --source-graph summary.",
+    "for graph-to-graph comparison and finding localization. When "
+    "--source-abi is also given, direct-call, type/field-dependency, and "
+    "compile-unit include edges are folded in automatically (REQUIRES "
+    "clang++; a missing clang degrades to a graph without those edges, "
+    "never aborting collection) — there is no separate opt-in flag for any "
+    "of the three, matching `dump --sources`'s own automatic behavior.",
 )
 @click.option(
     "--kythe-entries",
@@ -326,8 +312,6 @@ def collect_cmd(
     source_abi_cache: Path | None,
     clang_bin: str,
     source_graph: str,
-    call_graph: bool,
-    include_graph: bool,
     kythe_entries: Path | None,
     codeql_results: Path | None,
     extractor_manifests: tuple[Path, ...],
@@ -351,9 +335,21 @@ def collect_cmd(
     effective_compile_db = compile_db or compile_db_p
     extractors: list[ExtractorRecord] = []
     merged = BuildEvidence()
-    record_bazel_inputs = include_graph or (
-        source_abi
-        and _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
+    # The include-graph fold (now automatic whenever --source-abi and
+    # --source-graph summary are both active — see _collect_source_graph)
+    # needs recorded build-tool inputs the same way the headers-only L4
+    # selector does. `_collect_source_graph` also promotes an `off`
+    # `--source-graph` to `summary` when `--kythe-entries`/`--codeql-results`
+    # is given — that promotion must be anticipated here too, not just the
+    # literal `source_graph == "summary"` the user typed, or a Kythe/CodeQL
+    # run against a Bazel/aquery build records no inputs and the include-graph
+    # fold falls back to a live `clang -M` pass that cannot run outside the
+    # execroot (Codex review).
+    record_bazel_inputs = source_abi and (
+        source_graph == "summary"
+        or bool(kythe_entries)
+        or bool(codeql_results)
+        or _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
     # Collapse the unified `--from adapter[=path]` specs into the per-adapter
     # kwargs the engine still takes (ADR-037 CLI consolidation).
@@ -417,8 +413,7 @@ def collect_cmd(
         merged,
         extractors,
         source_graph=source_graph,
-        call_graph=call_graph,
-        include_graph=include_graph,
+        changed_paths=changed_paths,
         kythe_entries=kythe_entries,
         codeql_results=codeql_results,
         surface=surface,

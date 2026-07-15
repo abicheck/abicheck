@@ -9,6 +9,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- **`collect --call-graph`/`--include-graph` flags — dropped outright, no
+  deprecation.** Both had drifted into an asymmetry with the recommended
+  `dump --sources` inline path: `--call-graph` was redundant there (call/type
+  edges already fold automatically whenever `--source-abi`/`--source-graph
+  summary` — L4+L5 — are both active, no flag at all), while `--include-graph`
+  was the only way to get `COMPILE_UNIT_INCLUDES_FILE` edges into the graph at
+  all, with no equivalent in the inline path whatsoever. Both now fold
+  automatically on **every** path — `collect --source-abi --source-graph
+  summary` behaves exactly like `dump --sources` did already — via a new
+  shared `buildsource/inline_graph_fold.fold_include_graph()` the inline path
+  also now calls alongside its existing `fold_call_graph`/`fold_type_graph`.
+  `cli_buildsource_helpers._collect_call_graph`/`_collect_include_graph` (near
+  -duplicates of the inline path's own fold functions) are deleted; `collect`
+  now calls the same shared functions directly. `--kythe-entries`/
+  `--codeql-results` are unaffected (pre-captured, non-executing ingestion
+  always needs an explicit file path). **Real behavior narrowing, not just a
+  flag rename:** `collect --call-graph` previously worked from L3
+  `BuildEvidence` alone (no `--source-abi`/L4 replay needed) — folding is now
+  gated on `--source-abi` + `--source-graph summary` together, matching
+  `dump --sources`'s own L4+L5 gate exactly. A user who only wanted the
+  cheaper L3-only call-graph collection has no direct replacement; the
+  gate was deliberately unified rather than preserving `collect`'s more
+  permissive prior behavior, since that asymmetry between the two paths
+  was the whole problem this change set out to close. See the ADR-041
+  header-only-graph addendum's follow-up section.
+
 ### Performance
 
 - **DWARF-only dumps reuse one open `DWARFInfo` across all extraction passes.**
@@ -28,6 +56,65 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   repeated-type-across-CUs pattern.
 
 ### Added
+
+- **Header-only (L2) semantic graph — the ADR-041 dependency graph now works
+  with zero build integration.** New `abicheck/buildsource/header_graph.py`
+  (`build_header_only_graph`) builds a smaller, build-free alternative to the
+  L4/L5 graph straight from an ordinary header scan: `TYPE_INHERITS`/
+  `TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/`SOURCE_DECLARES` — the ADR's own
+  motivating "public struct with a private field type" example — are fully
+  available with no `compile_commands.json` at all, reusing
+  `type_graph.parse_clang_ast_types()`/`call_graph.parse_clang_ast_calls()`
+  unmodified over the same header-aggregate `clang -ast-dump=json` tree the L2
+  clang frontend already produces. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  are available only for in-header (inline/template) bodies — an honestly
+  bounded subset, not a false claim of L4/L5 parity. `crosscheck.py`'s
+  `public_to_internal_dependency` gets this for free (no detector change — it
+  already reads `snapshot.build_source.source_graph` generically). Wired via
+  `service.run_dump(..., header_graph=True)` uniformly across ELF/PE/Mach-O; a
+  `--header-graph` flag on the standalone `dump`/`scan` CLI commands is a
+  deliberately deferred follow-up (`cli.py`/`dumper.py` are both at/near their
+  line-count caps). See the ADR-041 header-only-graph addendum.
+
+- **Type-graph edges carry richer confidence/provenance labels.**
+  `type_graph._resolve_type_name` previously folded two structurally
+  different match tiers into the same flat `CONF_HIGH`: a real match via the
+  nearest-enclosing-scope walk, and a fallback match against the only
+  same-bare-name declaration anywhere in the TU when no scope matched at
+  all — a last-resort guess that could name a structurally unrelated type.
+  Now returns a `resolution` label (`"scope"` / `"unique_candidate"` /
+  `"unresolved"`) that `TypeEdge`/`augment_graph_with_types` thread into the
+  graph edge's `attrs`, so a "unique candidate" match reads `CONF_REDUCED`
+  distinctly from a real scope match instead of sharing `CONF_HIGH` with it —
+  a finer-grained trust signal for `graph explain`/future triage.
+
+- **Header-only graph gains an optional per-header include graph.**
+  `header_graph.ClangHeaderIncludeExtractor` (opt-in via
+  `service.run_dump(..., header_graph_includes=True)`, separate from
+  `header_graph` alone since it costs one extra `clang -M` invocation per
+  top-level header) adds `COMPILE_UNIT_INCLUDES_FILE` edges from each
+  top-level header to everything it transitively includes, reusing
+  `include_graph.ClangIncludeExtractor`'s vetted depfile-replay logic through
+  a throwaway per-header `BuildEvidence`. `build_header_only_graph` also
+  gained a `header_paths` parameter that pre-seeds a classified `header` node
+  for every top-level header even when it declares nothing itself (a pure
+  `#include`-only umbrella header is still a real public entry point).
+
+- **Header-only graph's structural edges no longer need clang at all.**
+  `build_header_only_graph` now derives `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE` directly from the already-parsed `AbiSnapshot`
+  (`RecordType.bases`/`.fields`, `Function.return_type`/`.params`,
+  `Variable.type`) when no clang AST is supplied — every L2 backend (castxml,
+  the default, or clang) populates these fields identically, so a project
+  that dumps with castxml (or whose headers don't parse cleanly under a bare
+  `clang++` invocation) now gets real structural edges instead of
+  declaration-visibility nodes only, at zero extra compiler-invocation cost.
+  Resolution is capped at `unique_candidate` confidence (never the AST path's
+  `scope` tier) since the flat model has no namespace/scope information to
+  disambiguate two same-named types. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  remain clang-AST-only (no backend records function bodies in the flat
+  model). See the ADR-041 header-only-graph addendum's flat-model-structural-
+  edges follow-up.
 
 - **11 new example-catalog cases (171–181) close implementation-to-example
   gaps in the detector matrix.** `static_tls_introduced`,
@@ -909,7 +996,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Documentation
 
-- **Producing source facts — wiring Flow B into a real build.** The
+- **Producing source facts — wiring Wrapper injection into a real build.** The
   `producing-source-facts.md` guide gained a make/CMake injection recipe for the
   `abicheck-cc` wrapper, an `ABICHECK_CC_EXTRACTOR` table (with the clang-only
   host note), a caveat that extraction concurrency is bound by the build's
@@ -974,7 +1061,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`merge` no longer truncates the binary export set.**
   `_exported_symbols_from_snapshot` unions the authoritative platform dynamic
   export table (`elf.symbols` / `pe.exports` / `macho.exports`) instead of only
-  the DWARF-shaped `functions[].mangled` view. On a pvxs Flow-C merge this lifts
+  the DWARF-shaped `functions[].mangled` view. On a pvxs Plugin-injection merge this lifts
   `matched_symbols` from 6 to 287 (`exported_symbols` 126 → 950).
 
 - **Source→binary matching normalizes Mach-O spellings for all names.** The
@@ -990,12 +1077,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Changed
 
 - **Clang facts plugin fails loud on a misconfigured `public-roots`** (ADR-038
-  Flow C, Caveat A): it now emits a diagnostic (and records it in the pack's
-  `diagnostics`) when `public-roots` matches zero declarations though header
-  decls were seen outside the roots, instead of silently producing an empty
-  pack with exit 0.
-- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038 Flow
-  C): with no explicit `public-roots=`, roots are inferred from the compile's
+  Plugin injection, Caveat A): it now emits a diagnostic (and records it in the
+  pack's `diagnostics`) when `public-roots` matches zero declarations though
+  header decls were seen outside the roots, instead of silently producing an
+  empty pack with exit 0.
+- **Clang facts plugin auto-derives `public-roots` when omitted** (ADR-038
+  Plugin injection): with no explicit `public-roots=`, roots are inferred from the compile's
   `-I`/`-iquote` include dirs (compiler/system entries excluded) and a one-time
   inference note is emitted, so a forgotten flag yields a populated surface
   rather than a silently empty pack. An explicit `public-roots=` still scopes
@@ -1037,7 +1124,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `PARITY_CASES` in `tests/test_abidiff_parity.py` (the vtable/return/param/
   struct-size gaps it still listed as open were closed by castxml
   integration).
-- New user-guide page **Producing Source Facts (Flow A/B/C)** documenting the
+- New user-guide page **Producing Source Facts (Full source scan / Wrapper injection / Plugin injection)** documenting the
   three source-fact producers, a selection tree, and the `public-roots`/
   `ABICHECK_CC_HEADERS` header-resolution trap.
 - **Two-way reconciliation in the `public_not_exported` cross-check** (ADR-035

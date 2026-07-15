@@ -684,7 +684,19 @@ def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
     assert edges == [CallEdge("caller", "callee")]
 
 
-# ── collect --call-graph wiring (_collect_call_graph) ───────────────
+# ── collect: call-graph folds automatically (inline_graph_fold.fold_call_graph) ──
+#
+# `collect`'s call/type/include-graph folding is the exact same
+# `inline_graph_fold.fold_call_graph`/`fold_type_graph`/`fold_include_graph`
+# the inline `dump --sources` path uses (no more separate
+# `cli_buildsource_helpers._collect_call_graph` near-duplicate) — the
+# pass-ran/degraded/empty-build/missing-clang scenarios for that shared
+# function are exercised in `tests/test_inline_changed_paths.py`
+# (`test_inline_graph_folds_call_edges_for_l4_l5_mode`,
+# `test_inline_graph_no_call_edges_when_clang_absent`, etc.). Only the
+# `collect`-specific end-to-end wiring is tested here: no `--call-graph`
+# flag exists any more — `--source-abi` + `--source-graph summary` together
+# fold call edges in automatically, mirroring `dump --sources`.
 
 
 class _FakeExtractor:
@@ -717,105 +729,11 @@ def _patch_extractor(monkeypatch, fake: _FakeExtractor) -> None:
     monkeypatch.setattr(cg, "ClangCallGraphExtractor", lambda **_k: fake)
 
 
-def test_collect_call_graph_folds_edges_and_refinalizes(monkeypatch) -> None:
-    from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.cli_buildsource import _collect_call_graph
-
-    _patch_extractor(
-        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
-    )
-    graph = build_source_graph(BuildEvidence())
-    records: list[ExtractorRecord] = []
-    merged = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
-    )
-    _collect_call_graph(graph, merged, records, clang_bin="clang")
-    assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
-    # coverage was re-finalized so the call-edge count is reflected.
-    assert graph.coverage["call_edges"]["count"] == 1
-    assert records[-1].name == "call_graph:clang" and records[-1].status == "ok"
-    # ADR-041 P0 slice 2 (fifth Codex review): the `collect --call-graph` path
-    # must record pass-ran provenance exactly like the inline `dump --sources`
-    # path (inline._fold_call_graph) does, or a version diff over two
-    # collected packs can never benefit from the zero-edge coverage fix.
-    assert graph.extractor_passes["call_graph"] is True
-
-
-def test_collect_call_graph_records_pass_ran_even_with_zero_edges(monkeypatch) -> None:
-    # The exact scenario the coverage fix targets: the pass runs to completion
-    # but the build genuinely has no calls to report yet.
-    from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.cli_buildsource import _collect_call_graph
-
-    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[]))
-    graph = build_source_graph(BuildEvidence())
-    records: list[ExtractorRecord] = []
-    merged = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
-    )
-    _collect_call_graph(graph, merged, records, clang_bin="clang")
-    assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
-    assert graph.extractor_passes["call_graph"] is True
-
-
-def test_collect_call_graph_empty_build_records_no_pass_coverage(monkeypatch) -> None:
-    # Seventh Codex review: an empty build (no compile units at all) trivially
-    # "finds nothing" without having looked at anything — it must not claim
-    # confirmed pass coverage.
-    from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.cli_buildsource import _collect_call_graph
-
-    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[]))
-    graph = build_source_graph(BuildEvidence())
-    records: list[ExtractorRecord] = []
-    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
-    assert "call_graph" not in graph.extractor_passes
-
-
-def test_collect_call_graph_partial_failure_records_no_pass_coverage(monkeypatch) -> None:
-    # Seventh Codex review: extract_from_build degrades a per-TU parse failure
-    # (clang crash/timeout/degenerate AST) to zero edges silently, recording it
-    # only via `diagnostics` — that must disqualify confirmed pass coverage
-    # even though the extractor otherwise ran and the build had real units.
-    from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.cli_buildsource import _collect_call_graph
-
-    fake = _FakeExtractor(available=True, edges=[])
-    fake.diagnostics.append("clang produced no AST (stderr: ...)")
-    _patch_extractor(monkeypatch, fake)
-    graph = build_source_graph(BuildEvidence())
-    records: list[ExtractorRecord] = []
-    merged = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://x.cpp", source="x.cpp")]
-    )
-    _collect_call_graph(graph, merged, records, clang_bin="clang")
-    assert "call_graph" not in graph.extractor_passes
-    # A degraded pass's surviving edges must not vouch for project-wide
-    # coverage either (sixteenth Codex review).
-    assert graph.degraded_passes["call_graph"] is True
-
-
-def test_collect_call_graph_missing_clang_records_failure(monkeypatch) -> None:
-    from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.buildsource.source_graph import build_source_graph
-    from abicheck.cli_buildsource import _collect_call_graph
-
-    _patch_extractor(monkeypatch, _FakeExtractor(available=False))
-    graph = build_source_graph(BuildEvidence())
-    records: list[ExtractorRecord] = []
-    _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
-    assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
-    assert records[-1].status == "failed"
-    # An unavailable extractor never ran — must not claim pass coverage.
-    assert "call_graph" not in graph.extractor_passes
-
-
-def test_collect_evidence_call_graph_flag_end_to_end(monkeypatch, tmp_path) -> None:
-    # --call-graph implies --source-graph summary and folds call edges in.
+def test_collect_evidence_call_graph_automatic_with_source_abi_and_graph(
+    monkeypatch, tmp_path
+) -> None:
+    # No --call-graph flag: --source-abi + --source-graph summary together
+    # fold call edges in automatically (mirroring dump --sources).
     import json as _json
 
     from click.testing import CliRunner
@@ -848,7 +766,9 @@ def test_collect_evidence_call_graph_flag_end_to_end(monkeypatch, tmp_path) -> N
             "collect",
             "--compile-db",
             str(cdb),
-            "--call-graph",
+            "--source-abi",
+            "--source-graph",
+            "summary",
             "-o",
             str(out),
         ],
@@ -857,6 +777,48 @@ def test_collect_evidence_call_graph_flag_end_to_end(monkeypatch, tmp_path) -> N
     pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in pack.source_graph.edges)
+
+
+def test_collect_evidence_source_graph_alone_does_not_fold_call_graph(
+    monkeypatch, tmp_path
+) -> None:
+    # --source-graph summary WITHOUT --source-abi stays structural-only — the
+    # semantic passes are gated on L4 also being requested, exactly like
+    # dump --sources's own with_call_graph gate.
+    import json as _json
+
+    from click.testing import CliRunner
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli import main
+
+    src = tmp_path / "foo.cpp"
+    src.write_text("int foo(){return 1;}\n")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        _json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -c {src} -o foo.o",
+                }
+            ]
+        )
+    )
+    _patch_extractor(
+        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
+    )
+
+    out = tmp_path / "out.evidence"
+    res = CliRunner().invoke(
+        main,
+        ["collect", "--compile-db", str(cdb), "--source-graph", "summary", "-o", str(out)],
+    )
+    assert res.exit_code == 0, res.output
+    pack = BuildSourcePack.load(out)
+    assert pack.source_graph is not None
+    assert not any(e.kind == "DECL_CALLS_DECL" for e in pack.source_graph.edges)
 
 
 # ── source-location provenance (defined_in_project) ───────────────────────────

@@ -536,7 +536,7 @@ def test_ctor_dtor_fold_handles_macho_leading_underscore() -> None:
     assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("__ZN1AC2Ev")
     # The prefix is NORMALIZED away (not restored): the export table strips one
     # underscore (`_ZN…`) while the plugin emits `__ZN…`, so the canonical key must
-    # unify both spellings or the clones never match on macOS Flow-C (Codex).
+    # unify both spellings or the clones never match on macOS Plugin injection (Codex).
     assert _ctor_dtor_canonical("__ZN1AC1Ev") == _ctor_dtor_canonical("_ZN1AC1Ev")
     assert not _ctor_dtor_canonical("__ZN1AC1Ev").startswith("__ZN")
     # A Mach-O non-ctor symbol is returned byte-for-byte unchanged.
@@ -544,7 +544,7 @@ def test_ctor_dtor_fold_handles_macho_leading_underscore() -> None:
 
 
 def test_linker_matches_macho_decl_against_stripped_exports() -> None:
-    # End-to-end macOS Flow-C: the plugin decl keeps the raw `__ZN…` mangling but
+    # End-to-end macOS Plugin injection: the plugin decl keeps the raw `__ZN…` mangling but
     # the export table stores `_ZN…` (one underscore stripped). The ctor clones
     # must still fold and match across the two spellings (Codex review).
     tu = SourceAbiTu(functions=[_entity("A::A", "function", mangled="__ZN1AC1Ev")])
@@ -554,7 +554,7 @@ def test_linker_matches_macho_decl_against_stripped_exports() -> None:
 
 def test_linker_matches_macho_non_ctor_decl_against_stripped_exports() -> None:
     # Codex review: an ORDINARY (non ctor/dtor) C++ method takes the no-fold path,
-    # so on macOS Flow-C the plugin's `__ZN1A3fooEv` must still exact-match the
+    # so on macOS Plugin injection the plugin's `__ZN1A3fooEv` must still exact-match the
     # export table's `_ZN1A3fooEv` (one underscore stripped). Before the fix these
     # landed in decls_without_symbol / symbols_without_decl because normalization
     # was applied only to ctor/dtor canonical keys.

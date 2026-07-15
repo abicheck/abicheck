@@ -1564,11 +1564,20 @@ def _build_inline_graph(
     evidence exists — it is compact by design (ADR-031 D7), so there is no
     separate opt-in flag.
 
-    When ``with_call_graph`` is set, a Clang call-graph pass folds
-    ``DECL_CALLS_DECL`` edges into the graph (best-effort — a missing ``clang++``
-    or a parse failure records an extractor row and leaves the graph without call
-    edges, never aborting). Those edges are what the decl-dependency cross-checks
-    (ADR-035 D4) consume, so this is gated to the semantic L4 modes by the caller.
+    When ``with_call_graph`` is set, Clang call/type-graph passes fold
+    ``DECL_CALLS_DECL``/``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/
+    ``DECL_HAS_TYPE``/``DECL_REFERENCES_DECL`` edges into the graph
+    (best-effort — a missing ``clang++`` or a parse failure records an
+    extractor row and leaves the graph without those edges, never aborting),
+    and an include-graph pass folds ``COMPILE_UNIT_INCLUDES_FILE`` edges the
+    same way (preferring already-recorded build-tool inputs over a fresh
+    ``clang -M`` invocation when available). Those edges are what the
+    decl-dependency cross-checks (ADR-035 D4) and the D6
+    ``include_graph_public_header_drift`` finding consume, so this is gated to
+    the semantic L4 modes by the caller — no separate opt-in flag for any of
+    the three (ADR-041 header-only-graph addendum follow-up: these used to be
+    ``collect``-only, explicit-flag-gated passes with no equivalent here at
+    all).
     """
     has_build = bool(merged.compile_units or merged.targets)
     if not has_build and surface is None:
@@ -1577,7 +1586,11 @@ def _build_inline_graph(
 
     graph = build_source_graph(merged, source_abi=surface)
     if with_call_graph:
-        from .inline_graph_fold import fold_call_graph, fold_type_graph
+        from .inline_graph_fold import (
+            fold_call_graph,
+            fold_include_graph,
+            fold_type_graph,
+        )
 
         fold_call_graph(
             graph,
@@ -1588,6 +1601,14 @@ def _build_inline_graph(
             scoped_units=call_graph_units,
         )
         fold_type_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=call_graph_units,
+        )
+        fold_include_graph(
             graph,
             merged,
             clang_bin,

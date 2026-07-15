@@ -3,7 +3,8 @@
 **Date:** 2026-07-12
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
-explain` proof paths), and P0 slice 4 (body/type-hash-change correlation)
+explain` proof paths), P0 slice 4 (body/type-hash-change correlation), and the
+header-only-graph addendum (`header_graph.py`, no build integration required)
 implemented; the rest of this ADR is a roadmap, not a commitment to ship on
 any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
@@ -40,7 +41,8 @@ inline int f() { return DETAIL_CONSTANT + 1; }
 Separately, `SourceAbiTu.source_edges` (`source_abi.py`) has existed since
 ADR-030 as a normalized carrier for exactly this kind of fact and has never
 been populated by any extractor (castxml, clang, Android, or the
-build-integrated plugin — ADR-038 Flow C always emits `"source_edges": []`).
+build-integrated plugin, ADR-038 Plugin injection — it always emits
+`"source_edges": []`).
 
 This ADR records the fuller roadmap for turning the L5 graph from "optional
 call graph" into a genuine compiler-derived semantic impact graph, and ships
@@ -219,7 +221,7 @@ more instances of the same two bug classes, deeper in each:
 independent `clang -ast-dump=json` pass per translation unit, alongside the
 call graph's own pass — the exact "AST replay is expensive, run it once"
 concern the wider plan below raises. Unifying the two into one parse (or
-better, one Flow-C plugin emission, see P1 below) is deliberately deferred
+better, one Plugin-injection emission, see P1 below) is deliberately deferred
 rather than risking `call_graph.py`'s existing tested extraction path in this
 change.
 
@@ -361,8 +363,9 @@ target gets classified internal rather than *whether* the diff runs at all:
   packs — not two inline dumps — still couldn't tell "ran, zero calls" from
   "never ran." Fixed with the same one-line stamp, mirroring
   `inline._fold_call_graph` exactly. `type_graph.py` has no equivalent
-  out-of-band collection path yet (P1 item 1 — moving extraction into Flow C —
-  is the eventual fix for needing two call sites at all), so nothing else
+  out-of-band collection path yet (P1 item 1 — moving extraction into Plugin
+  injection — is the eventual fix for needing two call sites at all), so
+  nothing else
   needed the same patch.
 
 No new `ChangeKind`: this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
@@ -761,6 +764,269 @@ correlation rides in `Change.description`, keeping this additive and
 low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all carry
 `description` verbatim already).
 
+## Decision — header-only-graph addendum (this change)
+
+Every P0 slice above is an **L4/L5** feature: it needs a real build (a
+`compile_commands.json`, per-TU `clang -ast-dump=json` replay of full bodies)
+via `inline.collect_inline_pack`. That requirement is not fundamental to the
+"not a call at all" risk this ADR opens with — a public struct with a private
+field type, or a public class inheriting an internal base, is visible in the
+**declarations alone**, with no build and no function body needed. A project
+with no `compile_commands.json` at all — the common case for a quick `abicheck
+dump libfoo.so -H api.h --public-header api.h` — got none of this ADR's
+recall, even for the exact "no call at all" case it was written to close.
+
+Added `abicheck/buildsource/header_graph.py`:
+
+- `build_header_only_graph(snapshot, ast_root, *, public_header_paths,
+  public_dir_paths)` — seeds `source_decl` nodes for every function/variable in
+  the already-parsed `AbiSnapshot` (visibility straight from
+  `Function.origin`/`Variable.origin`, the `ScopeOrigin` classification
+  `provenance.apply_provenance` already computes whenever `--public-header`/
+  `--public-header-dir` is given — no new classification logic), then folds
+  `type_graph.parse_clang_ast_types()`/`call_graph.parse_clang_ast_calls()`
+  over the *same* header-aggregate `clang -ast-dump=json` tree the L2 clang
+  frontend (`dumper_clang.py`) already produces when `--ast-frontend clang` is
+  selected. Both parsers are pure functions over a bare AST dict (P0 slice 1's
+  own docstring: "unit-tested without a compiler") — nothing about them
+  assumes a real, build-integrated translation unit, so reusing them here
+  needed zero changes to either.
+- Type-node visibility (public struct vs. private field type) is **not**
+  derived by matching `AbiSnapshot.types`/`.enums` against the type graph's
+  `type://` node ids: the flat snapshot model records a bare, unqualified type
+  name (`dumper_clang._ClangAstParser._build_record` never threads the
+  namespace scope into `RecordType.name`), while the type graph's node ids are
+  the AST's *resolved qualified* name (`ns::Widget`) — two representations
+  that would silently fail to join for any namespaced type. `type_graph.py`
+  gained a small additive public wrapper, `index_declared_type_files(ast)`
+  (qualified name → declaring file), factored out of the same first-indexing
+  pass `parse_clang_ast_types` already runs — rather than thread a new output
+  parameter through the hardened, many-times-reviewed
+  `_index_declared_entities`/`_walk_types` pair, this duplicates that one AST
+  walk, an acceptable cost for a header-only pass. `build_header_only_graph`
+  classifies each declaring file via `provenance.classify_origin` (the same
+  primitive `apply_provenance` uses) and sets `visibility` directly on the
+  type node — covering the ADR's own headline case, since a public struct
+  rarely has its own exported binary symbol and needs its `visibility` set
+  directly to act as a valid graph "entry" (`is_public_dependency_node`).
+
+**What is structurally available vs. not, from headers alone:**
+
+- `TYPE_INHERITS` / `TYPE_HAS_FIELD_TYPE` / `DECL_HAS_TYPE` / `SOURCE_DECLARES`
+  — fully available; a base class, a field type, and a parameter/return type
+  are declaration-level facts. This is also exactly the ADR's own motivating
+  example.
+- `DECL_CALLS_DECL` / `DECL_REFERENCES_DECL` — only for declarations whose
+  *body* is actually written in a header (inline/template/constexpr
+  functions). An ordinary out-of-line function has a prototype but no body in
+  a header, so it contributes no call/reference edges here — a real, honestly
+  bounded subset of the L4/L5 graph's recall, not a false claim of parity.
+- Anything from the *build*-level schema (`target`/`compile_unit`/
+  `build_option` nodes, `TARGET_HAS_SOURCE`, …) — not available at all; there
+  is no `BuildEvidence` in a header-only world, so this module never calls
+  `build_source_graph`.
+
+**Coverage honesty (ADR-031 D9).** Every node/edge this module creates carries
+`provenance="header_ast_l2"`, and the graph's `extractor_passes` use this
+module's own pass names, `HEADER_CALL_GRAPH_PASS`/`HEADER_TYPE_GRAPH_PASS`
+(`"header_call_graph"`/`"header_type_graph"`), distinct from
+`inline_graph_fold`'s build-integrated `"call_graph"`/`"type_graph"` — a
+header-only pass is never mistaken for a full L4/L5 build-integrated one.
+`SourceGraphSummary.finalize()`'s `type_edges`/`call_edges` coverage flags
+recognize both the build-integrated and header-only pass names (an `or` over
+both), so the human-readable coverage report is honest either way.
+`source_graph_findings._common_dependency_edge_kinds`/`_dependency_kinds_covered`
+(the version-diff family-widening logic) also honor the header-only pass names
+— but **not** by adding `header_call_graph`/`header_type_graph` as separate
+entries in `_DEPENDENCY_EDGE_FAMILIES`: that table's per-kind fallback loop
+unions "common" credit across every entry, which is only sound when each entry
+owns a disjoint edge-kind set (`call_graph` → `DECL_CALLS_DECL`, `type_graph` →
+the other four); a `header_type_graph` entry sharing `type_graph`'s exact kinds
+would let a kind correctly excluded under a narrowed/degraded `type_graph` pass
+leak back in as "common" under the second, unmarked entry for the same kind
+(caught by the existing test suite, then reverted, on the first attempt — a
+Codex review on the shipped PR caught the resulting gap: an unfixed version
+would silently drop a real `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding
+whenever a header-only baseline's verified-zero family gained its first edge).
+Fixed with `_HEADER_PASS_ALIAS` (`{"call_graph": "header_call_graph",
+"type_graph": "header_type_graph"}`) plus small helpers
+(`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) that each check *both* names
+within the *same*, single loop iteration per family — so a header-only
+graph's own narrowed/degraded markers are honored without ever double-counting
+a kind across two independent iterations, the exact failure mode the first
+attempt hit.
+
+A second Codex review then caught a subtler asymmetry in that same fix's
+initial shape: it let a header-only pass's confirmation grant the *same*
+full-family widening credit a build-integrated pass's confirmation grants.
+That is unsound specifically for `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` — a
+header-only pass structurally cannot see a call/reference inside an
+out-of-line function body, so its "zero" for either kind is not evidence of a
+project-wide zero, only of "headers can't show this." Comparing a header-only
+baseline against a build-integrated candidate could then report
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` for a dependency that already existed
+via a call the baseline structurally could never have observed — a real false
+positive the moment collection "improves" from header-only to
+build-integrated. Fixed with `_pass_trusted_kinds`/
+`_HEADER_FULL_VISIBILITY_KINDS`: a header-only confirmation now only vouches
+for the three structural kinds (`DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/
+`TYPE_INHERITS`) it has true project-wide visibility of — never the whole
+family, and never the two body-dependent kinds, regardless of the *other*
+side's shape (even header-vs-header, which is arguably safe but adds a second
+axis of bookkeeping for one kind's marginal recall — not worth it against the
+simpler, strictly-safe rule).
+
+**Consumer:** `crosscheck.py`'s `public_to_internal_dependency` and
+`source_graph_findings.diff_source_graph_findings`'s
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` both already read
+`snapshot.build_source.source_graph` generically — a header-only graph is
+just a different (cheaper, always-available) producer of the same edge
+vocabulary, so no detector-side change was needed, mirroring exactly how P0
+slice 1 wired `type_graph.py` into `crosscheck.py`.
+
+**Wiring:** `service.run_dump(..., header_graph=True)` builds and embeds the
+graph uniformly across all three binary formats (ELF/PE/Mach-O) — a
+`BuildSourcePack` with only `source_graph` set (`build_evidence`/`source_abi`
+stay `None`, since there is no L3/L4 payload in a header-only world). It runs
+a second, independent `clang -ast-dump=json` pass over the same header
+aggregate `dumper._clang_header_dump` already knows how to build (reused
+directly — private only by convention; `dumper.py` sits at its 2000-line hard
+cap, so a public wrapper was not added there), and degrades to a graph with
+declaration-visibility nodes only (no type/call edges) when clang is
+unavailable or the header parse fails — never aborts the dump (ADR-028 D3).
+`service.run_dump` is reachable from `compare`'s implicit dump-from-binary
+resolution and the buildsource merge/collect paths (`cli_resolve.py`,
+`cli_buildsource_helpers.py`), but **not** from the standalone `abicheck dump`
+command, which still calls `dumper.dump()` via its own legacy
+`cli_dump_helpers.py` path rather than `service.run_dump`. Adding a
+`--header-graph` flag to the standalone `dump`/`scan` CLI commands is a
+follow-up, deliberately deferred: `cli.py` and `dumper.py` are both at or near
+their line-count caps (`dumper.py` at 1995/2000 — five lines of margin — is
+where the header AST is produced), so threading a new flag through
+`cli_dump_helpers.perform_elf_dump`/`handle_non_elf_dump` needs its own
+reviewed slice rather than a rushed addition risking the hard cap.
+
+No new `ChangeKind` — same convention as every other graph slice in this ADR:
+this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and the intra-version
+`public_to_internal_dependency` check, broadening *when they have evidence to
+run at all* (no build needed), not what they detect.
+
+**Follow-up: header include graph.** `header_graph.ClangHeaderIncludeExtractor`
+adds an optional, separately-opted-in (`service.run_dump(...,
+header_graph_includes=True)`) per-header `clang -M` pass —
+`COMPILE_UNIT_INCLUDES_FILE` edges from each top-level header to everything it
+transitively includes. Reuses `include_graph.ClangIncludeExtractor`'s vetted
+depfile-replay logic (argv sanitization, timeouts, diagnostics) through a
+throwaway per-header `BuildEvidence`/`CompileUnit` — the header-only world has
+no real compile units, so each header's own graph-node id doubles as its
+synthetic compile-unit id, letting `include_graph.augment_graph_with_includes`
+fold the result with zero id translation. This is advisory structure only
+(`graph explain`/future triage material), not a classification override: a
+"private" header transitively reached from a public entry is still labelled
+by its own declaring-file origin. `build_header_only_graph` also gained a
+`header_paths` parameter that pre-seeds a `header` node (with classified
+visibility) for every top-level header even when it declares nothing itself
+(a pure `#include`-only umbrella header) — both because that's a real,
+independently-worth-fixing gap (such a header is still a genuine public entry
+point) and because the include-graph edges need a valid source node to attach
+to. A Codex review on the shipped commit caught two more issues in the same
+slice, both fixed: (1) `_attach_header_graph`'s deferred `-isystem` roots
+(from `resolve_inferred_header_roots`) rode only in `gcc_option_tokens`,
+which `_clang_header_dump`'s disk cache never hashes — fixed by threading
+`extra_hash_dirs=deferred_token_dirs(deferred)` through, mirroring
+`_dump_elf`'s own handling; (2) `type_graph.index_declared_type_files`
+returned `_index_declared_entities`'s shared `decl_file` dict unfiltered,
+which also carries var/enum-constant identities (used only for
+`DECL_REFERENCES_DECL` resolution) alongside real type declarations — a
+public constant could therefore get mistaken for a record/enum/typedef and
+seeded as a bogus `record_type` node; fixed by filtering to exactly the
+qualified names `name_index` (the type-only index) actually collected.
+
+**Follow-up: flat-model structural edges (castxml-generalized, no AST at
+all).** Every edge above still needed a *second*, independent `clang
+-ast-dump=json` invocation over the header aggregate — a real cost when the
+main dump used castxml (the default L2 backend), and a project whose headers
+don't parse cleanly under a bare `clang++` invocation (GCC-specific
+attributes, an MSVC-only codebase, etc.) got no structural edges at all, only
+declaration-visibility nodes. But `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+`DECL_HAS_TYPE` don't actually need an AST walk: every L2 backend (castxml or
+clang) already populates `RecordType.bases`/`.fields`, `Function.
+return_type`/`.params`, and `Variable.type` on the flat `AbiSnapshot` itself.
+`build_header_only_graph` now derives these three structural edge kinds
+directly from the snapshot when no `ast_root` is supplied
+(`_flat_structural_type_edges`), reusing `augment_graph_with_types` unchanged
+— no second compiler invocation, no clang dependency, works identically for
+any backend. The tradeoff is resolution confidence: the flat model records
+only a bare, unqualified type name (no enclosing-namespace/scope information
+survives dumping), so a bare-name lookup against the snapshot's own
+declared-type set can only ever reach `RESOLUTION_UNIQUE_CANDIDATE` (the name
+is unique across the whole snapshot) or `RESOLUTION_UNRESOLVED` (zero or more
+than one same-named declaration) — never the AST path's `RESOLUTION_SCOPE`
+tier, and always `CONF_REDUCED`. `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+remain clang-AST-only in every case: the flat model never records a function
+body, so there is nothing to derive them from regardless of backend; the flat
+path therefore only ever stamps `HEADER_TYPE_GRAPH_PASS`, never
+`HEADER_CALL_GRAPH_PASS`. The AST path (when `ast_root` is available) is
+unchanged and still takes priority — the two are mutually exclusive per
+`build_header_only_graph` call, not layered, since the AST path's qualified
+node ids and the flat path's bare-name node ids are different id spellings
+for the same real-world type and would otherwise create parallel,
+non-deduplicated node sets for one build.
+
+Two further fixes landed alongside this addendum, both from post-merge Codex
+review: (1) `source_graph_findings._common_dependency_edge_kinds`'s per-kind
+fallback trusted a header-only side's raw edge *presence* for a
+body-dependent kind even after `_pass_trusted_kinds` correctly capped
+*confirmation*-based trust — a header-only baseline that happened to fold one
+real in-header call edge (an inline function calling another inline function,
+both visible in headers) made `DECL_CALLS_DECL` "common" against a
+build-integrated candidate, so a pre-existing out-of-line call the baseline
+structurally could never have seen surfaced as a false
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the moment collection improved from
+header-only to build-integrated; fixed by gating `old_present` on whether the
+graph's *only* confirmation for that pass is the header-only alias, for
+every kind outside `_HEADER_FULL_VISIBILITY_KINDS`. (2) The include-graph pass
+(`ClangHeaderIncludeExtractor`) always constructed itself with the default
+`clang_bin="clang++"`, ignoring `CompileContext.gcc_path`/`gcc_prefix` even
+though the AST pass just above honors them — a hermetic/cross toolchain
+selected via those flags could silently lose every
+`COMPILE_UNIT_INCLUDES_FILE` edge (or resolve them against the host's clang
+instead); fixed by resolving the same clang driver (`dumper._resolve_clang_bin`)
+for both passes.
+
+**Follow-up: `--call-graph`/`--include-graph` removed from `collect` —
+call/type/include graph now fold automatically everywhere.** These two
+`collect`-only flags had drifted into a genuine asymmetry with the inline
+`dump --sources` path: `--call-graph` was redundant there (the inline path has
+folded call/type-graph edges automatically whenever `--source-abi`/`--source-graph`
+level L4+L5 are both active since P0 slice 1, no flag at all), while
+`--include-graph` was the *opposite* problem — the only way to get
+`COMPILE_UNIT_INCLUDES_FILE` edges into the graph at all, entirely absent from
+the recommended `dump --sources` path. A user following the documented
+"recommended" workflow (`docs/concepts/build-source-data.md`) had no way to
+request include edges, while a `collect` user had to remember an
+easy-to-miss flag for behavior the other path gave for free.
+
+Fixed by making all three automatic, everywhere, on one shared code path:
+`buildsource/inline_graph_fold.py` gained `fold_include_graph()` (mirroring
+`fold_call_graph`/`fold_type_graph`'s scoping precedence and graceful clang-
+absent degradation, preferring already-recorded build-tool inputs over a
+fresh `clang -M` invocation), and `inline._build_inline_graph` now calls it
+alongside the other two under the same existing `with_call_graph` gate — so
+`dump --sources` gains include-graph edges with no new flag. `collect`'s
+`_collect_source_graph` (`cli_buildsource_helpers.py`) was rewritten to call
+the *same* `inline_graph_fold` functions directly (deleting its own two
+near-duplicate `_collect_call_graph`/`_collect_include_graph` implementations
+entirely) whenever `--source-abi` and `--source-graph summary` are both
+given — matching the inline path's gate exactly, rather than requiring
+either flag. `--call-graph`/`--include-graph` are removed outright (not
+deprecated): both were recent, narrow-audience flags with no evidence of
+external dependents, and keeping a compatibility shim for a flag whose whole
+point was "this behavior should not need a flag" would be self-defeating.
+`--kythe-entries`/`--codeql-results` are unaffected — pre-captured,
+non-executing external ingestion always needs an explicit file path, so
+there is no equivalent "should this be automatic" question for them.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work
@@ -790,7 +1056,7 @@ low-risk to the wider reporting pipeline (JSON/SARIF/JUnit all carry
 
 ### P1 — stronger ABI/API intelligence
 
-1. **Move type/reference extraction into Flow C (the ADR-038 plugin).**
+1. **Move type/reference extraction into Plugin injection (the ADR-038 plugin).**
    `contrib/abicheck-clang-plugin/` already rides the compiler's own AST for
    the L4 entity facts (functions/types/macros/hashes) with **zero extra
    frontend passes** — the plugin hardcodes `"source_edges": []` today. Once
