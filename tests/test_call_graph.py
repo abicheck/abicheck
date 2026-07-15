@@ -90,7 +90,12 @@ def _real_ref(node_id: str, name: str, qualtype: str) -> dict:
     latest-main Clang plugin review PR1b). Unlike ``_ref()`` (used by the
     other parser tests), this never attaches a mangled name, so it exercises
     the id-index fallback rather than the stub's own identity."""
-    return {"kind": "FunctionDecl", "id": node_id, "name": name, "type": {"qualType": qualtype}}
+    return {
+        "kind": "FunctionDecl",
+        "id": node_id,
+        "name": name,
+        "type": {"qualType": qualtype},
+    }
 
 
 def _call_via_ref(ref: dict) -> dict:
@@ -156,7 +161,9 @@ def test_parse_resolves_via_prototype_seen_before_definition() -> None:
                 "type": {"qualType": "int (int)"},
             },  # prototype only, no CompoundStmt
             _func(
-                "caller", "_Zcaller", [_call_via_ref(_real_ref("0x1", "helper", "int (int)"))]
+                "caller",
+                "_Zcaller",
+                [_call_via_ref(_real_ref("0x1", "helper", "int (int)"))],
             ),
         ],
     }
@@ -455,7 +462,10 @@ def test_call_reachability_change_names_example_path() -> None:
         if c.kind == ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED
     ]
     assert len(cg) == 1
-    assert "Example newly-reachable path: entry --[DECL_CALLS_DECL]--> _Zimpl1 --[DECL_CALLS_DECL]--> _Zimpl2." in cg[0].description
+    assert (
+        "Example newly-reachable path: entry --[DECL_CALLS_DECL]--> _Zimpl1 --[DECL_CALLS_DECL]--> _Zimpl2."
+        in cg[0].description
+    )
 
 
 def test_no_call_edges_means_no_call_finding() -> None:
@@ -913,7 +923,15 @@ def test_collect_evidence_source_graph_alone_does_not_fold_call_graph(
     out = tmp_path / "out.evidence"
     res = CliRunner().invoke(
         main,
-        ["collect", "--compile-db", str(cdb), "--source-graph", "summary", "-o", str(out)],
+        [
+            "collect",
+            "--compile-db",
+            str(cdb),
+            "--source-graph",
+            "summary",
+            "-o",
+            str(out),
+        ],
     )
     assert res.exit_code == 0, res.output
     pack = BuildSourcePack.load(out)
@@ -1002,6 +1020,80 @@ def test_parse_fills_callee_file_from_sibling_functiondecl() -> None:
     ast_tree = {
         "kind": "TranslationUnitDecl",
         "inner": [
+            _func_in("helper", "_Zhelper", [], "/work/src/util.cc"),
+            _func_in(
+                "api",
+                "_Zapi",
+                [
+                    _direct_call(
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "helper",
+                            "mangledName": "_Zhelper",
+                        }
+                    )
+                ],
+                "/work/src/api.cc",
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast_tree)
+    edge = next(e for e in edges if e.callee == "_Zhelper")
+    assert edge.callee_file == "/work/src/util.cc"
+
+
+def test_parse_fills_callee_file_from_declaration_only_sibling() -> None:
+    # Codex review, PR #555: a helper only *declared* in this TU (e.g. a
+    # private header this TU includes, with its body compiled in a separate
+    # TU never present in this AST) previously left callee_file empty --
+    # _enter_function_scope only recorded a file when the sibling node had a
+    # body. The declaration's own file is exactly the private-header
+    # provenance a Flow-2 source_edges-only graph needs to mark the callee
+    # defined_in_project.
+    ast_tree = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "helper",
+                "mangledName": "_Zhelper",
+                "loc": {"file": "include/detail/helper.h", "line": 3},
+                # No CompoundStmt inner -- a bare prototype, no body in this TU.
+            },
+            _func_in(
+                "api",
+                "_Zapi",
+                [
+                    _direct_call(
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "helper",
+                            "mangledName": "_Zhelper",
+                        }
+                    )
+                ],
+                "/work/src/api.cc",
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast_tree)
+    edge = next(e for e in edges if e.callee == "_Zhelper")
+    assert edge.callee_file == "include/detail/helper.h"
+
+
+def test_parse_prefers_body_file_over_earlier_declaration_only_sighting() -> None:
+    # A body seen after an earlier declaration-only sighting of the same
+    # identity must upgrade decl_files to the (more authoritative)
+    # definition file, not stay pinned to the first bare declaration.
+    ast_tree = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "helper",
+                "mangledName": "_Zhelper",
+                "loc": {"file": "include/detail/helper.h", "line": 3},
+            },
             _func_in("helper", "_Zhelper", [], "/work/src/util.cc"),
             _func_in(
                 "api",

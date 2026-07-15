@@ -1088,8 +1088,16 @@ there is no equivalent "should this be automatic" question for them.
    `CallEdge.callee_file`/`TypeEdge.dst_file`, both of which already resolved
    it — and `fold_source_edges()` now marks a `dst_file`-matching node
    `defined_in_project`, mirroring `augment_graph_with_calls`/
-   `augment_graph_with_types`'s identical marker. The inline extractor
-   actually carries `dst_file` for **all five** kinds (`type_graph.py`'s
+   `augment_graph_with_types`'s identical marker. `call_graph.py`'s own
+   `callee_file` resolution had a gap of its own (Codex review): it only
+   recorded a callee's file from a *body*-bearing sibling `FunctionDecl`, so
+   a helper only *declared* in this TU (a private header this TU includes,
+   its body compiled in a separate TU never present in this AST — a common
+   out-of-line-helper shape) left `callee_file` empty. Now records a
+   declaration-only file as a fallback (a later body for the same identity
+   still upgrades it — the definition is the more authoritative location).
+   The inline extractor actually carries `dst_file` for **all five** kinds
+   (`type_graph.py`'s
    two-pass indexing resolves a type spelling to its declaring file
    regardless of edge kind); the plugin's three type-edge kinds
    (`DECL_HAS_TYPE`/`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`) still don't — its

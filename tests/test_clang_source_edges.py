@@ -142,6 +142,30 @@ def test_build_source_edges_preserves_dst_file_for_calls() -> None:
     assert call_edge["attrs"]["dst_file"] == "/work/src/util.cc"
 
 
+def test_build_source_edges_preserves_dst_file_for_declaration_only_callee() -> None:
+    # Codex review, PR #555: a callee only *declared* in this TU (e.g. a
+    # private header this TU includes, body compiled in a separate TU) must
+    # still resolve dst_file from the declaration's own file, not just a
+    # sibling definition's.
+    ast = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "helper",
+            "mangledName": "_Zhelper",
+            "loc": {"file": "include/detail/helper.h", "line": 3},
+        },
+        _func_in(
+            "api",
+            "_Zapi",
+            [_direct_call(_ref("FunctionDecl", "helper", "_Zhelper"))],
+            "/work/src/api.cc",
+        ),
+    )
+    edges = build_source_edges(ast, [])
+    call_edge = next(e for e in edges if e["edge"] == "DECL_CALLS_DECL")
+    assert call_edge["attrs"]["dst_file"] == "include/detail/helper.h"
+
+
 def test_build_source_edges_preserves_dst_file_for_type_edges() -> None:
     # Applies to every type_edges kind (TYPE_INHERITS here), not just
     # DECL_REFERENCES_DECL -- type_graph.parse_clang_ast_types resolves

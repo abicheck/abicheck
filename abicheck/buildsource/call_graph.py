@@ -281,8 +281,19 @@ def _enter_function_scope(
     if ident != caller:
         # Entering a new enclosing function: its body lives in cur_file.
         caller, caller_file = ident, cur_file
-    # Record the definition file so a callee-only leaf helper resolves it.
-    if ident and _has_function_body(node):
+    # Record a file so a callee-only leaf helper resolves it, preferring a
+    # body (the true definition) over a bare declaration but falling back to
+    # the declaration's own file when no body is ever seen in this TU (Codex
+    # review): a helper only *declared* here (e.g. a private header this TU
+    # includes) with its body compiled in a separate TU previously left
+    # callee_file empty, so a public function calling it through the Flow-2
+    # source_edges-only path could never be marked defined_in_project even
+    # though the declaration's own file is exactly the private-header
+    # provenance that marking needs. A body seen after an earlier
+    # declaration-only entry still upgrades it (the definition is the more
+    # authoritative location); a later declaration-only sighting never
+    # downgrades an already-recorded body.
+    if ident and (ident not in decl_files or _has_function_body(node)):
         decl_files[ident] = cur_file
     # Index this full declaration by clang's own per-node id so a later call
     # site's compact referencedDecl stub (which never carries mangledName,
@@ -340,7 +351,7 @@ def _walk_calls(
 def _fill_callee_files(
     edges: list[CallEdge], decl_files: dict[str, str]
 ) -> list[CallEdge]:
-    """Fill ``callee_file`` from the definition-file map (the callee's own FunctionDecl)."""
+    """Fill ``callee_file`` from the callee's own FunctionDecl file (body preferred, declaration-only as fallback)."""
     if not decl_files:
         return edges
     return [
@@ -370,11 +381,14 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     function (e.g. a global initializer) and unresolved callees are dropped.
     """
     edges: list[CallEdge] = []
-    # identity → file of its *definition* (a FunctionDecl with a body). Lets a leaf
-    # helper that only ever appears as a callee still resolve its source file: in
-    # clang JSON the call's ``referencedDecl`` usually carries no ``loc.file`` (the
-    # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
-    # this map after the walk, not from the reference node (Codex review).
+    # identity → file of its definition (preferred) or declaration (fallback,
+    # Codex review: a helper only *declared* in this TU -- e.g. a private
+    # header this TU includes, defined in a separately-compiled TU -- still
+    # needs a resolvable file). Lets a leaf helper that only ever appears as
+    # a callee still resolve its source file: in clang JSON the call's
+    # ``referencedDecl`` usually carries no ``loc.file`` (the location sits
+    # on the sibling FunctionDecl), so ``callee_file`` is filled from this
+    # map after the walk, not from the reference node (Codex review).
     decl_files: dict[str, str] = {}
     # clang AST node id -> mangled-or-bare identity, built from every full
     # FunctionDecl/CXXMethodDecl/... node seen, so a call site's compact
