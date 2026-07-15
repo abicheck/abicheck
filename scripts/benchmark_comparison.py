@@ -976,7 +976,7 @@ def _correct(verdict: str, expected: str) -> str:
     return "✅" if verdict == expected else "❌"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark abicheck vs abidiff vs ABICC")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                    help="Timeout per tool call for abicheck/abidiff(+headers) "
@@ -1017,7 +1017,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-frozen", action="store_true",
                    help="Don't merge in previously-frozen competitor data (default: merge "
                         "it in for any tool not actively selected this run).")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 # ── Helpers (module-level) ──────────────────────────────────────────────────
@@ -2361,13 +2361,18 @@ def _run_evidence_tiers(args: Any) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def main() -> None:
-    args = parse_args()
+def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]]:
+    """Run the selected tools across the selected cases and merge in frozen data.
 
-    if args.evidence_tiers:
-        _run_evidence_tiers(args)
-        return
+    Factored out of :func:`main` so other scripts (e.g.
+    ``generate_benchmark_report.py``) can drive a benchmark run programmatically
+    — via ``parse_args()`` for a compatible ``Namespace`` — without shelling out
+    to a subprocess or duplicating the case-discovery/freeze/merge sequence.
 
+    Returns ``(results, active_tools, selected_tools)``: ``active_tools`` may
+    include tools beyond ``selected_tools`` when frozen data was merged in for
+    a tool not actively run this session.
+    """
     REPORT_DIR.mkdir(exist_ok=True)
     BUILD_DIR.mkdir(exist_ok=True)
 
@@ -2400,6 +2405,18 @@ def main() -> None:
                 print(f"  Merged frozen results for: {', '.join(merged_tools)} "
                       f"(frozen at {frozen.get('frozen_at', '?')}, "
                       f"commit {frozen.get('git_commit', '?')[:12]})\n")
+
+    return results, active_tools, selected_tools
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.evidence_tiers:
+        _run_evidence_tiers(args)
+        return
+
+    results, active_tools, selected_tools = run_suite(args)
 
     # ── Accuracy summary ──────────────────────────────────────────────────────
     _print_accuracy_summary(results, active_tools, selected_tools)

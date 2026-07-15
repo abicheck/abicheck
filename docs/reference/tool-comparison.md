@@ -378,7 +378,7 @@ Two directions matter, not just one:
 
 ---
 
-## Full-catalog benchmark (2026-07-12, all 170 cases)
+## Full-catalog benchmark (2026-07-12, all 181 cases)
 
 Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
 misses** — a tool that hung, crashed, or simply has no mode for a case shape
@@ -387,13 +387,23 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
+> **Table pending regeneration.** The row numbers below are from the last full
+> run against a **170-case** catalog; 11 cases were added since
+> (`case171`–`case181`) without a rerun, so the Correct/Accuracy/FP/FN columns
+> are stale relative to the current catalog size in the heading above. Use
+> `scripts/generate_benchmark_report.py` (wraps the command below, adds a
+> reproducibility envelope and Markdown output) to regenerate this table on a
+> host with `castxml`, `abidiff`, and `abi-compliance-checker` installed, then
+> paste its Markdown output over the table; `--check` verifies the two stay in
+> sync going forward.
+
 ```bash
 python3 scripts/benchmark_comparison.py \
   --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
   --freeze abidiff abidiff_headers abicc_dumper abicc_xml
 ```
 
-| Tool | Correct / 170 | Accuracy | False positives | False negatives | Total time |
+| Tool | Correct / 170 (stale — see note above) | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
 | **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
 | **abicheck (L3-L5, +sources)** | 153 | 90.0% | 7 | 10 | 719s (~12 min) |

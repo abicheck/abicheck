@@ -282,6 +282,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   override the profile. First step of the ADR-040 plan to reduce `compare`'s
   flag surface from 79 toward the ADR-037 ~20 target.
 
+- **`scripts/generate_benchmark_report.py` — one reproducible benchmark
+  report, with a doc-drift check.** Wraps `scripts/benchmark_comparison.py`
+  into a single JSON + Markdown artifact stamped with the git commit,
+  `ground_truth.json` sha256, tool versions, exact case list, per-lane
+  accuracy/false-positive/false-negative/unsupported-error-timeout counts,
+  wall time, and process-tree peak RSS, plus per-lane cache-state (live run
+  vs. frozen-competitor provenance). `--check` diffs a freshly generated
+  report against the committed table in
+  `docs/reference/tool-comparison.md` and exits 1 on drift — this is the
+  fix for exactly the bug it caught on its first run: that table's
+  "Full-catalog benchmark" heading still said 170 cases after the catalog
+  grew to 181 (see above), and nothing had noticed.
+  `scripts/check_ai_readiness.py`'s `doc-count-sync` check now also pins
+  that heading's case count to `examples/ground_truth.json`.
+  `scripts/benchmark_comparison.py` gained a `run_suite(args)` entry point
+  (factored out of `main()`) so this and future tooling can drive a
+  benchmark run programmatically instead of shelling out.
+
 ### Fixed
 
 - **`case35_field_rename` reported `BREAKING` instead of `API_BREAK`.** A pure
@@ -315,7 +333,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   detector was dead code. Both mismatches are fixed (the second via a single
   batched demangle of the mangled name); the two hand-crafted unit tests
   that encoded the wrong symbol shape are corrected to match real detector
-  output.
+  output. Two further edge cases in the same detectors, found in review:
+  a DWARF struct-layout pure-rename could still misclassify a same-spelling
+  typedef whose resolved size or bit-field width changed as a bare rename
+  (now requires `byte_size`/`bit_offset`/`bit_size` equality, not just exact
+  type-name equality); and `_inline_accessors_for`'s demangled-name matching
+  missed every templated accessor (c++filt prefixes a return type only for
+  function templates/specializations) and mismatched conversion operators
+  and `operator new`/`operator delete` (whose own name contains a space
+  that isn't a return-type separator) — both are now handled by a shared
+  `_holder_of` helper.
 
 ### Documentation
 
