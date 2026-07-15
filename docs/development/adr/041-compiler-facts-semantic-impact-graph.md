@@ -839,13 +839,33 @@ leak back in as "common" under the second, unmarked entry for the same kind
 Codex review on the shipped PR caught the resulting gap: an unfixed version
 would silently drop a real `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` finding
 whenever a header-only baseline's verified-zero family gained its first edge).
-Fixed properly with `_HEADER_PASS_ALIAS` (`{"call_graph":
-"header_call_graph", "type_graph": "header_type_graph"}`) plus four small
-helpers (`_pass_ran`/`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) that each
-check *both* names within the *same*, single loop iteration per
-family — so a header-only graph's own confirmed-pass/narrowed/degraded markers
-are honored without ever double-counting a kind across two independent
-iterations, the exact failure mode the first attempt hit.
+Fixed with `_HEADER_PASS_ALIAS` (`{"call_graph": "header_call_graph",
+"type_graph": "header_type_graph"}`) plus small helpers
+(`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) that each check *both* names
+within the *same*, single loop iteration per family — so a header-only
+graph's own narrowed/degraded markers are honored without ever double-counting
+a kind across two independent iterations, the exact failure mode the first
+attempt hit.
+
+A second Codex review then caught a subtler asymmetry in that same fix's
+initial shape: it let a header-only pass's confirmation grant the *same*
+full-family widening credit a build-integrated pass's confirmation grants.
+That is unsound specifically for `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` — a
+header-only pass structurally cannot see a call/reference inside an
+out-of-line function body, so its "zero" for either kind is not evidence of a
+project-wide zero, only of "headers can't show this." Comparing a header-only
+baseline against a build-integrated candidate could then report
+`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` for a dependency that already existed
+via a call the baseline structurally could never have observed — a real false
+positive the moment collection "improves" from header-only to
+build-integrated. Fixed with `_pass_trusted_kinds`/
+`_HEADER_FULL_VISIBILITY_KINDS`: a header-only confirmation now only vouches
+for the three structural kinds (`DECL_HAS_TYPE`/`TYPE_HAS_FIELD_TYPE`/
+`TYPE_INHERITS`) it has true project-wide visibility of — never the whole
+family, and never the two body-dependent kinds, regardless of the *other*
+side's shape (even header-vs-header, which is arguably safe but adds a second
+axis of bookkeeping for one kind's marginal recall — not worth it against the
+simpler, strictly-safe rule).
 
 **Consumer:** `crosscheck.py`'s `public_to_internal_dependency` and
 `source_graph_findings.diff_source_graph_findings`'s
