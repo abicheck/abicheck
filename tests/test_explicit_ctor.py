@@ -459,3 +459,37 @@ class TestCtorOverloadAmbiguityRisk:
         assert not any(
             c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
         )
+
+    def test_class_name_containing_const_substring_not_corrupted(self) -> None:
+        """A class named e.g. `myconst` must not have "const" stripped out of
+        its own name by the CV-qualifier removal — that would turn its copy
+        constructor's normalized self-type from `myconst` into `my`, making
+        the copy ctor look like a converting overload and falsely flag
+        CTOR_OVERLOAD_AMBIGUITY_RISK (Codex review)."""
+        cls = RecordType(name="myconst", kind="class")
+        old = _snap_with_types(
+            "1.0",
+            [
+                _conv_ctor("myconst", "c1", "int"),
+                _conv_ctor("myconst", "copy", "const myconst &"),
+            ],
+            [cls],
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("myconst", "c1", "int"),
+                _conv_ctor("myconst", "copy", "const myconst &"),
+                _conv_ctor("myconst", "c2", "double"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        risk_changes = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
+        # Only the genuine new converting ctor (c2/double) should be flagged —
+        # the copy ctor must stay excluded as a self-type constructor, not
+        # miscounted as a second converting overload of its own.
+        assert len(risk_changes) == 1
+        assert "double" in (risk_changes[0].new_value or "")

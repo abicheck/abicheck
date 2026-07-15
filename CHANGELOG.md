@@ -101,6 +101,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`ctor_overload_ambiguity_risk`'s CV-qualifier stripping could corrupt a
+  class name that merely contains "const"/"volatile" as a substring** (e.g.
+  `myconst`), via blind `str.replace("const", "")`. A copy/move constructor's
+  self-type exclusion check then compared against the corrupted name, missed
+  the match, and miscounted the copy ctor as a second converting overload —
+  a spurious risk finding on an unrelated change. Now strips only whole-word
+  `const`/`volatile` tokens via a word-boundary regex
+  (`diff_symbols._CV_QUALIFIER_RE`) (Codex review).
+
 - **Vendored-wheel SONAME/install-name churn reported as spurious
   `SONAME_CHANGED`/`SONAME_BUMP_UNNECESSARY`/bundle-skew findings.**
   `auditwheel`/`delocate` rewrite a vendored library's own `DT_SONAME`/

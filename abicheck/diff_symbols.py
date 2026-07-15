@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import bisect
+import re
 from typing import Any
 
 from .checker_policy import ChangeKind
@@ -943,6 +944,13 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
+# Word-boundary-anchored so a class whose own name merely *contains* "const"/
+# "volatile" (e.g. ``myconst``) is not corrupted by the strip — a blind
+# substring .replace() previously turned ``myconst`` into ``my`` and made the
+# copy/move constructor look like a converting overload (Codex review).
+_CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
+
+
 def _converting_ctors_by_class(
     snap: AbiSnapshot, class_names: set[str]
 ) -> dict[str, dict[tuple[str, ...], Function]]:
@@ -987,11 +995,7 @@ def _converting_ctors_by_class(
         if len(required) > 1:
             continue
         arg_type = " ".join(
-            f.params[0]
-            .type.replace("const", "")
-            .replace("volatile", "")
-            .replace("&", "")
-            .split()
+            _CV_QUALIFIER_RE.sub("", f.params[0].type).replace("&", "").split()
         )
         if arg_type == f.name:
             continue
