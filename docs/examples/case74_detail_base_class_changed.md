@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case74_detail_base_class_changed/` |
+| **Known kind gap** | `internal_type_leaks_via_public_api` — verdict is correct; see note below |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -113,6 +114,10 @@ private:
   derived classes if pimpl is not used.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via type_size_changed/struct_field_offset_changed, but internal_type_leaks_via_public_api never fires — a real, root-caused detector gap shared with case75/case76 (same mechanism) and case77 (same root cause, different symptom). dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name/bases — the emitted symbol is the bare 'descriptor_base', not 'mylib::detail::descriptor_base' — so is_internal_type('descriptor_base') finds no 'detail' path segment and returns False, and the leak reachability walker never buckets this change as an internal-type leak. This is a castxml naming-path gap, not a fixture or reachability-logic problem.
 
 ## Source files
 

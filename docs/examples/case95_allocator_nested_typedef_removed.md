@@ -9,6 +9,7 @@
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed` |
 | **Source files** | `examples/case95_allocator_nested_typedef_removed/` |
+| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy escalated source break)
 
@@ -97,6 +98,10 @@ g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
   test coverage.
 
 ---
+
+## Ground-truth provenance
+
+**Policy note:** Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 — the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact.
 
 ## Source files
 

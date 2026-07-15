@@ -234,6 +234,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_size_changed": "L1",
     "type_field_offset_changed": "L1",
     "type_field_added": "L1",
+    # Same DWARF-layout evidence as type_field_added; distinguished only by
+    # severity (compatible append vs. breaking), not by evidence source.
     "type_field_added_compatible": "L1",
     "type_base_changed": "L1",
     # Fine-grained class-layout descriptor: a base subobject moving (e.g. an
@@ -272,6 +274,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_became_opaque": "L1",
     "func_virtual_added": "L1",
     "func_pure_virtual_added": "L1",
+    # Same is_virtual/is_pure_virtual DWARF comparison as func_pure_virtual_added
+    # (diff_types.py); only the old function's is_virtual value picks which of
+    # the two kinds fires, not the evidence source.
+    "func_virtual_became_pure": "L1",
     "used_reserved_field": "L1",
     # Build flags are recorded redundantly in debug info (DW_AT_producer /
     # .GCC.command.line), so a `-g` build exposes toolchain flag drift at L1 — a

@@ -9,6 +9,7 @@
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `func_removed`, `func_added`, `versioned_symbol_scheme_detected` |
 | **Source files** | `examples/case141_versioned_symbol_scheme/` |
+| **Known kind gap** | `versioned_symbol_scheme_detected` — verdict is correct; see note below |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -41,6 +42,10 @@ version-rename pairs as compatible and see the real delta.
 | …(6 symbols, all `_3`) | …(same 6, all `_4`) |
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed/func_added, but versioned_symbol_scheme_detected never fires here — a real, root-caused detector gap, not a fixture problem (6/6 symbols renamed is well above versioned_symbol_scheme.py's _MIN_PAIRS/_MIN_FRACTION thresholds for this exact ICU-style scheme). Root cause: these plain C functions (no extern "C") get pseudo-mangled by castxml as e.g. '_Z12mylib_init_3' even though they're C-linkage. _scheme_key() sees the '_Z' prefix and routes into the C++ inline-namespace-token path, which requires a token followed by '::' to match; these flat demangled names have no '::', so that path returns None and _scheme_key never falls back to the plain digit-collapse path that would correctly pair mylib_init_3 with mylib_init_4.
 
 ## Source files
 

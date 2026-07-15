@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_base_changed`, `type_vtable_changed`, `func_return_changed` |
 | **Source files** | `examples/case72_covariant_return_changed/` |
+| **Known kind gap** | `func_return_changed` — verdict is correct; see note below |
 
 **Category:** VTable / Inheritance | **Verdict:** BREAKING
 
@@ -127,6 +128,10 @@ hierarchies changed because the classof() chain encodes the exact hierarchy.
 - [KDE: Binary Compatibility — Do not add base classes](https://community.kde.org/Policies/Binary_Compatibility_Issues_With_C%2B%2B)
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** On the Linux lane (where the verdict itself is correct — see known_gap for the separate macOS verdict gap), func_return_changed IS computed for Circle::clone() (Circle* -> Drawable*) — proven by the surviving type_field_offset_changed change carrying affected_symbols referencing clone(). But it is then silently absorbed as 'redundant' by diff_filtering.py's _match_root_type, whose word-boundary regex matches the change's old_value text against every known root-type-change symbol name; here the return type text 'Circle*' coincidentally also names the unrelated root-type-change symbol (Circle::radius_'s own type_field_offset_changed), so the return-type finding is merged into that root and dropped from the emitted changes. A real, distinct finding is swallowed by an overly loose collapsing heuristic, not a fixture problem.
 
 ## Source files
 

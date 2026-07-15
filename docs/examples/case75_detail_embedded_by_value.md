@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case75_detail_embedded_by_value/` |
+| **Known kind gap** | `internal_type_leaks_via_public_api` — verdict is correct; see note below |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -116,6 +117,10 @@ private:
   internal detail struct can grow across releases without ABI impact.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via struct_size_changed/type_field_added_compatible, but internal_type_leaks_via_public_api never fires — same root cause as case74/case76: dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name, so the emitted symbol is the bare 'table_impl' rather than 'mylib::detail::table_impl'; is_internal_type('table_impl') finds no 'detail' path segment and returns False. This is a castxml naming-path gap, not a fixture problem.
 
 ## Source files
 

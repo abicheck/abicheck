@@ -573,6 +573,12 @@ def build_matrix(
     kind_mismatch_cases = sorted(
         row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"
     )
+    # Separate from kind_mismatch_cases: these have already been triaged (root
+    # cause identified and recorded in ground_truth.json's known_kind_gap/
+    # known_kind_gap_note) rather than being an unexplained backlog item.
+    documented_kind_gap_cases = sorted(
+        row["case_id"] for row in rows if row.get("kinds_strict") == "documented-mismatch"
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/collect_full_example_matrix.py",
@@ -593,6 +599,10 @@ def build_matrix(
         # the verdict without producing the calibrated ChangeKind. Triage
         # target for known_detector_gap entries.
         "kind_mismatch_cases": kind_mismatch_cases,
+        # Already root-caused (ground_truth.json's known_kind_gap/
+        # known_kind_gap_note) — a triaged, tracked detector gap, not an
+        # untriaged item on the kind_mismatch_cases backlog above.
+        "documented_kind_gap_cases": documented_kind_gap_cases,
         "results": rows,
     }
 

@@ -9,6 +9,7 @@
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `func_visibility_changed` |
 | **Source files** | `examples/case06_visibility/` |
+| **Known kind gap** | `func_visibility_changed` — verdict is correct; see note below |
 
 **Category:** Visibility | **Verdict:** 🔴 BREAKING (bad practice)
 
@@ -145,6 +146,10 @@ is correctly non-blocking today (see `examples/README.md`'s "Known
 validation gaps").
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct, but internal_helper's default→hidden visibility change is currently reported as func_removed instead of func_visibility_changed — a real, root-caused detector gap, not a fixture or metadata problem. Root cause: this repository's dump/validate harnesses never pass `--lang c`, so castxml parses bad.c/good.c under the CLI's `--lang` default of c++ (see cli_options.py LANG_DEFAULT), giving internal_helper a spurious Itanium-mangled `mangled` field (e.g. `_Z15internal_helper`) instead of its real plain-C exported symbol name. In v1, internal_helper is still exported, so the ELF/DWARF merge reconciles that mangled field back to the real symbol name; in v2, hidden visibility means it never reaches .dynsym, so nothing corrects the header-only castxml-derived mangled name. `_check_removed_function` (diff_symbols.py) then looks up v1's real symbol name in v2's function map and finds no match under that key (v2 only has the wrong mangled key), so it falls through to the FUNC_REMOVED branch instead of finding the hidden-visibility counterpart and emitting FUNC_VISIBILITY_CHANGED. Fixing this needs a C-language-aware castxml invocation for C fixtures (or an ELF-symbol-name-first merge key), not a fixture or metadata change.
 
 ## Source files
 

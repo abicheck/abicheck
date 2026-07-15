@@ -936,7 +936,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "func_pure_virtual_added",
-      "examples": "case23_pure_virtual_added"
+      "examples": ""
     },
     {
       "kind": "func_ref_qual_changed",
@@ -1015,9 +1015,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "func_virtual_became_pure",
-      "examples": ""
+      "examples": "case23_pure_virtual_added"
     },
     {
       "kind": "func_virtual_removed",
@@ -1260,7 +1260,7 @@
       "severity": "error",
       "min_evidence": "L2",
       "doc_slug": "internal_type_leaks_via_public_api",
-      "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed,case80_pimpl_shared_to_unique"
+      "examples": "case74_detail_base_class_changed,case75_detail_embedded_by_value,case76_detail_pimpl_vtable_changed"
     },
     {
       "kind": "interpreter_changed",
@@ -2295,7 +2295,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "struct_size_changed",
-      "examples": "case121_kernel_btf_struct_field_added"
+      "examples": "case121_kernel_btf_struct_field_added,case126_sycl_device_impl_ptr,case80_pimpl_shared_to_unique"
     },
     {
       "kind": "sycl_backend_driver_req_changed",
@@ -2826,7 +2826,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case126_sycl_device_impl_ptr,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case94_empty_tag_gained_state"
+      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_visibility_changed",
@@ -2853,7 +2853,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "typedef_base_changed",
-      "examples": "case73_typedef_underlying_changed"
+      "examples": "case73_typedef_underlying_changed,case80_pimpl_shared_to_unique"
     },
     {
       "kind": "typedef_removed",

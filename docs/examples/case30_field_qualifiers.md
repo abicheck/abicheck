@@ -9,6 +9,7 @@
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `type_field_type_changed` |
 | **Source files** | `examples/case30_field_qualifiers/` |
+| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
 
@@ -142,6 +143,10 @@ echo "exit: $?"
 - [C volatile semantics in systems code (WG14 N2148 discussion)](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n2148.htm)
 
 ---
+
+## Ground-truth provenance
+
+**Policy note:** By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral — size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible.
 
 ## Source files
 

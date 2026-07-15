@@ -9,6 +9,7 @@
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `default_template_arg_changed` |
 | **Source files** | `examples/case87_default_template_arg_changed/` |
+| **Known kind gap** | `default_template_arg_changed` — verdict is correct; see note below |
 
 **Category:** Template ABI | **Verdict:** BREAKING
 
@@ -90,6 +91,10 @@ Any change to the default for `Method`, `Task`, or `Distance` re-mangles
 every explicit instantiation that didn't override that argument.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed/type_removed on the re-mangled instantiation, but default_template_arg_changed never fires — a real, root-caused detector gap. detect_default_template_arg_changed requires _extract_template_args(fn.name) to find <...> template args embedded in the removed function's demangled name, but no dumper backend ever populates Function.name that way: the header/castxml backend sets .name from the bare AST method name (no template args), and the pure-ELF/DWARF path leaves .name equal to the raw mangled symbol (no demangling). old_args is therefore always None and the correlation loop never emits, regardless of the fixture.
 
 ## Source files
 

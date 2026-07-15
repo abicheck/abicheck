@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case76_detail_pimpl_vtable_changed/` |
+| **Known kind gap** | `internal_type_leaks_via_public_api` — verdict is correct; see note below |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -136,6 +137,10 @@ If polymorphism must remain part of the public surface, only ever
   virtual-method insertion.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** On the Linux lane (where the verdict itself is correct — see known_gap below for the separate macOS/Windows verdict gap), the overall verdict is correct via type_vtable_changed/vtable_slot_count_changed, but internal_type_leaks_via_public_api never fires — same root cause as case74/case75: dumper_castxml.py's _build_record_type never namespace-qualifies RecordType.name, so the emitted symbol is the bare 'algorithm_iface' rather than 'mylib::detail::algorithm_iface'; is_internal_type('algorithm_iface') finds no 'detail' path segment and returns False. This is a castxml naming-path gap, not a fixture problem.
 
 ## Source files
 

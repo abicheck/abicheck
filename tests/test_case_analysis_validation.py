@@ -252,6 +252,74 @@ class TestVerdictCategoryAlignment:
 
 
 # ---------------------------------------------------------------------------
+# 4b. Fact (underlying_fact) vs. policy (expected) alignment
+#
+# A case's `expected` verdict is a default-policy severity, not necessarily
+# the underlying compatibility fact — some cases (case30, case95, case109)
+# deliberately escalate a recompile-only API_BREAK to release-blocking
+# BREAKING via policy (see `policy_note`). Confusing the two produced a real
+# bug: case30 previously had `abi_break: true` even though its own
+# `policy_note` said the binary layout was unchanged. `underlying_fact` makes
+# the fact a first-class, machine-checked field wherever it diverges from
+# `expected`, instead of leaving the distinction only in prose.
+# ---------------------------------------------------------------------------
+
+
+class TestUnderlyingFactAlignment:
+    """Every policy-escalated case must declare underlying_fact consistently."""
+
+    def test_policy_note_cases_declare_underlying_fact(self, verdicts: dict) -> None:
+        """A case with a policy_note is precisely one where fact and policy
+        diverge, so it must say what the fact actually is."""
+        missing = [
+            case_name
+            for case_name, meta in verdicts.items()
+            if meta.get("policy_note") and not meta.get("underlying_fact")
+        ]
+        assert not missing, (
+            f"cases with policy_note but no underlying_fact: {missing}"
+        )
+
+    def test_underlying_fact_matches_break_flags(self, verdicts: dict) -> None:
+        """underlying_fact must agree with abi_break/api_break, the same way
+        `expected` does for an unescalated case (see VERDICT_TO_CATEGORIES)."""
+        violations = []
+        for case_name, meta in verdicts.items():
+            fact = meta.get("underlying_fact")
+            if fact is None:
+                continue
+            abi_break, api_break = meta["abi_break"], meta["api_break"]
+            if fact == "BREAKING":
+                if not abi_break:
+                    violations.append(case_name)
+            elif fact == "API_BREAK":
+                if abi_break or not api_break:
+                    violations.append(case_name)
+            elif fact == "COMPATIBLE":
+                if abi_break or api_break:
+                    violations.append(case_name)
+            else:
+                violations.append(case_name)
+        assert not violations, (
+            f"underlying_fact disagrees with abi_break/api_break flags: {violations}"
+        )
+
+    def test_underlying_fact_actually_diverges_from_expected(
+        self, verdicts: dict
+    ) -> None:
+        """If underlying_fact == expected, the case isn't policy-escalated and
+        the field (plus its policy_note) is redundant — drop it instead."""
+        redundant = [
+            case_name
+            for case_name, meta in verdicts.items()
+            if meta.get("underlying_fact") == meta.get("expected")
+        ]
+        assert not redundant, (
+            f"underlying_fact matches expected (not actually escalated): {redundant}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 5. Registry ↔ expected_kinds verdict alignment
 # ---------------------------------------------------------------------------
 

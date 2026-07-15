@@ -1373,7 +1373,17 @@ def _kinds_strict_signal(
         parts.append(f"expected_kinds missing: {missing}")
     if unexpected:
         parts.append(f"expected_absent_kinds present: {unexpected}")
-    return "mismatch", "; ".join(parts)
+    detail = "; ".join(parts)
+    # A case whose *entire* missing set is exactly the one kind ground_truth.json
+    # already root-caused as a known, triaged detector gap (known_kind_gap) is
+    # not a fresh, unexplained regression — it's the same documented gap firing
+    # again. Only the exact declared kind qualifies: a *different* or *additional*
+    # missing/unexpected kind on the same case is still a real "mismatch" so a
+    # new regression can't hide behind an old case's known_kind_gap note.
+    known_kind_gap = entry.get("known_kind_gap")
+    if known_kind_gap and missing == [known_kind_gap] and not unexpected:
+        return "documented-mismatch", detail
+    return "mismatch", detail
 
 
 def _category_strict_signal(

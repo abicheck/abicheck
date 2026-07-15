@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_became_const` |
 | **Source files** | `examples/case39_var_const/` |
+| **Known kind gap** | `var_became_const` — verdict is correct; see note below |
 
 **Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING (runtime) / NO_CHANGE in headers-only abicheck
 
@@ -122,6 +123,10 @@ Without `-H`, ELF-only mode may miss source-level type qualifiers on globals.
 - [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via var_type_changed/var_removed, but var_became_const never fires — a real, root-caused detector gap. _check_variable (diff_symbols.py) compares canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type) before checking is_const, and returns early with VAR_TYPE_CHANGED whenever the type strings differ. Both the DWARF and castxml type-name resolvers bake the const qualifier directly into the type string (e.g. 'int' vs 'const int'), and canonicalize_type_name only reorders qualifiers, never strips them, so a pure const-only flip always differs textually and always hits the earlier VAR_TYPE_CHANGED branch first — the VAR_BECAME_CONST branch is structurally unreachable as written, not a fixture problem.
 
 ## Source files
 

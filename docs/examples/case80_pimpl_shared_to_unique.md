@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
+| **Detected `ChangeKind`s** | `typedef_base_changed`, `struct_size_changed` |
 | **Source files** | `examples/case80_pimpl_shared_to_unique/` |
 
 **Category:** Pimpl ABI | **Verdict:** BREAKING
@@ -61,12 +61,17 @@ cp /tmp/abicheck-examples-build/case80_pimpl_shared_to_unique/libv2.so "$tmp/lib
 
 ## Why abicheck catches it
 
-The existing `type_field_type_changed` detector fires on `descriptor::impl_`
-(old type `std::shared_ptr<detail::descriptor_impl>`, new type
-`std::unique_ptr<detail::descriptor_impl>`). The `internal_type_leaks_via_public_api`
-overlay (from PR #238) then escalates it because the new field type
-references the same `detail::` namespace that the leak detector already
-tracks as internal.
+`impl_`'s *declared* spelling (`detail::pimpl<detail::descriptor_impl>`) is
+textually identical in both snapshots — only the `using pimpl = ...` alias
+target changes — so `type_field_type_changed` never actually fires on
+`impl_` itself; an earlier version of this note claimed otherwise. The real,
+portable signal is the alias-target flip: `typedef_base_changed` fires on
+`pimpl` (`shared_ptr<T>` → `unique_ptr<T>`), and the resulting
+`struct_size_changed` on the public `descriptor` struct (refcount/deleter
+bookkeeping differs between the two smart pointers) confirms it reaches the
+public ABI surface. `internal_type_leaks_via_public_api` does not apply
+here: no *internal* type's own layout changes — `descriptor_impl` itself is
+untouched, only which smart pointer wraps it changes.
 
 ## Code diff
 

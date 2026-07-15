@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_language_linkage_changed` |
 | **Source files** | `examples/case66_language_linkage_changed/` |
+| **Known kind gap** | `func_language_linkage_changed` — verdict is correct; see note below |
 
 **Category:** Function ABI | **Verdict:** BREAKING
 
@@ -116,6 +117,10 @@ rather than a simple removal + addition.
 - [Itanium C++ ABI — Name Mangling](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed_elf_only/func_visibility_changed, but func_language_linkage_changed never fires — a real, root-caused detector gap. _match_old_function has a purpose-built extern-C fallback pairing path keyed on Function.is_extern_c, and _check_linkage_change exists to catch exactly this. But castxml's `--castxml-output=1` XML never emits an extern="1" attribute for extern "C" functions, so dumper_castxml.py's is_extern_c detection stays False on both sides regardless of the real linkage; and dump skips the DWARF-derived function set (whose is_extern_c is correctly derived from the mangled-name prefix) whenever headers are supplied, so that correct signal never reaches the merged snapshot either. The fallback pairing and linkage check therefore never trigger, and the pair falls apart into a removal + a visibility change instead. This is a castxml-integration gap, not a fixture problem.
 
 ## Source files
 

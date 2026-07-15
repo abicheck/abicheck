@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `instantiation_missing_from_binary` |
 | **Source files** | `examples/case79_missing_template_instantiation/` |
+| **Known kind gap** | `instantiation_missing_from_binary` — verdict is correct; see note below |
 
 **Category:** Header-vs-binary parity | **Verdict:** BREAKING
 
@@ -85,6 +86,10 @@ advertises. case79 reproduces this failure with a minimal two-instantiation
 example.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed_elf_only/func_visibility_changed, but instantiation_missing_from_binary never fires — a real, root-caused detector gap in the same family as case87's default_template_arg_changed gap. detect_missing_instantiations (diff_templates.py) requires _looks_like_template_instantiation(fn.name) to find a top-level '<' in the function's declared name, but the header/castxml dumper populates Function.name from the bare AST method name only (e.g. 'threshold', never 'descriptor<float>::threshold') — confirmed live: dumping this exact fixture's v1.so with headers shows every descriptor<float>/descriptor<double> member with a plain, template-arg-free .name. The check can never match, regardless of the fixture.
 
 ## Source files
 
