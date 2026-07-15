@@ -213,11 +213,14 @@ into an authoritative baseline.
 Merges a Flow-2 `abicheck_inputs/` pack's many per-TU `source_facts/*.jsonl`
 files into one, optionally gzip-compressed (ADR-038 C.9). A post-build size/
 transfer optimization; never changes the decoded facts a later `merge`/
-`inputs validate` sees.
+`inputs validate` sees. A malformed or unreadable source-fact file anywhere
+in the pack skips compaction entirely (no partial merge published) rather
+than risk duplicating TUs on the next scan — the pack is left unchanged.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success |
+| `1` | Compaction skipped — a lossy read (see the printed notes); pack unchanged |
 | `64` | `PACK` is not a readable Flow-2 pack (usage error) |
 
 ---

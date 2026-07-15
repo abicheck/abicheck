@@ -130,6 +130,34 @@ def test_init_inputs_pack_is_idempotent(tmp_path: Path) -> None:
     assert m2.created_by == "abicheck-cc"
 
 
+def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
+    # A directory with a manifest.json for a different pack kind (e.g. a
+    # BuildSourcePack) must be rejected, not silently accepted -- this is
+    # the very first point of contact for a build's pack, so silently
+    # accepting it would let every subsequent append_source_facts() call
+    # write source_facts/*.jsonl into that unrelated directory (CodeRabbit
+    # review, P2).
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
+    with pytest.raises(ValueError, match="does not declare kind"):
+        init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+
+
+def test_init_inputs_pack_recovers_from_truly_malformed_manifest(
+    tmp_path: Path,
+) -> None:
+    # A manifest left partial by a non-atomic writer (our own writes are
+    # atomic) is genuinely malformed JSON, not a different pack -- this
+    # case must still re-initialize rather than raise (the original
+    # defensive behavior this fix must not regress).
+    pack = tmp_path / "abicheck_inputs"
+    pack.mkdir()
+    (pack / "manifest.json").write_text('{"kind": "abicheck_inputs", "library":')
+    manifest = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    assert manifest.library == "libfoo.so"
+
+
 def test_facts_filename_deterministic_and_collision_resistant() -> None:
     assert facts_filename("src/foo.cpp") == facts_filename("src/foo.cpp")
     # Same basename, different dir → different file.
@@ -430,10 +458,16 @@ def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> No
     assert names == {"foo", "bar", "baz"}  # foo/bar survive, not dropped
 
 
-def test_compact_preserves_originals_on_lossy_read(tmp_path: Path) -> None:
+def test_compact_skips_entirely_on_lossy_read(tmp_path: Path) -> None:
     # A malformed sibling source-fact file makes this compaction "lossy"
-    # (read_source_fact_files reports a diagnostic for it); every original
-    # must survive so the raw evidence isn't deleted (CodeRabbit review, P2).
+    # (read_source_fact_files reports a diagnostic for it). Publishing a
+    # best-effort merge here anyway -- while leaving the good original
+    # untouched too -- would duplicate that TU on the next scan (the merged
+    # file now also carries a copy of the record the untouched original
+    # still provides): reproduced empirically as tu_count == 2 for a single
+    # TU and a duplicate-tu_id error from `inputs validate` (CodeRabbit
+    # review, P2). Compaction must skip entirely instead: no merged file,
+    # pack left byte-for-byte unchanged.
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     append_source_facts(
@@ -444,17 +478,19 @@ def test_compact_preserves_originals_on_lossy_read(tmp_path: Path) -> None:
     )
 
     diagnostics: list[str] = []
-    compact_inputs_pack(pack, diagnostics=diagnostics)
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is None
 
     remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
-    assert "bad.jsonl" in remaining  # not deleted despite the lossy read
-    assert len(remaining) == 3  # good original + bad original + merged output
-    assert any("kept, not deleted" in d for d in diagnostics)
+    assert remaining == sorted(["bad.jsonl", facts_filename("src/foo.cpp")])  # unchanged
+    assert any("compaction was skipped entirely" in d for d in diagnostics)
 
-    # The good TU's facts still made it into the best-effort compacted output.
+    # The good TU's facts are still readable directly (no merge happened,
+    # nothing was duplicated).
     ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
     names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
-    assert "foo" in names
+    assert names == {"foo"}
 
 
 def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(

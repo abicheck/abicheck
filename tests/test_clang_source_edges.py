@@ -179,3 +179,5 @@ def test_build_source_edges_both_parsers_fail_yields_two_diagnostics(
     edges = build_source_edges(_tu(), diags)
     assert edges == []
     assert len(diags) == 2
+    assert diags[0].startswith("source_edges unavailable: call parser failed:")
+    assert diags[1].startswith("source_edges unavailable: type parser failed:")

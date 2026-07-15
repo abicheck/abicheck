@@ -48,6 +48,7 @@ from __future__ import annotations
 import datetime as _dt
 import gzip
 import json
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -411,7 +412,13 @@ def read_source_fact_files(
     for path in paths:
         try:
             text = _read_text_maybe_gz(path)
-        except OSError as exc:
+        # A truncated/corrupt .gz raises EOFError or zlib.error (decompression
+        # failures), neither an OSError subclass; invalid-UTF-8 bytes (plain
+        # or decompressed) raise UnicodeDecodeError, a ValueError subclass.
+        # Each previously escaped this handler and aborted the whole read
+        # pass instead of degrading to a per-file diagnostic like every other
+        # malformed-input case here (CodeRabbit review, P2).
+        except (OSError, EOFError, zlib.error, UnicodeDecodeError) as exc:
             sink.append(f"{path.name}: could not read/decompress ({exc})")
             continue
         tus.extend(_parse_tu_records(text, path.name, sink))

@@ -45,6 +45,7 @@ from pathlib import Path
 
 from .inputs_pack import (
     DEFAULT_COMPILE_DB_REL,
+    INPUTS_KIND,
     INPUTS_MANIFEST_NAME,
     SOURCE_FACTS_DIR,
     InputsManifest,
@@ -111,16 +112,40 @@ def init_inputs_pack(
 
     Idempotent: if a manifest already exists it is loaded and returned unchanged,
     so repeated per-TU wrapper invocations share one pack without clobbering it.
+
+    Raises ``ValueError`` if an existing manifest.json does not declare
+    ``kind: abicheck_inputs`` — e.g. a :class:`~.pack.BuildSourcePack`
+    directory a build was mistakenly pointed at. Silently accepting it (the
+    same forward-compat ``kind`` default :func:`InputsManifest.from_dict`
+    applies elsewhere) would let every subsequent :func:`append_source_facts`
+    call for this build write ``source_facts/*.jsonl`` into that unrelated
+    directory (CodeRabbit review, P2) — this is the very first point of
+    contact for a build's pack, so the check matters more here than anywhere
+    downstream.
     """
     root = Path(root)
     (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
     mpath = root / INPUTS_MANIFEST_NAME
     if mpath.is_file():
-        # Defensive: a manifest left partial by a non-atomic writer on an old pack
-        # (our writes are atomic) re-initializes rather than raising and losing
-        # this TU's facts.
-        with contextlib.suppress(ValueError, OSError):
-            return InputsManifest.from_dict(json.loads(mpath.read_text(encoding="utf-8")))
+        try:
+            data = json.loads(mpath.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            data = None
+        if isinstance(data, dict):
+            if data.get("kind") != INPUTS_KIND:
+                # A syntactically valid manifest naming a different (or no)
+                # kind names a real, different pack (e.g. a BuildSourcePack
+                # directory a build was mistakenly pointed at) -- not a
+                # "malformed" one, so it is not swallowed the way the
+                # fallback below swallows a truncated/corrupted manifest.
+                raise ValueError(
+                    f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
+                    "Flow-2 abicheck_inputs pack."
+                )
+            return InputsManifest.from_dict(data)
+        # Defensive: a manifest left partial/malformed by a non-atomic writer
+        # on an old pack (our writes are atomic) re-initializes rather than
+        # raising and losing this TU's facts.
     manifest = InputsManifest(
         library=library, version=version, created_by=created_by, created_at=_now()
     )
@@ -240,7 +265,7 @@ def compact_inputs_pack(
     compress: bool = False,
     remove_originals: bool = True,
     diagnostics: list[str] | None = None,
-) -> Path:
+) -> Path | None:
     """Merge a pack's many per-TU ``source_facts/*.jsonl`` files into one (P1 #21).
 
     The race-free incremental writer (:func:`append_source_facts`, fed by
@@ -272,17 +297,25 @@ def compact_inputs_pack(
     previous compaction's write can no longer flip the outcome (Codex
     review, P2 — both findings, the second reproduced empirically). And a
     read that produces new diagnostics (a malformed/unreadable original)
-    still writes the merged output best-effort, but leaves *every* original
-    in place rather than deleting evidence of a lossy compaction (CodeRabbit
-    review, P2) — check *diagnostics* after the call.
+    does **not** write or publish anything and returns ``None`` — check
+    *diagnostics* to find out why. Publishing a best-effort merged file
+    anyway, while leaving the lossy/malformed originals in place too (the
+    previous behavior), let a single malformed sibling silently duplicate
+    every successfully-read TU on the next ingest: the default directory
+    scan sees both the untouched originals and their copies now baked into
+    the merged file (CodeRabbit review, P2 — reproduced empirically: a pack
+    with one malformed ``source_facts`` file reported ``tu_count == 2`` for
+    a single TU, and ``inputs validate`` flagged a duplicate ``tu_id``
+    error). A lossy compaction therefore leaves the pack byte-for-byte
+    unchanged — safe to retry once the offending file is fixed or removed.
 
     *remove_originals* deletes the per-TU files that were merged once the
-    merged file is written (skipped when the read above was lossy, see
-    above), so a later ingest cannot double-count TUs by reading both the
-    merged file and its stale sources. A manifest that names explicit
-    ``source_facts`` entries is repointed at the single merged file; the
-    default (auto-scan of ``source_facts/``) needs no manifest change — the
-    new file already lives where the scan looks.
+    merged file is written (skipped entirely on a lossy read, see above), so
+    a later ingest cannot double-count TUs by reading both the merged file
+    and its stale sources. A manifest that names explicit ``source_facts``
+    entries is repointed at the single merged file; the default (auto-scan
+    of ``source_facts/``) needs no manifest change — the new file already
+    lives where the scan looks.
     """
     _reject_escaping_filename(output_filename)
     root = Path(root)
@@ -345,6 +378,21 @@ def compact_inputs_pack(
     fresh_by_id, fresh_no_id = _last_record_wins(fresh_only)
     lossy_read = len(sink) > before_diag_count
 
+    if lossy_read:
+        # Publishing a best-effort merge here (while leaving the malformed
+        # original in place too, for inspection) would duplicate every
+        # successfully-read TU on the next scan: the merged file now also
+        # carries copies of records the untouched good originals still
+        # provide (CodeRabbit review, P2 -- reproduced empirically). Fail
+        # closed instead: no write, no manifest update, pack unchanged.
+        sink.append(
+            "compaction read produced new diagnostics (a malformed/unreadable "
+            "original); compaction was skipped entirely (no merged file "
+            "written, pack left unchanged) so the raw evidence survives and "
+            "a retry cannot double-count TUs"
+        )
+        return None
+
     tus = (
         [tu for tid, tu in prior_by_id.items() if tid not in fresh_by_id]
         + prior_no_id
@@ -370,13 +418,7 @@ def compact_inputs_pack(
             os.unlink(tmp)
         raise
 
-    if lossy_read:
-        sink.append(
-            "compaction read produced new diagnostics (a malformed/unreadable "
-            "original); originals were kept, not deleted, so the raw evidence "
-            "survives for inspection"
-        )
-    elif remove_originals:
+    if remove_originals:
         for f in fresh_files:
             with contextlib.suppress(OSError):
                 f.unlink()

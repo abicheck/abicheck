@@ -22,6 +22,7 @@ non-executing fixture pattern.
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 
@@ -390,6 +391,43 @@ def test_read_source_facts_skips_malformed_lines(tmp_path: Path) -> None:
     # The good record still ingests; the junk line is dropped, not fatal.
     tus = read_source_facts(pack)
     assert len(tus) == 1
+
+
+def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    # UnicodeDecodeError is a ValueError subclass, not an OSError -- it
+    # previously escaped read_source_fact_files's `except OSError` and
+    # aborted the whole read pass instead of degrading to a per-file
+    # diagnostic like every other malformed-input case (CodeRabbit review,
+    # P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    (pack / "source_facts" / "bad.jsonl").write_bytes(b"\xff\xfe{\"tu_id\":1}")
+    diags: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diags)
+    assert len(tus) == 1  # the good record still ingests
+    assert any("could not read/decompress" in d for d in diags)
+
+
+def test_read_source_facts_degrades_on_corrupt_gzip_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    # A truncated/corrupt .gz raises EOFError or zlib.error during
+    # decompression -- neither an OSError subclass -- which previously
+    # escaped the same handler and crashed the read (CodeRabbit review, P2).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    good = pack / "source_facts" / "good.jsonl.gz"
+    with gzip.open(good, "wb") as fh:
+        fh.write(b'{"tu_id": "cu://src/bar.cpp"}\n')
+    truncated = pack / "source_facts" / "truncated.jsonl.gz"
+    truncated.write_bytes(good.read_bytes()[:5])  # valid header, no body
+    corrupt = pack / "source_facts" / "corrupt.jsonl.gz"
+    corrupt.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data")
+
+    diags: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diags)
+    assert len(tus) == 2  # foo (original) + bar (good.jsonl.gz) still ingest
+    assert sum("could not read/decompress" in d for d in diags) == 2
 
 
 def test_read_source_facts_threads_diagnostics_sink(tmp_path: Path) -> None:

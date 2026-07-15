@@ -116,6 +116,26 @@ def test_compact_bad_path_exits_usage_error(tmp_path: Path) -> None:
     assert result.exit_code == 64, result.output
 
 
+def test_compact_lossy_read_exits_one_and_leaves_pack_unchanged(
+    tmp_path: Path,
+) -> None:
+    # A malformed sibling source-fact file makes the read lossy; compaction
+    # must skip entirely (no partial merge published) rather than risk
+    # duplicating TUs on the next scan (CodeRabbit review, P2).
+    pack = _pack_with_two_tus(tmp_path)
+    (pack / "source_facts" / "bad.jsonl").write_text(
+        "{not valid json\n", encoding="utf-8"
+    )
+    before = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+
+    result = CliRunner().invoke(main, ["inputs", "compact", str(pack)])
+    assert result.exit_code == 1, result.output
+    assert "skipped" in result.output.lower()
+
+    after = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert after == before  # pack left unchanged
+
+
 def test_compact_wrong_kind_manifest_exits_usage_error(tmp_path: Path) -> None:
     # A directory with a manifest.json for a different pack kind (e.g. a
     # BuildSourcePack) must be rejected, not silently treated as a Flow-2

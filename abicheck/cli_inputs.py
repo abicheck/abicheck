@@ -155,10 +155,15 @@ def compact_cmd(
     pack. Re-serializes every discovered TU through the same canonical JSON
     form the writers already use, so a later ``merge``/``inputs validate``
     decodes the exact same facts either way (ADR-038 C.9 execution-policy
-    invariance) — only the on-disk file count/size changes.
+    invariance) — only the on-disk file count/size changes. A malformed or
+    unreadable source-fact file anywhere in the pack skips compaction
+    entirely rather than publishing a partial merge (see the *notes* this
+    prints) — the pack is left byte-for-byte unchanged, safe to retry once
+    fixed.
 
     \b
-    Exit codes: 0 success, 64 PACK is not a readable Flow-2 pack.
+    Exit codes: 0 success, 1 compaction skipped (a lossy read — see notes),
+    64 PACK is not a readable Flow-2 pack.
     """
     from .buildsource.inputs_emit import compact_inputs_pack
     from .buildsource.inputs_pack import load_inputs_manifest
@@ -179,6 +184,11 @@ def compact_cmd(
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
+    if out is None:
+        click.echo("Compaction skipped: pack left unchanged.")
+        for diag in diagnostics:
+            click.echo(f"  note: {diag}")
+        sys.exit(1)
     click.echo(f"Compacted source facts written to {out}")
     for diag in diagnostics:
         click.echo(f"  note: {diag}")
