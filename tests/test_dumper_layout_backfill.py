@@ -422,6 +422,29 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
+    def test_anonymous_aggregate_flag_does_not_trust_unrelated_polymorphic_type(
+        self,
+    ) -> None:
+        """Regression (Codex review): has_anonymous_aggregate_fields alone
+        doesn't vouch for the *specific* unique suffix-matched candidate — an
+        unrelated `impl::Foo` that is fieldless and baseless but polymorphic
+        (virtual methods only) would otherwise pass every check and hand its
+        real vtable/size over to the public anonymous-aggregate type. DWARF's
+        builder (unlike the header parser) does populate `vtable` for a truly
+        polymorphic type, so a non-empty dwarf.vtable here must still block
+        the match."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
+            has_anonymous_aggregate_fields=True,
+        )
+        unrelated = RecordType(
+            name="impl::Foo", kind="class", size_bits=64, fields=[],
+            vtable=["_ZN4impl3Foo1fEv"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
     def test_union_vs_struct_kind_mismatch_is_never_guessed(self) -> None:
         """Regression (Codex review): a struct and a union can share a bare
         name and even a field name while having fundamentally different

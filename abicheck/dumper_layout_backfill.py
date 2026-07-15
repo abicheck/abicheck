@@ -181,7 +181,13 @@ def backfill_dwarf_layout(
     which is a real, common C pattern, not a hypothetical. The exception is
     keyed off that dedicated flag rather than field non-emptiness alone, so
     an *ordinary* struct with real (non-anonymous) fields whose DWARF
-    counterpart happens to be absent doesn't get the same free pass.
+    counterpart happens to be absent doesn't get the same free pass. The
+    flag only vouches for the *header* side, though — it says nothing about
+    whether the specific unique suffix-matched DWARF candidate is really
+    the same declaration, so a non-empty ``dwarf.vtable`` (an unrelated,
+    fieldless-but-polymorphic type) still blocks the match even with the
+    flag set (Codex review): DWARF, unlike the header parser, does
+    populate ``vtable`` for a genuinely polymorphic type.
 
     The reverse — an empty *header* type matched against a DWARF candidate
     that DOES have fields — gets no such exception (Codex review): a header
@@ -297,7 +303,21 @@ def backfill_dwarf_layout(
         # "Foo", DWARF emits "api::Foo") would otherwise be permanently
         # layout-blind, defeating the point of that exception for exactly
         # the common namespaced case it exists for (Codex review).
-        return header.has_anonymous_aggregate_fields
+        #
+        # That flag alone still doesn't vouch for *this particular* unique
+        # candidate, though (Codex review, fresh evidence): an unrelated
+        # ``impl::Foo`` that is fieldless and baseless but *polymorphic*
+        # (virtual methods only, no data) would pass every check so far and
+        # hand over its real vtable/size onto the public anonymous-aggregate
+        # type. Unlike the header side, DWARF's own builder does populate
+        # ``vtable`` for a genuinely polymorphic type, so requiring it to be
+        # empty here closes that specific over-trust: the only match this
+        # still can't rule out is a *fully* trivial unrelated type (no
+        # fields, no bases, no vtable), whose own layout is necessarily
+        # near-fixed and small regardless of identity — the same bounded,
+        # low-consequence residual risk already accepted for the plain
+        # fieldless-tag-type case above.
+        return header.has_anonymous_aggregate_fields and not dwarf.vtable
 
     out: list[RecordType] = []
     for t in header_types:
