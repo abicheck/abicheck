@@ -218,10 +218,14 @@ class TestBackfillDwarfLayout:
         record's real size_bits. Rejecting this on "no overlap" would make
         every such struct permanently layout-blind under the clang backend —
         reproduced directly against real clang+gcc+DWARF output before this
-        fix (size_bits stayed None; fixed, it backfills correctly)."""
+        fix (size_bits stayed None; fixed, it backfills correctly). Same
+        (unscoped) name on both sides, so this is trusted via the exact-name
+        path regardless of has_anonymous_aggregate_fields — set here anyway
+        to match what the real clang parser would actually produce."""
         header = RecordType(
             name="Foo", kind="struct",
             fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
+            has_anonymous_aggregate_fields=True,
         )
         dwarf = RecordType(name="Foo", kind="struct", size_bits=32, fields=[])
         out = backfill_dwarf_layout([header], [dwarf])
@@ -383,15 +387,40 @@ class TestBackfillDwarfLayout:
     def test_suffix_only_match_with_no_remaining_evidence_and_header_fields_is_never_guessed(
         self,
     ) -> None:
-        """Same as above but for the anonymous-aggregate branch (header has
-        real fields, DWARF's are empty): a suffix-only match to an unrelated,
-        genuinely empty type must still be rejected, not silently trusted."""
+        """An *ordinary* struct with real fields (has_anonymous_aggregate_fields
+        left False — not an anonymous-aggregate flatten) matched via bare
+        suffix to an unrelated, genuinely empty type must still be rejected:
+        "the header happens to have fields" alone is not the same structural
+        guarantee as knowing those fields came from a flatten (CodeRabbit
+        review; see test_namespaced_anonymous_aggregate_suffix_match_is_trusted
+        below for the case that IS trusted)."""
         header = RecordType(
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
         )
         unrelated = RecordType(name="impl::Foo", kind="struct", size_bits=8, fields=[])
         out = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
+
+    def test_namespaced_anonymous_aggregate_suffix_match_is_trusted(self) -> None:
+        """Regression (Codex review): a *namespaced* anonymous-aggregate
+        record (`namespace api { struct Foo { union { int i; float f; }; };
+        }`) has clang emit the header record as bare "Foo" while DWARF names
+        it "api::Foo" with an empty field list (the aggregate is skipped, not
+        flattened). The exact-name-only fallback introduced to close the
+        ordinary-struct risk above would make this common, legitimate pattern
+        permanently layout-blind under the clang backend — defeating the
+        point of the anonymous-aggregate exception for exactly the namespaced
+        case it needs to cover. has_anonymous_aggregate_fields is the
+        structural signal that distinguishes it from the rejected case above:
+        set by the clang parser itself, not inferred from field non-emptiness."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
+            has_anonymous_aggregate_fields=True,
+        )
+        dwarf = RecordType(name="api::Foo", kind="struct", size_bits=32, fields=[])
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 32
 
     def test_union_vs_struct_kind_mismatch_is_never_guessed(self) -> None:
         """Regression (Codex review): a struct and a union can share a bare

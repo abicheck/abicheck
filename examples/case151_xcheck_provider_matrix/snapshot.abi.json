@@ -173,6 +173,7 @@
       "bases": [],
       "data_size_bits": null,
       "fields": [],
+      "has_anonymous_aggregate_fields": false,
       "is_final": null,
       "is_opaque": false,
       "is_standard_layout": null,

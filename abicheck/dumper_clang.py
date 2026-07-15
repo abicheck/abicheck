@@ -755,6 +755,7 @@ class _ClangAstParser:
             is_opaque=False,
             is_final=_clang_record_is_final(node),
             is_template_pattern=entry.in_template,
+            has_anonymous_aggregate_fields=bool(_anonymous_member_names(node)),
             source_location=self._source_location(entry),
         )
 

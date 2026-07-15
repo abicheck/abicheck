@@ -168,15 +168,20 @@ def backfill_dwarf_layout(
     alone.
 
     An empty DWARF field list, though, is not itself a sign of "unrelated" —
-    but only when the *header* side is the one with fields. A record whose
-    members are all injected from an anonymous struct/union (``struct Foo {
-    union { int i; float f; }; };``) is flattened onto the header side by
-    ``dumper_clang.py`` (so ``header.fields`` lists ``i``/``f`` directly) but
-    the DWARF builder does not flatten it the same way, leaving
+    but only when the *header* side is known to be a genuine anonymous-
+    aggregate flatten, not merely "the header happens to have fields". A
+    record whose members are all injected from an anonymous struct/union
+    (``struct Foo { union { int i; float f; }; };``) is flattened onto the
+    header side by ``dumper_clang.py`` (so ``header.fields`` lists ``i``/
+    ``f`` directly, and ``RecordType.has_anonymous_aggregate_fields`` is set)
+    but the DWARF builder does not flatten it the same way, leaving
     ``dwarf.fields`` empty even though DWARF *does* carry the record's real
     ``size_bits`` — rejecting that on "no overlap" would make every such
     struct permanently layout-blind under the clang backend (Codex review),
-    which is a real, common C pattern, not a hypothetical.
+    which is a real, common C pattern, not a hypothetical. The exception is
+    keyed off that dedicated flag rather than field non-emptiness alone, so
+    an *ordinary* struct with real (non-anonymous) fields whose DWARF
+    counterpart happens to be absent doesn't get the same free pass.
 
     The reverse — an empty *header* type matched against a DWARF candidate
     that DOES have fields — gets no such exception (Codex review): a header
@@ -215,20 +220,24 @@ def backfill_dwarf_layout(
     check.
 
     The one case this still can't distinguish (Codex review, fresh evidence
-    after the base-corroboration fix above): a header type matched against a
-    *totally unrelated* DWARF candidate that happens to have zero fields
-    *and* zero bases — e.g. public ``struct Foo { int x; }`` next to an
-    unrelated, genuinely empty ``impl::Foo {};`` reached only via the
-    bare-suffix fallback. There is no remaining signal on the DWARF side to
-    disagree with (no fields, no bases), so name equality is the last
-    signal left — and a *suffix* match (``impl::Foo`` recovered only because
-    it ends in "Foo") is rejected here rather than trusted (CodeRabbit
-    review): it already means the header's bare name lacks the scope
-    DWARF's qualified name carries, so stacking that on top of zero
-    field/base evidence would trust two independently weak signals at once.
-    An *exact* name match (``dwarf.name == header.name``, e.g. a genuinely
-    unscoped ``struct Foo {};`` gaining a field later) carries no such scope
-    ambiguity and is still trusted even with nothing else to go on.
+    after the base-corroboration fix above): a header type with *ordinary*
+    (non-anonymous-aggregate) fields matched against a *totally unrelated*
+    DWARF candidate that happens to have zero fields *and* zero bases —
+    e.g. public ``struct Foo { int x; }`` next to an unrelated, genuinely
+    empty ``impl::Foo {};`` reached only via the bare-suffix fallback. There
+    is no remaining signal on the DWARF side to disagree with (no fields,
+    no bases), so name equality is the last signal left — and a *suffix*
+    match (``impl::Foo`` recovered only because it ends in "Foo") is
+    rejected here rather than trusted (CodeRabbit review): it already means
+    the header's bare name lacks the scope DWARF's qualified name carries,
+    so stacking that on top of zero field/base evidence would trust two
+    independently weak signals at once. An *exact* name match
+    (``dwarf.name == header.name``, e.g. a genuinely unscoped ``struct Foo
+    {};`` gaining a field later) carries no such scope ambiguity and is
+    still trusted even with nothing else to go on — and so does a suffix
+    match when ``has_anonymous_aggregate_fields`` is set, since that flag
+    is a structural fact about the header record, not a guess from field
+    non-emptiness (Codex review, see above).
     """
     if not dwarf_types:
         return header_types
@@ -270,15 +279,25 @@ def backfill_dwarf_layout(
         dwarf_bases = {_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
-        # Truly nothing left to disagree on: no fields (or asymmetrically
-        # flattened away) and no bases on either side — the record's name is
-        # the only remaining signal, so only trust it when *exact*, not a
-        # suffix match (CodeRabbit review): a suffix match already means the
-        # header's bare name lacks the scope DWARF's qualified name carries,
-        # so on top of zero field/base evidence it would be trusting two
-        # independently weak signals at once. An exact match has no such
-        # scope ambiguity even with nothing else to go on.
-        return header.name == dwarf.name
+        if header.name == dwarf.name:
+            # Exact match: no scope ambiguity even with nothing else to
+            # disagree on — covers both a truly trivial tag type and an
+            # unnamespaced anonymous-aggregate record.
+            return True
+        # Suffix-only match with no field/base overlap left to corroborate.
+        # Trusting this on "header merely has some fields" would reopen the
+        # exact risk just closed above: an ordinary struct with real fields,
+        # whose actual DWARF counterpart is simply absent, matched instead
+        # to an unrelated, coincidentally-fieldless internal type via bare
+        # suffix (CodeRabbit review). Only trust it when the header's
+        # fields are *known* to come from an anonymous-aggregate flatten —
+        # a structural signal the clang parser sets itself, not a guess —
+        # since DWARF's own builder doesn't flatten the same way and a
+        # *namespaced* anonymous-aggregate record (clang emits the bare
+        # "Foo", DWARF emits "api::Foo") would otherwise be permanently
+        # layout-blind, defeating the point of that exception for exactly
+        # the common namespaced case it exists for (Codex review).
+        return header.has_anonymous_aggregate_fields
 
     out: list[RecordType] = []
     for t in header_types:

@@ -268,6 +268,31 @@ class TestSerializationRoundtripExtended:
         assert snap2.types[0].is_template_pattern is True
         assert snap2.types[1].is_template_pattern is False
 
+    def test_has_anonymous_aggregate_fields_roundtrip(self) -> None:
+        """RecordType.has_anonymous_aggregate_fields must survive a
+        load->save cycle, mirroring the is_template_pattern regression above:
+        the DWARF layout backfill relies on this flag being present after
+        reload to trust a namespaced anonymous-aggregate record's suffix
+        match (Codex review).
+        """
+        from abicheck.model import RecordType
+
+        snap = AbiSnapshot(
+            library="libanon.so.1",
+            version="1.0",
+            types=[
+                RecordType(name="Foo", kind="struct", has_anonymous_aggregate_fields=True),
+                RecordType(name="Bar", kind="struct", has_anonymous_aggregate_fields=False),
+            ],
+        )
+        d = snapshot_to_dict(snap)
+        assert d["types"][0]["has_anonymous_aggregate_fields"] is True
+        assert d["types"][1]["has_anonymous_aggregate_fields"] is False
+
+        snap2 = snapshot_from_dict(d)
+        assert snap2.types[0].has_anonymous_aggregate_fields is True
+        assert snap2.types[1].has_anonymous_aggregate_fields is False
+
     def test_param_default_none_roundtrip(self) -> None:
         """Param.default=None (no default) must round-trip correctly."""
         from abicheck.model import Param

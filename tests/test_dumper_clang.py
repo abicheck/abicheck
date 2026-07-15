@@ -365,6 +365,43 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
     # clang's JSON AST carries no computed layout.
     assert derived.size_bits is None
     assert derived.fields[0].offset_bits is None
+    assert derived.has_anonymous_aggregate_fields is False
+
+
+def test_parse_types_anonymous_aggregate_flattening_sets_flag() -> None:
+    """A record whose members come from an anonymous struct/union gets
+    those members flattened into `fields` (clang emits an IndirectFieldDecl
+    per injected member), and RecordType.has_anonymous_aggregate_fields must
+    reflect that — the DWARF layout backfill relies on this structural
+    signal to trust a namespaced match for exactly this pattern without also
+    trusting an ordinary struct's coincidental match (Codex review)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "RecordDecl",
+                    "tagUsed": "union",
+                    "loc": {"file": "include/foo.h", "line": 2},
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "FieldDecl", "name": "i", "type": {"qualType": "int"}},
+                        {"kind": "FieldDecl", "name": "f", "type": {"qualType": "float"}},
+                    ],
+                },
+                {"kind": "IndirectFieldDecl", "name": "i"},
+                {"kind": "IndirectFieldDecl", "name": "f"},
+            ],
+        }
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+    foo = types["Foo"]
+    assert [f.name for f in foo.fields] == ["i", "f"]
+    assert foo.has_anonymous_aggregate_fields is True
 
 
 def test_parse_enums_auto_increment_and_explicit() -> None:
