@@ -124,7 +124,6 @@ def init_inputs_pack(
     downstream.
     """
     root = Path(root)
-    (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
     mpath = root / INPUTS_MANIFEST_NAME
     if mpath.is_file():
         try:
@@ -138,14 +137,19 @@ def init_inputs_pack(
                 # directory a build was mistakenly pointed at) -- not a
                 # "malformed" one, so it is not swallowed the way the
                 # fallback below swallows a truncated/corrupted manifest.
+                # Raised BEFORE any write to root (mkdir included below) so
+                # an unrelated/wrong-kind pack is left completely untouched,
+                # not just its manifest (CodeRabbit review, P2).
                 raise ValueError(
                     f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
                     "Flow-2 abicheck_inputs pack."
                 )
+            (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
             return InputsManifest.from_dict(data)
         # Defensive: a manifest left partial/malformed by a non-atomic writer
         # on an old pack (our writes are atomic) re-initializes rather than
         # raising and losing this TU's facts.
+    (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
     manifest = InputsManifest(
         library=library, version=version, created_by=created_by, created_at=_now()
     )
@@ -444,13 +448,6 @@ def compact_inputs_pack(
             os.unlink(tmp)
         raise
 
-    if remove_originals:
-        for f in fresh_files:
-            with contextlib.suppress(OSError):
-                f.unlink()
-        # output_path itself (if it was among originals) was already
-        # replaced in place above, not deleted here (fresh_files excludes it).
-
     # A manifest that names explicit individual files is repointed at the
     # single merged file (those originals are gone). But any entry that is
     # itself a *directory* reference (SOURCE_FACTS_DIR itself — what the
@@ -513,7 +510,26 @@ def compact_inputs_pack(
         manifest.last_compacted = new_last_compacted
         manifest_changed = True
 
+    # Publish the manifest BEFORE destructively removing the originals it
+    # supersedes: _write_manifest is atomic (temp file + rename) but can
+    # still fail (disk full, permission change mid-run). Deleting the
+    # originals first and publishing the manifest after would leave a
+    # failed write pointing an explicit-file manifest at now-deleted files
+    # -- a later read finds neither the old originals nor a manifest that
+    # knows to look at the merged output, discarding evidence the merge
+    # itself successfully captured. Publishing first means a manifest-write
+    # failure leaves the pack exactly as it was pre-compaction (still
+    # discoverable via its old entries/originals) plus one harmless
+    # untracked merged file, never a state with less evidence than before
+    # (CodeRabbit review, P2).
     if manifest_changed:
         _write_manifest(root, manifest)
+
+    if remove_originals:
+        for f in fresh_files:
+            with contextlib.suppress(OSError):
+                f.unlink()
+        # output_path itself (if it was among originals) was already
+        # replaced in place above, not deleted here (fresh_files excludes it).
 
     return output_path

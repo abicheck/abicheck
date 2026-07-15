@@ -144,6 +144,10 @@ def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
     (pack / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
     with pytest.raises(ValueError, match="does not declare kind"):
         init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    # A rejected wrong-kind pack must be left completely untouched -- not
+    # just its manifest -- including no stray source_facts/ directory
+    # created before the kind check ran (CodeRabbit review, P2).
+    assert sorted(p.name for p in pack.iterdir()) == ["manifest.json"]
 
 
 def test_init_inputs_pack_recovers_from_truly_malformed_manifest(
@@ -876,6 +880,50 @@ def test_compact_preserved_directory_entry_is_rerunnable(tmp_path: Path) -> None
     out2 = compact_inputs_pack(pack, diagnostics=diagnostics2)
     assert out2 is None
     assert any("resolved to no readable fact files" in d for d in diagnostics2)
+
+
+def test_compact_preserves_originals_when_manifest_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_write_manifest is atomic (temp file + rename) but can still fail
+    (disk full, permission change mid-run). The manifest publish must
+    happen BEFORE the destructive removal of the originals it supersedes:
+    deleting first and publishing after would leave a failed write
+    pointing an explicit-file manifest at now-deleted files -- a later
+    read finds neither the old originals nor a manifest that knows to look
+    at the merged output, discarding evidence the merge itself
+    successfully captured (CodeRabbit review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    manifest = load_inputs_manifest(pack)
+    # An explicit per-file manifest entry -- the case that actually gets
+    # rewritten (and so actually needs a durable manifest write) rather
+    # than the directory-reference case that's left untouched.
+    manifest.source_facts = [f"source_facts/{facts_filename('src/foo.cpp')}"]
+    _write_manifest(pack, manifest)
+    original = append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+
+    import abicheck.buildsource.inputs_emit as inputs_emit_module
+
+    def _boom(root: Path, manifest: object) -> None:
+        raise OSError("disk full (simulated)")
+
+    monkeypatch.setattr(inputs_emit_module, "_write_manifest", _boom)
+
+    with pytest.raises(OSError, match="disk full"):
+        compact_inputs_pack(pack)
+
+    # The original per-TU file must still be there -- not deleted ahead of
+    # a manifest publish that never actually landed.
+    assert original.exists()
+    # And the manifest on disk is unchanged (still names the original,
+    # readable file, not a merged output the failed write never recorded).
+    assert load_inputs_manifest(pack).source_facts == [
+        f"source_facts/{facts_filename('src/foo.cpp')}"
+    ]
 
 
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
