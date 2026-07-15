@@ -132,6 +132,42 @@ class TestSeverityMapping:
 
 
 # ---------------------------------------------------------------------------
+# _parse_source_location (direct unit tests)
+# ---------------------------------------------------------------------------
+
+class TestParseSourceLocation:
+    def test_file_and_line(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("include/foo.h:42") == ("include/foo.h", 42, None)
+
+    def test_file_line_column(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("include/foo.h:42:7") == ("include/foo.h", 42, 7)
+
+    def test_windows_path_with_column(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("C:\\foo\\bar.h:42:7") == ("C:\\foo\\bar.h", 42, 7)
+
+    def test_bare_filename_no_colon(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("foo.h") == ("foo.h", None, None)
+
+    def test_non_numeric_line(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("foo.h:notaline") == ("foo.h:notaline", None, None)
+
+    def test_column_non_numeric_still_yields_line(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("foo.h:42:notacol") == ("foo.h", 42, None)
+
+
+# ---------------------------------------------------------------------------
 # Result content
 # ---------------------------------------------------------------------------
 
@@ -183,6 +219,28 @@ class TestResultContent:
         phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
         assert phys["artifactLocation"]["uri"] == "include/foo.h"
         assert phys["region"] == {"startLine": 42, "startColumn": 7}
+
+    def test_result_location_bare_filename_no_colon(self) -> None:
+        """A source_location with no colon at all has no line to extract."""
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            source_location="foo.h",
+        )
+        doc = to_sarif(_make_result([c]))
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "foo.h"
+        assert "region" not in phys
+
+    def test_result_location_non_numeric_line(self) -> None:
+        """A source_location whose 'line' segment isn't numeric has no region."""
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            source_location="foo.h:notaline",
+        )
+        doc = to_sarif(_make_result([c]))
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "foo.h:notaline"
+        assert "region" not in phys
 
     def test_result_location_windows_path_with_column(self) -> None:
         c = Change(
