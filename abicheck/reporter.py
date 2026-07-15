@@ -87,33 +87,32 @@ def _effective_severity_label(
         frozenset[ChangeKind],
         frozenset[ChangeKind],
     ],
+    *,
+    policy: str | None = None,
+    policy_file: object | None = None,
 ) -> str:
     """Severity label for a change, honouring its A4 ``effective_verdict``.
 
     The one place the reporter decides a finding's severity bucket: routes
-    through :func:`effective_category` so an ADR-027 pattern-aware demotion reads
-    ``compatible`` in the JSON ``severity`` field and the ``filtered_summary``
-    counts, consistent with the verdict and exit code.
+    through :func:`effective_verdict_for_change` (the same call
+    :func:`_change_to_dict` already makes) so an ADR-027 pattern-aware
+    demotion, *and* a per-change frozen-namespace floor guarding a
+    ``policy_file`` kind-level override, both read consistently with the
+    verdict and exit code. Without *policy_file* here, a leaf-mode root-type
+    change tagged ``frozen_namespace_violation`` could read "compatible" in
+    ``leaf_changes`` while the top-level ``severity`` block (which does pass
+    ``policy_file``) correctly reports it as blocking the gate — a direct,
+    visible contradiction on the same JSON document (Codex review on #549).
     """
     kind = getattr(c, "kind", None)
-    if kind is None:
+    if not isinstance(kind, ChangeKind):
         return "unknown"
-    # An explicit A4 override wins; otherwise fall back to the exact set-based
-    # logic (which yields "unknown" for a kind moved out of every set, e.g. an
-    # override to NO_CHANGE) rather than effective_category's BREAKING fail-safe.
-    eff = getattr(c, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        return _VERDICT_TO_SEVERITY_LABEL.get(eff, "unknown")
-    breaking, api_break, compatible, risk = kind_sets
-    if kind in breaking:
-        return "breaking"
-    if kind in api_break:
-        return "api_break"
-    if kind in risk:
-        return "risk"
-    if kind in compatible:
-        return "compatible"
-    return "unknown"
+    from .severity import effective_verdict_for_change
+
+    verdict = effective_verdict_for_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    return _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -268,7 +267,9 @@ def _to_json_leaf(
             "kind": c.kind.value,
             "symbol": c.symbol,
             "description": c.description,
-            "severity": _effective_severity_label(c, eff_sets),
+            "severity": _effective_severity_label(
+                c, eff_sets, policy=result.policy, policy_file=result.policy_file,
+            ),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
             "caused_count": c.caused_count,

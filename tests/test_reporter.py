@@ -183,6 +183,27 @@ class TestEvidenceStatusInJson:
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
 
+    def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
+        """Codex review on #549: a policy-file override that demotes a root
+        type kind (type_size_changed) to COMPATIBLE must not silently drop a
+        frozen_namespace_violation-tagged finding below its raw severity in
+        leaf_changes — the top-level `severity` block already honours
+        policy_file (via _build_severity_json), so leaf_changes reading
+        "compatible" for the same finding would be a direct contradiction."""
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE})
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.policy_file = pf
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert d["leaf_changes"][0]["severity"] == "breaking"
+        assert d["severity"]["exit_code"] == 4
+
     def test_leaf_mode_carries_severity_block(self):
         """report_mode="leaf" returned before the severity block was ever
         built, so a caller passing severity_config silently got no severity
