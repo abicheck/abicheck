@@ -623,6 +623,7 @@ def _attach_header_graph(
     if not header_graph or not headers:
         return snap
     from .buildsource.header_graph import (
+        HEADER_INCLUDE_GRAPH_PASS,
         ClangHeaderIncludeExtractor,
         build_header_only_graph,
     )
@@ -700,7 +701,7 @@ def _attach_header_graph(
             )
         except SnapshotError:
             include_clang_bin = "clang++" if lang != "c" else "clang"
-        include_map, _diags = ClangHeaderIncludeExtractor(
+        include_map, include_diags = ClangHeaderIncludeExtractor(
             clang_bin=include_clang_bin
         ).extract(
             [str(p) for p in resolved_headers],
@@ -714,6 +715,14 @@ def _attach_header_graph(
         if include_map:
             augment_graph_with_includes(graph, include_map)
             graph.finalize()
+        # A clean pass with an empty map (a leaf public header with no
+        # #include of its own, or every resolved include self-filtered) is
+        # a genuine zero, not a failure to collect — stamp the pass so
+        # `_include_graph_covered` doesn't mistake it for "never ran" and
+        # misreport every header on a later comparison's other side as
+        # newly entering the include graph (Codex review).
+        if not include_diags:
+            graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
     pack = BuildSourcePack(root=Path(""), source_graph=graph)
     # Populate the manifest coverage row the normal collect/embed path always
     # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's

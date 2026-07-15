@@ -35,7 +35,11 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
-from .header_graph import HEADER_CALL_GRAPH_PASS, HEADER_TYPE_GRAPH_PASS
+from .header_graph import (
+    HEADER_CALL_GRAPH_PASS,
+    HEADER_INCLUDE_GRAPH_PASS,
+    HEADER_TYPE_GRAPH_PASS,
+)
 from .source_graph import (
     _TYPE_ENTITY_KINDS,
     EVIDENCE_TIER_L5,
@@ -332,6 +336,7 @@ _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
 _HEADER_PASS_ALIAS: dict[str, str] = {
     "call_graph": HEADER_CALL_GRAPH_PASS,
     "type_graph": HEADER_TYPE_GRAPH_PASS,
+    "include_graph": HEADER_INCLUDE_GRAPH_PASS,
 }
 
 
@@ -927,15 +932,19 @@ def _call_reachability_findings(
 def _include_graph_covered(graph: SourceGraphSummary) -> bool:
     """Whether *graph* actually collected include-graph data at all.
 
-    True when its include-graph pass is confirmed (``extractor_passes``,
-    ADR-041 P0 slice 2 coverage-honesty convention: a pass can run and find
-    zero edges) or it carries any ``COMPILE_UNIT_INCLUDES_FILE`` edge at all
-    (an unmarked/legacy graph with real recorded data). False only when the
-    graph has neither — i.e. include-graph folding never ran, whether
-    because the caller never requested it (an older snapshot dumped before
-    the fold became automatic) or clang was unavailable.
+    True when its include-graph pass is confirmed — either the build-
+    integrated ``"include_graph"`` name or its header-only-graph counterpart
+    (:data:`~abicheck.buildsource.header_graph.HEADER_INCLUDE_GRAPH_PASS`,
+    via :func:`_pass_ran`) — (``extractor_passes``, ADR-041 P0 slice 2
+    coverage-honesty convention: a pass can run and find zero edges, e.g. a
+    leaf public header with no ``#include``s of its own) or it carries any
+    ``COMPILE_UNIT_INCLUDES_FILE`` edge at all (an unmarked/legacy graph with
+    real recorded data). False only when the graph has neither — i.e.
+    include-graph folding never ran, whether because the caller never
+    requested it (an older snapshot dumped before the fold became automatic)
+    or clang was unavailable.
     """
-    return graph.extractor_passes.get("include_graph", False) or any(
+    return _pass_ran(graph, "include_graph") or any(
         e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
     )
 

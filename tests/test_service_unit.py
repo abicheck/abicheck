@@ -1761,6 +1761,50 @@ class TestRunDumpHeaderGraph:
         )
         assert graph.coverage["include_edges"]["collected"] is True
 
+    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(
+        self, tmp_path
+    ):
+        """A leaf header with no #includes of its own is a genuine zero, not
+        an uncollected pass — `header_include_graph` must still be stamped so
+        `_include_graph_covered` doesn't mistake it for "never ran"."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _Proc:
+            stdout = f"api.o: {header}"
+            stderr = ""
+            returncode = 0
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                lambda *a, **k: _Proc(),
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [header],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
+        assert graph.extractor_passes.get("header_include_graph") is True
+
     def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)

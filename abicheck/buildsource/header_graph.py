@@ -131,6 +131,7 @@ if TYPE_CHECKING:
 #: never conflates a header-only pass with a full build-integrated one.
 HEADER_CALL_GRAPH_PASS = "header_call_graph"
 HEADER_TYPE_GRAPH_PASS = "header_type_graph"
+HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
 
 _PROVENANCE = "header_ast_l2"
 
