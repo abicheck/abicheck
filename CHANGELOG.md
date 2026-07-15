@@ -9,6 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **`exported_object_alignment_reduced` could false-positive on a purely
+  additive change.** The detector derives alignment from a symbol's `st_value`
+  (link-time address) as a power-of-two factor — adding an unrelated
+  neighbouring global can shift that apparent alignment with no change to the
+  variable's actual declared alignment at all. When DWARF/header evidence is
+  available on both sides (`Variable.alignment_bits`) and shows the declared
+  alignment did NOT change, the address-derived drop is now recognized as
+  linker-placement noise and suppressed; a genuine declared-alignment
+  reduction still fires (corroborated), and the weak address-only heuristic
+  is kept as a fallback when no declared-alignment evidence exists (symbols
+  -only / stripped-without-headers snapshots).
+
 ### Removed
 
 - **`collect --call-graph`/`--include-graph` flags — dropped outright, no

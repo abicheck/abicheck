@@ -43,21 +43,25 @@ from abicheck.elf_metadata import (
     _parse_dynamic,
     _value_alignment,
 )
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Variable
 
 
-def _snap(elf: ElfMetadata) -> AbiSnapshot:
+def _snap(elf: ElfMetadata, variables: list[Variable] | None = None) -> AbiSnapshot:
     return AbiSnapshot(
         library="libtest.so.1",
         version="1.0",
         functions=[],
-        variables=[],
+        variables=variables or [],
         types=[],
         enums=[],
         typedefs={},
         elf=elf,
         elf_only_mode=True,
     )
+
+
+def _var(name: str, alignment_bits: int | None) -> Variable:
+    return Variable(name=name, mangled=name, type="int", alignment_bits=alignment_bits)
 
 
 def _kinds(result) -> set[ChangeKind]:
@@ -483,6 +487,51 @@ class TestObjectAlignmentReduced:
         assert _value_alignment(0x1008) == 8
         assert _value_alignment(0x2000) == 4096  # page cap
         assert _value_alignment(0x3) == 1
+
+    def test_declared_alignment_unchanged_suppresses_false_positive(self):
+        # case61-style regression: st_value-derived alignment can shift purely
+        # from a neighbouring global being added/removed at link time, with no
+        # real change to the variable's declared alignment. When DWARF/header
+        # evidence (Variable.alignment_bits) is available on both sides and
+        # agrees the declared alignment did NOT change, the address-derived
+        # drop is placement noise and must not fire.
+        old = _elf(symbols=[_obj("lib_version", alignment=64)])
+        new = _elf(symbols=[_obj("lib_version", alignment=8)])
+        r = compare(
+            _snap(old, [_var("lib_version", 32)]),
+            _snap(new, [_var("lib_version", 32)]),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    def test_declared_alignment_reduced_still_fires(self):
+        # Declared evidence corroborates a genuine reduction — must still fire.
+        old = _elf(symbols=[_obj("g_table", alignment=64)])
+        new = _elf(symbols=[_obj("g_table", alignment=8)])
+        r = compare(
+            _snap(old, [_var("g_table", 512)]),
+            _snap(new, [_var("g_table", 64)]),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    def test_declared_alignment_unknown_falls_back_to_address_heuristic(self):
+        # No declared-alignment evidence on either side (e.g. symbols-only /
+        # stripped-without-headers) — corroboration is impossible, so the weak
+        # address-derived signal is kept as a best-effort finding.
+        old = _elf(symbols=[_obj("g_table", alignment=64)])
+        new = _elf(symbols=[_obj("g_table", alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    def test_declared_alignment_known_one_side_only_falls_back(self):
+        # Partial evidence (only one side captured alignment_bits) cannot
+        # corroborate either way — fall back to the address-derived signal.
+        old = _elf(symbols=[_obj("g_table", alignment=64)])
+        new = _elf(symbols=[_obj("g_table", alignment=8)])
+        r = compare(
+            _snap(old, [_var("g_table", 32)]),
+            _snap(new),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
 
 # ── Undefined-symbol (import) surface ────────────────────────────────────────
