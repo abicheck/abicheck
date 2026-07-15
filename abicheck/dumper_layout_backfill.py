@@ -94,23 +94,28 @@ def backfill_dwarf_layout(
     scope, while the DWARF builder qualifies it (``scope::name``) — an exact
     match therefore misses a genuinely namespaced type. Falling back to a
     match on the name's last ``::``-segment recovers that case, but *only*
-    when it is unambiguous: if two DWARF types share that bare suffix (e.g.
-    two different namespaces both declaring ``Foo``), matching either one
-    could silently attach the wrong type's layout, so both are left
-    unmatched rather than guessed (Codex review).
+    when it is unambiguous. Ambiguity is checked across *both* keys a DWARF
+    type can be found under (its full name and its bare suffix) together,
+    not the full name first and the suffix only as a fallback: an unrelated
+    top-level ``Foo`` matches "Foo" by full name just as validly as a
+    namespaced ``api::Foo`` matches it by suffix, so if both exist, an
+    exact-first lookup would silently pick the wrong one instead of ever
+    reaching the ambiguity check (Codex review). Collecting every DWARF type
+    under all of its lookup keys up front and requiring exactly one
+    candidate — regardless of which key matched — closes that gap: two
+    types sharing a bare name or suffix (e.g. two different namespaces both
+    declaring ``Foo``, or a global ``Foo`` alongside a namespaced one) are
+    both left unmatched rather than guessed.
     """
     if not dwarf_types:
         return header_types
-    dwarf_by_name = {t.name: t for t in dwarf_types}
-    dwarf_by_suffix: dict[str, list[RecordType]] = {}
+    dwarf_candidates: dict[str, list[RecordType]] = {}
     for t in dwarf_types:
-        dwarf_by_suffix.setdefault(t.name.rsplit("::", 1)[-1], []).append(t)
+        for key in {t.name, t.name.rsplit("::", 1)[-1]}:
+            dwarf_candidates.setdefault(key, []).append(t)
 
     def _dwarf_match(name: str) -> RecordType | None:
-        exact = dwarf_by_name.get(name)
-        if exact is not None:
-            return exact
-        candidates = dwarf_by_suffix.get(name, [])
+        candidates = dwarf_candidates.get(name, [])
         return candidates[0] if len(candidates) == 1 else None
 
     out: list[RecordType] = []

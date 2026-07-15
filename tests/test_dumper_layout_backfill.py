@@ -120,6 +120,18 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf_a, dwarf_b])
         assert out[0].size_bits is None
 
+    def test_global_and_namespaced_same_bare_name_is_never_guessed(self) -> None:
+        """A global ``Foo`` matches the header's bare "Foo" by exact name just
+        as validly as a namespaced ``api::Foo`` matches it by suffix — an
+        exact-match-first lookup would silently pick the global one and never
+        even reach the ambiguity check (Codex review: the dangerous mixed
+        global/namespaced case). Both must be left unmatched."""
+        header = RecordType(name="Foo", kind="struct")
+        dwarf_global = RecordType(name="Foo", kind="struct", size_bits=64)
+        dwarf_namespaced = RecordType(name="api::Foo", kind="struct", size_bits=999)
+        out = backfill_dwarf_layout([header], [dwarf_global, dwarf_namespaced])
+        assert out[0].size_bits is None
+
     def test_no_dwarf_types_is_a_no_op(self) -> None:
         header = RecordType(name="Point", kind="struct")
         assert backfill_dwarf_layout([header], []) == [header]
