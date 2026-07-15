@@ -634,6 +634,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_union=t.get("is_union", t.get("kind") == "union"),
             is_opaque=t.get("is_opaque", False),
             is_final=t.get("is_final"),  # tri-state; absent on pre-v? snapshots → None
+            is_template_pattern=t.get("is_template_pattern", False),
             source_header=t.get("source_header"),
             origin=_scope_origin_or_unknown(t.get("origin")),
             # Fine-grained layout descriptor (layout-closure work); all

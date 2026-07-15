@@ -16,6 +16,8 @@
 """Unit tests for abicheck.dumper_layout_backfill."""
 from __future__ import annotations
 
+import pytest
+
 from abicheck.dumper_layout_backfill import (
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
@@ -60,6 +62,31 @@ class TestDwarfLayoutTypesOrEmpty:
         )
         assert result == []
 
+    def test_extracts_dwarf_types_when_applicable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The one branch that actually calls build_snapshot_from_dwarf."""
+        import abicheck.dwarf_snapshot as dwarf_snapshot
+
+        expected = [RecordType(name="Point", kind="struct", size_bits=64)]
+
+        class _FakeSnap:
+            types = expected
+
+        calls = []
+
+        def _fake_build(so_path, elf_meta, dwarf_meta, dwarf_adv, *, version, language_profile, session):
+            calls.append((so_path, version, language_profile))
+            return _FakeSnap()
+
+        monkeypatch.setattr(dwarf_snapshot, "build_snapshot_from_dwarf", _fake_build)
+
+        result = dwarf_layout_types_or_empty(
+            "libfoo.so", None, _dwarf_meta(True), None, True,
+            symbols_only=False, debug_presence_only=False,
+            version="1.0", language_profile="c++", session=None,
+        )
+        assert result == expected
+        assert calls == [("libfoo.so", "1.0", "c++")]
+
 
 class TestBackfillDwarfLayout:
     def test_backfills_size_and_field_offsets(self) -> None:
@@ -79,6 +106,25 @@ class TestBackfillDwarfLayout:
         assert out[0].size_bits == 64
         assert out[0].alignment_bits == 32
         assert [f.offset_bits for f in out[0].fields] == [0, 32]
+
+    def test_leaves_field_untouched_when_already_offset_or_unmatched(self) -> None:
+        """A field that already has an offset (e.g. from a prior backfill), or
+        one with no same-named DWARF counterpart, is left as-is rather than
+        overwritten or dropped."""
+        header = RecordType(
+            name="Point", kind="struct",
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),  # already known
+                TypeField(name="ghost", type="int"),  # no DWARF counterpart
+            ],
+        )
+        dwarf = RecordType(
+            name="Point", kind="struct", size_bits=64,
+            fields=[TypeField(name="x", type="int", offset_bits=999)],
+        )
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].fields[0].offset_bits == 0  # untouched, not overwritten with 999
+        assert out[0].fields[1].offset_bits is None  # left alone, not dropped
 
     def test_leaves_castxml_derived_type_untouched(self) -> None:
         """A type that already has size_bits (castxml) must not be touched,

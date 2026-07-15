@@ -241,6 +241,33 @@ class TestSerializationRoundtripExtended:
         assert f[3].is_const is True and f[3].is_volatile is True and f[3].is_mutable is True
         assert f[4].is_const is False and f[4].is_volatile is False and f[4].is_mutable is False
 
+    def test_is_template_pattern_roundtrip(self) -> None:
+        """RecordType.is_template_pattern must survive a load→save cycle.
+
+        Regression: snapshot_from_dict originally omitted this field when
+        reconstructing RecordType, so a clang snapshot's template-pattern
+        marker was silently dropped on reload — re-enabling the exact
+        bare-name layout-backfill risk the flag exists to prevent (Codex
+        review).
+        """
+        from abicheck.model import RecordType
+
+        snap = AbiSnapshot(
+            library="libtemplate.so.1",
+            version="1.0",
+            types=[
+                RecordType(name="Buffer", kind="class", is_template_pattern=True),
+                RecordType(name="Point", kind="struct", is_template_pattern=False),
+            ],
+        )
+        d = snapshot_to_dict(snap)
+        assert d["types"][0]["is_template_pattern"] is True
+        assert d["types"][1]["is_template_pattern"] is False
+
+        snap2 = snapshot_from_dict(d)
+        assert snap2.types[0].is_template_pattern is True
+        assert snap2.types[1].is_template_pattern is False
+
     def test_param_default_none_roundtrip(self) -> None:
         """Param.default=None (no default) must round-trip correctly."""
         from abicheck.model import Param
