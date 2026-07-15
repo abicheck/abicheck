@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from click.testing import CliRunner
 
 from abicheck.cli import (
+    _build_match_map,
     _canonical_library_key,
     _is_supported_compare_input,
     _version_sort_key,
@@ -165,6 +166,28 @@ class TestVersionSortKey:
         k2 = _version_sort_key(Path("libfoo.so.1.2"), "libfoo.so")
         k3 = _version_sort_key(Path("libfoo.so.1.3"), "libfoo.so")
         assert k2 < k3
+
+    def test_vendor_hash_does_not_perturb_version_order(self) -> None:
+        # Codex (PR #551): an auditwheel/delocate content hash embedded in the
+        # filename must not out-rank the real SONAME version tokens — the
+        # hex hash's own digits/letters would otherwise corrupt the ordering.
+        older = _version_sort_key(Path("libfoo-000000.so.1"), "libfoo.so")
+        newer = _version_sort_key(Path("libfoo-ffffff.so.2"), "libfoo.so")
+        assert older < newer, "hash content must not outrank the .so version"
+
+
+class TestBuildMatchMapVendorHash:
+    def test_picks_higher_soname_version_despite_hash(self, tmp_path: Path) -> None:
+        # Same underlying bug as TestVersionSortKey.
+        # test_vendor_hash_does_not_perturb_version_order, exercised at the
+        # _build_match_map level that compare-release actually calls.
+        old = tmp_path / "libfoo-000000.so.1"
+        new = tmp_path / "libfoo-ffffff.so.2"
+        old.write_bytes(b"\x7fELF")
+        new.write_bytes(b"\x7fELF")
+        mapping, warnings = _build_match_map([old, new])
+        assert mapping["libfoo.so"] == new
+        assert warnings
 
 
 # ── file vs file ─────────────────────────────────────────────────────────────

@@ -227,8 +227,14 @@ def _canonical_library_key(path: Path) -> str:
 def _version_sort_key(
     path: Path, canonical_key: str
 ) -> tuple[list[tuple[int, int | str]], str]:
-    """Build a version-aware sort key for ambiguous library candidates."""
-    lower = path.name.lower()
+    """Build a version-aware sort key for ambiguous library candidates.
+
+    Uses the vendor-hash-stripped name (G9) so an auditwheel/delocate content
+    hash never enters the comparison — otherwise the hash's digits/letters can
+    outrank the real SONAME version tokens and ``_build_match_map`` picks a
+    stale duplicate over the newer one (Codex review, PR #551).
+    """
+    lower = strip_vendor_hash(path.name.lower())
     remainder = lower
     if canonical_key.endswith(".so") and canonical_key in lower:
         remainder = lower[lower.find(canonical_key) + len(canonical_key) :]

@@ -65,7 +65,11 @@ def _run_harness(harness: str) -> str:
         _helpers_region()
         + "\nCMD=()\n"
         + harness
-        + '\nprintf \'%s\\x1f\' "${CMD[@]}"\n'
+        # ${CMD[@]+"${CMD[@]}"} (not plain "${CMD[@]}"): pre-4.4 bash — macOS's
+        # stock 3.2 included — treats an empty array subscripted with [@]
+        # under `set -u` as an unbound-variable error and aborts the script
+        # (the same bug run.sh itself works around at its PR-comment loop).
+        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
     )
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
