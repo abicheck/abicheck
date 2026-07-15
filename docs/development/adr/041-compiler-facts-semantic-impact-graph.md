@@ -994,6 +994,39 @@ selected via those flags could silently lose every
 instead); fixed by resolving the same clang driver (`dumper._resolve_clang_bin`)
 for both passes.
 
+**Follow-up: `--call-graph`/`--include-graph` removed from `collect` —
+call/type/include graph now fold automatically everywhere.** These two
+`collect`-only flags had drifted into a genuine asymmetry with the inline
+`dump --sources` path: `--call-graph` was redundant there (the inline path has
+folded call/type-graph edges automatically whenever `--source-abi`/`--source-graph`
+level L4+L5 are both active since P0 slice 1, no flag at all), while
+`--include-graph` was the *opposite* problem — the only way to get
+`COMPILE_UNIT_INCLUDES_FILE` edges into the graph at all, entirely absent from
+the recommended `dump --sources` path. A user following the documented
+"recommended" workflow (`docs/concepts/build-source-data.md`) had no way to
+request include edges, while a `collect` user had to remember an
+easy-to-miss flag for behavior the other path gave for free.
+
+Fixed by making all three automatic, everywhere, on one shared code path:
+`buildsource/inline_graph_fold.py` gained `fold_include_graph()` (mirroring
+`fold_call_graph`/`fold_type_graph`'s scoping precedence and graceful clang-
+absent degradation, preferring already-recorded build-tool inputs over a
+fresh `clang -M` invocation), and `inline._build_inline_graph` now calls it
+alongside the other two under the same existing `with_call_graph` gate — so
+`dump --sources` gains include-graph edges with no new flag. `collect`'s
+`_collect_source_graph` (`cli_buildsource_helpers.py`) was rewritten to call
+the *same* `inline_graph_fold` functions directly (deleting its own two
+near-duplicate `_collect_call_graph`/`_collect_include_graph` implementations
+entirely) whenever `--source-abi` and `--source-graph summary` are both
+given — matching the inline path's gate exactly, rather than requiring
+either flag. `--call-graph`/`--include-graph` are removed outright (not
+deprecated): both were recent, narrow-audience flags with no evidence of
+external dependents, and keeping a compatibility shim for a flag whose whole
+point was "this behavior should not need a flag" would be self-defeating.
+`--kythe-entries`/`--codeql-results` are unaffected — pre-captured,
+non-executing external ingestion always needs an explicit file path, so
+there is no equivalent "should this be automatic" question for them.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 ### P0 — remaining high-value, low-risk work

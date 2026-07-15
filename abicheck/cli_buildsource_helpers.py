@@ -673,8 +673,7 @@ def _collect_source_graph(
     extractors: list[ExtractorRecord],
     *,
     source_graph: str,
-    call_graph: bool,
-    include_graph: bool,
+    changed_paths: tuple[str, ...],
     kythe_entries: Path | None,
     codeql_results: Path | None,
     surface: SourceAbiSurface | None,
@@ -682,13 +681,24 @@ def _collect_source_graph(
 ) -> tuple[SourceGraphSummary | None, str]:
     """Build the optional L5 source graph and fold in any requested augmentations.
 
-    Any graph-augmenting option (call/include graph, Kythe/CodeQL ingest) implies
-    graph collection. Returns ``(graph, graph_detail)``; ``graph`` is ``None`` when
-    no graph was requested.
+    Kythe/CodeQL ingestion (pre-captured, non-executing) implies graph
+    collection — their JSON is useless without a graph to fold into. Returns
+    ``(graph, graph_detail)``; ``graph`` is ``None`` when no graph was
+    requested.
+
+    Call/type/include-graph edges are **not** separate opt-in flags here —
+    they fold automatically whenever both ``--source-abi`` (L4) and
+    ``--source-graph summary`` (L5) are active, mirroring exactly the inline
+    ``dump --sources`` path's own automatic gate
+    (``inline._build_inline_graph``'s ``with_call_graph``). The two paths
+    used to diverge: this one required explicit ``--call-graph``/
+    ``--include-graph`` flags with no inline-path equivalent, which read as
+    dead CLI surface on the recommended path and a hidden, easy-to-miss
+    requirement on this one. Sharing ``inline_graph_fold``'s fold functions
+    (rather than this module's own now-removed near-duplicates) keeps the two
+    paths from drifting again.
     """
-    if (
-        call_graph or include_graph or kythe_entries or codeql_results
-    ) and source_graph == "off":
+    if (kythe_entries or codeql_results) and source_graph == "off":
         source_graph = "summary"
     if source_graph != "summary":
         return None, ""
@@ -698,10 +708,16 @@ def _collect_source_graph(
     # Fold the L4 surface in too when it was collected (--source-abi), so the
     # graph carries the public-reachability + source↔binary slices.
     graph = build_source_graph(merged, source_abi=surface)
-    if call_graph:
-        _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
-    if include_graph:
-        _collect_include_graph(graph, merged, extractors, clang_bin=clang_bin)
+    if surface is not None:
+        from .buildsource.inline_graph_fold import (
+            fold_call_graph,
+            fold_include_graph,
+            fold_type_graph,
+        )
+
+        fold_call_graph(graph, merged, clang_bin, extractors, changed_paths)
+        fold_type_graph(graph, merged, clang_bin, extractors, changed_paths)
+        fold_include_graph(graph, merged, clang_bin, extractors, changed_paths)
     if kythe_entries or codeql_results:
         _ingest_graph_backends(
             graph,
@@ -1156,133 +1172,6 @@ def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
     norm_dir = pack_root / "normalized" / name
     if norm_dir.is_dir():
         shutil.rmtree(norm_dir, ignore_errors=True)
-
-
-def _collect_call_graph(
-    graph: SourceGraphSummary,
-    merged: BuildEvidence,
-    extractors: list[ExtractorRecord],
-    *,
-    clang_bin: str,
-) -> None:
-    """Run the Clang call extractor over the build and fold edges into *graph*.
-
-    Best-effort (ADR-031 D4 / ADR-028 D3): a missing clang or a parse failure
-    records a partial/failed extractor row and leaves the graph without call
-    edges — it never aborts collection. Re-finalizes the graph so the content
-    hash and coverage counts reflect the added edges.
-    """
-    from .buildsource.call_graph import (
-        ClangCallGraphExtractor,
-        augment_graph_with_calls,
-    )
-
-    # clang_bin defaults to "clang" (the L4 extractor's tool); the call
-    # extractor needs a C++ driver, so prefer clang++ unless the user pointed
-    # --clang-bin at a specific clang.
-    extractor = ClangCallGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
-        extractors.append(
-            ExtractorRecord(
-                name="call_graph:clang",
-                status="failed",
-                detail=f"{extractor.clang_bin} not found in PATH; graph collected without call edges",
-            )
-        )
-        return
-    edges = extractor.extract_from_build(merged)
-    # Pass the project's source files (compile-unit sources + private headers) so
-    # call-graph decls earn the ``defined_in_project`` marker (source-location
-    # provenance) — the cross-source ``public_to_internal_dependency`` check needs
-    # it to flag an impl callee (in a `.cc` or a private header) in a collected
-    # pack, just like the inline scan path (Codex review).
-    from .buildsource.call_graph import project_source_files
-
-    project_files = project_source_files(merged)
-    added = augment_graph_with_calls(graph, edges, project_files or None)
-    # Recorded regardless of `added` — a pass that ran and found zero edges is
-    # still "covered" (ADR-041 P0 slice 2 follow-up, mirrors
-    # inline._fold_call_graph): edge presence alone cannot tell a version diff
-    # "ran, zero output" from "never ran". extractor_pass_fully_covered also
-    # requires units to examine and no per-TU parse failures (seventh Codex
-    # review) — this path never narrows (always runs over the whole `merged`
-    # build), so it always passes narrowed=False.
-    from .buildsource.call_graph import extractor_pass_fully_covered
-
-    if extractor_pass_fully_covered(merged, extractor, narrowed=False):
-        graph.extractor_passes["call_graph"] = True
-    elif extractor.diagnostics:
-        # Ran but some TU failed — its surviving edges must not vouch for
-        # project-wide coverage (sixteenth Codex review).
-        graph.degraded_passes["call_graph"] = True
-    graph.finalize()
-    for diag in extractor.diagnostics:
-        merged.diagnostics.append(f"call_graph: {diag}")
-    timing = (
-        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
-        if getattr(extractor, "last_jobs", 0)
-        else ""
-    )
-    extractors.append(
-        ExtractorRecord(
-            name="call_graph:clang",
-            status="ok" if added else "partial",
-            detail=(
-                f"{added} call edges from {len(merged.compile_units)} compile "
-                f"units{timing}"
-            ),
-        )
-    )
-
-
-def _collect_include_graph(
-    graph: SourceGraphSummary,
-    merged: BuildEvidence,
-    extractors: list[ExtractorRecord],
-    *,
-    clang_bin: str,
-) -> None:
-    """Run `clang -MM` over the build and fold include edges into *graph* (D3).
-
-    Best-effort like the call extractor: a missing clang records a failed row
-    and leaves the graph without include edges, never aborting collection.
-    """
-    from .buildsource.include_graph import (
-        ClangIncludeExtractor,
-        augment_graph_with_includes,
-        include_map_from_recorded_inputs,
-    )
-
-    includes = include_map_from_recorded_inputs(merged)
-    extractor_name = "include_graph:recorded_inputs"
-    if not includes:
-        extractor = ClangIncludeExtractor(
-            clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-        )
-        extractor_name = "include_graph:clang"
-        if not extractor.available():
-            extractors.append(
-                ExtractorRecord(
-                    name=extractor_name,
-                    status="failed",
-                    detail=f"{extractor.clang_bin} not found in PATH; graph collected without include edges",
-                )
-            )
-            return
-        includes = extractor.extract_from_build(merged)
-        for diag in extractor.diagnostics:
-            merged.diagnostics.append(f"include_graph: {diag}")
-    added = augment_graph_with_includes(graph, includes)
-    graph.finalize()
-    extractors.append(
-        ExtractorRecord(
-            name=extractor_name,
-            status="ok" if added else "partial",
-            detail=f"{added} include edges from {len(includes)} compile units",
-        )
-    )
 
 
 def _ingest_graph_backends(

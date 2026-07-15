@@ -986,9 +986,9 @@ def _check_public_to_internal_dependency(
             [],
             "skipped",
             "L5 source graph has no decl-dependency edges — run a semantic source "
-            "mode with clang++ available (`--depth source`) or fold a call graph "
-            "(`collect --call-graph`, Kythe/CodeQL); a structural-only graph emits "
-            "no call edges",
+            "mode with clang++ available (`--depth source`, or `--source-abi "
+            "--source-graph summary` with `collect`) or fold in a pre-captured "
+            "Kythe/CodeQL call graph; a structural-only graph emits no call edges",
             providers,
         )
 

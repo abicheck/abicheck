@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Clang call/type-graph folding for :mod:`inline`'s ``_build_inline_graph``.
+"""Clang call/type/include-graph folding for :mod:`inline`'s ``_build_inline_graph``.
 
 Split out of ``inline.py`` (which sits at its 2000-line hard cap) to keep
 adding scoping/coverage fields — ``narrowed_scope``, ``degraded_passes`` —
 from pushing that file over the limit (ADR-041 P0). ``inline.py`` imports
-:func:`fold_call_graph`/:func:`fold_type_graph` and calls them exactly as it
-called the former same-module ``_fold_call_graph``/``_fold_type_graph``.
+:func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph` and
+calls them exactly as it called the former same-module
+``_fold_call_graph``/``_fold_type_graph``.
 """
 
 from __future__ import annotations
@@ -265,6 +266,84 @@ def fold_type_graph(
             detail=(
                 f"{added} type edges from {len(target.compile_units)} compile "
                 f"unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
+def fold_include_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort compile-unit include-closure augmentation of *graph* (ADR-031 D3).
+
+    Mirrors :func:`fold_call_graph`'s scoping precedence and graceful
+    degradation, but folds ``COMPILE_UNIT_INCLUDES_FILE`` edges. Prefers
+    already-recorded build-tool inputs (``include_map_from_recorded_inputs`` —
+    no clang invocation needed at all, e.g. a CMake/Ninja/Bazel adapter that
+    captured them) and only shells out to ``clang -M`` when none were
+    recorded. Run alongside the call/type graph passes (``with_call_graph``),
+    sharing the same scoping decision — this used to be a separate opt-in CLI
+    flag (``collect --include-graph``) with no equivalent in the inline
+    ``dump --sources`` path at all; folding it in here closes that gap so
+    every path that runs the semantic graph gets the same edge kinds.
+    """
+    from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
+    from .include_graph import (
+        ClangIncludeExtractor,
+        augment_graph_with_includes,
+        include_map_from_recorded_inputs,
+    )
+
+    rows = extractors if extractors is not None else []
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    includes = include_map_from_recorded_inputs(target)
+    extractor_name = "include_graph:recorded_inputs"
+    extractor = None
+    if not includes:
+        extractor = ClangIncludeExtractor(
+            clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+        )
+        extractor_name = "include_graph:clang"
+        if not extractor.available():
+            rows.append(
+                ExtractorRecord(
+                    name=extractor_name,
+                    status="failed",
+                    detail=f"{extractor.clang_bin} not found; graph has no include edges",
+                )
+            )
+            return
+        includes = extractor.extract_from_build(target)
+        for diag in extractor.diagnostics:
+            merged.diagnostics.append(f"include_graph: {diag}")
+    added = augment_graph_with_includes(graph, includes)
+    # Coverage honesty mirrors fold_call_graph/fold_type_graph — but only when
+    # a live clang extractor ran at all: recorded-inputs mode has no
+    # ExtractorCapabilities-shaped object to check fully-covered/diagnostics
+    # against, so it stays unmarked (edge-presence inference downstream) the
+    # same way a pre-slice-2/externally-ingested pack does.
+    if extractor is not None:
+        if extractor_pass_fully_covered(target, extractor, narrowed):
+            graph.extractor_passes["include_graph"] = True
+        elif narrowed and narrowed_pass_confirmed(target, extractor):
+            graph.narrowed_passes["include_graph"] = True
+            graph.narrowed_scope["include_graph"] = scope_key
+        elif extractor.diagnostics:
+            graph.degraded_passes["include_graph"] = True
+    rows.append(
+        ExtractorRecord(
+            name=extractor_name,
+            status="ok" if added else "partial",
+            detail=(
+                f"{added} include edges from {len(includes)} compile "
+                f"unit(s){scoped_note}"
             ),
         )
     )

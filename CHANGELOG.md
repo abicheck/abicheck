@@ -9,6 +9,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- **`collect --call-graph`/`--include-graph` flags — dropped outright, no
+  deprecation.** Both had drifted into an asymmetry with the recommended
+  `dump --sources` inline path: `--call-graph` was redundant there (call/type
+  edges already fold automatically whenever `--source-abi`/`--source-graph
+  summary` — L4+L5 — are both active, no flag at all), while `--include-graph`
+  was the only way to get `COMPILE_UNIT_INCLUDES_FILE` edges into the graph at
+  all, with no equivalent in the inline path whatsoever. Both now fold
+  automatically on **every** path — `collect --source-abi --source-graph
+  summary` behaves exactly like `dump --sources` did already — via a new
+  shared `buildsource/inline_graph_fold.fold_include_graph()` the inline path
+  also now calls alongside its existing `fold_call_graph`/`fold_type_graph`.
+  `cli_buildsource_helpers._collect_call_graph`/`_collect_include_graph` (near
+  -duplicates of the inline path's own fold functions) are deleted; `collect`
+  now calls the same shared functions directly. `--kythe-entries`/
+  `--codeql-results` are unaffected (pre-captured, non-executing ingestion
+  always needs an explicit file path). See the ADR-041 header-only-graph
+  addendum's follow-up section.
+
 ### Performance
 
 - **DWARF-only dumps reuse one open `DWARFInfo` across all extraction passes.**

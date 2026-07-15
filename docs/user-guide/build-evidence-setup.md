@@ -143,18 +143,31 @@ abicheck dump libfoo.so -H include/ --sources libfoo.evidence/ -o new.abi.json
   pre-captured Android `header-abi-dumper`/`header-abi-linker` dump instead of
   running a compiler.
 
-Add `--call-graph` (requires `clang++`) to also fold approximate direct-call
-edges (`DECL_CALLS_DECL`, each labelled with a `call_kind` and `resolution`
-confidence) into the graph — enabling the
-`call_graph_public_entry_reachability_changed` quality finding. Without `clang`
-the graph is still collected, just without call edges.
+`--source-abi` and `--source-graph summary` together (as above) also fold
+three further edge kinds into the graph **automatically** — there is no
+separate opt-in flag for any of them, matching `dump --sources`'s own
+behavior exactly:
 
-Further graph layers (all optional, all non-aborting if the tool/file is
+- Approximate direct-call edges (`DECL_CALLS_DECL`, each labelled with a
+  `call_kind` and `resolution` confidence), enabling the
+  `call_graph_public_entry_reachability_changed` quality finding.
+- Type/field-dependency edges (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`), feeding
+  `public_to_internal_dependency`.
+- Compile-unit include edges (`COMPILE_UNIT_INCLUDES_FILE`, preferring
+  already-recorded build-tool inputs over a fresh `clang -M` invocation),
+  enabling `include_graph_public_header_drift`.
+
+All three require `clang++` and degrade gracefully without it — the graph is
+still collected, just without those edges (never aborts collection). Without
+`--source-abi` (L4), the graph stays structural-only (L3+L5) — the same
+cost-gating `dump --sources` uses (parsing every TU with `clang -ast-dump=json`
+for call/type edges is roughly as expensive as the L4 replay itself, so it
+only runs when you've already opted into that cost).
+
+A further, independent graph layer (optional, non-aborting if the file is
 absent):
 
-- `--include-graph` (requires `clang++`) folds compile-unit include edges
-  (`COMPILE_UNIT_INCLUDES_FILE`, from `clang -MM`), enabling
-  `include_graph_public_header_drift`.
 - `--kythe-entries FILE` / `--codeql-results FILE` fold a **pre-captured**
   Kythe entries export or CodeQL call-graph query result into the graph
   (ADR-031 D5). abicheck never runs Kythe or CodeQL — it ingests their exported

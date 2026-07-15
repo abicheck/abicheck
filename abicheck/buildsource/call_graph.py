@@ -352,12 +352,13 @@ def extractor_pass_fully_covered(
 ) -> bool:
     """Whether a call/type-graph extraction run may claim confirmed pass coverage.
 
-    Shared by ``inline._fold_call_graph``/``_fold_type_graph`` (the inline
-    ``dump --sources`` path) and ``cli_buildsource_helpers._collect_call_graph``
-    (the out-of-band ``collect --call-graph`` path) so both stamp
-    ``SourceGraphSummary.extractor_passes`` under the identical rule
-    (ADR-041 P0 slice 2/3 coverage-honesty chain). Three conditions, all
-    required:
+    Shared by ``inline_graph_fold.fold_call_graph``/``fold_type_graph``/
+    ``fold_include_graph`` — called identically from the inline ``dump
+    --sources`` path and the out-of-band ``collect --source-abi
+    --source-graph summary`` path (both fold automatically, no separate
+    opt-in flag) — so all stamp ``SourceGraphSummary.extractor_passes`` under
+    the identical rule (ADR-041 P0 slice 2/3 coverage-honesty chain). Three
+    conditions, all required:
 
     - Not *narrowed*: the run examined the whole compile DB, not a
       changed-path/headers-only-scoped subset (sixth Codex review) — a scoped
