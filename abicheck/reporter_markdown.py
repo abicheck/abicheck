@@ -452,6 +452,7 @@ def _to_markdown_leaf(
         lines += _build_severity_summary_md(
             changes,
             severity_config,
+            all_changes=list(result.changes),
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
@@ -559,11 +560,19 @@ def _build_severity_summary_md(
     changes: list[Change],
     severity_config: SeverityConfig,
     *,
+    all_changes: list[Change] | None = None,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
 ) -> list[str]:
-    """Build a severity configuration summary table for markdown output."""
+    """Build a severity configuration summary table for markdown output.
+
+    *changes* are the (possibly ``--show-only``-filtered) changes used for
+    the displayed ``Count`` column. *all_changes*, when provided, is the
+    unfiltered set used for the ``Exit Impact`` column so that filtering the
+    display doesn't make this table claim "no exit impact" for a category
+    that still fails the actual (unfiltered) severity gate.
+    """
     from .severity import SeverityLevel, categorize_changes
 
     categorized = categorize_changes(
@@ -572,6 +581,16 @@ def _build_severity_summary_md(
         kind_sets=kind_sets,
         policy_file=policy_file,
     )
+    exit_categorized = (
+        categorize_changes(
+            all_changes,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+        )
+        if all_changes is not None
+        else categorized
+    )
     lines = [
         "## Severity Configuration",
         "",
@@ -579,25 +598,41 @@ def _build_severity_summary_md(
         "|----------|----------|-------|-------------|",
     ]
 
-    _CATEGORY_INFO: list[tuple[str, str, list[HasKind]]] = [
-        ("ABI/API Incompatibilities", "abi_breaking", categorized.abi_breaking),
+    _CATEGORY_INFO: list[tuple[str, str, list[HasKind], list[HasKind]]] = [
+        (
+            "ABI/API Incompatibilities",
+            "abi_breaking",
+            categorized.abi_breaking,
+            exit_categorized.abi_breaking,
+        ),
         (
             "Potential Incompatibilities",
             "potential_breaking",
             categorized.potential_breaking,
+            exit_categorized.potential_breaking,
         ),
-        ("Quality Issues", "quality_issues", categorized.quality_issues),
-        ("Additions", "addition", categorized.addition),
+        (
+            "Quality Issues",
+            "quality_issues",
+            categorized.quality_issues,
+            exit_categorized.quality_issues,
+        ),
+        (
+            "Additions",
+            "addition",
+            categorized.addition,
+            exit_categorized.addition,
+        ),
     ]
 
-    for label, attr, cat_changes in _CATEGORY_INFO:
+    for label, attr, cat_changes, exit_cat_changes in _CATEGORY_INFO:
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
         count = len(cat_changes)
         impact = (
             "causes non-zero exit"
-            if level_val == "error" and count > 0
+            if level_val == "error" and len(exit_cat_changes) > 0
             else "no exit impact"
         )
         lines.append(
@@ -963,6 +998,7 @@ def to_markdown(
         lines += _build_severity_summary_md(
             changes,
             severity_config,
+            all_changes=list(result.changes),
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,

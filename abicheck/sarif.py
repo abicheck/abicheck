@@ -63,23 +63,55 @@ def _tool_version() -> str:
 # above under its historical private name so call sites are unchanged.
 
 
-def _severity(change: Change, result: DiffResult) -> str:
+_SEVERITY_LEVEL_TO_SARIF = {
+    "error": "error",
+    "warning": "warning",
+    "info": "note",
+}
+
+
+def _severity(
+    change: Change,
+    result: DiffResult,
+    severity_config: SeverityConfig | None = None,
+) -> str:
     """Return the SARIF ``level`` for *change*.
 
-    Whenever the canonical per-finding verdict (``result._effective_verdict_for_change``
-    — A4 per-finding ``effective_verdict`` (ADR-027), a PolicyFile verdict
-    override, *or* a named base policy like ``plugin_abi``/``sdk_vendor``
-    reclassifying this change's kind) differs from the kind's inherent default
-    verdict, the canonical verdict→SARIF-level table (ADR-036) applies, so
-    SARIF can never disagree with the JSON report or the gate/exit code.
-    Comparing against the *kind's own* default verdict (rather than checking
-    for specific override mechanisms) catches every reclassification path
-    uniformly — a hand-maintained ``has_override`` allowlist previously missed
-    base-policy downgrades entirely. Findings still at their kind's default
-    verdict keep the coarser per-kind default severity from the policy
-    registry, which is intentionally finer-grained than the 4-way verdict
-    table (e.g. distinguishing "warning" additions from "note"-worthy ones).
+    When *severity_config* is given, the result level follows the configured
+    severity for this change's effective issue category
+    (:func:`abicheck.severity.classify_effective_change`) — the same
+    classification the exit code and ``severityGate`` properties block use —
+    so a SARIF consumer keying off ``level`` never disagrees with the
+    configured gate (e.g. ``--severity-addition error`` must show additions
+    as ``level: error``, not the legacy policy severity).
+
+    Without a *severity_config*, whenever the canonical per-finding verdict
+    (``result._effective_verdict_for_change`` — A4 per-finding
+    ``effective_verdict`` (ADR-027), a PolicyFile verdict override, *or* a
+    named base policy like ``plugin_abi``/``sdk_vendor`` reclassifying this
+    change's kind) differs from the kind's inherent default verdict, the
+    canonical verdict→SARIF-level table (ADR-036) applies, so SARIF can never
+    disagree with the JSON report or the gate/exit code. Comparing against
+    the *kind's own* default verdict (rather than checking for specific
+    override mechanisms) catches every reclassification path uniformly — a
+    hand-maintained ``has_override`` allowlist previously missed base-policy
+    downgrades entirely. Findings still at their kind's default verdict keep
+    the coarser per-kind default severity from the policy registry, which is
+    intentionally finer-grained than the 4-way verdict table (e.g.
+    distinguishing "warning" additions from "note"-worthy ones).
     """
+    if severity_config is not None:
+        from abicheck.severity import classify_effective_change
+
+        category = classify_effective_change(
+            change,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        level = severity_config.level_for(category)
+        return _SEVERITY_LEVEL_TO_SARIF.get(level.value, "warning")
+
     entry = policy_for(change.kind)
     verdict = result._effective_verdict_for_change(change)
     if verdict != entry.default_verdict:
@@ -108,7 +140,11 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     }
 
 
-def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
+def _result_for(
+    change: Change,
+    result: DiffResult,
+    severity_config: SeverityConfig | None = None,
+) -> dict[str, Any]:
     """Produce a SARIF result object for a Change."""
     library, old_version, new_version = (
         result.library,
@@ -159,7 +195,7 @@ def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
 
     return {
         "ruleId": change.kind.value,
-        "level": _severity(change, result),
+        "level": _severity(change, result, severity_config),
         "message": {
             "text": " ".join(msg_parts),
         },
@@ -263,7 +299,7 @@ def to_sarif(
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
-        sarif_results.append(_result_for(change, result))
+        sarif_results.append(_result_for(change, result, severity_config))
 
     severity_gate = (
         _severity_gate_properties(result, severity_config)

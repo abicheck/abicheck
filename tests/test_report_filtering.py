@@ -447,6 +447,50 @@ class TestShowOnlyInReporters:
         assert "Filtered by" in text
         assert "2 of 3 changes shown" in text
 
+    def test_severity_summary_exit_impact_ignores_show_only_filter(self):
+        """Codex review on #549: the severity summary table's "Exit Impact"
+        column was computed from the --show-only-filtered changes, so
+        filtering out the finding that actually gates CI made the table
+        claim "no exit impact" for a category that still fails the gate.
+        `--show-only compatible` hides the breaking FUNC_REMOVED, but the
+        default severity preset still exits nonzero on it."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        result = _make_result(
+            changes=[
+                Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
+                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added"),
+            ],
+        )
+        text = to_markdown(
+            result, show_only="compatible", severity_config=PRESET_DEFAULT
+        )
+        assert "0 of 2 changes shown" not in text  # sanity: filter is active
+        assert "| ABI/API Incompatibilities |" in text
+        lines = [ln for ln in text.splitlines() if "ABI/API Incompatibilities" in ln]
+        assert len(lines) == 1
+        assert "causes non-zero exit" in lines[0]
+
+    def test_leaf_severity_summary_exit_impact_ignores_show_only_filter(self):
+        """Same fix as above, for the report_mode="leaf" summary table."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        result = _make_result(
+            changes=[
+                Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
+                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added"),
+            ],
+        )
+        text = to_markdown(
+            result,
+            report_mode="leaf",
+            show_only="compatible",
+            severity_config=PRESET_DEFAULT,
+        )
+        lines = [ln for ln in text.splitlines() if "ABI/API Incompatibilities" in ln]
+        assert len(lines) == 1
+        assert "causes non-zero exit" in lines[0]
+
     def test_show_only_in_json(self):
         result = _make_result(
             changes=[

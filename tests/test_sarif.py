@@ -386,3 +386,27 @@ class TestSeverityGate:
         text = to_sarif_str(r, severity_config=cfg)
         doc = json.loads(text)
         assert doc["runs"][0]["invocations"][0]["exitCode"] == 1
+
+    def test_result_level_follows_severity_addition_override(self) -> None:
+        """Codex review on #549: per-result `level` was built by `_result_for`
+        from the legacy policy severity, ignoring `severity_config` entirely.
+        `--severity-addition error` blocks the build (exitCode=1) but the
+        added-symbol result kept `level: warning` — a code-scanning UI reading
+        result levels would disagree with the configured gate."""
+        from abicheck.severity import resolve_severity_config
+
+        cfg = resolve_severity_config("default", addition="error")
+        r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
+        doc = to_sarif(r, severity_config=cfg)
+        assert doc["runs"][0]["results"][0]["level"] == "error"
+
+    def test_result_level_follows_severity_abi_breaking_override(self) -> None:
+        """Same fix, the inverse direction: `--severity-abi-breaking info` lets
+        the invocation pass (exitCode=0) but the removed-symbol result kept
+        `level: error` under the legacy mapping."""
+        from abicheck.severity import resolve_severity_config
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r, severity_config=cfg)
+        assert doc["runs"][0]["results"][0]["level"] == "note"
