@@ -190,9 +190,26 @@ def test_extractor_passes_stamped_when_ast_supplied() -> None:
     graph = build_header_only_graph(_snapshot(), ast)
     assert graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] is True
     assert graph.extractor_passes[HEADER_CALL_GRAPH_PASS] is True
-    # finalize()'s coverage recognizes the header-only pass names too, not
-    # just the build-integrated ones.
+    # finalize()'s coverage recognizes the header-only type-graph pass for
+    # the *structural* kinds — a header-only pass has true project-wide
+    # visibility of base classes/field/parameter types.
     assert graph.coverage["type_edges"]["collected"] is True
+
+
+def test_coverage_never_credits_body_dependent_kinds_from_header_pass_alone() -> None:
+    # Codex review: a header-only pass cannot see out-of-line calls/
+    # references, so its "ran" must not mark call_edges/reference_edges
+    # collected when zero such edges were actually found — only the
+    # structural type_edges bucket may be granted from the header-only
+    # pass name alone.
+    ast = _tu(_record("Widget", file=PUBLIC_HEADER))
+    graph = build_header_only_graph(
+        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+    )
+    assert graph.extractor_passes[HEADER_CALL_GRAPH_PASS] is True
+    assert graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] is True
+    assert graph.coverage["call_edges"]["collected"] is False
+    assert graph.coverage["reference_edges"]["collected"] is False
 
 
 def test_base_class_edge_from_headers_alone() -> None:
@@ -292,6 +309,31 @@ def test_header_include_extractor_parses_mocked_clang(tmp_path, monkeypatch) -> 
     # here the header itself — as the first prerequisite); only the real
     # included file remains.
     assert include_map == {f"header://{pub}": [str(impl)]}
+
+
+def test_header_include_extractor_forwards_gcc_options(tmp_path, monkeypatch) -> None:
+    # Codex review: --gcc-options flags (e.g. a define gating an #include)
+    # must reach this pass exactly like the AST pass, not just the deferred
+    # gcc_option_tokens.
+    import abicheck.buildsource.include_graph as ig
+
+    pub = tmp_path / "pub.h"
+    pub.write_text("void f();\n")
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_argv = {}
+
+    def _fake_run(cmd, **_kwargs):
+        seen_argv["cmd"] = cmd
+
+        class _Proc:
+            stdout = f"pub.o: {pub}"
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    ClangHeaderIncludeExtractor().extract([str(pub)], [], gcc_options="-DFOO=1")
+    assert "-DFOO=1" in seen_argv["cmd"]
 
 
 def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> None:

@@ -386,14 +386,21 @@ class SourceGraphSummary:
         # builder's own pass names (ADR-041 header-only-graph addendum) — a
         # distinct AST-walk shape (one synthetic header-aggregate TU, no build
         # integration) from the build-integrated ``call_graph``/``type_graph``
-        # passes, but "ran to completion, found nothing" is the same honesty
-        # gap either way, so both pass names count here.
-        call_pass_ran = self.extractor_passes.get(
-            "call_graph", False
-        ) or self.extractor_passes.get("header_call_graph", False)
-        type_pass_ran = self.extractor_passes.get(
-            "type_graph", False
-        ) or self.extractor_passes.get("header_type_graph", False)
+        # passes. Only ``header_type_graph`` grants "ran, zero found still
+        # collected" credit here, and only for the *structural* kinds
+        # (TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE): a header-only pass
+        # has true project-wide visibility of those (declaration-level facts,
+        # no body needed). ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` need a
+        # function body a header-only pass only sees when it happens to be
+        # written *in the header* — its "ran" is not evidence of project-wide
+        # call/reference coverage the way a build-integrated pass's is, so
+        # neither ``call_edges.collected`` nor ``reference_edges.collected``
+        # may be granted from ``header_call_graph``/``header_type_graph``
+        # alone (Codex review; mirrors ``source_graph_findings.
+        # _pass_trusted_kinds``'s structural-vs-body-dependent split).
+        call_pass_ran = self.extractor_passes.get("call_graph", False)
+        type_pass_ran = self.extractor_passes.get("type_graph", False)
+        header_type_pass_ran = self.extractor_passes.get("header_type_graph", False)
         has_calls = call_pass_ran or any(
             e.kind == "DECL_CALLS_DECL" for e in self.edges
         )
@@ -405,7 +412,7 @@ class SourceGraphSummary:
         #: separately from the call graph — a graph can have calls but no type
         #: edges (e.g. an older pack) and coverage must say so honestly.
         type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
-        has_type_edges = type_pass_ran or any(
+        has_type_edges = (type_pass_ran or header_type_pass_ran) or any(
             e.kind in type_edge_kinds for e in self.edges
         )
         has_reference_edges = type_pass_ran or any(

@@ -87,6 +87,7 @@ localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -318,19 +319,39 @@ class ClangHeaderIncludeExtractor:
         includes: list[str],
         *,
         language: str = "CXX",
+        gcc_options: str | None = None,
         gcc_option_tokens: tuple[str, ...] = (),
     ) -> tuple[dict[str, list[str]], list[str]]:
-        """Return ``({header_node_id: [included path, ...]}, diagnostics)``."""
+        """Return ``({header_node_id: [included path, ...]}, diagnostics)``.
+
+        *gcc_options* is the same free-form ``--gcc-options`` string
+        (e.g. ``"-I build/generated -DFOO=1"``) the AST pass
+        (``dumper._clang_header_dump``) also receives — tokenized the same
+        way (``shlex.split``) so a define/include gated by it doesn't leave
+        this include pass silently missing edges the AST pass could resolve
+        (Codex review: an earlier version of this method only forwarded
+        *gcc_option_tokens*, the deferred-``-isystem`` roots, not this).
+        """
+        import shlex
+
         from .build_evidence import BuildEvidence, CompileUnit
         from .include_graph import ClangIncludeExtractor
 
         if not self.available():
             return {}, [f"{self.clang_bin} not found in PATH"]
+        extra_tokens = (
+            shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
+        )
         compile_units = [
             CompileUnit(
                 id=_header_node_id(h),
                 source=h,
-                argv=[*(f"-I{i}" for i in includes), *gcc_option_tokens, h],
+                argv=[
+                    *(f"-I{i}" for i in includes),
+                    *extra_tokens,
+                    *gcc_option_tokens,
+                    h,
+                ],
                 language=language,
             )
             for h in headers
