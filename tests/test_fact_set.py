@@ -492,7 +492,9 @@ def test_diff_degrades_on_non_dict_nested_coverage_metadata() -> None:
     alone doesn't catch that (a non-empty non-dict value is still truthy),
     so this must not raise AttributeError, matching the defensive handling
     every other optional field here already gets (Codex review, P2)."""
-    old = _surface(coverage={"fact_set": "not-a-dict", "fact_family_states": "also-bad"})
+    old = _surface(
+        coverage={"fact_set": "not-a-dict", "fact_family_states": "also-bad"}
+    )
     new = _surface(coverage={"fact_set": ["also", "not", "a", "dict"]})
     changes = diff_source_abi(old, new)  # must not raise
     assert isinstance(changes, list)
@@ -554,9 +556,21 @@ def test_hash_recipe_id_explicit_field_wins() -> None:
     assert hash_recipe_id(fs) == "clang-json-canonical-v3"
 
 
-def test_hash_recipe_id_falls_back_to_producer_triple() -> None:
+def test_hash_recipe_id_falls_back_to_producer_quadruple() -> None:
     fs = default_fact_set(producer="p", producer_version="1", compiler_version="18")
-    assert hash_recipe_id(fs) == "p|1|18"
+    assert hash_recipe_id(fs) == "p|1|clang|18"
+
+
+def test_hash_recipe_id_fallback_differs_across_compiler_families() -> None:
+    """A gcc and a clang fact_set with otherwise-identical producer/
+    producer_version/compiler_version must never collide on the same
+    fallback recipe id -- their canonicalization/mangling differs."""
+    clang_fs = default_fact_set(
+        producer="p", producer_version="1", compiler_version="18"
+    )
+    gcc_fs = dict(clang_fs)
+    gcc_fs["compiler_family"] = "gcc"
+    assert hash_recipe_id(clang_fs) != hash_recipe_id(gcc_fs)
 
 
 def test_check_fact_compatibility_matching_fact_sets_all_comparable() -> None:
@@ -572,12 +586,30 @@ def test_check_fact_compatibility_producer_mismatch_blocks_opaque_and_edges_only
     None
 ):
     old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
-    new = default_fact_set(producer="abicheck-cc-clang-extractor", producer_version="0.6")
+    new = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
     compat = check_fact_compatibility(old, new)
     assert compat.structured_facts_comparable
     assert not compat.opaque_hashes_comparable
     assert not compat.source_edges_comparable
     assert any(i.rule == "producer_mismatch" for i in compat.issues)
+
+
+def test_check_fact_compatibility_compiler_family_mismatch_blocks_opaque_and_edges_only() -> (
+    None
+):
+    """A gcc-vs-clang pair must not be treated as byte-comparable: different
+    compiler families mangle/canonicalize differently even when the
+    abicheck producer identity and version otherwise match."""
+    old = default_fact_set(producer="p", producer_version="1")
+    new = dict(old)
+    new["compiler_family"] = "gcc"
+    compat = check_fact_compatibility(old, new)
+    assert compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert any(i.rule == "compiler_family_mismatch" for i in compat.issues)
 
 
 def test_check_fact_compatibility_name_mismatch_blocks_everything() -> None:
@@ -599,7 +631,9 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     rather than forcing every future comparison to suppress unnecessarily."""
     old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
     old["hash_recipe_id"] = "clang-json-canonical-v3"
-    new = default_fact_set(producer="abicheck-cc-clang-extractor", producer_version="0.6")
+    new = default_fact_set(
+        producer="abicheck-cc-clang-extractor", producer_version="0.6"
+    )
     new["hash_recipe_id"] = "clang-json-canonical-v3"
     compat = check_fact_compatibility(old, new)
     assert compat.opaque_hashes_comparable

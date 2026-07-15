@@ -312,12 +312,20 @@ _HARD_BLOCKING_RULES = frozenset(
 
 #: FactSetIssue rules whose presence means opaque body/template hashes may
 #: not be byte-comparable across the old/new pair (rule 3: producer/
-#: producer_version/compiler_version identify the canonicalization recipe
-#: that produced the opaque hashes). These *are* overridable by a matching
-#: hash_recipe_id -- a differential conformance run can prove two different
-#: producer identities emit byte-comparable hashes.
+#: producer_version/compiler_version/compiler_family identify the
+#: canonicalization recipe that produced the opaque hashes -- a different
+#: compiler family mangles/canonicalizes differently even when the abicheck
+#: producer identity matches, same reasoning as a compiler_version drift).
+#: These *are* overridable by a matching hash_recipe_id -- a differential
+#: conformance run can prove two different producer/compiler identities emit
+#: byte-comparable hashes.
 _RECIPE_OVERRIDABLE_RULES = frozenset(
-    {"producer_mismatch", "producer_version_mismatch", "compiler_version_mismatch"}
+    {
+        "producer_mismatch",
+        "producer_version_mismatch",
+        "compiler_family_mismatch",
+        "compiler_version_mismatch",
+    }
 )
 
 #: source_edges endpoint identities are derived from the same producer/
@@ -341,18 +349,25 @@ def hash_recipe_id(fact_set: dict[str, Any]) -> str:
     name/version differs formally, which is more precise than treating any
     producer-name difference as inherently incompatible. Absent an explicit
     ``"hash_recipe_id"`` field, falls back to the ``producer``/
-    ``producer_version``/``compiler_version`` triple
+    ``producer_version``/``compiler_family``/``compiler_version`` quadruple
     :func:`check_fact_set_compatibility` already keys its rule-3 checks on, so
     fact-sets recorded before this field existed still compare consistently
     (two such fact-sets only share a fallback recipe id when they'd already
-    pass rule 3 with no issues).
+    pass rule 3 with no issues). ``compiler_family`` is included so a gcc vs.
+    clang pair can never fall back to the same recipe id even when producer/
+    producer_version/compiler_version otherwise match.
     """
     recipe = fact_set.get("hash_recipe_id")
     if isinstance(recipe, str) and recipe:
         return recipe
     return "|".join(
         str(fact_set.get(key, ""))
-        for key in ("producer", "producer_version", "compiler_version")
+        for key in (
+            "producer",
+            "producer_version",
+            "compiler_family",
+            "compiler_version",
+        )
     )
 
 

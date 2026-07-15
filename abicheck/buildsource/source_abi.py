@@ -169,6 +169,17 @@ def _string_dict(raw: Any) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items()}
 
 
+def _edge_list(raw: Any) -> list[dict[str, Any]]:
+    """Defensive parse for a ``source_edges`` field (CodeRabbit review):
+    ``list(None)`` raises and ``list("...")`` yields character entries, so a
+    malformed/forward-versioned persisted value must not abort loading or
+    poison the graph with junk entries -- only well-formed dict rows survive.
+    """
+    if not isinstance(raw, list):
+        return []
+    return [dict(edge) for edge in raw if isinstance(edge, dict)]
+
+
 @dataclass
 class SourceLocation:
     """Where a source entity was declared, with provenance origin (ADR-030 D4)."""
@@ -400,9 +411,7 @@ class SourceAbiTu:
         # would poison cache dependency tracking (CodeRabbit review). Coerce to a
         # clean list of non-empty strings.
         rf_raw = d.get("read_files")
-        read_files = (
-            [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
-        )
+        read_files = [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
         fs_raw = d.get("fact_set")
         fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
 
@@ -422,7 +431,7 @@ class SourceAbiTu:
             templates=_ents("templates"),
             inline_bodies=_ents("inline_bodies"),
             constexpr_values=_ents("constexpr_values"),
-            source_edges=list(d.get("source_edges", [])),
+            source_edges=_edge_list(d.get("source_edges")),
             diagnostics=list(d.get("diagnostics", [])),
             read_files=read_files,
             fact_set=fact_set,
@@ -587,7 +596,7 @@ class SourceAbiSurface:
             reachable_macros=_ents("macros"),
             reachable_templates=_ents("templates"),
             reachable_inline_bodies=_ents("inline_bodies"),
-            source_edges=list(d.get("source_edges", [])),
+            source_edges=_edge_list(d.get("source_edges")),
             mappings=mappings,
             odr_conflicts=list(d.get("odr_conflicts", [])),
             unmatched=unmatched,

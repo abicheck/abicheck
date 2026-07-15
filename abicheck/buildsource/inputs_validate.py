@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .fact_set import (
     check_fact_set_compatibility,
@@ -147,10 +148,12 @@ def _fact_set_recipe_issues(tus: list[SourceAbiTu]) -> list[str]:
     for an old/new comparison — the same severity applies just as much within
     one pack (latest-main Clang plugin review, PR3).
     """
-    distinct = list({tuple(sorted(tu.fact_set.items())) for tu in tus if tu.fact_set})
-    if len(distinct) < 2:
+    fact_sets: list[dict[str, Any]] = []
+    for tu in tus:
+        if tu.fact_set and tu.fact_set not in fact_sets:
+            fact_sets.append(dict(tu.fact_set))
+    if len(fact_sets) < 2:
         return []
-    fact_sets = [dict(d) for d in distinct]
     seen_rules: set[str] = set()
     issues: list[str] = []
     for i, a in enumerate(fact_sets):

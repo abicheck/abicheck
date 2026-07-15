@@ -3098,10 +3098,7 @@ private:
 
   void ensureManifest() {
     std::string manifestPath = OutDir + "/manifest.json";
-    if (llvm::sys::fs::exists(manifestPath)) {
-      checkManifestTargetAgreement(manifestPath);
-      return;
-    }
+    llvm::sys::fs::create_directories(OutDir);
     std::string createdBy =
         std::string("abicheck-clang-plugin ") + kPluginVersion;
     // ADR-038 C.8: the pack-level fact_set mirrors every TU record's — one
@@ -3124,17 +3121,30 @@ private:
         ",\n  \"source_facts\": [\"source_facts\"],\n  \"version\": " + jsonStr(Version) +
         "\n}\n";
 
-    llvm::SmallString<128> tmp;
+    // Atomically claim manifest.json itself instead of exists()-then-rename():
+    // CD_CreateNew fails with file_exists if another parallel compile already
+    // created (or is concurrently creating) it, so "does a manifest already
+    // exist" and "claim the right to create it" become one indivisible
+    // syscall. The previous exists()-check + tmp-file-rename had a TOCTOU gap
+    // — two racing first-compiles of two different targets sharing one out=
+    // directory could both observe no manifest yet, both skip
+    // checkManifestTargetAgreement, and have the second rename() silently
+    // clobber the first's manifest with no warning ever firing (CodeRabbit
+    // review). Same exclusive-create primitive claimFirstRootsWarning/
+    // claimFirstInferenceNote already use for this file's other
+    // once-across-parallel-compiles claims.
     int fd = -1;
-    if (llvm::sys::fs::createUniqueFile(
-            llvm::Twine(OutDir) + "/.manifest.%%%%%%.tmp", fd, tmp))
+    std::error_code ec = llvm::sys::fs::openFile(
+        manifestPath, fd, llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
+        llvm::sys::fs::OF_None);
+    if (ec == std::errc::file_exists) {
+      checkManifestTargetAgreement(manifestPath);
       return;
-    {
-      llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
-      os << manifest;
     }
-    if (llvm::sys::fs::rename(tmp, manifestPath))
-      llvm::sys::fs::remove(tmp);
+    if (ec)
+      return; // unexpected error: best-effort, never abort the compile
+    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
+    os << manifest;
   }
 
   std::string OutDir;

@@ -1155,12 +1155,22 @@ def link_source_abi(
         for edge in tu.source_edges:
             if not isinstance(edge, dict):
                 continue
-            edge_key = (
-                str(edge.get("edge", "")),
-                str(edge.get("src", "")),
-                str(edge.get("dst", "")),
+            edge_name, edge_src, edge_dst = (
+                edge.get("edge"),
+                edge.get("src"),
+                edge.get("dst"),
             )
-            if not all(edge_key) or edge_key in seen_edge_keys:
+            if not (
+                isinstance(edge_name, str)
+                and edge_name
+                and isinstance(edge_src, str)
+                and edge_src
+                and isinstance(edge_dst, str)
+                and edge_dst
+            ):
+                continue
+            edge_key = (edge_name, edge_src, edge_dst)
+            if edge_key in seen_edge_keys:
                 continue
             seen_edge_keys.add(edge_key)
             source_edges.append(edge)

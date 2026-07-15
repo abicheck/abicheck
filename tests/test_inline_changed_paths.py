@@ -246,7 +246,9 @@ def test_inline_graph_folds_source_edges_and_still_runs_replay(monkeypatch):
     assert any(e.src == "decl://a" and e.dst == "decl://b" for e in graph.edges)
     # ...and the replay still ran (not skipped) and folded its own edge too.
     assert called["call"] is True
-    assert any(e.src == "decl://caller" and e.dst == "decl://callee" for e in graph.edges)
+    assert any(
+        e.src == "decl://caller" and e.dst == "decl://callee" for e in graph.edges
+    )
     assert graph.extractor_passes["call_graph"] is True
 
 
@@ -304,7 +306,9 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     assert graph.narrowed_scope["call_graph"] == frozenset({"src/a.cpp"})
 
 
-def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pass(monkeypatch):
+def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pass(
+    monkeypatch,
+):
     # Fifteenth Codex review: narrowed_passes now doubles as "this narrowed
     # scope's zero-edge family is trustworthy" (not just "discount this run's
     # edges elsewhere"), so a narrowed run that hit a per-TU diagnostic (a

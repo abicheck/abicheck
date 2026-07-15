@@ -226,9 +226,16 @@ def _diff_fact_coverage(
         suppression = (
             " Opaque body/template hash findings (inline_body_changed, "
             "template_body_changed) are suppressed for this comparison because "
-            "the producer/producer_version/compiler_version recipe differs and "
-            "no matching hash_recipe_id was declared on both sides; "
-            "source_edges reconciliation is skipped for the same reason."
+            "the fact-set compatibility verdict does not establish "
+            "byte-comparable recipes (a name/version mismatch, or a "
+            "producer/producer_version/compiler_version/compiler_family "
+            "difference with no matching hash_recipe_id declared on both "
+            "sides)."
+        )
+    if has_signal and not compat.source_edges_comparable:
+        suppression += (
+            " source_edges reconciliation is skipped because endpoint "
+            "identities are not comparable across the two sides."
         )
 
     return [

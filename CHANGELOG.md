@@ -443,9 +443,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   producer of those edges end-to-end. `source_link.link_source_abi()` now
   folds them onto a new `SourceAbiSurface.source_edges`, and
   `source_graph.fold_source_edges()` consumes it from inside
-  `build_source_graph()`; the separate replay passes are skipped when a
-  full-scope `source_edges` collection is already confirmed complete.
-  Fixing this exposed (and required fixing) a callee-identity bug in
+  `build_source_graph()`; the separate `call_graph`/`type_graph` replay
+  passes remain enabled unconditionally (a review found that skipping them
+  would drop the `dst_file`/project-file provenance those passes attach,
+  which the decl-dependency crosscheck needs to classify a callee/type as
+  project-internal — see ADR-038 C.10). Fixing this exposed (and required
+  fixing) a callee-identity bug in
   `call_graph.py`: clang's compact `referencedDecl` stub never carries
   `mangledName` (verified against a real Clang 18 AST dump), so an
   overloaded/constructor/destructor callee collapsed onto one bare-name

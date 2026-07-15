@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -103,8 +104,6 @@ def facts_filename(source: str, *, library: str = "") -> str:
     *library* keeps the pre-existing, library-blind filename for a caller
     that only ever emits one target into a given pack root.
     """
-    import hashlib
-
     stem = Path(source).name or "tu"
     digest_input = f"{library}\0{source}" if library else source
     digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:12]
@@ -389,7 +388,11 @@ def compact_inputs_pack(
     # case). Normalize to the canonical .jsonl extension before the
     # optional .gz suffix, matching every other producer in this codebase,
     # unless the caller already used a recognized extension.
-    base = output_filename[: -len(".gz")] if output_filename.endswith(".gz") else output_filename
+    base = (
+        output_filename[: -len(".gz")]
+        if output_filename.endswith(".gz")
+        else output_filename
+    )
     if not (base.endswith(".jsonl") or base.endswith(".json")):
         base = f"{base}.jsonl"
     output_filename = f"{base}.gz" if compress else base

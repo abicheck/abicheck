@@ -149,6 +149,39 @@ def test_source_abi_tu_from_dict_tolerates_missing_fields() -> None:
     assert tu.schema_version == SOURCE_ABI_VERSION
 
 
+def test_source_abi_tu_from_dict_tolerates_malformed_source_edges() -> None:
+    """A forward-versioned/hand-edited dump may carry ``source_edges: null``
+    or a stray string; ``list(None)`` raises and ``list("x")`` yields
+    character entries, either of which would abort loading or poison the
+    graph (CodeRabbit review)."""
+    assert (
+        SourceAbiTu.from_dict({"tu_id": "x", "source_edges": None}).source_edges == []
+    )
+    assert (
+        SourceAbiTu.from_dict({"tu_id": "x", "source_edges": "oops"}).source_edges == []
+    )
+    tu = SourceAbiTu.from_dict(
+        {
+            "tu_id": "x",
+            "source_edges": [
+                {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"},
+                "junk",
+                1,
+            ],
+        }
+    )
+    assert tu.source_edges == [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]
+
+
+def test_source_abi_surface_from_dict_tolerates_malformed_source_edges() -> None:
+    surface = SourceAbiSurface.from_dict({"library": "libfoo.so", "source_edges": None})
+    assert surface.source_edges == []
+    surface = SourceAbiSurface.from_dict(
+        {"library": "libfoo.so", "source_edges": "oops"}
+    )
+    assert surface.source_edges == []
+
+
 def test_source_entity_from_dict_boolean_safe_api_relevant() -> None:
     # A hand-edited pack may carry the string "false"; bool("false") would be
     # True, so loading must parse it as a real boolean (CodeRabbit #335).
@@ -289,6 +322,21 @@ def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
 
 def test_linker_skips_malformed_source_edges_rows() -> None:
     tu = SourceAbiTu(source_edges=[{}, "not-a-dict", {"edge": "DECL_CALLS_DECL"}])
+    surface = link_source_abi([tu])
+    assert surface.source_edges == []
+
+
+def test_linker_rejects_non_string_edge_identity_fields() -> None:
+    """A malformed row with a null/structured identity field must not be
+    stringified into a bogus graph endpoint -- str(None) == "None" would
+    otherwise pass the truthiness check (CodeRabbit review)."""
+    tu = SourceAbiTu(
+        source_edges=[
+            {"edge": "DECL_CALLS_DECL", "src": None, "dst": "b"},
+            {"edge": "DECL_CALLS_DECL", "src": ["a"], "dst": "b"},
+            {"edge": None, "src": "a", "dst": "b"},
+        ]
+    )
     surface = link_source_abi([tu])
     assert surface.source_edges == []
 

@@ -121,7 +121,11 @@ def _edge_keys(tus: list) -> set[tuple[str, str, str]]:
             if not isinstance(row, dict):
                 continue
             keys.add(
-                (str(row.get("edge", "")), str(row.get("src", "")), str(row.get("dst", "")))
+                (
+                    str(row.get("edge", "")),
+                    str(row.get("src", "")),
+                    str(row.get("dst", "")),
+                )
             )
     return keys
 
@@ -221,11 +225,16 @@ def _compare_fact_set(plugin_tus: list, wrapper_tus: list) -> list[str]:
 
 
 def _compare_coverage(plugin_tus: list, wrapper_tus: list) -> list[str]:
-    from abicheck.buildsource.source_abi import (
-        FACT_FAMILIES,
-        INCOMPLETE_COVERAGE_STATES,
-    )
+    from abicheck.buildsource.source_abi import COVERAGE_STATES, FACT_FAMILIES
 
+    # A mandatory family's coverage state must be an explicit, documented
+    # value ("unsupported" is a legitimate one -- e.g. the plugin never
+    # collects read_files -- so it is not itself a warning). But `None` (the
+    # TU's coverage dict never mentioned this family at all) or an
+    # unrecognized string a newer/older producer emits is a real conformance
+    # gap this check previously missed, since neither is in
+    # INCOMPLETE_COVERAGE_STATES ("partial"/"failed" only) -- every mandatory
+    # family must at least be explicitly reported on (CodeRabbit review).
     warnings: list[str] = []
     for label, tus in (("plugin", plugin_tus), ("clang backend", wrapper_tus)):
         for tu in tus:
@@ -233,7 +242,7 @@ def _compare_coverage(plugin_tus: list, wrapper_tus: list) -> list[str]:
                 continue
             for family in FACT_FAMILIES:
                 state = tu.coverage.get(family)
-                if state in INCOMPLETE_COVERAGE_STATES:
+                if state not in COVERAGE_STATES or state in ("partial", "failed"):
                     warnings.append(
                         f"{label} TU {tu.tu_id} family {family!r} reported "
                         f"{state!r} coverage on the C.6 fixture"
@@ -357,7 +366,11 @@ def main(argv: list[str] | None = None) -> int:
     # Only auto-created temp dirs are ours to delete; a caller-supplied --work
     # is owned by the caller and must never be rmtree'd (Codex review).
     created_tmp = args.work is None
-    work = Path(args.work).resolve() if args.work else Path(tempfile.mkdtemp(prefix="abicheck-c6-"))
+    work = (
+        Path(args.work).resolve()
+        if args.work
+        else Path(tempfile.mkdtemp(prefix="abicheck-c6-"))
+    )
     work.mkdir(parents=True, exist_ok=True)
     shutil.copytree(FIXTURES / "include", work / "include", dirs_exist_ok=True)
     shutil.copyfile(FIXTURES / "widget.cpp", work / "widget.cpp")
@@ -395,9 +408,11 @@ def main(argv: list[str] | None = None) -> int:
             for e in errors:
                 print(f"  - {e}", file=sys.stderr)
             return 1
-        print("\nC.6 conformance PASSED: plugin surface is entity-equivalent "
-              "to the clang backend (entities, source_edges, read_files, "
-              "fact_set).")
+        print(
+            "\nC.6 conformance PASSED: plugin surface is entity-equivalent "
+            "to the clang backend (entities, source_edges, read_files, "
+            "fact_set)."
+        )
         return 0
     finally:
         if created_tmp and not args.keep:
