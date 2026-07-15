@@ -2869,8 +2869,20 @@ private:
              anyDiagContains(diags, {"constexpr value unavailable"}))},
         // P1 #15-18: always attempted now (this producer's SourceManager walk
         // and per-function-body sub-walk), so "found nothing" is a real
-        // empty-confirmed result, not an unsupported family.
-        {"source_edges", familyCoverageState(!edges.empty(), /*diagnosticsSeen=*/false)},
+        // empty-confirmed result, not an unsupported family -- EXCEPT when a
+        // function's dumpDeclJson() failed: VisitFunctionDecl returns before
+        // ever running the CallRefVisitor sub-walk that adds this function's
+        // DECL_CALLS_DECL/DECL_REFERENCES_DECL edges, so every edge from that
+        // function's body was silently skipped, not "confirmed absent". A
+        // hardcoded diagnosticsSeen=false let source_edges report
+        // complete/empty-confirmed in that failure mode, so `inputs validate`
+        // and comparisons could trust an absence of source-edge findings that
+        // was actually just missing evidence (Codex review, P2).
+        {"source_edges",
+         familyCoverageState(
+             !edges.empty(),
+             anyDiagContains(diags, {"function facts unavailable",
+                                     "class-template member facts unavailable"}))},
         {"read_files", familyCoverageState(!readFiles.empty(), /*diagnosticsSeen=*/false)},
     };
     std::string coverage = jsonStrMap(coverageMap);
