@@ -43,6 +43,17 @@ from .cli import _EXIT_USAGE_ERROR, main
 from .cli_helpers_compare import discover_project_config
 from .cli_options import scope_options, severity_options
 
+# Block subkeys BuildConfig.from_dict() parses with `_opt_bool` (see
+# buildsource/inline.py) — a non-bool value there (e.g. YAML string "false"
+# instead of the boolean `false`) is silently dropped rather than raising, so
+# `config validate` checks these explicitly (Codex review).
+_BOOL_SUBKEYS: dict[str, frozenset[str]] = {
+    "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
+    "suppression": frozenset({"strict", "require_justification"}),
+    "compile": frozenset({"nostdinc"}),
+    "debug": frozenset({"dwarf_only", "debuginfod"}),
+}
+
 _INIT_TEMPLATE = """\
 # abicheck project configuration (ADR-037 D4). Every key is optional; a
 # missing key falls back to the built-in default. See
@@ -122,11 +133,16 @@ def config_validate(path: Path | None) -> None:
     Unlike the loader's forward-compat ``warnings.warn`` (which a suppressed
     or redirected warnings stream can hide entirely), this reports every
     unknown top-level/block key as a structured, always-visible finding. It
-    also runs the same ``BuildConfig.from_dict`` parser every real command
-    uses, so a recognized key with an invalid value (``severity.preset:
-    bogus``, ``exit_code_scheme: typo``, ...) is caught here too — without
-    this, `validate` could report OK on a file that `compare`/`config
-    show-effective` then fail on. Exits 0 when clean, 1 when unknown keys or
+    also checks that a known block key is actually a mapping (not e.g.
+    ``severity: strict``, which ``from_dict`` otherwise silently treats as
+    ``{}``) and that a known boolean subkey holds an actual boolean (not e.g.
+    ``scope: {public: "false"}``, which ``from_dict`` otherwise silently
+    treats as unset) — both are quiet no-ops in the real loader, not errors,
+    so `validate` would report OK on a file that behaves nothing like the
+    user intended. It also runs the same ``BuildConfig.from_dict`` parser
+    every real command uses, so a recognized key with an invalid enum value
+    (``severity.preset: bogus``, ``exit_code_scheme: typo``, ...) is caught
+    here too. Exits 0 when clean, 1 when unknown keys or
     invalid values are found, 64 when no config file could be found or it
     isn't valid YAML.
     """
@@ -164,10 +180,32 @@ def config_validate(path: Path | None) -> None:
             findings.append(f"unknown top-level key: {key!r}")
             continue
         known_block = BuildConfig._KNOWN_BLOCK_KEYS.get(key)
-        if known_block is not None and isinstance(value, dict):
-            for sub in value:
-                if sub not in known_block:
-                    findings.append(f"unknown key: {key}.{sub!r}")
+        if known_block is None or value is None:
+            continue
+        if not isinstance(value, dict):
+            # `severity: strict` (a bare scalar where a mapping is required)
+            # is silently coerced to `{}` by BuildConfig.from_dict's
+            # isinstance guards — every key under it is then quietly dropped
+            # rather than raising. Report it here instead of letting
+            # `validate` print OK on a file `compare` would parse differently
+            # (Codex review).
+            findings.append(
+                f"{key} must be a mapping, got {type(value).__name__}: {value!r}"
+            )
+            continue
+        for sub, sub_value in value.items():
+            if sub not in known_block:
+                findings.append(f"unknown key: {key}.{sub!r}")
+                continue
+            if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
+                # Same silent-coercion problem one level down: `_opt_bool`
+                # returns None for a non-bool value (e.g. the YAML string
+                # "false" instead of the boolean `false`), so the setting is
+                # quietly ignored rather than rejected (Codex review).
+                findings.append(
+                    f"{key}.{sub} must be a boolean, got "
+                    f"{type(sub_value).__name__}: {sub_value!r}"
+                )
 
     import warnings
 
@@ -240,7 +278,15 @@ def config_show_effective(
     from .cli_helpers_compare import resolve_compare_config
 
     resolved_path = _resolve_config_path(path)
-    cfg = load_build_config(resolved_path) if resolved_path else BuildConfig()
+    if resolved_path:
+        try:
+            cfg = load_build_config(resolved_path)
+        except ValueError as exc_parse:
+            exc = click.ClickException(f"{resolved_path}: {exc_parse}")
+            exc.exit_code = _EXIT_USAGE_ERROR
+            raise exc from None
+    else:
+        cfg = BuildConfig()
 
     cli_scope_public = _cli_flag("scope_public_headers", scope_public_headers)
     cli_strict_suppressions = _cli_flag("strict_suppressions", strict_suppressions)

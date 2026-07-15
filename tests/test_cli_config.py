@@ -109,6 +109,33 @@ class TestConfigValidate:
             assert "invalid value" in result.output
             assert "severity.preset" in result.output
 
+    def test_wrong_type_block_is_reported(self) -> None:
+        """A block key given a scalar (e.g. `severity: strict` instead of
+        `severity: {preset: strict}`) is silently coerced to `{}` by
+        BuildConfig.from_dict — every key under it quietly dropped rather
+        than raising. `validate` must catch this, not report OK (Codex
+        review)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text("severity: strict\n", encoding="utf-8")
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "severity must be a mapping" in result.output
+
+    def test_wrong_type_bool_subkey_is_reported(self) -> None:
+        """A boolean subkey given a non-bool (e.g. the YAML string "false"
+        instead of the boolean `false`) is silently treated as unset by
+        `_opt_bool` — `validate` must catch this, not report OK (Codex
+        review)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                'scope:\n  public: "false"\n', encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "scope.public must be a boolean" in result.output
+
     def test_explicit_path(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -142,6 +169,23 @@ class TestConfigValidate:
 
 
 class TestConfigShowEffective:
+    def test_invalid_config_value_is_usage_error_not_traceback(self) -> None:
+        """A recognized key with an invalid value (e.g. severity.preset:
+        bogus) previously raised an unhandled ValueError from the direct
+        load_build_config() call — a raw Python traceback instead of the
+        usage/config error `compare`/`config validate` produce for the same
+        input, making the command unusable while debugging a bad config
+        (Codex review)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "severity:\n  preset: bogus\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "show-effective"])
+            assert result.exit_code != 0
+            assert result.exception is None or isinstance(result.exception, SystemExit)
+            assert "severity.preset" in result.output
+
     def test_defaults_when_no_config_and_no_flags(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():

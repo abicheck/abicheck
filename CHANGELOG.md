@@ -101,6 +101,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`abicheck config validate` reported OK on a config with a wrong-type
+  block or subkey.** `severity: strict` (a scalar where `BuildConfig.from_dict`
+  expects a mapping) and `scope: {public: "false"}` (a string where a
+  boolean subkey is expected) are both silently coerced to an empty/unset
+  default by the real loader's `isinstance` guards — `validate` only checked
+  unknown keys and enum `ValueError`s, so it reported OK on both while
+  `compare`/`config show-effective` would silently ignore the user's
+  setting. `validate` now reports both shapes as findings (Codex review).
+
+- **`abicheck config show-effective` crashed with a raw Python traceback on
+  an invalid config value**, instead of the usage/config error `compare`/
+  `config validate` produce for the same input — it called
+  `load_build_config` directly with no exception handling. Now wraps the
+  call and raises a `click.ClickException` (Codex review).
+
 - **`ctor_overload_ambiguity_risk`'s CV-qualifier stripping could corrupt a
   class name that merely contains "const"/"volatile" as a substring** (e.g.
   `myconst`), via blind `str.replace("const", "")`. A copy/move constructor's
