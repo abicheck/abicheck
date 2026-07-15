@@ -450,6 +450,36 @@ def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
     assert names == {"foo", "bar"}
 
 
+@pytest.mark.parametrize("spelling", ["source_facts/", "./source_facts"])
+def test_compact_directory_scan_manifest_recognized_across_spellings(
+    tmp_path: Path, spelling: str
+) -> None:
+    """_iter_source_fact_files (via pathlib) treats "source_facts",
+    "source_facts/", and "./source_facts" as the exact same directory
+    reference; the directory-scan-manifest exemption above must recognize
+    all of them, not just the byte-exact "source_facts" spelling (Codex
+    review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-clang-plugin")
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = [spelling]
+    _write_manifest(pack, manifest)
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    compact_inputs_pack(pack)
+    assert load_inputs_manifest(pack).source_facts == [spelling]
+
+    append_source_facts(
+        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo", "bar"}
+
+
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")

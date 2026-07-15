@@ -372,7 +372,15 @@ def compact_inputs_pack(
     # (Codex review, P2). The merged file already lives inside
     # SOURCE_FACTS_DIR, so leaving the directory reference in place keeps
     # discovering it — and any future sibling files — via the existing scan.
-    if manifest.source_facts and manifest.source_facts != [SOURCE_FACTS_DIR]:
+    # Compared as normalized Path objects, not raw strings: _iter_source_
+    # fact_files (via pathlib) treats "source_facts", "source_facts/", and
+    # "./source_facts" as the exact same directory reference, so a byte-
+    # exact string comparison would miss those equivalent spellings and
+    # narrow them anyway (Codex review, P2).
+    is_plain_directory_scan = len(manifest.source_facts) == 1 and Path(
+        manifest.source_facts[0]
+    ) == Path(SOURCE_FACTS_DIR)
+    if manifest.source_facts and not is_plain_directory_scan:
         manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]
         _write_manifest(root, manifest)
 

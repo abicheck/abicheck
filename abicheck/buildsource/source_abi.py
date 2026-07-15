@@ -86,8 +86,16 @@ COVERAGE_STATES = frozenset(
 )
 
 #: States that mean a mandatory family's absence must NOT be read as proof
-#: nothing changed (recommendation P0 #6). ``unsupported`` is a *known*, not
-#: a silent, gap, but comparisons still must not treat it as "unchanged".
+#: nothing changed (recommendation P0 #6) -- an *unexpected* collection
+#: problem on an otherwise-supported family. Deliberately excludes
+#: ``unsupported``: unlike ``partial``/``failed`` (a family this producer
+#: normally collects failed to this time), ``unsupported`` is a producer's
+#: permanent, declared limitation (e.g. the Clang plugin never collects
+#: ``read_files``) -- visible in the coverage report itself so it is never
+#: a *silent* gap, but not a per-comparison anomaly worth a
+#: SOURCE_FACT_COVERAGE_INCOMPLETE RISK finding on literally every
+#: comparison that producer is ever used in (Codex review; see
+#: test_incomplete_families for the intentional contract this asserts).
 INCOMPLETE_COVERAGE_STATES = frozenset({"partial", "failed"})
 
 
