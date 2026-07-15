@@ -28,8 +28,10 @@ jobs:
       - name: Install MkDocs + Material theme
         run: pip install mkdocs mkdocs-material mkdocs-redirects
 
-      - name: Regenerate examples docs (idempotent)
-        run: python scripts/gen_examples_docs.py
+      - name: Regenerate published documentation assets (idempotent)
+        run: |
+          python scripts/gen_examples_docs.py
+          python scripts/publish_schemas.py
 
       - name: Build site
         run: mkdocs build --strict
@@ -47,3 +49,26 @@ jobs:
     steps:
       - uses: actions/deploy-pages@v5
         id: deployment
+
+  verify-schema-ids:
+    name: Verify published schema IDs
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Retrieve every canonical schema URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > schema_urls.txt
+          import json
+          from pathlib import Path
+          for path in sorted(Path("abicheck/schemas").glob("*.schema.json")):
+              print(json.loads(path.read_text(encoding="utf-8"))["$id"])
+          PY
+          while IFS= read -r url; do
+            echo "Checking $url"
+            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 15 "$url" -o /dev/null
+          done < schema_urls.txt
