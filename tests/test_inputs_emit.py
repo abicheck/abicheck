@@ -33,6 +33,7 @@ from abicheck.buildsource import (
     append_source_facts,
     ingest_inputs_pack,
     init_inputs_pack,
+    read_source_facts,
     write_inputs_pack,
 )
 from abicheck.buildsource.inputs_emit import (
@@ -421,6 +422,63 @@ def test_compact_rerun_ignores_mtime_ties_between_stale_output_and_fresh_tu(
     assert names == {"foo2", "bar"}  # fresh "foo2" wins over stale "foo"
 
 
+def test_read_without_recompacting_prefers_fresh_over_stale_compacted(
+    tmp_path: Path,
+) -> None:
+    """A directory-scan pack that was compacted, then reused for an
+    incremental rebuild WITHOUT a second compaction in between, has both the
+    prior compaction's output (manifest.last_compacted -- intentionally
+    preserved, compaction only deletes the per-TU originals it merged, never
+    its own output) and the fresh rebuilt per-TU file for the changed TU
+    sitting in source_facts/ together. validate/ingest/merge (all built on
+    read_source_facts, not compact_inputs_pack) must apply the same
+    prior-vs-fresh supersession compaction itself applies, not just report
+    two records for the same tu_id as a genuine pack-integrity duplicate or
+    fold both the stale and fresh facts into one surface (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    compact_inputs_pack(pack)
+
+    # Incremental rebuild: foo.cpp changes, bar.cpp is untouched. No
+    # recompaction happens before the next read.
+    append_source_facts(
+        pack,
+        [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    assert sorted(p.name for p in (pack / "source_facts").glob("*.jsonl")) == [
+        "compacted.jsonl",
+        facts_filename("src/foo.cpp"),
+    ]
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    assert diagnostics == []
+    assert {tu.tu_id: tu.functions[0].mangled_name for tu in tus} == {
+        "cu://src/foo.cpp": "_Z4foo2v",  # fresh wins, stale "foo" is gone
+        "cu://src/bar.cpp": "_Z3barv",  # untouched TU still carried forward
+    }
+
+    report = validate_inputs_pack(pack)
+    assert report.ok
+    assert report.duplicate_tu_ids == []
+    assert report.tu_count == 2
+
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo2", "bar"}
+
+
 def test_compact_rerun_never_treats_empty_tu_id_as_a_match(tmp_path: Path) -> None:
     """A hand-written/older record that never stamped tu_id defaults to
     tu_id="" (SourceAbiTu.tu_id); a single fresh no-tu_id record must not
@@ -648,12 +706,16 @@ def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
     compact_inputs_pack(pack, remove_originals=False)
     remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
     assert "compacted.jsonl" in remaining
-    assert len(remaining) == 2  # original + merged both present
+    assert len(remaining) == 2  # original + merged both present on disk
 
-    # Ingest now double-reads the same TU from both files -- exactly the
-    # hazard remove_originals=True exists to avoid; the caller opted into it.
+    # ingest_inputs_pack (built on read_source_facts) applies the same
+    # prior-vs-fresh supersession compact_inputs_pack itself applies:
+    # manifest.last_compacted marks compacted.jsonl as "prior", so the
+    # still-present original's record for the same tu_id supersedes it --
+    # no double count, even though the caller opted out of deleting the
+    # original (Codex review, P2).
     ingested = ingest_inputs_pack(pack)
-    assert ingested.tu_count == 2
+    assert ingested.tu_count == 1
 
 
 def test_compact_is_idempotent_when_rerun_on_same_output(tmp_path: Path) -> None:

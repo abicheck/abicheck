@@ -441,13 +441,42 @@ def read_source_facts(
     When a *diagnostics* sink is supplied, per-record parse warnings (malformed
     or non-object lines that were skipped) are appended to it, so a caller can
     surface them instead of silently dropping bad TUs (Codex review).
+
+    A directory-scan pack that was compacted and then reused for an
+    incremental rebuild ends up with *both* the prior compaction's output
+    (``manifest.last_compacted``, intentionally preserved — compaction only
+    deletes the per-TU originals it merged, never its own prior output) and
+    the freshly rebuilt per-TU files for since-changed TUs in
+    ``source_facts/``. Without resolution every reader of this function
+    (``validate``/``ingest``/``merge``) would see the same ``tu_id`` twice —
+    once from the now-stale prior-compaction record, once from the fresh
+    rebuild — and either misreport it as a pack-integrity duplicate or fold
+    both the stale and fresh facts into one surface. Apply the same
+    prior-vs-fresh supersession :func:`~.inputs_emit.compact_inputs_pack`
+    applies at compaction time: a fresh record for a ``tu_id`` drops the
+    prior compaction's record for that same ``tu_id``; prior records for
+    TUs not since rebuilt are still carried forward (Codex review, P2).
     """
     root = Path(root)
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
-    return read_source_fact_files(
-        _iter_source_fact_files(root, manifest, sink), diagnostics=sink
-    )
+    files = _iter_source_fact_files(root, manifest, sink)
+
+    prior_files: list[Path] = []
+    if manifest.last_compacted:
+        candidate = _safe_pack_path(root, manifest.last_compacted, sink)
+        if candidate is not None:
+            candidate = candidate.resolve()
+            prior_files = [f for f in files if f.resolve() == candidate]
+    if not prior_files:
+        return read_source_fact_files(files, diagnostics=sink)
+
+    fresh_files = [f for f in files if f not in prior_files]
+    fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
+    fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}
+    prior_tus = read_source_fact_files(prior_files, diagnostics=sink)
+    surviving_prior = [tu for tu in prior_tus if tu.tu_id not in fresh_ids]
+    return fresh_tus + surviving_prior
 
 
 def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list[str]) -> BuildEvidence | None:
