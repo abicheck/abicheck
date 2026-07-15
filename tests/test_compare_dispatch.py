@@ -609,6 +609,49 @@ class TestCompareDispatch:
         assert code == 4
         assert json.loads(out)["verdict"] == "BREAKING"
 
+    def test_config_severity_scheme_without_severity_block_applies_to_set_inputs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Codex review on #549: exit_code_scheme: severity from .abicheck.yml,
+        with no severity: block and no --severity-* flag anywhere, must still
+        gate on the default severity preset for directory/package inputs —
+        not silently fall back to the legacy verdict exit. The single-file
+        compare path never hits this: its resolved_cfg.severity is always
+        populated (defaulting to PRESET_DEFAULT), gated only by scheme; the
+        release fan-out re-derived its severity config from the raw
+        --severity-* values alone, which are all None here."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("exit_code_scheme: severity\n", encoding="utf-8")
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        # An API_BREAK finding: legacy scheme exits 2; the default severity
+        # preset (potential_breaking=warning) must exit 0 instead.
+        api_break_diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so",
+            changes=[Change(ChangeKind.ENUM_MEMBER_RENAMED, "Color::RED", "member renamed")],
+            verdict=Verdict.API_BREAK,
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release._run_compare_pair",
+            lambda *a, **kw: (api_break_diff, None, None),
+        )
+
+        code, out, _ = _invoke(
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
+            "--format", "json", "--no-bundle-analysis",
+        )
+
+        assert code == 0
+        assert json.loads(out)["verdict"] == "API_BREAK"
+
     @pytest.mark.parametrize(
         "flag, value, is_path",
         [

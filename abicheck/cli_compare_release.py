@@ -1137,6 +1137,24 @@ def compare_release_cmd(
             severity_quality_issues,
             severity_addition,
         )
+        if release_exit_code_scheme == "severity" and severity_config is None:
+            # The resolved scheme is "severity" (e.g. .abicheck.yml's
+            # exit_code_scheme: severity with no severity: block at all) but
+            # no --severity-* flag was ever set, so the raw-args resolution
+            # above returned None. The single-file compare path never hits
+            # this: its resolved_cfg.severity is unconditionally populated
+            # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
+            # re-derived from raw flags. Mirror that here — including
+            # reassigning severity_preset so the two downstream helpers below
+            # that independently re-resolve from these same raw args
+            # (_compute_release_severity_exit_code, _fold_release_global_severity)
+            # agree with it, instead of also silently resolving None and
+            # falling back to the legacy verdict-based exit (Codex review on
+            # #549).
+            from .severity import PRESET_DEFAULT
+
+            severity_config = PRESET_DEFAULT
+            severity_preset = "default"
         if release_exit_code_scheme == "legacy":
             severity_config = None
 
