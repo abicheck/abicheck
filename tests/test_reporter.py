@@ -267,6 +267,27 @@ class TestEvidenceStatusInJson:
         # policy check, not a vacuous one.
         assert d1["changes"][0]["severity"] != d2["changes"][0]["severity"]
 
+    def test_finding_id_differs_for_same_kind_symbol_and_values(self):
+        """Two findings on the same symbol, same kind, same old/new value,
+        and no distinct source location (e.g. the same pointer-depth
+        transition on two different parameters of one function) must not
+        collide on finding_id — description carries the per-finding detail
+        (parameter name/index here) that disambiguates them (Codex review,
+        PR #557)."""
+        c1 = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            "Parameter 'x' pointer level changed from 1 to 2",
+            old_value="1", new_value="2",
+        )
+        c2 = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            "Parameter 'y' pointer level changed from 1 to 2",
+            old_value="1", new_value="2",
+        )
+        r = _result(Verdict.BREAKING, changes=[c1, c2])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["finding_id"] != d["changes"][1]["finding_id"]
+
     def test_severity_blocking_fields_present_when_configured(self):
         from abicheck.severity import resolve_severity_config
 

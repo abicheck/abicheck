@@ -219,6 +219,24 @@ class TestCompareSecondaryFormat:
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
         assert parsed["changes"]
 
+    def test_secondary_format_ignores_primary_report_mode(self, tmp_path):
+        # The secondary render always uses report_mode="full", not the
+        # primary's --report-mode leaf — a --secondary-format consumer
+        # expects the same full shape regardless of how the primary format
+        # groups its own display (Codex review, PR #557).
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--report-mode", "leaf",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert "leaf_changes" not in parsed
+        assert parsed["changes"]
+
     def test_secondary_format_requires_secondary_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()

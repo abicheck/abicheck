@@ -470,6 +470,11 @@ def run_compare(
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
 
+    if secondary_fmt is not None and secondary_output is None:
+        raise click.UsageError(
+            "--secondary-format requires --secondary-output: writing two "
+            "output formats to the same stream would be ambiguous."
+        )
     if secondary_output is not None and secondary_fmt is None:
         raise click.UsageError(
             "--secondary-output requires --secondary-format: with no format "
@@ -850,22 +855,18 @@ def run_compare(
     _write_or_echo(output, text)
 
     if secondary_fmt is not None:
-        if secondary_output is None:
-            raise click.UsageError(
-                "--secondary-format requires --secondary-output: writing two "
-                "output formats to the same stream would be ambiguous."
-            )
         # Always the full, unfiltered report — ignores --show-only/--stat
-        # (which describe the *primary* format's display) so a --secondary-*
-        # consumer (e.g. a CI action rendering a PR-comment JSON from a
-        # markdown-format primary run) sees the complete change set the gate
-        # actually acted on, not whatever the primary format chose to filter
-        # down to. Reuses the same already-computed `result` — no second
-        # comparison run.
+        # (which describe the *primary* format's display) and forces
+        # report_mode="full" (not the primary's --report-mode leaf) so a
+        # --secondary-* consumer (e.g. a CI action rendering a PR-comment
+        # JSON from a markdown-format primary run) sees the complete change
+        # set the gate actually acted on, not whatever the primary format
+        # chose to filter or group down to. Reuses the same already-computed
+        # `result` — no second comparison run.
         secondary_text = _render_output(
             secondary_fmt, result, old, new,
             follow_deps=follow_deps,
-            show_only=None, report_mode=report_mode,
+            show_only=None, report_mode="full",
             show_impact=show_impact, stat=False,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
             show_recommendation=recommend,

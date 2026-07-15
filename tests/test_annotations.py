@@ -677,6 +677,27 @@ class TestSeverityConfigAwareAnnotations:
         _sort_key, line = annotations[0]
         assert "title=ABI Addition%3A func_added" in line
 
+    def test_potential_breaking_title_honours_effective_verdict_override(self):
+        """A raw-risk-set kind (SYMBOL_VERSION_REQUIRED_ADDED) whose
+        `effective_verdict` is overridden to API_BREAK must get an "API
+        Break" title, not "Deployment Risk" — the label raw kind-set
+        membership alone would produce, contradicting the override
+        (CodeRabbit review, PR #557)."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "f", "version req added",
+        )
+        c.effective_verdict = Verdict.API_BREAK
+        result = _result(Verdict.API_BREAK, [c])
+        cfg = resolve_severity_config("default", potential_breaking="error")
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert "title=API Break%3A symbol_version_required_added" in line
+        assert "Deployment Risk" not in line
+
     def test_frozen_namespace_floor_honoured_under_policy_override(self):
         """A policy-file override that demotes FUNC_REMOVED to COMPATIBLE must
         not silently downgrade a finding tagged frozen_namespace_violation —

@@ -334,7 +334,7 @@ class TestDirVsDir:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
-        assert code != 0
+        assert code == 4
         data = json.loads(out)
         lib = data["libraries"][0]
         assert lib["breaking"] == 1
@@ -359,7 +359,7 @@ class TestDirVsDir:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
-        assert code != 0
+        assert code == 4
         lib = json.loads(out)["libraries"][0]
         assert lib["breaking"] == 15
         assert len(lib["findings"]) == 10
@@ -386,10 +386,10 @@ class TestDirVsDir:
             "compare", str(old_dir), str(new_dir),
             "--format", "json", "--severity-addition", "error",
         )
-        assert code != 0
+        assert code == 1
         data = json.loads(out)
         lib = data["libraries"][0]
-        assert data["severity"]["exit_code"] != 0
+        assert data["severity"]["exit_code"] == 1
         assert "findings" in lib
         assert lib["findings"][0]["symbol"] == "_Z6new_apiv"
         assert lib["findings"][0]["bucket"] == "addition"

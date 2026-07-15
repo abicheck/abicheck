@@ -376,14 +376,16 @@ class TestOperationForKind:
         assert operation_for_kind("vptr_introduced") == "modified"
         assert operation_for_kind("static_tls_introduced") == "modified"
 
-    def test_no_remaining_add_remove_synonym_misses(self):
+    @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
+    def test_no_remaining_add_remove_synonym_misses(self, kind):
         """Systematic sweep: every ChangeKind whose name contains an add/
         remove synonym must classify as "added"/"removed", unless it is a
         known trait-change-on-persisting-entity exception (see the
-        docstring on _OPERATION_OVERRIDES)."""
+        docstring on _OPERATION_OVERRIDES). Parametrized (CodeRabbit review,
+        PR #557) so pytest reports each kind's failure independently instead
+        of aborting the whole sweep at the first miss."""
         import re
 
-        from abicheck.checker_policy import ChangeKind
         from abicheck.reporter_markdown import operation_for_kind
 
         trait_change_exceptions = {"python_abi3_dropped"}
@@ -392,21 +394,20 @@ class TestOperationForKind:
             r"|withdraw|retract|purge|delet|remov"
             r"|gain|introduc|new_|appear|creat"
         )
-        for kind in ChangeKind:
-            v = kind.value
-            # "_lost_*"/"_introduced" name a trait gained/lost on an entity
-            # that still exists, not the entity itself appearing/
-            # disappearing — see the docstring on _OPERATION_OVERRIDES.
-            if v in trait_change_exceptions or "_lost_" in v or v.endswith("_introduced"):
-                continue
-            if synonym.search(v) and "_added" not in v and "_removed" not in v:
-                # Not already covered by the plain suffix rule — must be a
-                # deliberate override, not a silent "modified" miss.
-                op = operation_for_kind(v)
-                assert op in ("added", "removed"), (
-                    f"{v!r} looks like an add/remove kind but "
-                    f"operation_for_kind() returned {op!r}"
-                )
+        v = kind.value
+        # "_lost_*"/"_introduced" name a trait gained/lost on an entity
+        # that still exists, not the entity itself appearing/
+        # disappearing — see the docstring on _OPERATION_OVERRIDES.
+        if v in trait_change_exceptions or "_lost_" in v or v.endswith("_introduced"):
+            return
+        if synonym.search(v) and "_added" not in v and "_removed" not in v:
+            # Not already covered by the plain suffix rule — must be a
+            # deliberate override, not a silent "modified" miss.
+            op = operation_for_kind(v)
+            assert op in ("added", "removed"), (
+                f"{v!r} looks like an add/remove kind but "
+                f"operation_for_kind() returned {op!r}"
+            )
 
     def test_addition_kinds_all_classify_as_added(self):
         """Authoritative cross-check against the canonical ADDITION_KINDS

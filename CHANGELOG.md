@@ -702,6 +702,69 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`finding_id` could collide for two distinct findings on the same symbol
+  (Codex review, PR #557).** Two findings of the same kind on the same
+  symbol with the same old/new value and no distinct source location (e.g.
+  `param_pointer_level_changed` on two different parameters of one
+  function, both going from pointer-depth 1 to 2) hashed to an identical
+  `finding_id`, defeating the correlation/waiver use case the field exists
+  for. `reporter._finding_id()` now also folds in `description` (which
+  embeds the per-finding detail — parameter name/index, member name, … —
+  that disambiguates them).
+
+- **`compare --secondary-format`/`--secondary-output` follow-ups (CodeRabbit
+  and Codex review, PR #557):**
+  - The secondary render forwarded the primary format's `--report-mode`
+    (e.g. `leaf`) instead of always using `full` as documented — a
+    `--secondary-format json` consumer combined with `--report-mode leaf`
+    got leaf-shaped JSON, not the full report the option promises. Now
+    hard-coded to `report_mode="full"` alongside the existing
+    `show_only=None, stat=False`.
+  - `--secondary-format` requiring `--secondary-output` was validated only
+    after `compare_snapshots()` and the primary report had already run — a
+    typo'd invocation burned the full comparison before failing with a
+    usage error. Moved next to its companion `--secondary-output`-requires-
+    `--secondary-format` check at the top of `run_compare()`.
+  - `--secondary-output` without `--secondary-format` was silently ignored
+    (no artifact, no error) — now rejected with the same fail-fast
+    `UsageError`.
+  - `--secondary-output` equal to `--output`/`-o` silently overwrote the
+    primary report with the secondary render — now rejected up front.
+  - The bundled GitHub Action's `mode: compare` unconditionally added
+    `--secondary-format json`, which the release fan-out engine rejects —
+    hard-failing a directory/package comparison that previously worked
+    under `mode: compare` regardless of the `mode` input. A new
+    `_is_release_style_operand` check (directory, or a recognized package
+    extension) skips the optimization for those operands.
+
+- **SARIF `_parse_source_location` still mishandled a path containing a
+  colon before the line separator** (e.g. a synthetic scheme like
+  `generated:headers/foo.h:42`), reading the whole string as the file with
+  no region — the earlier P0 fix only handled the Windows-drive-letter
+  special case (CodeRabbit review, PR #557). Rewritten to parse from the
+  right (`rsplit(":", 2)`): the file is whatever remains once a trailing
+  numeric `line[:column]` is peeled off, not a fixed prefix before the first
+  colon — this also subsumes the Windows drive-letter case without a
+  special branch.
+
+- **JUnit `type=` and GitHub annotation titles could mislabel a
+  POTENTIAL_BREAKING finding's API-Break-vs-Deployment-Risk subtype**
+  (CodeRabbit review, PR #557). Both recovered the subtype from raw
+  kind-set membership rather than the finding's actual effective verdict —
+  a per-finding `effective_verdict` override/modulation (A4 pattern-verdict,
+  PolicyFile) can move a finding between the two without changing which
+  kind-set its raw kind belongs to, so the label could contradict the
+  override's own intent. `junit_report._failure_type()` and
+  `annotations._title_for_change()` now derive the subtype from
+  `severity.effective_verdict_for_change()` instead.
+
+- **`compare_report.schema.json`'s `severity` object accepted an empty or
+  partial gate summary** — `config`/`categories`/`exit_code`/`blocking`/
+  `blocking_categories` were all optional, so a malformed report could pass
+  schema validation despite consumers expecting the complete gate summary
+  (CodeRabbit review, PR #557). All five are now `required` (the emitter
+  already always populates them; this only tightens the contract).
+
 - **Clang plugin: `source_edges` collected but never reached the L5 graph,
   plus four related correctness gaps from an independent review of the
   ADR-038 C.8 canonical fact-set work (ADR-038 C.10-C.12).**

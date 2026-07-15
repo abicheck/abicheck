@@ -649,10 +649,18 @@ def _finding_id(c: object) -> str:
     guarantees stays stable release to release.
 
     Derived only from fields that identify the finding's *identity* (kind,
-    symbol, old/new value, source location) — deliberately excluding
-    ``severity``/``evidence_status``, which are policy-derived and would
-    make the same underlying finding hash differently under a different
-    ``--policy``.
+    symbol, old/new value, source location, description) — deliberately
+    excluding ``severity``/``evidence_status``, which are policy-derived and
+    would make the same underlying finding hash differently under a
+    different ``--policy``.
+
+    ``description`` is included as a discriminator: two findings of the same
+    kind on the same symbol with the same old/new value and no distinct
+    source location (e.g. ``param_pointer_level_changed`` on two different
+    parameters of one function, both going from pointer-depth 1 to 2) would
+    otherwise collide on an identical id even though they are different
+    findings — ``description`` embeds the per-finding detail (parameter
+    name/index, member name, …) that disambiguates them.
     """
     key = "\x1f".join(
         [
@@ -661,6 +669,7 @@ def _finding_id(c: object) -> str:
             str(getattr(c, "old_value", None) or ""),
             str(getattr(c, "new_value", None) or ""),
             str(getattr(c, "source_location", None) or ""),
+            str(getattr(c, "description", None) or ""),
         ]
     )
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]

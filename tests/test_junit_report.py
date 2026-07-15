@@ -917,14 +917,18 @@ class TestSeverityConfig:
         risk_xml = _parse(to_junit_xml(risk_result, severity_config=cfg))
         assert risk_xml.find(".//failure").get("type") == "COMPATIBLE_WITH_RISK"
 
-    def test_failure_type_potential_breaking_fallback_for_non_conforming_kind(
+    def test_failure_type_honours_per_change_effective_verdict_override(
         self,
     ) -> None:
-        """Defensive fallback: a per-change `effective_verdict` override (A4)
-        can classify a finding as POTENTIAL_BREAKING without its *kind* being
-        a member of either api_break_set or risk_set (kind_sets is unaffected
-        by a per-change override, unlike a PolicyFile kind-level override) —
-        `_failure_type` must still return something, not raise/return None."""
+        """A per-change `effective_verdict` override (A4 pattern-verdict
+        modulation, PolicyFile) can classify a finding as POTENTIAL_BREAKING
+        without its *kind* being a member of either api_break_set or
+        risk_set (those sets classify by raw kind, unaffected by a
+        per-change override) — `_failure_type` must derive the API_BREAK vs.
+        COMPATIBLE_WITH_RISK subtype from the finding's actual effective
+        verdict, not from raw kind-set membership, so it doesn't fall back
+        to a generic label that contradicts the override's own intent
+        (CodeRabbit review, PR #557)."""
         from abicheck.severity import resolve_severity_config
 
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
@@ -933,7 +937,26 @@ class TestSeverityConfig:
         cfg = resolve_severity_config("default", potential_breaking="error")
         xml = to_junit_xml(result, severity_config=cfg)
         fail = _parse(xml).find(".//failure")
-        assert fail.get("type") == "POTENTIAL_BREAKING"
+        assert fail.get("type") == "COMPATIBLE_WITH_RISK"
+
+    def test_failure_type_effective_verdict_wins_over_raw_kind_set(self) -> None:
+        """A raw-risk-set kind (SYMBOL_VERSION_REQUIRED_ADDED) whose
+        `effective_verdict` is overridden to API_BREAK must report
+        type="API_BREAK", not "COMPATIBLE_WITH_RISK" — the type it would get
+        from raw kind-set membership alone, which would contradict the
+        override (CodeRabbit review, PR #557)."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="f",
+            description="version req added",
+        )
+        c.effective_verdict = Verdict.API_BREAK
+        result = _make_result([c], verdict=Verdict.API_BREAK)
+        cfg = resolve_severity_config("default", potential_breaking="error")
+        xml = to_junit_xml(result, severity_config=cfg)
+        fail = _parse(xml).find(".//failure")
+        assert fail.get("type") == "API_BREAK"
 
 
 # ---------------------------------------------------------------------------

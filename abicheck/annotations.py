@@ -31,6 +31,7 @@ from .checker import (
 )
 from .checker_policy import (
     ChangeKind,
+    Verdict,
 )
 
 if TYPE_CHECKING:
@@ -237,6 +238,7 @@ def _title_for_change(
     compatible_set: frozenset[ChangeKind],
     *,
     category: IssueCategory | None = None,
+    effective_verdict: Verdict | None = None,
 ) -> str:
     """Return the annotation title prefix, distinguishing API Break from Deployment Risk.
 
@@ -251,6 +253,13 @@ def _title_for_change(
     ``::error`` annotation as "Quality Issue" (or "ABI Addition"). Checking
     *category* first — the same effective classification that already drove
     the annotation *level* — keeps the title consistent with it.
+
+    *effective_verdict*, when given, resolves the POTENTIAL_BREAKING API
+    Break vs. Deployment Risk split instead of raw kind-set membership: a
+    per-change ``effective_verdict`` override/modulation (A4 pattern-verdict,
+    PolicyFile) can move a finding between the two without changing which
+    kind-set its raw *kind* belongs to, so kind-set membership alone could
+    label the title with the wrong subtype (CodeRabbit review, PR #557).
     """
     kind_label = kind.value
     if category is not None:
@@ -263,7 +272,15 @@ def _title_for_change(
         if category == _IssueCategory.ADDITION:
             return f"ABI Addition: {kind_label}"
         # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
-        # the kind sets, since IssueCategory does not itself split the two.
+        # the finding's actual effective verdict when available (falling
+        # back to the kind sets only if it wasn't supplied), since
+        # IssueCategory does not itself split the two.
+        if effective_verdict is not None:
+            if effective_verdict == Verdict.API_BREAK:
+                return f"API Break: {kind_label}"
+            if effective_verdict == Verdict.COMPATIBLE_WITH_RISK:
+                return f"Deployment Risk: {kind_label}"
+            return f"Potential Break: {kind_label}"
         if kind in api_break_set:
             return f"API Break: {kind_label}"
         if kind in risk_set:
@@ -327,6 +344,8 @@ def collect_annotations(
     kind-set membership, so a per-finding override is never misreported —
     see :func:`_legacy_level_for_category`.
     """
+    from .severity import effective_verdict_for_change
+
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
@@ -349,6 +368,10 @@ def collect_annotations(
         title = _title_for_change(
             change.kind, breaking_set, api_break_set, risk_set, compatible_set,
             category=category,
+            effective_verdict=effective_verdict_for_change(
+                change, policy=diff_result.policy, kind_sets=kind_sets,
+                policy_file=diff_result.policy_file,
+            ),
         )
         line = _format_annotation(level, change, title, change.description)
         sort_key = _SEVERITY_ORDER.get(level, 99)

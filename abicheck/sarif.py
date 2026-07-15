@@ -122,28 +122,43 @@ def _severity(
 def _parse_source_location(loc: str) -> tuple[str, int | None, int | None]:
     """Parse a ``file[:line[:column]]`` source location for a SARIF region.
 
-    A single ``rsplit(":", 1)`` mishandles ``file:line:column`` — it peels
-    off only the column, leaving ``file:line`` as the artifact URI and never
-    populating ``startColumn``. This walks from the left instead, treating a
-    single-letter first segment followed by a path separator as a Windows
-    drive letter (so ``C:\\foo\\bar.h:42`` still splits into file + line, not
-    ``C`` + ``\\foo\\bar.h:42``).
+    Parses from the right rather than assuming the file is everything
+    before the *first* colon — a path can itself contain colons (a
+    synthetic/virtual scheme like ``generated:headers/foo.h:42``, or a
+    Windows drive letter like ``C:\\foo\\bar.h:42``), and the file is
+    whatever colon segments remain once the trailing numeric line[:column]
+    is peeled off, not a fixed prefix.
+
+    ``loc.rsplit(":", 2)`` gives at most the last two colon-separated
+    segments as candidates for line/column:
+
+    * If the middle segment is numeric, it's the line and everything before
+      it (which may itself contain colons) is the file; the last segment is
+      the column if it's numeric too, otherwise it's dropped (a malformed
+      trailing column shouldn't hide a good line number).
+    * If the middle segment *isn't* numeric, the split point assumed too few
+      file-side colons (e.g. the drive-letter or ``generated:`` cases above)
+      — recombine it into the file and treat the last segment as the line.
+    * Fewer than two colons: fall back to a single trailing split for
+      ``file:line``.
+
+    Any shape that doesn't resolve to a numeric line returns the location
+    unchanged with no region.
     """
-    parts = loc.split(":")
-    if len(parts) >= 3 and len(parts[0]) == 1 and parts[0].isalpha() and parts[1][:1] in ("\\", "/"):
-        file_part = parts[0] + ":" + parts[1]
-        rest = parts[2:]
-    elif len(parts) >= 2:
-        file_part = parts[0]
-        rest = parts[1:]
-    else:
+    three = loc.rsplit(":", 2)
+    if len(three) == 3:
+        file_part, mid, last = three
+        if mid.isdigit():
+            column = int(last) if last.isdigit() else None
+            return file_part, int(mid), column
+        if last.isdigit():
+            return f"{file_part}:{mid}", int(last), None
         return loc, None, None
 
-    if not (rest and rest[0].isdigit()):
-        return loc, None, None
-    line = int(rest[0])
-    column = int(rest[1]) if len(rest) >= 2 and rest[1].isdigit() else None
-    return file_part, line, column
+    two = loc.rsplit(":", 1)
+    if len(two) == 2 and two[1].isdigit():
+        return two[0], int(two[1]), None
+    return loc, None, None
 
 
 def _rule_for(kind: ChangeKind) -> dict[str, Any]:

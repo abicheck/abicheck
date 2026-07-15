@@ -74,6 +74,7 @@
     "severity": {
       "type": "object",
       "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "required": ["config", "categories", "exit_code", "blocking", "blocking_categories"],
       "additionalProperties": true,
       "properties": {
         "config": { "type": "object" },

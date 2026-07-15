@@ -182,12 +182,23 @@ def _failure_type(
         if category == IssueCategory.POTENTIAL_BREAKING:
             # IssueCategory doesn't itself distinguish API break from
             # deployment risk (both fold into POTENTIAL_BREAKING) — recover
-            # that distinction from kind-set membership, mirroring
-            # annotations._title_for_change's analogous split.
-            _, api_break_set, _, risk_set = kind_sets
-            if change.kind in api_break_set:
+            # that distinction from the finding's *effective* verdict, not
+            # raw kind-set membership: a per-finding effective_verdict
+            # override/modulation (pattern-verdicts, PolicyFile) can move a
+            # change's verdict without changing which kind-set its raw kind
+            # belongs to, so kind-set membership alone could contradict the
+            # category already resolved above (CodeRabbit review, PR #557).
+            from .severity import effective_verdict_for_change
+
+            verdict = effective_verdict_for_change(
+                change,
+                policy=result.policy,
+                kind_sets=kind_sets,
+                policy_file=result.policy_file,
+            )
+            if verdict == Verdict.API_BREAK:
                 return "API_BREAK"
-            if change.kind in risk_set:
+            if verdict == Verdict.COMPATIBLE_WITH_RISK:
                 return "COMPATIBLE_WITH_RISK"
             return "POTENTIAL_BREAKING"
         return _CATEGORY_TO_JUNIT_TYPE.get(category.value, "COMPATIBLE")

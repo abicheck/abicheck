@@ -80,20 +80,29 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run(harness: str) -> None:
+def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     """Run the extracted function defs, then *harness* (which sets up
     PR_JSON/FORMAT/OUTPUT_FILE/CMD), then the extracted acquisition fragment
-    that consumes them — harness must execute before the fragment runs."""
+    that consumes them — harness must execute before the fragment runs.
+
+    *harness* should reference any filesystem paths via environment variable
+    expansion (e.g. ``PR_JSON="$TEST_PR_JSON"``) rather than embedding a
+    ``pathlib.Path``'s text directly — on Windows those paths use backslash
+    separators, and an unquoted or literal backslash embedded in a bash
+    script is an escape character (``\\a`` etc.), silently corrupting the
+    path. Passing paths through ``env`` instead sidesteps that entirely.
+    """
     script = _funcs_region() + "\n" + harness + "\n" + _fragment_region()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
+    env = dict(os.environ, **(env_extra or {}))
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True, text=True, encoding="utf-8", env=env,
         )
     finally:
         os.unlink(script_path)
@@ -114,13 +123,13 @@ class TestPrJsonAcquisition:
         pr_json.write_text('{"source": "secondary-format"}', encoding="utf-8")
         output_file = tmp_path / "primary.json"
         output_file.write_text('{"source": "primary-output-file"}', encoding="utf-8")
-        harness = f"""
-PR_JSON={pr_json}
-FORMAT=json
-OUTPUT_FILE={output_file}
-CMD=(abicheck compare old.json new.json --format json -o {output_file})
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+FORMAT=markdown
+OUTPUT_FILE="$TEST_OUTPUT_FILE"
+CMD=(abicheck compare old.json new.json --format markdown -o "$TEST_OUTPUT_FILE")
 """
-        _run(harness)
+        _run(harness, {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)})
         assert pr_json.read_text(encoding="utf-8") == '{"source": "secondary-format"}'
 
     def test_falls_back_to_reuse_when_pr_json_empty_and_format_json(self, tmp_path):
@@ -132,32 +141,37 @@ CMD=(abicheck compare old.json new.json --format json -o {output_file})
         pr_json.write_text("", encoding="utf-8")
         output_file = tmp_path / "primary.json"
         output_file.write_text('{"source": "primary-output-file"}', encoding="utf-8")
-        harness = f"""
-PR_JSON={pr_json}
+        harness = """
+PR_JSON="$TEST_PR_JSON"
 FORMAT=json
-OUTPUT_FILE={output_file}
-CMD=(abicheck compare old.json new.json --format json -o {output_file})
+OUTPUT_FILE="$TEST_OUTPUT_FILE"
+CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
 """
-        _run(harness)
+        _run(harness, {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)})
         assert pr_json.read_text(encoding="utf-8") == '{"source": "primary-output-file"}'
 
     def test_falls_back_to_rerun_when_pr_json_empty_and_not_reusable(self, tmp_path):
         # FORMAT isn't json (or --show-only/--stat is present) and PR_JSON
         # wasn't pre-populated — falls all the way through to _build_json_cmd
-        # and a rerun. Stub CMD[0] as a script that writes a sentinel to its
-        # last argument (where _build_json_cmd appends "-o $PR_JSON") so the
-        # rerun's execution is directly observable.
+        # and a rerun. Stub CMD[0]/[1] as `$TEST_BASH $TEST_STUB` — the same
+        # resolved bash the harness itself uses (a bare "bash" can resolve to
+        # Windows' non-functional WSL stub, see _bash_executable) running a
+        # script with no shebang/executable-bit dependency — that writes a
+        # sentinel to its last argument (where _build_json_cmd appends
+        # "-o $PR_JSON") so the rerun's execution is directly observable.
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         stub = tmp_path / "stub.sh"
-        stub.write_text('#!/bin/bash\necho rerun-sentinel > "${@: -1}"\n',
-                         encoding="utf-8")
-        stub.chmod(0o755)
-        harness = f"""
-PR_JSON={pr_json}
+        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        harness = """
+PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=({stub} compare old.json new.json --show-only added --format markdown)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --format markdown)
 """
-        _run(harness)
+        _run(harness, {
+            "TEST_PR_JSON": str(pr_json),
+            "TEST_STUB": str(stub),
+            "TEST_BASH": _bash_executable(),
+        })
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"

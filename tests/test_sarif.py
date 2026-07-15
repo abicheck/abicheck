@@ -166,6 +166,29 @@ class TestParseSourceLocation:
 
         assert _parse_source_location("foo.h:42:notacol") == ("foo.h", 42, None)
 
+    def test_colon_in_path_prefix_still_yields_line(self) -> None:
+        # A synthetic/virtual path scheme (colon before the first colon that
+        # actually separates line info) — CodeRabbit review, PR #557. The
+        # naive "file is everything before the first colon" reading would
+        # treat "headers/foo.h" as the line and fail to parse a region.
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("generated:headers/foo.h:42") == (
+            "generated:headers/foo.h", 42, None,
+        )
+
+    def test_colon_in_path_prefix_with_column(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("generated:headers/foo.h:42:7") == (
+            "generated:headers/foo.h", 42, 7,
+        )
+
+    def test_windows_path_no_column(self) -> None:
+        from abicheck.sarif import _parse_source_location
+
+        assert _parse_source_location("C:\\foo\\bar.h:42") == ("C:\\foo\\bar.h", 42, None)
+
 
 # ---------------------------------------------------------------------------
 # Result content
