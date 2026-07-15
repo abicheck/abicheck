@@ -310,7 +310,19 @@ def _iter_source_fact_files(
             found.extend(target.glob("*.json.gz"))
             files.extend(f for f in found if f.resolve() != manifest_path_resolved)
         elif target.is_file():
-            files.append(target)
+            # An *explicitly* named file entry pointing at the manifest
+            # itself (or a symlink resolving to it) is the same hazard as
+            # the directory-scan case above, just via a different entry
+            # shape -- only the glob results were filtered before, so this
+            # branch still fell through unfiltered. Deliberately not
+            # appended (rather than silently accepted): this leaves
+            # len(files) == before below, which fires the existing
+            # "resolved to no readable fact files" diagnostic and makes
+            # compact_inputs_pack fail closed instead of unlinking the
+            # pack's own manifest (Codex review, P2, reproduced
+            # empirically).
+            if target.resolve() != manifest_path_resolved:
+                files.append(target)
         # An *explicitly named* entry that resolves to nothing at all (typo,
         # missing file/dir) must not vanish quietly and leave an L3-only
         # baseline claiming L4 facts (Codex review). The default auto-scan

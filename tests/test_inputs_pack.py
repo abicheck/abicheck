@@ -422,6 +422,32 @@ def test_read_source_facts_excludes_manifest_from_root_directory_scan(
     assert tu_ids == {"cu://src/bar.cpp#cfg:abc"}
 
 
+def test_read_source_facts_excludes_manifest_from_explicit_file_entry(
+    tmp_path: Path,
+) -> None:
+    """The directory-scan exclusion above only filters glob() results; an
+    *explicitly* named file entry pointing at the manifest itself (e.g. a
+    hand-written source_facts: ["manifest.json"]) is a different code path
+    (the `elif target.is_file()` branch) and fell through unfiltered.
+    SourceAbiTu.from_dict() never raises for it, so it silently read as an
+    empty-but-valid TU, and compact_inputs_pack's default
+    remove_originals=True then deleted it as a merged "original" --
+    destroying the pack's own manifest (Codex review, P2)."""
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"source_facts": ["source_facts", "manifest.json"]},
+    )
+
+    diagnostics: list[str] = []
+    tus = read_source_facts(pack, diagnostics=diagnostics)
+    tu_ids = {tu.tu_id for tu in tus}
+    # manifest.json must not appear as a (spurious, empty-tu_id) record --
+    # explicitly naming it must be flagged, not silently accepted.
+    assert "" not in tu_ids
+    assert any("resolved to no readable fact files" in d for d in diagnostics)
+
+
 def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
     tmp_path: Path,
 ) -> None:
