@@ -116,6 +116,22 @@ use_cases:
       concept tightening, hidden friends, and user-ctor mangled names
       (dormant fixtures: cases 78/105/106/111).
 
+  - id: UC-ARCH-cython-api
+    axis: archetype
+    name: Cython API/ABI surface (.pxd + __pyx_capi__ capsule table)
+    status: planned
+    gap: G25
+    plan: docs/development/plans/g25-cython-api-abi-frontend.md
+    next_steps: >
+      Add a CythonSurface extractor (abicheck/cython_api.py) covering
+      distributed .pxd declarations and __pyx_capi__ capsule signatures, plus
+      a diff_cython_api.py detector emitting cython_capi_signature_changed
+      and siblings. Neither G14 (native C-ABI) nor G23 (Python-level API) see
+      a capsule signature change — SciPy's own bespoke __pyx_capi__
+      regression test is the motivating precedent (scikit-learn, statsmodels
+      compile against these capsules). See the SciPy/Scientific-Python
+      Roadmap for full context.
+
   - id: UC-ARCH-python-api
     axis: archetype
     name: CPython extension Python-level API surface
@@ -569,6 +585,37 @@ use_cases:
       against a declared floor (--glibc-floor or the wheel's manylinux tag) and
       emit a deployment-RISK finding when exceeded. New ChangeKind
       (platform_baseline_floor_raised); composes with diff_versioning.py (F2).
+
+  - id: UC-TC-numpy-capi-envelope
+    axis: toolchain
+    name: NumPy C-API build/target compatibility envelope
+    status: planned
+    gap: G26
+    plan: docs/development/plans/g26-numpy-capi-envelope.md
+    next_steps: >
+      Extract NPY_ABI_VERSION/NPY_API_VERSION/NPY_TARGET_VERSION facts from
+      binary evidence (rodata/string scanning, no header needed) and
+      cross-check against the declared numpy requirement range in wheel
+      metadata. Emit numpy_metadata_understates_required_version and
+      numpy_abi_major_incompatible; report a support-envelope summary rather
+      than a bare verdict. NumPy's capsule-based C-API is invisible to
+      ordinary symbol-table diffing. See the SciPy/Scientific-Python Roadmap
+      for full context.
+
+  - id: UC-TC-wheel-deployment-claims
+    axis: toolchain
+    name: Wheel tag / deployment-claim verification (multi-platform)
+    status: planned
+    gap: G27
+    plan: docs/development/plans/g27-wheel-deployment-verification.md
+    next_steps: >
+      Parse PEP 425/600 wheel platform tags into a structured claim and
+      cross-check against binary evidence: GLIBCXX/CXXABI floor (extends G10
+      from GLIBC-only), macOS LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION vs. the
+      tag's deployment target, Windows UCRT/runtime requirements vs. the PE
+      import set. Currently only the Linux glibc half is even planned (G10);
+      musllinux, macOS, and Windows claims are unchecked entirely. See the
+      SciPy/Scientific-Python Roadmap for full context.
 
   - id: UC-TC-dual-abi
     axis: toolchain
