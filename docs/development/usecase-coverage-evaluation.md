@@ -25,13 +25,18 @@ in a 5-tier policy model, **164 calibrated example cases** (134 binary shared-li
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
-five planned breadth/workflow items tracked in `usecase-registry.yaml`:
+five `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
 header-only/inline-only analysis (G4), auditwheel vendored-library pairing (G9),
 manylinux glibc-floor checks (G10), single-binary audit/lint mode (G11), and
-cross-architecture guardrails (G13) — plus the **partial** items:
-inline-namespace version-stamp normalization (G15) and header-scoped
-source-mode toolchain robustness (G16), whose diagnostics and
-`castxml --version` floor probe have shipped.
+cross-architecture guardrails (G13) — plus six **partial**/`modeled` items with
+some shipped work already: inline-namespace version-stamp normalization (G15),
+header-scoped source-mode toolchain robustness (G16, diagnostics and the
+`castxml --version` floor probe have shipped), a real-world validation corpus
+(G17), Bazel build-evidence (G18, `modeled` — code exists, not yet validated
+end-to-end in CI), the source-scan & cross-source example corpus (G20), and
+one-shot deep compare & CLI usability (G21, the `--depth` dial has shipped;
+the one-shot orchestrator has not). See "Gaps that matter" and "Proposed next
+steps" below for the current state of each.
 
 Several formerly broad gaps are now closed and should no longer be treated as
 open roadmap work: native PE/Mach-O compare validation (G1), build-config matrix
@@ -109,6 +114,8 @@ A real invocation is a point in this space:
 | **G13** | planned | Cross-architecture mismatch guardrail. |
 | **G14** | ✅ closed | CPython Limited-API / `abi3` import-contract conformance — extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit. |
 | **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
+| **G17** | partial | Real-world upstream-library validation corpus (`eval/manifest.yaml` + `runner.py`, conda-forge fetch + `dump`/`compare`) — reproducible but not continuously run in CI; complements the synthetic `examples/case*` fixtures. |
+| **G18** | modeled | Bazel L3 build-evidence adapter (`buildsource/adapters/bazel.py`, `cquery`/`aquery` jsonproto → `BuildEvidence`) exists but has never been validated end-to-end on a real Bazel C++ project (blocked on oneDAL's Bazel + legacy-makefile, no-CMake toolchain). |
 | **G19** | complete | PR-tier source intelligence (ADR-035, D1–D10): always-on compiler-free pre-scan + risk-scored escalation, intra-version cross-source validation findings (six checks + FP-rate-gate corpus), single-release hygiene audit, evidence-directed scan focusing, build-emitted source-facts protocol, and a typed `run_scan`/`ScanResult` API + per-level provider protocol with per-project cost estimate. |
 | **G20** | partial | Source-scan & cross-source example corpus (ADR-035 demonstration): single-release audit cases, cross-source corroboration cases (combination beats any single source), and evidence-directed focusing scenarios. Grows the `examples/` catalog + test suites to demonstrate the G19 engine; no engine change. |
 | **G21** | partial | One-shot deep compare + CLI usability (oneDAL eval). **Shipped (PR #422):** the `--depth headers\|build\|graph\|source\|full` dial (`--max`=full, reusing the `scan --depth` vocabulary) on `dump`; rich-click option-group `--help` panels (collapse M1); and the strict-mode honesty fix (empty requested L4 → `skipped`). **Remaining:** the one-shot `compare` orchestrator (dump both sides with `--sources`, then compare) + header/source auto-discovery, a cross-platform list-threaded `--gcc-option`, `compile_commands.json` auto-synthesis, a fail-loud signal on an empty requested layer, and vocab unification (M5). |
