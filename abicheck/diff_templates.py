@@ -651,6 +651,8 @@ def detect_missing_instantiations(
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
     for fn in old.functions:
+        if fn.visibility != Visibility.PUBLIC:
+            continue
         if fn.mangled in new_mangled:
             continue
         qname = _qualified_function_name(fn.name, fn.mangled)

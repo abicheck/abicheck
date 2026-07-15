@@ -121,6 +121,52 @@ def _ref_qualifier_from_mangled(mangled: str) -> str:
     return "&" if m.group(1) == "R" else "&&"
 
 
+_MANGLED_SOURCE_NAME = re.compile(r"\d+")
+
+
+def _mangled_name_is_local_linkage(mangled: str) -> bool:
+    """Detect the Itanium ``<local-name>``/internal-linkage marker: a bare
+    ``L`` immediately before the final component's length-prefixed
+    source-name (e.g. ``_ZN5mylibL12hidden_constE`` for a non-``extern``
+    namespace-scope ``const``/``constexpr`` variable).
+
+    Parses the length-prefixed identifier chain component-by-component
+    (jumping exactly ``length`` characters per source-name) rather than
+    substring-matching for a literal ``L`` — a namespace or class name that
+    merely *ends* in the letter ``L`` (e.g. ``MODEL``) is consumed as a whole
+    source-name and never mistaken for the marker, since the parser always
+    re-synchronizes on the next length-prefix digit run rather than rescanning
+    already-consumed identifier characters.
+
+    Returns ``False`` (not detected as local) on anything this simple
+    single-source-name walker doesn't recognize (templates, operators, …) —
+    a safe default, since the caller only uses this to rule OUT a public-CPO
+    fallback, not to affirmatively hide something.
+    """
+    if not mangled.startswith("_Z"):
+        return False
+    i = 2
+    n = len(mangled)
+    if i < n and mangled[i] == "N":
+        i += 1
+    while i < n:
+        local = mangled[i] == "L"
+        if local:
+            i += 1
+        m = _MANGLED_SOURCE_NAME.match(mangled, i)
+        if not m:
+            return False
+        length = int(m.group())
+        i = m.end() + length
+        if i > n:
+            return False
+        if local:
+            return True
+        if i < n and mangled[i] == "E":
+            return False
+    return False
+
+
 #: Prefix marking a snapshot key synthesized for a constructor overload whose
 #: real mangled name castxml omitted (see ``_CastxmlParser._function_mangled_name``).
 #: It is intentionally not a real ABI symbol, only a stable per-overload
@@ -413,15 +459,22 @@ class _CastxmlParser:
         variable at all (case88).
 
         Falls back to PUBLIC only when castxml's own attributes rule out
-        internal linkage: no ``static="1"`` (an explicit C++ ``static``) and
-        no anonymous-namespace mangling marker (``_GLOBAL__N_1``) — the same
-        "declared public, without contrary evidence" principle already
+        internal linkage: no ``static="1"`` (an explicit C++ ``static``), no
+        anonymous-namespace mangling marker (``_GLOBAL__N_1``), and no
+        Itanium local-linkage marker (a namespace-scope ``const``/
+        ``constexpr`` variable with no ``extern`` — internal linkage by
+        default, mangled with an ``L`` marker rather than exported) — the
+        same "declared public, without contrary evidence" principle already
         applied to constructors (:meth:`_constructor_visibility`).
         """
         vis = self._visibility(mangled, name)
         if vis is not Visibility.HIDDEN:
             return vis
-        if el.get("static") == "1" or "_GLOBAL__N_1" in mangled:
+        if (
+            el.get("static") == "1"
+            or "_GLOBAL__N_1" in mangled
+            or _mangled_name_is_local_linkage(mangled)
+        ):
             return Visibility.HIDDEN  # genuine internal linkage, not just unexported
         return Visibility.PUBLIC
 
