@@ -660,6 +660,12 @@ def test_mark_source_edges_extractor_coverage_not_trusted_for_plugin_producer() 
     mark_source_edges_extractor_coverage(g, s)
     assert "call_graph" not in g.extractor_passes
     assert "type_graph" not in g.extractor_passes
+    # Codex review: a non-full-walk producer that DID fold real edges must be
+    # stamped degraded, not left entirely unmarked -- an unmarked pass falls
+    # back to raw edge presence in _common_dependency_edge_kinds, which a
+    # scoped producer's edges cannot safely vouch for a project-wide zero.
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
 
 
 def test_mark_source_edges_extractor_coverage_not_trusted_when_producer_unknown() -> (
@@ -678,6 +684,26 @@ def test_mark_source_edges_extractor_coverage_not_trusted_when_producer_unknown(
     mark_source_edges_extractor_coverage(g, s)
     assert "call_graph" not in g.extractor_passes
     assert "type_graph" not in g.extractor_passes
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_no_degraded_stamp_when_no_edges_folded() -> (
+    None
+):
+    # A non-full-walk producer whose source_edges folded NOTHING (empty list
+    # -- e.g. "partial"/"failed"/"unsupported" states, or a legacy-drop
+    # surface) must not gain a spurious degraded stamp either -- there is
+    # nothing here to distrust, and marking it would be noise.
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "partial"}
+    s.coverage["fact_set"] = {"producer": "abicheck-clang-plugin"}
+    assert s.source_edges == []
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "call_graph" not in g.degraded_passes
+    assert "type_graph" not in g.degraded_passes
 
 
 def test_build_graph_without_surface_is_phase2_only() -> None:

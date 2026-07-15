@@ -1340,6 +1340,28 @@ def mark_source_edges_extractor_coverage(
     ``fact_set`` that disagrees across TUs, or is missing (pre-C.8 producer,
     mixed pack), is treated the same as the plugin case: never grant blanket
     trust without a positive, unambiguous "full walk" signal.
+
+    A non-full-walk producer (or an unresolved one) whose ``source_edges``
+    nonetheless folded real edges into *graph* is stamped ``degraded_passes``
+    instead of left entirely unmarked (Codex review): an unmarked pass falls
+    back to raw edge *presence* in
+    ``source_graph_findings._common_dependency_edge_kinds`` (its
+    ``_pass_ran``/``_pass_trusted_kinds`` checks only consult
+    ``extractor_passes``/``narrowed_passes``, not the *absence* of a
+    ``degraded_passes`` entry) — and a scoped producer's edges cannot safely
+    vouch for a project-wide zero any more than a narrowed/degraded
+    standalone replay's edges can (the same one-directional risk the sixth/
+    sixteenth Codex reviews already established ``degraded_passes`` guards
+    against elsewhere in that module). Left unmarked, a plugin baseline with
+    even one public-surface call edge would make ``DECL_CALLS_DECL`` look
+    "common" against a full-replay candidate, and a pre-existing
+    private-helper dependency the plugin structurally could never have seen
+    would surface as a false ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` the
+    moment collection switches producers. ``degraded_passes`` only ever
+    restricts trust in *this* side's absence of a kind (never gates the
+    *other* side's presence), so this can only trade a missed addition for
+    avoiding a false alarm — the same conservative bias the whole
+    narrowed/degraded chain already commits to.
     """
     if surface is None:
         return
@@ -1352,11 +1374,15 @@ def mark_source_edges_extractor_coverage(
         isinstance(fact_set, dict)
         and fact_set.get("producer") == _FULL_WALK_SOURCE_EDGES_PRODUCER
     )
-    if not full_walk_producer:
-        return
-    if state == "empty-confirmed" or (state == "complete" and surface.source_edges):
+    if full_walk_producer and (
+        state == "empty-confirmed" or (state == "complete" and surface.source_edges)
+    ):
         graph.extractor_passes["call_graph"] = True
         graph.extractor_passes["type_graph"] = True
+        return
+    if surface.source_edges:
+        graph.degraded_passes["call_graph"] = True
+        graph.degraded_passes["type_graph"] = True
 
 
 # ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────

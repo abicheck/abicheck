@@ -1144,7 +1144,27 @@ there is no equivalent "should this be automatic" question for them.
    plugin's own id (`"abicheck-clang-plugin"`), and a missing/disagreeing
    `fact_set` (pre-C.8 producer, mixed-producer pack), both fall back to no
    blanket trust — the same conservative default an unrecognized coverage
-   state already gets.
+   state already gets. A follow-up Codex review caught that "no blanket
+   trust" alone wasn't enough: leaving `call_graph`/`type_graph` entirely
+   *unmarked* for a non-full-walk producer still let
+   `source_graph_findings._common_dependency_edge_kinds`'s raw-edge-presence
+   fallback apply — its `_pass_ran`/`_pass_trusted_kinds` checks only consult
+   `extractor_passes`/`narrowed_passes`, never an *absence* of
+   `degraded_passes`. A plugin baseline with even one public-surface call
+   edge would then make `DECL_CALLS_DECL` look "common" against a
+   full-replay candidate, surfacing a pre-existing private-helper dependency
+   the plugin structurally could never have seen as a false
+   `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` — the same one-directional risk
+   the sixth/sixteenth Codex reviews already made `degraded_passes` guard
+   against for a narrowed/crashed standalone replay. Fixed: a non-full-walk
+   producer whose `source_edges` did fold real edges into the graph is now
+   stamped `degraded_passes["call_graph"]`/`["type_graph"]` instead of left
+   unmarked (a producer that folded *nothing* gets no stamp either — there is
+   nothing to distrust). `degraded_passes` only ever restricts trust in a
+   side's own *absence* of a kind, never the *other* side's presence, so
+   this can only trade a missed addition for avoiding a false alarm — the
+   same conservative bias the whole narrowed/degraded chain already
+   commits to.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges
