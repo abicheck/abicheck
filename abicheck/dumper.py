@@ -1655,19 +1655,16 @@ def _dump_elf(
     # leaks. The built snapshot holds extracted model objects, not live DIE
     # references, so closing after it is returned is safe.
     _dwarf_session_out: list[DwarfSession] = []
+    # Auto-detect can resolve to BTF/CTF with debug_format still None (Codex review).
+    _dwarf_format_out: list[str | None] = []
     dwarf_only_types: list[RecordType] = []
     try:
         if symbols_only or debug_presence_only:
             from .dwarf_presence import cheap_debug_presence_metadata
-            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
-                so_path,
-                debug_format=debug_format,
-            )
+            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path, debug_format=debug_format)
         else:
-            dwarf_meta, dwarf_adv = _resolve_debug_metadata(
-                so_path, debug_format, _session_out=_dwarf_session_out,
-                dwarf_source=debug_info_path,
-            )
+            dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format, _session_out=_dwarf_session_out, _format_out=_dwarf_format_out, dwarf_source=debug_info_path)
+        resolved_debug_format = _dwarf_format_out[0] if _dwarf_format_out else debug_format
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
         profile_hint = _lang_to_profile(lang)
         # ADR-003: Updated fallback chain
@@ -1701,7 +1698,7 @@ def _dump_elf(
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
         )
-        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, debug_format=debug_format, version=version, language_profile=profile_hint, session=dwarf_session)
+        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, debug_format=resolved_debug_format, version=version, language_profile=profile_hint, session=dwarf_session)
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()

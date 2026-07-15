@@ -158,6 +158,19 @@ def backfill_dwarf_layout(
     would be wrong regardless of how well the names line up (Codex review).
     ``is_union`` must agree before a match is used at all.
 
+    The clang header backend never namespace-qualifies ``RecordType.name``
+    at all (Codex review, fresh evidence) — so two distinct public records
+    that happen to collide on the same bare name (``api::Foo`` and
+    ``impl::Foo``, both stored as plain ``"Foo"``) would otherwise both
+    match whatever single DWARF candidate that name resolves to, silently
+    aliasing one type's real layout onto the other. That collision is a
+    pre-existing limitation of the clang backend generally (the same bare
+    name would already collide in ``AbiSnapshot``'s own ``_type_by_name``
+    index used for diffing), not something this function can fix on its
+    own, but it's cheap to guard against locally: any header type whose
+    bare name isn't unique among this snapshot's *own* header-parsed types
+    is left unmatched outright, before even attempting a DWARF lookup.
+
     The clang header backend emits a bare record name with no namespace
     scope, while the DWARF builder qualifies it (``scope::name``) — an exact
     match therefore misses a genuinely namespaced type. Falling back to a
@@ -381,9 +394,30 @@ def backfill_dwarf_layout(
         # left unbackfilled (stays ``None``) rather than guessed.
         return header.has_anonymous_aggregate_fields and not dwarf.vtable
 
+    header_name_counts: dict[str, int] = {}
+    for t in header_types:
+        header_name_counts[t.name] = header_name_counts.get(t.name, 0) + 1
+
     out: list[RecordType] = []
     for t in header_types:
         if t.size_bits is not None or t.is_opaque or t.is_template_pattern:
+            out.append(t)
+            continue
+        if header_name_counts[t.name] > 1:
+            # The clang header parser never namespace-qualifies
+            # RecordType.name (Codex review, fresh evidence): two distinct
+            # public records that collide on the same bare name (e.g.
+            # api::Foo and impl::Foo, both stored as "Foo") would otherwise
+            # both match the *same* unique DWARF candidate here, silently
+            # aliasing one type's real layout onto an unrelated one. This is
+            # a symptom of a pre-existing, broader limitation — the same
+            # bare-name collision already applies to AbiSnapshot's own
+            # `_type_by_name` index used for diffing, not something specific
+            # to this backfill step — so it's out of scope to fix generally
+            # here, but cheap to guard locally: skip backfilling any header
+            # type whose bare name isn't even unique within this snapshot's
+            # own header-parsed types, since there's no way to tell which of
+            # the colliding types a name-based match actually belongs to.
             out.append(t)
             continue
         dwarf_t = _dwarf_match(t.name)

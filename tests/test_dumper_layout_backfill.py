@@ -562,3 +562,25 @@ class TestBackfillDwarfLayout:
     def test_no_dwarf_types_is_a_no_op(self) -> None:
         header = RecordType(name="Point", kind="struct")
         assert backfill_dwarf_layout([header], []) == [header]
+
+    def test_duplicate_header_bare_names_are_never_backfilled(self) -> None:
+        """Regression (Codex review): the clang header parser never
+        namespace-qualifies RecordType.name, so two distinct public records
+        colliding on the same bare name (api::Foo and impl::Foo, both
+        stored as "Foo") would otherwise both match the same unique DWARF
+        candidate and get aliased to its layout. Both header records must
+        be left unmatched, even though the DWARF candidate itself is
+        genuinely unique and unambiguous on its own."""
+        header_a = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
+        )
+        header_b = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
+        )
+        dwarf = RecordType(
+            name="api::Foo", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out = backfill_dwarf_layout([header_a, header_b], [dwarf])
+        assert out[0].size_bits is None
+        assert out[1].size_bits is None

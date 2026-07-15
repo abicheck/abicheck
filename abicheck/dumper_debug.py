@@ -44,6 +44,7 @@ def _resolve_debug_metadata(
     debug_format: str | None,
     *,
     _session_out: list[DwarfSession] | None = None,
+    _format_out: list[str | None] | None = None,
     dwarf_source: Path | None = None,
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Resolve debug metadata using the specified or auto-detected format.
@@ -57,6 +58,15 @@ def _resolve_debug_metadata(
     (F5b: avoid re-parsing every DIE). The caller must close it. BTF/CTF and
     no-debug paths leave the list untouched (session stays ``None``).
 
+    ``_format_out`` (internal): when a list is supplied, the *actually
+    resolved* format ("dwarf"/"btf"/"ctf"/``None`` for no debug info at all)
+    is appended to it — distinct from the *requested* *debug_format*, which
+    is ``None`` on the auto-detect path even when that path resolves to BTF
+    (e.g. a kernel binary preferring BTF over its own embedded DWARF). A
+    caller that needs to know whether real DWARF backs the result (e.g. to
+    decide whether to open a second, direct DWARF walk) must consult this,
+    not *debug_format* (Codex review): the two can disagree.
+
     ``dwarf_source`` (P1.1, ADR-021a): when a detached debug artifact was
     resolved for *so_path* (``--debug-root``/``--debuginfod``: a build-id-tree
     or path-mirror ``.debug`` file, distinct from ``so_path`` itself), this is
@@ -69,11 +79,16 @@ def _resolve_debug_metadata(
 
     dwarf_path = dwarf_source or so_path
 
+    def _resolved(fmt: str | None) -> None:
+        if _format_out is not None:
+            _format_out.append(fmt)
+
     if debug_format == "btf":
         from .btf_metadata import parse_btf_metadata
         btf = parse_btf_metadata(so_path)
         if not btf.has_btf:
             log.warning("BTF requested but no .BTF section in %s", so_path)
+        _resolved("btf")
         return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     if debug_format == "ctf":
@@ -81,10 +96,12 @@ def _resolve_debug_metadata(
         ctf = parse_ctf_metadata(so_path)
         if not ctf.has_ctf:
             log.warning("CTF requested but no .ctf section in %s", so_path)
+        _resolved("ctf")
         return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     if debug_format == "dwarf":
         from .dwarf_unified import parse_dwarf
+        _resolved("dwarf")
         return parse_dwarf(dwarf_path, _session_out=_session_out)
 
     if debug_format is not None:
@@ -105,11 +122,13 @@ def _resolve_debug_metadata(
             btf = parse_btf_metadata(so_path)
             if btf.has_btf:
                 log.info("Using BTF debug info from %s (kernel binary)", so_path)
+                _resolved("btf")
                 return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
     dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
     if dwarf_meta.has_dwarf:
+        _resolved("dwarf")
         return dwarf_meta, dwarf_adv
 
     # Fallback to BTF if DWARF not available
@@ -117,6 +136,7 @@ def _resolve_debug_metadata(
         btf = parse_btf_metadata(so_path)
         if btf.has_btf:
             log.info("No DWARF, falling back to BTF in %s", so_path)
+            _resolved("btf")
             return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # Fallback to CTF
@@ -124,7 +144,9 @@ def _resolve_debug_metadata(
         ctf = parse_ctf_metadata(so_path)
         if ctf.has_ctf:
             log.info("No DWARF/BTF, falling back to CTF in %s", so_path)
+            _resolved("ctf")
             return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # No debug info at all — return empty DWARF metadata
+    _resolved(None)
     return dwarf_meta, dwarf_adv
