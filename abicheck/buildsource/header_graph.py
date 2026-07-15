@@ -228,9 +228,20 @@ def _resolve_flat_type_name(raw: str, counts: dict[str, int]) -> tuple[str, str]
     base = _base_type_name(raw)
     if not base or _is_excluded_type(base):
         return "", RESOLUTION_UNRESOLVED
-    if counts.get(base, 0) == 1:
-        return base, RESOLUTION_UNIQUE_CANDIDATE
-    return base, RESOLUTION_UNRESOLVED
+    # The flat model's own type nodes are keyed by *bare* (unqualified) name
+    # only — but a spelling reaching here is not guaranteed bare: clang's
+    # `qualType` (the alternative `--ast-frontend clang` L2 backend's own
+    # field/base-type extraction) is "as written", so a type referenced from
+    # a sibling namespace prints qualified (e.g. "detail::Impl") even though
+    # the flat model has no scope to resolve it against. Without stripping
+    # to the bare leaf first, such a spelling never matches its own
+    # already-seeded bare-named node and instead creates a brand new,
+    # unclassified one — silently losing the classification the seeded node
+    # already has (Codex review).
+    leaf = base.rsplit("::", 1)[-1]
+    if counts.get(leaf, 0) == 1:
+        return leaf, RESOLUTION_UNIQUE_CANDIDATE
+    return leaf, RESOLUTION_UNRESOLVED
 
 
 def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
@@ -282,6 +293,18 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
             edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
 
     for rt in snapshot.types:
+        # The emitting record's *own* bare name can be just as ambiguous as
+        # an edge target's (two distinct records sharing one bare name
+        # collapse to the same `type://<name>` node) — skip base/field
+        # edges from it entirely rather than attribute them to whichever
+        # same-named node was seeded first. If a public `Foo` and an
+        # unrelated private `Foo` both exist and only the private one has a
+        # private-typed field, that field edge must not land on the public
+        # node and read as a public-to-internal dependency that isn't real
+        # (Codex review) — the same "never guess an ambiguous bare name"
+        # rule already applied to edge targets.
+        if counts.get(rt.name, 0) > 1:
+            continue
         for base in rt.bases:
             emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:

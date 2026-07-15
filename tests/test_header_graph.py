@@ -361,6 +361,50 @@ def test_flat_model_ambiguous_bare_name_edge_skipped_entirely() -> None:
     assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
 
 
+def test_flat_model_resolves_qualified_spelling_to_seeded_bare_node() -> None:
+    # Codex review: the alternative --ast-frontend clang L2 backend's own
+    # field/base-type extraction uses clang's raw qualType, which prints
+    # "as written" — a type referenced from a sibling namespace prints
+    # qualified (e.g. "detail::Impl") even though the flat model records
+    # only Impl's own bare name. Without stripping to the bare leaf first,
+    # the edge missed the already-seeded, correctly-classified "Impl" node
+    # entirely and created a brand new, unclassified "detail::Impl" one.
+    impl = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    public = RecordType(
+        name="Public",
+        kind="struct",
+        fields=[TypeField(name="p", type="detail::Impl *")],
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(types=[public, impl]))
+    edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
+    assert edge.dst == "type://Impl"
+    node_by_id = {n.id: n for n in graph.nodes}
+    assert node_by_id["type://Impl"].attrs["visibility"] == "private_header"
+    assert "type://detail::Impl" not in node_by_id
+
+
+def test_flat_model_ambiguous_source_record_edges_skipped() -> None:
+    # Codex review: the *emitting* record's own bare name can be just as
+    # ambiguous as an edge target's. A public "Foo" and an unrelated private
+    # "Foo" collapse to the same type://Foo node; the private Foo's own
+    # private-typed field must not get attributed to the shared node and
+    # read as a (nonexistent) public-to-internal dependency of the public
+    # Foo.
+    foo_public = RecordType(name="Foo", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
+    priv = RecordType(name="Priv", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    foo_private = RecordType(
+        name="Foo",
+        kind="struct",
+        fields=[TypeField(name="p", type="Priv*")],
+        origin=ScopeOrigin.PRIVATE_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(types=[foo_public, priv, foo_private])
+    )
+    assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
+
+
 def test_flat_model_resolves_private_type_nested_in_a_template_argument() -> None:
     # Codex review: a public function returning e.g. std::vector<Private>
     # must not stop at the whole template spelling — the private template

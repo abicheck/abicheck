@@ -26,8 +26,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   -duplicates of the inline path's own fold functions) are deleted; `collect`
   now calls the same shared functions directly. `--kythe-entries`/
   `--codeql-results` are unaffected (pre-captured, non-executing ingestion
-  always needs an explicit file path). See the ADR-041 header-only-graph
-  addendum's follow-up section.
+  always needs an explicit file path). **Real behavior narrowing, not just a
+  flag rename:** `collect --call-graph` previously worked from L3
+  `BuildEvidence` alone (no `--source-abi`/L4 replay needed) — folding is now
+  gated on `--source-abi` + `--source-graph summary` together, matching
+  `dump --sources`'s own L4+L5 gate exactly. A user who only wanted the
+  cheaper L3-only call-graph collection has no direct replacement; the
+  gate was deliberately unified rather than preserving `collect`'s more
+  permissive prior behavior, since that asymmetry between the two paths
+  was the whole problem this change set out to close. See the ADR-041
+  header-only-graph addendum's follow-up section.
 
 ### Performance
 
