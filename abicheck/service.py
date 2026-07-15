@@ -714,15 +714,20 @@ def _attach_header_graph(
         )
         if include_map:
             augment_graph_with_includes(graph, include_map)
-            graph.finalize()
         # A clean pass with an empty map (a leaf public header with no
         # #include of its own, or every resolved include self-filtered) is
         # a genuine zero, not a failure to collect — stamp the pass so
         # `_include_graph_covered` doesn't mistake it for "never ran" and
         # misreport every header on a later comparison's other side as
-        # newly entering the include graph (Codex review).
+        # newly entering the include graph (Codex review). Re-finalize
+        # unconditionally (even with an empty map) since `finalize()` derives
+        # `coverage["include_edges"]["collected"]` from this same marker —
+        # skipping it for the empty-map case left that field stale/false
+        # despite `extractor_passes` correctly recording the pass as run
+        # (Codex review, follow-up).
         if not include_diags:
             graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        graph.finalize()
     pack = BuildSourcePack(root=Path(""), source_graph=graph)
     # Populate the manifest coverage row the normal collect/embed path always
     # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's

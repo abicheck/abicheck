@@ -1804,6 +1804,8 @@ class TestRunDumpHeaderGraph:
         graph = result.build_source.source_graph
         assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
         assert graph.extractor_passes.get("header_include_graph") is True
+        assert graph.coverage["include_edges"]["collected"] is True
+        assert graph.coverage["include_edges"]["count"] == 0
 
     def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
         p = tmp_path / "lib.dll"

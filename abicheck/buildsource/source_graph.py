@@ -401,10 +401,24 @@ class SourceGraphSummary:
         call_pass_ran = self.extractor_passes.get("call_graph", False)
         type_pass_ran = self.extractor_passes.get("type_graph", False)
         header_type_pass_ran = self.extractor_passes.get("header_type_graph", False)
+        # ``include_graph``/``header_include_graph`` (build-integrated and
+        # header-only-graph builder respectively) are pure file-inclusion
+        # facts with no body-dependent gap the way calls/references have — a
+        # confirmed pass with zero edges (a leaf header with no #includes of
+        # its own) is a genuine zero, not "never collected" (Codex review:
+        # this mirrors ``has_calls``/``has_type_edges`` below, which already
+        # credit a confirmed-but-empty pass; ``has_includes`` previously
+        # looked at edge presence alone).
+        include_pass_ran = self.extractor_passes.get("include_graph", False)
+        header_include_pass_ran = self.extractor_passes.get(
+            "header_include_graph", False
+        )
         has_calls = call_pass_ran or any(
             e.kind == "DECL_CALLS_DECL" for e in self.edges
         )
-        has_includes = any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
+        has_includes = (include_pass_ran or header_include_pass_ran) or any(
+            e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges
+        )
         #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe
         #: type-level dependencies; DECL_REFERENCES_DECL a non-call decl reference.
         #: Both come from ``type_graph.py`` (folded alongside the call graph) or an
