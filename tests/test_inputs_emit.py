@@ -367,6 +367,51 @@ def test_compact_root_directory_scan_does_not_destroy_manifest(
     load_inputs_manifest(pack)  # must not raise
 
 
+def test_compact_ancestor_directory_entry_does_not_lose_merged_facts(
+    tmp_path: Path,
+) -> None:
+    """The merged file always physically lands directly inside
+    SOURCE_FACTS_DIR, regardless of what the manifest's entries say. A
+    directory entry that is merely an ANCESTOR of SOURCE_FACTS_DIR (e.g.
+    source_facts=["."], root-level JSONL facts) is not equivalent to a
+    directory entry that IS SOURCE_FACTS_DIR itself:
+    _iter_source_fact_files()'s directory-scan is non-recursive, so a scan
+    of "." can never discover a file one level deeper in source_facts/.
+    Treating merged_ref.is_relative_to(".") as "covered" (true for any
+    ancestor) rather than "would a non-recursive scan of this directory
+    actually find it" silently discarded every TU compaction had just
+    merged: the compact call reported zero diagnostics, deleted the
+    original, and left the pack with zero readable TUs afterward (review
+    finding, reproduced empirically)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["."]
+    _write_manifest(pack, manifest)
+    (pack / "root.jsonl").write_text(
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict()) + "\n",
+        encoding="utf-8",
+    )
+
+    before = read_source_facts(pack)
+    assert len(before) == 1
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is not None
+    assert diagnostics == []
+
+    # "." alone can never rediscover the merged file one level down, so it
+    # must be added explicitly -- not silently treated as already covered.
+    assert load_inputs_manifest(pack).source_facts == [
+        ".",
+        "source_facts/compacted.jsonl",
+    ]
+
+    after = read_source_facts(pack)
+    assert {tu.tu_id for tu in after} == {"cu://src/foo.cpp"}
+
+
 def test_compact_rerun_prefers_fresh_record_over_stale_prior_output(
     tmp_path: Path,
 ) -> None:

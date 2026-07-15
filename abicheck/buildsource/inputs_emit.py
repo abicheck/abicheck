@@ -474,38 +474,44 @@ def compact_inputs_pack(
     # and this generalization to a manifest that lists a directory alongside
     # other entries, since the original single-entry check collapsed the
     # *whole* list, directory entries included, the moment there was more
-    # than one). The merged file already lives inside SOURCE_FACTS_DIR, so a
-    # preserved SOURCE_FACTS_DIR entry keeps discovering it — and any future
-    # sibling files — via the existing scan, with no separate file entry
-    # needed. Directory-ness (not a byte-exact string/SOURCE_FACTS_DIR
-    # comparison) is checked against a scratch diagnostics list, not *sink*,
-    # so this classification pass — which re-resolves entries already
-    # validated once during discovery above — cannot itself flip the
-    # already-decided lossy_read outcome or duplicate diagnostics in the
-    # caller-visible result.
+    # than one).
+    #
+    # The merged file always physically lands directly inside SOURCE_FACTS_DIR
+    # (facts_dir above), regardless of what the manifest's entries say -- so a
+    # directory entry only "covers" it when the entry *resolves to that exact
+    # directory*, not merely an ancestor of it. _iter_source_fact_files()'s
+    # directory-scan is non-recursive (one glob() call, no descent), so an
+    # ancestor entry like source_facts=["."] can never actually discover a
+    # file one level deeper in source_facts/ no matter how the two paths
+    # relate on paper. A prior version of this check used
+    # Path(merged_ref).is_relative_to(Path(d)), which answers "is merged_ref a
+    # sub-path of d" -- true for essentially any ancestor directory, not
+    # "would a non-recursive scan of d actually find merged_ref". That
+    # silently deleted the very TUs compaction had just merged:
+    # source_facts=["."] with a root-level fact file compacted with zero
+    # diagnostics, deleted the original, and left the pack with zero readable
+    # TUs afterward (review finding, reproduced empirically). Likewise a
+    # directory-only manifest that does not itself cover SOURCE_FACTS_DIR
+    # (e.g. source_facts=["extra_facts"], no "source_facts" entry at all)
+    # still needs the merged file added explicitly, or it becomes permanently
+    # undiscoverable the same way (Codex review, P2). Directory-ness is
+    # checked against a scratch diagnostics list, not *sink*, so this
+    # classification pass — which re-resolves entries already validated once
+    # during discovery above — cannot itself flip the already-decided
+    # lossy_read outcome or duplicate diagnostics in the caller-visible
+    # result.
+    facts_dir_resolved = facts_dir.resolve()
     _scratch: list[str] = []
-    directory_entries = [
-        entry
-        for entry in manifest.source_facts
-        if (target := _safe_pack_path(root, entry, _scratch)) is not None
-        and target.is_dir()
-    ]
-    # The merged file always physically lands in SOURCE_FACTS_DIR (facts_dir
-    # above), regardless of what the manifest's entries say -- a directory-
-    # only manifest that does not itself cover SOURCE_FACTS_DIR (e.g.
-    # source_facts=["extra_facts"], no "source_facts" entry at all) still
-    # needs the merged file added explicitly, or it becomes permanently
-    # undiscoverable: compaction deletes the entries' own originals but
-    # every later read still scans only the untouched explicit directory,
-    # never SOURCE_FACTS_DIR, turning a valid pack into one that
-    # ingests/validates as zero TUs (Codex review, P2 -- the previous fix
-    # only added the merged-file reference when at least one entry was a
-    # non-directory file, wrongly assuming an all-directory-entries manifest
-    # must already cover where the merged output lands).
+    directory_entries: list[str] = []
+    covered = False
+    for entry in manifest.source_facts:
+        target = _safe_pack_path(root, entry, _scratch)
+        if target is None or not target.is_dir():
+            continue
+        directory_entries.append(entry)
+        if target.resolve() == facts_dir_resolved:
+            covered = True
     merged_ref = f"{SOURCE_FACTS_DIR}/{output_filename}"
-    covered = any(
-        Path(merged_ref).is_relative_to(Path(d)) for d in directory_entries
-    )
     manifest_changed = False
     if manifest.source_facts:
         new_source_facts = (
