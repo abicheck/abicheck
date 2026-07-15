@@ -634,7 +634,7 @@ def _attach_header_graph(
         LayerCoverage,
     )
     from .buildsource.pack import BuildSourcePack
-    from .dumper import _clang_header_dump
+    from .dumper import _clang_header_dump, _resolve_clang_bin
 
     cc = compile if compile is not None else CompileContext()
     ast_root: dict[str, Any] | None = None
@@ -684,7 +684,25 @@ def _attach_header_graph(
         header_paths=[str(p) for p in resolved_headers],
     )
     if header_graph_includes and resolved_headers:
-        include_map, _diags = ClangHeaderIncludeExtractor().extract(
+        # Resolve the same clang driver `_clang_header_dump` above used
+        # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
+        # the bare "clang++" — otherwise a hermetic/cross toolchain selected
+        # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
+        # edge (or resolves them against the host's clang instead) even
+        # though the semantic header graph just above parsed correctly
+        # (Codex review). Non-raising here: an unresolvable driver degrades
+        # to ClangHeaderIncludeExtractor's own default, which then reports
+        # "not found" via its own .available() check rather than aborting
+        # the dump (ADR-028 D3).
+        try:
+            include_clang_bin = _resolve_clang_bin(
+                "cc" if lang == "c" else "c++", cc.gcc_path, cc.gcc_prefix
+            )
+        except SnapshotError:
+            include_clang_bin = "clang++" if lang != "c" else "clang"
+        include_map, _diags = ClangHeaderIncludeExtractor(
+            clang_bin=include_clang_bin
+        ).extract(
             [str(p) for p in resolved_headers],
             [str(p) for p in eff_includes],
             language="C" if lang == "c" else "CXX",

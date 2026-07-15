@@ -88,6 +88,7 @@ localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -96,6 +97,7 @@ from ..provenance import build_public_set, classify_origin
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .source_graph import (
     CONF_HIGH,
+    CONF_REDUCED,
     GraphEdge,
     GraphNode,
     SourceGraphSummary,
@@ -104,6 +106,14 @@ from .source_graph import (
     _type_node_id,
 )
 from .type_graph import (
+    EDGE_DECL_HAS_TYPE,
+    EDGE_TYPE_HAS_FIELD_TYPE,
+    EDGE_TYPE_INHERITS,
+    RESOLUTION_UNIQUE_CANDIDATE,
+    RESOLUTION_UNRESOLVED,
+    TypeEdge,
+    _base_type_name,
+    _is_excluded_type,
     augment_graph_with_types,
     index_declared_type_files,
     parse_clang_ast_types,
@@ -129,6 +139,134 @@ def _decl_identity(fn_or_var: Function | Variable) -> str:
     parsers use, so a pre-seeded node id matches an edge the AST parsers
     create for the identical declaration."""
     return str(getattr(fn_or_var, "mangled", "") or getattr(fn_or_var, "name", ""))
+
+
+#: Provenance tag for nodes/edges built straight from the flat
+#: :class:`~abicheck.model.AbiSnapshot` (no AST at all) — distinct from
+#: :data:`_PROVENANCE` (the clang-AST-derived path) so a reader can tell
+#: which resolution tier produced a given node/edge.
+_FLAT_PROVENANCE = "header_flat_l2"
+
+
+def _seed_flat_type_node(
+    graph: SourceGraphSummary,
+    header_node: Callable[[str], str],
+    name: str,
+    kind: str,
+    origin: ScopeOrigin,
+    source_header: str | None,
+) -> None:
+    """Seed one record/enum type node straight from its own snapshot entry.
+
+    Unlike the AST path above, ``RecordType``/``EnumType`` already carry their
+    own ``origin``/``source_header`` (ADR-015 provenance, populated by
+    :func:`abicheck.provenance.apply_provenance` from the same
+    ``--public-header``/``--public-header-dir`` inputs) — no
+    ``classify_origin`` re-derivation needed here.
+    """
+    node_id = _type_node_id(name)
+    attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
+    graph.add_node(
+        GraphNode(
+            id=node_id,
+            kind=kind,
+            label=name,
+            provenance=_FLAT_PROVENANCE,
+            confidence=CONF_HIGH,
+            attrs=attrs,
+        )
+    )
+    if source_header:
+        hid = header_node(source_header)
+        graph.add_edge(
+            GraphEdge(
+                src=hid,
+                dst=node_id,
+                kind="SOURCE_DECLARES",
+                provenance=_FLAT_PROVENANCE,
+                confidence=CONF_HIGH,
+            )
+        )
+
+
+def _flat_type_name_counts(snapshot: AbiSnapshot) -> dict[str, int]:
+    """How many declared record/enum types in *snapshot* share each bare name.
+
+    The flat model has no namespace/scope info to disambiguate two
+    same-named types declared in different scopes (``dumper_castxml.
+    _CastxmlParser._type_name`` returns the bare name for a
+    ``Struct``/``Class``/``Union``/``Enumeration``, same for the clang L2
+    frontend) — a count is the cheapest way to tell "this name is unique in
+    the snapshot" (safe to trust) from "this name is ambiguous" (must not
+    guess which declaration a reference to it means).
+    """
+    counts: dict[str, int] = {}
+    for rt in snapshot.types:
+        counts[rt.name] = counts.get(rt.name, 0) + 1
+    for en in snapshot.enums:
+        counts[en.name] = counts.get(en.name, 0) + 1
+    return counts
+
+
+def _resolve_flat_type_name(raw: str, counts: dict[str, int]) -> tuple[str, str]:
+    """Best-effort bare-name resolution with no AST/scope index available.
+
+    Mirrors ``type_graph._resolve_type_name``'s (raw, resolution) contract,
+    but ``RESOLUTION_SCOPE`` is never reachable here: the flat
+    :class:`~abicheck.model.AbiSnapshot` model records only a bare,
+    unqualified type name, with no enclosing-namespace/scope information at
+    all, so there is no scope to walk. A name matching exactly one declared
+    record/enum anywhere in the snapshot is trusted as that type
+    (:data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE`); a
+    name matching zero or more than one declaration is left unresolved
+    (:data:`~abicheck.buildsource.type_graph.RESOLUTION_UNRESOLVED`) rather
+    than guessed — the same "never guess an ambiguous bare name" rule the AST
+    path already follows.
+    """
+    base = _base_type_name(raw)
+    if not base or _is_excluded_type(base):
+        return "", RESOLUTION_UNRESOLVED
+    if counts.get(base, 0) == 1:
+        return base, RESOLUTION_UNIQUE_CANDIDATE
+    return base, RESOLUTION_UNRESOLVED
+
+
+def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
+    """Derive ``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/``DECL_HAS_TYPE`` edges
+    straight from the already-parsed flat :class:`~abicheck.model.AbiSnapshot`
+    — no clang AST needed at all. Every L2 backend (castxml, the default, or
+    clang) populates ``RecordType.bases``/``.fields``, ``Function.
+    return_type``/``.params``, and ``Variable.type`` identically, so this
+    works uniformly regardless of which frontend parsed the headers, at zero
+    extra compiler-invocation cost. Confidence is always
+    :data:`~abicheck.buildsource.source_graph.CONF_REDUCED` — even a
+    :data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE` match
+    here is a weaker guess than the AST path's scope-walk resolution.
+    """
+    counts = _flat_type_name_counts(snapshot)
+    edges: list[TypeEdge] = []
+
+    def emit(src: str, raw: str, kind: str, role: str) -> None:
+        if not src or not raw:
+            return
+        name, resolution = _resolve_flat_type_name(raw, counts)
+        if not name:
+            return
+        edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
+
+    for rt in snapshot.types:
+        for base in rt.bases:
+            emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
+        for fld in rt.fields:
+            emit(rt.name, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")
+    for fn in snapshot.functions:
+        identity = _decl_identity(fn)
+        emit(identity, fn.return_type, EDGE_DECL_HAS_TYPE, "return")
+        for p in fn.params:
+            emit(identity, p.type, EDGE_DECL_HAS_TYPE, "param")
+    for var in snapshot.variables:
+        emit(_decl_identity(var), var.type, EDGE_DECL_HAS_TYPE, "var")
+    return edges
 
 
 def build_header_only_graph(
@@ -328,6 +466,28 @@ def build_header_only_graph(
         # convention: "ran, zero output" must be distinguishable from
         # "never ran").
         graph.extractor_passes[HEADER_CALL_GRAPH_PASS] = True
+        graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
+    else:
+        # No clang AST available (clang missing/unselected — the default L2
+        # backend is castxml) — still recover the three structural edge
+        # kinds directly from the flat snapshot already parsed, rather than
+        # leaving the graph at declaration-visibility nodes only. No second
+        # compiler invocation needed: every L2 backend populates
+        # ``RecordType.bases``/``.fields``/``Function.return_type``/``.params``/
+        # ``Variable.type`` identically (see :func:`_flat_structural_type_edges`).
+        for rt in snapshot.types:
+            _seed_flat_type_node(
+                graph, header_node, rt.name, "record_type", rt.origin, rt.source_header
+            )
+        for en in snapshot.enums:
+            _seed_flat_type_node(
+                graph, header_node, en.name, "enum_type", en.origin, en.source_header
+            )
+        augment_graph_with_types(graph, _flat_structural_type_edges(snapshot))
+        # Only the structural pass ran — no bodies were ever visible to the
+        # flat model, in any circumstance, so ``HEADER_CALL_GRAPH_PASS`` must
+        # never be stamped here (that would falsely vouch for a project-wide
+        # zero on ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL``).
         graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
 
     return graph.finalize()

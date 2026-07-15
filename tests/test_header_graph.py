@@ -34,20 +34,33 @@ from abicheck.buildsource.source_graph import (
     is_internal_dependency_node,
     is_public_dependency_node,
 )
-from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Variable
+from abicheck.model import (
+    AbiSnapshot,
+    EnumType,
+    Function,
+    RecordType,
+    ScopeOrigin,
+    TypeField,
+    Variable,
+)
 
 PUBLIC_HEADER = "/proj/include/pub.h"
 PRIVATE_HEADER = "/proj/include/detail/impl.h"
 
 
 def _snapshot(
-    functions: list[Function] | None = None, variables: list[Variable] | None = None
+    functions: list[Function] | None = None,
+    variables: list[Variable] | None = None,
+    types: list[RecordType] | None = None,
+    enums: list[EnumType] | None = None,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         library="libfoo.so.1",
         version="1.0",
         functions=functions or [],
         variables=variables or [],
+        types=types or [],
+        enums=enums or [],
     )
 
 
@@ -114,8 +127,11 @@ def test_seeds_public_and_private_function_decls_with_visibility() -> None:
     assert node_by_id[pub_id].attrs["visibility"] == "public_header"
     assert node_by_id[priv_id].attrs["visibility"] == "private_header"
     assert any(e.kind == "SOURCE_DECLARES" and e.dst == pub_id for e in graph.edges)
-    # No AST supplied: no type/call edges, no extractor passes stamped.
-    assert graph.extractor_passes == {}
+    # No AST supplied: no call edges/pass — the flat-model structural pass
+    # still runs unconditionally (no clang needed), but there are no types
+    # in this snapshot for it to find anything about.
+    assert "header_call_graph" not in graph.extractor_passes
+    assert graph.extractor_passes == {"header_type_graph": True}
     assert not any(e.kind in ("DECL_CALLS_DECL", "TYPE_INHERITS") for e in graph.edges)
 
 
@@ -232,11 +248,117 @@ def test_base_class_edge_from_headers_alone() -> None:
     )
 
 
-def test_no_ast_root_yields_no_type_nodes_or_edges() -> None:
+def test_no_ast_root_yields_no_call_pass_on_an_empty_snapshot() -> None:
+    # An empty snapshot has no declarations/types for either path to find
+    # anything about, but the flat-model structural pass still runs
+    # unconditionally (no clang needed) — only the call-graph pass requires
+    # an AST and is genuinely absent here.
     graph = build_header_only_graph(_snapshot())
     assert graph.nodes == []
     assert graph.edges == []
-    assert graph.extractor_passes == {}
+    assert graph.extractor_passes == {"header_type_graph": True}
+
+
+# ── flat-model structural edges (no AST/clang at all) ───────────────────────
+
+
+def test_flat_model_public_struct_private_field_type() -> None:
+    # The ADR's own headline example, reachable with zero clang dependency:
+    # castxml (the default L2 backend) already parses RecordType.fields, so
+    # the private field-type dependency is visible without a second AST pass.
+    public = RecordType(
+        name="Public",
+        kind="struct",
+        fields=[TypeField(name="p", type="Private*")],
+        origin=ScopeOrigin.PUBLIC_HEADER,
+        source_header=PUBLIC_HEADER,
+    )
+    private = RecordType(
+        name="Private",
+        kind="struct",
+        origin=ScopeOrigin.PRIVATE_HEADER,
+        source_header=PRIVATE_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(types=[public, private]))
+    edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
+    assert edge.src == "type://Public"
+    assert edge.dst == "type://Private"
+    assert edge.attrs["resolution"] == "unique_candidate"
+    node_by_id = {n.id: n for n in graph.nodes}
+    assert node_by_id["type://Private"].attrs["visibility"] == "private_header"
+    assert graph.extractor_passes == {"header_type_graph": True}
+
+
+def test_flat_model_type_inherits_base() -> None:
+    base = RecordType(
+        name="Base", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+    )
+    derived = RecordType(
+        name="Derived",
+        kind="struct",
+        bases=["Base"],
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(types=[base, derived]))
+    edge = next(e for e in graph.edges if e.kind == "TYPE_INHERITS")
+    assert edge.src == "type://Derived"
+    assert edge.dst == "type://Base"
+
+
+def test_flat_model_function_return_and_param_types() -> None:
+    private = RecordType(name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type="Private",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(functions=[fn], types=[private]))
+    edge = next(e for e in graph.edges if e.kind == "DECL_HAS_TYPE")
+    assert edge.src == "decl://_Z1fv"
+    assert edge.dst == "type://Private"
+    assert edge.attrs["role"] == "return"
+
+
+def test_flat_model_enum_type_node_kind() -> None:
+    en = EnumType(name="Color", origin=ScopeOrigin.PUBLIC_HEADER, source_header=PUBLIC_HEADER)
+    graph = build_header_only_graph(_snapshot(enums=[en]))
+    node = next(n for n in graph.nodes if n.id == "type://Color")
+    assert node.kind == "enum_type"
+    assert node.attrs["visibility"] == "public_header"
+
+
+def test_flat_model_builtin_and_pointer_types_excluded() -> None:
+    fn = Function(name="f", mangled="_Z1fv", return_type="int", origin=ScopeOrigin.PUBLIC_HEADER)
+    graph = build_header_only_graph(_snapshot(functions=[fn]))
+    assert not any(e.kind == "DECL_HAS_TYPE" for e in graph.edges)
+
+
+def test_flat_model_ambiguous_bare_name_left_unresolved() -> None:
+    # Two distinct types share the bare name "Impl" (e.g. from different,
+    # unrecorded namespaces) — the flat model has no scope info to
+    # disambiguate, so a reference to "Impl" must not guess which one.
+    impl_a = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    impl_b = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    public = RecordType(
+        name="Public",
+        kind="struct",
+        fields=[TypeField(name="p", type="Impl*")],
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(types=[public, impl_a, impl_b]))
+    edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
+    assert edge.attrs["resolution"] == "unresolved"
+
+
+def test_flat_model_never_stamps_call_graph_pass() -> None:
+    # No bodies are ever visible to the flat model, in any circumstance — a
+    # header-only-confirmed call-graph pass would falsely vouch for a
+    # project-wide zero on DECL_CALLS_DECL/DECL_REFERENCES_DECL.
+    public = RecordType(name="Public", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
+    graph = build_header_only_graph(_snapshot(types=[public]))
+    assert HEADER_CALL_GRAPH_PASS not in graph.extractor_passes
+    assert graph.extractor_passes == {HEADER_TYPE_GRAPH_PASS: True}
 
 
 # ── header_paths pre-seeding ─────────────────────────────────────────────────
