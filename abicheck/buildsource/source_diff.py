@@ -239,12 +239,13 @@ def _diff_fact_coverage(
         )
     if has_signal and not compat.structured_facts_comparable:
         suppression += (
-            " generated_header_changed/public_typedef_removed/public_macro_removed "
-            "removal detection is suppressed for this comparison because the "
-            "fact_set name/version mismatch means an entity's absence may only "
-            "reflect the old contract never collecting its family, not an "
-            "actual removal; content-change findings for entities present on "
-            "both sides are unaffected."
+            " generated_header_changed/public_typedef_removed/public_macro_removed/"
+            "inline_function_removed/uninstantiated_template_removed removal "
+            "detection is suppressed for this comparison because the fact_set "
+            "name/version mismatch means an entity's absence may only reflect "
+            "the old contract never collecting its family, not an actual "
+            "removal; content-change findings for entities present on both "
+            "sides are unaffected."
         )
 
     return [
@@ -725,8 +726,9 @@ def _diff_inline_bodies(
     old_i = _by_identity(old.reachable_inline_bodies)
     new_i = _by_identity(new.reachable_inline_bodies)
     changes: list[Change] = []
-    # Existence (removal) is not hash-derived, so it stays gated only by
-    # opaque_hashes_comparable below, not this loop's body-hash comparison.
+    # Existence (removal) is not hash-derived, so it is gated separately below
+    # (structured_facts_comparable), not by opaque_hashes_comparable which only
+    # covers this loop's body-hash comparison.
     for key in (
         sorted(set(old_i) & set(new_i)) if compat.opaque_hashes_comparable else ()
     ):
@@ -765,7 +767,16 @@ def _diff_inline_bodies(
     # diff's job to report (ADR-028 D3 authority rule: L3-L5 never duplicates an
     # artifact-proven break) — skip it here.
     old_exports = set(old.roots.get("exported_symbols", []))
-    inline_removals = sorted(set(old_i) - set(new_i)) if _surface_has_facts(new) else []
+    # Skipped entirely when the new surface carries no facts (L4 extraction
+    # failed) or the two sides used incompatible fact-set contracts: an entity's
+    # absence there may only reflect the old contract never mandating collection
+    # of the inline-bodies family, not an actual removal (Codex review, mirrors
+    # the same gate on _diff_generated/_diff_typedefs/_diff_macros).
+    inline_removals = (
+        sorted(set(old_i) - set(new_i))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    )
     for key in inline_removals:
         ov = old_i[key]
         if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
@@ -799,7 +810,18 @@ def _diff_templates(
     old_t = _by_identity(old.reachable_templates)
     new_t = _by_identity(new.reachable_templates)
     changes: list[Change] = []
-    for key in sorted(set(old_t) - set(new_t)):
+    # Removal is skipped when the new surface carries no facts (L4 extraction
+    # failed) or the two sides used incompatible fact-set contracts: an
+    # entity's absence there may only reflect the old contract never mandating
+    # collection of the templates family, not an actual removal (Codex
+    # review, mirrors the same gate on
+    # _diff_generated/_diff_typedefs/_diff_macros/_diff_inline_bodies).
+    template_removals = (
+        sorted(set(old_t) - set(new_t))
+        if _surface_has_facts(new) and compat.structured_facts_comparable
+        else []
+    )
+    for key in template_removals:
         ov = old_t[key]
         name = ov.qualified_name
         changes.append(
@@ -814,7 +836,8 @@ def _diff_templates(
                 source_location=_loc(ov),
             )
         )
-    # Body-hash comparison only -- existence (removal, above) is not gated.
+    # Body-hash comparison is gated separately (opaque_hashes_comparable);
+    # existence (removal, above) is gated by structured_facts_comparable instead.
     for key in (
         sorted(set(old_t) & set(new_t)) if compat.opaque_hashes_comparable else ()
     ):

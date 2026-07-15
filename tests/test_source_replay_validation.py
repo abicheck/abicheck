@@ -143,9 +143,13 @@ def _template_body_changed() -> tuple[SourceAbiSurface, SourceAbiSurface]:
 
 
 def _template_removed() -> tuple[SourceAbiSurface, SourceAbiSurface]:
+    # The new side carries an unrelated declaration so _surface_has_facts(new)
+    # is true (L4 extraction ran) without resurrecting the removed template --
+    # an entirely empty new surface is indistinguishable from "L4 didn't run"
+    # and would be (correctly) suppressed by the no-facts-at-all removal gate.
     return (
         _surface(reachable_templates=[_ent("maxv", "template", body_hash="a")]),
-        _surface(),
+        _surface(reachable_declarations=[_ent("keep", "function", mangled="_Z4keepv")]),
     )
 
 

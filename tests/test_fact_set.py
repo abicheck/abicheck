@@ -915,3 +915,58 @@ def test_diff_still_reports_removals_when_fact_sets_match() -> None:
     kinds = {c.kind for c in changes}
     assert ChangeKind.PUBLIC_MACRO_REMOVED in kinds
     assert ChangeKind.PUBLIC_TYPEDEF_REMOVED in kinds
+
+
+def test_diff_suppresses_inline_function_removed_on_fact_set_name_mismatch() -> None:
+    """Same reasoning as the macro/typedef/generated-header removal gates: a
+    fact_set NAME mismatch means an inline function's absence may only
+    reflect the old contract never collecting the inline-bodies family, not a
+    real removal (Codex review -- this gate previously only covered
+    generated/typedef/macro removals, leaving inline/template removals
+    ungated)."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.INLINE_FUNCTION_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_template_removed_on_fact_set_version_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["version"] = 999
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_templates=[_template_entity("hash-a")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_inline_and_template_removals_when_fact_sets_match() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_inline_bodies=[_inline_entity("hash-a")],
+        reachable_templates=[_template_entity("hash-b")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.INLINE_FUNCTION_REMOVED in kinds
+    assert ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED in kinds
