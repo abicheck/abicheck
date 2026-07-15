@@ -652,7 +652,8 @@ def abi_compare(
         # flags). Validated early, before the expensive compare work.
         severity_config: SeverityConfig | None = None
         if any(
-            (
+            value is not None
+            for value in (
                 severity_preset,
                 severity_abi_breaking,
                 severity_potential_breaking,

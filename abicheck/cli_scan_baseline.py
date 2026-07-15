@@ -407,15 +407,23 @@ def _run_baseline_compare(
     # "breaking=1" with no way to tell which symbol broke without a separate
     # `compare` run. Only the gating buckets are embedded (compatible findings
     # are additions/quality noise this summary was never meant to itemize);
-    # capped so a large diff cannot blow up the always-on scan output.
-    findings = [
-        *_baseline_finding_dicts(diff.breaking, "breaking"),
-        *_baseline_finding_dicts(diff.source_breaks, "api_break"),
-        *_baseline_finding_dicts(diff.risk, "risk"),
-    ]
+    # capped so a large diff cannot blow up the always-on scan output. Counts
+    # (not dicts) decide truncation for each bucket so a large diff never
+    # builds more finding dicts than the cap can ever keep (CodeRabbit review).
+    total_gating = len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+    findings: list[dict[str, Any]] = []
+    for bucket_name, bucket_changes in (
+        ("breaking", diff.breaking),
+        ("api_break", diff.source_breaks),
+        ("risk", diff.risk),
+    ):
+        remaining = _MAX_BASELINE_FINDINGS - len(findings)
+        if remaining <= 0:
+            break
+        findings.extend(_baseline_finding_dicts(bucket_changes[:remaining], bucket_name))
     if findings:
-        summary["findings"] = findings[:_MAX_BASELINE_FINDINGS]
-        if len(findings) > _MAX_BASELINE_FINDINGS:
+        summary["findings"] = findings
+        if total_gating > _MAX_BASELINE_FINDINGS:
             summary["findings_truncated"] = True
     verdict = diff.verdict.value
     if verdict == "BREAKING":

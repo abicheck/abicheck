@@ -49,6 +49,7 @@ from .html_template import (
 )
 from .report_classifications import (
     ADDED_KINDS,
+    BREAKING_KINDS,
     CATEGORY_PREFIXES,
     REMOVED_KINDS,
     category,
@@ -64,11 +65,19 @@ if TYPE_CHECKING:
 
 
 def _change_bucket(change: object) -> str:
-    """Classify a change into 'removed', 'added', or 'changed'."""
+    """Classify a change into 'removed', 'added', or 'changed'.
+
+    A kind in ``ADDED_KINDS`` is excluded from the 'added' bucket when it is
+    also a canonical breaking kind (e.g. ``type_field_added`` — appending a
+    field to a non-final/polymorphic type can break binary layout, unlike
+    its sibling ``type_field_added_compatible``). Without this guard, a
+    structurally-additive but ABI-breaking finding would render under the
+    green "Added" section, reading as safe when it is not.
+    """
     ks = kind_str(change)
     if ks in REMOVED_KINDS:
         return "removed"
-    if ks in ADDED_KINDS:
+    if ks in ADDED_KINDS and ks not in BREAKING_KINDS:
         return "added"
     return "changed"
 
@@ -668,8 +677,23 @@ def generate_html_report(
     added = [ch for ch in display_changes if _change_bucket(ch) == "added"]
     changed = [ch for ch in display_changes if _change_bucket(ch) == "changed"]
 
-    # Metrics always use the full (unfiltered) change list
-    metrics = compatibility_metrics(cast(list[HasKind], all_changes), old_symbol_count)
+    # Metrics always use the full (unfiltered) change list. policy/kind_sets/
+    # policy_file make the Binary Compatibility % agree with the verdict
+    # banner above: without them, a policy-demoted removal still counts
+    # toward breaking_count by its raw kind, producing e.g. "0.0% binary
+    # compatibility" on the same page whose verdict reads COMPATIBLE.
+    # Duck-typed via getattr (like the rest of this function) so a
+    # lightweight stub result without a real DiffResult's policy machinery
+    # still renders — compatibility_metrics falls back to raw-kind counting
+    # when kind_sets is None.
+    _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
+    metrics = compatibility_metrics(
+        cast(list[HasKind], all_changes),
+        old_symbol_count,
+        policy=getattr(result, "policy", None),
+        kind_sets=_eff_kind_sets_fn() if callable(_eff_kind_sets_fn) else None,
+        policy_file=getattr(result, "policy_file", None),
+    )
     breaking_count = metrics.breaking_count
     bc_pct = metrics.binary_compatibility_pct
     affected_pct = metrics.affected_pct

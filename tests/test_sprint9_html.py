@@ -133,6 +133,40 @@ def test_added_section_present_when_additions_exist() -> None:
     assert "Added Symbols" in out
 
 
+def test_breaking_field_addition_not_in_green_added_section() -> None:
+    """A structurally-additive but ABI-breaking finding (type_field_added -
+    appending a field to a non-final/polymorphic type can break binary
+    layout) must not render under the green Added section, or it reads as
+    safe when it is not. Verified defect (source assessment): confirmed
+    ChangeKind.TYPE_FIELD_ADDED is in both ADDED_KINDS and BREAKING_KINDS."""
+    r = _result(verdict="BREAKING", changes=[_ch("type_field_added", "Config")])
+    out = generate_html_report(r)
+    assert "id='added'" not in out
+    assert "id='changed'" in out
+
+
+def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None:
+    """A policy-file override that demotes a removal to COMPATIBLE must not
+    leave the page reporting "0.0% binary compatibility" next to a
+    COMPATIBLE verdict banner — verified defect (source assessment): the
+    binary-compatibility % previously counted breaking_count by raw kind
+    membership, ignoring the policy override the verdict itself honours."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.policy_file import PolicyFile
+
+    c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+    )
+    out = generate_html_report(result)
+    assert "Verdict: COMPATIBLE" in out
+    assert "Binary Compatibility: <strong>100.0%</strong>" in out
+    assert "Binary Compatibility: <strong>0.0%</strong>" not in out
+    assert "(0 breaking change(s))" in out
+
+
 def test_changed_section_present_for_changed_kinds() -> None:
     r = _result(verdict="BREAKING", changes=[_ch("func_return_changed", "myfunc")])
     out = generate_html_report(r)

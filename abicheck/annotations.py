@@ -212,16 +212,36 @@ def _title_for_change(
 ) -> str:
     """Return the annotation title prefix, distinguishing API Break from Deployment Risk.
 
-    *category*, when given (the severity-aware path), distinguishes a
-    genuine addition from a compatible *quality* finding (e.g.
-    ``soname_bump_unnecessary``) — both fall in *compatible_set*, but only
-    the former is actually "ABI Addition"; mislabeling a quality warning as
-    an addition previously went unnoticed because compatible findings were
-    only ever annotated opt-in via ``annotate_additions``, but a severity
-    config can now surface a quality finding (e.g. ``quality_issues=warning``)
-    without that opt-in.
+    *category*, when given (the severity-aware path), is consulted *before*
+    kind-set membership (CodeRabbit review on #549). ``breaking_set``/etc.
+    are pre-baked from ``DiffResult._effective_kind_sets()``, which already
+    applies *kind-level* policy-file overrides — so a policy-demoted
+    ``FUNC_REMOVED`` reads as being "in" ``compatible_set``. But a
+    *per-change* frozen-namespace clamp can keep that one finding's
+    *effective* category at ``ABI_BREAKING`` despite the kind-level move; a
+    title picked from kind-set membership alone would then mislabel an
+    ``::error`` annotation as "Quality Issue" (or "ABI Addition"). Checking
+    *category* first — the same effective classification that already drove
+    the annotation *level* — keeps the title consistent with it.
     """
     kind_label = kind.value
+    if category is not None:
+        from .severity import IssueCategory as _IssueCategory
+
+        if category == _IssueCategory.ABI_BREAKING:
+            return f"ABI Break: {kind_label}"
+        if category == _IssueCategory.QUALITY_ISSUES:
+            return f"Quality Issue: {kind_label}"
+        if category == _IssueCategory.ADDITION:
+            return f"ABI Addition: {kind_label}"
+        # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
+        # the kind sets, since IssueCategory does not itself split the two.
+        if kind in api_break_set:
+            return f"API Break: {kind_label}"
+        if kind in risk_set:
+            return f"Deployment Risk: {kind_label}"
+        return f"Potential Break: {kind_label}"
+
     if kind in breaking_set:
         return f"ABI Break: {kind_label}"
     if kind in api_break_set:
@@ -229,15 +249,6 @@ def _title_for_change(
     if kind in risk_set:
         return f"Deployment Risk: {kind_label}"
     if kind in compatible_set:
-        if category is not None:
-            from .severity import IssueCategory as _IssueCategory
-
-            label = (
-                "ABI Addition"
-                if category == _IssueCategory.ADDITION
-                else "Quality Issue"
-            )
-            return f"{label}: {kind_label}"
         return f"ABI Addition: {kind_label}"
     return f"ABI Change: {kind_label}"
 

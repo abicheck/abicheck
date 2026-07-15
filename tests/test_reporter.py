@@ -116,6 +116,18 @@ class TestJsonReporter:
         assert d["summary"]["breaking"] == 1
         assert d["changes"][0]["kind"] == "func_removed"
 
+    def test_stat_forwards_severity_config(self):
+        """Codex review: to_json(stat=True, severity_config=...) returned
+        before forwarding severity_config to to_stat_json, so a caller going
+        through to_json directly (not service.render_output) silently lost
+        the severity block/exit code in stat JSON output."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, stat=True, severity_config=PRESET_DEFAULT))
+        assert "severity" in d
+
 
 class TestEvidenceStatusInJson:
     """The per-finding `evidence_status` field (schema 2.2): the epistemic

@@ -945,7 +945,7 @@ class TestCompareReleaseErrorPaths:
         # A permissive severity config would otherwise surface this quality
         # finding as ::warning regardless of --annotate-additions.
         cfg = resolve_severity_config("default")
-        _pairs, annotations = _collect_release_extras(
+        pairs, annotations = _collect_release_extras(
             matched_keys=["libfoo.so"],
             old_map={"libfoo.so": old_path},
             new_map={"libfoo.so": new_path},
@@ -957,12 +957,20 @@ class TestCompareReleaseErrorPaths:
             lang="c++",
             suppress=None, policy="", policy_file_path=None,
             annotate_additions=False,
-            collect_diff_results=False,
+            # Also exercise the JUnit re-run path (CodeRabbit review): the
+            # suppression must apply to diff_pairs too, not just annotations
+            # — both consumers share the same independently-fetched DiffResult.
+            collect_diff_results=True,
             annotate=True,
             severity_config=cfg,
             worst_verdict="BREAKING",
         )
         assert annotations == []
+        assert len(pairs) == 1
+        assert all(
+            change.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
+            for change in pairs[0][0].changes
+        )
 
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""

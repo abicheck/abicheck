@@ -163,7 +163,7 @@ def to_stat_json(
     }
     if severity_config is not None:
         d["severity"] = _build_severity_json(
-            list(result.changes),
+            result.changes,
             severity_config,
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
@@ -567,7 +567,7 @@ def to_json(
     severity_config: SeverityConfig | None = None,
 ) -> str:
     if stat:
-        return to_stat_json(result, indent=indent)
+        return to_stat_json(result, indent=indent, severity_config=severity_config)
 
     if report_mode == "leaf":
         return _to_json_leaf(

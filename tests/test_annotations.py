@@ -692,3 +692,10 @@ class TestSeverityConfigAwareAnnotations:
         sort_key, line = annotations[0]
         assert sort_key == 0
         assert line.startswith("::error ")
+        # CodeRabbit review: the title must agree with the level — the kind
+        # itself was policy-demoted into compatible_set, so a title picked
+        # from kind-set membership alone would misreport this ::error as
+        # "Quality Issue" (or "ABI Addition") instead of "ABI Break".
+        assert "title=ABI Break%3A func_removed" in line
+        assert "Quality Issue" not in line
+        assert "ABI Addition" not in line

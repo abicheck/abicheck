@@ -1369,6 +1369,17 @@ class TestAbiCompareSeverity:
         data = json.loads(raw)
         assert "error" in data
 
+    def test_empty_string_severity_arg_is_validated_not_ignored(self, tmp_path: Path):
+        """CodeRabbit review: `any((severity_preset, ...))` treated an empty
+        string as absent (falsy), silently selecting the legacy scheme
+        instead of surfacing the documented validation error."""
+        old_p, new_p = self._make_pair(
+            tmp_path, _make_snapshot("1.0"), _make_snapshot("2.0"),
+        )
+        raw = abi_compare(str(old_p), str(new_p), severity_abi_breaking="")
+        data = json.loads(raw)
+        assert "error" in data
+
     def test_json_report_embeds_severity_block(self, tmp_path: Path):
         old_p, new_p = self._make_pair(
             tmp_path,
@@ -1380,6 +1391,25 @@ class TestAbiCompareSeverity:
             severity_addition="error", output_format="json",
         )
         data = json.loads(raw)
+        assert "severity" in data["report"]
+        assert data["report"]["severity"]["exit_code"] == 1
+
+    def test_leaf_mode_json_report_embeds_severity_block(self, tmp_path: Path):
+        """CodeRabbit review: report_mode="leaf" returned before the severity
+        block was built, so the MCP JSON report silently had no `severity`
+        key even though `exit_code`/`exit_code_scheme` were already
+        severity-gated — a direct contradiction on the same response."""
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            severity_addition="error", output_format="json", report_mode="leaf",
+        )
+        data = json.loads(raw)
+        assert data["exit_code_scheme"] == "severity"
         assert "severity" in data["report"]
         assert data["report"]["severity"]["exit_code"] == 1
 
