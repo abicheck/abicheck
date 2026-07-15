@@ -89,7 +89,17 @@ class FactCompatibility:
     - ``structured_facts_comparable``: compiler-neutral facts (signatures,
       declarations, type shapes) — false only on a ``fact_set`` name/version
       mismatch, since those change what the mandatory-family contract even
-      promises.
+      promises. This specifically gates *existence/removal* claims (an
+      identity present old, absent new): under a contract mismatch, absence
+      may only mean the old contract never mandated collecting that family,
+      not that the entity disappeared. It does **not** gate a *content*
+      comparison for an identity present on **both** sides — a signature/type
+      hash means the same thing regardless of which mandatory-family contract
+      collected it, so those comparisons remain valid even under this flag
+      (a review found the previous wording implied otherwise while nothing
+      consumed it that way; `source_diff.py`'s removal-detection loops in
+      `_diff_generated`/`_diff_typedefs`/`_diff_macros` are what this
+      actually gates).
     - ``opaque_hashes_comparable``: producer-specific body/template hashes
       (``inline_body_changed``, ``template_body_changed``) — false on a
       producer/producer_version/compiler_version mismatch too, since the

@@ -778,3 +778,140 @@ def test_diff_matching_recipe_id_keeps_hash_diffs_despite_producer_mismatch() ->
     )
     changes = diff_source_abi(old, new)
     assert ChangeKind.INLINE_BODY_CHANGED in {c.kind for c in changes}
+
+
+# -- diff_source_abi: gating removal detection on structured_facts_comparable -
+
+
+def _macro_entity(qualified_name: str, value: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id=qualified_name, kind="macro", qualified_name=qualified_name, value=value
+    )
+
+
+def _typedef_entity(qualified_name: str, type_hash: str, value: str = "int") -> object:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(
+        id=qualified_name,
+        kind="typedef",
+        qualified_name=qualified_name,
+        type_hash=type_hash,
+        value=value,
+    )
+
+
+def _generated_entity(qualified_name: str, value: str) -> object:
+    from abicheck.buildsource.source_abi import SourceEntity, SourceLocation
+
+    return SourceEntity(
+        id=qualified_name,
+        kind="constexpr",
+        qualified_name=qualified_name,
+        value=value,
+        visibility="generated",
+        source_location=SourceLocation(path="gen/cfg.h", line=1, origin="GENERATED"),
+    )
+
+
+def _unrelated_entity() -> object:
+    """A decl unrelated to the removal under test, keeping
+    ``_surface_has_facts(new)`` true so the removal-suppression assertion is
+    isolated to the fact-set-mismatch gate, not the separate no-facts-at-all
+    gate (mirrors the existing inline-body-removal test's own convention)."""
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceEntity(id="decl://keep", kind="function", qualified_name="keep")
+
+
+def test_diff_suppresses_macro_removed_on_fact_set_name_mismatch() -> None:
+    """A fact_set NAME mismatch means the two sides don't agree on the
+    mandatory-family contract, so a macro's absence may only reflect the old
+    contract never collecting macros -- not a real removal (Codex review)."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+    )
+    # An unrelated declaration keeps _surface_has_facts(new) True (L4 ran on
+    # the new side too) without resurrecting the removed macro.
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.PUBLIC_MACRO_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_typedef_removed_on_fact_set_version_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["version"] = 999
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.PUBLIC_TYPEDEF_REMOVED not in {c.kind for c in changes}
+
+
+def test_diff_suppresses_generated_header_removal_on_fact_set_name_mismatch() -> None:
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_declarations=[_generated_entity("cfg::KMax", "64")],
+    )
+    new = _surface(coverage={"fact_set": new_fs, "fact_family_states": {}})
+    changes = diff_source_abi(old, new)
+    assert ChangeKind.GENERATED_HEADER_CHANGED not in {c.kind for c in changes}
+
+
+def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
+    """Removal detection is suppressed on a contract mismatch, but a content
+    comparison for an identity present on *both* sides stays meaningful
+    regardless -- a type_hash/value means the same thing under any
+    mandatory-family contract."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = dict(old_fs)
+    new_fs["name"] = "some-other-fact-set"
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED in kinds
+
+
+def test_diff_still_reports_removals_when_fact_sets_match() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": dict(fs), "fact_family_states": {}},
+        reachable_declarations=[_unrelated_entity()],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_REMOVED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_REMOVED in kinds
