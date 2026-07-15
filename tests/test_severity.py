@@ -361,3 +361,102 @@ class TestInfoOnlyAlias:
     def test_alias_resolves(self) -> None:
         from abicheck.severity import SEVERITY_PRESETS
         assert SEVERITY_PRESETS["info_only"] is SEVERITY_PRESETS["info-only"]
+
+
+# ---------------------------------------------------------------------------
+# GateDecision / compute_gate_decision / CompatibilityDecision
+# ---------------------------------------------------------------------------
+
+
+class TestCompatibilityDecision:
+    def test_is_verdict(self) -> None:
+        from abicheck.checker import Verdict
+        from abicheck.severity import CompatibilityDecision
+
+        assert CompatibilityDecision is Verdict
+
+
+class TestComputeGateDecision:
+    def test_legacy_scheme_uses_supplied_exit_code(self) -> None:
+        from abicheck.severity import compute_gate_decision
+
+        decision = compute_gate_decision([], None, legacy_exit_code=4)
+        assert decision.scheme == "legacy"
+        assert decision.exit_code == 4
+        assert decision.blocking is True
+        assert decision.blocking_categories == ()
+
+    def test_legacy_scheme_zero_exit_code_not_blocking(self) -> None:
+        from abicheck.severity import compute_gate_decision
+
+        decision = compute_gate_decision([], None, legacy_exit_code=0)
+        assert decision.scheme == "legacy"
+        assert decision.blocking is False
+
+    def test_severity_scheme_addition_promoted_to_error(self) -> None:
+        from abicheck.severity import compute_gate_decision, resolve_severity_config
+
+        cfg = resolve_severity_config("default", addition="error")
+        changes = [_FakeChange(ChangeKind.FUNC_ADDED)]
+        decision = compute_gate_decision(changes, cfg)
+        assert decision.scheme == "severity"
+        assert decision.blocking is True
+        assert decision.blocking_categories == ("addition",)
+        assert decision.exit_code != 0
+
+    def test_severity_scheme_no_error_level_findings(self) -> None:
+        from abicheck.severity import PRESET_DEFAULT, compute_gate_decision
+
+        changes = [_FakeChange(ChangeKind.FUNC_ADDED)]
+        decision = compute_gate_decision(changes, PRESET_DEFAULT)
+        assert decision.scheme == "severity"
+        assert decision.blocking is False
+        assert decision.blocking_categories == ()
+        assert decision.exit_code == 0
+
+    def test_matches_compute_exit_code(self) -> None:
+        """The gate decision's exit_code must never disagree with the
+        standalone compute_exit_code for the same inputs — it's derived
+        from it, not a parallel reimplementation."""
+        from abicheck.severity import (
+            PRESET_STRICT,
+            compute_exit_code,
+            compute_gate_decision,
+        )
+
+        changes = [
+            _FakeChange(ChangeKind.FUNC_REMOVED),
+            _FakeChange(ChangeKind.ENUM_MEMBER_RENAMED),
+            _FakeChange(ChangeKind.FUNC_ADDED),
+        ]
+        decision = compute_gate_decision(changes, PRESET_STRICT)
+        assert decision.exit_code == compute_exit_code(changes, PRESET_STRICT)
+
+    def test_multiple_blocking_categories(self) -> None:
+        from abicheck.severity import PRESET_STRICT, compute_gate_decision
+
+        changes = [
+            _FakeChange(ChangeKind.FUNC_REMOVED),
+            _FakeChange(ChangeKind.FUNC_ADDED),
+        ]
+        decision = compute_gate_decision(changes, PRESET_STRICT)
+        assert set(decision.blocking_categories) == {"abi_breaking", "addition"}
+
+    def test_single_input_keeps_exit_code_and_categories_in_sync(self) -> None:
+        """compute_gate_decision takes exactly one `changes` sequence used
+        for both exit_code and blocking_categories — by construction it
+        cannot reproduce the bug class this type replaces (two independent
+        call sites computing exit_code and blocking_categories from two
+        different change sets, e.g. one --show-only-filtered and one not,
+        and disagreeing as a result)."""
+        from abicheck.severity import compute_gate_decision, resolve_severity_config
+
+        cfg = resolve_severity_config("default", addition="error")
+        changes = [
+            _FakeChange(ChangeKind.ENUM_MEMBER_RENAMED),  # potential_breaking: warning
+            _FakeChange(ChangeKind.FUNC_ADDED),  # addition: error (overridden)
+        ]
+        decision = compute_gate_decision(changes, cfg)
+        assert decision.blocking is True
+        assert decision.blocking_categories == ("addition",)
+        assert "potential_breaking" not in decision.blocking_categories  # not error-level

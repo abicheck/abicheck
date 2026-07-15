@@ -799,24 +799,31 @@ def _release_gating_buckets(
     what blocked the release).
     """
     if severity_config is not None:
-        from .severity import SeverityLevel, categorize_changes
+        from .severity import categorize_changes, compute_gate_decision
 
-        categorized = categorize_changes(
+        kind_sets = diff._effective_kind_sets()
+        # compute_gate_decision (the single canonical gate computation, also
+        # used by reporter.py/sarif.py) decides *which* categories are
+        # actually blocking; categorize_changes supplies the change lists for
+        # them — a category with no findings never contributes an (empty)
+        # bucket, matching how JSON/SARIF's blocking_categories behave.
+        gate = compute_gate_decision(
             diff.changes,
+            severity_config,
             policy=diff.policy,
-            kind_sets=diff._effective_kind_sets(),
+            kind_sets=kind_sets,
             policy_file=diff.policy_file,
         )
-        return [
-            (name, cat_changes)
-            for name, cat_changes in (
-                ("abi_breaking", categorized.abi_breaking),
-                ("potential_breaking", categorized.potential_breaking),
-                ("quality_issues", categorized.quality_issues),
-                ("addition", categorized.addition),
-            )
-            if getattr(severity_config, name) == SeverityLevel.ERROR
-        ]
+        categorized = categorize_changes(
+            diff.changes, policy=diff.policy, kind_sets=kind_sets, policy_file=diff.policy_file,
+        )
+        cat_changes_by_name = {
+            "abi_breaking": categorized.abi_breaking,
+            "potential_breaking": categorized.potential_breaking,
+            "quality_issues": categorized.quality_issues,
+            "addition": categorized.addition,
+        }
+        return [(name, cat_changes_by_name[name]) for name in gate.blocking_categories]
     return [
         ("breaking", diff.breaking),
         ("api_break", diff.source_breaks),

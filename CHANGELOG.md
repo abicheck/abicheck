@@ -271,6 +271,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`GateDecision` / `CompatibilityDecision` — formal separation of "is this
+  compatible?" from "does this block CI?" (ADR-042).**
+  `abicheck.severity.compute_gate_decision()` is now the single canonical
+  computation for a report's gate summary (exit code, `blocking`,
+  `blocking_categories`), replacing three independent hand-rolled
+  categorize-then-filter-to-`error` implementations
+  (`reporter._build_severity_json`, `sarif._severity_gate_properties`,
+  `cli_compare_release._release_gating_buckets`) that had drifted apart from
+  each other — the root cause of two bugs fixed earlier in this cycle
+  (JSON's `blocking_categories` disagreeing with `exit_code` under
+  `--show-only`; release JSON's per-library `findings` missing
+  severity-gated additions). `CompatibilityDecision` is a plain alias for
+  the existing `Verdict` enum — purely additive, no behavior or public-API
+  change to either type; JSON/SARIF output shapes are byte-for-byte
+  unchanged.
+
 - **Canonical fact-set versioning and per-family coverage honesty for the
   Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
   the Clang facts plugin and the reference `clang.py` wrapper now carries a

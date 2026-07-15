@@ -199,6 +199,7 @@ nav:
       - "039: Build-Context Reconciliation": development/adr/039-build-context-reconciliation.md
       - "040: compare Surface Reduction": development/adr/040-compare-surface-reduction.md
       - "041: Compiler-Facts Semantic Impact Graph": development/adr/041-compiler-facts-semantic-impact-graph.md
+      - "042: CompatibilityDecision/GateDecision Separation": development/adr/042-compatibility-and-gate-decision-separation.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

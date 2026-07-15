@@ -247,44 +247,25 @@ def _severity_gate_properties(
     Mirrors the categories/exit-code contract of JSON's ``severity`` block
     (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
     tell *why* the invocation's exit code is what it is without
-    cross-referencing the JSON report separately.
+    cross-referencing the JSON report separately. Both routed through
+    :func:`abicheck.severity.compute_gate_decision` — the single canonical
+    gate computation — so ``exitCode``/``blocking``/``blockingCategories``
+    can never independently drift apart from each other or from JSON's
+    equivalent block.
     """
-    from abicheck.severity import (
-        IssueCategory,
-        SeverityLevel,
-        categorize_changes,
-        compute_exit_code,
-    )
+    from abicheck.severity import compute_gate_decision
 
-    eff_sets = result._effective_kind_sets()
-    exit_code = compute_exit_code(
+    gate = compute_gate_decision(
         result.changes,
         severity_config,
         policy=result.policy,
-        kind_sets=eff_sets,
+        kind_sets=result._effective_kind_sets(),
         policy_file=result.policy_file,
     )
-    categorized = categorize_changes(
-        result.changes,
-        policy=result.policy,
-        kind_sets=eff_sets,
-        policy_file=result.policy_file,
-    )
-    by_category = {
-        IssueCategory.ABI_BREAKING: categorized.abi_breaking,
-        IssueCategory.POTENTIAL_BREAKING: categorized.potential_breaking,
-        IssueCategory.QUALITY_ISSUES: categorized.quality_issues,
-        IssueCategory.ADDITION: categorized.addition,
-    }
-    blocking_categories = [
-        cat.value
-        for cat, cat_changes in by_category.items()
-        if cat_changes and severity_config.level_for(cat) == SeverityLevel.ERROR
-    ]
     return {
-        "exitCode": exit_code,
-        "blocking": exit_code != 0,
-        "blockingCategories": blocking_categories,
+        "exitCode": gate.exit_code,
+        "blocking": gate.blocking,
+        "blockingCategories": list(gate.blocking_categories),
         "config": {
             "abi_breaking": severity_config.abi_breaking.value,
             "potential_breaking": severity_config.potential_breaking.value,

@@ -764,7 +764,7 @@ def _build_severity_json(
     *kind_sets* from ``DiffResult._effective_kind_sets()`` includes
     PolicyFile overrides.
     """
-    from .severity import SeverityLevel, categorize_changes, compute_exit_code
+    from .severity import SeverityLevel, categorize_changes, compute_gate_decision
 
     categorized = categorize_changes(
         changes,
@@ -797,17 +797,6 @@ def _build_severity_json(
         },
     }
 
-    # Exit code uses the full unfiltered change set so --show-only
-    # does not affect it.
-    exit_changes = all_changes if all_changes is not None else changes
-    exit_code = compute_exit_code(
-        exit_changes,
-        severity_config,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-    )
-
     # ``blocking``/``blocking_categories`` (schema 2.3, additive): a typed,
     # auditable gate summary mirroring SARIF's ``severityGate`` block
     # (``sarif._severity_gate_properties``) — without them, a JSON consumer
@@ -815,37 +804,30 @@ def _build_severity_json(
     # build" from ``config``/``categories`` itself; this makes that answer a
     # first-class, versioned part of the report.
     #
-    # Must be derived from *exit_changes* (the unfiltered gate set), not
-    # ``categorized`` above (built from the possibly --show-only-filtered
-    # *display* ``changes``) — otherwise hiding the one category that's
-    # actually failing the build (e.g. ``--show-only=breaking`` when an
-    # addition promoted to ``error`` is what's blocking) would report
-    # ``blocking: true`` alongside ``blocking_categories: []`` (Codex review
-    # on #557).
-    gate_categorized = (
-        categorized
-        if exit_changes is changes
-        else categorize_changes(
-            exit_changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
-        )
+    # Derived from *exit_changes* (the unfiltered gate set), not ``changes``
+    # (the possibly --show-only-filtered *display* set) — otherwise hiding
+    # the one category that's actually failing the build (e.g.
+    # ``--show-only=breaking`` when an addition promoted to ``error`` is
+    # what's blocking) would report ``blocking: true`` alongside
+    # ``blocking_categories: []`` (Codex review on #557). Routed through
+    # ``compute_gate_decision`` — the single canonical gate computation —
+    # rather than hand-rolling exit_code and blocking_categories as two
+    # independent computations that could drift apart from each other.
+    exit_changes = all_changes if all_changes is not None else changes
+    gate = compute_gate_decision(
+        exit_changes,
+        severity_config,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
-    blocking_categories = [
-        name
-        for name, cat_changes in (
-            ("abi_breaking", gate_categorized.abi_breaking),
-            ("potential_breaking", gate_categorized.potential_breaking),
-            ("quality_issues", gate_categorized.quality_issues),
-            ("addition", gate_categorized.addition),
-        )
-        if cat_changes and config_dict[name] == "error"
-    ]
 
     return {
         "config": config_dict,
         "categories": categories,
-        "exit_code": exit_code,
-        "blocking": exit_code != 0,
-        "blocking_categories": blocking_categories,
+        "exit_code": gate.exit_code,
+        "blocking": gate.blocking,
+        "blocking_categories": list(gate.blocking_categories),
     }
 
 
