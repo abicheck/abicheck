@@ -1,5 +1,40 @@
 # Architecture Decision Records
 
+## Status field convention
+
+A documentation-lifecycle review (2026-07) found that a single "Status" word
+per ADR routinely conflated three independent facts — whether the *decision*
+was accepted, whether it's *implemented*, and whether that implementation
+claim has been *verified* against the current code — which is exactly how
+several ADRs went stale silently (e.g. ADR-022 said "implemented" when only
+one of its four backends had shipped). Introducing a separate structured
+frontmatter schema (`decision_status`/`implementation_status`/
+`verification_status` fields, as some ADR tooling does) was considered and
+deferred: every ADR here uses a single plain-prose `**Status:**` line, and
+retrofitting 40+ files with fabricated metadata (owners, PR numbers, "last
+verified" dates for documents nobody actually re-audited line-by-line) would
+trade one inaccuracy for another. Instead, the convention **going forward**
+is to keep encoding the same three facts in that one line, explicitly:
+
+```
+**Status:** <decision: Proposed | Accepted | Superseded by ADR-NNN | Deprecated>
+— <implementation: implemented | partially implemented (name what's missing)
+| not implemented>. <optional amendment note: what's stale, what superseded
+it, where the current behavior is documented instead>
+```
+
+Good examples already in this table: ADR-022 ("partially implemented" +
+naming exactly which backend shipped), ADR-037 (distinguishes "the contract
+is implemented" from "enforcement is advisory until 1.0"), ADR-025 ("Proposed,
+but substantially implemented/generalized elsewhere" + pointers to the ADRs
+that absorbed it). When you touch an ADR and confirm a claim against current
+code, update its `**Status:**` line rather than leaving the reader to infer
+freshness from the file's git history. `scripts/check_usecase_docs_sync.py`
+and the `adr-index-nav-sync` AI-readiness check keep the *registry* and *nav*
+mechanically honest; the status line itself is still maintainer-verified
+prose, not generated — treat a status claim you haven't personally checked
+against the code as unverified, regardless of how confident it reads.
+
 | # | Title | Status |
 |---|-------|--------|
 | [001](001-technology-stack.md) | Technology Stack — Python + pyelftools + castxml | Accepted — implemented, substantially amended |
