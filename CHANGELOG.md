@@ -48,6 +48,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   deliberately deferred follow-up (`cli.py`/`dumper.py` are both at/near their
   line-count caps). See the ADR-041 header-only-graph addendum.
 
+- **Type-graph edges carry richer confidence/provenance labels.**
+  `type_graph._resolve_type_name` previously folded two structurally
+  different match tiers into the same flat `CONF_HIGH`: a real match via the
+  nearest-enclosing-scope walk, and a fallback match against the only
+  same-bare-name declaration anywhere in the TU when no scope matched at
+  all — a last-resort guess that could name a structurally unrelated type.
+  Now returns a `resolution` label (`"scope"` / `"unique_candidate"` /
+  `"unresolved"`) that `TypeEdge`/`augment_graph_with_types` thread into the
+  graph edge's `attrs`, so a "unique candidate" match reads `CONF_REDUCED`
+  distinctly from a real scope match instead of sharing `CONF_HIGH` with it —
+  a finer-grained trust signal for `graph explain`/future triage.
+
 - **Header-only graph gains an optional per-header include graph.**
   `header_graph.ClangHeaderIncludeExtractor` (opt-in via
   `service.run_dump(..., header_graph_includes=True)`, separate from
