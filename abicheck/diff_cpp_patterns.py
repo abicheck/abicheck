@@ -200,18 +200,21 @@ def detect_sycl_overload_set_removal(
     the ``func_removed`` stream because they are children of the grouped
     finding.
     """
-    from .model import Visibility
+    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
-    # Scoped to Visibility.PUBLIC: a snapshot can retain HIDDEN functions
-    # for cross-reference (both the header/castxml backend and, since the
-    # case06 fix, the DWARF-only backend), and a purely-internal helper
-    # disappearing between versions is not a real ABI event — including it
-    # here could group non-exported churn into a user-facing
-    # SYCL_OVERLOAD_SET_REMOVED finding.
-    old_funcs = [f for f in old.functions if f.visibility == Visibility.PUBLIC]
-    new_funcs = [f for f in new.functions if f.visibility == Visibility.PUBLIC]
+    # Scoped to the public surface (PUBLIC + ELF_ONLY, same set diff_symbols
+    # uses): a snapshot can retain HIDDEN functions for cross-reference (both
+    # the header/castxml backend and, since the case06 fix, the DWARF-only
+    # backend), and a purely-internal helper disappearing between versions is
+    # not a real ABI event — including it here could group non-exported churn
+    # into a user-facing SYCL_OVERLOAD_SET_REMOVED finding. ELF_ONLY stays
+    # included for consistency with the sibling ISA-dropped detector, though
+    # a param-type check can't fire in symbols-only mode anyway (no header
+    # info means Function.params is always empty there).
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
     new_mangled = {f.mangled for f in new_funcs}
     # Bare-name -> {distinct qualified_names}, merged from both sides, so a
     # bare param spelling (``queue&``) can be resolved to its real namespace
@@ -409,18 +412,22 @@ def detect_cpu_dispatch_isa_dropped(
     are those rolled up under the grouped finding so the per-symbol
     ``func_removed`` noise doesn't double-count.
     """
-    from .model import Visibility
+    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
-    # Scoped to Visibility.PUBLIC: a snapshot can retain HIDDEN functions
-    # for cross-reference (both the header/castxml backend and, since the
-    # case06 fix, the DWARF-only backend). A hidden dispatch helper
-    # (e.g. a `static`/non-exported `*_avx2` specialization) disappearing
-    # between versions never affected any real ABI consumer, and must not
-    # be grouped into a user-facing CPU_DISPATCH_ISA_DROPPED finding.
-    old_funcs = [f for f in old.functions if f.visibility == Visibility.PUBLIC]
-    new_funcs = [f for f in new.functions if f.visibility == Visibility.PUBLIC]
+    # Scoped to the public surface (PUBLIC + ELF_ONLY, same set diff_symbols
+    # uses): a snapshot can retain HIDDEN functions for cross-reference (both
+    # the header/castxml backend and, since the case06 fix, the DWARF-only
+    # backend). A hidden dispatch helper (e.g. a `static`/non-exported
+    # `*_avx2` specialization) disappearing between versions never affected
+    # any real ABI consumer and must not be grouped into a user-facing
+    # CPU_DISPATCH_ISA_DROPPED finding. ELF_ONLY must stay included though —
+    # this detector is calibrated as an L0 (symbols-only) signal, where every
+    # real exported function is ELF_ONLY, never PUBLIC; excluding it would
+    # empty out old_funcs/new_funcs and silently disable case83 in that mode.
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
     new_mangled = {f.mangled for f in new_funcs}
     removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
     all_surviving_stems = _build_all_surviving_stems(new_funcs)

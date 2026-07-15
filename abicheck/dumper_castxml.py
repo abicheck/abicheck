@@ -319,6 +319,24 @@ class _CastxmlParser:
             return "_Atomic"
         return el.get("name", tag)
 
+    def _is_global_scope(self, el: Any) -> bool:
+        """True if *el*'s immediate lexical context is the root ``::``
+        namespace — i.e. not nested in any namespace or class.
+
+        Every function-like element carries a ``context`` id; the file-level
+        root ``Namespace`` element is the one with no ``context`` of its own
+        (``name="::"``). A missing/unresolvable ``context`` is treated as
+        global too (conservative default matching this method's callers,
+        which only need to positively rule out namespace/class nesting).
+        """
+        ctx_id = el.get("context", "")
+        if not ctx_id:
+            return True
+        ctx = self._resolve(ctx_id)
+        if ctx is None:
+            return True
+        return ctx.tag == "Namespace" and not ctx.get("context")
+
     def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
         """Namespace/enclosing-class-qualified name for a Struct/Class/Union
         element, or ``None`` if it's already at global scope (or a cycle /
@@ -715,11 +733,21 @@ class _CastxmlParser:
         # function's real compiled export would essentially never coincide
         # with its bare unqualified name. Use the bare name as the
         # canonical symbol identity instead (case141).
+        #
+        # Restricted to global-scope functions (context is the root ``::``
+        # namespace): ``name`` is always castxml's bare leaf identifier —
+        # for a *namespaced* C++ function (``ns::foo``), the same bare
+        # leaf could coincidentally match an unrelated, genuinely-exported
+        # plain C ``foo``, which would wrongly rewrite the namespaced
+        # function's identity onto that unrelated export instead. A real
+        # (possibly extern "C") function this override is meant to recover
+        # is always declared at global scope.
         if (
             el.tag == "Function"
             and mangled.startswith("_Z")
             and mangled not in self._exported_dynamic
             and name in self._exported_dynamic
+            and self._is_global_scope(el)
         ):
             mangled = name
             is_extern_c_override = True
