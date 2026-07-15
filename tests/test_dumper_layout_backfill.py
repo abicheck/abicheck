@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper_layout_backfill import (
+    _topmost_scope_suffix,
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
 )
@@ -90,6 +91,34 @@ class TestDwarfLayoutTypesOrEmpty:
         )
         assert result == expected
         assert calls == [("libfoo.so", "1.0", "c++")]
+
+
+class TestTopmostScopeSuffix:
+    """_topmost_scope_suffix must strip only the outermost `::` scope
+    qualifier, not descend into `::` nested inside template arguments
+    (Codex review)."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("Foo", "Foo"),
+            ("api::Foo", "Foo"),
+            ("a::b::Foo", "Foo"),
+            ("api::Base<detail::Tag>", "Base<detail::Tag>"),
+            ("Base<detail::Tag>", "Base<detail::Tag>"),
+            ("api::Outer<a::b::Inner<c::D>>", "Outer<a::b::Inner<c::D>>"),
+        ],
+        ids=[
+            "unscoped",
+            "single-scope",
+            "nested-scope",
+            "templated-base-strips-only-own-scope",
+            "templated-base-already-bare",
+            "nested-template-args-untouched",
+        ],
+    )
+    def test_strips_only_outermost_scope(self, name: str, expected: str) -> None:
+        assert _topmost_scope_suffix(name) == expected
 
 
 class TestBackfillDwarfLayout:
@@ -268,6 +297,39 @@ class TestBackfillDwarfLayout:
         dwarf = RecordType(name="Foo", kind="class", size_bits=8, fields=[], bases=["Base"])
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
+
+    def test_templated_bases_with_differing_scope_are_not_falsely_corroborated(self) -> None:
+        """Regression (Codex review): a naive last-`::`-segment split on a
+        templated base name splits *inside* the template argument instead of
+        at the base's own scope qualifier — `"api::Base<detail::Tag>"` and an
+        unrelated `"other::Different<detail::Tag>"` would both naively reduce
+        to `"Tag>"` and appear to overlap. A fieldless public `Foo` deriving
+        from `api::Base<detail::Tag>` must not be corroborated against an
+        unrelated `impl::Foo` deriving from `other::Different<detail::Tag>`
+        just because both templates happen to close over the same argument."""
+        header = RecordType(
+            name="Foo", kind="class", fields=[], bases=["api::Base<detail::Tag>"],
+        )
+        unrelated = RecordType(
+            name="impl::Foo", kind="class", size_bits=64, fields=[],
+            bases=["other::Different<detail::Tag>"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_templated_bases_with_matching_scope_are_corroborated(self) -> None:
+        """The legitimate counterpart: same base, same template argument,
+        just with the DWARF-side asymmetry of a bare (non-scope-qualified)
+        spelling — still recognized as the same base after normalization."""
+        header = RecordType(
+            name="Foo", kind="class", fields=[], bases=["api::Base<detail::Tag>"],
+        )
+        dwarf = RecordType(
+            name="Foo", kind="class", size_bits=16, fields=[],
+            bases=["Base<detail::Tag>"],
+        )
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 16
 
     def test_fieldless_virtual_base_only_mismatch_is_never_guessed(self) -> None:
         """Regression (Codex review): virtual inheritance is stored in

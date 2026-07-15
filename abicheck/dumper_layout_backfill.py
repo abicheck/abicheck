@@ -74,6 +74,39 @@ def dwarf_layout_types_or_empty(
     ).types)
 
 
+def _topmost_scope_suffix(name: str) -> str:
+    """*name* after its outermost ``::`` scope qualifier, template-args aware.
+
+    A naive ``name.rsplit("::", 1)[-1]`` splits at the *last* ``::``
+    anywhere in the string, including one nested inside a template
+    argument — ``"api::Base<detail::Tag>".rsplit("::", 1)[-1]`` yields the
+    nonsensical ``"Tag>"``, and an unrelated ``"other::Different<detail::
+    Tag>"`` collides on that same ``"Tag>"`` (Codex review). This tracks
+    ``<``/``>`` nesting depth and only splits on a ``::`` seen at depth 0,
+    so ``"api::Base<detail::Tag>"`` correctly yields ``"Base<detail::
+    Tag>"`` — stripping only the base's own scope, not descending into its
+    template arguments.
+    """
+    depth = 0
+    last = 0
+    i = 0
+    n = len(name)
+    while i < n:
+        ch = name[i]
+        if ch == "<":
+            depth += 1
+            i += 1
+        elif ch == ">":
+            depth -= 1
+            i += 1
+        elif depth == 0 and name.startswith("::", i):
+            last = i + 2
+            i += 2
+        else:
+            i += 1
+    return name[last:]
+
+
 def backfill_dwarf_layout(
     header_types: list[RecordType],
     dwarf_types: list[RecordType],
@@ -201,7 +234,7 @@ def backfill_dwarf_layout(
         return header_types
     dwarf_candidates: dict[str, list[RecordType]] = {}
     for t in dwarf_types:
-        for key in {t.name, t.name.rsplit("::", 1)[-1]}:
+        for key in {t.name, _topmost_scope_suffix(t.name)}:
             dwarf_candidates.setdefault(key, []).append(t)
 
     def _dwarf_match(name: str) -> RecordType | None:
@@ -227,14 +260,14 @@ def backfill_dwarf_layout(
         # header parser and the DWARF builder (RecordType.virtual_bases,
         # not .bases) — a virtual-inheritance-only class would otherwise
         # leave both .bases sets empty and fall through unchallenged. Base
-        # names also need the same bare-suffix normalization record names
+        # names also need the same scope-suffix normalization record names
         # get: the clang header parser stores each base's full `qualType`
         # (e.g. "api::Base"), while the DWARF builder's base resolution
         # only ever reads DW_AT_name (always bare, e.g. "Base", never
         # scope-qualified) — comparing the raw strings would reject a
         # namespaced base's own correct match (Codex review).
-        header_bases = {b.rsplit("::", 1)[-1] for b in header.bases + header.virtual_bases}
-        dwarf_bases = {b.rsplit("::", 1)[-1] for b in dwarf.bases + dwarf.virtual_bases}
+        header_bases = {_topmost_scope_suffix(b) for b in header.bases + header.virtual_bases}
+        dwarf_bases = {_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         # Truly nothing left to disagree on: no fields (or asymmetrically
