@@ -35,6 +35,11 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from .header_graph import (
+    HEADER_CALL_GRAPH_PASS,
+    HEADER_INCLUDE_GRAPH_PASS,
+    HEADER_TYPE_GRAPH_PASS,
+)
 from .source_graph import (
     _TYPE_ENTITY_KINDS,
     EVIDENCE_TIER_L5,
@@ -286,6 +291,22 @@ def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) ->
 #: a new side that has both — the first ``TYPE_HAS_FIELD_TYPE`` edge there is
 #: a real new dependency, not a collector-coverage artifact, and must not be
 #: dropped just because that exact kind is new.
+#: Deliberately does NOT also list ``header_call_graph``/``header_type_graph``
+#: (the header-only graph builder's own pass names, ADR-041 header-only-graph
+#: addendum) alongside their build-integrated namesakes: the per-kind fallback
+#: loop below unions "common" credit across every entry in this dict, so two
+#: entries sharing the same edge-kind family are not additive-safe — a kind
+#: correctly excluded under ``type_graph`` (a narrowed/degraded pass) would
+#: still leak back in as "common" under a second, unmarked ``header_type_graph``
+#: entry for the very same kind, since that entry's own narrowed/degraded
+#: flags are independently (and here, vacuously) false. Instead,
+#: ``_pass_trusted_kinds`` resolves each pass name's header-only counterpart
+#: *within the same iteration*, capped to the structural kinds a header-only
+#: pass genuinely has project-wide visibility of
+#: (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — never the whole family, so a
+#: header-only confirmation is never treated as equivalent to a
+#: build-integrated one for a body-dependent kind, on either side of the
+#: comparison, regardless of the *other* side's shape.
 _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
     "call_graph": frozenset({"DECL_CALLS_DECL"}),
     "type_graph": frozenset(
@@ -297,6 +318,111 @@ _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+
+#: Maps a build-integrated pass name to its header-only-graph counterpart
+#: (``header_graph.py``, ADR-041 header-only-graph addendum) — the *same*
+#: edge-kind family, produced by a different, no-build extraction path.
+#: Deliberately NOT folded into :data:`_DEPENDENCY_EDGE_FAMILIES` itself (see
+#: that constant's docstring): adding a second entry sharing the same kinds
+#: would make the per-kind fallback loop iterate the same kind under two
+#: independent "authorities", and one iteration finding it common is enough
+#: to override a *different* iteration's correct exclusion — a real
+#: regression the existing test suite caught. Instead, every flag lookup
+#: below (`_pass_ran`/`_pass_narrowed`/`_pass_degraded`/`_pass_scope`) checks
+#: *both* names for the *same* pass-name iteration, so a header-only graph's
+#: own confirmed-pass/narrowed/degraded markers are honored without ever
+#: double-counting a kind under two separate loop iterations (Codex review).
+_HEADER_PASS_ALIAS: dict[str, str] = {
+    "call_graph": HEADER_CALL_GRAPH_PASS,
+    "type_graph": HEADER_TYPE_GRAPH_PASS,
+    "include_graph": HEADER_INCLUDE_GRAPH_PASS,
+}
+
+
+def _pass_ran(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) ran to completion."""
+    return graph.extractor_passes.get(pass_name, False) or graph.extractor_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_narrowed(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) ran narrowed."""
+    return graph.narrowed_passes.get(pass_name, False) or graph.narrowed_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_degraded(graph: SourceGraphSummary, pass_name: str) -> bool:
+    """Whether *pass_name* (or its header-only counterpart) hit diagnostics."""
+    return graph.degraded_passes.get(pass_name, False) or graph.degraded_passes.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), False
+    )
+
+
+def _pass_scope(graph: SourceGraphSummary, pass_name: str) -> frozenset[str]:
+    """The narrowed scope *pass_name* (or its header-only counterpart) used.
+
+    A graph only ever populates one of the two — a header-only pass is never
+    narrowed by construction (it always parses the whole header aggregate in
+    one shot) — so preferring the build-integrated name when both happen to
+    be non-empty is an arbitrary, safe tie-break, not a real ambiguity.
+    """
+    return graph.narrowed_scope.get(pass_name, frozenset()) or graph.narrowed_scope.get(
+        _HEADER_PASS_ALIAS.get(pass_name, ""), frozenset()
+    )
+
+
+#: Edge kinds a *header-only* pass (``header_call_graph``/``header_type_graph``,
+#: ADR-041 header-only-graph addendum) has genuine, project-wide visibility of
+#: — declaration-level facts, no function body needed. ``DECL_CALLS_DECL`` and
+#: ``DECL_REFERENCES_DECL`` are deliberately excluded: a header-only pass only
+#: sees a call/reference inside a body that happens to be written *in the
+#: header* (inline/template functions), so its "zero" for either kind is not
+#: evidence of a project-wide zero — only of "this build's out-of-line bodies
+#: are invisible to a header-only scan." A tenth Codex review on the shipped
+#: PR caught the consequence of treating a header-only confirmation as
+#: equivalent to a build-integrated one for these two kinds: comparing a
+#: header-only baseline against a build-integrated candidate could then report
+#: ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` for a dependency that already
+#: existed via an out-of-line call the header-only baseline structurally could
+#: never have seen — a real false positive the moment collection "improves"
+#: from header-only to build-integrated. The three structural kinds have no
+#: such gap: a base class, a field type, and a parameter/return type are
+#: fully visible in headers regardless of where the function body lives.
+_HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
+    {"DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS"}
+)
+
+
+def _pass_trusted_kinds(
+    graph: SourceGraphSummary, pass_name: str, family: frozenset[str]
+) -> frozenset[str]:
+    """Which kinds in *family* a confirmed *pass_name* genuinely vouches for.
+
+    A build-integrated confirmation (``graph.extractor_passes[pass_name]``)
+    vouches for the *whole* family — a real per-TU AST replay sees function
+    bodies too, so its "zero" is authoritative for every kind in the family,
+    exactly as before this addendum. A header-only confirmation
+    (``graph.extractor_passes[header_name]``) only vouches for the structural
+    subset it has true project-wide visibility of
+    (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — regardless of what the *other*
+    side of the comparison is (build-integrated, another header-only graph, or
+    unmarked): a header-only pass's blindness to out-of-line bodies is a
+    property of *that side alone*, not something the other side's shape can
+    make trustworthy. This deliberately loses a little recall for a
+    header-only-vs-header-only comparison's body-dependent kinds (which *are*
+    symmetric, and so arguably safe to widen too) in exchange for never
+    needing to track which specific shape the *other* side is — the simpler,
+    strictly-safe rule a Codex review asked for.
+    """
+    if graph.extractor_passes.get(pass_name, False):
+        return family
+    header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
+    if header_name and graph.extractor_passes.get(header_name, False):
+        return family & _HEADER_FULL_VISIBILITY_KINDS
+    return frozenset()
 
 
 def _dependency_kinds_covered(
@@ -328,10 +454,7 @@ def _dependency_kinds_covered(
     if any(e.kind in edge_kinds for e in graph.edges):
         return True
     return any(
-        (
-            graph.extractor_passes.get(pass_name, False)
-            or graph.narrowed_passes.get(pass_name, False)
-        )
+        (_pass_ran(graph, pass_name) or _pass_narrowed(graph, pass_name))
         and (family & edge_kinds)
         for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items()
     )
@@ -433,12 +556,23 @@ def _common_dependency_edge_kinds(
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        old_pass = old.extractor_passes.get(pass_name, False)
-        new_pass = new.extractor_passes.get(pass_name, False)
-        old_narrowed = old.narrowed_passes.get(pass_name, False)
-        new_narrowed = new.narrowed_passes.get(pass_name, False)
-        old_scope = old.narrowed_scope.get(pass_name, frozenset())
-        new_scope = new.narrowed_scope.get(pass_name, frozenset())
+        # ``_pass_trusted_kinds`` resolves *pass_name*'s header-only-graph
+        # counterpart (``header_call_graph``/``header_type_graph``, ADR-041
+        # header-only-graph addendum) too, but caps what a header-only
+        # confirmation vouches for to its true structural visibility —
+        # never the whole family, regardless of the *other* side's shape
+        # (Codex review: an earlier version of this fix let a header-only
+        # confirmation grant full-family trust exactly like a build-
+        # integrated one, which could manufacture a false
+        # ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` for a pre-existing,
+        # invisible-to-headers call/reference the moment a baseline switched
+        # from header-only to build-integrated collection).
+        old_trusted = _pass_trusted_kinds(old, pass_name, family)
+        new_trusted = _pass_trusted_kinds(new, pass_name, family)
+        old_narrowed = _pass_narrowed(old, pass_name)
+        new_narrowed = _pass_narrowed(new, pass_name)
+        old_scope = _pass_scope(old, pass_name)
+        new_scope = _pass_scope(new, pass_name)
         # A narrowed old side is only trusted against a new side narrowed to
         # the *identical*, non-empty scope — "both narrowed" alone does not
         # establish they examined the same code (fourteenth Codex review).
@@ -450,7 +584,13 @@ def _common_dependency_edge_kinds(
         # real, verified zero *within that scope*, safe to widen to the whole
         # family, not merely a per-kind fallback.
         narrowed_confirmed = old_narrowed and new_narrowed and scope_matches
-        if (old_pass and new_pass) or narrowed_confirmed:
+        # Whole-family widening requires BOTH sides to fully trust the
+        # family — i.e. both ran a build-integrated pass (a header-only
+        # confirmation's trusted set is always a strict subset of a family
+        # containing a body-dependent kind, so this never fires for a
+        # header-only side there; it still fires correctly for the
+        # call/type structural kinds via the per-kind loop below).
+        if (old_trusted == family and new_trusted == family) or narrowed_confirmed:
             common |= family
             continue
         # A pass that ran unnarrowed but hit per-TU diagnostics still folds
@@ -458,21 +598,41 @@ def _common_dependency_edge_kinds(
         # "this kind was examined project-wide" any more than a narrowed
         # side's edges may (sixteenth Codex review): the failed TUs are an
         # unknown, untracked gap.
-        old_degraded = old.degraded_passes.get(pass_name, False)
+        old_degraded = _pass_degraded(old, pass_name)
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
+        # A header-only-confirmed OLD side (header alias set, build-integrated
+        # name not) can still fold real edges of a body-dependent kind — an
+        # inline/template function calling/referencing another one, both
+        # visible straight from the header. That single edge is genuine, but
+        # it is not proof the kind was searched project-wide: the same scan
+        # is structurally blind to any out-of-line body. Raw edge *presence*
+        # must therefore not stand in for pass-confirmed trust here any more
+        # than it may for the family-widening shortcut above — otherwise a
+        # baseline's one incidental in-header call edge would make
+        # DECL_CALLS_DECL "common" against a build-integrated candidate, and
+        # a pre-existing out-of-line call the header-only baseline could
+        # never have seen would surface as a false
+        # ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` the moment collection
+        # improves (Codex review).
+        old_header_only = (
+            _HEADER_PASS_ALIAS.get(pass_name, "") != ""
+            and old.extractor_passes.get(_HEADER_PASS_ALIAS[pass_name], False)
+            and not old.extractor_passes.get(pass_name, False)
+        )
         for kind in family:
             # Only OLD's negative evidence needs the narrowing/degraded guard
             # — see the docstring's one-directional-risk note (thirteenth
             # Codex review).
             old_present = (
                 (kind in old_kinds)
+                and not (old_header_only and kind not in _HEADER_FULL_VISIBILITY_KINDS)
                 and not old_degraded
                 and (not old_narrowed or (new_narrowed and scope_matches))
             )
             new_present = kind in new_kinds
-            old_has = old_present or old_pass
-            new_has = new_present or new_pass
+            old_has = old_present or (kind in old_trusted)
+            new_has = new_present or (kind in new_trusted)
             if old_has and new_has:
                 common.add(kind)
     return frozenset(common)
@@ -769,6 +929,71 @@ def _call_reachability_findings(
     return findings
 
 
+def _include_graph_covered(graph: SourceGraphSummary) -> bool:
+    """Whether *graph* actually collected include-graph data at all.
+
+    True when its include-graph pass is confirmed — either the build-
+    integrated ``"include_graph"`` name or its header-only-graph counterpart
+    (:data:`~abicheck.buildsource.header_graph.HEADER_INCLUDE_GRAPH_PASS`,
+    via :func:`_pass_ran`) — (``extractor_passes``, ADR-041 P0 slice 2
+    coverage-honesty convention: a pass can run and find zero edges, e.g. a
+    leaf public header with no ``#include``s of its own) or it carries any
+    ``COMPILE_UNIT_INCLUDES_FILE`` edge at all (an unmarked/legacy graph with
+    real recorded data). False only when the graph has neither — i.e.
+    include-graph folding never ran, whether because the caller never
+    requested it (an older snapshot dumped before the fold became automatic)
+    or clang was unavailable.
+
+    This is a coarse "was there any include-graph collection at all" signal
+    — it does not distinguish a full project-wide pass from a narrowed
+    (PR/``--since``-scoped) or degraded (partial per-TU failures) one. Use
+    :func:`_include_graph_fully_covered` instead when trusting the
+    *absence* of a header from the set (:func:`_include_graph_drift_findings`).
+    """
+    return _pass_ran(graph, "include_graph") or any(
+        e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
+    )
+
+
+def _include_graph_fully_covered(graph: SourceGraphSummary) -> bool:
+    """Whether *graph*'s absence of a header from the include graph is trustworthy.
+
+    A narrowed pass (folding only the changed compile units) or a degraded one
+    (a live extractor that hit per-TU diagnostics after finding some edges)
+    only examined a subset of the project — its edges are real, but a header
+    missing from that subset says nothing about whether the *rest* of the
+    project still includes it, exactly the same coverage-honesty distinction
+    :func:`_common_dependency_edge_kinds` already applies to the call/type
+    dependency families (Codex review: an earlier version of this gate only
+    checked :func:`_include_graph_covered`, which a narrowed or degraded pass
+    still satisfies via its real, but partial, edges — reporting every public
+    header outside that partial subset as having newly entered/left the
+    include graph against a fully-covered baseline).
+
+    Deliberately checks only the build-integrated ``"include_graph"`` name
+    directly — never :func:`_include_graph_covered`/:func:`_pass_ran`'s
+    header-only-graph alias — and additionally requires at least one
+    ``TARGET_HAS_PUBLIC_HEADER`` edge. :func:`_public_headers_in_include_graph`
+    needs exactly that edge kind to recognize a header as "public"; a
+    header-only graph (``header_graph.py``) has no build-integrated "target"
+    concept at all and never emits it (it marks visibility via a node
+    ``attrs["visibility"]`` instead — a structurally different vocabulary).
+    So a header-only graph's ``old_inc``/``new_inc`` is *always* the empty
+    set, no matter how cleanly its own include pass ran or how many
+    ``COMPILE_UNIT_INCLUDES_FILE`` edges it folded — trusting either signal
+    here would read every genuinely-unchanged public header on a
+    build-integrated other side as newly "entered" the moment a baseline
+    switches from header-only to build-integrated collection (Codex review).
+    """
+    if _pass_narrowed(graph, "include_graph") or _pass_degraded(graph, "include_graph"):
+        return False
+    if not any(e.kind == "TARGET_HAS_PUBLIC_HEADER" for e in graph.edges):
+        return False
+    return graph.extractor_passes.get("include_graph", False) or any(
+        e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
+    )
+
+
 def _include_graph_drift_findings(
     old: SourceGraphSummary,
     new: SourceGraphSummary,
@@ -776,7 +1001,36 @@ def _include_graph_drift_findings(
     new_labels: dict[str, str],
     boundary: str,
 ) -> list[Change]:
-    """Public headers entering/leaving the compiled include graph."""
+    """Public headers entering/leaving the compiled include graph.
+
+    Trusts a side's *absence* of a header from the include graph only when
+    that side is *fully* covered (:func:`_include_graph_fully_covered`) — a
+    confirmed, unnarrowed, undegraded pass, or an unmarked/legacy graph with
+    real recorded edges — mirroring the same "an absent/never-run pass is not
+    evidence of absence" principle :func:`_common_dependency_edge_kinds`
+    already applies to the dependency-edge families. Without this, comparing
+    a snapshot with no include-graph data (dumped before the fold existed/
+    became automatic, or where clang was unavailable) against one that has it
+    would read *every* header in the covered side as newly "entered"/"left"
+    — a coverage artifact, not a real change (Codex review: this became a
+    much more likely everyday scenario once include-graph folding stopped
+    being an explicit opt-in flag both sides had to remember to pass
+    identically).
+
+    A narrowed (PR/``--since``-scoped) or degraded pass only examined a
+    subset of the project, so its bare "covered" signal is not enough either
+    — a subsequent Codex review caught that a narrowed/degraded ``new`` side
+    still had real ``COMPILE_UNIT_INCLUDES_FILE`` edges (making
+    :func:`_include_graph_covered` true) while having examined only a handful
+    of changed TUs, which read every public header outside that partial
+    subset as having "left" the include graph against a fully-covered
+    baseline. The one exception: two sides narrowed to the *identical*,
+    non-empty scope (:func:`_pass_scope`) examined the exact same compile
+    units, so their header sets are a complete, apples-to-apples slice of
+    that shared scope — any header entering/leaving it is real drift, not a
+    coverage gap (mirrors ``_common_dependency_edge_kinds``'s
+    ``narrowed_confirmed`` branch).
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -786,24 +1040,35 @@ def _include_graph_drift_findings(
         _public_headers_in_include_graph(old),
         _public_headers_in_include_graph(new),
     )
-    if old_inc or new_inc:
-        for hdr in sorted(new_inc - old_inc) + sorted(old_inc - new_inc):
-            entered = hdr in new_inc
-            label = (new_labels if entered else old_labels).get(hdr, hdr)
-            findings.append(
-                Change(
-                    kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
-                    symbol=label,
-                    description=(
-                        f"Public header {label!r} {'entered' if entered else 'left'} "
-                        "the compiled include graph. Consumers may pull in different "
-                        "declarations/macros through it. Source-graph evidence to review."
-                    ),
-                    old_value="in include graph" if not entered else "not included",
-                    new_value="in include graph" if entered else "not included",
-                    source_location=boundary,
-                )
+    old_scope = _pass_scope(old, "include_graph")
+    new_scope = _pass_scope(new, "include_graph")
+    same_narrowed_scope = (
+        _pass_narrowed(old, "include_graph")
+        and _pass_narrowed(new, "include_graph")
+        and bool(old_scope)
+        and old_scope == new_scope
+    )
+    old_covered = _include_graph_fully_covered(old) or same_narrowed_scope
+    new_covered = _include_graph_fully_covered(new) or same_narrowed_scope
+    entered = sorted(new_inc - old_inc) if old_covered else []
+    left = sorted(old_inc - new_inc) if new_covered else []
+    for hdr in entered + left:
+        is_entered = hdr in new_inc
+        label = (new_labels if is_entered else old_labels).get(hdr, hdr)
+        findings.append(
+            Change(
+                kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+                symbol=label,
+                description=(
+                    f"Public header {label!r} {'entered' if is_entered else 'left'} "
+                    "the compiled include graph. Consumers may pull in different "
+                    "declarations/macros through it. Source-graph evidence to review."
+                ),
+                old_value="in include graph" if not is_entered else "not included",
+                new_value="in include graph" if is_entered else "not included",
+                source_location=boundary,
             )
+        )
     return findings
 
 

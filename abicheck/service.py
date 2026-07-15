@@ -226,6 +226,7 @@ def resolve_input(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -254,6 +255,9 @@ def resolve_input(
     Args:
         debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
             *None* for auto-detection.
+        debuginfod_url: Override debuginfod server URL (only meaningful when
+            ``enable_debuginfod`` is set); ``None`` uses the resolver's
+            default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
         follow_linker_scripts: When True (default), a GNU ld linker script is
@@ -283,6 +287,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -307,6 +312,7 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -380,6 +386,7 @@ def resolve_input(
                     dwarf_only=dwarf_only,
                     debug_roots=debug_roots,
                     enable_debuginfod=enable_debuginfod,
+                    debuginfod_url=debuginfod_url,
                     debug_format=debug_format,
                     symbols_only=symbols_only,
                     debug_presence_only=debug_presence_only,
@@ -431,6 +438,7 @@ def run_dump(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -438,6 +446,8 @@ def run_dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -448,6 +458,20 @@ def run_dump(
     via :func:`_apply_native_provenance`. A no-op when no header set is supplied.
     ``debug_format`` forces the ELF debug format. ``notify`` receives
     user-facing progress notes (see :func:`resolve_input`).
+
+    ``header_graph`` builds and embeds the header-only (L2) semantic graph
+    (:func:`abicheck.buildsource.header_graph.build_header_only_graph`, ADR-041
+    addendum) — a smaller, build-free alternative to the L4/L5 build-integrated
+    graph, available uniformly across all three binary formats. A no-op when no
+    headers were parsed; degrades to a graph with declaration-visibility nodes
+    only (no type/call edges) when clang is unavailable. ``header_graph_includes``
+    additionally runs a per-header ``clang -M`` pass
+    (:class:`abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`) to
+    add ``COMPILE_UNIT_INCLUDES_FILE`` edges from each top-level header to
+    everything it transitively includes — a separate opt-in from
+    ``header_graph`` alone since it costs one extra clang invocation per
+    top-level header, not just one for the whole aggregate; ignored when
+    ``header_graph`` is not also set.
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
@@ -473,6 +497,7 @@ def run_dump(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
             debug_format=debug_format,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
@@ -485,7 +510,17 @@ def run_dump(
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            header_graph_includes,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     if binary_fmt == "pe":
         snap = _dump_pe(
             path,
@@ -500,7 +535,17 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            header_graph_includes,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -514,7 +559,17 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
-        return snap
+        return _attach_header_graph(
+            snap,
+            header_graph,
+            header_graph_includes,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+        )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
@@ -532,6 +587,191 @@ def _apply_native_provenance(
     from .provenance import apply_provenance
 
     return apply_provenance(snap, public_headers, public_header_dirs)
+
+
+def _attach_header_graph(
+    snap: AbiSnapshot,
+    header_graph: bool,
+    header_graph_includes: bool,
+    headers: list[Path],
+    includes: list[Path],
+    lang: str,
+    compile: CompileContext | None,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+) -> AbiSnapshot:
+    """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
+
+    A no-op when ``header_graph`` was not requested or no headers were parsed.
+    Runs a second, independent ``clang -ast-dump=json`` pass over the same
+    header aggregate ``dumper._clang_header_dump`` already knows how to build —
+    reused directly (private only by convention; ``dumper.py`` sits at its
+    2000-line hard cap, so a public wrapper is not added there) rather than
+    threading the parser's already-consumed AST back out through three
+    format-specific builders. Mirrors ``_dump_elf``'s own header-expansion
+    (``expand_header_inputs`` — a ``headers`` entry may be a directory) and
+    inferred-include-root derivation (``resolve_inferred_header_roots`` — an
+    umbrella header's relative ``#include``s need the same auto-added ``-I``/
+    ``-isystem`` search dirs the main dump computes) so this second pass sees
+    the identical resolved input the main dump already parsed successfully,
+    rather than the raw, unexpanded arguments (Codex review: without this, a
+    header *directory* input made ``_clang_header_dump`` write an invalid
+    ``#include`` of the directory path itself and raise, and even a single
+    umbrella header with relative includes into a sibling directory could
+    fail to resolve, both silently degrading to the declaration-only graph).
+    Degrades to a graph with declaration-visibility nodes only (no type/call
+    edges) when clang is unavailable or the header parse fails — never aborts
+    the dump itself (ADR-028 D3).
+
+    ``header_graph_includes`` additionally folds a per-header include graph
+    (:class:`~abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`) —
+    a separate opt-in since it costs one extra ``clang -M`` invocation per
+    top-level header, not just the one aggregate pass ``header_graph`` alone
+    needs.
+    """
+    if not header_graph or not headers:
+        return snap
+    from .buildsource.header_graph import (
+        HEADER_INCLUDE_GRAPH_PASS,
+        ClangHeaderIncludeExtractor,
+        build_header_only_graph,
+    )
+    from .buildsource.include_graph import augment_graph_with_includes
+    from .buildsource.model import (
+        CoverageStatus,
+        DataLayer,
+        LayerConfidence,
+        LayerCoverage,
+    )
+    from .buildsource.pack import BuildSourcePack
+    from .dumper import _clang_header_dump, _resolve_clang_bin
+
+    cc = compile if compile is not None else CompileContext()
+    ast_root: dict[str, Any] | None = None
+    resolved_headers: list[Path] = []
+    eff_includes: list[Path] = list(includes)
+    eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
+    deferred_dirs: tuple[Path, ...] = ()
+    try:
+        resolved_headers = expand_header_inputs(headers)
+        if resolved_headers:
+            inc_extra, deferred = resolve_inferred_header_roots(
+                resolved_headers,
+                list(includes),
+                gcc_options=cc.gcc_options,
+                gcc_option_tokens=cc.gcc_option_tokens,
+            )
+            eff_includes = list(includes) + inc_extra
+            eff_tokens = cc.gcc_option_tokens + tuple(deferred)
+            # The deferred roots ride in gcc_option_tokens (-isystem), not
+            # extra_includes, so their contents must also be hashed into the
+            # AST cache key explicitly — _clang_header_dump's disk cache
+            # never inspects option-token content, only extra_includes/
+            # extra_hash_dirs, so without this a header changed under an
+            # inferred root would reuse a stale cached AST (Codex review;
+            # mirrors _dump_elf's own deferred_dirs handling).
+            deferred_dirs = tuple(deferred_token_dirs(deferred))
+        ast_root = _clang_header_dump(
+            resolved_headers,
+            eff_includes,
+            compiler="cc" if lang == "c" else "c++",
+            gcc_path=cc.gcc_path,
+            gcc_prefix=cc.gcc_prefix,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=eff_tokens,
+            sysroot=cc.sysroot,
+            nostdinc=cc.nostdinc,
+            lang=lang,
+            extra_hash_dirs=deferred_dirs,
+        )
+    except (SnapshotError, ValidationError):
+        ast_root = None
+    graph = build_header_only_graph(
+        snap,
+        ast_root,
+        public_header_paths=[str(p) for p in (public_headers or [])],
+        public_dir_paths=[str(p) for p in (public_header_dirs or [])],
+        header_paths=[str(p) for p in resolved_headers],
+    )
+    if header_graph_includes and resolved_headers:
+        # Resolve the same clang driver `_clang_header_dump` above used
+        # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
+        # the bare "clang++" — otherwise a hermetic/cross toolchain selected
+        # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
+        # edge (or resolves them against the host's clang instead) even
+        # though the semantic header graph just above parsed correctly
+        # (Codex review). Non-raising here: an unresolvable driver degrades
+        # to ClangHeaderIncludeExtractor's own default, which then reports
+        # "not found" via its own .available() check rather than aborting
+        # the dump (ADR-028 D3).
+        try:
+            include_clang_bin = _resolve_clang_bin(
+                "cc" if lang == "c" else "c++", cc.gcc_path, cc.gcc_prefix
+            )
+        except SnapshotError:
+            include_clang_bin = "clang++" if lang != "c" else "clang"
+        include_map, include_diags = ClangHeaderIncludeExtractor(
+            clang_bin=include_clang_bin
+        ).extract(
+            [str(p) for p in resolved_headers],
+            [str(p) for p in eff_includes],
+            language="C" if lang == "c" else "CXX",
+            sysroot=str(cc.sysroot) if cc.sysroot else None,
+            nostdinc=cc.nostdinc,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=eff_tokens,
+        )
+        if include_map:
+            augment_graph_with_includes(graph, include_map)
+        # A clean pass with an empty map (a leaf public header with no
+        # #include of its own, or every resolved include self-filtered) is
+        # a genuine zero, not a failure to collect — stamp the pass so
+        # `_include_graph_covered` doesn't mistake it for "never ran" and
+        # misreport every header on a later comparison's other side as
+        # newly entering the include graph (Codex review). Re-finalize
+        # unconditionally (even with an empty map) since `finalize()` derives
+        # `coverage["include_edges"]["collected"]` from this same marker —
+        # skipping it for the empty-map case left that field stale/false
+        # despite `extractor_passes` correctly recording the pass as run
+        # (Codex review, follow-up). A *partial* run (one header's `clang -M`
+        # failed while another's succeeded) folds real edges for the headers
+        # that did parse but must not be confirmed as a clean full pass
+        # either — mark it degraded instead, mirroring
+        # `inline_graph_fold.fold_include_graph`'s own
+        # `elif extractor.diagnostics: degraded_passes[...] = True` branch,
+        # so `_include_graph_fully_covered` never trusts the missing portion
+        # as evidence a header genuinely stopped being included (Codex
+        # review, follow-up).
+        if include_diags:
+            graph.degraded_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        else:
+            graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        graph.finalize()
+    pack = BuildSourcePack(root=Path(""), source_graph=graph)
+    # Populate the manifest coverage row the normal collect/embed path always
+    # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's
+    # default empty ``coverage`` reads as "L5 not collected" to
+    # cli_buildsource_helpers._layer_presence/_optional_coverage even though
+    # source_graph is populated, making coverage/asymmetry reporting
+    # misleading (Codex review). L3/L4 stay honestly NOT_COLLECTED — neither
+    # a build nor an L4 source-ABI replay ran in a header-only world.
+    pack.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value,
+            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
+            confidence=LayerConfidence.REDUCED
+            if graph.edges
+            else LayerConfidence.UNKNOWN,
+        ),
+    ]
+    snap.build_source = pack
+    return snap
 
 
 def _emit(notify: Callable[[str], None] | None, message: str) -> None:
@@ -628,6 +868,7 @@ def _dump_elf(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
@@ -647,6 +888,31 @@ def _dump_elf(
     provenance-gated cross-checks on the ``scan`` entry point.
     """
     from .dumper import dump
+
+    # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
+    # --debuginfod) was previously only used for a CLI log line — the DWARF
+    # parse always read `path` itself, so a stripped production .so stayed
+    # L0-only even after abicheck reported it found the matching debug file.
+    # Resolve here (gated on the caller actually requesting it, same as the
+    # CLI) and thread the artifact's DWARF-bearing file through to dumper.dump
+    # so it's read instead of `path`. Split DWARF (.dwo/.dwp) and dSYM are not
+    # threaded here — narrower follow-up, not this fix's scope.
+    debug_info_path: Path | None = None
+    if not symbols_only and not debug_presence_only and (debug_roots or enable_debuginfod):
+        from .debug_resolver import resolve_debug_info
+        artifact = resolve_debug_info(
+            path, debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
+        )
+        if artifact is not None and artifact.dwarf_path is not None:
+            resolved_dwarf = artifact.dwarf_path.resolve()
+            if resolved_dwarf != path.resolve():
+                debug_info_path = artifact.dwarf_path
+                message = f"Debug info for {path.name}: {artifact.source}"
+                if notify is not None:
+                    notify(message)
+                else:
+                    _logger.info(message)
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
@@ -717,6 +983,7 @@ def _dump_elf(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=deferred_dirs,
+            debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
@@ -1152,7 +1419,9 @@ def compare_snapshots(
     if public_surface_allowlist is not None:
         from .post_manifest import _snapshot_contract_symbols
 
-        public_surface_allowlist = set(public_surface_allowlist) | _snapshot_contract_symbols(old)
+        public_surface_allowlist = set(
+            public_surface_allowlist
+        ) | _snapshot_contract_symbols(old)
     return compare(
         old,
         new,
@@ -1219,6 +1488,7 @@ def run_compare_request(
         pdb_path=request.old.pdb,
         debug_roots=list(request.old.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.old.headers),
     )
@@ -1232,6 +1502,7 @@ def run_compare_request(
         pdb_path=request.new.pdb,
         debug_roots=list(request.new.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        debuginfod_url=request.debuginfod_url,
         header_backend=header_backend,
         public_headers=list(request.new.headers),
     )
@@ -1286,6 +1557,7 @@ def run_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    debuginfod_url: str | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1293,6 +1565,11 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
+
+    ``debuginfod_url`` is appended after every pre-existing parameter (not
+    inserted alongside ``enable_debuginfod``) so a caller invoking this
+    positionally keeps binding every argument after it to the same parameter
+    it always did (Codex review, PR #551).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1334,6 +1611,7 @@ def run_compare(
         ),
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
     )
     return run_compare_request(request)
 
@@ -1370,8 +1648,8 @@ def render_output(
     """
     if stat and fmt != "junit":
         if fmt == "json":
-            return to_stat_json(result)
-        return to_stat(result)
+            return to_stat_json(result, severity_config=severity_config)
+        return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":
         return _render_json_output(
@@ -1388,7 +1666,7 @@ def render_output(
     if fmt == "sarif":
         from .sarif import to_sarif_str
 
-        return to_sarif_str(result, show_only=show_only)
+        return to_sarif_str(result, show_only=show_only, severity_config=severity_config)
 
     if fmt == "html":
         from .html_report import generate_html_report
@@ -1416,7 +1694,7 @@ def render_output(
     if fmt == "review":
         from .reporter import to_review_digest
 
-        txt = to_review_digest(result)
+        txt = to_review_digest(result, severity_config=severity_config)
         if demangle:
             from .demangle import demangle_text
 

@@ -1,4 +1,4 @@
-# Reference build for the abicheck Clang facts plugin (ADR-035 D5, ADR-038 Flow C).
+# Reference build for the abicheck Clang facts plugin (ADR-035 D5, ADR-038 Plugin injection).
 # Optional optimization — not part of the abicheck CI build. The plugin is
 # ABI-locked to the loading clang's LLVM major (ADR-038 C.5): build it once
 # against your pinned toolchain image and inject it.

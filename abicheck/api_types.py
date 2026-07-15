@@ -143,6 +143,9 @@ class CompareRequest:
     public_surface_allowlist: frozenset[str] | None = None
     pattern_verdicts: bool = False
     enable_debuginfod: bool = False
+    # Override debuginfod server URL (only meaningful with enable_debuginfod);
+    # None uses the resolver's default server list / DEBUGINFOD_URLS env var.
+    debuginfod_url: str | None = None
     # ADR-039: clear context-free header-parse false positives using the build's
     # active preprocessor defines (a conditional field's phantom add/remove/size
     # delta the build proves never changed). Opt-in; a no-op unless the snapshots

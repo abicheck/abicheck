@@ -3,7 +3,7 @@
 
 Listed in `ADDITION_KINDS` — backward-compatible additions.
 
-_9 case(s)._ [← back to all examples](../index.md)
+_8 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -15,4 +15,3 @@ _9 case(s)._ [← back to all examples](../index.md)
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |

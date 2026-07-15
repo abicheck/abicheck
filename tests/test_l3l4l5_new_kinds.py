@@ -37,6 +37,7 @@ from abicheck.buildsource.source_graph_findings import (
     _dependency_path,
     _dependency_reachability,
     _format_dependency_path,
+    _include_graph_fully_covered,
     _public_entry_internal_reach,
     _public_types,
     diff_source_graph_findings,
@@ -1764,3 +1765,196 @@ def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> 
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )
     assert "own implementation also changed" not in dep_finding.description
+
+
+def test_common_dependency_edge_kinds_header_only_confirmed_pass_widens_family() -> (
+    None
+):
+    # Codex review (ADR-041 header-only-graph addendum): a header-only graph
+    # stamps `extractor_passes["header_type_graph"]`, not `"type_graph"`. Two
+    # header-only graphs both confirming that pass ran must get credit for
+    # the *structural* kinds a header-only pass has true project-wide
+    # visibility of — a baseline public struct with no private fields
+    # (verified zero) compared against a candidate that adds one must still
+    # be flagged. `DECL_REFERENCES_DECL` is deliberately excluded even here:
+    # a header-only pass's "zero" for a body-dependent kind is never
+    # authoritative (a later Codex review caught the false-positive risk of
+    # trusting it against a build-integrated side; capping it unconditionally
+    # is the simpler, strictly-safe fix, at the cost of this one kind's
+    # recall in the header-vs-header case specifically).
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[],  # confirmed pass, zero type edges anywhere
+        extractor_passes={"header_type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type"), _N("c", "record_type")],
+        edges=[_E("b", "c", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"header_type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset(
+        {
+            "DECL_HAS_TYPE",
+            "TYPE_HAS_FIELD_TYPE",
+            "TYPE_INHERITS",
+        }
+    )
+
+
+def test_common_dependency_edge_kinds_header_and_build_pass_names_not_double_counted() -> (
+    None
+):
+    # The regression this alias mechanism specifically guards against: a
+    # narrowed/degraded build-integrated pass on one side must still be
+    # correctly excluded, even though the *other* side (or the same side)
+    # might carry no marker under the header-only pass name at all — the
+    # header alias must never manufacture a *second*, independent "vacuously
+    # trusting" authority for the same kind.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        narrowed_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
+        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
+        # No extractor_passes/narrowed_passes at all: an unmarked/legacy pack.
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
+
+
+def test_common_dependency_edge_kinds_header_vs_build_never_widens_call_family() -> (
+    None
+):
+    # Codex review: a header-only baseline's "confirmed zero DECL_CALLS_DECL"
+    # is not evidence of a project-wide zero — it's structurally blind to
+    # out-of-line calls. Comparing it against a build-integrated candidate
+    # that has a real call edge must NOT report it as newly added: the call
+    # could have existed all along, just invisible to the header-only
+    # baseline.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")],
+        edges=[],  # header-only "zero" — trivially true, not proof of absence
+        extractor_passes={"header_call_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")],
+        edges=[_E("a", "b", "DECL_CALLS_DECL")],
+        extractor_passes={"call_graph": True},  # build-integrated: sees bodies
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert common == frozenset()
+
+
+def test_common_dependency_edge_kinds_header_vs_build_still_widens_structural_kinds() -> (
+    None
+):
+    # The structural kinds have no such gap: a header-only pass has true
+    # project-wide visibility of base classes/field types/parameter types
+    # regardless of where a function body lives, so its "zero" IS
+    # authoritative even against a build-integrated candidate.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "record_type"), _N("b", "record_type")],
+        edges=[],
+        extractor_passes={"header_type_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("a", "record_type"), _N("b", "record_type")],
+        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
+        extractor_passes={"type_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert "TYPE_HAS_FIELD_TYPE" in common
+    assert "DECL_REFERENCES_DECL" not in common
+
+
+def test_common_dependency_edge_kinds_header_only_incidental_body_edge_not_trusted() -> (
+    None
+):
+    # Codex review: a header-only OLD side is not limited to a confirmed
+    # *zero* — an inline/template function calling another one, both visible
+    # straight from the header, folds a genuine ``DECL_CALLS_DECL`` edge even
+    # under a header-only scan. That single incidental edge must not be
+    # mistaken for "this kind was searched project-wide": the same scan is
+    # structurally blind to any out-of-line call. A build-integrated
+    # candidate's *additional*, out-of-line call edge must NOT be reported as
+    # newly added — it could have existed all along, just invisible to the
+    # header-only baseline.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")],
+        edges=[_E("a", "b", "DECL_CALLS_DECL")],  # incidental in-header call
+        extractor_passes={"header_call_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[
+            _N("a", "source_decl"),
+            _N("b", "source_decl"),
+            _N("c", "source_decl"),
+            _N("d", "source_decl"),
+        ],
+        edges=[
+            _E("a", "b", "DECL_CALLS_DECL"),
+            _E("c", "d", "DECL_CALLS_DECL"),  # out-of-line, invisible to OLD
+        ],
+        extractor_passes={"call_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert "DECL_CALLS_DECL" not in common
+
+
+def test_include_graph_fully_covered_false_for_header_only_confirmed_pass() -> None:
+    # Codex review: a header-only graph (header_graph.py) has no
+    # build-integrated "target" concept, so it never emits a
+    # TARGET_HAS_PUBLIC_HEADER edge -- _public_headers_in_include_graph needs
+    # exactly that edge kind to recognize a header as "public". A header-only
+    # graph's own confirmed include pass (and even its real
+    # COMPILE_UNIT_INCLUDES_FILE edges) must therefore never be trusted as
+    # "fully covered" for the compiled include-graph drift check: doing so
+    # would read every genuinely-unchanged public header on a build-
+    # integrated other side as newly "entered" the moment a baseline
+    # switches from header-only to build-integrated collection.
+    header_only = SourceGraphSummary(
+        nodes=[_N("h", "header")],
+        edges=[_E("h", "detail/impl.h", "COMPILE_UNIT_INCLUDES_FILE")],
+        extractor_passes={"header_include_graph": True},
+    )
+    assert _include_graph_fully_covered(header_only) is False
+
+
+def test_include_graph_fully_covered_true_for_build_integrated_confirmed_pass() -> None:
+    build_integrated = SourceGraphSummary(
+        nodes=[_N("target", "target"), _N("pub.h", "header")],
+        edges=[
+            _E("target", "pub.h", "TARGET_HAS_PUBLIC_HEADER"),
+            _E("cu", "pub.h", "COMPILE_UNIT_INCLUDES_FILE"),
+        ],
+        extractor_passes={"include_graph": True},
+    )
+    assert _include_graph_fully_covered(build_integrated) is True
+
+
+def test_include_graph_drift_suppressed_against_header_only_baseline() -> None:
+    # The end-to-end regression: a header-only baseline must not make an
+    # unchanged public header on the build-integrated candidate read as
+    # newly "entered" the include graph.
+    old = SourceGraphSummary(
+        nodes=[_N("h", "header")],
+        edges=[_E("h", "pub.h", "COMPILE_UNIT_INCLUDES_FILE")],
+        extractor_passes={"header_include_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("target", "target"), _N("pub.h", "header")],
+        edges=[
+            _E("target", "pub.h", "TARGET_HAS_PUBLIC_HEADER"),
+            _E("cu", "pub.h", "COMPILE_UNIT_INCLUDES_FILE"),
+        ],
+        extractor_passes={"include_graph": True},
+    )
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
+    assert inc == []

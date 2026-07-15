@@ -87,33 +87,32 @@ def _effective_severity_label(
         frozenset[ChangeKind],
         frozenset[ChangeKind],
     ],
+    *,
+    policy: str | None = None,
+    policy_file: object | None = None,
 ) -> str:
     """Severity label for a change, honouring its A4 ``effective_verdict``.
 
     The one place the reporter decides a finding's severity bucket: routes
-    through :func:`effective_category` so an ADR-027 pattern-aware demotion reads
-    ``compatible`` in the JSON ``severity`` field and the ``filtered_summary``
-    counts, consistent with the verdict and exit code.
+    through :func:`effective_verdict_for_change` (the same call
+    :func:`_change_to_dict` already makes) so an ADR-027 pattern-aware
+    demotion, *and* a per-change frozen-namespace floor guarding a
+    ``policy_file`` kind-level override, both read consistently with the
+    verdict and exit code. Without *policy_file* here, a leaf-mode root-type
+    change tagged ``frozen_namespace_violation`` could read "compatible" in
+    ``leaf_changes`` while the top-level ``severity`` block (which does pass
+    ``policy_file``) correctly reports it as blocking the gate — a direct,
+    visible contradiction on the same JSON document (Codex review on #549).
     """
     kind = getattr(c, "kind", None)
-    if kind is None:
+    if not isinstance(kind, ChangeKind):
         return "unknown"
-    # An explicit A4 override wins; otherwise fall back to the exact set-based
-    # logic (which yields "unknown" for a kind moved out of every set, e.g. an
-    # override to NO_CHANGE) rather than effective_category's BREAKING fail-safe.
-    eff = getattr(c, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        return _VERDICT_TO_SEVERITY_LABEL.get(eff, "unknown")
-    breaking, api_break, compatible, risk = kind_sets
-    if kind in breaking:
-        return "breaking"
-    if kind in api_break:
-        return "api_break"
-    if kind in risk:
-        return "risk"
-    if kind in compatible:
-        return "compatible"
-    return "unknown"
+    from .severity import effective_verdict_for_change
+
+    verdict = effective_verdict_for_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    return _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -130,8 +129,18 @@ def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
     return "unknown"
 
 
-def to_stat_json(result: DiffResult, indent: int = 2) -> str:
-    """JSON output for --stat mode: summary only, no changes array."""
+def to_stat_json(
+    result: DiffResult, indent: int = 2, *, severity_config: SeverityConfig | None = None,
+) -> str:
+    """JSON output for --stat mode: summary only, no changes array.
+
+    *severity_config*, when given, adds a ``severity`` block (same shape as
+    the full JSON report's — see :func:`_build_severity_json`) so ``--stat
+    --format json`` reflects the actual severity-aware gate instead of only
+    the compatibility verdict. Without it, ``--stat`` output has historically
+    bypassed severity handling entirely (it short-circuits in
+    ``service.render_output`` before format dispatch).
+    """
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
     d: dict[str, object] = {
@@ -151,6 +160,14 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
             "affected_pct": round(summary.affected_pct, 1),
         },
     }
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            result.changes,
+            severity_config,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
     d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
@@ -222,8 +239,17 @@ def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
     show_only: str | None = None,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Leaf-change mode JSON output."""
+    """Leaf-change mode JSON output.
+
+    *severity_config*, when given, adds the same top-level ``severity`` block
+    the full-mode JSON report has (see :func:`_build_severity_json`) —
+    without it, ``--report-mode leaf`` returned before that block was ever
+    built, so it silently had no severity information even when a caller
+    passed ``severity_config`` through :func:`to_json`.
+    """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
     summary = build_summary(result)
@@ -241,7 +267,9 @@ def _to_json_leaf(
             "kind": c.kind.value,
             "symbol": c.symbol,
             "description": c.description,
-            "severity": _effective_severity_label(c, eff_sets),
+            "severity": _effective_severity_label(
+                c, eff_sets, policy=result.policy, policy_file=result.policy_file,
+            ),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
             "caused_count": c.caused_count,
@@ -264,7 +292,9 @@ def _to_json_leaf(
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
     non_type_list = [
-        _change_to_dict(c, policy=effective_policy, kind_sets=eff_sets)
+        _change_to_dict(
+            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file,
+        )
         for c in non_type_changes
     ]
 
@@ -287,6 +317,15 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
     # Release recommendation — always present in JSON, including leaf mode.
     d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
@@ -531,10 +570,12 @@ def to_json(
     severity_config: SeverityConfig | None = None,
 ) -> str:
     if stat:
-        return to_stat_json(result, indent=indent)
+        return to_stat_json(result, indent=indent, severity_config=severity_config)
 
     if report_mode == "leaf":
-        return _to_json_leaf(result, indent=indent, show_only=show_only)
+        return _to_json_leaf(
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
+        )
 
     changes = list(result.changes)
     if show_only:

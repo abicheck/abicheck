@@ -233,8 +233,10 @@ def test_extractor_handles_subprocess_error(monkeypatch) -> None:
 
 
 def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeypatch) -> None:
-    # --include-graph implies --source-graph summary; a missing clang records a
-    # failed extractor row but still writes the pack with the build graph.
+    # Include-graph folding is automatic whenever --source-abi and
+    # --source-graph summary are both given (no separate --include-graph flag
+    # any more) — a missing clang records a failed extractor row but still
+    # writes the pack with the build graph.
     import json
 
     from click.testing import CliRunner
@@ -252,7 +254,8 @@ def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeyp
     }]))
     out = tmp_path / "ev"
     res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb), "--include-graph", "-o", str(out),
+        "collect", "--compile-db", str(cdb), "--source-abi",
+        "--source-graph", "summary", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
     pack = BuildSourcePack.load(out)

@@ -173,3 +173,51 @@ def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:
     # Malformed export must not abort collection; the pack is still written.
     assert res.exit_code == 0, res.output
     assert BuildSourcePack.load(out).source_graph is not None
+
+
+def test_collect_evidence_kythe_implied_graph_still_records_bazel_inputs(
+    tmp_path,
+) -> None:
+    # Codex review: --kythe-entries/--codeql-results with the default
+    # --source-graph off implicitly promotes to "summary" *inside*
+    # _collect_source_graph, after --from bazel-aquery has already run. The
+    # record_bazel_inputs decision (made before that promotion) must
+    # anticipate it — otherwise a Bazel/aquery build's include-graph fold
+    # (now automatic whenever --source-abi is given) finds no recorded
+    # inputs and falls back to a live `clang -M` pass that cannot run
+    # outside the execroot.
+    import json
+
+    from click.testing import CliRunner
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli import main
+    from tests.test_bazel_adapter import AQUERY
+
+    aquery_file = tmp_path / "aquery.json"
+    aquery_file.write_text(AQUERY)
+    kythe = tmp_path / "kythe.json"
+    kythe.write_text(json.dumps([]))
+    out = tmp_path / "ev"
+    res = CliRunner().invoke(
+        main,
+        [
+            "collect",
+            "--from",
+            f"bazel-aquery={aquery_file}",
+            "--source-abi",
+            "--source-abi-scope",
+            "off",
+            "--kythe-entries",
+            str(kythe),
+            "-o",
+            str(out),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    pack = BuildSourcePack.load(out)
+    assert pack.source_graph is not None
+    assert any(
+        e.name == "include_graph:recorded_inputs" and e.status == "ok"
+        for e in pack.manifest.extractors
+    )

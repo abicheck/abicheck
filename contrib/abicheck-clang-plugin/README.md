@@ -1,18 +1,19 @@
 # abicheck Clang plugin (`abicheck-facts`)
 
-> Status: **optional optimization**, implemented (ADR-038 Flow C). Built and
-> validated by the dedicated `clang-plugin` workflow across LLVM/Clang 16/17/18
-> (the C.6 differential-conformance test), but **never a required gate in the
-> main abicheck CI** — it is ABI-locked to the loading clang's LLVM major
-> (ADR-038 C.5). The supported portable producers remain Flow A
-> (`abicheck dump --sources` / `collect` + `compile_commands.json` replay) and
-> Flow B (the `abicheck-cc` compiler wrapper, `abicheck/cc_wrapper.py`). See
+> Status: **optional optimization**, implemented (ADR-038 Plugin injection).
+> Built and validated by the dedicated `clang-plugin` workflow across
+> LLVM/Clang 16/17/18 (the C.6 differential-conformance test), but **never a
+> required gate in the main abicheck CI** — it is ABI-locked to the loading
+> clang's LLVM major (ADR-038 C.5). The supported portable producers remain
+> Full source scan (`abicheck dump --sources` / `collect` +
+> `compile_commands.json` replay) and Wrapper injection (the `abicheck-cc`
+> compiler wrapper, `abicheck/cc_wrapper.py`). See
 > `docs/development/adr/038-build-integrated-fact-collection-variants.md`.
 
 A Clang plugin that, **during a normal compile**, emits abicheck's normalized
 source facts (`source_facts/*.jsonl`) directly from the AST Clang already
 built — removing the second front-end pass the `abicheck-cc` wrapper otherwise
-runs (ADR-038 Flow C: **zero** extra parse). The output is the **same
+runs (ADR-038 Plugin injection: **zero** extra parse). The output is the **same
 `abicheck_inputs/` protocol** abicheck ingests via `merge`, so the plugin is a
 drop-in faster producer, never a new format.
 
@@ -20,7 +21,8 @@ drop-in faster producer, never a new format.
 
 Clang plugins are compiler-version-sensitive: a plugin built against LLVM N must
 match the `clang` that loads it. That is why abicheck does **not** require it —
-Flow A/B are the portable, supported paths. Reach for the plugin only when the
+Full source scan and Wrapper injection are the portable, supported paths.
+Reach for the plugin only when the
 second-frontend cost is measurable on a large template-heavy build and you own
 the toolchain image (ADR-038 producer-selection tree).
 
@@ -220,8 +222,9 @@ Two ways to get it right:
 - **Check the resolution** — `clang++ <your -I flags> -H -fsyntax-only x.cpp`
   prints the actual file each `#include` opened; point `public-roots=` at *that*
   directory (e.g. `src/pvxs`), not the installed copy.
-- **Trust the diagnostic** — since ADR-038 Flow C the plugin no longer fails
-  silently: if `public-roots` matches zero declarations while header decls were
+- **Trust the diagnostic** — since ADR-038's Plugin injection spec the plugin
+  no longer fails silently: if `public-roots` matches zero declarations while
+  header decls were
   seen outside the roots, it prints
 
   ```
@@ -290,7 +293,7 @@ non-blocking workflow, never a required abicheck-CI gate.
 A build that cannot load a Clang plugin can still feed the same
 `abicheck_inputs/` protocol:
 
-- **`abicheck-cc` wrapper** (Flow B) — the portable default; wraps any compiler
+- **`abicheck-cc` wrapper** (Wrapper injection) — the portable default; wraps any compiler
   and runs the castxml/clang extractor as a companion action. No plugin needed.
 - **GCC** — `-fdump-lang-class` / `-fdump-translation-unit` produce class/TU
   dumps; a small normalizer (not shipped) converts them to `source_facts`.

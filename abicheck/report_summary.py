@@ -18,9 +18,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
 from .checker_policy import HasKind
+
+if TYPE_CHECKING:
+    from .severity import KindSets
 
 # Re-exported under its historical name; the implementation (and the prefix
 # tables it relies on) now lives in the canonical name_classification module.
@@ -81,10 +85,45 @@ class CompatibilityMetrics:
 
 
 def compatibility_metrics(
-    changes: Sequence[HasKind], old_symbol_count: int | None = None
+    changes: Sequence[HasKind],
+    old_symbol_count: int | None = None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> CompatibilityMetrics:
-    """Compute canonical ABICC-style binary compatibility counters/percentages."""
-    breaking_count = sum(1 for c in changes if c.kind in _BREAKING_KINDS)
+    """Compute canonical ABICC-style binary compatibility counters/percentages.
+
+    Without *policy*/*kind_sets*/*policy_file*, ``breaking_count`` counts raw
+    ``ChangeKind`` membership in the canonical ``_BREAKING_KINDS`` set —
+    which disagrees with a policy-demoted finding's *effective* verdict. A
+    removal a policy file demotes to ``COMPATIBLE`` still carries its raw
+    ``FUNC_REMOVED`` kind, so the canonical-kind count would report it as
+    breaking (e.g. "0.0% binary compatibility") on the same page whose
+    verdict banner reads ``COMPATIBLE`` (computed from the *effective*
+    verdict) — a direct, visible contradiction. Passing *kind_sets* (from
+    ``DiffResult._effective_kind_sets()``) and/or *policy_file* makes this
+    metric agree with the verdict by counting each change's effective
+    verdict instead of its raw kind. A named *policy* alone (e.g.
+    ``plugin_abi``, with no ``kind_sets``/``policy_file``) must also take
+    this path — ``effective_verdict_for_change`` resolves its own kind sets
+    from *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
+    policy-downgraded kind would still be counted as breaking here.
+    """
+    if policy is not None or kind_sets is not None or policy_file is not None:
+        from .checker_policy import Verdict as _Verdict
+        from .severity import effective_verdict_for_change
+
+        breaking_count = sum(
+            1
+            for c in changes
+            if effective_verdict_for_change(
+                c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            )
+            == _Verdict.BREAKING
+        )
+    else:
+        breaking_count = sum(1 for c in changes if c.kind in _BREAKING_KINDS)
 
     if breaking_count == 0:
         bc_pct = 100.0
@@ -107,7 +146,13 @@ def compatibility_metrics(
 
 
 def build_summary(result: DiffResult) -> ReportSummary:
-    metrics = compatibility_metrics(result.changes, result.old_symbol_count)
+    metrics = compatibility_metrics(
+        result.changes,
+        result.old_symbol_count,
+        policy=result.policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=result.policy_file,
+    )
     return ReportSummary(
         breaking=len(result.breaking),
         source_breaks=len(result.source_breaks),

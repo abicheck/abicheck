@@ -23,6 +23,7 @@ See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-gi
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from .checker import (
     Change,
@@ -31,6 +32,9 @@ from .checker import (
 from .checker_policy import (
     ChangeKind,
 )
+
+if TYPE_CHECKING:
+    from .severity import IssueCategory, KindSets, SeverityConfig
 
 # GitHub caps visible annotations at ~50 per step.
 _MAX_ANNOTATIONS = 50
@@ -144,15 +148,100 @@ def _classify_change(
     return None
 
 
+def _category_for_change_severity(
+    change: Change,
+    kind_sets: KindSets,
+    *,
+    policy: str | None = None,
+    policy_file: object | None = None,
+) -> IssueCategory:
+    """Return the severity-aware :class:`~abicheck.severity.IssueCategory` for *change*.
+
+    *policy_file* must be threaded through (not just the pre-baked
+    *kind_sets*) so a frozen-namespace-tagged finding's floor is honoured the
+    same way ``severity.compute_exit_code`` honours it for the actual exit
+    code: ``kind_sets`` alone already moves a policy-overridden *kind* to its
+    new bucket, but the *per-change* frozen-namespace clamp-back (never let an
+    override downgrade a frozen-namespace violation below its raw verdict)
+    only fires when ``policy_file`` itself is passed to
+    ``classify_effective_change`` — omitting it would let this annotation
+    under-report a finding that still fails CI at its raw severity.
+    """
+    from .severity import classify_effective_change
+
+    return classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+
+
+def _annotation_level_for_category(
+    category: IssueCategory,
+    severity_config: SeverityConfig,
+    annotate_additions: bool,
+) -> str | None:
+    """Return the annotation level for *category* under *severity_config*, or None to skip.
+
+    Reflects the actual CI gate (ADR "GateDecision" direction): a category
+    configured ``error`` always emits ``::error`` regardless of whether it is
+    an addition or a breaking kind, so an annotation is never silently absent
+    for a finding that will fail the build. ``warning``/``info`` mirror the
+    severity level directly; ``info`` only surfaces (as ``::notice``) when
+    *annotate_additions* opts into the noisier informational annotations —
+    matching the pre-existing opt-in behaviour for additions.
+    """
+    from .severity import SeverityLevel
+
+    level = severity_config.level_for(category)
+    if level == SeverityLevel.ERROR:
+        return "error"
+    if level == SeverityLevel.WARNING:
+        return "warning"
+    if level == SeverityLevel.INFO:
+        return "notice" if annotate_additions else None
+    return None
+
+
 def _title_for_change(
     kind: ChangeKind,
     breaking_set: frozenset[ChangeKind],
     api_break_set: frozenset[ChangeKind],
     risk_set: frozenset[ChangeKind],
     compatible_set: frozenset[ChangeKind],
+    *,
+    category: IssueCategory | None = None,
 ) -> str:
-    """Return the annotation title prefix, distinguishing API Break from Deployment Risk."""
+    """Return the annotation title prefix, distinguishing API Break from Deployment Risk.
+
+    *category*, when given (the severity-aware path), is consulted *before*
+    kind-set membership (CodeRabbit review on #549). ``breaking_set``/etc.
+    are pre-baked from ``DiffResult._effective_kind_sets()``, which already
+    applies *kind-level* policy-file overrides — so a policy-demoted
+    ``FUNC_REMOVED`` reads as being "in" ``compatible_set``. But a
+    *per-change* frozen-namespace clamp can keep that one finding's
+    *effective* category at ``ABI_BREAKING`` despite the kind-level move; a
+    title picked from kind-set membership alone would then mislabel an
+    ``::error`` annotation as "Quality Issue" (or "ABI Addition"). Checking
+    *category* first — the same effective classification that already drove
+    the annotation *level* — keeps the title consistent with it.
+    """
     kind_label = kind.value
+    if category is not None:
+        from .severity import IssueCategory as _IssueCategory
+
+        if category == _IssueCategory.ABI_BREAKING:
+            return f"ABI Break: {kind_label}"
+        if category == _IssueCategory.QUALITY_ISSUES:
+            return f"Quality Issue: {kind_label}"
+        if category == _IssueCategory.ADDITION:
+            return f"ABI Addition: {kind_label}"
+        # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
+        # the kind sets, since IssueCategory does not itself split the two.
+        if kind in api_break_set:
+            return f"API Break: {kind_label}"
+        if kind in risk_set:
+            return f"Deployment Risk: {kind_label}"
+        return f"Potential Break: {kind_label}"
+
     if kind in breaking_set:
         return f"ABI Break: {kind_label}"
     if kind in api_break_set:
@@ -189,26 +278,47 @@ def collect_annotations(
     diff_result: DiffResult,
     *,
     annotate_additions: bool = False,
+    severity_config: SeverityConfig | None = None,
 ) -> list[tuple[int, str]]:
     """Collect raw annotation tuples (sort_key, line) for a single DiffResult.
 
     This is the building block for both single-library and multi-library flows.
     Callers are responsible for sorting, truncating, and emitting.
+
+    Without *severity_config*, annotation levels follow the fixed
+    kind-set mapping (BREAKING → error, API_BREAK/RISK → warning, additions →
+    notice when opted in) — the legacy, verdict-only behaviour. When
+    *severity_config* is supplied, it takes priority: the annotation level
+    mirrors each finding's actually-configured severity so an annotation is
+    never silently absent (or under/over-stated) for a finding that does (or
+    does not) gate CI — see :func:`_annotation_level_for_category`.
     """
-    breaking_set, api_break_set, compatible_set, risk_set = diff_result._effective_kind_sets()
+    kind_sets = diff_result._effective_kind_sets()
+    breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
-        level = _classify_change(
-            change.kind, breaking_set, api_break_set, risk_set,
-            compatible_set, annotate_additions,
-        )
+        category: IssueCategory | None = None
+        if severity_config is not None:
+            category = _category_for_change_severity(
+                change, kind_sets,
+                policy=diff_result.policy, policy_file=diff_result.policy_file,
+            )
+            level = _annotation_level_for_category(
+                category, severity_config, annotate_additions,
+            )
+        else:
+            level = _classify_change(
+                change.kind, breaking_set, api_break_set, risk_set,
+                compatible_set, annotate_additions,
+            )
         if level is None:
             continue
 
         title = _title_for_change(
             change.kind, breaking_set, api_break_set, risk_set, compatible_set,
+            category=category,
         )
         line = _format_annotation(level, change, title, change.description)
         sort_key = _SEVERITY_ORDER.get(level, 99)
@@ -241,6 +351,7 @@ def emit_github_annotations(
     *,
     annotate_additions: bool = False,
     max_annotations: int = _MAX_ANNOTATIONS,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Generate GitHub Actions annotation lines for ABI changes.
 
@@ -248,11 +359,18 @@ def emit_github_annotations(
         diff_result: The diff result to annotate.
         annotate_additions: If True, also emit ``::notice`` for additions/compatible changes.
         max_annotations: Maximum number of annotations to emit (default 50).
+        severity_config: When given, annotation levels follow the configured
+            per-category severity instead of the fixed kind-set mapping (see
+            :func:`collect_annotations`).
 
     Returns:
         A string of newline-separated workflow commands (may be empty).
     """
-    annotations = collect_annotations(diff_result, annotate_additions=annotate_additions)
+    annotations = collect_annotations(
+        diff_result,
+        annotate_additions=annotate_additions,
+        severity_config=severity_config,
+    )
     return format_annotations(annotations, max_annotations=max_annotations)
 
 
@@ -261,8 +379,19 @@ def is_github_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def emit_github_step_summary(diff_result: DiffResult) -> str | None:
+def emit_github_step_summary(
+    diff_result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> str | None:
     """Write a Markdown job summary to $GITHUB_STEP_SUMMARY if available.
+
+    *severity_config*, when given, is forwarded to :func:`abicheck.reporter.to_markdown`
+    so the step summary carries the same "Severity Configuration" section the
+    inline annotations are already gated on — without it, `--severity-addition
+    error` (for example) could fail the annotations/exit code while the step
+    summary still rendered the legacy compatible report with no severity gate
+    section, contradicting the actual gate on the same PR.
 
     Returns the summary path if written, None otherwise.
     """
@@ -272,7 +401,7 @@ def emit_github_step_summary(diff_result: DiffResult) -> str | None:
 
     from .reporter import to_markdown
 
-    md = to_markdown(diff_result)
+    md = to_markdown(diff_result, severity_config=severity_config)
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write(md)
         f.write("\n")

@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// abicheck Clang facts plugin (ADR-035 D5, ADR-038 Flow C) — REFERENCE
+// abicheck Clang facts plugin (ADR-035 D5, ADR-038 Plugin injection) — REFERENCE
 // IMPLEMENTATION.
 //
 // During a normal compile this plugin emits abicheck's normalized Flow-2 source
@@ -1582,7 +1582,7 @@ bool pathUnderAnyRoot(llvm::StringRef file, const std::vector<std::string> &root
 }
 
 // Auto-derive public roots from the compile's user include search paths when the
-// operator passed no explicit `public-roots=` (ADR-038 Flow C, Caveat A). The
+// operator passed no explicit `public-roots=` (ADR-038 Plugin injection, Caveat A). The
 // `-I` (Angled) and `-iquote` (Quoted) directories are exactly where a project's
 // own public headers resolve, so treating them as roots turns the common "forgot
 // public-roots → silently empty pack" trap into a populated (if slightly broad)
@@ -1637,7 +1637,7 @@ std::vector<std::string> deriveRootsFromIncludes(const HeaderSearchOptions &hso)
 // Whether `file` names a C/C++ translation-unit source (not a header). Used to
 // tell an ordinary internal .cpp decl (expected to be non-public) from a decl in
 // a *header* that fell outside the public roots (the public-roots-misconfigured
-// signal, ADR-038 Flow C Caveat A).
+// signal, ADR-038 Plugin injection, Caveat A).
 bool isSourceFileName(llvm::StringRef file) {
   llvm::StringRef ext = llvm::sys::path::extension(file);
   return ext.equals_insensitive(".c") || ext.equals_insensitive(".cc") ||
@@ -2360,7 +2360,7 @@ private:
       publicSurfaceLabels(file, origin, visibility);
       return true;
     }
-    // Misconfiguration signal (ADR-038 Flow C, Caveat A): a decl in a real,
+    // Misconfiguration signal (ADR-038 Plugin injection, Caveat A): a decl in a real,
     // non-system *header* that is not under any public root. Ordinary internal
     // code lives in the .cpp source, so counting only header-declared rejections
     // distinguishes "public-roots does not match how headers resolve" (every
@@ -2625,7 +2625,7 @@ public:
   }
 
 private:
-  // Public-roots inference note (ADR-038 Flow C, Caveat A): when no explicit
+  // Public-roots inference note (ADR-038 Plugin injection, Caveat A): when no explicit
   // `public-roots=` was given, the roots were auto-derived from the compile's
   // -I/-iquote include dirs. Record that per-TU (forensic) and tell the operator
   // once — the inferred surface can be slightly broad, so an explicit
@@ -2647,7 +2647,7 @@ private:
       llvm::errs() << msg << "\n";
   }
 
-  // Caveat A (ADR-038 Flow C): fail loud, not silent. If public-roots is set
+  // Caveat A (ADR-038 Plugin injection): fail loud, not silent. If public-roots is set
   // but this TU emitted zero public entities *while* header-declared decls were
   // rejected for not being under any root, public-roots may not match how the
   // compiler resolves the public headers (e.g. it points at the installed
@@ -3077,7 +3077,7 @@ public:
     Preprocessor &pp = ci.getPreprocessor();
     pp.addPPCallbacks(std::make_unique<MacroCollector>(pp, macros));
     // Auto-derive public roots from the -I/-iquote include dirs when the operator
-    // gave none (ADR-038 Flow C, Caveat A): a populated (broad) surface beats the
+    // gave none (ADR-038 Plugin injection, Caveat A): a populated (broad) surface beats the
     // silent empty pack a missing public-roots= used to produce.
     std::vector<std::string> roots = Roots;
     size_t inferredRootCount = 0;
@@ -3190,7 +3190,7 @@ public:
 
   bool ParseArgs(const CompilerInstance &,
                  const std::vector<std::string> &args) override {
-    // Invoke with the unambiguous cc1 form (ADR-038 Flow C):
+    // Invoke with the unambiguous cc1 form (ADR-038 Plugin injection):
     //   -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs
     //   -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include
     for (const std::string &arg : args) {
@@ -3232,4 +3232,4 @@ private:
 } // namespace
 
 static FrontendPluginRegistry::Add<FactsAction>
-    X("abicheck-facts", "emit abicheck Flow-C source facts during compile");
+    X("abicheck-facts", "emit abicheck Plugin injection source facts during compile");

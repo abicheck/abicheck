@@ -214,17 +214,19 @@ export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"
 abicheck compare old-libfoo.so new-libfoo.so --debuginfod
 ```
 
-!!! warning "`--debug-root`/`--debuginfod` currently resolve and report — they do not yet feed the parse"
-    On `dump` and `compare`, these flags locate the matching debug artifact
-    through the resolver chain above and print where they found it
-    (`Debug info: <source>`), but that resolved path is **not** currently
-    passed into the DWARF parse — the two commands above still analyze
-    `old/usr/lib64/libfoo.so.1`/`new/usr/lib64/libfoo.so.1` as given, so a
-    stripped input stays **symbols-only** (L0) even though a matching
-    `.debug`/build-id file was found. For a debug-info split that *does* get
-    parsed today, package the debug info as its own artifact (RPM/Deb/tar) and
-    pass it on directory/package inputs with the side-aware `--debug-info`
-    flag, which *is* wired into the dump:
+!!! note "What `--debug-root`/`--debuginfod` feed into the DWARF parse today"
+    On `dump` and `compare`, a build-id-tree, path-mirror, or debuginfod-fetched
+    `.debug` file — a separate ELF file distinct from the input binary — is
+    parsed for DWARF instead of the (stripped) input itself: the commands above
+    correctly detect the `libpng16` struct-layout example even though
+    `old/usr/lib64/libfoo.so.1`/`new/usr/lib64/libfoo.so.1` carry no `.debug_info`
+    of their own (P1.1). **Split DWARF** (`.dwo`/`.dwp`, the first entry in the
+    resolver chain above) and **dSYM bundles** (macOS) are resolved and reported
+    (`Debug info: <source>`) but not yet threaded into the parse — a binary
+    whose only debug info takes one of those two shapes still analyzes
+    symbols-only. For those, package the debug info as its own artifact
+    (RPM/Deb/tar, or a dSYM bundle) and pass it on directory/package inputs with
+    the side-aware `--debug-info` flag, which *is* wired into the dump:
 
     ```bash
     abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm \

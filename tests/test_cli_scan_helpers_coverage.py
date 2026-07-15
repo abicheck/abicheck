@@ -417,3 +417,50 @@ def test_render_baseline_none_and_populated() -> None:
     text = "\n".join(render_baseline_lines(out))
     assert "Baseline comparison" in text
     assert "breaking=1 api_break=2 risk=3 compatible=4" in text
+
+
+def test_render_baseline_lines_lists_findings_not_just_counts() -> None:
+    """A failing baseline compare must name the broken symbol, not just count it."""
+    out = SimpleNamespace(
+        diff_summary={
+            "breaking": 1,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "breaking",
+                    "kind": "func_removed",
+                    "symbol": "_Z3foov",
+                    "description": "Public function removed: foo",
+                    "source_location": "foo.h:42",
+                }
+            ],
+        }
+    )
+    lines = render_baseline_lines(out)
+    text = "\n".join(lines)
+    assert "[breaking] func_removed: _Z3foov (foo.h:42)" in text
+
+
+def test_render_baseline_lines_notes_truncation() -> None:
+    out = SimpleNamespace(
+        diff_summary={
+            "breaking": 25,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "breaking",
+                    "kind": "func_removed",
+                    "symbol": "sym",
+                    "description": None,
+                    "source_location": None,
+                }
+            ],
+            "findings_truncated": True,
+        }
+    )
+    text = "\n".join(render_baseline_lines(out))
+    assert "additional findings omitted" in text

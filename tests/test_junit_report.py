@@ -838,6 +838,27 @@ class TestSeverityConfig:
         ts = root.find("testsuite")
         assert ts.get("failures") == "1"
 
+    def test_severity_config_demotes_breaking_verdict_to_pass(self) -> None:
+        """Codex review on #549: `_is_failure` used to return True for a
+        BREAKING/API_BREAK verdict *before* consulting `severity_config`, so
+        `--severity-preset info-only` (which demotes every category to
+        'info') could exit 0 via the severity-aware gate while the JUnit XML
+        still contained a `<failure>` for the same removal — disagreeing
+        with `severity.compute_exit_code`, which treats `severity_config` as
+        the sole source of truth once given. Fixed by consulting
+        `severity_config` first, unconditionally, matching
+        `compute_exit_code`'s own logic."""
+        from abicheck.severity import PRESET_INFO_ONLY
+
+        changes = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed"),
+        ]
+        result = _make_result(changes, verdict=Verdict.BREAKING)
+        xml = to_junit_xml(result, severity_config=PRESET_INFO_ONLY)
+        root = _parse(xml)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "0"
+
 
 # ---------------------------------------------------------------------------
 # Error libraries in multi-suite

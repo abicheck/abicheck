@@ -3,8 +3,8 @@
 **Date:** 2026-07-01
 **Status:** Accepted — implemented. Formalizes and extends ADR-035 D5 (Flow 1 /
 Flow 2) into a complete, three-flow producer contract and pins the Clang-plugin
-specification. Flow A (full source scan / no injection) and Flow B (the
-`abicheck-cc` wrapper) already ship; Flow C (the Clang plugin,
+specification. Full source scan (no injection) and Wrapper injection (the
+`abicheck-cc` wrapper) already ship; Plugin injection (the Clang plugin,
 `contrib/abicheck-clang-plugin/`) now implements this spec —
 functions/mangled-name rule/signatures/default args,
 typedefs, constexpr, records/enums/templates **including the AST subtree hashes**
@@ -92,9 +92,9 @@ one producer. The binary dump (L0–L2) stays artifact-authoritative for
 shipped-ABI verdicts; source evidence only *explains, localizes, scopes, or adds
 source-level (`API_BREAK`/`RISK`) findings* and never deletes an artifact-proven
 break (ADR-028 D3 authority rule). This is what makes the three flows a
-**migration path, not a lock-in**: a project adopts at Flow A with zero build
-changes and moves to B or C only when parse cost demands it — with no change to
-the compare side. The one operational rule this implies: **produce the old and
+**migration path, not a lock-in**: a project adopts Full source scan with zero
+build changes and moves to Wrapper injection or Plugin injection only when
+parse cost demands it — with no change to the compare side. The one operational rule this implies: **produce the old and
 new baselines of a comparison the same way** — the only sanctioned cross-producer
 pair is the plugin and the clang backend it is conformance-tested against (C.6),
 which agree on the *whole* surface including macros; an *arbitrary* producer mix
@@ -150,7 +150,7 @@ file-byte equality.
 
 ---
 
-## Flow A — Full source scan (no injection)
+## Full source scan (no injection)
 
 **The straight way: change nothing in the build.** abicheck reads the build's
 existing `compile_commands.json` (or infers one) *post-build* and replays the
@@ -209,7 +209,8 @@ abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 ```
 
 `collect` produces a `BuildSourcePack` consumed via `dump --build-info`/`--sources`
-— **not** an `abicheck_inputs/` pack via `merge` (that protocol is Flow B/C).
+— **not** an `abicheck_inputs/` pack via `merge` (that protocol belongs to
+Wrapper injection and Plugin injection).
 
 ### Scope, cost, and when to use
 
@@ -239,7 +240,7 @@ abicheck dump libfoo.so --build-info libfoo.evidence/ -o libfoo.baseline.json
 
 ---
 
-## Flow B — Wrapper injection (`abicheck-cc`)
+## Wrapper injection (`abicheck-cc`)
 
 Prefix the real compiler with `abicheck-cc` (`abicheck/cc_wrapper.py`). The
 wrapper runs the real compile pass-through (preserving its exit code), then
@@ -266,8 +267,8 @@ abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
   facts, per-TU isolated.
 - **Exact per-TU context:** flags, macros, includes, sysroot, and target triple
   are captured from the real argv, so `compile_context_hash` matches the build.
-- **Cost:** one *companion* parse per TU, inside the build. More than Flow C,
-  but no version-pinned artifact and it wraps any compiler.
+- **Cost:** one *companion* parse per TU, inside the build. More than Plugin
+  injection, but no version-pinned artifact and it wraps any compiler.
 - **Config (argv-transparent, all env):** `ABICHECK_INPUTS_DIR`,
   `ABICHECK_CC_EXTRACTOR`, `ABICHECK_CC_HEADERS`, `ABICHECK_CC_LIBRARY`,
   `ABICHECK_CC_VERSION`, `ABICHECK_CC_DISABLE`.
@@ -276,7 +277,7 @@ abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
 
 ---
 
-## Flow C — Plugin injection: the specification
+## Plugin injection: the specification
 
 Load an abicheck Clang plugin during the normal compile
 (`contrib/abicheck-clang-plugin/`). It emits the *same* `source_facts` from the
@@ -465,12 +466,12 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
 - **Macros:** macro parity is delivered by in-compile `PPCallbacks` (`MacroCollector`
   in `AbicheckFactsPlugin.cpp`, registered on the preprocessor in
   `CreateASTConsumer`/`ParseArgs`), never a second `-E -dD` pass — a companion
-  preprocess would reintroduce exactly the extra front-end pass Flow C exists to
+  preprocess would reintroduce exactly the extra front-end pass Plugin injection exists to
   avoid (C.2/C.3). Captured macro values are normalized to match
   `macros_from_preprocessor` so the plugin stays entity-equivalent to the clang
   backend it substitutes; the C.6 gate covers macros (leniently — operator-adjacent
   spacing is the documented soft edge). A project that still hits a macro mismatch
-  runs Flow A/B for **both** sides of the comparison rather than mixing producers —
+  runs Full source scan or Wrapper injection for **both** sides of the comparison rather than mixing producers —
   the sanctioned plugin↔clang-backend equivalence of D0, not a licence to mix
   arbitrary producers.
 - **Public-surface classifier (pragmatic):** the plugin classifies a decl/macro
@@ -485,7 +486,8 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
   `SYSTEM PUBLIC`) are dropped by the system-header guard even though they are
   explicitly public, and exact-file public roots given from a **different tree**
   than the compile's are matched only by segment-subsequence. A project hitting
-  either runs Flow A/B for both sides of the comparison.
+  either runs Full source scan or Wrapper injection for both sides of the
+  comparison.
 - **Compiler-implicit special members:** the plugin does **not** emit
   compiler-*implicit* (never user-declared) special members — the default/copy/
   move constructors, destructor, and assignment operators a class gets for free.
@@ -501,8 +503,8 @@ ordinary scan*, not merely entity-equivalent to the clang backend.
   fragile rather than exact. Under D0 (same-producer baselines) the implicit
   surface is identical on both sides, so it never yields a false finding; a
   project needing implicit-member facts in a cross-producer comparison runs
-  Flow A/B for both sides. `= default`-ed members are user-declared (not
-  implicit) and *are* emitted normally.
+  Full source scan or Wrapper injection for both sides. `= default`-ed members
+  are user-declared (not implicit) and *are* emitted normally.
 
 ### C.8 — Canonical fact-set identity and coverage honesty
 
@@ -643,11 +645,11 @@ caching serializes/deserializes the same `SourceAbiTu` records verbatim.
 
 ```text
 Can you change the build at all?
- └─ No  ───────────────────────────────► Flow A (full scan). Default. Zero integration.
+ └─ No  ───────────────────────────────► Full source scan. Default. Zero integration.
  └─ Yes, and it's a large template-heavy
     build where a companion parse hurts,
-    and you own the toolchain image ─────► Flow C (plugin). Zero extra parse.
- └─ Yes, otherwise ───────────────────── ► Flow B (wrapper). Exact context, portable.
+    and you own the toolchain image ─────► Plugin injection. Zero extra parse.
+ └─ Yes, otherwise ───────────────────── ► Wrapper injection. Exact context, portable.
 ```
 
 Because all three share the D0 contract, this is a spectrum, not a fork: start at
@@ -659,8 +661,8 @@ baseline.
 
 ## The shared consumer: `abicheck_inputs/` and `merge`
 
-Flows B and C drop a self-describing pack next to the binary; Flow A feeds the
-same linker in-process. The pack (ADR-035 D5) is:
+Wrapper injection and Plugin injection drop a self-describing pack next to the
+binary; Full source scan feeds the same linker in-process. The pack (ADR-035 D5) is:
 
 ```text
 abicheck_inputs/
@@ -684,15 +686,16 @@ abicheck_inputs/
 
 **Positive.**
 - The full end-to-end story of working with sources is documented as one
-  interchangeable family; the cheapest path (Flow A, no injection) is explicitly
-  first-class.
+  interchangeable family; the cheapest path (Full source scan, no injection) is
+  explicitly first-class.
 - The plugin has a complete, testable build-to spec — hashing recipe, mangled-name
   rule, visibility model, output layout, versioning, and a differential
   conformance gate — instead of an open TODO.
 
 **Negative / costs.**
-- Flows B and C add build-time cost and CI wiring on the **product** side; Flow A
-  moves that cost to the analysis host. There is no free parse — the ADR only
+- Wrapper injection and Plugin injection add build-time cost and CI wiring on
+  the **product** side; Full source scan moves that cost to the analysis host.
+  There is no free parse — the ADR only
   lets a team choose *where* to pay it.
 - The plugin carries real maintenance burden: rebuilt per LLVM major, and its
   differential test must track any change to `clang.py`'s field/hash mapping (the
@@ -715,6 +718,6 @@ baselines and readers are unaffected.
   castxml recipe.
 - **ADR-032** — extractor action/security model; producers of the same normalized
   facts, ingested by the non-executing `inputs_pack` path.
-- **ADR-033** — replay scopes, per-TU caching, and CI cost model that bound Flow
-  A's parse cost to changed scope.
-- **ADR-037** — the `--depth`/`--ast-frontend` CLI dials that drive Flow A.
+- **ADR-033** — replay scopes, per-TU caching, and CI cost model that bound Full
+  source scan's parse cost to changed scope.
+- **ADR-037** — the `--depth`/`--ast-frontend` CLI dials that drive Full source scan.

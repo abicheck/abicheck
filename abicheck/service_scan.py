@@ -39,6 +39,7 @@ from .buildsource.build_query import (
 )
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
@@ -682,6 +683,7 @@ class ScanResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "scan_schema_version": SCAN_SCHEMA_VERSION,
             "verdict": self.verdict,
             "exit_code": self.exit_code,
             "findings": len(self.findings),

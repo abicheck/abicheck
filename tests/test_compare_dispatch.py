@@ -180,6 +180,44 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     assert captured["pdb_path"] == Path("/p.pdb")
 
 
+def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -> None:
+    """P1.1 Codex-review regression: --debug-root/--debuginfod must reach the
+    inline dump too — without this, a raw --old/new-sources tree bypassed
+    detached-debug-artifact resolution entirely (the inline dump used its own
+    unset defaults), so a stripped binary on that side still lost its DWARF
+    even though the non-inline compare path was already fixed."""
+    import inspect
+
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    droot = tmp_path / "debugroot"
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+        debug_roots=(droot,), debuginfod=True, debuginfod_url="https://example.test",
+    )
+    dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
+    assert set(captured) <= dump_params, set(captured) - dump_params
+    assert captured["debug_roots"] == (droot,)
+    assert captured["debuginfod"] is True
+    assert captured["debuginfod_url"] == "https://example.test"
+
+
 def test_embed_inline_source_merges_tree_config_but_cli_wins(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -608,6 +646,49 @@ class TestCompareDispatch:
 
         assert code == 4
         assert json.loads(out)["verdict"] == "BREAKING"
+
+    def test_config_severity_scheme_without_severity_block_applies_to_set_inputs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Codex review on #549: exit_code_scheme: severity from .abicheck.yml,
+        with no severity: block and no --severity-* flag anywhere, must still
+        gate on the default severity preset for directory/package inputs —
+        not silently fall back to the legacy verdict exit. The single-file
+        compare path never hits this: its resolved_cfg.severity is always
+        populated (defaulting to PRESET_DEFAULT), gated only by scheme; the
+        release fan-out re-derived its severity config from the raw
+        --severity-* values alone, which are all None here."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("exit_code_scheme: severity\n", encoding="utf-8")
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        # An API_BREAK finding: legacy scheme exits 2; the default severity
+        # preset (potential_breaking=warning) must exit 0 instead.
+        api_break_diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so",
+            changes=[Change(ChangeKind.ENUM_MEMBER_RENAMED, "Color::RED", "member renamed")],
+            verdict=Verdict.API_BREAK,
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release._run_compare_pair",
+            lambda *a, **kw: (api_break_diff, None, None),
+        )
+
+        code, out, _ = _invoke(
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
+            "--format", "json", "--no-bundle-analysis",
+        )
+
+        assert code == 0
+        assert json.loads(out)["verdict"] == "API_BREAK"
 
     @pytest.mark.parametrize(
         "flag, value, is_path",

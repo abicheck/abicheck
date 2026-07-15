@@ -325,10 +325,15 @@ def render_preprocessor_lines(out: Any) -> list[str]:
 
 
 def render_baseline_lines(out: Any) -> list[str]:
-    """The baseline comparison summary block (empty without a baseline diff)."""
+    """The baseline comparison summary block (empty without a baseline diff).
+
+    Beyond the counts, lists the actual findings (kind/symbol/location) the
+    baseline compare produced — a bare "breaking=1" count is not actionable
+    without naming what broke (see ``_run_baseline_compare``'s ``findings``).
+    """
     if out.diff_summary is None:
         return []
-    return [
+    lines = [
         "",
         "Baseline comparison",
         f"  breaking={out.diff_summary['breaking']} "
@@ -336,6 +341,15 @@ def render_baseline_lines(out: Any) -> list[str]:
         f"risk={out.diff_summary['risk']} "
         f"compatible={out.diff_summary['compatible']}",
     ]
+    for f in out.diff_summary.get("findings", []):
+        loc = f" ({f['source_location']})" if f.get("source_location") else ""
+        symbol = f.get("symbol") or "?"
+        lines.append(f"    [{f['bucket']}] {f['kind']}: {symbol}{loc}")
+    if out.diff_summary.get("findings_truncated"):
+        lines.append(
+            "    … additional findings omitted; rerun `compare` for the full list"
+        )
+    return lines
 
 
 def render_verdict_lines(out: Any) -> list[str]:

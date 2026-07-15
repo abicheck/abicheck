@@ -17,9 +17,9 @@ Use this catalog to:
 | Verdict | Count | What it means |
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 100 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 16 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 17 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
 | 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 25 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 30 | Backward-compatible changes (additions or quality-only). |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 29 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 5 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
@@ -40,9 +40,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | Category | Cases | What it covers |
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 100 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 16 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [API Break](by-category/api_break.md) | 17 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 25 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
-| [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
+| [Addition (Compatible)](by-category/addition.md) | 8 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 5 | Identical ABI/API — sanity-check baselines. |
 
@@ -158,7 +158,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
 | [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
 | [case114_char8t_migration](case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |

@@ -15,6 +15,10 @@ int main(void) {
     for (int i = 0; i < 4; i++) {
         block_init(&blocks[i]);
         blocks[i].data[0] = (char)(i + 1);
+        /* block_checksum() sums the mutated data[]; store it back so the
+         * per-block equality check in block_process() has something correct
+         * to compare against (block_init() only zeroed the checksum). */
+        blocks[i].checksum = block_checksum(&blocks[i]);
     }
 
     int ok = block_process(blocks, 4);

@@ -55,11 +55,15 @@ binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
 `target → public header → declaration → exported symbol` reachability closure.
 Every node and edge carries provenance and a confidence label. Collect it with
 `--source-graph summary` and compare two summaries with `graph compare` (below).
-Deeper layers extend the same graph: approximate Clang call edges
-(`--call-graph`), compile-unit include edges (`--include-graph`), and
-pre-captured Kythe/CodeQL backends (`--kythe-entries`/`--codeql-results`). All
-six graph-derived findings flow through `graph compare` and the verdict
-pipeline, and `graph explain` localizes a single finding through the graph.
+When `--source-abi` (L4) is also given, two further edge kinds fold in
+**automatically** — no separate flag for either, mirroring `dump --sources`'s
+own behavior: approximate Clang call edges (`DECL_CALLS_DECL`) and
+compile-unit include edges (`COMPILE_UNIT_INCLUDES_FILE`, preferring
+already-recorded build-tool inputs over a fresh `clang -M` invocation). A
+further, independent layer folds pre-captured Kythe/CodeQL backends
+(`--kythe-entries`/`--codeql-results`). All six graph-derived findings flow
+through `graph compare` and the verdict pipeline, and `graph explain`
+localizes a single finding through the graph.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -477,8 +481,8 @@ graph-derived **risk** findings (ADR-031 D6):
 | `public_reachability_changed` | risk | A declaration entered or left the public-API reachability closure (target → public header → declaration → exported symbol) |
 | `source_to_binary_mapping_changed` | risk | A declaration present in both versions now maps to a different exported binary symbol |
 | `generated_header_reaches_public_api` | risk | A generated file newly participates in the public declaration closure (it is a public header) |
-| `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--call-graph`) |
-| `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--include-graph`) |
+| `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--source-abi` + `--source-graph summary`, folded automatically) |
+| `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--source-abi` + `--source-graph summary`, folded automatically) |
 | `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
 | `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration via the call graph ([case160](../examples/case160_public_api_internal_dep_added.md)) |
 | `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../examples/case161_target_dependency_added.md)) |

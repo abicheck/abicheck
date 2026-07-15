@@ -10,7 +10,14 @@
 | **Detected `ChangeKind`s** | `typedef_removed` |
 | **Source files** | `examples/case95_allocator_nested_typedef_removed/` |
 
-**Category:** Source API contract | **Verdict:** 🔴 BREAKING
+**Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy escalated source break)
+
+## Compatibility classification
+
+- **Binary ABI impact:** None — exported member symbols are unchanged; already-built consumer binaries keep linking and running.
+- **Source compatibility impact:** BREAKING — `typename Alloc::value_type` and the other four nested aliases stop resolving.
+- **Semantic verdict (by the project's own API_BREAK/BREAKING definitions):** `API_BREAK` — a recompile-only failure with no impact on already-built binaries.
+- **Policy severity:** `BREAKING` in `ground_truth.json` — `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, without distinguishing "this alias was source-only, never encoded in the binary" from an actual layout/link break. See `case158_public_typedef_removed` (L4 source-ABI replay) for the API_BREAK-classified sibling of this same removal pattern.
 
 ## What breaks
 

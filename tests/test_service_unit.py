@@ -719,6 +719,46 @@ class TestDumpElf:
             or call_kwargs[1].get("compiler") == "cc"
         )
 
+    def test_debuginfod_url_reaches_resolve_debug_info(self, tmp_path):
+        # Codex (PR #551): a custom --debuginfod-url must reach the resolver's
+        # debuginfod_urls kwarg, not just gate enable_debuginfod on/off.
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch("abicheck.dumper.dump", return_value=snap),
+        ):
+            _dump_elf(
+                p,
+                [],
+                [],
+                "1.0",
+                "c++",
+                enable_debuginfod=True,
+                debuginfod_url="https://debuginfod.example.test/",
+            )
+        assert mock_resolve.call_args.kwargs["debuginfod_urls"] == [
+            "https://debuginfod.example.test/"
+        ]
+
+    def test_no_debuginfod_url_passes_none(self, tmp_path):
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch("abicheck.dumper.dump", return_value=snap),
+        ):
+            _dump_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
+        assert mock_resolve.call_args.kwargs["debuginfod_urls"] is None
+
 
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
 
@@ -1155,12 +1195,29 @@ class TestRunCompare:
         monkeypatch.setattr(service_mod, "resolve_input", _spy)
 
         run_compare(
-            old_p, new_p, old_headers=[old_h], new_headers=[new_h],
+            old_p,
+            new_p,
+            old_headers=[old_h],
+            new_headers=[new_h],
         )
         assert len(calls) == 2
         old_call, new_call = calls
         assert old_call["public_headers"] == [old_h]
         assert new_call["public_headers"] == [new_h]
+
+    def test_debuginfod_url_appended_last_preserves_positional_order(self):
+        # Codex review (PR #551): debuginfod_url was originally inserted right
+        # after enable_debuginfod, ahead of scope_to_public_surface — any
+        # caller invoking run_compare positionally that far would have every
+        # later positional argument silently shift by one slot. It must be
+        # the LAST parameter so no pre-existing positional binding moves.
+        import inspect
+
+        params = list(inspect.signature(run_compare).parameters)
+        assert params[-1] == "debuginfod_url"
+        assert params.index("scope_to_public_surface") == (
+            params.index("enable_debuginfod") + 1
+        )
 
 
 # ── render_output() ─────────────────────────────────────────────────────────
@@ -1606,6 +1663,278 @@ class TestRunDumpHeaderWiring:
         with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
             run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
+
+
+class TestRunDumpHeaderGraph:
+    """``header_graph=True`` embeds the header-only (L2) semantic graph
+    (ADR-041 addendum) uniformly across all three binary formats."""
+
+    def test_noop_when_not_requested(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
+        assert result.build_source is None
+
+    def test_noop_when_no_headers_parsed(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(p, "pe", [], [], "1.0", "c++", header_graph=True)
+        assert result.build_source is None
+
+    def test_embeds_graph_from_clang_ast(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(
+            library="lib",
+            version="1.0",
+            platform="pe",
+            functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+        )
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+        ):
+            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
+        mock_ast.assert_called_once()
+        # The resolved (existing, expanded) header must reach the clang pass —
+        # not the raw, unexpanded argument (Codex review).
+        assert mock_ast.call_args.args[0] == [header]
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
+        node_ids = {n.id for n in result.build_source.source_graph.nodes}
+        assert "decl://_Z1fv" in node_ids
+        # The manifest coverage row must be populated too (Codex review) — an
+        # empty default manifest would read as "L5 not collected" to
+        # cli_buildsource_helpers._layer_presence/_optional_coverage even
+        # though source_graph is populated.
+        from abicheck.buildsource.model import CoverageStatus, DataLayer
+
+        l5 = result.build_source.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+        assert l5 is not None
+        assert l5.status == CoverageStatus.PARTIAL  # no edges in this empty AST
+        l3 = result.build_source.manifest.coverage_for(DataLayer.L3_BUILD)
+        assert l3 is not None
+        assert l3.status == CoverageStatus.NOT_COLLECTED
+
+    def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+
+        def _raise(*a, **k):
+            raise SnapshotError("clang not found")
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
+        ):
+            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
+        mock_ast.assert_called_once()
+        # Never aborts the dump (ADR-028 D3); the graph is embedded but inert.
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
+        assert result.build_source.source_graph.edges == []
+
+    def test_expands_header_directory_before_clang_pass(self, tmp_path):
+        # Codex review: a `headers` entry may be a directory (a supported
+        # run_dump input the main dump path already expands) — the header
+        # graph's own clang pass must see the expanded file list, not the
+        # raw directory (which would otherwise get written into an invalid
+        # `#include "<dir>"` line and silently degrade to the seed-only
+        # graph).
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        hdr_dir = tmp_path / "include"
+        hdr_dir.mkdir()
+        header = hdr_dir / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+        ):
+            result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++", header_graph=True)
+        mock_ast.assert_called_once()
+        assert mock_ast.call_args.args[0] == [header]
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
+
+    def test_header_graph_includes_folds_include_edges(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pub = tmp_path / "pub.h"
+        pub.write_text('#include "detail/impl.h"\n')
+        impl_dir = tmp_path / "detail"
+        impl_dir.mkdir()
+        impl = impl_dir / "impl.h"
+        impl.write_text("struct Impl {};\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _Proc:
+            stdout = f"pub.o: {pub} {impl}"
+            stderr = ""
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                lambda *a, **k: _Proc(),
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [pub],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        pub_id = f"header://{pub}"
+        assert any(
+            e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == pub_id
+            for e in graph.edges
+        )
+        assert graph.coverage["include_edges"]["collected"] is True
+
+    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(
+        self, tmp_path
+    ):
+        """A leaf header with no #includes of its own is a genuine zero, not
+        an uncollected pass — `header_include_graph` must still be stamped so
+        `_include_graph_covered` doesn't mistake it for "never ran"."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _Proc:
+            stdout = f"api.o: {header}"
+            stderr = ""
+            returncode = 0
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                lambda *a, **k: _Proc(),
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [header],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
+        assert graph.extractor_passes.get("header_include_graph") is True
+        assert graph.coverage["include_edges"]["collected"] is True
+        assert graph.coverage["include_edges"]["count"] == 0
+
+    def test_header_graph_includes_marks_pass_degraded_on_partial_failure(
+        self, tmp_path
+    ):
+        """One header's `clang -M` succeeding while another's fails is a real,
+        partial result -- it must fold the successful header's edges but
+        must NOT be confirmed as a clean full pass (`extractor_passes`), only
+        `degraded_passes`, so `_include_graph_fully_covered` never trusts the
+        failed header's portion as evidence of genuine absence."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        good = tmp_path / "good.h"
+        good.write_text('#include "good_impl.h"\n')
+        impl = tmp_path / "good_impl.h"
+        impl.write_text("struct Impl {};\n")
+        bad = tmp_path / "bad.h"
+        bad.write_text("void g();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _OkProc:
+            stdout = f"good.o: {good} {impl}"
+            stderr = ""
+            returncode = 0
+
+        class _FailProc:
+            stdout = ""
+            stderr = "fatal error: something broke"
+            returncode = 1
+
+        def _fake_run(cmd, *a, **k):
+            return _OkProc() if str(good) in cmd else _FailProc()
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                _fake_run,
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [good, bad],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        good_id = f"header://{good}"
+        assert any(
+            e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == good_id
+            for e in graph.edges
+        )
+        assert graph.extractor_passes.get("header_include_graph") is not True
+        assert graph.degraded_passes.get("header_include_graph") is True
+
+    def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap):
+            result = run_dump(
+                p, "pe", [header], [], "1.0", "c++", header_graph_includes=True
+            )
+        assert result.build_source is None
 
 
 class TestCliNativeBinaryHeaderWiring:

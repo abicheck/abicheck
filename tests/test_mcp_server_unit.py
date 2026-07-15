@@ -1302,6 +1302,131 @@ class TestAbiCompareEdgeCases:
         assert isinstance(data["report"], str)
 
 
+class TestAbiCompareSeverity:
+    """Without any severity_* argument, exit_code follows the legacy
+    verdict-based scheme — which can misreport the actual gate once severity
+    configuration is in play (the MCP surface previously had no severity
+    configuration at all). These guard the fix."""
+
+    def _make_pair(self, tmp_path: Path, old_snap: AbiSnapshot, new_snap: AbiSnapshot):
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        _write_snapshot(old_p, old_snap)
+        _write_snapshot(new_p, new_snap)
+        return old_p, new_p
+
+    def test_no_severity_args_uses_legacy_scheme(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["verdict"] == "COMPATIBLE"
+        assert data["exit_code"] == 0
+        assert data["exit_code_scheme"] == "legacy"
+
+    def test_addition_configured_as_error_switches_to_severity_scheme(
+        self, tmp_path: Path,
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            severity_preset="default", severity_addition="error",
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["verdict"] == "COMPATIBLE"
+        # Legacy scheme would say exit_code=0; the severity gate says 1.
+        assert data["exit_code"] == 1
+        assert data["exit_code_scheme"] == "severity"
+
+    def test_breaking_demoted_to_info_exits_zero(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("foo", "_Z3foov")]),
+            _make_snapshot("2.0"),
+        )
+        raw = abi_compare(str(old_p), str(new_p), severity_abi_breaking="info")
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["verdict"] == "BREAKING"
+        # Legacy scheme would say exit_code=4; the severity gate says 0.
+        assert data["exit_code"] == 0
+        assert data["exit_code_scheme"] == "severity"
+
+    def test_invalid_severity_preset_returns_error(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path, _make_snapshot("1.0"), _make_snapshot("2.0"),
+        )
+        raw = abi_compare(str(old_p), str(new_p), severity_preset="not_a_preset")
+        data = json.loads(raw)
+        assert "error" in data
+
+    def test_empty_string_severity_arg_is_validated_not_ignored(self, tmp_path: Path):
+        """CodeRabbit review: `any((severity_preset, ...))` treated an empty
+        string as absent (falsy), silently selecting the legacy scheme
+        instead of surfacing the documented validation error."""
+        old_p, new_p = self._make_pair(
+            tmp_path, _make_snapshot("1.0"), _make_snapshot("2.0"),
+        )
+        raw = abi_compare(str(old_p), str(new_p), severity_abi_breaking="")
+        data = json.loads(raw)
+        assert "error" in data
+
+    def test_json_report_embeds_severity_block(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            severity_addition="error", output_format="json",
+        )
+        data = json.loads(raw)
+        assert "severity" in data["report"]
+        assert data["report"]["severity"]["exit_code"] == 1
+
+    def test_leaf_mode_json_report_embeds_severity_block(self, tmp_path: Path):
+        """CodeRabbit review: report_mode="leaf" returned before the severity
+        block was built, so the MCP JSON report silently had no `severity`
+        key even though `exit_code`/`exit_code_scheme` were already
+        severity-gated — a direct contradiction on the same response."""
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            severity_addition="error", output_format="json", report_mode="leaf",
+        )
+        data = json.loads(raw)
+        assert data["exit_code_scheme"] == "severity"
+        assert "severity" in data["report"]
+        assert data["report"]["severity"]["exit_code"] == 1
+
+    def test_stat_output_reflects_severity_gate(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0"),
+            _make_snapshot("2.0", functions=[_pub_func("bar", "_Z3barv")]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            severity_addition="error", stat=True, output_format="markdown",
+        )
+        data = json.loads(raw)
+        assert "gate: FAIL" in data["report"]
+
+
 class TestSanitizeErrorEdgeCases:
     def test_nested_abicheck_error(self):
         """Subclasses of AbicheckError also pass through."""

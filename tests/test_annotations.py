@@ -520,6 +520,25 @@ class TestEmitGitHubStepSummary:
         assert content.startswith("existing content\n")
         assert "NO_CHANGE" in content
 
+    def test_forwards_severity_config_to_markdown(self, tmp_path):
+        """Codex review on #549: `_maybe_emit_annotations` (cli.py) makes the
+        inline GitHub annotations severity-aware, but still called
+        `emit_github_step_summary(result)` without `severity_config` — so
+        e.g. `--severity-addition error` could fail the annotations/exit code
+        while the step summary rendered the legacy compatible report with no
+        severity gate section, contradicting the actual gate on the same
+        PR."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        summary_file = tmp_path / "summary.md"
+        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+            result = _result(Verdict.COMPATIBLE, [
+                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added: bar"),
+            ])
+            emit_github_step_summary(result, severity_config=PRESET_DEFAULT)
+        content = summary_file.read_text(encoding="utf-8")
+        assert "Severity Configuration" in content
+
 
 # ---------------------------------------------------------------------------
 # collect_annotations / format_annotations
@@ -567,3 +586,135 @@ class TestCollectAndFormatAnnotations:
         # All 20 errors survive; 30 of 40 warnings fit.
         assert len(error_lines) == 20
         assert len(warning_lines) == 30
+
+
+# ---------------------------------------------------------------------------
+# severity_config-aware annotation levels
+# ---------------------------------------------------------------------------
+
+class TestSeverityConfigAwareAnnotations:
+    """Without severity_config, annotation levels follow the fixed kind-set
+    mapping regardless of what actually gates CI. These guard the fix: when a
+    SeverityConfig is supplied, the annotation level mirrors the real gate."""
+
+    def test_addition_configured_as_error_gets_error_annotation(self):
+        """An addition that severity config promotes to `error` must not be
+        silently absent — the build fails on it, so the annotation must too."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+
+        # Legacy behaviour (no severity_config, additions not opted in): silent.
+        assert collect_annotations(result) == []
+
+        cfg = resolve_severity_config("default", addition="error")
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 0
+        assert line.startswith("::error ")
+
+    def test_breaking_demoted_to_info_does_not_emit_error(self):
+        """A breaking kind that severity config demotes below `error` must not
+        emit `::error` — that would misreport a non-blocking finding as fatal."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, [c])
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        # info-level findings are opt-in (annotate_additions), same gate as
+        # the legacy compatible/notice behaviour.
+        assert collect_annotations(result, severity_config=cfg) == []
+
+        annotations = collect_annotations(
+            result, severity_config=cfg, annotate_additions=True,
+        )
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 2  # notice
+        assert line.startswith("::notice ")
+
+    def test_emit_github_annotations_forwards_severity_config(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default", addition="error")
+        output = emit_github_annotations(result, severity_config=cfg)
+        assert output.startswith("::error ")
+
+    def test_quality_finding_not_mislabeled_as_addition(self):
+        """Codex review on #549: a compatible *quality* finding (e.g.
+        soname_bump_unnecessary) surfaced by severity_config (the default
+        preset sets quality_issues=warning, no annotate_additions needed)
+        must not be titled "ABI Addition" — it isn't one."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(
+            ChangeKind.SONAME_BUMP_UNNECESSARY, "libfoo.so", "unnecessary bump",
+        )
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default")  # quality_issues=warning
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert line.startswith("::warning ")
+        assert "title=Quality Issue%3A soname_bump_unnecessary" in line
+        assert "ABI Addition" not in line
+
+    def test_genuine_addition_still_labeled_as_addition(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default", addition="error")
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert "title=ABI Addition%3A func_added" in line
+
+    def test_frozen_namespace_floor_honoured_under_policy_override(self):
+        """A policy-file override that demotes FUNC_REMOVED to COMPATIBLE must
+        not silently downgrade a finding tagged frozen_namespace_violation —
+        the actual exit code (severity.compute_exit_code, given policy_file)
+        keeps such a finding at its raw BREAKING severity, so the annotation
+        must too, or a build that still fails CI would get no ::error at all.
+        """
+        from abicheck.checker_policy import Verdict as _Verdict
+        from abicheck.policy_file import PolicyFile
+        from abicheck.severity import compute_exit_code, resolve_severity_config
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            frozen_namespace_violation="**::detail::r1::*",
+        )
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: _Verdict.COMPATIBLE})
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so.1",
+            changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+        )
+        cfg = resolve_severity_config("default")  # abi_breaking=error
+
+        # The actual gate: still fails at the frozen finding's raw severity.
+        eff_sets = result._effective_kind_sets()
+        exit_code = compute_exit_code(
+            result.changes, cfg, kind_sets=eff_sets, policy_file=result.policy_file,
+        )
+        assert exit_code == 4
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        sort_key, line = annotations[0]
+        assert sort_key == 0
+        assert line.startswith("::error ")
+        # CodeRabbit review: the title must agree with the level — the kind
+        # itself was policy-demoted into compatible_set, so a title picked
+        # from kind-set membership alone would misreport this ::error as
+        # "Quality Issue" (or "ABI Addition") instead of "ABI Break".
+        assert "title=ABI Break%3A func_removed" in line
+        assert "Quality Issue" not in line
+        assert "ABI Addition" not in line

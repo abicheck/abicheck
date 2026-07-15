@@ -517,6 +517,26 @@ class TypeEdge:
     #: review: without this, a private-header dst node carries no visibility
     #: and ``public_to_internal_dependency`` never fires on it).
     dst_file: str = ""
+    #: How *dst*'s name was resolved to its qualified form (:func:`_resolve_type_name`
+    #: — richer confidence/provenance, ADR-041 addendum): ``"scope"`` (matched
+    #: via the nearest-enclosing-scope walk — real C++ lookup order, the
+    #: confident case), ``"unique_candidate"`` (no scope matched, but exactly
+    #: one same-bare-name declaration exists anywhere in the TU — a
+    #: last-resort guess, weaker than a scope match even though both were
+    #: previously folded into the same flat ``CONF_HIGH`` tier),
+    #: ``"unresolved"`` (no candidate at all; the raw spelling is kept), or
+    #: ``""`` for an edge kind this labeling doesn't apply to (a
+    #: ``DECL_REFERENCES_DECL`` edge's target is resolved by
+    #: :func:`_resolve_ref_identity`, a different mechanism with its own
+    #: confidence — always ``CONF_REDUCED`` — not this field). Excluded from
+    #: equality/hash (``compare=False``): it's a purely informational
+    #: refinement of *why* ``confidence`` already came out ``CONF_REDUCED``
+    #: (``unique_candidate`` vs. ``unresolved``, both already REDUCED before
+    #: this field existed) — the many existing tests asserting exact
+    #: ``TypeEdge(...) ==`` equality against ``confidence``/``role``/
+    #: ``dst_file`` alone should not need updating for a field that adds
+    #: detail without changing what they already verify.
+    resolution: str = field(default="", compare=False)
 
 
 def _index_declared_entities(
@@ -615,6 +635,34 @@ def _index_declared_entities(
             )
         return cur_file
 
+    if kind == "FieldDecl" and name and not in_body:
+        # A field's own qualified identity (``Widget::x``), mirroring
+        # ``_walk_types``'s own ``field_ident`` computation — so a
+        # DECL_REFERENCES_DECL edge whose *source* is a field (a default
+        # member initializer, ``int x = detail::k;``) has a declaring file
+        # to resolve, not just its target (Codex review: without this, such
+        # a field was never seeded as a `source_decl` and never backfilled
+        # either, so it carried no visibility at all and a public struct's
+        # dependency on a private constant through it was silently dropped).
+        # Deliberately NOT added to ``name_index``/``ref_name_index`` —
+        # fields are not resolvable *type* targets or reference targets in
+        # their own right, only entities with their own file to look up.
+        field_ident = "::".join([*scope, name])
+        if cur_file:
+            decl_file.setdefault(field_ident, cur_file)
+        for child in node.get("inner", []) or []:
+            cur_file = _index_declared_entities(
+                child,
+                scope,
+                cur_file,
+                name_index,
+                decl_file,
+                ref_name_index,
+                id_index,
+                in_body,
+            )
+        return cur_file
+
     if kind in _FUNCTION_DECL_KINDS:
         # Everything declared inside a function/method body — including a
         # plain block-scope local (``int api() { int x; return x; }``) — is
@@ -673,9 +721,16 @@ def _index_declared_entities(
     return cur_file
 
 
+#: :func:`_resolve_type_name` resolution labels (ADR-041 richer-confidence
+#: addendum), ordered strongest first.
+RESOLUTION_SCOPE = "scope"
+RESOLUTION_UNIQUE_CANDIDATE = "unique_candidate"
+RESOLUTION_UNRESOLVED = "unresolved"
+
+
 def _resolve_type_name(
     raw: str, scope: list[str], name_index: dict[str, list[str]]
-) -> tuple[str, bool]:
+) -> tuple[str, str]:
     """Resolve a possibly-unqualified or partially-qualified type spelling to
     a fully qualified name.
 
@@ -694,16 +749,21 @@ def _resolve_type_name(
     ``"other::Impl"``), then the nearest enclosing scope is tried first,
     each enclosing scope outward next, and a unique remaining candidate last.
 
-    Returns ``(name, matched)`` — *matched* is ``True`` only when a
-    qualifying declaration was found, so a **global** declaration whose
-    resolved spelling happens to equal the raw spelling (e.g. ``"Base"`` at
-    namespace scope) is still reported as a real match rather than mistaken
-    for "unresolved" by a naive string-equality check (Codex review). Best
-    effort, not a real semantic lookup: an unmatched name is returned
-    unchanged with ``matched=False``.
+    Returns ``(name, resolution)`` — *resolution* is one of
+    :data:`RESOLUTION_SCOPE` (a qualifying declaration was found via the
+    scope walk — real C++ lookup order; this includes a **global**
+    declaration whose resolved spelling happens to equal the raw spelling,
+    e.g. ``"Base"`` at namespace scope, which is still a real scope match,
+    not "unresolved" — Codex review), :data:`RESOLUTION_UNIQUE_CANDIDATE` (no
+    scope in the walk matched, but exactly one same-bare-name declaration
+    exists anywhere in the TU — a last-resort guess, weaker than a scope
+    match even though a caller may still choose to trust it), or
+    :data:`RESOLUTION_UNRESOLVED` (no candidate matched at all; the raw
+    spelling is returned unchanged). Best effort, not a real semantic
+    lookup.
     """
     if not raw:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     # A leading "::" is C++'s global-scope qualifier ("::ns::detail::Impl"),
     # not part of the name itself — the index stores declarations without it
     # (Codex review: matching on the unstripped spelling built "::::..." and
@@ -712,19 +772,19 @@ def _resolve_type_name(
     leaf = lookup.rsplit("::", 1)[-1]
     candidates = name_index.get(leaf)
     if not candidates:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     suffix = "::" + lookup
     matching = [c for c in candidates if c == lookup or c.endswith(suffix)]
     if not matching:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     for k in range(len(scope), -1, -1):
         prefix = "::".join(scope[:k])
         target = f"{prefix}::{lookup}" if prefix else lookup
         if target in matching:
-            return target, True
+            return target, RESOLUTION_SCOPE
     if len(matching) == 1:
-        return matching[0], True
-    return raw, False
+        return matching[0], RESOLUTION_UNIQUE_CANDIDATE
+    return raw, RESOLUTION_UNRESOLVED
 
 
 def _emit_type_edges(
@@ -751,7 +811,7 @@ def _emit_type_edges(
     """
     seen: set[str] = set()
     for candidate in _resolve_nested_type_names(raw):
-        name, matched = _resolve_type_name(candidate, scope, name_index)
+        name, resolution = _resolve_type_name(candidate, scope, name_index)
         if not name or _is_excluded_type(name) or name in seen:
             continue
         seen.add(name)
@@ -760,9 +820,10 @@ def _emit_type_edges(
                 src,
                 name,
                 kind,
-                CONF_HIGH if matched else CONF_REDUCED,
+                CONF_HIGH if resolution == RESOLUTION_SCOPE else CONF_REDUCED,
                 role,
                 decl_file.get(name, ""),
+                resolution,
             )
         )
 
@@ -1078,6 +1139,69 @@ def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     return out
 
 
+def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
+    """Public wrapper: qualified type/enum/typedef name -> declaring file.
+
+    Reuses the same first-indexing pass :func:`parse_clang_ast_types` already
+    runs over the AST (:func:`_index_declared_entities`), exposed standalone
+    for a caller that only needs the declaring-file index (e.g. a header-only
+    graph builder resolving a type's public/private origin) and not the
+    type/reference edges themselves. Duplicates the one AST walk rather than
+    threading an output parameter through the hardened, heavily-reviewed
+    ``_index_declared_entities``/``_walk_types`` pair — an acceptable, cheap
+    cost for a header-only pass (ADR-041 header-only-graph addendum).
+
+    ``_index_declared_entities``'s ``decl_file`` output is a dict shared
+    between two unrelated uses: type declarations (records/enums/typedefs,
+    also indexed in ``name_index``) *and* var/enum-constant identities (used
+    only to resolve ``DECL_REFERENCES_DECL`` edge targets, never indexed in
+    ``name_index``). Returning it unfiltered would let a caller (Codex
+    review: caught in ``header_graph.py``, which treats every key as a type)
+    mistake a public constant or enum value for a record/enum/typedef
+    declaration. Filtered here to exactly the qualified names
+    ``name_index`` actually collected — the type-only subset.
+    """
+    name_index: dict[str, list[str]] = {}
+    decl_file: dict[str, str] = {}
+    ref_name_index: dict[str, list[str]] = {}
+    id_index: dict[str, tuple[str, str]] = {}
+    _index_declared_entities(
+        ast, [], "", name_index, decl_file, ref_name_index, id_index
+    )
+    type_qnames = {qname for qnames in name_index.values() for qname in qnames}
+    return {qname: decl_file[qname] for qname in type_qnames if qname in decl_file}
+
+
+def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:
+    """Public wrapper: every declared identity's own declaring file.
+
+    Unlike :func:`index_declared_type_files`, deliberately **unfiltered** —
+    every entity kind :func:`_index_declared_entities` indexes into
+    ``decl_file`` (record/enum/typedef, var/enum-constant, and field), not
+    just the type-only subset. Safe for a caller that only ever backfills a
+    *declaration node's own origin* (always seeded as a ``source_decl``,
+    never a type node) — the "public constant mistaken for a record/enum/
+    typedef" risk :func:`index_declared_type_files`'s filtering guards
+    against does not apply to that use.
+
+    For a header-only graph, this resolves the *source* side of a
+    ``DECL_REFERENCES_DECL`` edge whose source is a field's default member
+    initializer (``struct Widget { int x = detail::k; };`` — ``Widget::x``
+    is never seeded from ``snapshot.functions``/``snapshot.variables``, the
+    flat model has no per-field entity to iterate) — mirroring the existing
+    per-edge ``dst_file``/``caller_file``/``callee_file`` backfill for each
+    edge's *target* (Codex review).
+    """
+    name_index: dict[str, list[str]] = {}
+    decl_file: dict[str, str] = {}
+    ref_name_index: dict[str, list[str]] = {}
+    id_index: dict[str, tuple[str, str]] = {}
+    _index_declared_entities(
+        ast, [], "", name_index, decl_file, ref_name_index, id_index
+    )
+    return decl_file
+
+
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     """Extract type/reference edges from a ``clang -ast-dump=json`` tree (pure).
 
@@ -1189,6 +1313,11 @@ def augment_graph_with_types(
                 existing.attrs["defined_in_project"] = True
                 existing.attrs["def_file"] = e.dst_file
         before = len(graph.edges)
+        edge_attrs: dict[str, Any] = {}
+        if e.role:
+            edge_attrs["role"] = e.role
+        if e.resolution:
+            edge_attrs["resolution"] = e.resolution
         graph.add_edge(
             GraphEdge(
                 src=src_id,
@@ -1196,7 +1325,7 @@ def augment_graph_with_types(
                 kind=e.kind,
                 provenance="type_graph",
                 confidence=e.confidence,
-                attrs={"role": e.role} if e.role else {},
+                attrs=edge_attrs,
             )
         )
         added += len(graph.edges) - before

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public-roots misconfiguration diagnostic (ADR-038 Flow C, Caveat A).
+"""Public-roots misconfiguration diagnostic (ADR-038 Plugin injection, Caveat A).
 
 Regression guard for the plugin's silent-empty-pack failure mode: when
 ``public-roots`` does not match how the compiler resolves the public headers,
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         # from the compile's -I/-iquote include dirs, so the pack is non-empty and a
         # one-time inference note names how many roots it derived. This turns the
         # "forgot public-roots" trap into a populated surface instead of an empty
-        # pack (ADR-038 Flow C, Caveat A).
+        # pack (ADR-038 Plugin injection, Caveat A).
         auto = _compile(work, plugin, args.clangxx, None)
         auto_err, auto_pack = auto.split("\n@@PACK@@")
         if "no public-roots given; inferred" not in auto_err:

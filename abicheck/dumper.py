@@ -1278,6 +1278,7 @@ def dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
+    debug_info_path: Path | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1308,6 +1309,13 @@ def dump(
         debug_presence_only: For ELF inputs, skip expensive DWARF type expansion
             while still allowing header parsing. Used by shallow scan depths that
             collect L2/L3 from headers/build evidence.
+        debug_info_path: For ELF inputs, a resolved detached debug artifact
+            (ADR-021a: a build-id-tree or path-mirror ``.debug`` file distinct
+            from *so_path*) to read DWARF sections from instead of *so_path*
+            itself — lets a stripped binary still get DWARF-aware comparison
+            when its separate debug file was found via ``--debug-root``/
+            ``--debuginfod`` (P1.1). ``None`` (the default) parses DWARF from
+            *so_path*, unchanged. Ignored for non-ELF formats.
         public_headers: Explicit public-header files used only to classify
             declaration provenance (ADR-015). When empty, every declaration's
             origin stays UNKNOWN and behaviour is unchanged.
@@ -1341,6 +1349,7 @@ def dump(
         extra["debug_format"] = debug_format
         extra["symbols_only"] = symbols_only
         extra["debug_presence_only"] = debug_presence_only
+        extra["debug_info_path"] = debug_info_path
     snapshot = handler.builder(
         so_path, headers, extra_includes or [], version, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -1627,6 +1636,7 @@ def _dump_elf(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
+    debug_info_path: Path | None = None,
 ) -> AbiSnapshot:
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
@@ -1655,6 +1665,7 @@ def _dump_elf(
         else:
             dwarf_meta, dwarf_adv = _resolve_debug_metadata(
                 so_path, debug_format, _session_out=_dwarf_session_out,
+                dwarf_source=debug_info_path,
             )
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
         profile_hint = _lang_to_profile(lang)

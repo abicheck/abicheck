@@ -185,7 +185,11 @@ def _copy_runtime_tree(src_dir: Path, dst_dir: Path) -> None:
 def _classify_runtime_signal(baseline: dict[str, object], swapped: dict[str, object]) -> str:
     if swapped.get("timeout"):
         return "timeout"
-    if swapped.get("returncode") not in (0, None):
+    # Compare against the *baseline's* returncode, not a hardcoded 0: some
+    # apps deliberately return a nonzero computed value (see
+    # runtime_baseline_exit above), and for those a swap that changes
+    # nothing must not be misread as "the swap made it fail".
+    if swapped.get("returncode") != baseline.get("returncode"):
         return "nonzero"
     if baseline.get("stdout") != swapped.get("stdout"):
         return "stdout_changed"
@@ -278,12 +282,21 @@ def run_case(
         }
 
     baseline = _run_app(app, out)
-    if baseline.get("returncode") != 0:
+    # Most apps signal success with exit 0, but some deliberately return a
+    # computed value (e.g. case111's ets(42).local() returning 42) rather
+    # than a pass/fail flag. ground_truth.json's runtime_baseline_exit
+    # records that value per case; absent means the ordinary 0 convention.
+    expected_baseline_exit = entry.get("runtime_baseline_exit", 0)
+    if baseline.get("returncode") != expected_baseline_exit:
         return {
             "case_id": case_name,
             "status": "BASELINE_SIGNAL",
             "expected": expected,
-            "message": "old app exited non-zero with libv1",
+            "message": (
+                "old app exited "
+                f"{baseline.get('returncode')!r} with libv1, "
+                f"expected {expected_baseline_exit!r}"
+            ),
             "baseline": baseline,
             "seconds": round(time.perf_counter() - started, 3),
         }

@@ -65,8 +65,16 @@ _VERDICT_LABEL = {
 # ---------------------------------------------------------------------------
 
 
-def to_stat(result: DiffResult) -> str:
-    """One-line summary for CI gates."""
+def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None) -> str:
+    """One-line summary for CI gates.
+
+    *severity_config*, when given, appends a ``gate: PASS|FAIL`` suffix
+    reflecting the actual severity-aware exit code — without it, ``--stat``
+    output has historically bypassed severity handling entirely (it
+    short-circuits in ``service.render_output`` before format dispatch), so
+    the verdict label alone could misreport whether the run actually blocks
+    CI once severity configuration is in play.
+    """
     summary = build_summary(result)
     label = _VERDICT_LABEL[result.verdict]
     parts = []
@@ -82,7 +90,24 @@ def to_stat(result: DiffResult) -> str:
     redundant_note = ""
     if result.redundant_count > 0:
         redundant_note = f" [{result.redundant_count} redundant hidden]"
-    return f"{label}: {detail} ({summary.total_changes} total){redundant_note}"
+    gate_note = ""
+    if severity_config is not None:
+        from .severity import compute_exit_code
+
+        exit_code = compute_exit_code(
+            result.changes,
+            severity_config,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        gate_note = (
+            f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
+        )
+    return (
+        f"{label}: {detail} ({summary.total_changes} total)"
+        f"{redundant_note}{gate_note}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +408,18 @@ def _to_markdown_leaf(
     show_impact: bool = False,
     show_only: str | None = None,
     show_recommendation: bool = False,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Leaf-change mode: root type changes with affected interface lists."""
+    """Leaf-change mode: root type changes with affected interface lists.
+
+    *severity_config*, when given, adds the same "Severity Configuration"
+    summary section the full-mode report has (see
+    :func:`_build_severity_summary_md`) — without it, ``report_mode="leaf"``
+    returned before that section was ever built, so it silently had no
+    severity information even when a caller passed ``severity_config``
+    through :func:`to_markdown`.
+    """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
     v = result.verdict
@@ -412,6 +447,16 @@ def _to_markdown_leaf(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
         lines.append("")
+
+    if severity_config is not None:
+        lines += _build_severity_summary_md(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Group root type changes by severity
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
@@ -515,11 +560,19 @@ def _build_severity_summary_md(
     changes: list[Change],
     severity_config: SeverityConfig,
     *,
+    all_changes: list[Change] | None = None,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
 ) -> list[str]:
-    """Build a severity configuration summary table for markdown output."""
+    """Build a severity configuration summary table for markdown output.
+
+    *changes* are the (possibly ``--show-only``-filtered) changes used for
+    the displayed ``Count`` column. *all_changes*, when provided, is the
+    unfiltered set used for the ``Exit Impact`` column so that filtering the
+    display doesn't make this table claim "no exit impact" for a category
+    that still fails the actual (unfiltered) severity gate.
+    """
     from .severity import SeverityLevel, categorize_changes
 
     categorized = categorize_changes(
@@ -528,6 +581,16 @@ def _build_severity_summary_md(
         kind_sets=kind_sets,
         policy_file=policy_file,
     )
+    exit_categorized = (
+        categorize_changes(
+            all_changes,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+        )
+        if all_changes is not None
+        else categorized
+    )
     lines = [
         "## Severity Configuration",
         "",
@@ -535,25 +598,41 @@ def _build_severity_summary_md(
         "|----------|----------|-------|-------------|",
     ]
 
-    _CATEGORY_INFO: list[tuple[str, str, list[HasKind]]] = [
-        ("ABI/API Incompatibilities", "abi_breaking", categorized.abi_breaking),
+    _CATEGORY_INFO: list[tuple[str, str, list[HasKind], list[HasKind]]] = [
+        (
+            "ABI/API Incompatibilities",
+            "abi_breaking",
+            categorized.abi_breaking,
+            exit_categorized.abi_breaking,
+        ),
         (
             "Potential Incompatibilities",
             "potential_breaking",
             categorized.potential_breaking,
+            exit_categorized.potential_breaking,
         ),
-        ("Quality Issues", "quality_issues", categorized.quality_issues),
-        ("Additions", "addition", categorized.addition),
+        (
+            "Quality Issues",
+            "quality_issues",
+            categorized.quality_issues,
+            exit_categorized.quality_issues,
+        ),
+        (
+            "Additions",
+            "addition",
+            categorized.addition,
+            exit_categorized.addition,
+        ),
     ]
 
-    for label, attr, cat_changes in _CATEGORY_INFO:
+    for label, attr, cat_changes, exit_cat_changes in _CATEGORY_INFO:
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
         count = len(cat_changes)
         impact = (
             "causes non-zero exit"
-            if level_val == "error" and count > 0
+            if level_val == "error" and len(exit_cat_changes) > 0
             else "no exit impact"
         )
         lines.append(
@@ -702,7 +781,35 @@ _VERDICT_MERGE_EFFECT = {
 }
 
 
-def to_review_digest(result: DiffResult) -> str:
+def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) -> str:
+    """Merge-effect phrase reflecting the actual severity-aware gate.
+
+    Compatibility (``result.verdict``) and the CI gate are independent
+    decisions once a severity configuration is in play — e.g. an ``addition``
+    finding configured as ``error`` blocks the build even though the verdict
+    is ``COMPATIBLE``, and an ``abi_breaking`` finding configured below
+    ``error`` does not. The hard-coded ``_VERDICT_MERGE_EFFECT`` phrases would
+    misreport both cases, so this asks the severity gate directly instead of
+    inferring "safe to merge" from the verdict alone.
+    """
+    from .severity import compute_exit_code
+
+    eff_sets = result._effective_kind_sets()
+    exit_code = compute_exit_code(
+        result.changes,
+        severity_config,
+        policy=result.policy,
+        kind_sets=eff_sets,
+        policy_file=result.policy_file,
+    )
+    if exit_code == 0:
+        return "no error-level findings under the configured severity policy — safe to merge"
+    return "blocked by severity policy — review required before merge"
+
+
+def to_review_digest(
+    result: DiffResult, *, severity_config: SeverityConfig | None = None,
+) -> str:
     """Compact GitHub-facing review digest (Markdown).
 
     A single, reviewer-oriented summary suitable for a job summary
@@ -712,12 +819,21 @@ def to_review_digest(result: DiffResult) -> str:
     public-header scoping fell back (issue #235), and the top impacted symbols.
     Distinct from to_markdown (the full report) — this is the "presentation"
     layer over the same machine-readable decision contract.
+
+    *severity_config*, when given, drives the merge-effect phrase from the
+    actual severity-aware CI gate instead of the raw compatibility verdict —
+    compatibility and "blocks CI" are independent decisions once severity
+    configuration is in play (see :func:`_severity_merge_effect`).
     """
     summary = build_summary(result)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
-    effect = _VERDICT_MERGE_EFFECT.get(v, "")
+    effect = (
+        _severity_merge_effect(result, severity_config)
+        if severity_config is not None
+        else _VERDICT_MERGE_EFFECT.get(v, "")
+    )
 
     lines: list[str] = [
         f"## ABI review — `{result.library}` {result.old_version} → {result.new_version}",
@@ -813,7 +929,7 @@ def to_markdown(
         return demangle_text(text)
 
     if stat:
-        return _out(to_stat(result))
+        return _out(to_stat(result, severity_config=severity_config))
 
     if report_mode == "leaf":
         return _out(
@@ -822,6 +938,7 @@ def to_markdown(
                 show_impact=show_impact,
                 show_only=show_only,
                 show_recommendation=show_recommendation,
+                severity_config=severity_config,
             )
         )
 
@@ -881,6 +998,7 @@ def to_markdown(
         lines += _build_severity_summary_md(
             changes,
             severity_config,
+            all_changes=list(result.changes),
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
