@@ -131,6 +131,19 @@ echo "exit: $?"  # → 1
 
 **Why CRITICAL:** The consumer relies on the accidentally-exported `internal_helper` symbol. v2 hides it, so any binary that resolved the symbol at load time will now fail to link/symbolize and abort before it can handle the crash. This app shows the missing symbol and exits with failure to make the issue obvious.
 
+**Why this case stays `BASELINE_SIGNAL` in the runtime-smoke matrix (intentionally, not a bug):**
+this `app.c` doesn't fit `validation/scripts/run_example_runtime_smoke.py`'s
+baseline-then-swap model — it `dlopen`s `./libv1.so` *and* `./libv2.so` by name
+in a single run, independent of which library the harness's swap step
+substitutes. Its exit code 1 is overloaded: it fires both when `libv2.so`
+correctly hides `internal_helper` (the intended demonstration above) *and*
+when `libv1.so` unexpectedly fails to export it (a real build regression,
+unrelated to this case). A per-case `runtime_baseline_exit` override can't
+distinguish those two conditions, so whitelisting exit 1 as "expected" would
+silently mask the second one. Leave this case's baseline unwhitelisted; it
+is correctly non-blocking today (see `examples/README.md`'s "Known
+validation gaps").
+
 ---
 
 ## Source files

@@ -1,6 +1,6 @@
 # Case 111: enumerable_thread_specific Lambda-Init Ambiguity
 
-**Category:** Subtle source break / regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
+**Category:** Subtle source break / regression suite | **Verdict:** 🟠 API_BREAK (known detector gap — abicheck currently reports COMPATIBLE at every evidence tier; see below)
 
 ## What breaks
 
@@ -30,20 +30,41 @@ container-like types.
 
 ## How abicheck catches it (and where it doesn't)
 
+**It doesn't — at any evidence tier.** This is the catalog's canonical
+example of a *scenario* being proven true (by the `source_smoke` oracle
+below) while no current detector, at any of L0-L5, produces the verdict
+that scenario demands. That is different from case105 (concept tightening)
+or case122 (uninstantiated template change), where a *higher* evidence
+tier (L4) does catch the break — case111 has no tier that catches it yet.
+
 The diff exposes:
 
 - `FUNC_ADDED`: the new `std::function<int()>` constructor
 
-`FUNC_ADDED` on a constructor is COMPATIBLE — by itself it cannot link-
-or ABI-break anything. The follow-on **overload ambiguity** that breaks
-downstream source compilation cannot be detected from snapshots alone:
-it depends on the consumer's call-site context. This is a documented
-**known_gap**.
+`FUNC_ADDED` on a constructor is, in isolation, compatible — it cannot
+link- or ABI-break anything by itself. The follow-on **overload
+ambiguity** that breaks downstream source compilation depends on the
+consumer's call-site context, which no snapshot-level detector currently
+reasons about for newly-added constructor overloads (contrast
+`case169_overload_added`'s `OVERLOAD_ADDED`, which only groups
+same-named *free-function* overloads by Itanium mangling — it does not
+reason about constructor-overload call-site ambiguity).
 
-Future work (see roadmap: case105 concept tightening) is the natural
-home for "constructor overload set risk-classification" because both
-need the castxml header-AST capture path to reason about call-site
-resolvability.
+**Canonical verdict:** `API_BREAK` — proven by this case's own
+`source_smoke` (v1 compiles, v2 is ambiguous), matching the project's
+definition of API_BREAK: a public-header change that breaks
+recompilation while already-built binaries remain viable (`abi_break:
+false`, `api_break: true`). abicheck's actual output at every evidence
+tier is `COMPATIBLE` with only `func_added` observed — a real,
+tracked **known detector gap**, not an evidence-depth limitation. The
+gap is recorded so a `KINDS_MISMATCH`/verdict-mismatch reviewer can see
+*why* the mismatch is expected rather than silently accepting the tool's
+current output as ground truth.
+
+A constructor-overload-ambiguity detector is the natural home for
+closing this gap; it would need the same castxml header-AST capture
+path used for case105's concept-tightening detector to reason about
+call-site resolvability.
 
 ## Code diff
 

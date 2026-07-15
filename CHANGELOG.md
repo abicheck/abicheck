@@ -458,18 +458,55 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `known_gap_platforms` scoping added to 13 cases whose `known_gap` text
   named a specific OS/toolchain but had no structured scope (so an
   unrelated-platform gap could silently excuse a real regression);
-  `case111`/`case105`/`case122` ground truth now carries the
-  `known_gap`/`expected_by_evidence`/`scenario_verdict` fields their
-  READMEs already implied but the JSON never recorded; fixed a stale/wrong
-  `case98` narrative and broken repro-command case-number references in six
-  READMEs. `tests/validate_examples.py` now actually checks
-  `expected_kinds`/`expected_absent_kinds` against the real compare output
-  (previously only the top-level verdict string was asserted), surfaced as
-  `kinds_strict`/`KINDS_MISMATCH` and gated blocking via
-  `ABICHECK_STRICT_KINDS=1`; the first full-catalog run under this check
-  found 19 pre-existing cases where the verdict is right but the named
-  detector kind never fires, documented in `examples/README.md` for
-  follow-up.
+  `case105`/`case122` ground truth now carries `known_gap` text explaining
+  which evidence tier closes the gap; fixed a stale/wrong `case98` narrative
+  and broken repro-command case-number references in six READMEs.
+  `tests/validate_examples.py` now actually checks `expected_kinds`/
+  `expected_absent_kinds` against the real compare output (previously only
+  the top-level verdict string was asserted), surfaced as `kinds_strict`/
+  `KINDS_MISMATCH` and gated blocking via `ABICHECK_STRICT_KINDS=1`; the
+  first full-catalog run under this check found 19 pre-existing cases where
+  the verdict is right but the named detector kind never fires, documented
+  in `examples/README.md` for follow-up.
+- **A second external-audit pass on the same catalog found `case111`'s
+  ground truth was still self-contradictory: `expected: COMPATIBLE` while
+  the case's own `source_smoke` oracle proved v2 fails to compile — an
+  `API_BREAK` by the project's own definitions, with the `known_gap` text
+  admitting as much but keeping `expected` at `COMPATIBLE` "to match actual
+  tool output". Fixed by correcting `expected`/`category` to `API_BREAK`
+  (not by adding an alternate-truth field — `test_case_analysis_validation.py`
+  already forbids any key containing `verdict`/`ground_truth`/`oracle`
+  besides `expected` itself, so `expected` had to become the honest value).
+  Also fixed: the full-example-matrix artifact-contract check falsely failed
+  whenever a gcc/clang artifact's `summary` carried the `KINDS_MISMATCH`/
+  `CATEGORY_COLLAPSED` diagnostic counters alongside status counts (status
+  and diagnostic counts are now validated separately); the matrix now
+  surfaces each covered case's winning-lane `kinds_strict` and a
+  `kind_mismatch_cases` rollup instead of only inferring coverage from
+  verdict-level `PASS`; the gcc/clang JSON artifacts now preserve the full
+  `actual_kinds` list per case, not just a mismatch flag; the runtime-smoke
+  runner compared every case's v1 baseline exit code against a hardcoded 0,
+  so 6 cases whose app deliberately returns a computed value (e.g. case111's
+  `ets(42).local()` returning `42`) were misreported as `BASELINE_SIGNAL`
+  (broken baseline) — fixed via a per-case `runtime_baseline_exit` ground-truth
+  field, plus a genuine app.c bug in case42 (the checksum was never
+  recomputed after mutating `data[0]`, so its baseline failed regardless of
+  alignment) that the same audit surfaced. `case06_visibility` stays
+  unwhitelisted on purpose: its app's exit code 1 is overloaded between the
+  intended demonstration and an unrelated real regression, so a single
+  `runtime_baseline_exit` value can't safely paper over it (caught in review
+  — a first pass at this fix wrongly whitelisted it too). case30/95/109
+  (`BREAKING` from a
+  conservative generic-detector policy despite an underlying API_BREAK-level
+  compatibility fact — old binaries keep working) now document that
+  fact/policy split in `policy_note` and a README "Compatibility
+  classification" section instead of leaving `BREAKING` looking like the
+  binary-incompatibility fact itself; `examples/README.md`'s "Current
+  Validation Status" table was stale (still showing a pre-181-case-catalog
+  148/1/32 split) with nothing checking it against a real run — added
+  `scripts/check_examples_validation_status_sync.py` and wired it into
+  `examples-validation.yml` so future drift fails CI instead of aging
+  silently.
 
 ### Changed
 

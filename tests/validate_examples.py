@@ -230,6 +230,11 @@ class CaseResult(NamedTuple):
     # ABICHECK_STRICT_KINDS=1.
     kinds_strict: str = "n/a"
     kinds_strict_detail: str = ""
+    # The full set of ChangeKind names the run actually emitted (not just the
+    # ones checked by expected_kinds/expected_absent_kinds). Preserved so a
+    # KINDS_MISMATCH row can be diagnosed from the artifact alone, without
+    # re-running the case locally.
+    actual_kinds: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -1311,6 +1316,7 @@ def run_case(
         category_strict=_category_strict_signal(entry, result, source_layers),
         kinds_strict=kinds_strict,
         kinds_strict_detail=kinds_detail,
+        actual_kinds=tuple(sorted(set(got_kinds))),
     )
 
 
@@ -1439,6 +1445,7 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
     d["evidence_asymmetry"] = "symmetric"
     d["manual_review_ok"] = r.status in {"XFAIL", "SKIP"}
     d["category_strict"] = r.category_strict
+    d["actual_kinds"] = list(r.actual_kinds)
     return d
 
 
