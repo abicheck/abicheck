@@ -1311,7 +1311,9 @@ def run_case(
     if smoke_proof:
         combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
         result = result._replace(message=combined)
-    kinds_strict, kinds_detail = _kinds_strict_signal(entry, result, got_kinds)
+    kinds_strict, kinds_detail = _kinds_strict_signal(
+        entry, result, got_kinds, known_gap
+    )
     return result._replace(
         category_strict=_category_strict_signal(entry, result, source_layers),
         kinds_strict=kinds_strict,
@@ -1324,6 +1326,7 @@ def _kinds_strict_signal(
     entry: dict,
     result: CaseResult,
     got_kinds: tuple[str, ...],
+    known_gap: str | None = None,
 ) -> tuple[str, str]:
     """Check ``expected_kinds``/``expected_absent_kinds`` against the actual run.
 
@@ -1333,8 +1336,17 @@ def _kinds_strict_signal(
     detector that fired is not the one the case is meant to calibrate. Only
     meaningful for a case that actually ran compare (PASS/FAIL/XFAIL); SKIP/
     ERROR results carry no *got_kinds* to check against.
+
+    A *known_gap* (already scoped to this toolchain/platform/variant by
+    ``_gap_applies`` at the call site, same as ``_evaluate_verdict`` above)
+    means the missing evidence is a documented, honest capability boundary,
+    not a mismatch to report — mirrors ``_evaluate_verdict``'s own known_gap
+    short-circuit so a documented gap doesn't ALSO surface as a bare,
+    undifferentiated "expected_kinds missing" strict-kinds mismatch.
     """
     if result.status not in ("PASS", "FAIL", "XFAIL"):
+        return "n/a", ""
+    if known_gap:
         return "n/a", ""
     expected_kinds = entry.get("expected_kinds")
     expected_absent_kinds = entry.get("expected_absent_kinds")

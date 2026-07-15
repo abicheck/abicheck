@@ -224,6 +224,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_size_changed": "L1",
     "type_field_offset_changed": "L1",
     "type_field_added": "L1",
+    "type_field_added_compatible": "L1",
     "type_base_changed": "L1",
     # Fine-grained class-layout descriptor: a base subobject moving (e.g. an
     # empty-base optimization lost) is read from DWARF DW_TAG_inheritance

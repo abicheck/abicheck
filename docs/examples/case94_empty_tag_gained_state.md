@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `type_size_changed`, `type_field_added` |
+| **Detected `ChangeKind`s** | `type_size_changed`, `type_field_added_compatible` |
 | **Source files** | `examples/case94_empty_tag_gained_state/` |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
