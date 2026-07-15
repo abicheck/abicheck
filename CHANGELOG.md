@@ -900,6 +900,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   Now derived from the same unfiltered set as `exit_code`, matching how
   SARIF's own `_severity_gate_properties` was already doing it correctly.
 
+- **`--report-mode leaf`'s root-type-change entries were missing the schema
+  2.3 `operation`/`finding_id` fields.** `_to_json_leaf`'s `_leaf_entry`
+  builds its own dict for root type changes rather than routing through
+  `_change_to_dict`, so those entries in `leaf_changes[]` (and the
+  backward-compat `changes[]` union) lacked `operation`/`finding_id` even
+  though non-type leaf entries and full-mode entries both have them —
+  breaking `finding_id` correlation for leaf-mode reports specifically.
+  `_leaf_entry` now sets both fields the same way `_change_to_dict` does.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**

@@ -276,6 +276,26 @@ class TestEvidenceStatusInJson:
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
 
+    def test_leaf_mode_root_type_change_carries_schema_2_3_fields(self):
+        """Codex review on #557: _leaf_entry() builds its own dict rather
+        than routing through _change_to_dict(), so root type changes in
+        leaf_changes[]/changes[] were missing the schema 2.3 `operation`/
+        `finding_id` fields present on non-type leaf entries and full-mode
+        entries — breaking finding_id correlation for leaf-mode reports."""
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["operation"] == "modified"
+        assert isinstance(d["leaf_changes"][0]["finding_id"], str)
+        assert len(d["leaf_changes"][0]["finding_id"]) == 16
+        assert d["changes"][0]["operation"] == "modified"
+        assert d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+
+        # Same finding_id as full (non-leaf) mode for the identical change —
+        # the fingerprint must not depend on which report mode built it.
+        full_d = json.loads(to_json(_result(Verdict.BREAKING, changes=[c])))
+        assert full_d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+
     def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a root
         type kind (type_size_changed) to COMPATIBLE must not silently drop a

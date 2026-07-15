@@ -278,6 +278,15 @@ def _to_json_leaf(
             "severity": _effective_severity_label(
                 c, eff_sets, policy=result.policy, policy_file=result.policy_file,
             ),
+            # Schema 2.3 fields (Codex review on #557): _leaf_entry builds its
+            # own dict rather than routing through _change_to_dict, so root
+            # type changes in leaf_changes[]/changes[] were missing
+            # operation/finding_id even though non-type leaf entries (via
+            # _change_to_dict below) and full-mode entries both have them —
+            # breaking a consumer relying on finding_id correlation across
+            # --report-mode leaf and full-mode reports.
+            "operation": operation_for_kind(c.kind.value),
+            "finding_id": _finding_id(c),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
             "caused_count": c.caused_count,
