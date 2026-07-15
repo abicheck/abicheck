@@ -1474,7 +1474,8 @@ class TestDwarfSnapshotFallbacks:
         assert builder.types == []
 
     def test_process_field_no_name(self):
-        """_process_field with no name returns None."""
+        """_process_field with no name and no DW_AT_type (plain padding, not
+        an anonymous aggregate) returns an empty list."""
         from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 
         elf_meta = self._make_elf_meta()
@@ -1483,7 +1484,115 @@ class TestDwarfSnapshotFallbacks:
         die = MockDIE(tag="DW_TAG_member", attributes={})
         cu = MockCU()
         result = builder._process_field(die, cu)
-        assert result is None
+        assert result == []
+
+    def test_process_field_flattens_anonymous_union_member(self):
+        """An unnamed member whose type is a genuinely anonymous union is
+        flattened into its own named fields (mirrors the clang header
+        parser's IndirectFieldDecl flattening), with each inner field's
+        offset adjusted by the outer member's own offset within the parent
+        (Codex review: without this, DWARF's empty field list for an
+        anonymous-aggregate record left every flattened header field's
+        offset permanently unbackfilled)."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        int_type = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_name": MockAttr("int"), "DW_AT_byte_size": MockAttr(4)},
+        )
+        float_type = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_name": MockAttr("float"), "DW_AT_byte_size": MockAttr(4)},
+        )
+        inner_i = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("i"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+        )
+        inner_f = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_name": MockAttr("f"),
+                "DW_AT_type": MockAttr(11, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(0),
+            },
+        )
+        # A nested type declaration inside the union (not a data member)
+        # must be skipped rather than mistaken for a field.
+        nested_decl = MockDIE(tag="DW_TAG_structure_type", attributes={})
+        anon_union = MockDIE(
+            tag="DW_TAG_union_type", attributes={}, children=[nested_decl, inner_i, inner_f]
+        )
+        outer_member = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(20, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(4),
+            },
+        )
+        cu = MockCU(cu_offset=0, die_map={10: int_type, 11: float_type, 20: anon_union})
+
+        result = builder._process_field(outer_member, cu)
+        assert [f.name for f in result] == ["i", "f"]
+        # Both inner fields sit at the start of the anonymous union (offset
+        # 0 relative to it), so both land at the union's own offset (byte 4
+        # -> 32 bits) within the parent.
+        assert [f.offset_bits for f in result] == [32, 32]
+
+    def test_process_field_does_not_flatten_named_anonymous_member_type(self):
+        """A member whose type DIE carries its own DW_AT_name (a typedef'd
+        anonymous-record type) is not flattened: the clang header parser
+        doesn't flatten that case either, so flattening it here would
+        create DWARF fields the header side has no counterpart for."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        inner_i = MockDIE(
+            tag="DW_TAG_member", attributes={"DW_AT_name": MockAttr("i")},
+        )
+        named_union = MockDIE(
+            tag="DW_TAG_union_type",
+            attributes={"DW_AT_name": MockAttr("SomeUnion")},
+            children=[inner_i],
+        )
+        outer_member = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_type": MockAttr(20, form="DW_FORM_ref4")},
+        )
+        cu = MockCU(cu_offset=0, die_map={20: named_union})
+
+        assert builder._process_field(outer_member, cu) == []
+
+    def test_process_field_flattens_anonymous_member_at_default_offset(self):
+        """An outer anonymous member with no DW_AT_data_member_location of
+        its own (a leading anonymous aggregate, sitting at offset 0) still
+        flattens correctly, defaulting the outer offset to 0."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        int_type = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_name": MockAttr("int"), "DW_AT_byte_size": MockAttr(4)},
+        )
+        inner_x = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("x"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+        )
+        anon_struct = MockDIE(tag="DW_TAG_structure_type", attributes={}, children=[inner_x])
+        outer_member = MockDIE(
+            tag="DW_TAG_member", attributes={"DW_AT_type": MockAttr(20, form="DW_FORM_ref4")},
+        )
+        cu = MockCU(cu_offset=0, die_map={10: int_type, 20: anon_struct})
+
+        result = builder._process_field(outer_member, cu)
+        assert [f.name for f in result] == ["x"]
+        assert result[0].offset_bits == 0
 
     def test_process_enum_no_name(self):
         """_process_enum with no name is skipped."""

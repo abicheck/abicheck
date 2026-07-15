@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import collections
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -818,9 +819,7 @@ class _DwarfSnapshotBuilder:
         kids = children if children is not None else die.iter_children()
         for child in kids:
             if child.tag == "DW_TAG_member":
-                tf = self._process_field(child, CU)
-                if tf is not None:
-                    fields.append(tf)
+                fields.extend(self._process_field(child, CU))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
                     child, CU, bases, virtual_bases, base_offsets
@@ -911,11 +910,24 @@ class _DwarfSnapshotBuilder:
             log.debug("Failed to resolve source location for DIE")
         return None
 
-    def _process_field(self, die: Any, CU: Any) -> TypeField | None:
-        """Extract a struct/class/union field."""
+    def _process_field(self, die: Any, CU: Any) -> list[TypeField]:
+        """Extract a struct/class/union field, or the flattened fields of an
+        anonymous struct/union member.
+
+        Returns a list (0, 1, or more ``TypeField``\\ s): an unnamed
+        ``DW_TAG_member`` is either padding (0 results) or an anonymous
+        aggregate whose own members clang flattens into the enclosing
+        record's public surface (``RecordType.has_anonymous_aggregate_fields``
+        in ``dumper_clang.py``) — recursing into it here and adjusting each
+        inner field's offset by this member's own offset keeps DWARF's field
+        offsets in step with the header's flattened view, so a field
+        reordered *within* the aggregate remains a detectable layout change
+        under the clang+DWARF backend instead of always resolving to
+        ``offset_bits=None`` (Codex review).
+        """
         name = _attr_str(die, "DW_AT_name")
         if not name:
-            return None  # anonymous member (padding or anonymous aggregate)
+            return self._flatten_anonymous_member(die, CU)
 
         type_name = "?"
         if "DW_AT_type" in die.attributes:
@@ -955,16 +967,53 @@ class _DwarfSnapshotBuilder:
             elif type_die.tag == "DW_TAG_volatile_type":
                 is_volatile = True
 
-        return TypeField(
-            name=name,
-            type=type_name,
-            offset_bits=offset_bits,
-            is_bitfield=is_bitfield,
-            bitfield_bits=bitfield_bits,
-            is_const=is_const,
-            is_volatile=is_volatile,
-            access=access,
-        )
+        return [
+            TypeField(
+                name=name,
+                type=type_name,
+                offset_bits=offset_bits,
+                is_bitfield=is_bitfield,
+                bitfield_bits=bitfield_bits,
+                is_const=is_const,
+                is_volatile=is_volatile,
+                access=access,
+            )
+        ]
+
+    def _flatten_anonymous_member(self, die: Any, CU: Any) -> list[TypeField]:
+        """Flatten an anonymous struct/union member's own fields.
+
+        *die* is the unnamed ``DW_TAG_member`` slot for the aggregate itself
+        (not its type). Only a genuinely anonymous member type is flattened —
+        a named (typedef'd) anonymous-record type isn't flattened by the
+        clang header parser either, so treating it the same way here would
+        create fields DWARF has that the header side doesn't. Each inner
+        field's offset is relative to the anonymous aggregate, not the
+        enclosing record, so it is adjusted by this member's own offset
+        before returning.
+        """
+        type_die = _resolve_type_die(die, CU)
+        if type_die is None or type_die.tag not in (
+            "DW_TAG_structure_type",
+            "DW_TAG_union_type",
+        ):
+            return []
+        if _attr_str(type_die, "DW_AT_name"):
+            return []
+        outer_offset_bits = 0
+        if "DW_AT_data_member_location" in die.attributes:
+            outer_offset_bits = (
+                _decode_member_location(die.attributes["DW_AT_data_member_location"].value) * 8
+            )
+        flattened: list[TypeField] = []
+        for child in type_die.iter_children():
+            if child.tag != "DW_TAG_member":
+                continue  # e.g. a nested type declaration, not a data member
+            for inner in self._process_field(child, CU):
+                flattened.append(
+                    replace(inner, offset_bits=(inner.offset_bits or 0) + outer_offset_bits)
+                )
+        return flattened
 
     def _resolve_base_name(self, die: Any, CU: Any) -> str:
         """Resolve DW_TAG_inheritance → base class name."""
