@@ -662,18 +662,30 @@ def detect_default_template_arg_changed(
     header/castxml backend populates ``.name`` from the bare AST method name
     only, so a real templated method name (e.g. ``dimension``) never shows
     ``<...>`` there, and this check could otherwise never match (case87).
+
+    Scoped to the public surface (``PUBLIC`` + ``ELF_ONLY``, same set
+    ``diff_symbols.py`` uses): a snapshot can retain ``HIDDEN`` functions for
+    cross-reference (both the header/castxml backend and, since the case06
+    fix, the DWARF-only backend), and a purely-internal template
+    instantiation changing is not a real ABI event — including it here could
+    emit a DEFAULT_TEMPLATE_ARG_CHANGED finding for a helper no consumer can
+    ever see.
     """
+    from .diff_symbols import _PUBLIC_VIS
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
-    removed = [f for f in old.functions if f.mangled not in new_mangled]
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    new_mangled = {f.mangled for f in new_funcs}
+    removed = [f for f in old_funcs if f.mangled not in new_mangled]
     # Key by *qualified* callable stem (full namespace path with all
     # template args stripped). This prevents matching ``ns1::foo::compute``
     # against ``ns2::bar::compute`` and other namespace-confusion false
     # positives — only different instantiations of the SAME callable get
     # paired.
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
-    for fn in new.functions:
+    for fn in new_funcs:
         qname = _qualified_function_name(fn.name, fn.mangled)
         added_by_entity[_callable_stem(qname)].append(fn)
     findings: list[Change] = []
