@@ -904,6 +904,66 @@ class TestCompareReleaseErrorPaths:
         _sort_key, line = annotations[0]
         assert line.startswith("::error ")
 
+    def test_collect_release_extras_drops_suppressed_soname_finding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A `SONAME_BUMP_UNNECESSARY` finding the primary pass suppressed as a
+        coordinated lockstep bump (Codex review on #549) must not resurface via
+        the independent JUnit/annotate re-run `_collect_release_extras` drives
+        — that re-run builds a fresh `DiffResult` the primary pass's mutation
+        never touched, so it must re-apply the same suppression itself.
+        """
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release import _collect_release_extras
+        from abicheck.severity import resolve_severity_config
+
+        old_path = tmp_path / "libfoo.so"
+        new_path = tmp_path / "libfoo.so"
+        old_path.write_bytes(b"\x7fELF")
+        new_path.write_bytes(b"\x7fELF")
+
+        c = Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "libfoo.so", "unnecessary bump")
+
+        def _fake_run_compare_pair(*a, **kw):  # noqa: ANN002, ANN003
+            # A fresh DiffResult each call, mirroring the real re-run —
+            # asserts the suppression is applied per-call, not by mutating a
+            # shared fixture.
+            return (
+                DiffResult(
+                    old_version="1", new_version="2", library="libfoo.so",
+                    changes=[c], verdict=Verdict.COMPATIBLE,
+                ),
+                object(),
+                None,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair,
+        )
+        monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
+
+        # A permissive severity config would otherwise surface this quality
+        # finding as ::warning regardless of --annotate-additions.
+        cfg = resolve_severity_config("default")
+        _pairs, annotations = _collect_release_extras(
+            matched_keys=["libfoo.so"],
+            old_map={"libfoo.so": old_path},
+            new_map={"libfoo.so": new_path},
+            old_debug_dir=None, new_debug_dir=None,
+            resolve_debug_info=lambda *_a, **_kw: None,
+            old_h=[], new_h=[],
+            old_inc=[], new_inc=[],
+            old_version="1", new_version="2",
+            lang="c++",
+            suppress=None, policy="", policy_file_path=None,
+            annotate_additions=False,
+            collect_diff_results=False,
+            annotate=True,
+            severity_config=cfg,
+            worst_verdict="BREAKING",
+        )
+        assert annotations == []
+
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""
         from abicheck.cli_compare_release import _format_release_summary

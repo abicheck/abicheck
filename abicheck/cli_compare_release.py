@@ -320,6 +320,23 @@ def _suppress_lockstep_soname_findings(
     return suppressed
 
 
+def _drop_lockstep_soname_finding(result: DiffResult) -> None:
+    """Mirror ``_suppress_lockstep_soname_findings``'s per-result filter.
+
+    Called on the independent re-run :func:`_collect_release_extras` performs
+    for JUnit/annotations, only when the caller has already confirmed
+    ``worst_verdict == "BREAKING"`` (the same release-level condition
+    ``_suppress_lockstep_soname_findings`` gates on) — so this stays a no-op
+    unless the primary pass would also have suppressed the finding.
+    """
+    from .checker_policy import ChangeKind
+
+    if any(c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes):
+        result.changes = [
+            c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
+        ]
+
+
 def _compare_release_libraries(
     matched_keys: list[str],
     old_map: dict[str, Path],
@@ -449,6 +466,7 @@ def _compare_release_libraries(
             annotate=annotate,
             scope_to_public_surface=scope_to_public_surface,
             severity_config=severity_config,
+            worst_verdict=worst_verdict,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -531,8 +549,18 @@ def _collect_release_extras(
     annotate: bool,
     scope_to_public_surface: bool = True,
     severity_config: SeverityConfig | None = None,
+    worst_verdict: str = "NO_CHANGE",
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
-    """Collect optional re-run artifacts for JUnit and annotations."""
+    """Collect optional re-run artifacts for JUnit and annotations.
+
+    *worst_verdict* mirrors the condition ``_suppress_lockstep_soname_findings``
+    uses on the primary per-library pass. This function re-runs comparison
+    independently (see its docstring), so a coordinated-release SONAME bump
+    that pass judged intentional and dropped must be dropped here too — else
+    JUnit/annotations disagree with the primary report and can surface (or
+    even gate on, under a severity config) a finding the release-level report
+    no longer shows at all.
+    """
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
     annotations: list[tuple[int, str]] = []
     for key in matched_keys:
@@ -564,6 +592,8 @@ def _collect_release_extras(
                 err=True,
             )
             continue
+        if worst_verdict == "BREAKING":
+            _drop_lockstep_soname_finding(result)
         if collect_diff_results:
             diff_pairs.append((result, old_snap))
         if annotate:
