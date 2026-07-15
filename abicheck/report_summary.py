@@ -94,7 +94,7 @@ def compatibility_metrics(
 ) -> CompatibilityMetrics:
     """Compute canonical ABICC-style binary compatibility counters/percentages.
 
-    Without *kind_sets*/*policy_file*, ``breaking_count`` counts raw
+    Without *policy*/*kind_sets*/*policy_file*, ``breaking_count`` counts raw
     ``ChangeKind`` membership in the canonical ``_BREAKING_KINDS`` set —
     which disagrees with a policy-demoted finding's *effective* verdict. A
     removal a policy file demotes to ``COMPATIBLE`` still carries its raw
@@ -102,11 +102,15 @@ def compatibility_metrics(
     breaking (e.g. "0.0% binary compatibility") on the same page whose
     verdict banner reads ``COMPATIBLE`` (computed from the *effective*
     verdict) — a direct, visible contradiction. Passing *kind_sets* (from
-    ``DiffResult._effective_kind_sets()``) and *policy_file* makes this
+    ``DiffResult._effective_kind_sets()``) and/or *policy_file* makes this
     metric agree with the verdict by counting each change's effective
-    verdict instead of its raw kind.
+    verdict instead of its raw kind. A named *policy* alone (e.g.
+    ``plugin_abi``, with no ``kind_sets``/``policy_file``) must also take
+    this path — ``effective_verdict_for_change`` resolves its own kind sets
+    from *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
+    policy-downgraded kind would still be counted as breaking here.
     """
-    if kind_sets is not None or policy_file is not None:
+    if policy is not None or kind_sets is not None or policy_file is not None:
         from .checker_policy import Verdict as _Verdict
         from .severity import effective_verdict_for_change
 
