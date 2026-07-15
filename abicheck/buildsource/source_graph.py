@@ -1171,6 +1171,42 @@ def fold_source_edges(
     return added
 
 
+def mark_source_edges_extractor_coverage(
+    graph: SourceGraphSummary, surface: SourceAbiSurface | None
+) -> None:
+    """Translate a confirmed-complete ``source_edges`` rollup into
+    ``call_graph``/``type_graph`` extractor-pass coverage (Codex review).
+
+    ``fold_source_edges`` (called from :func:`build_source_graph`) never
+    touches ``graph.extractor_passes`` itself -- when a caller runs the
+    ``call_graph``/``type_graph`` replay right after building the graph
+    (``inline._build_inline_graph``, ``cli_buildsource_helpers``), that
+    replay's own ``extractor_pass_fully_covered()``/``narrowed_pass_confirmed()``
+    tracking is strictly more precise (it knows full-vs-narrowed scope; a bare
+    ``source_edges`` rollup does not) and must be the sole source of truth —
+    do not call this alongside it. But a caller that folds ``source_edges``
+    and never runs a replay at all (``inputs_pack.ingest_inputs_pack``
+    ingesting a build-emitted Flow-2 pack; ``cli_buildsource_merge``'s
+    export-relink graph rebuild) leaves both flags permanently unset even
+    though the AST was genuinely, completely walked for these edge kinds --
+    ``source_graph_findings._common_dependency_edge_kinds``/
+    ``_dependency_kinds_covered`` then read that as "no pass ever ran" and
+    suppress a real ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` finding as a
+    coverage artifact instead of reporting it. A Flow-2 pack always reflects
+    whatever the build compiled (never a `changed_paths`-narrowed subset the
+    way an inline scan can be), so a confirmed-complete rollup here is safe
+    to treat as full-scope coverage.
+    """
+    if surface is None:
+        return
+    families = surface.coverage.get("fact_family_states")
+    if not isinstance(families, dict):
+        return
+    if families.get("source_edges") in ("complete", "empty-confirmed"):
+        graph.extractor_passes["call_graph"] = True
+        graph.extractor_passes["type_graph"] = True
+
+
 # ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────
 
 

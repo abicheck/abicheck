@@ -144,49 +144,84 @@ def init_inputs_pack(
     names the *same* target across its per-TU invocations). A caller that
     omits ``library``/``version`` (leaves it ``""``) is never treated as a
     conflict either way, preserving callers that do not always know it yet.
+
+    The very first creation is claimed atomically (write-temp + ``os.link``):
+    an ``is_file()``-then-write TOCTOU let two racing first-TU invocations for
+    two *different* targets sharing one out= directory both observe no
+    manifest yet, both skip the library/version agreement check above, and
+    have the second writer silently win with neither call ever raising
+    (Codex review; same fix shape as the Clang plugin's ``ensureManifest``).
+    ``os.link`` is all-or-nothing — it fails with ``FileExistsError`` without
+    ever creating a partial file at the destination if it already exists — so
+    the loser always re-reads a fully-written manifest, never a torn one.
     """
     root = Path(root)
     mpath = root / INPUTS_MANIFEST_NAME
-    if mpath.is_file():
+    # Only `root` itself -- not source_facts/ -- so a rejected wrong-kind
+    # pack below is still left with no new files of ours (CodeRabbit review,
+    # P2); tempfile.mkstemp(dir=root) below needs root to already exist.
+    root.mkdir(parents=True, exist_ok=True)
+
+    if not mpath.is_file():
+        # Best-effort: skip the claim attempt when a manifest is already
+        # visible (the common case after the pack's first TU) -- the
+        # exclusivity guarantee is os.link() below, not this check.
+        new_manifest = InputsManifest(
+            library=library, version=version, created_by=created_by, created_at=_now()
+        )
+        manifest_json = (
+            json.dumps(new_manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+        )
+        fd, tmp = tempfile.mkstemp(dir=str(root), prefix=".manifest.", suffix=".tmp")
         try:
-            data = json.loads(mpath.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            data = None
-        if isinstance(data, dict):
-            if data.get("kind") != INPUTS_KIND:
-                # A syntactically valid manifest naming a different (or no)
-                # kind names a real, different pack (e.g. a BuildSourcePack
-                # directory a build was mistakenly pointed at) -- not a
-                # "malformed" one, so it is not swallowed the way the
-                # fallback below swallows a truncated/corrupted manifest.
-                # Raised BEFORE any write to root (mkdir included below) so
-                # an unrelated/wrong-kind pack is left completely untouched,
-                # not just its manifest (CodeRabbit review, P2).
-                raise ValueError(
-                    f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
-                    "Flow-2 abicheck_inputs pack."
-                )
-            existing_library = str(data.get("library") or "")
-            if library and existing_library and library != existing_library:
-                raise ValueError(
-                    f"{mpath} already names library {existing_library!r}; this "
-                    f"call named {library!r}. Two different targets must not "
-                    "share one abicheck_inputs pack directory -- use a separate "
-                    "out= directory per target/configuration/architecture."
-                )
-            existing_version = str(data.get("version") or "")
-            if version and existing_version and version != existing_version:
-                raise ValueError(
-                    f"{mpath} already names version {existing_version!r}; this "
-                    f"call named {version!r}. Two different versions must not "
-                    "share one abicheck_inputs pack directory -- use a fresh "
-                    "out= directory per build."
-                )
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(manifest_json)
+            os.link(tmp, mpath)
+        except FileExistsError:
+            pass  # lost the race -- fall through and validate the winner's manifest
+        else:
             (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
-            return InputsManifest.from_dict(data)
-        # Defensive: a manifest left partial/malformed by a non-atomic writer
-        # on an old pack (our writes are atomic) re-initializes rather than
-        # raising and losing this TU's facts.
+            return new_manifest
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+    try:
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        data = None
+    if isinstance(data, dict):
+        if data.get("kind") != INPUTS_KIND:
+            # A syntactically valid manifest naming a different (or no)
+            # kind names a real, different pack (e.g. a BuildSourcePack
+            # directory a build was mistakenly pointed at) -- not a
+            # "malformed" one, so it is not swallowed the way the
+            # fallback below swallows a truncated/corrupted manifest.
+            raise ValueError(
+                f"{mpath} does not declare kind: {INPUTS_KIND} — not a "
+                "Flow-2 abicheck_inputs pack."
+            )
+        existing_library = str(data.get("library") or "")
+        if library and existing_library and library != existing_library:
+            raise ValueError(
+                f"{mpath} already names library {existing_library!r}; this "
+                f"call named {library!r}. Two different targets must not "
+                "share one abicheck_inputs pack directory -- use a separate "
+                "out= directory per target/configuration/architecture."
+            )
+        existing_version = str(data.get("version") or "")
+        if version and existing_version and version != existing_version:
+            raise ValueError(
+                f"{mpath} already names version {existing_version!r}; this "
+                f"call named {version!r}. Two different versions must not "
+                "share one abicheck_inputs pack directory -- use a fresh "
+                "out= directory per build."
+            )
+        (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
+        return InputsManifest.from_dict(data)
+    # Defensive: a manifest left partial/malformed by a non-atomic writer
+    # on an old pack (our writes are atomic) re-initializes rather than
+    # raising and losing this TU's facts.
     (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
     manifest = InputsManifest(
         library=library, version=version, created_by=created_by, created_at=_now()

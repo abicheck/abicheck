@@ -186,7 +186,8 @@ class InputsManifest:
         return cls(
             kind=_opt_str(d.get("kind"), INPUTS_KIND),
             abicheck_inputs_version=int(
-                d.get("abicheck_inputs_version", ABICHECK_INPUTS_VERSION) or ABICHECK_INPUTS_VERSION
+                d.get("abicheck_inputs_version", ABICHECK_INPUTS_VERSION)
+                or ABICHECK_INPUTS_VERSION
             ),
             library=_opt_str(d.get("library")),
             version=_opt_str(d.get("version")),
@@ -339,7 +340,9 @@ def _iter_source_fact_files(
         # both ways). The pack-wide "zero readable TU records" diagnostic
         # still catches a genuinely fact-less pack.
         if explicit and len(files) == before and not is_existing_dir:
-            sink.append(f"source_facts entry resolved to no readable fact files: {entry}")
+            sink.append(
+                f"source_facts entry resolved to no readable fact files: {entry}"
+            )
     # Re-validate each discovered file on its *resolved* path: a file inside an
     # in-pack directory can itself be a symlink pointing outside the pack, which
     # the per-entry guard above does not catch (Codex review). Drop any escapee
@@ -360,13 +363,16 @@ def _iter_source_fact_files(
     return sorted(set(safe))
 
 
-def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[SourceAbiTu]:
+def _parse_tu_records(
+    text: str, source: str, diagnostics: list[str]
+) -> list[SourceAbiTu]:
     """Parse one ``source_facts`` file into :class:`SourceAbiTu` records.
 
     Accepts JSON-Lines (one TU object per line, the preferred form), a single
     JSON array of TU objects, or a single TU object. Malformed lines are skipped
     with a diagnostic rather than aborting the whole ingest (forward-compat).
     """
+
     def _convert(obj: Any, where: str) -> SourceAbiTu | None:
         """Convert one record, skipping (not aborting) a schema-invalid TU.
 
@@ -416,7 +422,9 @@ def _parse_tu_records(text: str, source: str, diagnostics: list[str]) -> list[So
         try:
             obj = json.loads(line)
         except ValueError as exc:
-            diagnostics.append(f"{source}:{lineno}: skipped malformed JSON line ({exc})")
+            diagnostics.append(
+                f"{source}:{lineno}: skipped malformed JSON line ({exc})"
+            )
             continue
         if isinstance(obj, dict):
             tu = _convert(obj, f"{source}:{lineno}")
@@ -554,7 +562,9 @@ def read_source_facts(
     return fresh_tus + surviving_prior
 
 
-def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list[str]) -> BuildEvidence | None:
+def _load_build_evidence(
+    root: Path, manifest: InputsManifest, diagnostics: list[str]
+) -> BuildEvidence | None:
     """Parse the pack's compile DB into L3 build evidence, if present."""
     rel = manifest.compile_db or DEFAULT_COMPILE_DB_REL
     compile_db = _safe_pack_path(root, rel, diagnostics)  # refuse absolute/escaping
@@ -619,9 +629,20 @@ def ingest_inputs_pack(
 
     graph = None
     if surface is not None or has_build:
-        from .source_graph import build_source_graph
+        from .source_graph import (
+            build_source_graph,
+            mark_source_edges_extractor_coverage,
+        )
 
-        graph = build_source_graph(build_evidence or BuildEvidence(), source_abi=surface)
+        graph = build_source_graph(
+            build_evidence or BuildEvidence(), source_abi=surface
+        )
+        # No call/type-graph replay ever runs for an ingested Flow-2 pack (pure
+        # parsing, ADR-035 D5) -- translate a confirmed-complete source_edges
+        # rollup into the same extractor-pass coverage a replay would have
+        # recorded, or the decl-dependency crosscheck reads "never ran" and
+        # suppresses a real finding as a coverage artifact (Codex review).
+        mark_source_edges_extractor_coverage(graph, surface)
         graph.finalize()
 
     extractor = ExtractorRecord(
@@ -631,7 +652,11 @@ def ingest_inputs_pack(
         status="ok" if (tus or has_build) and not diagnostics else "partial",
         detail=(
             f"Flow-2 ingest: {len(tus)} source-fact TUs"
-            + (f", L3 from {manifest.compile_db or DEFAULT_COMPILE_DB_REL}" if has_build else "")
+            + (
+                f", L3 from {manifest.compile_db or DEFAULT_COMPILE_DB_REL}"
+                if has_build
+                else ""
+            )
             + (f", {len(diagnostics)} skipped/diagnostic" if diagnostics else "")
             + (f" (produced by {manifest.created_by})" if manifest.created_by else "")
         ),

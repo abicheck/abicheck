@@ -48,6 +48,7 @@ from abicheck.buildsource.source_graph import (
     diff_source_graph,
     diff_source_graph_findings,
     fold_source_edges,
+    mark_source_edges_extractor_coverage,
 )
 from abicheck.checker_policy import RISK_KINDS, ChangeKind
 from abicheck.cli import main
@@ -55,19 +56,27 @@ from abicheck.cli import main
 
 def _sample_build() -> BuildEvidence:
     b = BuildEvidence(generated_files=["gen/config.h"])
-    b.targets.append(Target(
-        id="target://libfoo", name="foo", kind=TargetKind.SHARED_LIBRARY,
-        source_files=["src/foo.cpp", "gen/config.h"],
-        public_headers=["include/foo.h"],
-        dependencies=["target://libbar", "sys://pthread"],
-        confidence=Confidence.HIGH,
-    ))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            name="foo",
+            kind=TargetKind.SHARED_LIBRARY,
+            source_files=["src/foo.cpp", "gen/config.h"],
+            public_headers=["include/foo.h"],
+            dependencies=["target://libbar", "sys://pthread"],
+            confidence=Confidence.HIGH,
+        )
+    )
     b.targets.append(Target(id="target://libbar", name="bar"))
-    b.compile_units.append(CompileUnit(
-        id="cu://foo", source="src/foo.cpp", output="foo.o",
-        target_id="target://libfoo",
-        abi_relevant_flags=["-fvisibility=hidden", "-std=c++20"],
-    ))
+    b.compile_units.append(
+        CompileUnit(
+            id="cu://foo",
+            source="src/foo.cpp",
+            output="foo.o",
+            target_id="target://libfoo",
+            abi_relevant_flags=["-fvisibility=hidden", "-std=c++20"],
+        )
+    )
     return b
 
 
@@ -141,12 +150,20 @@ def test_empty_build_yields_empty_graph() -> None:
 
 def test_target_confidence_maps_onto_node_and_edges() -> None:
     b = BuildEvidence()
-    b.targets.append(Target(
-        id="target://red", source_files=["a.cpp"], confidence=Confidence.REDUCED,
-    ))
-    b.targets.append(Target(
-        id="target://unk", source_files=["b.cpp"], confidence=Confidence.UNKNOWN,
-    ))
+    b.targets.append(
+        Target(
+            id="target://red",
+            source_files=["a.cpp"],
+            confidence=Confidence.REDUCED,
+        )
+    )
+    b.targets.append(
+        Target(
+            id="target://unk",
+            source_files=["b.cpp"],
+            confidence=Confidence.UNKNOWN,
+        )
+    )
     g = build_source_graph(b)
     by_id = {n.id: n for n in g.nodes}
     assert by_id["target://red"].confidence == "reduced"
@@ -173,23 +190,37 @@ def test_compile_unit_without_source_emits_no_source_edge() -> None:
 # ── Phases 3-4: enrich from the L4 source surface ───────────────────────────
 
 
-def _entity(qn: str, kind: str, *, mangled: str = "", path: str = "include/foo.h",
-            origin: str = "PUBLIC_HEADER",
-            conf: LayerConfidence = LayerConfidence.HIGH) -> SourceEntity:
+def _entity(
+    qn: str,
+    kind: str,
+    *,
+    mangled: str = "",
+    path: str = "include/foo.h",
+    origin: str = "PUBLIC_HEADER",
+    conf: LayerConfidence = LayerConfidence.HIGH,
+) -> SourceEntity:
     return SourceEntity(
-        id=qn, kind=kind, qualified_name=qn, mangled_name=mangled,
+        id=qn,
+        kind=kind,
+        qualified_name=qn,
+        mangled_name=mangled,
         source_location=SourceLocation(path=path, line=1, origin=origin),
-        visibility="public_header", confidence=conf,
+        visibility="public_header",
+        confidence=conf,
     )
 
 
 def _sample_surface() -> SourceAbiSurface:
     s = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
-    s.reachable_declarations.append(_entity("foo::bar", "function", mangled="_ZN3foo3barEv"))
+    s.reachable_declarations.append(
+        _entity("foo::bar", "function", mangled="_ZN3foo3barEv")
+    )
     s.reachable_types.append(_entity("foo::Widget", "record"))
     s.reachable_types.append(_entity("foo::Color", "enum"))
     s.reachable_types.append(_entity("foo::Alias", "typedef"))
-    s.reachable_macros.append(_entity("FOO_VERSION", "macro", conf=LayerConfidence.REDUCED))
+    s.reachable_macros.append(
+        _entity("FOO_VERSION", "macro", conf=LayerConfidence.REDUCED)
+    )
     # Keyed by entity identity (the mangled name for C++), exactly as
     # link_source_abi/relink_surface_exports persist it — not by qualified_name.
     s.mappings["source_decl_to_binary_symbol"] = {"_ZN3foo3barEv": "_ZN3foo3barEv"}
@@ -199,9 +230,13 @@ def _sample_surface() -> SourceAbiSurface:
 
 def test_source_abi_builds_public_reachability_slice() -> None:
     b = BuildEvidence()
-    b.targets.append(Target(
-        id="target://libfoo", public_headers=["include/foo.h"], confidence=Confidence.HIGH,
-    ))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["include/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
     g = build_source_graph(b, source_abi=_sample_surface())
     edge_kinds = {e.kind for e in g.edges}
     # target -> header -> decl -> exported symbol, plus target -> symbol.
@@ -273,10 +308,15 @@ def test_source_abi_degenerate_inputs_handled() -> None:
     # location (so no SOURCE_DECLARES edge), and a blank symbol mapping value
     # (skipped) must all be tolerated without error.
     s = SourceAbiSurface(library="l", target_id="")
-    s.reachable_declarations.append(SourceEntity(
-        id="d", kind="function", qualified_name="loose", source_location=None,
-        confidence=LayerConfidence.UNKNOWN,
-    ))
+    s.reachable_declarations.append(
+        SourceEntity(
+            id="d",
+            kind="function",
+            qualified_name="loose",
+            source_location=None,
+            confidence=LayerConfidence.UNKNOWN,
+        )
+    )
     s.mappings["source_decl_to_binary_symbol"] = {"loose": "", "other": "_Zsym"}
     g = build_source_graph(BuildEvidence(), source_abi=s)
     assert not any(e.kind == "SOURCE_DECLARES" for e in g.edges)
@@ -341,12 +381,16 @@ def test_fold_source_edges_dedupes_against_call_graph_pass() -> None:
     g.add_node(GraphNode(id="decl://b", kind="source_decl", provenance="call_graph"))
     g.add_edge(
         GraphEdge(
-            src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL",
-            provenance="call_graph", confidence="high",
+            src="decl://a",
+            dst="decl://b",
+            kind="DECL_CALLS_DECL",
+            provenance="call_graph",
+            confidence="high",
         )
     )
     added = fold_source_edges(
-        g, [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "reduced"}]
+        g,
+        [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "reduced"}],
     )
     assert added == 0
     call_edges = [e for e in g.edges if e.kind == "DECL_CALLS_DECL"]
@@ -379,6 +423,50 @@ def test_build_source_graph_folds_surface_source_edges() -> None:
     assert any(e.kind == "DECL_CALLS_DECL" for e in g.edges)
 
 
+def test_mark_source_edges_extractor_coverage_when_complete() -> None:
+    """A caller that folds source_edges but never runs a call/type-graph
+    replay (e.g. Flow-2 pack ingestion) must still translate a
+    confirmed-complete rollup into extractor_passes coverage, or the
+    decl-dependency crosscheck reads the graph as "no pass ever ran"
+    (Codex review)."""
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert g.extractor_passes["call_graph"] is True
+    assert g.extractor_passes["type_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_empty_confirmed_also_counts() -> None:
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "empty-confirmed"}
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert g.extractor_passes["call_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_skips_when_incomplete() -> None:
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "partial"}
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+
+
+def test_mark_source_edges_extractor_coverage_handles_none_surface_and_malformed_states() -> (
+    None
+):
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, None)  # must not raise
+    assert g.extractor_passes == {}
+
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = "not-a-dict"
+    mark_source_edges_extractor_coverage(g, s)  # must not raise
+    assert g.extractor_passes == {}
+
+
 def test_build_graph_without_surface_is_phase2_only() -> None:
     g = build_source_graph(_sample_build())
     assert not any(n.kind == "source_decl" for n in g.nodes)
@@ -388,45 +476,66 @@ def test_build_graph_without_surface_is_phase2_only() -> None:
 def test_source_abi_round_trip_and_determinism() -> None:
     s = _sample_surface()
     g = build_source_graph(BuildEvidence(), source_abi=s)
-    assert SourceGraphSummary.from_dict(g.to_dict()).compute_graph_id() == g.compute_graph_id()
+    assert (
+        SourceGraphSummary.from_dict(g.to_dict()).compute_graph_id()
+        == g.compute_graph_id()
+    )
     assert build_source_graph(BuildEvidence(), source_abi=s).graph_id == g.graph_id
 
 
 # ── Phase 5: graph-derived risk findings (D6) ───────────────────────────────
 
 
-def _surface_with(decls, mapping, *, generated_header=None,
-                  target="target://libfoo") -> SourceAbiSurface:
+def _surface_with(
+    decls, mapping, *, generated_header=None, target="target://libfoo"
+) -> SourceAbiSurface:
     s = SourceAbiSurface(library="libfoo.so", target_id=target)
     for qn, path in decls:
-        s.reachable_declarations.append(SourceEntity(
-            id=qn, kind="function", qualified_name=qn,
-            source_location=SourceLocation(path=path, line=1, origin="PUBLIC_HEADER"),
-            visibility="public_header", confidence=LayerConfidence.HIGH,
-        ))
+        s.reachable_declarations.append(
+            SourceEntity(
+                id=qn,
+                kind="function",
+                qualified_name=qn,
+                source_location=SourceLocation(
+                    path=path, line=1, origin="PUBLIC_HEADER"
+                ),
+                visibility="public_header",
+                confidence=LayerConfidence.HIGH,
+            )
+        )
     s.mappings["source_decl_to_binary_symbol"] = dict(mapping)
     return s
 
 
 def _build_with_public_header(headers=("inc/foo.h",), generated=()) -> BuildEvidence:
     b = BuildEvidence(generated_files=list(generated))
-    b.targets.append(Target(
-        id="target://libfoo", public_headers=list(headers), confidence=Confidence.HIGH,
-    ))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=list(headers),
+            confidence=Confidence.HIGH,
+        )
+    )
     return b
 
 
 def test_all_three_graph_kinds_are_risk() -> None:
-    for k in (ChangeKind.PUBLIC_REACHABILITY_CHANGED,
-              ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
-              ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API):
+    for k in (
+        ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+        ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+        ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+    ):
         assert k in RISK_KINDS
 
 
 def test_findings_mapping_changed_for_persisting_decl() -> None:
     b = _build_with_public_header()
-    old = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"}))
-    new = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"}))
+    old = build_source_graph(
+        b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"})
+    )
+    new = build_source_graph(
+        b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"})
+    )
     findings = diff_source_graph_findings(old, new)
     assert len(findings) == 1
     c = findings[0]
@@ -444,10 +553,18 @@ def test_findings_reachability_ignores_brand_new_or_removed_decls() -> None:
     # is already reported (at the correct COMPATIBLE severity) by the
     # ordinary addition/removal findings elsewhere in the pipeline.
     b = _build_with_public_header()
-    old = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::gone", "inc/foo.h")], {"foo::a": "_Za"}))
-    new = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::new", "inc/foo.h")], {"foo::a": "_Za"}))
+    old = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::gone", "inc/foo.h")], {"foo::a": "_Za"}
+        ),
+    )
+    new = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::new", "inc/foo.h")], {"foo::a": "_Za"}
+        ),
+    )
     kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
     assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") not in kinds_syms
     assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") not in kinds_syms
@@ -459,20 +576,36 @@ def test_findings_reachability_fires_for_persisting_decl_crossing_boundary() -> 
     # existing declaration crossing the public/private boundary, the
     # genuinely risk-worthy signal this finding exists for.
     b = _build_with_public_header()
-    old = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
-    new = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
+    old = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}
+        ),
+    )
+    new = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}
+        ),
+    )
     kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
     assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
 
 
 def test_findings_reachability_fires_when_persisting_decl_leaves_closure() -> None:
     b = _build_with_public_header()
-    old = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}))
-    new = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}))
+    old = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::b", "inc/foo.h")], {"foo::a": "_Za"}
+        ),
+    )
+    new = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "inc/foo.h"), ("foo::b", "")], {"foo::a": "_Za"}
+        ),
+    )
     kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
     assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::b") in kinds_syms
 
@@ -480,7 +613,9 @@ def test_findings_reachability_fires_when_persisting_decl_leaves_closure() -> No
 def test_findings_empty_baseline_does_not_spam_reachability() -> None:
     # An empty old graph must not flag every new declaration as "entered".
     b = _build_with_public_header()
-    new = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
+    new = build_source_graph(
+        b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"})
+    )
     findings = diff_source_graph_findings(SourceGraphSummary(), new)
     assert not any(c.kind == ChangeKind.PUBLIC_REACHABILITY_CHANGED for c in findings)
 
@@ -488,10 +623,15 @@ def test_findings_empty_baseline_does_not_spam_reachability() -> None:
 def test_findings_generated_header_reaches_public_api() -> None:
     # A public header that is also a generated file → reaches public API.
     old = build_source_graph(_build_with_public_header(headers=("inc/foo.h",)))
-    new = build_source_graph(_build_with_public_header(
-        headers=("inc/foo.h", "gen/config.h"), generated=("gen/config.h",)))
+    new = build_source_graph(
+        _build_with_public_header(
+            headers=("inc/foo.h", "gen/config.h"), generated=("gen/config.h",)
+        )
+    )
     findings = diff_source_graph_findings(old, new)
-    gen = [c for c in findings if c.kind == ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API]
+    gen = [
+        c for c in findings if c.kind == ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API
+    ]
     assert len(gen) == 1
     assert "gen/config.h" in gen[0].symbol
 
@@ -505,14 +645,18 @@ def test_owner_unchanged_across_different_absolute_checkout_roots() -> None:
     # false positive this produced across most of examples/, since the
     # catalog's own v1/v2 fixture convention is exactly this shape).
     old = build_source_graph(
-        _build_with_public_header(headers=("/old_root/inc/foo.h", "/old_root/inc/bar.h")),
+        _build_with_public_header(
+            headers=("/old_root/inc/foo.h", "/old_root/inc/bar.h")
+        ),
         source_abi=_surface_with(
             [("foo::a", "/old_root/inc/foo.h"), ("foo::c", "/old_root/inc/bar.h")],
             {"foo::a": "_Za", "foo::c": "_Zc"},
         ),
     )
     new = build_source_graph(
-        _build_with_public_header(headers=("/new_root/inc/foo.h", "/new_root/inc/bar.h")),
+        _build_with_public_header(
+            headers=("/new_root/inc/foo.h", "/new_root/inc/bar.h")
+        ),
         source_abi=_surface_with(
             [("foo::a", "/new_root/inc/foo.h"), ("foo::c", "/new_root/inc/bar.h")],
             {"foo::a": "_Za", "foo::c": "_Zc"},
@@ -531,16 +675,24 @@ def test_owner_changed_when_relative_path_actually_moves() -> None:
     b = _build_with_public_header(
         headers=("/root/inc/foo.h", "/root/inc/bar.h", "/root/inc/baz.h"),
     )
-    old = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/bar.h")],
-        {"foo::a": "_Za", "foo::c": "_Zc"},
-    ))
-    new = build_source_graph(b, source_abi=_surface_with(
-        [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/baz.h")],
-        {"foo::a": "_Za", "foo::c": "_Zc"},
-    ))
+    old = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/bar.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
+    new = build_source_graph(
+        b,
+        source_abi=_surface_with(
+            [("foo::a", "/root/inc/foo.h"), ("foo::c", "/root/inc/baz.h")],
+            {"foo::a": "_Za", "foo::c": "_Zc"},
+        ),
+    )
     findings = diff_source_graph_findings(old, new)
-    owner = [c for c in findings if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED]
+    owner = [
+        c for c in findings if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED
+    ]
     assert len(owner) == 1
     assert owner[0].symbol == "_Zc"
 
@@ -567,7 +719,8 @@ def test_owner_changed_when_sole_declaring_file_is_renamed_both_sides() -> None:
     )
     findings = diff_source_graph_findings(old, new)
     owner_syms = {
-        c.symbol for c in findings
+        c.symbol
+        for c in findings
         if c.kind == ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED
     }
     assert owner_syms == {"_Za", "_Zc"}
@@ -610,7 +763,8 @@ def test_owner_unchanged_when_only_one_persisting_symbol_declares() -> None:
     old = build_source_graph(
         _build_with_public_header(headers=("/root/old/lib.h",)),
         source_abi=_surface_with(
-            [("foo::a", "/root/old/lib.h")], {"foo::a": "_Za"},
+            [("foo::a", "/root/old/lib.h")],
+            {"foo::a": "_Za"},
         ),
     )
     new = build_source_graph(
@@ -628,14 +782,20 @@ def test_owner_unchanged_when_only_one_persisting_symbol_declares() -> None:
 
 def test_findings_identical_graphs_yield_nothing() -> None:
     b = _build_with_public_header()
-    g = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
+    g = build_source_graph(
+        b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"})
+    )
     assert diff_source_graph_findings(g, g) == []
 
 
 def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
     b = _build_with_public_header()
-    old = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"}))
-    new = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"}))
+    old = build_source_graph(
+        b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"})
+    )
+    new = build_source_graph(
+        b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"})
+    )
     op, np = tmp_path / "o.json", tmp_path / "n.json"
     op.write_text(json.dumps(old.to_dict()))
     np.write_text(json.dumps(new.to_dict()))
@@ -645,7 +805,9 @@ def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
     assert "Graph-derived risk findings" in res.output
     assert "source_to_binary_mapping_changed" in res.output
 
-    res_json = CliRunner().invoke(main, ["graph", "compare", str(op), str(np), "--format", "json"])
+    res_json = CliRunner().invoke(
+        main, ["graph", "compare", str(op), str(np), "--format", "json"]
+    )
     payload = json.loads(res_json.output)
     assert payload["findings"][0]["kind"] == "source_to_binary_mapping_changed"
 
@@ -656,19 +818,34 @@ def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
 def test_build_option_reaches_public_symbol_edges_and_finding() -> None:
     def _build(flags):
         b = BuildEvidence()
-        b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
-                                confidence=Confidence.HIGH))
-        b.compile_units.append(CompileUnit(
-            id="cu://foo", source="src/foo.cpp", target_id="target://libfoo",
-            abi_relevant_flags=flags))
+        b.targets.append(
+            Target(
+                id="target://libfoo",
+                public_headers=["inc/foo.h"],
+                confidence=Confidence.HIGH,
+            )
+        )
+        b.compile_units.append(
+            CompileUnit(
+                id="cu://foo",
+                source="src/foo.cpp",
+                target_id="target://libfoo",
+                abi_relevant_flags=flags,
+            )
+        )
         return b
 
     surf = _surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"})
     old = build_source_graph(_build(["-std=c++20"]), source_abi=surf)
-    new = build_source_graph(_build(["-std=c++20", "-fvisibility=hidden"]), source_abi=surf)
+    new = build_source_graph(
+        _build(["-std=c++20", "-fvisibility=hidden"]), source_abi=surf
+    )
     assert any(e.kind == "BUILD_OPTION_AFFECTS_SYMBOL" for e in new.edges)
-    bo = [c for c in diff_source_graph_findings(old, new)
-          if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL]
+    bo = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL
+    ]
     assert len(bo) == 1
     assert "-fvisibility=hidden" in bo[0].symbol
     assert bo[0].source_location == f"[{EVIDENCE_TIER_L5}]"
@@ -680,19 +857,37 @@ def test_build_option_reaches_public_symbol_ignores_reused_flag_on_new_target() 
     def _build(targets):
         b = BuildEvidence()
         for tid, hdr in targets:
-            b.targets.append(Target(id=tid, public_headers=[hdr], confidence=Confidence.HIGH))
-            b.compile_units.append(CompileUnit(
-                id=f"cu://{tid}", source=f"src/{tid}.cpp", target_id=tid,
-                abi_relevant_flags=["-std=c++20"]))
+            b.targets.append(
+                Target(id=tid, public_headers=[hdr], confidence=Confidence.HIGH)
+            )
+            b.compile_units.append(
+                CompileUnit(
+                    id=f"cu://{tid}",
+                    source=f"src/{tid}.cpp",
+                    target_id=tid,
+                    abi_relevant_flags=["-std=c++20"],
+                )
+            )
         return b
 
-    old_surf = _surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}, target="target://foo")
-    new_surf = _surface_with([("bar::b", "inc/bar.h")], {"bar::b": "_Zb"}, target="target://bar")
-    old = build_source_graph(_build([("target://foo", "inc/foo.h")]), source_abi=old_surf)
+    old_surf = _surface_with(
+        [("foo::a", "inc/foo.h")], {"foo::a": "_Za"}, target="target://foo"
+    )
+    new_surf = _surface_with(
+        [("bar::b", "inc/bar.h")], {"bar::b": "_Zb"}, target="target://bar"
+    )
+    old = build_source_graph(
+        _build([("target://foo", "inc/foo.h")]), source_abi=old_surf
+    )
     new = build_source_graph(
-        _build([("target://foo", "inc/foo.h"), ("target://bar", "inc/bar.h")]), source_abi=new_surf)
-    bo = [c for c in diff_source_graph_findings(old, new)
-          if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL]
+        _build([("target://foo", "inc/foo.h"), ("target://bar", "inc/bar.h")]),
+        source_abi=new_surf,
+    )
+    bo = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL
+    ]
     # -std=c++20 already existed in the old graph → no flag-drift finding.
     assert bo == []
 
@@ -701,10 +896,16 @@ def test_include_graph_public_header_drift_finding() -> None:
     from abicheck.buildsource.include_graph import augment_graph_with_includes
 
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
-                            confidence=Confidence.HIGH))
-    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
-                                       target_id="target://libfoo"))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["inc/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
+    b.compile_units.append(
+        CompileUnit(id="cu://foo", source="src/foo.cpp", target_id="target://libfoo")
+    )
     old = build_source_graph(b)
     # The old side must have *confirmed* include-graph coverage (a pass that
     # ran and genuinely found nothing) for its absence to be trusted evidence
@@ -715,8 +916,11 @@ def test_include_graph_public_header_drift_finding() -> None:
     new = build_source_graph(b)
     augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
     new.finalize()
-    inc = [c for c in diff_source_graph_findings(old, new)
-           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
     assert len(inc) == 1
     assert inc[0].symbol == "inc/foo.h"
 
@@ -729,16 +933,25 @@ def test_include_graph_public_header_drift_suppressed_without_old_coverage() -> 
     from abicheck.buildsource.include_graph import augment_graph_with_includes
 
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
-                            confidence=Confidence.HIGH))
-    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
-                                       target_id="target://libfoo"))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["inc/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
+    b.compile_units.append(
+        CompileUnit(id="cu://foo", source="src/foo.cpp", target_id="target://libfoo")
+    )
     old = build_source_graph(b)  # no include data, no confirmed pass at all
     new = build_source_graph(b)
     augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
     new.finalize()
-    inc = [c for c in diff_source_graph_findings(old, new)
-           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
     assert inc == []
 
 
@@ -751,13 +964,19 @@ def test_include_graph_public_header_drift_suppressed_for_narrowed_new_side() ->
     from abicheck.buildsource.include_graph import augment_graph_with_includes
 
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo",
-                            public_headers=["inc/foo.h", "inc/bar.h"],
-                            confidence=Confidence.HIGH))
-    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
-                                       target_id="target://libfoo"))
-    b.compile_units.append(CompileUnit(id="cu://bar", source="src/bar.cpp",
-                                       target_id="target://libfoo"))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["inc/foo.h", "inc/bar.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
+    b.compile_units.append(
+        CompileUnit(id="cu://foo", source="src/foo.cpp", target_id="target://libfoo")
+    )
+    b.compile_units.append(
+        CompileUnit(id="cu://bar", source="src/bar.cpp", target_id="target://libfoo")
+    )
     old = build_source_graph(b)
     augment_graph_with_includes(
         old, {"cu://foo": ["inc/foo.h"], "cu://bar": ["inc/bar.h"]}
@@ -771,22 +990,33 @@ def test_include_graph_public_header_drift_suppressed_for_narrowed_new_side() ->
     new.narrowed_passes["include_graph"] = True
     new.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
     new.finalize()
-    inc = [c for c in diff_source_graph_findings(old, new)
-           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
     assert inc == []
 
 
-def test_include_graph_public_header_drift_trusted_for_matching_narrowed_scope() -> None:
+def test_include_graph_public_header_drift_trusted_for_matching_narrowed_scope() -> (
+    None
+):
     # Two sides narrowed to the *identical* scope examined the exact same
     # compile units, so a header appearing in one but not the other within
     # that shared scope is real drift, not a coverage gap.
     from abicheck.buildsource.include_graph import augment_graph_with_includes
 
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
-                            confidence=Confidence.HIGH))
-    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
-                                       target_id="target://libfoo"))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["inc/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
+    b.compile_units.append(
+        CompileUnit(id="cu://foo", source="src/foo.cpp", target_id="target://libfoo")
+    )
     old = build_source_graph(b)
     old.narrowed_passes["include_graph"] = True
     old.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
@@ -796,8 +1026,11 @@ def test_include_graph_public_header_drift_trusted_for_matching_narrowed_scope()
     new.narrowed_passes["include_graph"] = True
     new.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
     new.finalize()
-    inc = [c for c in diff_source_graph_findings(old, new)
-           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
     assert len(inc) == 1
     assert inc[0].symbol == "inc/foo.h"
 
@@ -806,8 +1039,13 @@ def test_localize_symbol_walks_the_graph() -> None:
     from abicheck.buildsource.source_graph import localize_symbol
 
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
-                            confidence=Confidence.HIGH))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["include/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
     g = build_source_graph(b, source_abi=_sample_surface())
     result = localize_symbol(g, "_ZN3foo3barEv")
     assert result["found"] is True
@@ -826,23 +1064,45 @@ def test_localize_symbol_absent_returns_empty() -> None:
 
 def test_explain_finding_cli(tmp_path) -> None:
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
-                            confidence=Confidence.HIGH))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["include/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
     g = build_source_graph(b, source_abi=_sample_surface())
     graph_json = tmp_path / "g.json"
     graph_json.write_text(json.dumps(g.to_dict()))
 
-    res = CliRunner().invoke(main, [
-        "graph", "explain", "--sources", str(graph_json), "--symbol", "_ZN3foo3barEv",
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "graph",
+            "explain",
+            "--sources",
+            str(graph_json),
+            "--symbol",
+            "_ZN3foo3barEv",
+        ],
+    )
     assert res.exit_code == 0, res.output
     assert "target://libfoo" in res.output
     assert "foo::bar" in res.output
 
-    res_json = CliRunner().invoke(main, [
-        "graph", "explain", "--sources", str(graph_json),
-        "--symbol", "_ZN3foo3barEv", "--format", "json",
-    ])
+    res_json = CliRunner().invoke(
+        main,
+        [
+            "graph",
+            "explain",
+            "--sources",
+            str(graph_json),
+            "--symbol",
+            "_ZN3foo3barEv",
+            "--format",
+            "json",
+        ],
+    )
     payload = json.loads(res_json.output)
     assert payload["found"] is True
     assert "foo::bar" in payload["source_declarations"]
@@ -850,18 +1110,34 @@ def test_explain_finding_cli(tmp_path) -> None:
 
 def test_explain_finding_resolves_symbol_from_report(tmp_path) -> None:
     b = BuildEvidence()
-    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
-                            confidence=Confidence.HIGH))
+    b.targets.append(
+        Target(
+            id="target://libfoo",
+            public_headers=["include/foo.h"],
+            confidence=Confidence.HIGH,
+        )
+    )
     g = build_source_graph(b, source_abi=_sample_surface())
     graph_json = tmp_path / "g.json"
     graph_json.write_text(json.dumps(g.to_dict()))
     report = tmp_path / "report.json"
     report.write_text(json.dumps({"changes": [{"symbol": "_ZN3foo3barEv"}]}))
 
-    res = CliRunner().invoke(main, [
-        "graph", "explain", "--sources", str(graph_json),
-        "--report", str(report), "--finding-id", "0", "--format", "json",
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "graph",
+            "explain",
+            "--sources",
+            str(graph_json),
+            "--report",
+            str(report),
+            "--finding-id",
+            "0",
+            "--format",
+            "json",
+        ],
+    )
     assert res.exit_code == 0, res.output
     assert json.loads(res.output)["symbol"] == "_ZN3foo3barEv"
 
@@ -879,9 +1155,16 @@ def test_resolve_symbol_from_report_variants(tmp_path) -> None:
     from abicheck.cli_graph import _resolve_symbol_from_report
 
     report = tmp_path / "r.json"
-    report.write_text(json.dumps({"changes": [
-        {"symbol": "_ZN3foo3barEv"}, {"symbol": "_ZN3foo3bazEv"},
-    ]}))
+    report.write_text(
+        json.dumps(
+            {
+                "changes": [
+                    {"symbol": "_ZN3foo3barEv"},
+                    {"symbol": "_ZN3foo3bazEv"},
+                ]
+            }
+        )
+    )
     # index lookup
     assert _resolve_symbol_from_report(report, "1") == "_ZN3foo3bazEv"
     # substring match
@@ -931,7 +1214,8 @@ def test_explain_finding_text_symbol_absent(tmp_path) -> None:
     graph_json = tmp_path / "g.json"
     graph_json.write_text(json.dumps(g.to_dict()))
     res = CliRunner().invoke(
-        main, ["graph", "explain", "--sources", str(graph_json), "--symbol", "_Zmissing"]
+        main,
+        ["graph", "explain", "--sources", str(graph_json), "--symbol", "_Zmissing"],
     )
     assert res.exit_code == 0, res.output
     assert "symbol not present in the source graph" in res.output
@@ -1010,7 +1294,9 @@ def test_narrowed_scope_round_trips() -> None:
     g.narrowed_passes["type_graph"] = True
     g.narrowed_scope["type_graph"] = frozenset({"src/a.cpp", "src/b.cpp"})
     restored = SourceGraphSummary.from_dict(g.to_dict())
-    assert restored.narrowed_scope == {"type_graph": frozenset({"src/a.cpp", "src/b.cpp"})}
+    assert restored.narrowed_scope == {
+        "type_graph": frozenset({"src/a.cpp", "src/b.cpp"})
+    }
 
 
 def test_degraded_passes_round_trips() -> None:
@@ -1075,8 +1361,11 @@ def test_indexes_cover_forward_looking_symbol_and_decl_kinds() -> None:
     g = SourceGraphSummary()
     g.add_node(GraphNode(id="decl://foo", kind="source_decl"))
     g.add_node(GraphNode(id="sym://_Z3foov", kind="binary_symbol"))
-    g.add_edge(GraphEdge(src="decl://foo", dst="sym://_Z3foov",
-                         kind="SOURCE_DECL_MAPS_TO_SYMBOL"))
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo", dst="sym://_Z3foov", kind="SOURCE_DECL_MAPS_TO_SYMBOL"
+        )
+    )
     idx = g.indexes()
     assert "sym://_Z3foov" in idx["by_binary_symbol"]
     assert "decl://foo" in idx["by_source_decl"]
@@ -1085,7 +1374,7 @@ def test_indexes_cover_forward_looking_symbol_and_decl_kinds() -> None:
 def test_to_dict_fills_graph_id_when_unset() -> None:
     g = SourceGraphSummary()
     g.add_node(GraphNode(id="x", kind="target"))
-    assert g.graph_id == ""               # not finalized
+    assert g.graph_id == ""  # not finalized
     assert g.to_dict()["graph_id"].startswith("sha256:")
 
 
@@ -1139,15 +1428,30 @@ def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
     cdb = tmp_path / "compile_commands.json"
     src = tmp_path / "foo.cpp"
     src.write_text("int foo(){return 1;}\n")
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": str(src),
-        "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o foo.o",
-    }]))
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o foo.o",
+                }
+            ]
+        )
+    )
     out = tmp_path / "out.evidence"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb),
-        "--source-graph", "summary", "-o", str(out),
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "collect",
+            "--compile-db",
+            str(cdb),
+            "--source-graph",
+            "summary",
+            "-o",
+            str(out),
+        ],
+    )
     assert res.exit_code == 0, res.output
     assert (out / "graph" / "source_graph_summary.json").is_file()
     pack = BuildSourcePack.load(out)
@@ -1188,7 +1492,10 @@ def test_compare_graph_identical(tmp_path) -> None:
 
 
 def test_compare_graph_missing_graph_errors(tmp_path) -> None:
-    res = CliRunner().invoke(main, ["graph", "compare", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")])
+    res = CliRunner().invoke(
+        main,
+        ["graph", "compare", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")],
+    )
     assert res.exit_code != 0
 
 
@@ -1196,24 +1503,38 @@ def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
     """Run `collect --source-graph summary` and return the pack dir."""
     src = tmp_path / f"{name}.cpp"
     src.write_text("int x(){return 1;}\n")
-    entries = [{
-        "directory": str(tmp_path), "file": str(src),
-        "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o {name}.o",
-    }]
+    entries = [
+        {
+            "directory": str(tmp_path),
+            "file": str(src),
+            "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o {name}.o",
+        }
+    ]
     if two_units:
         src2 = tmp_path / f"{name}2.cpp"
         src2.write_text("int y(){return 2;}\n")
-        entries.append({
-            "directory": str(tmp_path), "file": str(src2),
-            "command": f"c++ -std=c++20 -c {src2} -o {name}2.o",
-        })
+        entries.append(
+            {
+                "directory": str(tmp_path),
+                "file": str(src2),
+                "command": f"c++ -std=c++20 -c {src2} -o {name}2.o",
+            }
+        )
     cdb = tmp_path / f"{name}_cc.json"
     cdb.write_text(json.dumps(entries))
     out = tmp_path / f"{name}.evidence"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb),
-        "--source-graph", "summary", "-o", str(out),
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "collect",
+            "--compile-db",
+            str(cdb),
+            "--source-graph",
+            "summary",
+            "-o",
+            str(out),
+        ],
+    )
     assert res.exit_code == 0, res.output
     return str(out)
 
@@ -1233,14 +1554,33 @@ def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
     cdb = tmp_path / "cc.json"
     src = tmp_path / "z.cpp"
     src.write_text("int z(){return 0;}\n")
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": str(src),
-        "command": f"c++ -c {src} -o z.o",
-    }]))
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -c {src} -o z.o",
+                }
+            ]
+        )
+    )
     out = tmp_path / "nograph.evidence"
-    assert CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb), "-o", str(out),
-    ]).exit_code == 0
+    assert (
+        CliRunner()
+        .invoke(
+            main,
+            [
+                "collect",
+                "--compile-db",
+                str(cdb),
+                "-o",
+                str(out),
+            ],
+        )
+        .exit_code
+        == 0
+    )
     res = CliRunner().invoke(main, ["graph", "compare", str(out), str(out)])
     assert res.exit_code != 0
     assert "no L5 source graph" in res.output
@@ -1276,9 +1616,16 @@ def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     # --source-graph summary with no build adapter inputs yields an empty graph;
     # the L5 coverage row must read PARTIAL (ran, produced nothing), not PRESENT.
     out = tmp_path / "empty.evidence"
-    res = CliRunner().invoke(main, [
-        "collect", "--source-graph", "summary", "-o", str(out),
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "collect",
+            "--source-graph",
+            "summary",
+            "-o",
+            str(out),
+        ],
+    )
     assert res.exit_code == 0, res.output
     pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None

@@ -240,6 +240,45 @@ def test_ingest_links_source_facts_into_l4_surface(tmp_path: Path) -> None:
     assert "foo" in names
 
 
+def test_ingest_marks_call_type_graph_coverage_from_complete_source_edges(
+    tmp_path: Path,
+) -> None:
+    """No call/type-graph replay ever runs for an ingested Flow-2 pack (pure
+    parsing) -- a confirmed-complete source_edges rollup must still translate
+    into extractor_passes coverage, or a decl-dependency crosscheck would read
+    the graph as "no pass ever ran" and suppress a real
+    PUBLIC_API_INTERNAL_DEPENDENCY_ADDED finding as a coverage artifact
+    (Codex review)."""
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    pack = _write_inputs_pack(tmp_path, [tu])
+    ingested = ingest_inputs_pack(pack)
+    graph = ingested.pack.source_graph
+    assert graph is not None
+    assert graph.extractor_passes.get("call_graph") is True
+    assert graph.extractor_passes.get("type_graph") is True
+
+
+def test_ingest_does_not_mark_coverage_when_source_edges_incomplete(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
+
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.fact_set = default_fact_set(producer="p", producer_version="1")
+    tu.coverage = dict.fromkeys(FACT_FAMILIES, "complete")
+    tu.coverage["source_edges"] = "partial"
+    pack = _write_inputs_pack(tmp_path, [tu])
+    ingested = ingest_inputs_pack(pack)
+    graph = ingested.pack.source_graph
+    assert graph is not None
+    assert not graph.extractor_passes.get("call_graph")
+    assert not graph.extractor_passes.get("type_graph")
+
+
 def test_ingest_with_explicit_exports_maps_decl_to_symbol(tmp_path: Path) -> None:
     pack = _write_inputs_pack(
         tmp_path,
@@ -405,12 +444,15 @@ def test_read_source_facts_excludes_manifest_from_root_directory_scan(
     a merged "original" -- destroying the pack's own manifest (Codex
     review, P2)."""
     pack = _write_inputs_pack(
-        tmp_path, [_tu("foo", mangled="_Z3foov")], manifest_extra={"source_facts": ["."]}
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"source_facts": ["."]},
     )
     # Root-level fact file, matching a producer that used "." as its
     # source_facts directory instead of the default source_facts/ subdir.
     (pack / "root.jsonl").write_text(
-        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict()) + "\n",
+        json.dumps(_tu("bar", mangled="_Z3barv", source="src/bar.cpp").to_dict())
+        + "\n",
         encoding="utf-8",
     )
 
@@ -461,7 +503,7 @@ def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
     # diagnostic like every other malformed-input case (CodeRabbit review,
     # P2).
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
-    (pack / "source_facts" / "bad.jsonl").write_bytes(b"\xff\xfe{\"tu_id\":1}")
+    (pack / "source_facts" / "bad.jsonl").write_bytes(b'\xff\xfe{"tu_id":1}')
     diags: list[str] = []
     tus = read_source_facts(pack, diagnostics=diags)
     assert len(tus) == 1  # the good record still ingests
@@ -481,7 +523,9 @@ def test_read_source_facts_degrades_on_corrupt_gzip_instead_of_crashing(
     truncated = pack / "source_facts" / "truncated.jsonl.gz"
     truncated.write_bytes(good.read_bytes()[:5])  # valid header, no body
     corrupt = pack / "source_facts" / "corrupt.jsonl.gz"
-    corrupt.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data")
+    corrupt.write_bytes(
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"not deflate data"
+    )
 
     diags: list[str] = []
     tus = read_source_facts(pack, diagnostics=diags)
