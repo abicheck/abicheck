@@ -21,9 +21,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 100 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 16 | `API_BREAK_KINDS` | 🟠 |
+| API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (addition) | 8 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 5 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
@@ -76,11 +76,11 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 148 PASS / 1 XFAIL / 32 SKIP; clang: 148 PASS / 2 XFAIL / 31 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 81 DEMONSTRATED / 60 NO_RUNTIME_SIGNAL / 8 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. 8 BASELINE_SIGNAL cases (case06/42/78/109/110/111/112/141) exit non-zero on the *unmodified* v1 baseline, before any v2 substitution — tracked as a runner-visibility gap, not yet CI-blocking (see "Known validation gaps" below) |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 142 PASS / 37 SKIP / 1 FAIL / 1 XFAIL | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 3 FAIL / 37 SKIP / 3 XFAIL | Informational; reduced-evidence signal-loss backlog (below) |
-| Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 139 PASS / 5 XFAIL / 37 SKIP; clang: 139 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 85 DEMONSTRATED / 64 NO_RUNTIME_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR, no BASELINE_SIGNAL. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 1 FAIL / 5 XFAIL / 37 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 134 PASS / 5 FAIL / 5 XFAIL / 37 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
 the `Examples Validation` workflow and update this table whenever the catalog size or a lane's
@@ -90,29 +90,32 @@ the way it previously did (stale at a 169-case catalog for several releases).
 ### Known validation gaps
 
 - **`expected_kinds`/`expected_absent_kinds` are checked but not yet blocking.**
-  `tests/validate_examples.py` now parses the real compare output's change kinds and checks them
+  `tests/validate_examples.py` parses the real compare output's change kinds and checks them
   against `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` and
   summarized as a `KINDS_MISMATCH` count — previously only the final verdict string was asserted,
-  so a case could PASS with the right severity for the wrong detector reason. The first full-catalog
-  run under this check found 19 such cases (verdict correct, named detector kind not actually
-  produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
-  `case59_func_became_inline`, `case65_symbol_version_removed`, `case66_language_linkage_changed`,
+  so a case could PASS with the right severity for the wrong detector reason. The latest full-catalog
+  run under this check found 18 (gcc) / 19 (clang) such cases (verdict correct, named detector kind
+  not actually produced): `case06_visibility`, `case23_pure_virtual_added`, `case39_var_const`,
+  `case65_symbol_version_removed`, `case66_language_linkage_changed`,
   `case72_covariant_return_changed`, `case74/75/76/77/80_detail_*` (the `internal_type_leaks_via_
   public_api` escalation doesn't fire for any of these detail-namespace-leak cases — its reachability
   check appears to need namespace-qualified symbols that the DWARF-derived struct/type diff doesn't
   currently emit), `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
   `case87_default_template_arg_changed`, `case88_cpo_kind_changed`, `case94_empty_tag_gained_state`,
-  and `case116_atomic_qualifier_changed`. These are real, pre-existing detector gaps this check
-  newly surfaced, not regressions from this pass — set `ABICHECK_STRICT_KINDS=1` (see
+  `case116_atomic_qualifier_changed`, `case141_versioned_symbol_scheme`, and (clang only)
+  `case115_bit_int_width_changed`. These are real, pre-existing detector gaps this check
+  surfaces, not regressions from this pass — set `ABICHECK_STRICT_KINDS=1` (see
   `tests/check_validate_results.py`) to make them blocking once triaged and fixed case by case.
+  The full example matrix (`validation/scripts/collect_full_example_matrix.py`) now surfaces each
+  covered case's winning-lane `kinds_strict` and rolls up a `kind_mismatch_cases` list at the
+  matrix level, so this triage backlog is machine-readable instead of living only in this prose.
 - **`API_BREAK`/`COMPATIBLE` normalization can mask a real regression.** `_normalize_verdict`
   treats `API_BREAK` and `COMPATIBLE` as equivalent for the default PASS/FAIL gate (a case's
   `category_strict` field flags — but does not block on — the collapse); CI does not currently
   set `ABICHECK_STRICT_CATEGORY=1` to make a collapse blocking.
-- **Runtime-smoke `BASELINE_SIGNAL` is visible but not blocking.** See the Runtime smoke row
-  above; the runner's exit code only fails on `BUILD_ERROR`.
-- **Build/source coverage is a 7-case smoke, not full L3–L5 coverage.** The `--artifact-variant
-  build-source` lane exercises a representative subset, not every L3/L4/L5 case in the catalog.
+- **Build/source coverage is a 10-case smoke, not full L3–L5 coverage.** The `--artifact-variant
+  build-source` lane exercises a representative subset (the cases in
+  `BUILD_SOURCE_PROOF_CASES`), not every L3/L4/L5 case in the catalog.
 
 Default/debug skips are not accepted as green coverage. They are cases outside
 the default single-library debug lane: G20 audit/cross-source snapshots, L3/L4/L5
@@ -151,7 +154,14 @@ classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 
-- XFAIL: `case111`, `case64`, `case78`, `case97`
+- XFAIL: `case105`, `case111`, `case122`, `case64`, `case98` (gcc); additionally
+  `case103`, `case180` (clang only) — each carries a `known_gap` explaining why
+  debug-headers can't reach the canonical verdict. case105/case122/case98 are
+  the catalog's flagship examples of a *higher* evidence tier (L3/L4) closing
+  the gap; case111 is the flagship example of the opposite case — a scenario
+  proven true by its own `source_smoke` oracle with **no** evidence tier that
+  currently catches it (a genuine, unfixed detector gap, not an evidence-depth
+  limitation).
 - SKIP: `case115`, `case121`, and bundle cases `case84`, `case90`, `case91`,
   `case92`, `case93`
 
@@ -273,7 +283,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (historical ABI break — vtable angle) | Breaking | 🔴 BREAKING |
 | [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames | Breaking | 🔴 BREAKING |
 | [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift | Breaking | 🔴 BREAKING |
-| [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | Addition | 🟢 COMPATIBLE (bad practice) |
+| [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | API Break | 🟠 API_BREAK (bad practice) |
 | [112](case112_lp64_ilp64/README.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | Breaking | 🔴 BREAKING |
 | [113](case113_abi_tag_changed/README.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | Breaking | 🔴 BREAKING |
 | [114](case114_char8t_migration/README.md) | char8_t migration (C++20 char-family → char8_t) | Breaking | 🔴 BREAKING |

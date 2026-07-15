@@ -104,7 +104,8 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
-   ]
+   ],
+   "runtime_baseline_exit": 1
   },
   "case07_struct_layout": {
    "abi_break": true,
@@ -380,7 +381,9 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "runtime_baseline_exit": 1,
+   "policy_note": "The .so files are byte-identical between v1 and v2 (deliberately — no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break."
   },
   "case10_return_type": {
    "abi_break": true,
@@ -410,24 +413,26 @@
    "platforms": [
     "linux",
     "macos"
-   ]
+   ],
+   "runtime_baseline_exit": 1
   },
   "case111_enumerable_thread_specific_lambda_ambiguity": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": true,
-   "category": "addition",
-   "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this is a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. The risk: brace-initialization and generic callable arguments can become ambiguous at downstream call sites. Member of the oneTBB regression suite.",
-   "expected": "COMPATIBLE",
+   "category": "api_break",
+   "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this looks like a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. But this case's own source_smoke proves the real failure mode: brace-initialization (`ets({})`) becomes an ambiguous overload at downstream call sites, so recompilation against v2 fails while already-built v1 binaries keep working \u2014 the textbook definition of API_BREAK. Member of the oneTBB regression suite.",
+   "expected": "API_BREAK",
    "expected_kinds": [
     "func_added"
    ],
-   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions \u2014 but no snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so `expected` stays COMPATIBLE to match actual tool output rather than claim a detection capability that does not exist. Tracked as a real detector gap (see case105 concept tightening for the sibling 'needs call-site context' pattern) \u2014 a constructor-overload-ambiguity detector is the natural home for this.",
+   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
     "macos"
    ],
+   "runtime_baseline_exit": 42,
    "source_smoke": {
     "proof": "consumer overload-resolution smoke: old brace-init compiles, new lambda/factory overload is ambiguous",
     "standard": "c++17",
@@ -454,7 +459,8 @@
    "min_evidence": "L1",
    "platforms": [
     "linux"
-   ]
+   ],
+   "runtime_baseline_exit": 1
   },
   "case113_abi_tag_changed": {
    "abi_break": true,
@@ -1008,7 +1014,8 @@
    "platforms": [
     "linux",
     "macos"
-   ]
+   ],
+   "runtime_baseline_exit": 2
   },
   "case142_vtable_slot_count_binary_only": {
    "abi_break": true,
@@ -2094,7 +2101,8 @@
    ],
    "expected_kinds": [
     "type_field_type_changed"
-   ]
+   ],
+   "policy_note": "By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral — size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible."
   },
   "case31_enum_rename": {
    "abi_break": false,
@@ -2977,7 +2985,8 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "runtime_baseline_exit": 4
   },
   "case79_missing_template_instantiation": {
    "abi_break": true,
@@ -3340,7 +3349,8 @@
    "platforms": [
     "linux",
     "macos"
-   ]
+   ],
+   "policy_note": "Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 — the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact."
   },
   "case96_hidden_friend_removed": {
    "abi_break": false,

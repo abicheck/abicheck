@@ -10,7 +10,14 @@
 | **Detected `ChangeKind`s** | `typedef_removed`, `type_removed` |
 | **Source files** | `examples/case109_flow_graph_policy_renames/` |
 
-**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING
+**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy escalated source break)
+
+## Compatibility classification
+
+- **Binary ABI impact:** None — the `.so` files are byte-identical between v1 and v2 (deliberate: no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified.
+- **Source compatibility impact:** BREAKING — the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers.
+- **Semantic verdict (by the project's own API_BREAK/BREAKING definitions):** `API_BREAK` — a recompile-only failure with no impact on already-built binaries.
+- **Policy severity:** `BREAKING` in `ground_truth.json` — `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing "this symbol never existed in the binary to begin with" from an actual layout/link break.
 
 ## What breaks
 
@@ -39,9 +46,13 @@ The diff exposes:
 - `TYPE_ADDED`: `buffering_policy`, `backpressure_policy`
 - `TYPEDEF_ADDED` (informational): `buffer_node`
 
-That set is enough to classify the diff as API_BREAK without any new
-detector. Use `member_name` / `type_pattern` suppressions if a downstream
-consumer wants to silence informational additions.
+That set is enough to reach the canonical API_BREAK fact without any new
+detector — but the catalog's default policy conservatively escalates
+generic `typedef_removed`/`type_removed` findings to `BREAKING` (see
+"Compatibility classification" above), so `ground_truth.json` records
+`BREAKING` as the enforced severity. Use `member_name` / `type_pattern`
+suppressions if a downstream consumer wants to silence informational
+additions.
 
 ## Code diff
 

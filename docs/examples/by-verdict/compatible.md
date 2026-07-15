@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_30 case(s)._ [← back to all examples](../index.md)
+_29 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -24,7 +24,6 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case137_runpath_changed](../case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |

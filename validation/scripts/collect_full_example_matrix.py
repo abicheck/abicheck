@@ -241,6 +241,12 @@ def _artifact_errors(
     if unknown_statuses:
         errors.append(f"{label}: unknown statuses: {', '.join(unknown_statuses)}")
 
+    # ``summary`` in the gcc/clang artifacts mixes status counts (PASS/FAIL/...)
+    # with diagnostic counters (KINDS_MISMATCH, CATEGORY_COLLAPSED) that
+    # validate_examples.py adds alongside them (see _summary_counts). Those
+    # counters are not row statuses, so they must be validated against their
+    # own per-row signals, not folded into the status-count recomputation —
+    # otherwise every artifact with a diagnostic counter fails this check.
     actual_summary = dict(
         Counter(
             str(row.get("status"))
@@ -248,10 +254,40 @@ def _artifact_errors(
             if isinstance(row, dict) and row.get("status") is not None
         )
     )
-    if data.get("summary") != actual_summary:
+    declared_summary = data.get("summary") or {}
+    declared_status_summary = (
+        {k: v for k, v in declared_summary.items() if k in allowed_statuses}
+        if isinstance(declared_summary, dict)
+        else declared_summary
+    )
+    if declared_status_summary != actual_summary:
         errors.append(
             f"{label}: summary={data.get('summary')!r}, recomputed {actual_summary!r}"
         )
+    if isinstance(declared_summary, dict):
+        declared_diagnostics = {
+            k: v for k, v in declared_summary.items() if k not in allowed_statuses
+        }
+        actual_diagnostics = {}
+        kinds_mismatch = sum(
+            1
+            for row in results
+            if isinstance(row, dict) and row.get("kinds_strict") == "mismatch"
+        )
+        if kinds_mismatch:
+            actual_diagnostics["KINDS_MISMATCH"] = kinds_mismatch
+        category_collapsed = sum(
+            1
+            for row in results
+            if isinstance(row, dict) and row.get("category_strict") == "collapsed"
+        )
+        if category_collapsed:
+            actual_diagnostics["CATEGORY_COLLAPSED"] = category_collapsed
+        if declared_diagnostics != actual_diagnostics:
+            errors.append(
+                f"{label}: diagnostic summary={declared_diagnostics!r}, "
+                f"recomputed {actual_diagnostics!r}"
+            )
     bad_cases = sorted(
         str(row.get("case_id") or row.get("name") or row.get("case"))
         for row in results
@@ -365,6 +401,7 @@ def _lane_record(label: str, result: dict[str, Any] | None) -> dict[str, Any]:
         "expected": result.get("expected"),
         "got": result.get("got"),
         "message": result.get("message", ""),
+        "kinds_strict": result.get("kinds_strict"),
     }
 
 
@@ -469,6 +506,9 @@ def build_matrix(
             status, proof_lane, note = "UNRESOLVED", owner, "unknown owner"
             provenance = "unknown"
 
+        proof_lane_record = next(
+            (lane for lane in lanes if lane["lane"] == proof_lane), None
+        )
         row = {
             "case_id": name,
             "owner": owner,
@@ -478,6 +518,11 @@ def build_matrix(
             "proof_lane": proof_lane,
             "provenance": provenance,
             "note": note,
+            # Coverage-by-verdict alone can hide a wrong-detector-kind pass
+            # (right severity, unrelated ChangeKind). Surface the winning
+            # lane's strict-kinds signal so "COVERED" isn't read as "fully
+            # calibrated" when kinds_strict == "mismatch".
+            "kinds_strict": (proof_lane_record or {}).get("kinds_strict"),
             "lanes": lanes,
         }
         if runtime_lane is not None:
@@ -497,6 +542,9 @@ def build_matrix(
     )
     unresolved = [row for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row for row in rows if row["status"] == "FAILED"]
+    kind_mismatch_cases = sorted(
+        row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/collect_full_example_matrix.py",
@@ -512,6 +560,11 @@ def build_matrix(
         },
         "unresolved_cases": [row["case_id"] for row in unresolved],
         "failed_cases": [row["case_id"] for row in failed],
+        # Non-blocking by design (see docs/development/examples-validation-runbook.md):
+        # a case here still counts as COVERED, but its winning lane matched
+        # the verdict without producing the calibrated ChangeKind. Triage
+        # target for known_detector_gap entries.
+        "kind_mismatch_cases": kind_mismatch_cases,
         "results": rows,
     }
 

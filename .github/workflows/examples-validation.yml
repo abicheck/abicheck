@@ -337,6 +337,23 @@ jobs:
           path: results/
           retention-days: 14
 
+      # examples/README.md's "Current Validation Status" table is hand-typed
+      # prose summarizing these same artifacts; nothing previously checked it
+      # against a real run, so it silently drifted for several releases. This
+      # step is the fix: fail the job (rather than warn) when the table's
+      # Result cells don't match the JSON artifacts just produced above.
+      - name: Check examples/README.md validation-status table is in sync
+        if: always()
+        run: |
+          PYTHONPATH=. python scripts/check_examples_validation_status_sync.py \
+            --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
+            --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
+            --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
+            --release downloaded/examples-validation-artifact-modes/validate_examples-release-headers.json \
+            --stripped downloaded/examples-validation-artifact-modes/validate_examples-stripped-headers.json \
+            --build-source downloaded/examples-validation-artifact-modes/validate_examples-build-source.json \
+            --check
+
       - name: Job summary
         if: always()
         run: |
