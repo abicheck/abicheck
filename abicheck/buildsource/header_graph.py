@@ -114,6 +114,7 @@ from .type_graph import (
     TypeEdge,
     _base_type_name,
     _is_excluded_type,
+    _resolve_nested_type_names,
     augment_graph_with_types,
     index_declared_type_files,
     parse_clang_ast_types,
@@ -249,10 +250,21 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
     def emit(src: str, raw: str, kind: str, role: str) -> None:
         if not src or not raw:
             return
-        name, resolution = _resolve_flat_type_name(raw, counts)
-        if not name:
-            return
-        edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
+        # A field/parameter typed e.g. ``std::vector<Private>`` must not stop
+        # at the whole template spelling — ``_resolve_nested_type_names``
+        # (the same pure, AST-independent string walk the clang path already
+        # uses) also surfaces the private template argument itself, the
+        # actual dependency a public-to-internal-dependency check cares about
+        # (Codex review: an earlier version only resolved the outer name,
+        # creating an unresolved edge to the literal "std::vector<Private>"
+        # string and missing the real "Private" edge entirely).
+        seen: set[str] = set()
+        for candidate in _resolve_nested_type_names(raw):
+            name, resolution = _resolve_flat_type_name(candidate, counts)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
 
     for rt in snapshot.types:
         for base in rt.bases:

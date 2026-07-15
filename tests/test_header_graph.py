@@ -351,6 +351,28 @@ def test_flat_model_ambiguous_bare_name_left_unresolved() -> None:
     assert edge.attrs["resolution"] == "unresolved"
 
 
+def test_flat_model_resolves_private_type_nested_in_a_template_argument() -> None:
+    # Codex review: a public function returning e.g. std::vector<Private>
+    # must not stop at the whole template spelling — the private template
+    # argument itself is the real dependency a public-to-internal-dependency
+    # check cares about, and it was previously missed entirely (only an
+    # unresolved edge to the literal "std::vector<Private>" string was
+    # created).
+    private = RecordType(name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type="std::vector<Private>",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(_snapshot(functions=[fn], types=[private]))
+    edges = [e for e in graph.edges if e.kind == "DECL_HAS_TYPE"]
+    private_edge = next(e for e in edges if e.dst == "type://Private")
+    assert private_edge.attrs["resolution"] == "unique_candidate"
+    node_by_id = {n.id: n for n in graph.nodes}
+    assert node_by_id["type://Private"].attrs["visibility"] == "private_header"
+
+
 def test_flat_model_never_stamps_call_graph_pass() -> None:
     # No bodies are ever visible to the flat model, in any circumstance — a
     # header-only-confirmed call-graph pass would falsely vouch for a
