@@ -31,7 +31,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   remains open — that needs a new no-binary snapshot-building path plus
   `CompareRequest`/`InputSpec` changes, deliberately out of scope here since
   the maintainers already looked at that larger wiring and deferred it in
-  ADR-041 pending `cli.py`/`dumper.py` file-size headroom).
+  ADR-041 pending `cli.py`/`dumper.py` file-size headroom). Two follow-up
+  correctness fixes on the same feature (Codex review): `--header-graph`/
+  `--header-graph-includes` are now rejected (not silently dropped) on
+  directory/package (release fan-out) `compare` operands, same as the other
+  single-pair-only evidence flags; and `service.resolve_input` now forwards
+  both flags through its GNU-ld-linker-script-following recursive call, so a
+  direct `resolve_input(script, header_graph=True)` caller still gets the L2
+  graph on the real target the script resolves to.
 
 - **`abicheck init` / `abicheck config validate` / `abicheck config
   show-effective` / `abicheck doctor` — new diagnostic commands.** Closes a

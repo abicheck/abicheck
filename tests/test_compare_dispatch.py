@@ -697,6 +697,8 @@ class TestCompareDispatch:
             ("--depth", "source", False),
             ("--sources", "old=src", True),
             ("--build-info", "new=build", True),
+            ("--header-graph", None, False),
+            ("--header-graph-includes", None, False),
         ],
     )
     def test_evidence_flags_rejected_on_set_inputs(

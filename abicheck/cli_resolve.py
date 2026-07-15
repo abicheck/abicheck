@@ -627,6 +627,8 @@ _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
     "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
+    "header_graph": "--header-graph",
+    "header_graph_includes": "--header-graph-includes",
 }
 
 
@@ -634,10 +636,11 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     """Reject inline build/source evidence flags for directory/package compares.
 
     The release fan-out forwards only release-comparison kwargs, so ``--max``/
-    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
-    would be accepted and silently dropped (no L3-L5 collected). Fail loudly so
-    the user knows to compare libraries individually to collect deep evidence
-    (Codex review)."""
+    ``--depth``, the per-side ``--old/new-sources`` / ``--old/new-build-info``,
+    and ``--header-graph``/``--header-graph-includes`` would be accepted and
+    silently dropped (no L3-L5 collected, no L2 header graph built). Fail
+    loudly so the user knows to compare libraries individually to collect
+    deep evidence (Codex review)."""
     used = [
         flag
         for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()

@@ -408,6 +408,8 @@ def resolve_input(
                     follow_linker_scripts=follow_linker_scripts,
                     header_backend=header_backend,
                     compile=compile,
+                    header_graph=header_graph,
+                    header_graph_includes=header_graph_includes,
                     notify=notify,
                 )
             raise ValidationError(
