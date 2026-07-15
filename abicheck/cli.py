@@ -1518,7 +1518,9 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
+    cli_config,  # noqa: F401  — registers init, config (validate, show-effective)
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_doctor,  # noqa: F401  — registers doctor
     cli_graph,  # noqa: F401  — registers graph (compare, explain)
     cli_inputs,  # noqa: F401  — registers inputs (validate)
     cli_plugin,  # noqa: F401  — registers plugin-check

@@ -11,6 +11,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`abicheck init` / `abicheck config validate` / `abicheck config
+  show-effective` / `abicheck doctor` — new diagnostic commands.** Closes a
+  recurring adoption-friction gap: `.abicheck.yml` had no scaffolding, no
+  structured validation (an unknown key only ever warned via
+  `warnings.warn`, easy to miss or suppress), and no way to see what the
+  CLI-flag/config-file/default precedence actually resolved to short of
+  reading source.
+  - `init` scaffolds a starter `.abicheck.yml` with every key documented and
+    commented out (`--force` to overwrite).
+  - `config validate [PATH]` reports every unknown top-level/block key as a
+    structured, always-visible finding (exit 1), distinct from the loader's
+    lenient forward-compat warning.
+  - `config show-effective [PATH]` renders the resolved severity/scope/
+    suppression/exit-code settings a `compare` invocation would use, one row
+    per setting with its source (cli/config/default) — using the same
+    `click.get_current_context().get_parameter_source` provenance primitive
+    `compare` itself uses internally (`cli_compare_helpers._cli_flag`).
+  - `doctor [BINARY]` reports the selected AST frontend and its version,
+    external tool availability (castxml/clang/gcc/g++/debuginfod), and the
+    discovered project config; given a binary, also runs the same
+    debug-artifact/header-match diagnostic as `dump --show-data-sources`.
+
 - **`ctor_overload_ambiguity_risk` (new `ChangeKind`) — best-effort detector
   for constructor-overload-ambiguity risk.** A class gaining a 2nd+
   non-explicit, single-required-argument ("converting") constructor is
