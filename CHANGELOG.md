@@ -378,12 +378,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   verdict-level `PASS`; the gcc/clang JSON artifacts now preserve the full
   `actual_kinds` list per case, not just a mismatch flag; the runtime-smoke
   runner compared every case's v1 baseline exit code against a hardcoded 0,
-  so 7 cases whose app deliberately returns a computed value (e.g. case111's
+  so 6 cases whose app deliberately returns a computed value (e.g. case111's
   `ets(42).local()` returning `42`) were misreported as `BASELINE_SIGNAL`
   (broken baseline) — fixed via a per-case `runtime_baseline_exit` ground-truth
   field, plus a genuine app.c bug in case42 (the checksum was never
   recomputed after mutating `data[0]`, so its baseline failed regardless of
-  alignment) that the same audit surfaced; case30/95/109 (`BREAKING` from a
+  alignment) that the same audit surfaced. `case06_visibility` stays
+  unwhitelisted on purpose: its app's exit code 1 is overloaded between the
+  intended demonstration and an unrelated real regression, so a single
+  `runtime_baseline_exit` value can't safely paper over it (caught in review
+  — a first pass at this fix wrongly whitelisted it too). case30/95/109
+  (`BREAKING` from a
   conservative generic-detector policy despite an underlying API_BREAK-level
   compatibility fact — old binaries keep working) now document that
   fact/policy split in `policy_note` and a README "Compatibility

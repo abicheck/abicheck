@@ -77,7 +77,7 @@ Commands below use `PYTHONPATH=.`.
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
 | Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 139 PASS / 5 XFAIL / 37 SKIP; clang: 139 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 85 DEMONSTRATED / 64 NO_RUNTIME_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR, no BASELINE_SIGNAL. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 84 DEMONSTRATED / 64 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
 | Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 1 FAIL / 5 XFAIL / 37 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
 | Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 134 PASS / 5 FAIL / 5 XFAIL / 37 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
@@ -116,6 +116,16 @@ the way it previously did (stale at a 169-case catalog for several releases).
 - **Build/source coverage is a 10-case smoke, not full L3–L5 coverage.** The `--artifact-variant
   build-source` lane exercises a representative subset (the cases in
   `BUILD_SOURCE_PROOF_CASES`), not every L3/L4/L5 case in the catalog.
+- **`case06_visibility`'s runtime baseline is intentionally left unwhitelisted.**
+  Its `app.c` doesn't fit the runtime-smoke harness's baseline-then-swap model
+  — it `dlopen`s both `./libv1.so` and `./libv2.so` by name in a single run,
+  and its exit code 1 is overloaded: it fires both for the intended
+  demonstration (v2 correctly hides `internal_helper`) *and* for a real,
+  unrelated regression (v1 unexpectedly failing to export it). A single
+  `runtime_baseline_exit` value can't distinguish those two conditions, so
+  whitelisting exit 1 would mask the second one — see the case's README for
+  the full explanation. It stays `BASELINE_SIGNAL`, which per policy is
+  visible but not CI-blocking.
 
 Default/debug skips are not accepted as green coverage. They are cases outside
 the default single-library debug lane: G20 audit/cross-source snapshots, L3/L4/L5

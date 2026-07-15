@@ -8,6 +8,7 @@ on:
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
+      - "scripts/check_examples_validation_status_sync.py"
       - ".github/workflows/examples-validation.yml"
   pull_request:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
+      - "scripts/check_examples_validation_status_sync.py"
       - ".github/workflows/examples-validation.yml"
   workflow_dispatch:
 

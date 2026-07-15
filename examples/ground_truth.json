@@ -104,8 +104,7 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
-   ],
-   "runtime_baseline_exit": 1
+   ]
   },
   "case07_struct_layout": {
    "abi_break": true,
