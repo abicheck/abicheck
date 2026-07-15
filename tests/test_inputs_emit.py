@@ -141,12 +141,16 @@ def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
     # review, P2).
     pack = tmp_path / "pack"
     pack.mkdir()
-    (pack / "manifest.json").write_text(json.dumps({"build_source_pack_version": 1}))
+    manifest_path = pack / "manifest.json"
+    original_manifest = json.dumps({"build_source_pack_version": 1})
+    manifest_path.write_text(original_manifest)
     with pytest.raises(ValueError, match="does not declare kind"):
         init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     # A rejected wrong-kind pack must be left completely untouched -- not
-    # just its manifest -- including no stray source_facts/ directory
-    # created before the kind check ran (CodeRabbit review, P2).
+    # just its directory listing, but the manifest's own bytes -- including
+    # no stray source_facts/ directory created before the kind check ran
+    # (CodeRabbit review, P2).
+    assert manifest_path.read_text() == original_manifest
     assert sorted(p.name for p in pack.iterdir()) == ["manifest.json"]
 
 
@@ -1145,6 +1149,21 @@ def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
     # The merged file (now holding this run's fresher content) must
     # survive -- not deleted just because this run's manifest write failed.
     assert first_out.exists()
+    # Read first_out's own bytes directly rather than relying on
+    # read_source_facts(pack)'s prior-vs-fresh superseding logic to
+    # reconstruct the right answer -- that would pass even if first_out
+    # had been rolled back to its pre-rerun contents (CodeRabbit review).
+    merged_records = [
+        json.loads(line)
+        for line in first_out.read_text(encoding="utf-8").splitlines()
+    ]
+    merged_names = {
+        function["mangled_name"]
+        for record in merged_records
+        for function in record["functions"]
+    }
+    assert merged_names == {"_Z4foo2v", "_Z3barv", "_Z5extrav"}
+
     names = {tu.functions[0].mangled_name for tu in read_source_facts(pack)}
     # fresh foo2 wins, bar carried forward, extra merged in from its
     # explicit file entry -- none lost despite the manifest write failure.

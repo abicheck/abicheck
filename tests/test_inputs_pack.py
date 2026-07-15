@@ -446,6 +446,10 @@ def test_read_source_facts_excludes_manifest_from_explicit_file_entry(
     # explicitly naming it must be flagged, not silently accepted.
     assert "" not in tu_ids
     assert any("resolved to no readable fact files" in d for d in diagnostics)
+    # The co-located valid TU (from the "source_facts" directory entry) must
+    # still be ingested despite the excluded manifest.json entry -- the fix
+    # must not collaterally drop legitimate facts from the same read.
+    assert tu_ids == {"cu://src/foo.cpp#cfg:abc"}
 
 
 def test_read_source_facts_degrades_on_invalid_utf8_instead_of_crashing(
