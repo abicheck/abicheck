@@ -117,13 +117,18 @@ def config_group() -> None:
     "path", required=False, type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
 def config_validate(path: Path | None) -> None:
-    """Validate .abicheck.yml's keys against the known schema.
+    """Validate .abicheck.yml's keys AND values against the known schema.
 
     Unlike the loader's forward-compat ``warnings.warn`` (which a suppressed
     or redirected warnings stream can hide entirely), this reports every
-    unknown top-level/block key as a structured, always-visible finding.
-    Exits 0 when clean, 1 when unknown keys are found, 64 when no config file
-    could be found or it isn't valid YAML.
+    unknown top-level/block key as a structured, always-visible finding. It
+    also runs the same ``BuildConfig.from_dict`` parser every real command
+    uses, so a recognized key with an invalid value (``severity.preset:
+    bogus``, ``exit_code_scheme: typo``, ...) is caught here too — without
+    this, `validate` could report OK on a file that `compare`/`config
+    show-effective` then fail on. Exits 0 when clean, 1 when unknown keys or
+    invalid values are found, 64 when no config file could be found or it
+    isn't valid YAML.
     """
     from .buildsource.inline import BuildConfig
 
@@ -164,13 +169,25 @@ def config_validate(path: Path | None) -> None:
                 if sub not in known_block:
                     findings.append(f"unknown key: {key}.{sub!r}")
 
+    import warnings
+
+    try:
+        with warnings.catch_warnings():
+            # Unknown-key warnings are already reported above as structured
+            # findings; suppress from_dict's own warnings.warn for the same
+            # keys so they aren't reported twice in different shapes.
+            warnings.simplefilter("ignore", UserWarning)
+            BuildConfig.from_dict(raw)
+    except ValueError as exc_parse:
+        findings.append(f"invalid value: {exc_parse}")
+
     click.echo(f"{resolved}:")
     if not findings:
         click.echo("  OK — every key is recognized.")
         return
     for finding in findings:
         click.echo(f"  {finding}")
-    click.echo(f"\n{len(findings)} unrecognized key(s).")
+    click.echo(f"\n{len(findings)} finding(s).")
     raise SystemExit(1)
 
 

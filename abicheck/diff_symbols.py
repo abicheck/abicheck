@@ -69,6 +69,7 @@ from .elf_symbol_filter import (
 )
 from .model import (
     AbiSnapshot,
+    AccessLevel,
     Function,
     Param,
     Variable,
@@ -953,16 +954,19 @@ def _converting_ctors_by_class(
     Itanium mangled name — public overloaded constructors that castxml never
     ODR-uses may have none (see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``).
 
-    "Converting constructor" here means: not deleted, definitively non-explicit
-    (``is_explicit is False`` — ``None`` is unknown evidence and skipped, same
-    tri-state convention as ``_check_explicit_change``), and callable with
-    exactly one argument — at most one *required* parameter (everything after
-    it defaulted), and at least one parameter total (excludes the zero-arg
-    default constructor). A leading defaulted parameter still makes the
-    constructor single-argument-callable (``Widget(int x = 0)`` accepts
-    ``Widget w = 5;`` the same as ``Widget(int x)`` would), so the exclusion
-    check below binds to the *first* parameter regardless of whether it has a
-    default, not to the (possibly empty) required-parameter list. That first
+    "Converting constructor" here means: public (a private/protected
+    constructor isn't callable at an ordinary consumer call site, so it
+    cannot create the implicit-conversion collision this heuristic looks
+    for), not deleted, definitively non-explicit (``is_explicit is False`` —
+    ``None`` is unknown evidence and skipped, same tri-state convention as
+    ``_check_explicit_change``), and callable with exactly one argument — at
+    most one *required* parameter (everything after it defaulted), and at
+    least one parameter total (excludes the zero-arg default constructor). A
+    leading defaulted parameter still makes the constructor
+    single-argument-callable (``Widget(int x = 0)`` accepts ``Widget w =
+    5;`` the same as ``Widget(int x)`` would), so the exclusion check below
+    binds to the *first* parameter regardless of whether it has a default,
+    not to the (possibly empty) required-parameter list. That first
     parameter's type is checked against the class's own type to exclude
     copy/move constructors. Keyed by the full parameter-type tuple so two
     overloads are distinguished even when both qualify.
@@ -974,6 +978,8 @@ def _converting_ctors_by_class(
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
         if f.name not in class_names or f.is_deleted or f.is_explicit is not False:
+            continue
+        if f.access != AccessLevel.PUBLIC:
             continue
         if not f.params:
             continue

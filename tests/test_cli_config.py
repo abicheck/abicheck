@@ -94,6 +94,21 @@ class TestConfigValidate:
             assert result.exit_code == 1
             assert "severity.'bogus'" in result.output
 
+    def test_invalid_value_on_recognized_key_is_reported(self) -> None:
+        # Codex review #556: a recognized key with an invalid value (e.g.
+        # severity.preset: bogus) must not report OK — compare/show-effective
+        # would fail on the same file via BuildConfig.from_dict's real
+        # validation, which `validate` now runs too.
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "severity:\n  preset: bogus\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "invalid value" in result.output
+            assert "severity.preset" in result.output
+
     def test_explicit_path(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():

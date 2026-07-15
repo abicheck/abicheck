@@ -9,7 +9,14 @@ from xml.etree.ElementTree import Element
 from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind, Verdict
 from abicheck.dumper import _CastxmlParser
-from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    AccessLevel,
+    Function,
+    Param,
+    RecordType,
+    Visibility,
+)
 
 
 def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
@@ -197,6 +204,7 @@ def _conv_ctor(
     param_type: str,
     is_explicit: bool | None = False,
     default: str | None = None,
+    access: AccessLevel = AccessLevel.PUBLIC,
 ) -> Function:
     # A castxml Constructor's demangled `name` is the bare class name, not
     # `Class::Class` — C++ forbids any other member from sharing that name,
@@ -208,6 +216,7 @@ def _conv_ctor(
         return_type="void",
         params=[Param(name="x", type=param_type, default=default)],
         visibility=Visibility.PUBLIC,
+        access=access,
         is_explicit=is_explicit,
     )
 
@@ -298,6 +307,50 @@ class TestCtorOverloadAmbiguityRisk:
             [
                 _conv_ctor("Widget", "c1", "int"),
                 _conv_ctor("Widget", "c2", "const Widget &"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_new_private_ctor_is_not_flagged(self) -> None:
+        """A private constructor isn't callable at an ordinary consumer call
+        site (Codex review #556), so it cannot create the implicit-conversion
+        collision this heuristic looks for."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor(
+                    "Widget", "c2", "double", access=AccessLevel.PRIVATE
+                ),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
+    def test_new_protected_ctor_is_not_flagged(self) -> None:
+        """Same reasoning as private — only derived classes can call it."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor(
+                    "Widget", "c2", "double", access=AccessLevel.PROTECTED
+                ),
             ],
             [cls],
         )
