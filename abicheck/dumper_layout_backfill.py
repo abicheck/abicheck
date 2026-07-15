@@ -123,9 +123,23 @@ def backfill_dwarf_layout(
     corroborating signal: two independent record definitions coincidentally
     sharing both a bare name *and* at least one member name is implausible,
     while the same source's header/DWARF views of one real type always
-    share theirs. No overlap (and at least one side has fields) means
-    "unrelated type, not just unqualified" — left unmatched rather than
-    trusted on name alone.
+    share theirs. No overlap when *both* sides have fields means "unrelated
+    type, not just unqualified" — left unmatched rather than trusted on name
+    alone.
+
+    An empty DWARF field list, though, is not itself a sign of "unrelated": a
+    record whose members are all injected from an anonymous struct/union
+    (``struct Foo { union { int i; float f; }; };``) is flattened onto the
+    header side by ``dumper_clang.py`` (so ``header.fields`` lists ``i``/``f``
+    directly) but the DWARF builder does not flatten it the same way, leaving
+    ``dwarf.fields`` empty even though DWARF *does* carry the record's real
+    ``size_bits`` — rejecting that on "no overlap" would make every such
+    struct permanently layout-blind under the clang backend (Codex review),
+    which is a real, common C pattern, not a hypothetical. The residual risk
+    (an unrelated same-bare-name type that also happens to have zero DWARF
+    fields) is accepted: a fieldless type's layout is trivial regardless of
+    identity, so a wrong match there is low-consequence, unlike the
+    non-empty-vs-non-empty case above.
     """
     if not dwarf_types:
         return header_types
@@ -139,8 +153,8 @@ def backfill_dwarf_layout(
         return candidates[0] if len(candidates) == 1 else None
 
     def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
-        if not header.fields and not dwarf.fields:
-            return True  # both empty (e.g. a tag type) — nothing to disagree on
+        if not header.fields or not dwarf.fields:
+            return True  # nothing on one side to disagree with the other
         return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
 
     out: list[RecordType] = []

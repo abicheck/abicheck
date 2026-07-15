@@ -176,6 +176,24 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
+    def test_empty_dwarf_fields_from_anonymous_aggregate_is_trusted(self) -> None:
+        """Regression (Codex review): a struct whose only members come from an
+        anonymous struct/union (`struct Foo { union { int i; float f; }; };`)
+        is flattened onto the header side by dumper_clang.py (header.fields
+        lists i/f directly) but the DWARF builder does not flatten it the
+        same way, leaving dwarf.fields empty even though DWARF does carry the
+        record's real size_bits. Rejecting this on "no overlap" would make
+        every such struct permanently layout-blind under the clang backend —
+        reproduced directly against real clang+gcc+DWARF output before this
+        fix (size_bits stayed None; fixed, it backfills correctly)."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
+        )
+        dwarf = RecordType(name="Foo", kind="struct", size_bits=32, fields=[])
+        out = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 32
+
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)
