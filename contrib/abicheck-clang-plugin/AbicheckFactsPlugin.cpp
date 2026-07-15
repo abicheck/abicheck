@@ -3121,30 +3121,35 @@ private:
         ",\n  \"source_facts\": [\"source_facts\"],\n  \"version\": " + jsonStr(Version) +
         "\n}\n";
 
-    // Atomically claim manifest.json itself instead of exists()-then-rename():
-    // CD_CreateNew fails with file_exists if another parallel compile already
-    // created (or is concurrently creating) it, so "does a manifest already
-    // exist" and "claim the right to create it" become one indivisible
-    // syscall. The previous exists()-check + tmp-file-rename had a TOCTOU gap
-    // — two racing first-compiles of two different targets sharing one out=
-    // directory could both observe no manifest yet, both skip
-    // checkManifestTargetAgreement, and have the second rename() silently
-    // clobber the first's manifest with no warning ever firing (CodeRabbit
-    // review). Same exclusive-create primitive claimFirstRootsWarning/
-    // claimFirstInferenceNote already use for this file's other
-    // once-across-parallel-compiles claims.
+    // Write the full manifest to a private temp file first, then publish it
+    // via create_hard_link() -- an all-or-nothing claim of manifest.json
+    // itself, exactly like os.link() in the Python inputs_emit wrapper's
+    // equivalent fix. An earlier revision of this fix claimed manifestPath
+    // directly via openFile(..., CD_CreateNew, ...) and wrote the content
+    // into it afterward: that leaves a window where the file exists but is
+    // still empty/partial, so a losing concurrent compile's file_exists
+    // check could immediately call checkManifestTargetAgreement() on a
+    // torn read, fail json::parse, and silently skip the cross-target
+    // warning it exists to give (Codex review) -- the very race this fix
+    // was meant to close, just moved one step later. create_hard_link()
+    // only ever leaves manifestPath as "absent" or "fully written," never
+    // partial, so a loser's read is always complete.
+    llvm::SmallString<128> tmp;
     int fd = -1;
-    std::error_code ec = llvm::sys::fs::openFile(
-        manifestPath, fd, llvm::sys::fs::CD_CreateNew, llvm::sys::fs::FA_Write,
-        llvm::sys::fs::OF_None);
-    if (ec == std::errc::file_exists) {
-      checkManifestTargetAgreement(manifestPath);
-      return;
-    }
-    if (ec)
+    if (llvm::sys::fs::createUniqueFile(
+            llvm::Twine(OutDir) + "/.manifest.%%%%%%.tmp", fd, tmp))
       return; // unexpected error: best-effort, never abort the compile
-    llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
-    os << manifest;
+    {
+      llvm::raw_fd_ostream os(fd, /*shouldClose=*/true);
+      os << manifest;
+    }
+    std::error_code ec = llvm::sys::fs::create_hard_link(tmp, manifestPath);
+    llvm::sys::fs::remove(tmp);
+    if (ec == std::errc::file_exists)
+      checkManifestTargetAgreement(manifestPath);
+    // Any other error (including success) needs no further action here:
+    // success published the manifest; an unexpected error is best-effort
+    // and never aborts the compile.
   }
 
   std::string OutDir;

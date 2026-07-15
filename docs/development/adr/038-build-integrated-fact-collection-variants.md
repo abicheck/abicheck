@@ -731,6 +731,34 @@ to remove. This is now closed:
   both the plugin's wire format and `clang_source_edges.build_source_edges()`)
   is the natural follow-up that would let this optimization return safely;
   tracked as future work, not bundled into this fix.
+- **The Flow-2 ingestion path (`inputs_pack.ingest_inputs_pack`) has no
+  replay fallback at all, so the provenance gap above is not just an
+  optimization risk there — it is the only edge source.** A follow-up review
+  found that a Flow-2-ingested pack's graph never marked `extractor_passes`
+  for `call_graph`/`type_graph` at all (`fold_source_edges` never touches
+  it), so `source_graph_findings._common_dependency_edge_kinds()` treated a
+  genuinely complete-but-zero-edge family as "never examined" and suppressed
+  a real finding as a coverage artifact. `source_graph.
+  mark_source_edges_extractor_coverage()` closes that half — applied only at
+  `ingest_inputs_pack` and the export-relink graph rebuild in
+  `cli_buildsource_merge.py` (the two call sites that never run a replay
+  afterward; `inline._build_inline_graph`/`cli_buildsource_helpers` already
+  track this precisely via the replay itself and must not call it, since a
+  bare `source_edges` rollup can't tell full-scope from narrowed). But this
+  only fixes the *pass-coverage* gate (`_dependency_kinds_covered`) — it does
+  **not** fix the separate *node-classification* gate
+  `is_internal_dependency_node()` still applies per-node: a Flow-2-ingested
+  node from `fold_source_edges` alone still carries no `defined_in_project`
+  attr and, being genuinely private, is never covered by the L4 surface's own
+  `decl_to_file` (which only maps *public* reachable declarations). Both
+  gates must pass for `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` to fire on such
+  a node, so for a Flow-2-only pack (no compile DB / no replay ever
+  possible), a public-API-to-private-helper dependency collected only via
+  `source_edges` still cannot be detected end-to-end. Closing this
+  fully requires the same producer-side wire-format change described above
+  (both the plugin and `clang_source_edges.build_source_edges()` emitting
+  `dst_file`); until then this is a known, accepted limitation of the
+  ingestion-only path specifically (Codex review).
 
 **Identity normalization (the second half of the same review finding).**
 Even with the fold wired up, the Clang JSON-AST replay's callee identity was
