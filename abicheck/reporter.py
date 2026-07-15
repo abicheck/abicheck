@@ -130,8 +130,18 @@ def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
     return "unknown"
 
 
-def to_stat_json(result: DiffResult, indent: int = 2) -> str:
-    """JSON output for --stat mode: summary only, no changes array."""
+def to_stat_json(
+    result: DiffResult, indent: int = 2, *, severity_config: SeverityConfig | None = None,
+) -> str:
+    """JSON output for --stat mode: summary only, no changes array.
+
+    *severity_config*, when given, adds a ``severity`` block (same shape as
+    the full JSON report's — see :func:`_build_severity_json`) so ``--stat
+    --format json`` reflects the actual severity-aware gate instead of only
+    the compatibility verdict. Without it, ``--stat`` output has historically
+    bypassed severity handling entirely (it short-circuits in
+    ``service.render_output`` before format dispatch).
+    """
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
     d: dict[str, object] = {
@@ -151,6 +161,14 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
             "affected_pct": round(summary.affected_pct, 1),
         },
     }
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            list(result.changes),
+            severity_config,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
     d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count

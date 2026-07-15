@@ -34,7 +34,7 @@ from .checker_policy import (
 )
 
 if TYPE_CHECKING:
-    from .severity import KindSets, SeverityConfig
+    from .severity import IssueCategory, KindSets, SeverityConfig
 
 # GitHub caps visible annotations at ~50 per step.
 _MAX_ANNOTATIONS = 50
@@ -148,24 +148,14 @@ def _classify_change(
     return None
 
 
-def _classify_change_by_severity(
+def _category_for_change_severity(
     change: Change,
     kind_sets: KindSets,
-    severity_config: SeverityConfig,
-    annotate_additions: bool,
     *,
     policy: str | None = None,
     policy_file: object | None = None,
-) -> str | None:
-    """Return the annotation level driven by *severity_config*, or None to skip.
-
-    Reflects the actual CI gate (ADR "GateDecision" direction): a category
-    configured ``error`` always emits ``::error`` regardless of whether it is
-    an addition or a breaking kind, so an annotation is never silently absent
-    for a finding that will fail the build. ``warning``/``info`` mirror the
-    severity level directly; ``info`` only surfaces (as ``::notice``) when
-    *annotate_additions* opts into the noisier informational annotations —
-    matching the pre-existing opt-in behaviour for additions.
+) -> IssueCategory:
+    """Return the severity-aware :class:`~abicheck.severity.IssueCategory` for *change*.
 
     *policy_file* must be threaded through (not just the pre-baked
     *kind_sets*) so a frozen-namespace-tagged finding's floor is honoured the
@@ -177,11 +167,30 @@ def _classify_change_by_severity(
     ``classify_effective_change`` — omitting it would let this annotation
     under-report a finding that still fails CI at its raw severity.
     """
-    from .severity import SeverityLevel, classify_effective_change
+    from .severity import classify_effective_change
 
-    category = classify_effective_change(
+    return classify_effective_change(
         change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
     )
+
+
+def _annotation_level_for_category(
+    category: IssueCategory,
+    severity_config: SeverityConfig,
+    annotate_additions: bool,
+) -> str | None:
+    """Return the annotation level for *category* under *severity_config*, or None to skip.
+
+    Reflects the actual CI gate (ADR "GateDecision" direction): a category
+    configured ``error`` always emits ``::error`` regardless of whether it is
+    an addition or a breaking kind, so an annotation is never silently absent
+    for a finding that will fail the build. ``warning``/``info`` mirror the
+    severity level directly; ``info`` only surfaces (as ``::notice``) when
+    *annotate_additions* opts into the noisier informational annotations —
+    matching the pre-existing opt-in behaviour for additions.
+    """
+    from .severity import SeverityLevel
+
     level = severity_config.level_for(category)
     if level == SeverityLevel.ERROR:
         return "error"
@@ -198,8 +207,20 @@ def _title_for_change(
     api_break_set: frozenset[ChangeKind],
     risk_set: frozenset[ChangeKind],
     compatible_set: frozenset[ChangeKind],
+    *,
+    category: IssueCategory | None = None,
 ) -> str:
-    """Return the annotation title prefix, distinguishing API Break from Deployment Risk."""
+    """Return the annotation title prefix, distinguishing API Break from Deployment Risk.
+
+    *category*, when given (the severity-aware path), distinguishes a
+    genuine addition from a compatible *quality* finding (e.g.
+    ``soname_bump_unnecessary``) — both fall in *compatible_set*, but only
+    the former is actually "ABI Addition"; mislabeling a quality warning as
+    an addition previously went unnoticed because compatible findings were
+    only ever annotated opt-in via ``annotate_additions``, but a severity
+    config can now surface a quality finding (e.g. ``quality_issues=warning``)
+    without that opt-in.
+    """
     kind_label = kind.value
     if kind in breaking_set:
         return f"ABI Break: {kind_label}"
@@ -208,6 +229,15 @@ def _title_for_change(
     if kind in risk_set:
         return f"Deployment Risk: {kind_label}"
     if kind in compatible_set:
+        if category is not None:
+            from .severity import IssueCategory as _IssueCategory
+
+            label = (
+                "ABI Addition"
+                if category == _IssueCategory.ADDITION
+                else "Quality Issue"
+            )
+            return f"{label}: {kind_label}"
         return f"ABI Addition: {kind_label}"
     return f"ABI Change: {kind_label}"
 
@@ -250,7 +280,7 @@ def collect_annotations(
     *severity_config* is supplied, it takes priority: the annotation level
     mirrors each finding's actually-configured severity so an annotation is
     never silently absent (or under/over-stated) for a finding that does (or
-    does not) gate CI — see :func:`_classify_change_by_severity`.
+    does not) gate CI — see :func:`_annotation_level_for_category`.
     """
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
@@ -258,10 +288,14 @@ def collect_annotations(
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
+        category: IssueCategory | None = None
         if severity_config is not None:
-            level = _classify_change_by_severity(
-                change, kind_sets, severity_config, annotate_additions,
+            category = _category_for_change_severity(
+                change, kind_sets,
                 policy=diff_result.policy, policy_file=diff_result.policy_file,
+            )
+            level = _annotation_level_for_category(
+                category, severity_config, annotate_additions,
             )
         else:
             level = _classify_change(
@@ -273,6 +307,7 @@ def collect_annotations(
 
         title = _title_for_change(
             change.kind, breaking_set, api_break_set, risk_set, compatible_set,
+            category=category,
         )
         line = _format_annotation(level, change, title, change.description)
         sort_key = _SEVERITY_ORDER.get(level, 99)

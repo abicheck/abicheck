@@ -329,3 +329,60 @@ class TestSarifConfidenceAndPolicy:
         doc = to_sarif(_make_result([], verdict=Verdict.NO_CHANGE))
         props = doc["runs"][0]["properties"]
         assert "policyOverrides" not in props
+
+
+# ---------------------------------------------------------------------------
+# Severity-aware invocation gate
+# ---------------------------------------------------------------------------
+
+class TestSeverityGate:
+    """Without severity_config, the invocation exit is inferred purely from
+    the compatibility verdict — which can misreport the actual CI gate once
+    severity configuration is in play (compatibility and "blocks CI" are
+    independent decisions). These guard the fix."""
+
+    def test_no_severity_config_keeps_legacy_behaviour(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()], verdict=Verdict.BREAKING))
+        props = doc["runs"][0]["properties"]
+        assert "severityGate" not in props
+
+    def test_compatible_addition_configured_as_error_fails_invocation(self) -> None:
+        from abicheck.severity import resolve_severity_config
+
+        cfg = resolve_severity_config("default", addition="error")
+        r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
+        doc = to_sarif(r, severity_config=cfg)
+        inv = doc["runs"][0]["invocations"][0]
+        # Legacy inference would say COMPATIBLE -> exitCode 0, executionSuccessful.
+        assert inv["exitCode"] == 1
+        assert inv["executionSuccessful"] is False
+
+        gate = doc["runs"][0]["properties"]["severityGate"]
+        assert gate["exitCode"] == 1
+        assert gate["blocking"] is True
+        assert gate["blockingCategories"] == ["addition"]
+        assert gate["config"]["addition"] == "error"
+
+    def test_breaking_demoted_to_info_passes_invocation(self) -> None:
+        from abicheck.severity import resolve_severity_config
+
+        cfg = resolve_severity_config("default", abi_breaking="info")
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r, severity_config=cfg)
+        inv = doc["runs"][0]["invocations"][0]
+        # Legacy inference would say BREAKING -> exitCode 4, executionSuccessful=False.
+        assert inv["exitCode"] == 0
+        assert inv["executionSuccessful"] is True
+
+        gate = doc["runs"][0]["properties"]["severityGate"]
+        assert gate["blocking"] is False
+        assert gate["blockingCategories"] == []
+
+    def test_to_sarif_str_forwards_severity_config(self) -> None:
+        from abicheck.severity import resolve_severity_config
+
+        cfg = resolve_severity_config("default", addition="error")
+        r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
+        text = to_sarif_str(r, severity_config=cfg)
+        doc = json.loads(text)
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 1

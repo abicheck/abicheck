@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import (
@@ -40,6 +40,9 @@ from abicheck.checker_policy import (
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import apply_show_only
+
+if TYPE_CHECKING:
+    from abicheck.severity import SeverityConfig
 
 # ---------------------------------------------------------------------------
 # Severity mapping
@@ -175,12 +178,77 @@ def _result_for(change: Change, result: DiffResult) -> dict[str, Any]:
     }
 
 
+def _severity_gate_properties(
+    result: DiffResult, severity_config: SeverityConfig,
+) -> dict[str, Any]:
+    """Build a compact, auditable ``severityGate`` block for SARIF ``properties``.
+
+    Mirrors the categories/exit-code contract of JSON's ``severity`` block
+    (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
+    tell *why* the invocation's exit code is what it is without
+    cross-referencing the JSON report separately.
+    """
+    from abicheck.severity import (
+        IssueCategory,
+        SeverityLevel,
+        categorize_changes,
+        compute_exit_code,
+    )
+
+    eff_sets = result._effective_kind_sets()
+    exit_code = compute_exit_code(
+        result.changes,
+        severity_config,
+        policy=result.policy,
+        kind_sets=eff_sets,
+        policy_file=result.policy_file,
+    )
+    categorized = categorize_changes(
+        result.changes,
+        policy=result.policy,
+        kind_sets=eff_sets,
+        policy_file=result.policy_file,
+    )
+    by_category = {
+        IssueCategory.ABI_BREAKING: categorized.abi_breaking,
+        IssueCategory.POTENTIAL_BREAKING: categorized.potential_breaking,
+        IssueCategory.QUALITY_ISSUES: categorized.quality_issues,
+        IssueCategory.ADDITION: categorized.addition,
+    }
+    blocking_categories = [
+        cat.value
+        for cat, cat_changes in by_category.items()
+        if cat_changes and severity_config.level_for(cat) == SeverityLevel.ERROR
+    ]
+    return {
+        "exitCode": exit_code,
+        "blocking": exit_code != 0,
+        "blockingCategories": blocking_categories,
+        "config": {
+            "abi_breaking": severity_config.abi_breaking.value,
+            "potential_breaking": severity_config.potential_breaking.value,
+            "quality_issues": severity_config.quality_issues.value,
+            "addition": severity_config.addition.value,
+        },
+    }
+
+
 def to_sarif(
     result: DiffResult,
     *,
     show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> dict[str, Any]:
-    """Convert a DiffResult to a SARIF 2.1.0 document (dict)."""
+    """Convert a DiffResult to a SARIF 2.1.0 document (dict).
+
+    *severity_config*, when given, drives the invocation's ``exitCode`` /
+    ``executionSuccessful`` from the actual severity-aware gate instead of
+    inferring "passed" purely from ``result.verdict`` — compatibility and
+    "blocks CI" are independent decisions once severity configuration is in
+    play (e.g. an addition configured ``error`` blocks the build despite a
+    ``COMPATIBLE`` verdict). A ``severityGate`` properties block is added so
+    the reason is auditable in the SARIF document itself.
+    """
     tool_version = _tool_version()
 
     changes = list(result.changes)
@@ -197,8 +265,18 @@ def to_sarif(
             rules_seen[rule_id] = _rule_for(change.kind)
         sarif_results.append(_result_for(change, result))
 
+    severity_gate = (
+        _severity_gate_properties(result, severity_config)
+        if severity_config is not None
+        else None
+    )
+
     # Overall ABI verdict as a notification
-    invocation_success = result.verdict != Verdict.BREAKING
+    invocation_success = (
+        severity_gate["exitCode"] == 0
+        if severity_gate is not None
+        else result.verdict != Verdict.BREAKING
+    )
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -216,18 +294,29 @@ def to_sarif(
                 "invocations": [
                     {
                         "executionSuccessful": invocation_success,
-                        # Exit codes mirror abicheck compare CLI contract:
-                        # BREAKING=4 (mapped to SARIF 1), API_BREAK=2, others=0.
-                        # COMPATIBLE_WITH_RISK intentionally exits 0 — binary-compatible,
-                        # deployment risk is surfaced via exitCodeDescription only.
+                        # Exit codes mirror abicheck compare CLI contract when no
+                        # severity_config is given: BREAKING=4 (mapped to SARIF 1),
+                        # API_BREAK=2, others=0. COMPATIBLE_WITH_RISK intentionally
+                        # exits 0 — binary-compatible, deployment risk is surfaced
+                        # via exitCodeDescription only. When severity_config *is*
+                        # given, the exit code instead follows the severity-aware
+                        # gate (severityGate.exitCode below) — see docstring.
                         "exitCode": (
-                            4
-                            if result.verdict == Verdict.BREAKING
-                            else 2
-                            if result.verdict == Verdict.API_BREAK
-                            else 0
+                            severity_gate["exitCode"]
+                            if severity_gate is not None
+                            else (
+                                4
+                                if result.verdict == Verdict.BREAKING
+                                else 2
+                                if result.verdict == Verdict.API_BREAK
+                                else 0
+                            )
                         ),
-                        "exitCodeDescription": result.verdict.value,
+                        "exitCodeDescription": (
+                            f"{result.verdict.value} (severity-gated)"
+                            if severity_gate is not None
+                            else result.verdict.value
+                        ),
                     }
                 ],
                 "results": sarif_results,
@@ -248,6 +337,11 @@ def to_sarif(
                     "library": result.library,
                     "changeCount": len(changes),
                     "suppressedCount": result.suppressed_count,
+                    **(
+                        {"severityGate": severity_gate}
+                        if severity_gate is not None
+                        else {}
+                    ),
                     **(
                         {"redundantCount": result.redundant_count}
                         if result.redundant_count > 0
@@ -367,9 +461,13 @@ def to_sarif_str(
     indent: int = 2,
     *,
     show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Serialize DiffResult to a SARIF JSON string."""
-    return json.dumps(to_sarif(result, show_only=show_only), indent=indent)
+    return json.dumps(
+        to_sarif(result, show_only=show_only, severity_config=severity_config),
+        indent=indent,
+    )
 
 
 def write_sarif(result: DiffResult, path: Path) -> None:

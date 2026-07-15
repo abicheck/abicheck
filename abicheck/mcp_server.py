@@ -33,7 +33,10 @@ import platform
 import sys
 import time as _time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .severity import SeverityConfig
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -374,8 +377,16 @@ def _render_output(
     report_mode: str = "full",
     show_impact: bool = False,
     stat: bool = False,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Render comparison result in the requested output format."""
+    """Render comparison result in the requested output format.
+
+    *severity_config*, when given, is forwarded to every format that
+    supports it (json, sarif, markdown, stat) so an MCP caller passing
+    ``severity_*`` arguments to :func:`abi_compare` gets the same
+    severity-aware report content the CLI's ``--severity-*`` flags produce —
+    without it, the MCP surface had no severity configuration at all.
+    """
     if fmt not in _VALID_FORMATS:
         msg = f"Unknown output format {fmt!r}. Valid formats: {sorted(_VALID_FORMATS)}"
         raise ValueError(msg)
@@ -383,21 +394,22 @@ def _render_output(
         if fmt == "json":
             from .reporter import to_stat_json
 
-            return to_stat_json(result)
+            return to_stat_json(result, severity_config=severity_config)
         from .reporter import to_stat
 
-        return to_stat(result)
+        return to_stat(result, severity_config=severity_config)
     if fmt == "json":
         return to_json(
             result,
             show_only=show_only,
             report_mode=report_mode,
             show_impact=show_impact,
+            severity_config=severity_config,
         )
     if fmt == "sarif":
         from .sarif import to_sarif_str
 
-        return to_sarif_str(result, show_only=show_only)
+        return to_sarif_str(result, show_only=show_only, severity_config=severity_config)
     if fmt == "html":
         from .html_report import generate_html_report
 
@@ -411,7 +423,11 @@ def _render_output(
             show_impact=show_impact,
         )
     return to_markdown(
-        result, show_only=show_only, report_mode=report_mode, show_impact=show_impact
+        result,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        severity_config=severity_config,
     )
 
 
@@ -553,6 +569,11 @@ def abi_compare(
     report_mode: str = "full",
     show_impact: bool = False,
     stat: bool = False,
+    severity_preset: str | None = None,
+    severity_abi_breaking: str | None = None,
+    severity_potential_breaking: str | None = None,
+    severity_quality_issues: str | None = None,
+    severity_addition: str | None = None,
 ) -> str:
     """Compare two ABI surfaces and report breaking changes.
 
@@ -566,6 +587,15 @@ def abi_compare(
     - COMPATIBLE_WITH_RISK: binary-compatible but deployment risk present
     - API_BREAK: source-level break (recompilation needed)
     - BREAKING: binary ABI break (old binaries will crash)
+
+    Without any ``severity_*`` argument, ``exit_code`` follows the legacy
+    verdict-based scheme (0/2/4, matching the verdicts above). Compatibility
+    and "blocks CI" are independent decisions once severity configuration is
+    in play (e.g. an addition can be configured to gate CI despite a
+    COMPATIBLE verdict) — passing any ``severity_*`` argument switches
+    ``exit_code``/``exit_code_scheme`` to the severity-aware scheme (mirrors
+    the CLI's ``--severity-*`` flags) and populates a ``severity`` block in a
+    JSON ``report``.
 
     Args:
         old_input: Path to old library (.so/.dll/.dylib) or JSON snapshot.
@@ -585,6 +615,14 @@ def abi_compare(
         report_mode: "full" (default) or "leaf" (root-type-grouped view).
         show_impact: If True, append an impact summary table.
         stat: If True, emit one-line summary instead of full report.
+        severity_preset: Severity preset: "default", "strict", or "info-only".
+            Presence of this (or any other severity_* argument) switches
+            exit_code to the severity-aware scheme.
+        severity_abi_breaking: Override severity for abi_breaking findings
+            ("error", "warning", or "info").
+        severity_potential_breaking: Override severity for potential_breaking findings.
+        severity_quality_issues: Override severity for quality_issues findings.
+        severity_addition: Override severity for addition findings.
     """
     t0 = _time.monotonic()
     try:
@@ -608,6 +646,33 @@ def abi_compare(
                     f"Valid policies: {', '.join(sorted(VALID_BASE_POLICIES))}",
                 }
             )
+
+        # Resolve severity config (any severity_* argument opts into the
+        # severity-aware exit-code scheme, matching the CLI's --severity-*
+        # flags). Validated early, before the expensive compare work.
+        severity_config: SeverityConfig | None = None
+        if any(
+            (
+                severity_preset,
+                severity_abi_breaking,
+                severity_potential_breaking,
+                severity_quality_issues,
+                severity_addition,
+            )
+        ):
+            from .errors import PolicyError
+            from .severity import resolve_severity_config
+
+            try:
+                severity_config = resolve_severity_config(
+                    severity_preset,
+                    abi_breaking=severity_abi_breaking,
+                    potential_breaking=severity_potential_breaking,
+                    quality_issues=severity_quality_issues,
+                    addition=severity_addition,
+                )
+            except PolicyError as exc:
+                return json.dumps({"status": "error", "error": str(exc)})
 
         # Resolve per-side headers
         shared = [_safe_read_path(h, label="header") for h in (headers or [])]
@@ -701,18 +766,33 @@ def abi_compare(
         # policy_file overrides the base policy).
         active_policy = result.policy
 
-        # Determine exit code (matches CLI semantics)
-        exit_code = 0
-        if result.verdict == Verdict.BREAKING:
-            exit_code = 4
-        elif result.verdict == Verdict.API_BREAK:
-            exit_code = 2
+        # Determine exit code: severity-aware scheme when any severity_*
+        # argument was given (compatibility and "blocks CI" are independent
+        # decisions once severity configuration is in play), else the legacy
+        # verdict scheme (matches CLI semantics).
+        if severity_config is not None:
+            from .severity import compute_exit_code
+
+            exit_code = compute_exit_code(
+                result.changes,
+                severity_config,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
+        else:
+            exit_code = 0
+            if result.verdict == Verdict.BREAKING:
+                exit_code = 4
+            elif result.verdict == Verdict.API_BREAK:
+                exit_code = 2
 
         # Build structured response
         response: dict[str, Any] = {
             "status": "ok",
             "verdict": result.verdict.value,
             "exit_code": exit_code,
+            "exit_code_scheme": "severity" if severity_config is not None else "legacy",
             "summary": {
                 "breaking": len(result.breaking),
                 "api_breaks": len(result.source_breaks),
@@ -745,6 +825,7 @@ def abi_compare(
             report_mode=report_mode,
             show_impact=show_impact,
             stat=stat,
+            severity_config=severity_config,
         )
         # When format is json, embed as nested object (not double-encoded string)
         if output_format == "json":

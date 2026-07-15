@@ -65,8 +65,16 @@ _VERDICT_LABEL = {
 # ---------------------------------------------------------------------------
 
 
-def to_stat(result: DiffResult) -> str:
-    """One-line summary for CI gates."""
+def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None) -> str:
+    """One-line summary for CI gates.
+
+    *severity_config*, when given, appends a ``gate: PASS|FAIL`` suffix
+    reflecting the actual severity-aware exit code — without it, ``--stat``
+    output has historically bypassed severity handling entirely (it
+    short-circuits in ``service.render_output`` before format dispatch), so
+    the verdict label alone could misreport whether the run actually blocks
+    CI once severity configuration is in play.
+    """
     summary = build_summary(result)
     label = _VERDICT_LABEL[result.verdict]
     parts = []
@@ -82,7 +90,24 @@ def to_stat(result: DiffResult) -> str:
     redundant_note = ""
     if result.redundant_count > 0:
         redundant_note = f" [{result.redundant_count} redundant hidden]"
-    return f"{label}: {detail} ({summary.total_changes} total){redundant_note}"
+    gate_note = ""
+    if severity_config is not None:
+        from .severity import compute_exit_code
+
+        exit_code = compute_exit_code(
+            result.changes,
+            severity_config,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        gate_note = (
+            f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
+        )
+    return (
+        f"{label}: {detail} ({summary.total_changes} total)"
+        f"{redundant_note}{gate_note}"
+    )
 
 
 # ---------------------------------------------------------------------------

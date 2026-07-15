@@ -1370,8 +1370,8 @@ def render_output(
     """
     if stat and fmt != "junit":
         if fmt == "json":
-            return to_stat_json(result)
-        return to_stat(result)
+            return to_stat_json(result, severity_config=severity_config)
+        return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":
         return _render_json_output(
@@ -1388,7 +1388,7 @@ def render_output(
     if fmt == "sarif":
         from .sarif import to_sarif_str
 
-        return to_sarif_str(result, show_only=show_only)
+        return to_sarif_str(result, show_only=show_only, severity_config=severity_config)
 
     if fmt == "html":
         from .html_report import generate_html_report

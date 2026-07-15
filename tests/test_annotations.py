@@ -626,6 +626,38 @@ class TestSeverityConfigAwareAnnotations:
         output = emit_github_annotations(result, severity_config=cfg)
         assert output.startswith("::error ")
 
+    def test_quality_finding_not_mislabeled_as_addition(self):
+        """Codex review on #549: a compatible *quality* finding (e.g.
+        soname_bump_unnecessary) surfaced by severity_config (the default
+        preset sets quality_issues=warning, no annotate_additions needed)
+        must not be titled "ABI Addition" — it isn't one."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(
+            ChangeKind.SONAME_BUMP_UNNECESSARY, "libfoo.so", "unnecessary bump",
+        )
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default")  # quality_issues=warning
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert line.startswith("::warning ")
+        assert "title=Quality Issue%3A soname_bump_unnecessary" in line
+        assert "ABI Addition" not in line
+
+    def test_genuine_addition_still_labeled_as_addition(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result(Verdict.COMPATIBLE, [c])
+        cfg = resolve_severity_config("default", addition="error")
+
+        annotations = collect_annotations(result, severity_config=cfg)
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert "title=ABI Addition%3A func_added" in line
+
     def test_frozen_namespace_floor_honoured_under_policy_override(self):
         """A policy-file override that demotes FUNC_REMOVED to COMPATIBLE must
         not silently downgrade a finding tagged frozen_namespace_violation —

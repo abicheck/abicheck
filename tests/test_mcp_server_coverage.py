@@ -418,7 +418,7 @@ class TestRenderOutput:
         result = _minimal_diff()
         monkeypatch.setattr(
             "abicheck.reporter.to_stat_json",
-            lambda r: '{"stat": "ok"}',
+            lambda r, **kw: '{"stat": "ok"}',
         )
         out = _render_output("json", result, _empty_snapshot(), _empty_snapshot(), stat=True)
         assert '"stat"' in out
@@ -428,7 +428,7 @@ class TestRenderOutput:
         result = _minimal_diff()
         monkeypatch.setattr(
             "abicheck.reporter.to_stat",
-            lambda r: "COMPATIBLE 0 breaking",
+            lambda r, **kw: "COMPATIBLE 0 breaking",
         )
         out = _render_output("markdown", result, _empty_snapshot(), _empty_snapshot(), stat=True)
         assert "COMPATIBLE" in out
@@ -634,7 +634,7 @@ class TestAbiCompareTool:
         )
         monkeypatch.setattr(
             "abicheck.reporter.to_stat_json",
-            lambda r: '{"stat": true}',
+            lambda r, **kw: '{"stat": true}',
         )
         result_str = abi_compare(
             old_input=str(old), new_input=str(new), stat=True,
