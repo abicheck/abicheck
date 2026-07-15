@@ -109,11 +109,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   unknown keys and enum `ValueError`s, so it reported OK on both while
   `compare`/`config show-effective` would silently ignore the user's
   setting. `validate` now reports both shapes as findings (Codex review) —
-  extended in a follow-up pass to also cover string subkeys
-  (`debug.debuginfod_url: 456`) and list-of-string subkeys
-  (`sources.public_headers: 123`), the two other value shapes
-  `BuildConfig.from_dict` silently coerces (fresh Codex review evidence
-  after the initial bool-only pass).
+  extended in two follow-up passes to also cover string subkeys
+  (`debug.debuginfod_url: 456`), list-of-string subkeys
+  (`sources.public_headers: 123`), and recognized top-level *scalars* that
+  aren't block keys (`exit_code_scheme: 123`, `version: "1"`) — the value
+  shapes `BuildConfig.from_dict` silently coerces one level up from the
+  block subkeys (fresh Codex review evidence after each prior pass).
 
 - **`strip_vendor_hash` (vendor-hash normalization for wheel-repaired
   libraries) over-matched purely-decimal suffixes, causing a false negative

@@ -76,6 +76,11 @@ _LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public_symbols"}),
     "compile": frozenset({"include_dirs", "defines"}),
 }
+# Recognized top-level keys that are scalars, not blocks (i.e. absent from
+# _KNOWN_BLOCK_KEYS) — the same wrong-type-silently-coerced gap as the block
+# subkeys above, one level up.
+_TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset({"exit_code_scheme"})
+_TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
 
 _INIT_TEMPLATE = """\
 # abicheck project configuration (ADR-037 D4). Every key is optional; a
@@ -158,14 +163,15 @@ def config_validate(path: Path | None) -> None:
     unknown top-level/block key as a structured, always-visible finding. It
     also checks that a known block key is actually a mapping (not e.g.
     ``severity: strict``, which ``from_dict`` otherwise silently treats as
-    ``{}``) and that a known boolean/string/list subkey holds a value of that
+    ``{}``), that a known boolean/string/list subkey holds a value of that
     type (not e.g. ``scope: {public: "false"}``, ``debug: {debuginfod_url:
-    456}``, or ``sources: {public_headers: 123}``, which ``from_dict``
-    otherwise silently treats as unset/empty) — all quiet no-ops in the real
-    loader, not errors, so `validate` would report OK on a file that behaves
-    nothing like the user intended. It also runs the same
-    ``BuildConfig.from_dict`` parser
-    every real command uses, so a recognized key with an invalid enum value
+    456}``, or ``sources: {public_headers: 123}``), and that a recognized
+    top-level scalar (``exit_code_scheme``/``version``, not a block key)
+    holds a value of its type (not e.g. ``exit_code_scheme: 123`` or
+    ``version: "1"``) — all quiet no-ops in the real loader, not errors, so
+    `validate` would report OK on a file that behaves nothing like the user
+    intended. It also runs the same ``BuildConfig.from_dict`` parser every
+    real command uses, so a recognized key with an invalid enum value
     (``severity.preset: bogus``, ``exit_code_scheme: typo``, ...) is caught
     here too. Exits 0 when clean, 1 when unknown keys or
     invalid values are found, 64 when no config file could be found or it
@@ -205,7 +211,30 @@ def config_validate(path: Path | None) -> None:
             findings.append(f"unknown top-level key: {key!r}")
             continue
         known_block = BuildConfig._KNOWN_BLOCK_KEYS.get(key)
-        if known_block is None or value is None:
+        if known_block is None:
+            # A recognized top-level *scalar* (not a block key) — e.g.
+            # exit_code_scheme/version — has the same silent-coercion gap:
+            # `_str(data, "exit_code_scheme", "auto")` and the `isinstance(v,
+            # int)` version check both fall back to their default rather
+            # than raising on the wrong type. `risk_rules`/`crosschecks` are
+            # deliberately excluded: BuildConfig.from_dict never parses
+            # them at all (consumed by risk.py/crosscheck.py instead), so
+            # there is no from_dict-level type contract here to mirror
+            # (Codex review — fresh evidence after the block/subkey passes).
+            if value is not None:
+                if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
+                    findings.append(
+                        f"{key} must be a string, got {type(value).__name__}: {value!r}"
+                    )
+                elif key in _TOP_LEVEL_INT_KEYS and (
+                    not isinstance(value, int) or isinstance(value, bool)
+                ):
+                    findings.append(
+                        f"{key} must be an integer, got "
+                        f"{type(value).__name__}: {value!r}"
+                    )
+            continue
+        if value is None:
             continue
         if not isinstance(value, dict):
             # `severity: strict` (a bare scalar where a mapping is required)

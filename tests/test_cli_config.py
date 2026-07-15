@@ -177,6 +177,38 @@ class TestConfigValidate:
             result = runner.invoke(main, ["config", "validate"])
             assert result.exit_code == 0, result.output
 
+    def test_wrong_type_top_level_string_is_reported(self) -> None:
+        """A recognized top-level scalar (not a block key) has the same
+        silent-coercion gap one level up: `exit_code_scheme: 123` is
+        silently treated as "auto" by `_str(data, "exit_code_scheme",
+        "auto")` — `validate` must catch this too, not just block subkeys
+        (Codex review — fresh evidence after the block/subkey passes)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "exit_code_scheme: 123\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "exit_code_scheme must be a string" in result.output
+
+    def test_wrong_type_top_level_int_is_reported(self) -> None:
+        """`version` must be an int (excluding bool) — a non-int is silently
+        treated as 0 by BuildConfig.from_dict's isinstance guard."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text('version: "1"\n', encoding="utf-8")
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "version must be an integer" in result.output
+
+    def test_version_accepts_plain_int(self) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text("version: 1\n", encoding="utf-8")
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 0, result.output
+
     def test_explicit_path(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
