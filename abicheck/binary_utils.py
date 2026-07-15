@@ -135,7 +135,16 @@ def detect_archive(path: str | Path) -> bool:
 #: component leading to one) so ordinary hyphenated names — e.g.
 #: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
 #: are never touched (G9, ADR: docs/development/plans/g9-wheel-vendored-matching.md).
-_VENDOR_HASH_RE = re.compile(r"-[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)")
+#: The lookahead ``(?=[0-9a-f]*[a-f])`` requires at least one non-decimal hex
+#: letter in the run: without it, a purely-decimal 6-16-digit suffix (a
+#: legitimate embedded build/version number, e.g. ``libfoo-100200.so.1`` vs.
+#: ``libfoo-100300.so.1``) also matched and stripped to the same key,
+#: silently hiding a real SONAME/dependency change as vendor-hash noise —
+#: the exact false-negative an ABI-breaking-change detector must not produce
+#: (self-review finding).
+_VENDOR_HASH_RE = re.compile(
+    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)"
+)
 
 
 def strip_vendor_hash(name: str) -> str:

@@ -43,15 +43,38 @@ from .cli import _EXIT_USAGE_ERROR, main
 from .cli_helpers_compare import discover_project_config
 from .cli_options import scope_options, severity_options
 
-# Block subkeys BuildConfig.from_dict() parses with `_opt_bool` (see
-# buildsource/inline.py) — a non-bool value there (e.g. YAML string "false"
-# instead of the boolean `false`) is silently dropped rather than raising, so
-# `config validate` checks these explicitly (Codex review).
+# Block subkeys BuildConfig.from_dict() parses with `_opt_bool`/`_opt_str`/
+# `_str`/`_strs` (see buildsource/inline.py) — a value of the wrong type
+# there (e.g. the YAML string "false" for a boolean, or a bare number for a
+# string/list field) is silently dropped/coerced rather than raising, so
+# `config validate` checks all three shapes explicitly (Codex review — the
+# initial pass only covered booleans; a recognized string/list key with the
+# wrong type, e.g. ``sources.public_headers: 123`` or
+# ``debug.debuginfod_url: 456``, still reported OK). Keep these three maps in
+# sync with ``BuildConfig.from_dict``'s helper calls when a new subkey is
+# added — nothing enforces that automatically.
 _BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
     "suppression": frozenset({"strict", "require_justification"}),
     "compile": frozenset({"nostdinc"}),
     "debug": frozenset({"dwarf_only", "debuginfod"}),
+}
+_STR_SUBKEYS: dict[str, frozenset[str]] = {
+    "build": frozenset({"system", "query", "compile_db"}),
+    "sources": frozenset({"graph"}),
+    "severity": frozenset(
+        {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
+    ),
+    "source": frozenset({"method"}),
+    "compile": frozenset({"frontend", "std", "sysroot"}),
+    "debug": frozenset({"format", "debuginfod_url"}),
+}
+# `_strs()` accepts either a list of strings or a single bare string (folded
+# to a 1-element list), so both shapes are valid here — anything else isn't.
+_LIST_SUBKEYS: dict[str, frozenset[str]] = {
+    "sources": frozenset({"public_headers", "exclude"}),
+    "scope": frozenset({"public_symbols"}),
+    "compile": frozenset({"include_dirs", "defines"}),
 }
 
 _INIT_TEMPLATE = """\
@@ -135,11 +158,13 @@ def config_validate(path: Path | None) -> None:
     unknown top-level/block key as a structured, always-visible finding. It
     also checks that a known block key is actually a mapping (not e.g.
     ``severity: strict``, which ``from_dict`` otherwise silently treats as
-    ``{}``) and that a known boolean subkey holds an actual boolean (not e.g.
-    ``scope: {public: "false"}``, which ``from_dict`` otherwise silently
-    treats as unset) — both are quiet no-ops in the real loader, not errors,
-    so `validate` would report OK on a file that behaves nothing like the
-    user intended. It also runs the same ``BuildConfig.from_dict`` parser
+    ``{}``) and that a known boolean/string/list subkey holds a value of that
+    type (not e.g. ``scope: {public: "false"}``, ``debug: {debuginfod_url:
+    456}``, or ``sources: {public_headers: 123}``, which ``from_dict``
+    otherwise silently treats as unset/empty) — all quiet no-ops in the real
+    loader, not errors, so `validate` would report OK on a file that behaves
+    nothing like the user intended. It also runs the same
+    ``BuildConfig.from_dict`` parser
     every real command uses, so a recognized key with an invalid enum value
     (``severity.preset: bogus``, ``exit_code_scheme: typo``, ...) is caught
     here too. Exits 0 when clean, 1 when unknown keys or
@@ -197,13 +222,27 @@ def config_validate(path: Path | None) -> None:
             if sub not in known_block:
                 findings.append(f"unknown key: {key}.{sub!r}")
                 continue
+            # Same silent-coercion problem one level down as the block-level
+            # check above: `_opt_bool`/`_opt_str`/`_str`/`_strs` return
+            # None/default/[] for a value of the wrong type (e.g. the YAML
+            # string "false" instead of the boolean `false`, or a bare number
+            # for a string/list field), so the setting is quietly ignored
+            # rather than rejected (Codex review).
             if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
-                # Same silent-coercion problem one level down: `_opt_bool`
-                # returns None for a non-bool value (e.g. the YAML string
-                # "false" instead of the boolean `false`), so the setting is
-                # quietly ignored rather than rejected (Codex review).
                 findings.append(
                     f"{key}.{sub} must be a boolean, got "
+                    f"{type(sub_value).__name__}: {sub_value!r}"
+                )
+            elif sub in _STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
+                findings.append(
+                    f"{key}.{sub} must be a string, got "
+                    f"{type(sub_value).__name__}: {sub_value!r}"
+                )
+            elif sub in _LIST_SUBKEYS.get(key, ()) and not isinstance(
+                sub_value, (list, str)
+            ):
+                findings.append(
+                    f"{key}.{sub} must be a string or list of strings, got "
                     f"{type(sub_value).__name__}: {sub_value!r}"
                 )
 

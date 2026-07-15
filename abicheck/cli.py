@@ -1526,7 +1526,27 @@ main.add_command(compat_group)
 # Sub-command modules. Imported for side-effect so their @main.command(...)
 # decorators register the commands on the Click group above. They sit in
 # sibling files to keep this module under the AI-readiness file-size limit.
+#
+# When this file is run directly (``python -m abicheck.cli``, distinct from
+# the documented ``python -m abicheck`` entry point in __main__.py but still
+# a common thing to type), Python executes it as the ``__main__`` module —
+# under a DIFFERENT sys.modules key than ``abicheck.cli``. Every sibling
+# module below does ``from .cli import main``, a fresh relative import that
+# would otherwise re-execute this file a second time under the real
+# ``abicheck.cli`` key, producing a second, empty ``main`` Click group; every
+# ``@main.command(...)`` decorator then attaches to that second group, not
+# the one actually running, so `python -m abicheck.cli --help` silently
+# listed only the handful of commands defined directly in this file (dump/
+# compare/compat) and omitted every sibling-registered one (config, doctor,
+# scan, appcompat, ...). Alias the already-running module under its real
+# package name first, so the relative import below reuses it instead
+# (Codex review).
 # ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import sys
+
+    sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
+
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline

@@ -108,7 +108,37 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   default by the real loader's `isinstance` guards — `validate` only checked
   unknown keys and enum `ValueError`s, so it reported OK on both while
   `compare`/`config show-effective` would silently ignore the user's
-  setting. `validate` now reports both shapes as findings (Codex review).
+  setting. `validate` now reports both shapes as findings (Codex review) —
+  extended in a follow-up pass to also cover string subkeys
+  (`debug.debuginfod_url: 456`) and list-of-string subkeys
+  (`sources.public_headers: 123`), the two other value shapes
+  `BuildConfig.from_dict` silently coerces (fresh Codex review evidence
+  after the initial bool-only pass).
+
+- **`strip_vendor_hash` (vendor-hash normalization for wheel-repaired
+  libraries) over-matched purely-decimal suffixes, causing a false negative
+  on a real version change.** The regex required 6-16 hex characters but
+  never checked for an actual non-decimal hex *letter*, so a legitimate
+  embedded build/version number like `libfoo-100200.so.1` and
+  `libfoo-100300.so.1` collapsed to the same normalized key as if they were
+  the same library with two different content-hash rebuilds — silently
+  hiding a real `SONAME_CHANGED`/`NEEDED_ADDED`/`NEEDED_REMOVED` behind the
+  same noise-suppression this PR added for genuine hash-only rebuilds. Real
+  auditwheel/delocate hashes are hex digest fragments and essentially never
+  come out purely decimal, so the regex now requires at least one `a`-`f`
+  letter in the matched run (self-review finding).
+
+- **`python -m abicheck.cli` (distinct from the documented `python -m
+  abicheck` entry point, but a common thing to type) silently registered
+  only `dump`/`compare`/`compat` and omitted every sibling-module command
+  (`config`, `doctor`, `scan`, `appcompat`, ...).** Running `cli.py` directly
+  as `__main__` and then having a sibling module `from .cli import main`
+  re-executes `cli.py` a second time under the real `abicheck.cli`
+  sys.modules key, producing a second, empty Click group that every
+  `@main.command(...)` decorator attached to instead of the one actually
+  running. `cli.py` now aliases the running `__main__` module under its real
+  package name before the sibling-module imports run, so both entry points
+  register every command (Codex review).
 
 - **`abicheck config show-effective` crashed with a raw Python traceback on
   an invalid config value**, instead of the usage/config error `compare`/

@@ -136,6 +136,47 @@ class TestConfigValidate:
             assert result.exit_code == 1
             assert "scope.public must be a boolean" in result.output
 
+    def test_wrong_type_string_subkey_is_reported(self) -> None:
+        """A string subkey given a non-string (e.g. a bare number) is
+        silently treated as unset by `_opt_str` — `validate` must catch this
+        too, not just boolean subkeys (Codex review — fresh evidence after
+        the initial bool-only pass)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "debug:\n  debuginfod_url: 456\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert "debug.debuginfod_url must be a string" in result.output
+
+    def test_wrong_type_list_subkey_is_reported(self) -> None:
+        """A list-of-strings subkey given a non-list/non-string (e.g. a bare
+        number) is silently treated as empty by `_strs` — `validate` must
+        catch this too (Codex review)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "sources:\n  public_headers: 123\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert (
+                "sources.public_headers must be a string or list of strings"
+                in result.output
+            )
+
+    def test_list_subkey_accepts_bare_string(self) -> None:
+        """A bare string is a valid (1-element) value for a list subkey —
+        `_strs` folds it, so this must NOT be reported as wrong-type."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "sources:\n  public_headers: include/foo.h\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 0, result.output
+
     def test_explicit_path(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
