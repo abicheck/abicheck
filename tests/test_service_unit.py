@@ -1202,6 +1202,20 @@ class TestRunCompare:
         assert old_call["public_headers"] == [old_h]
         assert new_call["public_headers"] == [new_h]
 
+    def test_debuginfod_url_appended_last_preserves_positional_order(self):
+        # Codex review (PR #551): debuginfod_url was originally inserted right
+        # after enable_debuginfod, ahead of scope_to_public_surface — any
+        # caller invoking run_compare positionally that far would have every
+        # later positional argument silently shift by one slot. It must be
+        # the LAST parameter so no pre-existing positional binding moves.
+        import inspect
+
+        params = list(inspect.signature(run_compare).parameters)
+        assert params[-1] == "debuginfod_url"
+        assert params.index("scope_to_public_surface") == (
+            params.index("enable_debuginfod") + 1
+        )
+
 
 # ── render_output() ─────────────────────────────────────────────────────────
 

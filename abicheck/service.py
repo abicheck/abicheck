@@ -1320,11 +1320,11 @@ def run_compare(
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
-    debuginfod_url: str | None = None,
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    debuginfod_url: str | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1332,6 +1332,11 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
+
+    ``debuginfod_url`` is appended after every pre-existing parameter (not
+    inserted alongside ``enable_debuginfod``) so a caller invoking this
+    positionally keeps binding every argument after it to the same parameter
+    it always did (Codex review, PR #551).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
