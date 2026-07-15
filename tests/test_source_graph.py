@@ -647,6 +647,66 @@ def test_include_graph_public_header_drift_suppressed_without_old_coverage() -> 
     assert inc == []
 
 
+def test_include_graph_public_header_drift_suppressed_for_narrowed_new_side() -> None:
+    # A narrowed new side (a PR/--since scan folding only the changed compile
+    # units) only examined a subset of the project. It must not report public
+    # headers outside that subset as having "left" the include graph just
+    # because its narrowed pass has real, but partial, edges (Codex review;
+    # _include_graph_fully_covered).
+    from abicheck.buildsource.include_graph import augment_graph_with_includes
+
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo",
+                            public_headers=["inc/foo.h", "inc/bar.h"],
+                            confidence=Confidence.HIGH))
+    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
+                                       target_id="target://libfoo"))
+    b.compile_units.append(CompileUnit(id="cu://bar", source="src/bar.cpp",
+                                       target_id="target://libfoo"))
+    old = build_source_graph(b)
+    augment_graph_with_includes(
+        old, {"cu://foo": ["inc/foo.h"], "cu://bar": ["inc/bar.h"]}
+    )
+    old.finalize()
+    # New side only re-examined src/foo.cpp (a narrowed PR-diff scan) — its
+    # include graph genuinely has "inc/bar.h" missing, but only because that
+    # TU was never walked, not because the header stopped being included.
+    new = build_source_graph(b)
+    augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
+    new.narrowed_passes["include_graph"] = True
+    new.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
+    new.finalize()
+    inc = [c for c in diff_source_graph_findings(old, new)
+           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    assert inc == []
+
+
+def test_include_graph_public_header_drift_trusted_for_matching_narrowed_scope() -> None:
+    # Two sides narrowed to the *identical* scope examined the exact same
+    # compile units, so a header appearing in one but not the other within
+    # that shared scope is real drift, not a coverage gap.
+    from abicheck.buildsource.include_graph import augment_graph_with_includes
+
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
+                            confidence=Confidence.HIGH))
+    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
+                                       target_id="target://libfoo"))
+    old = build_source_graph(b)
+    old.narrowed_passes["include_graph"] = True
+    old.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
+    old.finalize()
+    new = build_source_graph(b)
+    augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
+    new.narrowed_passes["include_graph"] = True
+    new.narrowed_scope["include_graph"] = frozenset({"src/foo.cpp"})
+    new.finalize()
+    inc = [c for c in diff_source_graph_findings(old, new)
+           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    assert len(inc) == 1
+    assert inc[0].symbol == "inc/foo.h"
+
+
 def test_localize_symbol_walks_the_graph() -> None:
     from abicheck.buildsource.source_graph import localize_symbol
 

@@ -943,10 +943,36 @@ def _include_graph_covered(graph: SourceGraphSummary) -> bool:
     include-graph folding never ran, whether because the caller never
     requested it (an older snapshot dumped before the fold became automatic)
     or clang was unavailable.
+
+    This is a coarse "was there any include-graph collection at all" signal
+    — it does not distinguish a full project-wide pass from a narrowed
+    (PR/``--since``-scoped) or degraded (partial per-TU failures) one. Use
+    :func:`_include_graph_fully_covered` instead when trusting the
+    *absence* of a header from the set (:func:`_include_graph_drift_findings`).
     """
     return _pass_ran(graph, "include_graph") or any(
         e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
     )
+
+
+def _include_graph_fully_covered(graph: SourceGraphSummary) -> bool:
+    """Whether *graph*'s absence of a header from the include graph is trustworthy.
+
+    A narrowed pass (folding only the changed compile units) or a degraded one
+    (a live extractor that hit per-TU diagnostics after finding some edges)
+    only examined a subset of the project — its edges are real, but a header
+    missing from that subset says nothing about whether the *rest* of the
+    project still includes it, exactly the same coverage-honesty distinction
+    :func:`_common_dependency_edge_kinds` already applies to the call/type
+    dependency families (Codex review: an earlier version of this gate only
+    checked :func:`_include_graph_covered`, which a narrowed or degraded pass
+    still satisfies via its real, but partial, edges — reporting every public
+    header outside that partial subset as having newly entered/left the
+    include graph against a fully-covered baseline).
+    """
+    if _pass_narrowed(graph, "include_graph") or _pass_degraded(graph, "include_graph"):
+        return False
+    return _include_graph_covered(graph)
 
 
 def _include_graph_drift_findings(
@@ -959,17 +985,32 @@ def _include_graph_drift_findings(
     """Public headers entering/leaving the compiled include graph.
 
     Trusts a side's *absence* of a header from the include graph only when
-    that side actually collected include-graph data at all
-    (:func:`_include_graph_covered`) — mirroring the same "an absent/never-
-    run pass is not evidence of absence" principle
-    :func:`_common_dependency_edge_kinds` already applies to the dependency-
-    edge families. Without this, comparing a snapshot with no include-graph
-    data (dumped before the fold existed/became automatic, or where clang
-    was unavailable) against one that has it would read *every* header in
-    the covered side as newly "entered"/"left" — a coverage artifact, not a
-    real change (Codex review: this became a much more likely everyday
-    scenario once include-graph folding stopped being an explicit opt-in
-    flag both sides had to remember to pass identically).
+    that side is *fully* covered (:func:`_include_graph_fully_covered`) — a
+    confirmed, unnarrowed, undegraded pass, or an unmarked/legacy graph with
+    real recorded edges — mirroring the same "an absent/never-run pass is not
+    evidence of absence" principle :func:`_common_dependency_edge_kinds`
+    already applies to the dependency-edge families. Without this, comparing
+    a snapshot with no include-graph data (dumped before the fold existed/
+    became automatic, or where clang was unavailable) against one that has it
+    would read *every* header in the covered side as newly "entered"/"left"
+    — a coverage artifact, not a real change (Codex review: this became a
+    much more likely everyday scenario once include-graph folding stopped
+    being an explicit opt-in flag both sides had to remember to pass
+    identically).
+
+    A narrowed (PR/``--since``-scoped) or degraded pass only examined a
+    subset of the project, so its bare "covered" signal is not enough either
+    — a subsequent Codex review caught that a narrowed/degraded ``new`` side
+    still had real ``COMPILE_UNIT_INCLUDES_FILE`` edges (making
+    :func:`_include_graph_covered` true) while having examined only a handful
+    of changed TUs, which read every public header outside that partial
+    subset as having "left" the include graph against a fully-covered
+    baseline. The one exception: two sides narrowed to the *identical*,
+    non-empty scope (:func:`_pass_scope`) examined the exact same compile
+    units, so their header sets are a complete, apples-to-apples slice of
+    that shared scope — any header entering/leaving it is real drift, not a
+    coverage gap (mirrors ``_common_dependency_edge_kinds``'s
+    ``narrowed_confirmed`` branch).
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
@@ -980,7 +1021,16 @@ def _include_graph_drift_findings(
         _public_headers_in_include_graph(old),
         _public_headers_in_include_graph(new),
     )
-    old_covered, new_covered = _include_graph_covered(old), _include_graph_covered(new)
+    old_scope = _pass_scope(old, "include_graph")
+    new_scope = _pass_scope(new, "include_graph")
+    same_narrowed_scope = (
+        _pass_narrowed(old, "include_graph")
+        and _pass_narrowed(new, "include_graph")
+        and bool(old_scope)
+        and old_scope == new_scope
+    )
+    old_covered = _include_graph_fully_covered(old) or same_narrowed_scope
+    new_covered = _include_graph_fully_covered(new) or same_narrowed_scope
     entered = sorted(new_inc - old_inc) if old_covered else []
     left = sorted(old_inc - new_inc) if new_covered else []
     for hdr in entered + left:
