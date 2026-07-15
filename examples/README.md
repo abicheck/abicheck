@@ -38,7 +38,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 - 🟡 **BAD PRACTICE** — library works today but mismanages the ABI contract
 - ✅ **BASELINE** — no change; expected passing state
 
-Some policy-escalated source/contract breaks (notably case30, case35) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
+Some policy-escalated source/contract breaks (notably case30, case95, case109 — each an underlying API_BREAK fact escalated to BREAKING by default policy; see each case's `policy_note` in `ground_truth.json`) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
 
 ## Runtime Demos vs. abicheck Analysis
 
@@ -149,6 +149,15 @@ the way it previously did (stale at a 169-case catalog for several releases).
   treats `API_BREAK` and `COMPATIBLE` as equivalent for the default PASS/FAIL gate (a case's
   `category_strict` field flags — but does not block on — the collapse); CI does not currently
   set `ABICHECK_STRICT_CATEGORY=1` to make a collapse blocking.
+- **Verdicts are matched exactly — there is no `API_BREAK`/`COMPATIBLE` normalization.**
+  `tests/validate_examples.py` compares the actual verdict to `expected` verbatim; an
+  earlier `_normalize_verdict` helper that treated the two as equivalent has been removed.
+  The one declared escape hatch is a case-level `known_gap`: it only turns a verdict
+  mismatch into `XFAIL` (not a silent PASS) when `ground_truth.json` explicitly records
+  the gap, and the full example matrix additionally requires a case's own `source_smoke`
+  oracle to have proven the canonical verdict before crediting it as `COVERED` — see
+  `case111_enumerable_thread_specific_lambda_ambiguity`, the catalog's one case covered
+  this way instead of by a direct detector/CLI match (`docs/development/examples-validation-runbook.md`).
 - **Build/source coverage is a 10-case smoke, not full L3–L5 coverage.** The `--artifact-variant
   build-source` lane exercises a representative subset (the cases in
   `BUILD_SOURCE_PROOF_CASES`), not every L3/L4/L5 case in the catalog.

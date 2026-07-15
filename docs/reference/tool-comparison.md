@@ -47,16 +47,25 @@ ABICC/libabigail on a stable cross-tool corpus?"
 | Runtime smoke | 181 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
 | Release headers | 181 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
 | Stripped headers | 181 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
-| Build/source smoke | 7 representative cases | `validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 7 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
+| Build/source smoke | 10 representative cases | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 10 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
 | Binary competitor scan | 134 shared-library pairs × 2 external tools | abicc/ABI Compliance Checker and libabigail `abidiff` over built `.so` pairs | 268 tool results: abicc 134, abidiff 134 | Competitor `.so` lane only; fixture/source-only L2/L5/source cases are represented in dedicated lanes, not as missing `.so` results |
 | Scan-depth matrix | 141 comparable targets × 5 depths | `abicheck scan --depth {binary,headers,build,source,full}` | 141/141 scans completed at each depth. Correct/FP/FN on all 141 comparable targets: binary 79 / 1 / 61; headers 115 / 0 / 26; build 115 / 0 / 26; source 141 / 0 / 0; full 141 / 0 / 0 | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
-Current unresolved full-example cases: `case97_api_depends_on_consumer_env`,
-`case105_concept_tightening`, and
-`case111_enumerable_thread_specific_lambda_ambiguity`. These remain blockers for
-claiming full-catalog expected-behavior coverage.
+`case97_api_depends_on_consumer_env` and `case105_concept_tightening` are
+resolved: the former is proven by its own source_smoke oracle at the default
+compiler lanes, the latter by the build/source (L4) lane. The one case not
+proven by a direct detector/CLI match is
+`case111_enumerable_thread_specific_lambda_ambiguity`: every evidence tier
+(L0-L5) currently reaches `COMPATIBLE`, a real tracked detector gap (see its
+README), so it is credited in the full example matrix via known-gap-oracle
+provenance — its own `source_smoke` proves the canonical `API_BREAK` — rather
+than direct coverage. See
+[the validation runbook](../development/examples-validation-runbook.md) for
+the direct-vs-known-gap-oracle accounting (180 direct + 1 known-gap-oracle
+= 181 `COVERED`).
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
-`case117_no_unique_address`, and `case129_struct_return_convention`.
+`case117_no_unique_address`, `case129_struct_return_convention`,
+`case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
 
 The full release/stripped/build-source mode matrix is intentionally not a
 blocking CI gate. It remains a manual extended-scan path because it is much

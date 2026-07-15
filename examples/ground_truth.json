@@ -422,11 +422,19 @@
    "category": "api_break",
    "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this looks like a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. But this case's own source_smoke proves the real failure mode: brace-initialization (`ets({})`) becomes an ambiguous overload at downstream call sites, so recompilation against v2 fails while already-built v1 binaries keep working \u2014 the textbook definition of API_BREAK. Member of the oneTBB regression suite.",
    "expected": "API_BREAK",
+   "detectability": "none",
+   "observed_detector_behavior": {
+    "verdict": "COMPATIBLE",
+    "kinds": [
+     "func_added"
+    ]
+   },
    "expected_kinds": [
     "func_added"
    ],
-   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
-   "min_evidence": "L0",
+   "known_detector_gap": "constructor_overload_ambiguity",
+   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. `expected_kinds` records the same `func_added` that `observed_detector_behavior.kinds` does \u2014 the actual, insufficient, currently-observed detector output \u2014 not a calibration target that proves API_BREAK; `detectability: none` (and the derived `min_evidence: none`, see scripts/evidence_tiers.py) is the explicit signal that no L0-L5 tier proves the canonical verdict, so `min_evidence` must not be misread as \"L0 already sees this.\" Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
+   "min_evidence": "none",
    "platforms": [
     "linux",
     "macos"
@@ -2087,7 +2095,7 @@
    ]
   },
   "case30_field_qualifiers": {
-   "abi_break": true,
+   "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",

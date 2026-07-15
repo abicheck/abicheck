@@ -479,3 +479,88 @@ def test_forced_validate_results_path_matches_ci_workflow(tmp_path: Path) -> Non
         json.dumps({"summary": {"PASS": 2}, "results": []}), encoding="utf-8"
     )
     assert (results / "validate_examples.json").exists()
+
+
+def _synthetic_ground_truth(tmp_path: Path, verdicts: dict) -> Path:
+    gt = tmp_path / "ground_truth.json"
+    gt.write_text(json.dumps({"verdicts": verdicts}), encoding="utf-8")
+    return gt
+
+
+def test_all_xfail_without_source_smoke_is_unresolved_not_covered(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """An all-XFAIL known_gap case with no declared oracle must not earn free
+    known-gap-oracle coverage — only a case whose own source_smoke actually
+    proved the canonical verdict may skip direct detector/CLI proof."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    case_id = "caseXX_unproven_known_gap"
+    gt = _synthetic_ground_truth(
+        tmp_path,
+        {
+            case_id: {
+                "expected": "API_BREAK",
+                "known_gap": "claims a detector gap but has no oracle behind it",
+            }
+        },
+    )
+    monkeypatch.setattr(matrix, "GROUND_TRUTH", gt)
+    xfail_lane = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "XFAIL",
+                "expected": "API_BREAK",
+                "got": "COMPATIBLE",
+                "message": "known_gap: claims a detector gap but has no oracle behind it",
+            }
+        ]
+    }
+    result = matrix.build_matrix(
+        gcc=xfail_lane, clang=xfail_lane, bundle=None, special_cli=None, runtime=None
+    )
+    row = next(r for r in result["results"] if r["case_id"] == case_id)
+    assert row["status"] == "UNRESOLVED"
+    assert "no source_smoke oracle" in row["note"]
+
+
+def test_all_xfail_with_source_smoke_is_covered_known_gap_oracle(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The mirror case: an all-XFAIL known_gap case that DOES declare a
+    source_smoke oracle is legitimately COVERED via known-gap-oracle
+    provenance (this is case111's actual shape)."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    case_id = "caseXX_proven_known_gap"
+    gt = _synthetic_ground_truth(
+        tmp_path,
+        {
+            case_id: {
+                "expected": "API_BREAK",
+                "known_gap": "detector gap, but proven by this case's own source_smoke",
+                "source_smoke": {
+                    "v1": {"code": "int main(){return 0;}", "expect": "success"},
+                    "v2": {"code": "int main(){return bad;}", "expect": "failure"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(matrix, "GROUND_TRUTH", gt)
+    xfail_lane = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "XFAIL",
+                "expected": "API_BREAK",
+                "got": "COMPATIBLE",
+                "message": "known_gap: detector gap, but proven by this case's own source_smoke",
+            }
+        ]
+    }
+    result = matrix.build_matrix(
+        gcc=xfail_lane, clang=xfail_lane, bundle=None, special_cli=None, runtime=None
+    )
+    row = next(r for r in result["results"] if r["case_id"] == case_id)
+    assert row["status"] == "COVERED"
+    assert row["proof_lane"] == "known-gap-xfail"
+    assert row["provenance"] == "known-gap-oracle"

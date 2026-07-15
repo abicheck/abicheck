@@ -1,14 +1,25 @@
 # Case 30 — Field Qualifier Changes (const, volatile)
 
-**Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy escalated source break)
+**Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
 
+The underlying compatibility **fact** is `API_BREAK`, exactly like case95 and
+case109: `abi_break: false`, `api_break: true` in `ground_truth.json` — the
+binary layout of `struct SensorConfig` is unchanged, so an already-built
+consumer binary keeps linking and running against v2 unmodified. `expected`
+is escalated to `BREAKING` as a **policy** decision (see `policy_note` in
+`ground_truth.json`): the project's default policy conservatively routes
+field-qualifier changes through the same contract detector as other
+field-type changes, treating the semantic-divergence risk (a `const` write
+becoming a silent bug, a missing `volatile` risking stale-cache reads) as
+release-blocking rather than recompile-only. This is a deliberate policy
+choice, not a claim that the binary itself is incompatible.
 
 ## Compatibility classification
 
-- **Binary ABI impact:** Usually layout-compatible (no size/offset change), but stale optimization assumptions can still break behavior.
-- **Source compatibility impact:** BREAKING (`const` write errors, `volatile` contract changes).
-- **Runtime behavior impact:** Semantic divergence (stale reads / UB writes) without linker errors.
-- **Policy severity:** **BREAKING** in `ground_truth.json` (`source_break` category escalated by policy).
+- **Binary ABI impact:** None — layout-compatible (no size/offset change); an existing binary keeps linking and running against v2.
+- **Source compatibility impact:** API_BREAK (`const` write errors, `volatile` contract changes) — the underlying compatibility fact.
+- **Runtime behavior impact:** Semantic divergence (stale reads / UB writes) without linker errors, if an old binary's assumptions about a now-`const`/`volatile` field are wrong.
+- **Policy severity:** **BREAKING** in `ground_truth.json` — a policy escalation of the API_BREAK fact, not a second independent verdict.
 
 ## What changes
 
@@ -18,11 +29,11 @@
 | `raw_value` | `int raw_value` | `volatile int raw_value` | Compiler must not cache reads |
 | `cache_hits` | `int cache_hits` | `int cache_hits` | Unchanged |
 
-## Why this IS a (semantic) ABI break
+## Why this is an API break despite binary compatibility
 
 The binary layout of `struct SensorConfig` is **unchanged** — `const` and `volatile`
 do not affect size, alignment, or field offsets. An existing binary will link and
-run against the v2 library without error.
+run against the v2 library without error. This is not an ABI break.
 
 However, the **API contract** has changed:
 

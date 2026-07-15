@@ -222,12 +222,16 @@ class CaseResult(NamedTuple):
     # Retained in the artifact schema for compatibility. Exact verdict matching
     # means a PASS is "ok"; category collapse is no longer possible.
     category_strict: str = "n/a"
-    # Strict-kinds signal: "ok" | "mismatch" | "n/a". "mismatch" means the
-    # verdict-level PASS/XFAIL/FAIL above hides a ground_truth.json
-    # expected_kinds/expected_absent_kinds violation — a case can get the
-    # right severity for the wrong detector reason. Surfaced (not failed) by
-    # default; check_validate_results.py can gate on it via
-    # ABICHECK_STRICT_KINDS=1.
+    # Strict-kinds signal: "ok" | "mismatch" | "gap-observed" | "n/a".
+    # "mismatch" means the verdict-level PASS/XFAIL/FAIL above hides a
+    # ground_truth.json expected_kinds/expected_absent_kinds violation — a
+    # case can get the right severity for the wrong detector reason.
+    # "gap-observed" means the case is a declared `detectability: none` known
+    # gap (e.g. case111): expected_kinds there records the tool's actual,
+    # insufficient current output for regression tracking, not a calibration
+    # target that proves the canonical verdict, so it must not read as "ok"
+    # (full calibration). Surfaced (not failed) by default;
+    # check_validate_results.py can gate "mismatch" via ABICHECK_STRICT_KINDS=1.
     kinds_strict: str = "n/a"
     kinds_strict_detail: str = ""
     # The full set of ChangeKind names the run actually emitted (not just the
@@ -1356,6 +1360,13 @@ def _kinds_strict_signal(
     missing = [k for k in (expected_kinds or []) if k not in got_set]
     unexpected = [k for k in (expected_absent_kinds or []) if k in got_set]
     if not missing and not unexpected:
+        if entry.get("detectability") == "none":
+            return (
+                "gap-observed",
+                "expected_kinds here is the tool's current insufficient "
+                "observation under a declared detector gap, not calibration "
+                "proof of the canonical verdict",
+            )
         return "ok", ""
     parts = []
     if missing:
@@ -1431,13 +1442,10 @@ def _run_all_cases(
 
 
 def _summary_counts(results: list[CaseResult]) -> dict[str, int]:
-    """Count result statuses, plus the strict-category and strict-kinds tallies."""
+    """Count result statuses, plus the strict-kinds tally."""
     counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
-    collapsed = sum(1 for r in results if r.category_strict == "collapsed")
-    if collapsed:
-        counts["CATEGORY_COLLAPSED"] = collapsed
     kinds_mismatch = sum(1 for r in results if r.kinds_strict == "mismatch")
     if kinds_mismatch:
         counts["KINDS_MISMATCH"] = kinds_mismatch
