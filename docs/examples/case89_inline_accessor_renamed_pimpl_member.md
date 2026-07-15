@@ -51,11 +51,11 @@ The tiny app happens to read the same value, but its inline accessor is compiled
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case87_inline_accessor_renamed_pimpl_member_app case87_inline_accessor_renamed_pimpl_member_v2
+cmake --build /tmp/abicheck-examples-build --target case89_inline_accessor_renamed_pimpl_member_app case89_inline_accessor_renamed_pimpl_member_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case89_inline_accessor_renamed_pimpl_member/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case89_inline_accessor_renamed_pimpl_member/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # class_count = 2
 ```

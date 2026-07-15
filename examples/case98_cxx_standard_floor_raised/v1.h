@@ -1,4 +1,4 @@
-// case116 v1 — header works under C++17 (uses no post-17 facilities).
+// case98 v1 — header works under C++17 (uses no post-17 facilities).
 #pragma once
 
 namespace lib {

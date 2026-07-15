@@ -458,6 +458,197 @@ class TestDwarfStructFieldTypeChanged:
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in _kinds(r)
 
 
+class TestDwarfStructFieldRenamed:
+    """DWARF-level pure field rename: same offset, same type and size."""
+
+    def test_pure_rename_reports_field_renamed_not_removed(self):
+        old_dwarf = DwarfMetadata(
+            structs={"Point": StructLayout(
+                name="Point", byte_size=4,
+                fields=[FieldInfo("x", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Point": StructLayout(
+                name="Point", byte_size=4,
+                fields=[FieldInfo("col", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED not in kinds
+
+    def test_pointer_to_value_retype_is_not_treated_as_a_bare_rename(self):
+        """A same-offset pointer->value retype under a new field name must not
+        be masked as a harmless FIELD_RENAMED just because
+        ``_normalize_type_name`` (which also strips pointer/reference sigils
+        for tag-spelling comparisons) equates "Handle *" with "Handle" —
+        the field's byte size differs, so this is a real layout break
+        (regression guard for a review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_ptr", "Handle *", 0, 8)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=32,
+                fields=[FieldInfo("handle_obj", "Handle", 0, 32)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+    def test_same_size_pointer_to_value_retype_is_not_a_bare_rename(self) -> None:
+        """A byte-size guard alone is not enough: an 8-byte pointer and an
+        (incidentally) 8-byte-by-value class at the same offset must not be
+        treated as a rename either, because ``_normalize_type_name`` strips
+        the ``*`` and would equate "Handle *" with "Handle" regardless of
+        size (second review finding on the case35 fix — exact, non-lossy
+        type-spelling equality is required, not normalized-name-plus-size).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_ptr", "Handle *", 0, 8)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("handle_obj", "Handle", 0, 8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+    def test_same_spelling_different_resolved_size_is_not_a_bare_rename(self) -> None:
+        """Exact type-spelling equality is still not enough: the *same*
+        typedef name ("Word") can resolve to a different byte size across
+        versions (e.g. widened 4B->8B elsewhere) while the field at this
+        offset keeps a stable-looking struct size via padding. This must
+        fall through to STRUCT_FIELD_REMOVED, not a bare FIELD_RENAMED
+        (third review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("word_val", "Word", 0, 4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Widget": StructLayout(
+                name="Widget", byte_size=8,
+                fields=[FieldInfo("word_value", "Word", 0, 8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+    def test_bitfield_width_change_at_same_offset_is_not_a_bare_rename(self) -> None:
+        """A bit-field at the same byte offset that changes width under a
+        new name must not be masked as a bare rename either — same
+        reasoning as the byte-size guard, applied to bit_offset/bit_size
+        (third review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[FieldInfo("mode", "unsigned int", 0, 4,
+                                   bit_offset=0, bit_size=4)])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[FieldInfo("mode_flags", "unsigned int", 0, 4,
+                                   bit_offset=0, bit_size=8)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+    def test_multiple_same_byte_bitfields_each_matched_by_own_bit_position(
+        self,
+    ) -> None:
+        """Two renamed bit-fields sharing a byte_offset must each find their
+        *own* rename candidate by bit position/width, not whichever one a
+        single-value ``dict[byte_offset]`` index happened to keep last — a
+        naive index silently drops every same-byte candidate but the most
+        recently inserted, so only one of the two renames would be seen and
+        the other would misreport as a real STRUCT_FIELD_REMOVED (review
+        finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[
+                    FieldInfo("a", "unsigned int", 0, 4, bit_offset=0, bit_size=1),
+                    FieldInfo("b", "unsigned int", 0, 4, bit_offset=1, bit_size=1),
+                ])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Flags": StructLayout(
+                name="Flags", byte_size=4,
+                fields=[
+                    FieldInfo("x", "unsigned int", 0, 4, bit_offset=0, bit_size=1),
+                    FieldInfo("y", "unsigned int", 0, 4, bit_offset=1, bit_size=1),
+                ])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        kinds = _kinds(r)
+        assert ChangeKind.STRUCT_FIELD_REMOVED not in kinds
+        assert ChangeKind.FIELD_RENAMED in kinds
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        assert {(c.old_value, c.new_value) for c in renames} == {("a", "x"), ("b", "y")}
+
+    def test_two_same_layout_fields_collapsing_to_one_do_not_both_rename(
+        self,
+    ) -> None:
+        """Two old fields with identical layout (offset, type, size,
+        bit position) collapsing to a single new field must not both be
+        reported as FIELD_RENAMED to the same target — only the first can
+        genuinely be "the same field renamed"; the other was really
+        removed. Without tracking which added field a rename has already
+        consumed, both would silently claim it, hiding the real removal
+        (review finding on the case35 fix).
+        """
+        old_dwarf = DwarfMetadata(
+            structs={"Overlay": StructLayout(
+                name="Overlay", byte_size=4,
+                fields=[
+                    FieldInfo("a", "int", 0, 4),
+                    FieldInfo("b", "int", 0, 4),
+                ])},
+            has_dwarf=True,
+        )
+        new_dwarf = DwarfMetadata(
+            structs={"Overlay": StructLayout(
+                name="Overlay", byte_size=4,
+                fields=[FieldInfo("x", "int", 0, 4)])},
+            has_dwarf=True,
+        )
+        r = compare(_snap(dwarf=old_dwarf), _snap(dwarf=new_dwarf))
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        removals = [c for c in r.changes if c.kind == ChangeKind.STRUCT_FIELD_REMOVED]
+        assert len(renames) == 1
+        assert len(removals) == 1
+        assert renames[0].new_value == "x"
+
+
 class TestDwarfStructAlignmentChanged:
     """DWARF-level struct alignment change (2 refs)."""
 

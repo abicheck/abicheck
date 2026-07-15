@@ -12,13 +12,13 @@
 
 ## What this case demonstrates
 
-`v1.h` and `v2.h` declare an identical public surface. The difference
-is the build contract: `v2` is compiled with `-std=c++20` (via
-`V2_COMPILE_OPTIONS` in `CMakeLists.txt`), so the `.so` was produced
-under a higher C++ standard floor than `v1`. Consumers still building
-with C++17 see no symbol churn but a freshly compiled TU against the
-new headers will hit any C++20-only constructs the library starts to
-require.
+`v1.h` and `v2.h` declare an identical public surface and neither uses any
+post-C++17 construct — a consumer TU including `v2.h` compiles unchanged
+under `-std=c++17` with both GCC and Clang (verified directly). The
+difference is entirely in the *library's own* build contract: `v2` is
+compiled with `-std=c++20` (via `V2_COMPILE_OPTIONS` in `CMakeLists.txt`),
+so the `.so` was produced under a higher C++ standard floor than `v1`
+while its public declaration set stays byte-identical.
 
 ## Why build context changes the verdict
 

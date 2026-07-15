@@ -69,6 +69,7 @@ from .diff_templates import (  # noqa: F401
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
+from .model import AccessLevel
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType
@@ -648,14 +649,23 @@ def _collect_field_rename_candidates(
     namespaces: tuple[str, ...],
 ) -> list[tuple[str, str, str]]:
     """Return ``(record_name, old_field, new_field)`` triples from FIELD_RENAMED changes
-    whose record belongs to an internal namespace."""
+    whose record belongs to an internal namespace.
+
+    FIELD_RENAMED's ``symbol`` is the (possibly namespace-qualified) record
+    name itself — e.g. ``mylib::detail::descriptor_impl`` — not a
+    ``Record::field`` pair; the field names live in ``old_value``/
+    ``new_value``. Splitting on the last ``::`` here used to strip the record
+    name down to its enclosing namespace (or drop it to ``""`` when
+    unqualified), so ``is_internal_type`` never matched and no candidate was
+    ever collected — this detector never actually fired (case89).
+    """
     from .internal_leak import is_internal_type  # local import: cycle-free
 
     candidates: list[tuple[str, str, str]] = []
     for ch in changes:
         if ch.kind != ChangeKind.FIELD_RENAMED:
             continue
-        record_name = ch.symbol.rsplit("::", 1)[0] if "::" in ch.symbol else ""
+        record_name = ch.symbol
         if not is_internal_type(record_name, namespaces):
             continue
         if ch.old_value and ch.new_value:
@@ -800,21 +810,145 @@ def _find_public_pimpl_holders(
     return found
 
 
+_OPERATOR_MARKER_RE = re.compile(r"::operator(?![A-Za-z0-9_])")
+
+
+def _last_top_level_space(text: str) -> int:
+    """Return the index of the last top-level (non-template-nested) space
+    in *text*, or -1 if none. "Top-level" excludes spaces nested inside a
+    template argument list's angle brackets, since those may themselves
+    contain spaces (e.g. ``"Foo<int, long>"``)."""
+    depth = 0
+    last_space = -1
+    for i, ch in enumerate(text):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        elif ch == " " and depth <= 0:
+            last_space = i
+    return last_space
+
+
+def _strip_leading_return_type(head: str) -> str:
+    """Strip a leading return type from a demangled function signature head.
+
+    Only a function template/specialization carries a return type ahead of
+    the qualified name in c++filt's output (e.g.
+    ``"int mylib::Widget::foo<int>"``); an ordinary function's head is
+    already bare (``"mylib::Widget::get"``). The return type is separated
+    from the qualified name by a top-level space, so take everything after
+    the last one rather than naively splitting on the first space.
+
+    Callers must route anything matching ``_OPERATOR_MARKER_RE`` through
+    ``_holder_of``'s operator special case instead — an operator's own name
+    can itself contain a top-level space (``"operator int"``,
+    ``"operator new"``) or even ``"::"`` (a qualified conversion-operator
+    target, ``"operator ns::Type"``), neither of which this generic
+    space/`::`-based split can tell apart from a real return-type boundary.
+    """
+    last_space = _last_top_level_space(head)
+    if last_space == -1:
+        return head
+    suffix = head[last_space + 1 :]
+    return suffix if "::" in suffix else head
+
+
+def _holder_of(head: str, holders: set[str]) -> str | None:
+    """Return the entry of *holders* that owns the qualified name in *head*.
+
+    *head* is a function signature with the parameter list already
+    stripped. *holders* may hold either fully-qualified record names or
+    bare/unqualified ones (``RecordType.name`` is not consistently
+    qualified — e.g. a nested class can appear as just ``"descriptor"``),
+    so both the full enclosing-scope name and its last segment are checked
+    against *holders*, mirroring how a record name would be looked up
+    either way.
+
+    An operator overload (conversion operator, ``operator new``/``delete``,
+    ``operator+`` etc.) is handled as an explicit special case: its own
+    name can contain a top-level space and/or ``"::"`` (a qualified
+    conversion-operator target type, ``"operator ns::Type"``), which
+    otherwise defeats both the return-type-stripping heuristic and a plain
+    trailing ``rsplit("::", 1)``. The enclosing scope is unambiguous
+    regardless of what the operator's own name contains: everything before
+    the last ``"::operator"`` marker. That prefix can itself still carry a
+    leading return type when the operator is a function template/
+    specialization (``"int mylib::Widget::operator+<int>"`` for
+    ``operator+<int>``) — stripped the same way, but *without* the
+    ``"::"``-in-suffix guard the generic path needs: this prefix is known
+    to end exactly at a qualified-name boundary (right before
+    ``"::operator"``), so any top-level space within it can only be a
+    return-type separator, never operator-name punctuation.
+    """
+    operator_matches = list(_OPERATOR_MARKER_RE.finditer(head))
+    if operator_matches:
+        holder = head[: operator_matches[-1].start()]
+        last_space = _last_top_level_space(holder)
+        if last_space != -1:
+            holder = holder[last_space + 1 :]
+    else:
+        qualified = _strip_leading_return_type(head)
+        if "::" not in qualified:
+            return None
+        holder = qualified.rsplit("::", 1)[0]
+    if not holder:
+        return None
+    if holder in holders:
+        return holder
+    leaf = _last_segment(holder)
+    if leaf in holders:
+        return leaf
+    return None
+
+
 def _inline_accessors_for(
     functions: Iterable[Function],
     holders: set[str],
 ) -> list[Function]:
-    """Return inline public functions whose qualified name lives inside
-    one of *holders*."""
+    """Return inline public functions whose enclosing class is one of *holders*.
+
+    ``Function.name`` is the short (unqualified) demangled name — e.g.
+    ``"get_class_count"``, not ``"mylib::descriptor::get_class_count"`` — so
+    it never contains ``::`` and the old prefix-based lookup here always
+    missed every real accessor. Recover the enclosing scope from the mangled
+    name via a single batched demangle instead (functions without ``::`` in
+    ``name`` are the common case, not the exception).
+
+    Requires ``access == PUBLIC``: a private/protected inline helper that
+    happens to reach into the pimpl is not something a consumer's own code
+    can call, so its stale-name inline body cannot be baked into consumer
+    binaries the way a public accessor's can — treating it as evidence of a
+    reachable break would be a false API_BREAK for an internal-only rename
+    (caught in review).
+    """
+    from .demangle import demangle_batch
+
+    fns = list(functions)
+    inline_fns = [
+        fn
+        for fn in fns
+        if getattr(fn, "is_inline", False) and getattr(fn, "access", None) == AccessLevel.PUBLIC
+    ]
+    if not inline_fns:
+        return []
+
+    already_qualified = [fn for fn in inline_fns if "::" in fn.name]
+    needs_demangle = [fn for fn in inline_fns if "::" not in fn.name and fn.mangled]
+    demangled = demangle_batch([fn.mangled for fn in needs_demangle])
+
     out: list[Function] = []
-    for fn in functions:
-        if not getattr(fn, "is_inline", False):
+    for fn in already_qualified:
+        if _holder_of(fn.name, holders) is not None:
+            out.append(fn)
+    for fn in needs_demangle:
+        text = demangled.get(fn.mangled)
+        if not text:
             continue
-        # qualified function name like "ns::Holder::method_name"
-        if "::" not in fn.name:
+        head = text.split("(", 1)[0]
+        if "::" not in head:
             continue
-        holder = fn.name.rsplit("::", 1)[0]
-        if holder in holders:
+        if _holder_of(head, holders) is not None:
             out.append(fn)
     return out
 

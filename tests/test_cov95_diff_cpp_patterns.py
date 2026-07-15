@@ -51,6 +51,7 @@ from abicheck.diff_cpp_patterns import (
 )
 from abicheck.model import (
     AbiSnapshot,
+    AccessLevel,
     Function,
     RecordType,
     TypeField,
@@ -66,6 +67,7 @@ def _fn(
     mangled: str | None = None,
     *,
     is_inline: bool = False,
+    access: AccessLevel = AccessLevel.PUBLIC,
 ) -> Function:
     return Function(
         name=name,
@@ -73,6 +75,7 @@ def _fn(
         return_type="void",
         params=[],
         is_inline=is_inline,
+        access=access,
     )
 
 
@@ -406,6 +409,93 @@ class TestInlineAccessorsFor:
         fn = _fn("mylib::Other::get", "_Zget", is_inline=True)
         assert _inline_accessors_for([fn], {"mylib::Widget"}) == []
 
+    def test_private_inline_helper_skipped(self) -> None:
+        # A private/protected inline helper that happens to reach into the
+        # pimpl isn't callable by consumer code, so it can't bake a stale
+        # name into a consumer binary the way a public accessor's inline
+        # body can — treating it as accessor evidence would be a false
+        # API_BREAK for an internal-only rename (review finding on the
+        # case89 fix).
+        fn = _fn(
+            "mylib::Widget::get",
+            "_Zget",
+            is_inline=True,
+            access=AccessLevel.PRIVATE,
+        )
+        assert _inline_accessors_for([fn], {"mylib::Widget"}) == []
+
+    def test_unqualified_holder_matched_via_last_segment(self) -> None:
+        # RecordType.name is not consistently fully-qualified in practice —
+        # a nested/pimpl-holding class can be recorded as just "descriptor"
+        # rather than "mylib::descriptor" — while the demangled function
+        # scope is always fully qualified. The last-segment fallback (not
+        # just an exact-string match) is what makes real case89-style
+        # matching work; a regression here silently drops every real
+        # accessor match (review-driven regression guard).
+        fn = _fn("get_class_count", "_ZNK5mylib10descriptor15get_class_countEv", is_inline=True)
+        out = _inline_accessors_for([fn], {"descriptor"})
+        assert out == [fn]
+
+    def test_conversion_operator_accessor_matched_despite_internal_space(self) -> None:
+        # A conversion operator demangles with a space *inside its own
+        # name* ("mylib::Widget::operator int") and carries no leading
+        # return type at all, unlike a templated function. Stripping on the
+        # last top-level space unconditionally would discard the real
+        # qualified prefix and leave just "int", losing the "::" needed to
+        # find a holder (review finding on the templated-accessor fix).
+        fn = _fn("operator int", "_ZNK5mylib6WidgetcviEv", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
+    def test_qualified_conversion_operator_target_is_not_mistaken_for_return_type(
+        self,
+    ) -> None:
+        # A conversion operator whose target type is itself qualified
+        # ("operator ns::Type") has a top-level space (from "operator") AND
+        # a "::" in what follows (from "ns::Type") — exactly the signal the
+        # generic return-type-stripping heuristic uses to decide a split is
+        # safe. Stripping there yields just "ns::Type", losing the
+        # "mylib::Widget" prefix entirely (review finding on the
+        # conversion-operator fix); the "::operator" marker must be
+        # special-cased ahead of that heuristic instead.
+        # Function.name carries only the bare target ("operator Type", per
+        # real castxml/DWARF output — DW_AT_name never includes the
+        # target's own namespace) so this fn is demangled rather than
+        # treated as already-qualified; the demangled text is what
+        # actually surfaces the qualified target.
+        fn = _fn(
+            "operator Type",
+            "_ZNK5mylib6WidgetcvN2ns4TypeEEv",
+            is_inline=True,
+        )
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
+    def test_templated_operator_accessor_matched_despite_leading_return_type(
+        self,
+    ) -> None:
+        # A templated operator overload (e.g. `operator+<int>`) gets the
+        # same leading-return-type treatment from c++filt as any other
+        # function template/specialization: "int mylib::Widget::operator+
+        # <int>(int) const". The "::operator" special case must still
+        # strip that leading "int " before comparing against holders, not
+        # just locate the marker (review finding on the
+        # qualified-conversion-operator fix).
+        fn = _fn("operator+", "_ZNK5mylib6WidgetplIiEEiT_", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
+    def test_templated_accessor_matched_despite_leading_return_type(self) -> None:
+        # c++filt includes a leading return type for a function
+        # template/specialization (e.g. "int mylib::Widget::foo<int>(int)")
+        # that ordinary functions never carry. A naive
+        # ``head.rsplit("::", 1)[0]`` on that text yields "int mylib::Widget"
+        # instead of "mylib::Widget", missing every templated inline
+        # accessor (review finding on the case89 fix).
+        fn = _fn("foo", "_ZN5mylib6Widget3fooIiEEiT_", is_inline=True)
+        out = _inline_accessors_for([fn], {"mylib::Widget"})
+        assert out == [fn]
+
 
 class TestEmitInlineBodyFindings:
     def test_no_pimpl_holder_skips_candidate(self) -> None:
@@ -492,7 +582,10 @@ class TestDetectInlineBodyNoCandidates:
         assert detect_inline_body_renamed_member(old, new, changes) == []
 
     def test_field_renamed_candidate_path(self) -> None:
-        # Drive the FIELD_RENAMED collector (lines 682-686).
+        # Drive the FIELD_RENAMED collector (lines 682-686). FIELD_RENAMED's
+        # real symbol is the bare record name (see _diff_field_renames /
+        # diff_types._diff_removed_field) — the field names live in
+        # old_value/new_value, not appended to symbol as "Record::field".
         holder = RecordType(
             name="mylib::Widget",
             kind="class",
@@ -500,13 +593,15 @@ class TestDetectInlineBodyNoCandidates:
             fields=[TypeField(name="impl_", type="mylib::detail::Impl*")],
         )
         impl = RecordType(name="mylib::detail::Impl", kind="class", size_bits=32)
-        inline_fn = _fn("mylib::Widget::get", "_Zget", is_inline=True)
+        # Function.name is the short (unqualified) demangled name — no "::" —
+        # so the enclosing class is recovered via the mangled name instead.
+        inline_fn = _fn("get", "_ZN5mylib6Widget3getEv", is_inline=True)
         old = _snap(functions=[inline_fn], types=[impl, holder])
         new = _snap(functions=[inline_fn], types=[impl, holder])
         changes = [
             Change(
                 kind=ChangeKind.FIELD_RENAMED,
-                symbol="mylib::detail::Impl::a_",
+                symbol="mylib::detail::Impl",
                 description="",
                 old_value="a_",
                 new_value="b_",

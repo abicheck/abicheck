@@ -1473,23 +1473,40 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
         # 3. Removed fields — check for reserved-field activations first
         removed_names = sorted(old_fields.keys() - new_fields.keys())
         added_names = new_fields.keys() - old_fields.keys()
-        # Build added-field index by byte_offset for reserved-field matching
-        added_by_offset: dict[int, FieldInfo] = {
-            new_fields[fn].byte_offset: new_fields[fn]
-            for fn in added_names
-            if not _RESERVED_FIELD_RE.match(fn)
-        }
+        # Build added-field index by byte_offset for reserved-field matching.
+        # A list per offset, not a single value: two renamed bit-fields can
+        # legitimately share a byte_offset (e.g. two 1-bit flags in the same
+        # storage byte), and a plain ``dict[int, FieldInfo]`` comprehension
+        # would silently keep only the last one, leaving every other
+        # same-byte bit-field with no candidate to match against and
+        # falling through to a false STRUCT_FIELD_REMOVED (caught in
+        # review).
+        added_by_offset: dict[int, list[FieldInfo]] = {}
+        for fn in added_names:
+            if _RESERVED_FIELD_RE.match(fn):
+                continue
+            added_by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
         reserved_matched: set[str] = set()
+        # Tracks candidates already consumed by a pure-rename match below, so
+        # a second removed field at the same offset (e.g. two overlapping
+        # anonymous-union members collapsing to one field) can't also claim
+        # it — without this, both would report FIELD_RENAMED to the same
+        # target and the fact that one of them was genuinely dropped would
+        # be silently hidden (caught in review).
+        rename_matched: set[str] = set()
 
         for fname in removed_names:
+            old_f = old_fields[fname]
             if _RESERVED_FIELD_RE.match(fname):
-                old_f = old_fields[fname]
-                candidate = added_by_offset.get(old_f.byte_offset)
-                if (
-                    candidate is not None
-                    and not _RESERVED_FIELD_RE.match(candidate.name)
-                    and old_f.type_name == candidate.type_name
-                ):
+                candidate = next(
+                    (
+                        c
+                        for c in added_by_offset.get(old_f.byte_offset, [])
+                        if c.name not in rename_matched and old_f.type_name == c.type_name
+                    ),
+                    None,
+                )
+                if candidate is not None:
                     changes.append(
                         make_change(
                             ChangeKind.USED_RESERVED_FIELD,
@@ -1500,6 +1517,80 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                         )
                     )
                     reserved_matched.add(candidate.name)
+                    continue
+            else:
+                # Pure rename: same offset, identical type, different name.
+                # Report FIELD_RENAMED (API_BREAK) directly instead of a
+                # STRUCT_FIELD_REMOVED that would falsely claim the field no
+                # longer exists — mirrors the rename-skip already done for
+                # enum members below (ENUM_MEMBER_RENAMED). This does not
+                # depend on `_diff_field_renames` (over AbiSnapshot.types, a
+                # different model with its own type-name strings) also firing
+                # for the same pair — relying on that would silently drop the
+                # finding entirely whenever the two independent extractors
+                # spell the type differently (caught in review). Emitting the
+                # same FIELD_RENAMED shape here is safe either way: the
+                # post-processing dedup pass collapses an exact duplicate if
+                # `_diff_field_renames` also matches.
+                # _normalize_type_name is lossy by design (it also strips
+                # pointer/reference sigils to compare "struct Foo *" against
+                # "Foo" for the *tag-spelling* case), so it alone would equate
+                # "Foo *" with "Foo" and even a byte-size guard cannot save
+                # it: a same-size pointer-to-inline-value retype (e.g.
+                # "Handle *" (8B) -> an 8-byte-by-value "Handle") would still
+                # pass a size check while being a real layout/representation
+                # break (caught in review — twice). Require exact, non-lossy
+                # equality of the raw type spelling instead of any
+                # normalized comparison. Spelling alone is still not enough,
+                # though: the *same* typedef name can resolve to a different
+                # size/bit-layout across versions (e.g. "Word" widened
+                # 4B->8B elsewhere, or a bit-field at the same byte offset
+                # changing width) without the spelling changing at all, so
+                # also require byte_size and bit_offset/bit_size to match
+                # (caught in review — three times now). This is strictly
+                # narrower than a real rename check would ideally be (a
+                # harmless "struct Foo *" vs "Foo *" spelling difference now
+                # falls through to STRUCT_FIELD_REMOVED instead of
+                # FIELD_RENAMED) but never misclassifies a genuine type or
+                # layout change as a bare rename. Scanning the full
+                # same-offset candidate list (not just one arbitrary entry)
+                # also matters when two bit-fields share a byte_offset —
+                # each removed bit-field must find *its own* matching
+                # candidate by bit position/width, not whichever one a
+                # single-value dict happened to keep (caught in review —
+                # four times now). And a matched candidate must be excluded
+                # from further matches (`rename_matched`) — otherwise two
+                # removed fields with identical layout at the same offset
+                # (overlapping anonymous-union members collapsing to one
+                # field) would both claim the same new field as their
+                # rename target, hiding that one of them was genuinely
+                # dropped (caught in review — five times now).
+                candidate = next(
+                    (
+                        c
+                        for c in added_by_offset.get(old_f.byte_offset, [])
+                        if (
+                            c.name not in reserved_matched
+                            and c.name not in rename_matched
+                            and old_f.type_name == c.type_name
+                            and old_f.byte_size == c.byte_size
+                            and old_f.bit_offset == c.bit_offset
+                            and old_f.bit_size == c.bit_size
+                        )
+                    ),
+                    None,
+                )
+                if candidate is not None:
+                    rename_matched.add(candidate.name)
+                    changes.append(
+                        make_change(
+                            ChangeKind.FIELD_RENAMED,
+                            symbol=name,
+                            name=name,
+                            old=fname,
+                            new=candidate.name,
+                        )
+                    )
                     continue
             changes.append(
                 make_change(

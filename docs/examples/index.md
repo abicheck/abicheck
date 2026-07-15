@@ -16,8 +16,8 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 101 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 15 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 100 | ABI breaks: existing consumers will fail at runtime. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 16 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
 | 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 25 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 30 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 5 | Identical ABI/API — baseline control cases. |
@@ -39,8 +39,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 101 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 15 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [Breaking](by-category/breaking.md) | 100 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [API Break](by-category/api_break.md) | 16 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 25 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
@@ -87,7 +87,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case32_param_defaults](case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case33_pointer_level](case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
 | [case34_access_level](case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
-| [case35_field_rename](case35_field_rename.md) | - Field Rename | 🔴 BREAKING | Breaking |
+| [case35_field_rename](case35_field_rename.md) | - Field Rename | 🟠 API_BREAK | API Break |
 | [case36_anon_struct](case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
 | [case37_base_class](case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |

@@ -222,6 +222,14 @@ class CaseResult(NamedTuple):
     # Retained in the artifact schema for compatibility. Exact verdict matching
     # means a PASS is "ok"; category collapse is no longer possible.
     category_strict: str = "n/a"
+    # Strict-kinds signal: "ok" | "mismatch" | "n/a". "mismatch" means the
+    # verdict-level PASS/XFAIL/FAIL above hides a ground_truth.json
+    # expected_kinds/expected_absent_kinds violation — a case can get the
+    # right severity for the wrong detector reason. Surfaced (not failed) by
+    # default; check_validate_results.py can gate on it via
+    # ABICHECK_STRICT_KINDS=1.
+    kinds_strict: str = "n/a"
+    kinds_strict_detail: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -628,17 +636,22 @@ def _build_compare_cmd(
     return cmd
 
 
-def _run_compare_and_parse(compare_cmd: list[str]) -> tuple[str | None, str | None]:
-    """Run the compare command and parse its JSON verdict.
+def _run_compare_and_parse(
+    compare_cmd: list[str],
+) -> tuple[str | None, tuple[str, ...], str | None]:
+    """Run the compare command and parse its JSON verdict and change kinds.
 
-    Returns ``(verdict, None)`` on success or ``(None, error_msg)`` on failure.
+    Returns ``(verdict, kinds, None)`` on success or ``(None, (), error_msg)``
+    on failure. *kinds* is every ``changes[].kind`` in the report, used to
+    check ``expected_kinds``/``expected_absent_kinds`` from ground_truth.json.
     """
     rc = subprocess.run(compare_cmd, capture_output=True, text=True, timeout=60)
     try:
         data = json.loads(rc.stdout)
-        return data.get("verdict", "UNKNOWN"), None
     except json.JSONDecodeError:
-        return None, f"invalid JSON from compare: {rc.stdout[:200]}"
+        return None, (), f"invalid JSON from compare: {rc.stdout[:200]}"
+    kinds = tuple(c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict))
+    return data.get("verdict", "UNKNOWN"), kinds, None
 
 
 def _dump_and_compare(
@@ -655,10 +668,11 @@ def _dump_and_compare(
     new_build_info: Path | None = None,
     sources: bool = False,
     pattern_verdicts: bool = False,
-) -> tuple[str | None, str | None]:
-    """Run abicheck dump+compare. Returns (verdict, error_msg).
+) -> tuple[str | None, tuple[str, ...], str | None]:
+    """Run abicheck dump+compare. Returns (verdict, kinds, error_msg).
 
-    On success *error_msg* is None. On failure *verdict* is None.
+    On success *error_msg* is None. On failure *verdict* is None and *kinds*
+    is empty.
     """
     snap1 = tmp / "snap1.json"
     cmd1 = _build_dump_cmd(
@@ -672,7 +686,7 @@ def _dump_and_compare(
     )
     r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=120)
     if r1.returncode != 0:
-        return None, f"dump v1 failed: {r1.stderr[:200]}"
+        return None, (), f"dump v1 failed: {r1.stderr[:200]}"
 
     snap2 = tmp / "snap2.json"
     cmd2 = _build_dump_cmd(
@@ -686,7 +700,7 @@ def _dump_and_compare(
     )
     r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
     if r2.returncode != 0:
-        return None, f"dump v2 failed: {r2.stderr[:200]}"
+        return None, (), f"dump v2 failed: {r2.stderr[:200]}"
 
     compare_cmd = _build_compare_cmd(
         snap1=snap1,
@@ -1252,7 +1266,7 @@ def run_case(
             )
 
     # Dump + compare
-    got, dc_err = _dump_and_compare(
+    got, got_kinds, dc_err = _dump_and_compare(
         tmp, v1_so, v2_so, v1_hdr, v2_hdr,
         scope_public_headers=bool(entry.get("scope_public_headers", False)),
         old_build_source=old_build_source,
@@ -1292,9 +1306,45 @@ def run_case(
     if smoke_proof:
         combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
         result = result._replace(message=combined)
+    kinds_strict, kinds_detail = _kinds_strict_signal(entry, result, got_kinds)
     return result._replace(
-        category_strict=_category_strict_signal(entry, result, source_layers)
+        category_strict=_category_strict_signal(entry, result, source_layers),
+        kinds_strict=kinds_strict,
+        kinds_strict_detail=kinds_detail,
     )
+
+
+def _kinds_strict_signal(
+    entry: dict,
+    result: CaseResult,
+    got_kinds: tuple[str, ...],
+) -> tuple[str, str]:
+    """Check ``expected_kinds``/``expected_absent_kinds`` against the actual run.
+
+    ground_truth.json's ``expected_kinds`` (must appear) and
+    ``expected_absent_kinds`` (must not appear) are richer than the top-level
+    verdict string: a case can PASS/XFAIL on verdict alone while the specific
+    detector that fired is not the one the case is meant to calibrate. Only
+    meaningful for a case that actually ran compare (PASS/FAIL/XFAIL); SKIP/
+    ERROR results carry no *got_kinds* to check against.
+    """
+    if result.status not in ("PASS", "FAIL", "XFAIL"):
+        return "n/a", ""
+    expected_kinds = entry.get("expected_kinds")
+    expected_absent_kinds = entry.get("expected_absent_kinds")
+    if not expected_kinds and not expected_absent_kinds:
+        return "n/a", ""
+    got_set = set(got_kinds)
+    missing = [k for k in (expected_kinds or []) if k not in got_set]
+    unexpected = [k for k in (expected_absent_kinds or []) if k in got_set]
+    if not missing and not unexpected:
+        return "ok", ""
+    parts = []
+    if missing:
+        parts.append(f"expected_kinds missing: {missing}")
+    if unexpected:
+        parts.append(f"expected_absent_kinds present: {unexpected}")
+    return "mismatch", "; ".join(parts)
 
 
 def _category_strict_signal(
@@ -1363,13 +1413,16 @@ def _run_all_cases(
 
 
 def _summary_counts(results: list[CaseResult]) -> dict[str, int]:
-    """Count result statuses, plus the strict-category collapse tally."""
+    """Count result statuses, plus the strict-category and strict-kinds tallies."""
     counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
     collapsed = sum(1 for r in results if r.category_strict == "collapsed")
     if collapsed:
         counts["CATEGORY_COLLAPSED"] = collapsed
+    kinds_mismatch = sum(1 for r in results if r.kinds_strict == "mismatch")
+    if kinds_mismatch:
+        counts["KINDS_MISMATCH"] = kinds_mismatch
     return counts
 
 
@@ -1442,6 +1495,11 @@ def _print_summary(
         for r in results:
             if r.status in ("FAIL", "ERROR"):
                 print(f"FAIL: {r.name}  expected={r.expected!r} got={r.got!r}  {r.message}",
+                      file=sys.stderr)
+    if counts.get("KINDS_MISMATCH"):
+        for r in results:
+            if r.kinds_strict == "mismatch":
+                print(f"KINDS_MISMATCH: {r.name} [{r.status}]  {r.kinds_strict_detail}",
                       file=sys.stderr)
     return 1 if failures else 0
 

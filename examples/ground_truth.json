@@ -289,7 +289,12 @@
    "expected_kinds": [
     "ctor_explicit_added"
    ],
-   "known_gap": "castxml does not emit the `explicit` attribute on <Converter> elements (user-defined conversion operators), and does not emit a mangled name for user-declared constructors. The CTOR_EXPLICIT_ADDED detector is therefore not exercised end-to-end by the default castxml-based dump path on Linux/macOS \u2014 only via DWARF-only mode. The detector itself is validated by tests/test_explicit_ctor.py with synthetic snapshots.",
+   "known_gap": "castxml does not emit the `explicit` attribute on <Converter> elements (user-defined conversion operators), and does not emit a mangled name for user-declared constructors. The CTOR_EXPLICIT_ADDED detector is therefore not exercised end-to-end by the default castxml-based dump path on Linux/macOS \u2014 only via DWARF-only mode. The detector itself is validated by tests/test_explicit_ctor.py with synthetic snapshots. Windows also observes NO_CHANGE for the same case in the source_smoke lane (confirmed by CI), for a currently unconfirmed reason distinct from the castxml mechanism above (Windows uses MSVC PDB metadata, not castxml) \u2014 tracked as a separate, undiagnosed Windows gap.",
+   "known_gap_platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -417,6 +422,7 @@
    "expected_kinds": [
     "func_added"
    ],
+   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions \u2014 but no snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so `expected` stays COMPATIBLE to match actual tool output rather than claim a detection capability that does not exist. Tracked as a real detector gap (see case105 concept tightening for the sibling 'needs call-site context' pattern) \u2014 a constructor-overload-ambiguity detector is the natural home for this.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -2162,8 +2168,9 @@
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
-   "category": "breaking",
-   "expected": "BREAKING",
+   "category": "api_break",
+   "description": "Struct field renamed (same offset, same type). The dedicated field-rename detector reports FIELD_RENAMED (API_BREAK); the generic field-removed/-added detectors now suppress the redundant BREAKING pair for this exact rename (same offset + identical type), so old binaries keep working and only recompilation against the new header fails.",
+   "expected": "API_BREAK",
    "expected_kinds": [
     "field_renamed"
    ],
@@ -2297,14 +2304,17 @@
    "category": "breaking",
    "description": "Struct alignment changed via __attribute__((aligned(8))) to aligned(64) \u2014 stack allocation and array stride break (TYPE_ALIGNMENT_CHANGED)",
    "expected": "BREAKING",
+   "expected_kinds": [
+    "type_alignment_changed"
+   ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; type-level alignment changes are invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos"
-   ],
-   "expected_kinds": [
-    "type_alignment_changed"
    ]
   },
   "case43_base_class_member_added": {
@@ -2523,6 +2533,9 @@
     "used_reserved_field"
    ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct field renames are invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2540,6 +2553,9 @@
     "type_kind_changed"
    ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct-to-union type kind change is invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2557,6 +2573,9 @@
     "struct_packing_changed"
    ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; packing/layout changes are invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2574,6 +2593,9 @@
     "enum_underlying_size_changed"
    ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; enum underlying size changes are invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2591,6 +2613,9 @@
     "var_removed"
    ],
    "known_gap": "macOS: Mach-O export table does not distinguish functions from variables, so lib_debug_level can be detected as func_removed_elf_only instead of var_removed; both are breaking under strict binary policy.",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -2620,14 +2645,17 @@
    "category": "breaking",
    "description": "Multiple inheritance base class order swapped \u2014 subobject offsets and vtable pointers change (BASE_CLASS_POSITION_CHANGED)",
    "expected": "BREAKING",
+   "expected_kinds": [
+    "base_class_position_changed"
+   ],
    "known_gap": "macOS: Tool returns NO_CHANGE \u2014 no headers provided; Mach-O mode captures only exported symbols; base class layout changes are invisible",
+   "known_gap_platforms": [
+    "macos"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos"
-   ],
-   "expected_kinds": [
-    "base_class_position_changed"
    ]
   },
   "case61_var_added": {
@@ -2774,7 +2802,11 @@
    "expected_kinds": [
     "value_abi_trait_changed"
    ],
-   "known_gap": "Windows MSVC x64: structs >8 bytes are always passed by pointer regardless of triviality, so the calling convention does not change",
+   "known_gap": "Windows MSVC x64: structs >8 bytes are always passed by pointer regardless of triviality, so the calling convention does not change. macOS also observes NO_CHANGE (confirmed by CI: the VALUE_ABI_TRAIT_CHANGED detector does not fire there either) for a currently unconfirmed reason distinct from the Windows mechanism above \u2014 tracked as a separate, undiagnosed macOS gap rather than assumed to share the Windows root cause.",
+   "known_gap_platforms": [
+    "macos",
+    "windows"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2901,6 +2933,10 @@
     "internal_type_leaks_via_public_api"
    ],
    "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot \u2014 neither signal fires on these platforms",
+   "known_gap_platforms": [
+    "macos",
+    "windows"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -2970,6 +3006,9 @@
     "internal_type_leaks_via_public_api"
    ],
    "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
+   "known_gap_platforms": [
+    "windows"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -2987,6 +3026,9 @@
     "serialization_tag_changed"
    ],
    "known_gap": "Windows: the v1.h fixture includes ``<cstdint>`` for ``std::uint64_t``. On the GitHub Actions Windows runner, castxml's bundled Clang frontend can't parse mingw64 GCC 15.2.0's ``bits/c++config.h`` (it uses the C++23 ``bf16`` floating-point literal suffix: ``typedef __decltype(0.0bf16) __bfloat16_t;``). This is a toolchain incompatibility, not an issue with the detector or the example \u2014 castxml dump fails before the detector runs. Same root cause as case80 / case89.",
+   "known_gap_platforms": [
+    "windows"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -3087,7 +3129,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, NO_CHANGE), template defaults are part of the substituted type.",
+   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, source-only API_BREAK), template defaults are part of the substituted type and re-mangle, so this is a binary BREAKING change.",
    "expected": "BREAKING",
    "expected_kinds": [
     "default_template_arg_changed"
@@ -3127,6 +3169,9 @@
     "inline_body_references_renamed_member"
    ],
    "known_gap": "Windows: the public class holds std::shared_ptr<detail::descriptor_impl> which renders differently in MSVC PDB/STL field-type strings, so the internal-leak reachability heuristic that ties the inline accessor to the renamed detail:: member does not fire as-shipped.",
+   "known_gap_platforms": [
+    "windows"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",

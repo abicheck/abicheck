@@ -300,6 +300,69 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (factored out of `main()`) so this and future tooling can drive a
   benchmark run programmatically instead of shelling out.
 
+### Fixed
+
+- **`case35_field_rename` reported `BREAKING` instead of `API_BREAK`.** A pure
+  field rename (same offset + type, name only) fell through the generic
+  field-removed/-added detectors to a plain `TYPE_FIELD_REMOVED`/
+  `STRUCT_FIELD_REMOVED` in both `diff_types.py` and `diff_platform.py`,
+  alongside the correct `FIELD_RENAMED` (API_BREAK) finding from the
+  dedicated rename detector — the higher severity won the overall verdict.
+  Both detectors now suppress the redundant removed/added pair for an
+  exact-match rename, mirroring the existing rename+retype special case and
+  the analogous `ENUM_MEMBER_RENAMED` skip already used in
+  `diff_platform.py`. The suppression reports `FIELD_RENAMED` itself rather
+  than assuming a separate detector will independently re-match the same
+  pair, which a review of the fix correctly flagged as a way to silently
+  *lose* a finding (not just duplicate it) when two extractors spell an
+  otherwise-identical field type differently.
+
+- **`INLINE_BODY_REFERENCES_RENAMED_MEMBER` (case89) never actually fired.**
+  Three independent symbol/name-format mismatches in
+  `diff_cpp_patterns.py` meant this detector had never triggered on real
+  compiled input, only on hand-crafted unit-test fixtures that (unlike real
+  detector output) embedded the field name directly in `Change.symbol` and
+  used fully-qualified `Function.name`: `_collect_field_rename_candidates`
+  expected `FIELD_RENAMED.symbol` as `"Record::field"` when it is actually
+  the bare record name (field names live in `old_value`/`new_value`), and
+  `_inline_accessors_for` expected `Function.name` to be qualified
+  (`"ns::Class::method"`) when it is the short, unqualified demangled name.
+  Surfaced by the case35 fix above: case89's expected `BREAKING` verdict was
+  previously reached only via the *redundant* `TYPE_FIELD_REMOVED`/
+  `STRUCT_FIELD_REMOVED` that fix removes, masking that the case's own named
+  detector was dead code. Both mismatches are fixed (the second via a single
+  batched demangle of the mangled name); the two hand-crafted unit tests
+  that encoded the wrong symbol shape are corrected to match real detector
+  output. Two further edge cases in the same detectors, found in review:
+  a DWARF struct-layout pure-rename could still misclassify a same-spelling
+  typedef whose resolved size or bit-field width changed as a bare rename
+  (now requires `byte_size`/`bit_offset`/`bit_size` equality, not just exact
+  type-name equality); and `_inline_accessors_for`'s demangled-name matching
+  missed every templated accessor (c++filt prefixes a return type only for
+  function templates/specializations) and mismatched conversion operators
+  and `operator new`/`operator delete` (whose own name contains a space
+  that isn't a return-type separator) — both are now handled by a shared
+  `_holder_of` helper.
+
+### Documentation
+
+- **Example-catalog semantic-validation gaps from an external audit.**
+  `known_gap_platforms` scoping added to 13 cases whose `known_gap` text
+  named a specific OS/toolchain but had no structured scope (so an
+  unrelated-platform gap could silently excuse a real regression);
+  `case111`/`case105`/`case122` ground truth now carries the
+  `known_gap`/`expected_by_evidence`/`scenario_verdict` fields their
+  READMEs already implied but the JSON never recorded; fixed a stale/wrong
+  `case98` narrative and broken repro-command case-number references in six
+  READMEs. `tests/validate_examples.py` now actually checks
+  `expected_kinds`/`expected_absent_kinds` against the real compare output
+  (previously only the top-level verdict string was asserted), surfaced as
+  `kinds_strict`/`KINDS_MISMATCH` and gated blocking via
+  `ABICHECK_STRICT_KINDS=1`; the first full-catalog run under this check
+  found 19 pre-existing cases where the verdict is right but the named
+  detector kind never fires, documented in `examples/README.md` for
+  follow-up.
+
 ### Changed
 
 - **Breaking — side-aware `--header`/`--include`/`--sources`/`--build-info`
