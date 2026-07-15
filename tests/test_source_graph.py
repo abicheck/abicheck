@@ -644,6 +644,39 @@ def test_mark_source_edges_extractor_coverage_handles_none_surface_and_malformed
     assert g.extractor_passes == {}
 
 
+def test_mark_source_edges_extractor_coverage_degrades_when_family_states_missing() -> (
+    None
+):
+    # Codex review, PR #555: a third-party/hand-edited surface (or a
+    # pre-C.8 schema) can carry source_edges with no/malformed
+    # fact_family_states at all. That must not read as "return unmarked" --
+    # the exact same raw-edge-presence-fallback gap a known non-full-walk
+    # producer has -- when source_edges actually folded real edges.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    assert "fact_family_states" not in s.coverage
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
+
+    # Malformed (non-dict) fact_family_states behaves identically.
+    s2 = _sample_surface()
+    s2.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s2.coverage["fact_family_states"] = "not-a-dict"
+    g2 = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g2, s2)
+    assert "call_graph" not in g2.extractor_passes
+    assert g2.degraded_passes["call_graph"] is True
+    assert g2.degraded_passes["type_graph"] is True
+
+
 def test_mark_source_edges_extractor_coverage_not_trusted_for_plugin_producer() -> None:
     # Codex review, PR #555: the ADR-038 C.8 clang plugin's source_edges only
     # walks call/reference bodies for classify()-accepted (public-header)

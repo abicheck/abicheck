@@ -1366,9 +1366,15 @@ def mark_source_edges_extractor_coverage(
     if surface is None:
         return
     families = surface.coverage.get("fact_family_states")
-    if not isinstance(families, dict):
-        return
-    state = families.get("source_edges")
+    # A missing/malformed fact_family_states (a third-party or hand-edited
+    # surface, or a schema older than ADR-038 C.8) must not fall through to
+    # "return unmarked" when source_edges nonetheless folded real edges into
+    # *graph* -- that leaves the exact same raw-edge-presence-fallback gap
+    # a non-full-walk producer does (Codex review): treated as unknown/
+    # non-full coverage below (state stays None, so the full-walk-trust
+    # branch never fires), falling through to the degraded stamp instead of
+    # returning early.
+    state = families.get("source_edges") if isinstance(families, dict) else None
     fact_set = surface.coverage.get("fact_set")
     full_walk_producer = (
         isinstance(fact_set, dict)

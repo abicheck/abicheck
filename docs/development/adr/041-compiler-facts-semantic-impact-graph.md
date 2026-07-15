@@ -1164,7 +1164,16 @@ there is no equivalent "should this be automatic" question for them.
    side's own *absence* of a kind, never the *other* side's presence, so
    this can only trade a missed addition for avoiding a false alarm — the
    same conservative bias the whole narrowed/degraded chain already
-   commits to.
+   commits to. A further review caught the same fallback gap one layer up:
+   a third-party/hand-edited surface (or a schema older than ADR-038 C.8)
+   can carry `source_edges` with no `fact_family_states` at all (missing or
+   malformed) — the function used to `return` immediately in that case,
+   before ever reaching the degraded-stamping check, leaving folded edges
+   just as unmarked as the recognized-non-full-walk-producer case the fix
+   above addressed. Now a missing/malformed `fact_family_states` is treated
+   as unknown coverage (`state` stays `None`, so the full-walk-trust branch
+   never fires) and falls through to the same degraded stamp instead of
+   returning early.
 2. **Object/link provenance graph.** New node kinds
    (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges
