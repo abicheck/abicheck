@@ -117,12 +117,20 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     """ADR-038 C.8: flag incompatible or incomplete L4 fact-set evidence.
 
     Fires only when there is something to report: at least one side carries a
-    ``fact_set`` identity (``link_source_abi`` rolls it up from the per-TU
-    records), or a mandatory family was rolled up as ``partial``/``failed``.
-    Silent when neither side has ever populated this metadata (a producer that
-    predates ADR-038 C.8, or hand-built test fixtures), matching the existing
-    forward-compat convention rather than manufacturing noise for a producer
-    that never claimed to report coverage.
+    ``fact_set`` identity or a per-family coverage rollup (``link_source_abi``
+    rolls both up from the per-TU records), or a mandatory family was rolled
+    up as ``partial``/``failed``. Silent when neither side has ever populated
+    this metadata (a producer that predates ADR-038 C.8, or hand-built test
+    fixtures), matching the existing forward-compat convention rather than
+    manufacturing noise for a producer that never claimed to report coverage.
+
+    Checking ``fact_family_states`` too (not just ``fact_set``) matters for a
+    mixed pack: ``rollup_fact_set`` deliberately returns ``{}`` when some TUs
+    carry a fact_set and others don't (an inconsistency, not "unknown"), but
+    ``rollup_coverage`` can still carry non-empty family states from the TUs
+    that *did* report — that combination must still route through
+    :func:`check_fact_set_compatibility` so its ``fact_set_unknown`` warning
+    fires instead of being silently skipped (Codex review).
     """
     old_cov = old.coverage if isinstance(old.coverage, dict) else {}
     new_cov = new.coverage if isinstance(new.coverage, dict) else {}
@@ -131,10 +139,9 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     old_families = old_cov.get("fact_family_states") or {}
     new_families = new_cov.get("fact_family_states") or {}
 
+    has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
     issues = (
-        check_fact_set_compatibility(old_fact_set, new_fact_set)
-        if (old_fact_set or new_fact_set)
-        else []
+        check_fact_set_compatibility(old_fact_set, new_fact_set) if has_signal else []
     )
     old_incomplete = incomplete_families(old_families)
     new_incomplete = incomplete_families(new_families)
@@ -143,9 +150,13 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
 
     parts = [f"{issue.rule}: {issue.message}" for issue in issues]
     if old_incomplete:
-        parts.append(f"old side mandatory family/families incomplete: {', '.join(old_incomplete)}")
+        parts.append(
+            f"old side mandatory family/families incomplete: {', '.join(old_incomplete)}"
+        )
     if new_incomplete:
-        parts.append(f"new side mandatory family/families incomplete: {', '.join(new_incomplete)}")
+        parts.append(
+            f"new side mandatory family/families incomplete: {', '.join(new_incomplete)}"
+        )
 
     return [
         Change(

@@ -148,6 +148,42 @@ def test_manifest_level_fact_set_used_when_present(tmp_path: Path) -> None:
     assert report.ok
 
 
+def test_manifest_level_fact_set_does_not_mask_tu_disagreement(tmp_path: Path) -> None:
+    """A manifest-declared fact_set must not paper over TUs that disagree with
+    each other (or with it) — the manifest cannot know what every TU later
+    reported (Codex review)."""
+    fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    other_fs = default_fact_set(
+        producer="abicheck-clang-plugin", producer_version="0.5"
+    )
+    tu1 = _tu("a", fact_set=fs)
+    tu2 = _tu("b", fact_set=other_fs)
+    pack = _write_pack(tmp_path, [tu1, tu2], manifest_extra={"fact_set": fs})
+    report = validate_inputs_pack(pack)
+    assert report.fact_set == {}
+    assert any(
+        "do not agree on a single fact_set identity" in w for w in report.warnings
+    )
+    # Only the disagreement warning fires, not also the generic "no fact_set
+    # identity found" one (they'd be redundant/confusing together).
+    assert not any("no fact_set identity found" in w for w in report.warnings)
+
+
+def test_manifest_level_fact_set_used_when_no_tu_ever_stamped_one(
+    tmp_path: Path,
+) -> None:
+    """When no TU carries a fact_set at all (a plain pre-C.8 producer for the
+    per-TU records, but the manifest itself is current), the manifest value is
+    still usable — this is not the "TUs disagree" case."""
+    fs = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
+    tu1 = _tu("a")
+    tu2 = _tu("b")
+    pack = _write_pack(tmp_path, [tu1, tu2], manifest_extra={"fact_set": fs})
+    report = validate_inputs_pack(pack)
+    assert report.fact_set == fs
+    assert report.ok
+
+
 def test_incomplete_mandatory_family_warns(tmp_path: Path) -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     tu = _tu("a", fact_set=fs, coverage={"functions": "complete", "macros": "partial"})
@@ -176,6 +212,32 @@ def test_empty_public_surface_warns(tmp_path: Path) -> None:
     pack = _write_pack(tmp_path, [tu])
     report = validate_inputs_pack(pack)
     assert any("empty public surface" in w for w in report.warnings)
+
+
+def test_macro_only_pack_is_not_reported_as_empty_surface(tmp_path: Path) -> None:
+    """A macro-only (or header-only) pack's public evidence lands in
+    reachable_macros, not reachable_declarations/reachable_types — checking
+    only the latter two would false-warn on a genuinely non-empty pack
+    (Codex review)."""
+    macro = SourceEntity(
+        id="macro://FOO",
+        kind="macro",
+        qualified_name="FOO",
+        value="1",
+        visibility="public_header",
+        source_location=SourceLocation(
+            path="include/a.h", line=1, origin="PUBLIC_HEADER"
+        ),
+    )
+    tu = SourceAbiTu(
+        tu_id="cu://src/a.cpp#cfg:abc",
+        target_id="target://libfoo",
+        public_header_roots=["include/a.h"],
+        macros=[macro],
+    )
+    pack = _write_pack(tmp_path, [tu])
+    report = validate_inputs_pack(pack)
+    assert not any("empty public surface" in w for w in report.warnings)
 
 
 def test_report_to_dict_round_trips_shape(tmp_path: Path) -> None:

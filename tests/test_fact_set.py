@@ -325,6 +325,25 @@ def test_diff_silent_when_neither_side_has_fact_set() -> None:
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE not in {c.kind for c in changes}
 
 
+def test_diff_fires_fact_set_unknown_when_family_states_present_but_fact_set_empty() -> (
+    None
+):
+    """A mixed pack rolls fact_set up to {} (rollup_fact_set's stricter rule)
+    while fact_family_states can still be non-empty from the TUs that did
+    report — that combination must still surface fact_set_unknown, not be
+    silently skipped (Codex review)."""
+    old = _surface(
+        coverage={"fact_set": {}, "fact_family_states": {"macros": "complete"}}
+    )
+    new = _surface(coverage={"fact_set": {}, "fact_family_states": {}})
+    changes = diff_source_abi(old, new)
+    matches = [
+        c for c in changes if c.kind == ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE
+    ]
+    assert len(matches) == 1
+    assert "fact_set_unknown" in matches[0].description
+
+
 def test_diff_fires_on_fact_set_version_mismatch() -> None:
     old_fs = default_fact_set(producer="p", producer_version="1")
     new_fs = dict(old_fs)

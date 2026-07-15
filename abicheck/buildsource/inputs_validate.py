@@ -129,14 +129,33 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
             f"per-TU filename should make this impossible): {', '.join(dupes)}"
         )
 
-    fact_set = manifest.fact_set or rollup_fact_set(tus)
+    # Prefer the per-TU rollup over the manifest-declared fact_set: a plugin
+    # that stamps manifest.json up front cannot know whether every TU later
+    # agreed with it, so a manifest-level fact_set must never mask a TU-level
+    # inconsistency (Codex review). Only fall back to the manifest when there
+    # is no TU-level signal to check it against (no TUs, or no TU ever stamped
+    # a fact_set at all).
+    tu_fact_set = rollup_fact_set(tus)
+    stamped_tus_disagree = (
+        bool(tus) and any(tu.fact_set for tu in tus) and not tu_fact_set
+    )
+    if stamped_tus_disagree:
+        fact_set: dict[str, object] = {}
+        report.warnings.append(
+            "TU records do not agree on a single fact_set identity (mixed "
+            "producers/versions, or some TUs missing fact_set entirely) — the "
+            "manifest-level fact_set cannot be trusted to describe every TU."
+        )
+    else:
+        fact_set = tu_fact_set or manifest.fact_set
     report.fact_set = fact_set
     if not fact_set:
-        report.warnings.append(
-            "no fact_set identity found (manifest nor any TU record) — this "
-            "pack predates ADR-038 C.8 coverage/fact-set reporting, or mixes "
-            "producers inconsistently."
-        )
+        if not stamped_tus_disagree:
+            report.warnings.append(
+                "no fact_set identity found (manifest nor any TU record) — this "
+                "pack predates ADR-038 C.8 coverage/fact-set reporting, or mixes "
+                "producers inconsistently."
+            )
     else:
         version = fact_set.get("version")
         if version != SOURCE_ABI_FACT_SET_VERSION:
@@ -161,10 +180,16 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
         surface = link_source_abi(
             tus, exported_symbols=exports, library=manifest.library
         )
-        if not surface.reachable_declarations and not surface.reachable_types:
+        # Every reachable bucket (declarations/types/macros/templates/inline
+        # bodies), not just declarations+types — a macro-only or header-only
+        # pack's public evidence can land entirely in the other buckets, and
+        # checking only two of the five would false-warn on a genuinely
+        # non-empty pack (Codex review).
+        if not any(surface.reachable_buckets().values()):
             report.warnings.append(
                 "linked surface has an empty public surface (no reachable "
-                "declarations or types) — check public-header-roots scoping."
+                "declarations, types, macros, templates, or inline bodies) — "
+                "check public-header-roots scoping."
             )
 
     return report
