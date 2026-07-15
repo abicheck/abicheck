@@ -595,12 +595,32 @@ def _common_dependency_edge_kinds(
         old_degraded = _pass_degraded(old, pass_name)
         old_kinds = {e.kind for e in old.edges if e.kind in family}
         new_kinds = {e.kind for e in new.edges if e.kind in family}
+        # A header-only-confirmed OLD side (header alias set, build-integrated
+        # name not) can still fold real edges of a body-dependent kind — an
+        # inline/template function calling/referencing another one, both
+        # visible straight from the header. That single edge is genuine, but
+        # it is not proof the kind was searched project-wide: the same scan
+        # is structurally blind to any out-of-line body. Raw edge *presence*
+        # must therefore not stand in for pass-confirmed trust here any more
+        # than it may for the family-widening shortcut above — otherwise a
+        # baseline's one incidental in-header call edge would make
+        # DECL_CALLS_DECL "common" against a build-integrated candidate, and
+        # a pre-existing out-of-line call the header-only baseline could
+        # never have seen would surface as a false
+        # ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` the moment collection
+        # improves (Codex review).
+        old_header_only = (
+            _HEADER_PASS_ALIAS.get(pass_name, "") != ""
+            and old.extractor_passes.get(_HEADER_PASS_ALIAS[pass_name], False)
+            and not old.extractor_passes.get(pass_name, False)
+        )
         for kind in family:
             # Only OLD's negative evidence needs the narrowing/degraded guard
             # — see the docstring's one-directional-risk note (thirteenth
             # Codex review).
             old_present = (
                 (kind in old_kinds)
+                and not (old_header_only and kind not in _HEADER_FULL_VISIBILITY_KINDS)
                 and not old_degraded
                 and (not old_narrowed or (new_narrowed and scope_matches))
             )

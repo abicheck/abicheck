@@ -1867,3 +1867,37 @@ def test_common_dependency_edge_kinds_header_vs_build_still_widens_structural_ki
     common = _common_dependency_edge_kinds(old, new)
     assert "TYPE_HAS_FIELD_TYPE" in common
     assert "DECL_REFERENCES_DECL" not in common
+
+
+def test_common_dependency_edge_kinds_header_only_incidental_body_edge_not_trusted() -> (
+    None
+):
+    # Codex review: a header-only OLD side is not limited to a confirmed
+    # *zero* — an inline/template function calling another one, both visible
+    # straight from the header, folds a genuine ``DECL_CALLS_DECL`` edge even
+    # under a header-only scan. That single incidental edge must not be
+    # mistaken for "this kind was searched project-wide": the same scan is
+    # structurally blind to any out-of-line call. A build-integrated
+    # candidate's *additional*, out-of-line call edge must NOT be reported as
+    # newly added — it could have existed all along, just invisible to the
+    # header-only baseline.
+    old = SourceGraphSummary(
+        nodes=[_N("a", "source_decl"), _N("b", "source_decl")],
+        edges=[_E("a", "b", "DECL_CALLS_DECL")],  # incidental in-header call
+        extractor_passes={"header_call_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[
+            _N("a", "source_decl"),
+            _N("b", "source_decl"),
+            _N("c", "source_decl"),
+            _N("d", "source_decl"),
+        ],
+        edges=[
+            _E("a", "b", "DECL_CALLS_DECL"),
+            _E("c", "d", "DECL_CALLS_DECL"),  # out-of-line, invisible to OLD
+        ],
+        extractor_passes={"call_graph": True},
+    )
+    common = _common_dependency_edge_kinds(old, new)
+    assert "DECL_CALLS_DECL" not in common
