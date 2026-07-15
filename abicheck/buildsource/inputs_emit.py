@@ -261,11 +261,15 @@ def compact_inputs_pack(
     incremental build emitted for since-rebuilt TUs) prefers each fresh
     per-TU record over the prior output's now-stale record for the same
     ``tu_id`` — the prior output's records for TUs *not* rebuilt since are
-    still carried forward, never dropped (Codex review, P2). And a read that
-    produces new diagnostics (a malformed/unreadable original) still writes
-    the merged output best-effort, but leaves *every* original in place
-    rather than deleting evidence of a lossy compaction (CodeRabbit review,
-    P2) — check *diagnostics* after the call.
+    still carried forward, never dropped (Codex review, P2). "Prior" vs
+    "fresh" is decided by each file's mtime, not by matching *this* run's
+    output filename — a rerun with a different ``--output-filename``/
+    ``--compress`` setting than last time still recognizes last run's output
+    as stale (Codex review, P2). And a read that produces new diagnostics (a
+    malformed/unreadable original) still writes the merged output best-effort,
+    but leaves *every* original in place rather than deleting evidence of a
+    lossy compaction (CodeRabbit review, P2) — check *diagnostics* after the
+    call.
 
     *remove_originals* deletes the per-TU files that were merged once the
     merged file is written (skipped when the read above was lossy, see
@@ -291,24 +295,39 @@ def compact_inputs_pack(
     output_path = facts_dir / output_filename
 
     originals = _iter_source_fact_files(root, manifest, sink)
-    prior_output_files = [
-        f for f in originals if f.resolve() == output_path.resolve()
-    ]
+    # Files other than the one *this* run writes to, for the deletion step
+    # below only -- os.replace() already handles output_path itself, so it
+    # must never also be unlinked as a "leftover original".
     fresh_files = [f for f in originals if f.resolve() != output_path.resolve()]
 
+    # Merge every discovered record, deduping same-tu_id records by which
+    # file was modified most recently. This recognizes a *stale* prior
+    # compaction's output as superseded by a fresher per-TU record even when
+    # the two compaction runs used different output filenames -- e.g. a
+    # --compress toggle or a custom --output-filename between two `compact`
+    # calls changes output_path, so a byte-exact match against *this* run's
+    # output_path could no longer recognize last run's output as "prior"
+    # (Codex review, P2). A record with no tu_id (an older/hand-written
+    # producer that never stamped one) is never deduped -- "" cannot be
+    # treated as a real shared identity between otherwise-unrelated TUs
+    # (Codex review, P2).
     before_diag_count = len(sink)
-    prior_tus = read_source_fact_files(prior_output_files, diagnostics=sink)
-    fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)
+    best_by_id: dict[str, tuple[int, SourceAbiTu]] = {}
+    no_id_tus: list[SourceAbiTu] = []
+    for f in originals:
+        try:
+            mtime = f.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        for tu in read_source_fact_files([f], diagnostics=sink):
+            if not tu.tu_id:
+                no_id_tus.append(tu)
+                continue
+            prev = best_by_id.get(tu.tu_id)
+            if prev is None or mtime > prev[0]:
+                best_by_id[tu.tu_id] = (mtime, tu)
     lossy_read = len(sink) > before_diag_count
-
-    # Only a non-empty tu_id identifies "this fresh record supersedes that
-    # prior one" -- SourceAbiTu.tu_id defaults to "" for an older/hand-written
-    # record that never stamped one, and treating "" as a real id would make
-    # any single no-tu_id fresh record supersede *every* no-tu_id prior
-    # record, dropping unrelated TUs that just happen to share the same
-    # "unknown identity" (Codex review, P2).
-    fresh_ids = {tu.tu_id for tu in fresh_tus if tu.tu_id}
-    tus = [tu for tu in prior_tus if not tu.tu_id or tu.tu_id not in fresh_ids] + fresh_tus
+    tus = [tu for _, tu in best_by_id.values()] + no_id_tus
 
     # Temp file + atomic rename so a concurrent reader never observes a
     # partially-written merge (same discipline as _write_manifest).
@@ -338,7 +357,8 @@ def compact_inputs_pack(
         for f in fresh_files:
             with contextlib.suppress(OSError):
                 f.unlink()
-        # prior_output_files (if any) was already replaced in place above.
+        # output_path itself (if it was among originals) was already
+        # replaced in place above, not deleted here (fresh_files excludes it).
 
     # A manifest that names explicit individual files is repointed at the
     # single merged file (those originals are gone). But a manifest whose
