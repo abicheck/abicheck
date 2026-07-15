@@ -210,6 +210,23 @@ def write_inputs_pack(
 DEFAULT_COMPACTED_FACTS_FILE = "compacted.jsonl"
 
 
+def _reject_escaping_filename(name: str) -> None:
+    """Refuse an ``output_filename`` that could write outside ``source_facts/``.
+
+    Documented as a bare filename, not a path — an absolute path or a ``..``
+    component (e.g. ``../merged.jsonl``) would make the merged file land
+    outside the directory a later ingest scans while ``remove_originals``
+    still deletes every per-TU file from ``source_facts/``, leaving a pack
+    that silently ingests zero TUs (Codex review, P2).
+    """
+    p = Path(name)
+    if not name or name in (".", "..") or p.is_absolute() or p.name != name:
+        raise ValueError(
+            "output_filename must be a plain filename with no path "
+            f"separators or '..', got {name!r}"
+        )
+
+
 def compact_inputs_pack(
     root: Path | str,
     *,
@@ -243,6 +260,7 @@ def compact_inputs_pack(
     the default (auto-scan of ``source_facts/``) needs no manifest change —
     the new file already lives where the scan looks.
     """
+    _reject_escaping_filename(output_filename)
     root = Path(root)
     manifest = load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []

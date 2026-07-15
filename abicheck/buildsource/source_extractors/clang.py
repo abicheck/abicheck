@@ -1800,7 +1800,13 @@ class ClangSourceExtractor:
         # P1 #17-18: source-graph edges from the SAME already-parsed AST dict —
         # parse_clang_ast_calls()/parse_clang_ast_types() are pure dict-walking
         # functions (no subprocess), so this adds no second frontend pass.
-        self._attach_source_edges(tu, ast_root, diags)
+        # Append onto tu.diagnostics directly, not the now-disconnected `diags`
+        # list: source_abi_from_clang_ast() above already copied `diags` into
+        # tu.diagnostics (list(diagnostics or [])), so a diagnostic appended to
+        # `diags` after that point would never reach _stamp_fact_set_and_coverage()
+        # below, which reads tu.diagnostics — silently reporting source_edges as
+        # empty-confirmed instead of failed on a parser error (Codex review, P2).
+        self._attach_source_edges(tu, ast_root, tu.diagnostics)
         # Drop the large AST tree before the macro pass spawns another subprocess,
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root

@@ -2392,6 +2392,42 @@ def test_extract_populates_source_edges_and_coverage(
     assert tu.coverage["source_edges"] == "complete"
 
 
+def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    # Regression guard (Codex review, P2): a diagnostic appended by
+    # build_source_edges() must land in tu.diagnostics (not a disconnected
+    # copy), so _stamp_fact_set_and_coverage() reports source_edges as
+    # failed/partial rather than silently empty-confirmed.
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    def _boom(ast_root, diags):  # type: ignore[no-untyped-def]
+        diags.append("source_edges unavailable: boom")
+        return []
+
+    monkeypatch.setattr(clang_mod, "build_source_edges", _boom)
+
+    extractor = ClangSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):
+            out.write(json.dumps(_ast()).encode("utf-8"))
+            return _Result(0, "", "")
+        return _Result(0, "")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
+    tu = extractor.extract(
+        cu, public_header_roots=["include/foo.h"], target_id="target://x"
+    )
+    assert "source_edges unavailable: boom" in tu.diagnostics
+    assert tu.coverage["source_edges"] == "failed"
+
+
 def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from abicheck.buildsource.source_extractors import clang as clang_mod
 

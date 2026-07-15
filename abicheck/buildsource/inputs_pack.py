@@ -165,6 +165,14 @@ class InputsManifest:
             raw = d.get(key)
             return [str(x) for x in raw if x] if isinstance(raw, list) else []
 
+        # A hand-written/third-party manifest's fact_set might not be a
+        # mapping at all (e.g. a string) — dict(fs_raw) would raise before
+        # `inputs validate` could produce a report, even though a malformed
+        # optional field is supposed to degrade gracefully like everything
+        # else here (Codex review, P2).
+        fs_raw = d.get("fact_set")
+        fact_set = dict(fs_raw) if isinstance(fs_raw, dict) else {}
+
         return cls(
             kind=_opt_str(d.get("kind"), INPUTS_KIND),
             abicheck_inputs_version=int(
@@ -179,7 +187,7 @@ class InputsManifest:
             compile_db=_opt_str(d.get("compile_db")),
             source_facts=_str_list("source_facts"),
             exported_symbols=_str_list("exported_symbols"),
-            fact_set=dict(d.get("fact_set") or {}),
+            fact_set=fact_set,
         )
 
 

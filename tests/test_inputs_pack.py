@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource import (
@@ -181,6 +182,18 @@ def test_manifest_null_optional_strings_become_empty_not_none_literal() -> None:
     assert m.library == ""
     assert m.compile_db == ""
     assert m.created_by == ""
+
+
+@pytest.mark.parametrize("bad_fact_set", ["not-a-mapping", 7, ["a", "b"], True])
+def test_manifest_non_mapping_fact_set_degrades_to_empty(bad_fact_set: object) -> None:
+    # Codex review (P2): a hand-written/third-party manifest's fact_set might
+    # not be a mapping (e.g. a string) -- dict(fs_raw) would raise before
+    # `inputs validate` could produce a report, even though a malformed
+    # optional field is supposed to degrade like every other field here.
+    m = InputsManifest.from_dict(
+        {"kind": INPUTS_KIND, "library": "l", "fact_set": bad_fact_set}
+    )
+    assert m.fact_set == {}
 
 
 def test_ingest_with_null_compile_db_still_finds_default(tmp_path: Path) -> None:

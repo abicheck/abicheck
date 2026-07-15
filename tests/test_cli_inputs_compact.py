@@ -113,3 +113,15 @@ def test_compact_output_filename_option(tmp_path: Path) -> None:
 def test_compact_bad_path_exits_usage_error(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["inputs", "compact", str(tmp_path / "nope")])
     assert result.exit_code == 64, result.output
+
+
+def test_compact_escaping_output_filename_exits_usage_error(tmp_path: Path) -> None:
+    pack = _pack_with_two_tus(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        ["inputs", "compact", str(pack), "--output-filename", "../escape.jsonl"],
+    )
+    assert result.exit_code == 64, result.output
+    # The originals must survive a rejected compaction attempt.
+    remaining = list((pack / "source_facts").glob("*.jsonl"))
+    assert len(remaining) == 2

@@ -22,6 +22,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource import (
     SourceAbiTu,
     SourceEntity,
@@ -248,6 +250,35 @@ def test_compact_is_idempotent_when_rerun_on_same_output(tmp_path: Path) -> None
     )
     compact_inputs_pack(pack)
     compact_inputs_pack(pack)  # rerun onto the same merged filename
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "../escape.jsonl",
+        "sub/dir/out.jsonl",
+        "/etc/passwd",
+        "..",
+        "",
+    ],
+)
+def test_compact_rejects_escaping_output_filename(
+    tmp_path: Path, bad_name: str
+) -> None:
+    # Codex review (P2): an output_filename with a path component could write
+    # the merged file outside source_facts/ while remove_originals still
+    # deletes every per-TU file from source_facts/, leaving the pack ingesting
+    # zero TUs.
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+    with pytest.raises(ValueError):
+        compact_inputs_pack(pack, output_filename=bad_name)
+    # The original file must survive a rejected compaction attempt.
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 1
 

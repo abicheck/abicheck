@@ -169,13 +169,16 @@ def compact_cmd(
         raise click.UsageError(str(exc)) from None
 
     diagnostics: list[str] = []
-    out = compact_inputs_pack(
-        pack,
-        output_filename=output_filename,
-        compress=compress,
-        remove_originals=not keep_originals,
-        diagnostics=diagnostics,
-    )
+    try:
+        out = compact_inputs_pack(
+            pack,
+            output_filename=output_filename,
+            compress=compress,
+            remove_originals=not keep_originals,
+            diagnostics=diagnostics,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from None
     click.echo(f"Compacted source facts written to {out}")
     for diag in diagnostics:
         click.echo(f"  note: {diag}")
