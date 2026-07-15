@@ -332,6 +332,15 @@ def compact_inputs_pack(
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename
 
+    # Captured before ANY discovery/read step below, not just the per-file
+    # record reads -- _iter_source_fact_files() itself can append a
+    # diagnostic (an explicitly-named source_facts entry that resolves to no
+    # readable files, or an escaping/unsafe path), and that must count as
+    # "lossy" too: otherwise compaction proceeds as if the pack were fully
+    # readable, publishes a merge missing that entry's TUs, repoints the
+    # manifest to it, and deletes files based on an incomplete understanding
+    # of the pack (Codex review, P2).
+    before_diag_count = len(sink)
     originals = _iter_source_fact_files(root, manifest, sink)
     # Files other than the one *this* run writes to, for the deletion step
     # below only -- os.replace() already handles output_path itself, so it
@@ -372,7 +381,6 @@ def compact_inputs_pack(
                 no_id.append(tu)
         return by_id, no_id
 
-    before_diag_count = len(sink)
     prior_by_id, prior_no_id = _last_record_wins(prior_files)
     fresh_only = [f for f in originals if f not in prior_files]
     fresh_by_id, fresh_no_id = _last_record_wins(fresh_only)

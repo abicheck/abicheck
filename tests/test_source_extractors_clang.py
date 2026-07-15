@@ -2224,6 +2224,33 @@ def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type:
     assert any("macro pass" in d for d in tu.diagnostics)
 
 
+def test_extract_recovered_ast_exit_downgrades_edges_and_read_files_coverage(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """source_edges/read_files are derived from the same (possibly
+    ast_recovered-truncated) AST dict as the AST-derived families above --
+    a recovered parse must downgrade their coverage too, not just report
+    complete/empty-confirmed because build_source_edges/resolve_read_files
+    themselves raised no exception on the partial AST (Codex review, P2)."""
+    import json
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(
+                kw,
+                json.dumps(_ast()),
+                1,
+                "fatal error: 'llvm/IR/Attributes.inc' file not found",
+            )
+        return _Result(0, "")
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert any("recovered" in d for d in tu.diagnostics)
+    assert tu.coverage["source_edges"] in {"partial", "failed"}
+    assert tu.coverage["read_files"] in {"partial", "failed"}
+
+
 def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 

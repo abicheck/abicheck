@@ -134,10 +134,21 @@ def _diff_fact_coverage(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Ch
     """
     old_cov = old.coverage if isinstance(old.coverage, dict) else {}
     new_cov = new.coverage if isinstance(new.coverage, dict) else {}
-    old_fact_set = old_cov.get("fact_set") or {}
-    new_fact_set = new_cov.get("fact_set") or {}
-    old_families = old_cov.get("fact_family_states") or {}
-    new_families = new_cov.get("fact_family_states") or {}
+    # A hand-written/newer source_abi.json's nested coverage metadata might
+    # not be a mapping at all (e.g. a string) -- `x or {}` alone doesn't
+    # catch that (a non-empty non-dict value is still truthy), and passing
+    # it through to check_fact_set_compatibility()/incomplete_families()
+    # (which call .get()/.items() on it) would raise AttributeError instead
+    # of degrading gracefully, unlike every other optional field here
+    # (Codex review, P2).
+    old_fact_set_raw = old_cov.get("fact_set")
+    new_fact_set_raw = new_cov.get("fact_set")
+    old_families_raw = old_cov.get("fact_family_states")
+    new_families_raw = new_cov.get("fact_family_states")
+    old_fact_set = old_fact_set_raw if isinstance(old_fact_set_raw, dict) else {}
+    new_fact_set = new_fact_set_raw if isinstance(new_fact_set_raw, dict) else {}
+    old_families = old_families_raw if isinstance(old_families_raw, dict) else {}
+    new_families = new_families_raw if isinstance(new_families_raw, dict) else {}
 
     has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
     issues = (

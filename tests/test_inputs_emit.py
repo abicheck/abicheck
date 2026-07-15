@@ -493,6 +493,38 @@ def test_compact_skips_entirely_on_lossy_read(tmp_path: Path) -> None:
     assert names == {"foo"}
 
 
+def test_compact_skips_on_explicit_missing_source_facts_entry(
+    tmp_path: Path,
+) -> None:
+    """An explicitly-named source_facts entry that resolves to nothing
+    (typo, stale reference) makes _iter_source_fact_files() itself append a
+    diagnostic -- before any per-file record is even read. That diagnostic
+    must count as "lossy" too: otherwise compaction proceeds as if the pack
+    were fully readable, publishes a merge missing whatever that entry would
+    have contributed, and repoints the manifest to it (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["source_facts", "typo_missing.jsonl"]
+    _write_manifest(pack, manifest)
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is None
+
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert remaining == [facts_filename("src/foo.cpp")]  # unchanged, no merge
+    assert any("resolved to no readable fact files" in d for d in diagnostics)
+    assert any("compaction was skipped entirely" in d for d in diagnostics)
+    assert load_inputs_manifest(pack).source_facts == [
+        "source_facts",
+        "typo_missing.jsonl",
+    ]  # manifest not repointed
+
+
 def test_compact_directory_scan_manifest_stays_discoverable_after_rebuild(
     tmp_path: Path,
 ) -> None:

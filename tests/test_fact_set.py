@@ -483,6 +483,18 @@ def test_diff_silent_when_fact_sets_match_and_coverage_clean() -> None:
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE not in {c.kind for c in changes}
 
 
+def test_diff_degrades_on_non_dict_nested_coverage_metadata() -> None:
+    """A hand-written/newer source_abi.json's nested coverage.fact_set or
+    coverage.fact_family_states might not be a mapping at all -- `x or {}`
+    alone doesn't catch that (a non-empty non-dict value is still truthy),
+    so this must not raise AttributeError, matching the defensive handling
+    every other optional field here already gets (Codex review, P2)."""
+    old = _surface(coverage={"fact_set": "not-a-dict", "fact_family_states": "also-bad"})
+    new = _surface(coverage={"fact_set": ["also", "not", "a", "dict"]})
+    changes = diff_source_abi(old, new)  # must not raise
+    assert isinstance(changes, list)
+
+
 def test_source_fact_coverage_incomplete_is_risk_kind() -> None:
     from abicheck.checker_policy import RISK_KINDS
 

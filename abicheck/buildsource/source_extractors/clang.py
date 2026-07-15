@@ -1850,14 +1850,20 @@ class ClangSourceExtractor:
         coverage["macros"] = coverage_state_for_family(
             entities_present=bool(tu.macros), family_diagnostics_seen=macro_diag
         )
-        edges_diag = any(
+        # Both families are derived from the same (possibly ast_recovered
+        # -truncated) AST dict the AST-derived families above already
+        # account for -- a recovered parse with no edge-parser exception of
+        # its own must still downgrade these two, or a partially-collected
+        # AST could advertise them as complete/empty-confirmed (Codex
+        # review, P2).
+        edges_diag = ast_recovered or any(
             d.startswith("source_edges unavailable") for d in tu.diagnostics
         )
         coverage["source_edges"] = coverage_state_for_family(
             entities_present=bool(tu.source_edges), family_diagnostics_seen=edges_diag
         )
         coverage["read_files"] = coverage_state_for_family(
-            entities_present=bool(tu.read_files), family_diagnostics_seen=False
+            entities_present=bool(tu.read_files), family_diagnostics_seen=ast_recovered
         )
         tu.coverage = coverage
         tu.fact_set = default_fact_set(
