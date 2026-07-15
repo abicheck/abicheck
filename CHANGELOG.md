@@ -302,6 +302,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **CI's "Full example matrix" gate false-failed on every PR after #547.**
+  `tests/validate_examples.py::_summary_counts` overlays two secondary,
+  independent tallies onto a run's summary dict — `CATEGORY_COLLAPSED`
+  (`category_strict == "collapsed"`) and `KINDS_MISMATCH`
+  (`kinds_strict == "mismatch"`) — alongside the primary pass/fail status
+  counts; a case can be `PASS` *and* contribute to one of these. But
+  `validation/scripts/collect_full_example_matrix.py`'s cross-check
+  recomputed the artifact's summary from per-case `status` alone, so it
+  never matched the artifact's own (legitimately correct) summary the
+  moment any case tripped either signal — 22 gcc / 24 clang cases,
+  reliably, on every run. The recomputation now overlays the same two
+  tallies from each row's `category_strict`/`kinds_strict` fields.
+
 - **`case35_field_rename` reported `BREAKING` instead of `API_BREAK`.** A pure
   field rename (same offset + type, name only) fell through the generic
   field-removed/-added detectors to a plain `TYPE_FIELD_REMOVED`/

@@ -248,6 +248,28 @@ def _artifact_errors(
             if isinstance(row, dict) and row.get("status") is not None
         )
     )
+    # `tests/validate_examples.py::_summary_counts` overlays two secondary,
+    # non-status tallies onto the same summary dict: CATEGORY_COLLAPSED
+    # (category_strict == "collapsed") and KINDS_MISMATCH (kinds_strict ==
+    # "mismatch") — a case can be e.g. PASS *and* contribute to one of these,
+    # since they measure a stricter, independent signal, not the primary
+    # pass/fail status. Recompute both here too, or the artifact's own
+    # summary (which legitimately includes them) never matches this
+    # by-status-only recomputation whenever any case trips either signal.
+    category_collapsed = sum(
+        1
+        for row in results
+        if isinstance(row, dict) and row.get("category_strict") == "collapsed"
+    )
+    if category_collapsed:
+        actual_summary["CATEGORY_COLLAPSED"] = category_collapsed
+    kinds_mismatch = sum(
+        1
+        for row in results
+        if isinstance(row, dict) and row.get("kinds_strict") == "mismatch"
+    )
+    if kinds_mismatch:
+        actual_summary["KINDS_MISMATCH"] = kinds_mismatch
     if data.get("summary") != actual_summary:
         errors.append(
             f"{label}: summary={data.get('summary')!r}, recomputed {actual_summary!r}"

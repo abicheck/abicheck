@@ -154,6 +154,40 @@ def test_full_matrix_artifact_rejects_partial_duplicate_and_stale_catalog() -> N
     assert any("missing case ids: case02" in error for error in errors)
 
 
+def test_full_matrix_artifact_summary_accounts_for_kinds_mismatch_and_category_collapsed() -> (
+    None
+):
+    """PR #547 added KINDS_MISMATCH/CATEGORY_COLLAPSED as secondary overlay
+    tallies in tests/validate_examples.py::_summary_counts -- a case can be
+    PASS *and* contribute to one of these (they measure a stricter,
+    independent signal, not the primary pass/fail status). The by-status-only
+    recomputation must account for both, or a clean artifact whose summary
+    legitimately includes them always reads as an ARTIFACT ERROR."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01", "case02", "case03"}
+    payload = _artifact(matrix, "gcc", cases)
+    payload["summary"] = {"PASS": 3, "KINDS_MISMATCH": 1, "CATEGORY_COLLAPSED": 1}
+    payload["results"] = [
+        {"case_id": "case01", "status": "PASS", "kinds_strict": "mismatch"},
+        {"case_id": "case02", "status": "PASS", "category_strict": "collapsed"},
+        {"case_id": "case03", "status": "PASS"},
+    ]
+    errors = matrix._artifact_errors("gcc", payload, expected_cases=cases)
+    assert not any("summary=" in error for error in errors)
+
+
+def test_full_matrix_artifact_summary_mismatch_still_caught() -> None:
+    """A genuinely wrong KINDS_MISMATCH/CATEGORY_COLLAPSED count must still be
+    flagged -- the fix must not blanket-ignore these keys."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    cases = {"case01"}
+    payload = _artifact(matrix, "gcc", cases)
+    payload["summary"] = {"PASS": 1, "KINDS_MISMATCH": 1}  # no row actually mismatched
+    payload["results"] = [{"case_id": "case01", "status": "PASS"}]
+    errors = matrix._artifact_errors("gcc", payload, expected_cases=cases)
+    assert any("summary=" in error for error in errors)
+
+
 def test_full_matrix_runtime_build_error_is_an_artifact_error() -> None:
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
     payload = _artifact(matrix, "runtime", {"case01"}, status="BUILD_ERROR")
