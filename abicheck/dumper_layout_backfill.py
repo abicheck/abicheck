@@ -96,6 +96,13 @@ def backfill_dwarf_layout(
     review: template patterns and ordinary records share the same clang AST
     kind and bare name, with nothing else to tell them apart).
 
+    A name (and field-name) match alone is not enough, either: a struct/
+    class and a union can share a bare name and even a member name while
+    having fundamentally different layouts (a union's members overlap in
+    memory; a struct's/class's don't) — copying one's layout onto the other
+    would be wrong regardless of how well the names line up (Codex review).
+    ``is_union`` must agree before a match is used at all.
+
     The clang header backend emits a bare record name with no namespace
     scope, while the DWARF builder qualifies it (``scope::name``) — an exact
     match therefore misses a genuinely namespaced type. Falling back to a
@@ -214,7 +221,11 @@ def backfill_dwarf_layout(
             out.append(t)
             continue
         dwarf_t = _dwarf_match(t.name)
-        if dwarf_t is None or not _fields_corroborate(t, dwarf_t):
+        if (
+            dwarf_t is None
+            or t.is_union != dwarf_t.is_union
+            or not _fields_corroborate(t, dwarf_t)
+        ):
             out.append(t)
             continue
         dwarf_fields_by_name = {f.name: f for f in dwarf_t.fields}

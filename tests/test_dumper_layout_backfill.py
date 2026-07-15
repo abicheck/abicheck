@@ -269,6 +269,23 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
+    def test_union_vs_struct_kind_mismatch_is_never_guessed(self) -> None:
+        """Regression (Codex review): a struct and a union can share a bare
+        name and even a field name while having fundamentally different
+        layouts (a union's members overlap in memory; a struct's don't) —
+        field-name overlap corroboration alone is not enough to accept a
+        match across that boundary. `is_union` must agree first."""
+        header = RecordType(
+            name="Foo", kind="struct", is_union=False,
+            fields=[TypeField(name="x", type="int")],
+        )
+        dwarf_union = RecordType(
+            name="impl::Foo", kind="union", is_union=True, size_bits=64,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out = backfill_dwarf_layout([header], [dwarf_union])
+        assert out[0].size_bits is None
+
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)
