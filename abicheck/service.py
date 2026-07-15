@@ -587,9 +587,20 @@ def _attach_header_graph(
     reused directly (private only by convention; ``dumper.py`` sits at its
     2000-line hard cap, so a public wrapper is not added there) rather than
     threading the parser's already-consumed AST back out through three
-    format-specific builders. Degrades to a graph with declaration-visibility
-    nodes only (no type/call edges) when clang is unavailable or the header
-    parse fails — never aborts the dump itself (ADR-028 D3).
+    format-specific builders. Mirrors ``_dump_elf``'s own header-expansion
+    (``expand_header_inputs`` — a ``headers`` entry may be a directory) and
+    inferred-include-root derivation (``resolve_inferred_header_roots`` — an
+    umbrella header's relative ``#include``s need the same auto-added ``-I``/
+    ``-isystem`` search dirs the main dump computes) so this second pass sees
+    the identical resolved input the main dump already parsed successfully,
+    rather than the raw, unexpanded arguments (Codex review: without this, a
+    header *directory* input made ``_clang_header_dump`` write an invalid
+    ``#include`` of the directory path itself and raise, and even a single
+    umbrella header with relative includes into a sibling directory could
+    fail to resolve, both silently degrading to the declaration-only graph).
+    Degrades to a graph with declaration-visibility nodes only (no type/call
+    edges) when clang is unavailable or the header parse fails — never aborts
+    the dump itself (ADR-028 D3).
     """
     if not header_graph or not headers:
         return snap
@@ -606,19 +617,31 @@ def _attach_header_graph(
     cc = compile if compile is not None else CompileContext()
     ast_root: dict[str, Any] | None
     try:
+        resolved_headers = expand_header_inputs(headers)
+        eff_includes = list(includes)
+        eff_tokens = cc.gcc_option_tokens
+        if resolved_headers:
+            inc_extra, deferred = resolve_inferred_header_roots(
+                resolved_headers,
+                list(includes),
+                gcc_options=cc.gcc_options,
+                gcc_option_tokens=cc.gcc_option_tokens,
+            )
+            eff_includes += inc_extra
+            eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         ast_root = _clang_header_dump(
-            headers,
-            includes,
+            resolved_headers,
+            eff_includes,
             compiler="cc" if lang == "c" else "c++",
             gcc_path=cc.gcc_path,
             gcc_prefix=cc.gcc_prefix,
             gcc_options=cc.gcc_options,
-            gcc_option_tokens=cc.gcc_option_tokens,
+            gcc_option_tokens=eff_tokens,
             sysroot=cc.sysroot,
             nostdinc=cc.nostdinc,
             lang=lang,
         )
-    except SnapshotError:
+    except (SnapshotError, ValidationError):
         ast_root = None
     graph = build_header_only_graph(
         snap,

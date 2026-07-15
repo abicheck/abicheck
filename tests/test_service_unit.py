@@ -1634,6 +1634,8 @@ class TestRunDumpHeaderGraph:
     def test_embeds_graph_from_clang_ast(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
         snap = AbiSnapshot(
             library="lib",
             version="1.0",
@@ -1645,10 +1647,11 @@ class TestRunDumpHeaderGraph:
             patch("abicheck.service._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
         ):
-            result = run_dump(
-                p, "pe", [Path("api.h")], [], "1.0", "c++", header_graph=True
-            )
+            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
         mock_ast.assert_called_once()
+        # The resolved (existing, expanded) header must reach the clang pass —
+        # not the raw, unexpanded argument (Codex review).
+        assert mock_ast.call_args.args[0] == [header]
         assert result.build_source is not None
         assert result.build_source.source_graph is not None
         node_ids = {n.id for n in result.build_source.source_graph.nodes}
@@ -1669,6 +1672,8 @@ class TestRunDumpHeaderGraph:
     def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
 
         def _raise(*a, **k):
@@ -1676,15 +1681,39 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", side_effect=_raise),
+            patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
         ):
-            result = run_dump(
-                p, "pe", [Path("api.h")], [], "1.0", "c++", header_graph=True
-            )
+            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
+        mock_ast.assert_called_once()
         # Never aborts the dump (ADR-028 D3); the graph is embedded but inert.
         assert result.build_source is not None
         assert result.build_source.source_graph is not None
         assert result.build_source.source_graph.edges == []
+
+    def test_expands_header_directory_before_clang_pass(self, tmp_path):
+        # Codex review: a `headers` entry may be a directory (a supported
+        # run_dump input the main dump path already expands) — the header
+        # graph's own clang pass must see the expanded file list, not the
+        # raw directory (which would otherwise get written into an invalid
+        # `#include "<dir>"` line and silently degrade to the seed-only
+        # graph).
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        hdr_dir = tmp_path / "include"
+        hdr_dir.mkdir()
+        header = hdr_dir / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+        ):
+            result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++", header_graph=True)
+        mock_ast.assert_called_once()
+        assert mock_ast.call_args.args[0] == [header]
+        assert result.build_source is not None
+        assert result.build_source.source_graph is not None
 
 
 class TestCliNativeBinaryHeaderWiring:

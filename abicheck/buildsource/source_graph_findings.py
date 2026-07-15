@@ -294,10 +294,14 @@ def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) ->
 #: correctly excluded under ``type_graph`` (a narrowed/degraded pass) would
 #: still leak back in as "common" under a second, unmarked ``header_type_graph``
 #: entry for the very same kind, since that entry's own narrowed/degraded
-#: flags are independently (and here, vacuously) false. A header-only-vs-
-#: header-only comparison therefore always falls back to the conservative
-#: per-kind edge-presence path (safe, just without full-pass family-widening
-#: credit) rather than risk this cross-family leak.
+#: flags are independently (and here, vacuously) false. Instead,
+#: ``_pass_trusted_kinds`` resolves each pass name's header-only counterpart
+#: *within the same iteration*, capped to the structural kinds a header-only
+#: pass genuinely has project-wide visibility of
+#: (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — never the whole family, so a
+#: header-only confirmation is never treated as equivalent to a
+#: build-integrated one for a body-dependent kind, on either side of the
+#: comparison, regardless of the *other* side's shape.
 _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
     "call_graph": frozenset({"DECL_CALLS_DECL"}),
     "type_graph": frozenset(
@@ -362,6 +366,57 @@ def _pass_scope(graph: SourceGraphSummary, pass_name: str) -> frozenset[str]:
     return graph.narrowed_scope.get(pass_name, frozenset()) or graph.narrowed_scope.get(
         _HEADER_PASS_ALIAS.get(pass_name, ""), frozenset()
     )
+
+
+#: Edge kinds a *header-only* pass (``header_call_graph``/``header_type_graph``,
+#: ADR-041 header-only-graph addendum) has genuine, project-wide visibility of
+#: — declaration-level facts, no function body needed. ``DECL_CALLS_DECL`` and
+#: ``DECL_REFERENCES_DECL`` are deliberately excluded: a header-only pass only
+#: sees a call/reference inside a body that happens to be written *in the
+#: header* (inline/template functions), so its "zero" for either kind is not
+#: evidence of a project-wide zero — only of "this build's out-of-line bodies
+#: are invisible to a header-only scan." A tenth Codex review on the shipped
+#: PR caught the consequence of treating a header-only confirmation as
+#: equivalent to a build-integrated one for these two kinds: comparing a
+#: header-only baseline against a build-integrated candidate could then report
+#: ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` for a dependency that already
+#: existed via an out-of-line call the header-only baseline structurally could
+#: never have seen — a real false positive the moment collection "improves"
+#: from header-only to build-integrated. The three structural kinds have no
+#: such gap: a base class, a field type, and a parameter/return type are
+#: fully visible in headers regardless of where the function body lives.
+_HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
+    {"DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS"}
+)
+
+
+def _pass_trusted_kinds(
+    graph: SourceGraphSummary, pass_name: str, family: frozenset[str]
+) -> frozenset[str]:
+    """Which kinds in *family* a confirmed *pass_name* genuinely vouches for.
+
+    A build-integrated confirmation (``graph.extractor_passes[pass_name]``)
+    vouches for the *whole* family — a real per-TU AST replay sees function
+    bodies too, so its "zero" is authoritative for every kind in the family,
+    exactly as before this addendum. A header-only confirmation
+    (``graph.extractor_passes[header_name]``) only vouches for the structural
+    subset it has true project-wide visibility of
+    (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — regardless of what the *other*
+    side of the comparison is (build-integrated, another header-only graph, or
+    unmarked): a header-only pass's blindness to out-of-line bodies is a
+    property of *that side alone*, not something the other side's shape can
+    make trustworthy. This deliberately loses a little recall for a
+    header-only-vs-header-only comparison's body-dependent kinds (which *are*
+    symmetric, and so arguably safe to widen too) in exchange for never
+    needing to track which specific shape the *other* side is — the simpler,
+    strictly-safe rule a Codex review asked for.
+    """
+    if graph.extractor_passes.get(pass_name, False):
+        return family
+    header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
+    if header_name and graph.extractor_passes.get(header_name, False):
+        return family & _HEADER_FULL_VISIBILITY_KINDS
+    return frozenset()
 
 
 def _dependency_kinds_covered(
@@ -495,14 +550,19 @@ def _common_dependency_edge_kinds(
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        # Each lookup also honors *pass_name*'s header-only-graph counterpart
-        # (``header_call_graph``/``header_type_graph``, ADR-041 header-only-
-        # graph addendum) — same pass-name iteration, so a header-only
-        # graph's own confirmed-pass/narrowed/degraded markers are trusted
-        # without adding a second, independently-iterated family entry that
-        # could double-count a kind (see ``_HEADER_PASS_ALIAS``'s docstring).
-        old_pass = _pass_ran(old, pass_name)
-        new_pass = _pass_ran(new, pass_name)
+        # ``_pass_trusted_kinds`` resolves *pass_name*'s header-only-graph
+        # counterpart (``header_call_graph``/``header_type_graph``, ADR-041
+        # header-only-graph addendum) too, but caps what a header-only
+        # confirmation vouches for to its true structural visibility —
+        # never the whole family, regardless of the *other* side's shape
+        # (Codex review: an earlier version of this fix let a header-only
+        # confirmation grant full-family trust exactly like a build-
+        # integrated one, which could manufacture a false
+        # ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` for a pre-existing,
+        # invisible-to-headers call/reference the moment a baseline switched
+        # from header-only to build-integrated collection).
+        old_trusted = _pass_trusted_kinds(old, pass_name, family)
+        new_trusted = _pass_trusted_kinds(new, pass_name, family)
         old_narrowed = _pass_narrowed(old, pass_name)
         new_narrowed = _pass_narrowed(new, pass_name)
         old_scope = _pass_scope(old, pass_name)
@@ -518,7 +578,13 @@ def _common_dependency_edge_kinds(
         # real, verified zero *within that scope*, safe to widen to the whole
         # family, not merely a per-kind fallback.
         narrowed_confirmed = old_narrowed and new_narrowed and scope_matches
-        if (old_pass and new_pass) or narrowed_confirmed:
+        # Whole-family widening requires BOTH sides to fully trust the
+        # family — i.e. both ran a build-integrated pass (a header-only
+        # confirmation's trusted set is always a strict subset of a family
+        # containing a body-dependent kind, so this never fires for a
+        # header-only side there; it still fires correctly for the
+        # call/type structural kinds via the per-kind loop below).
+        if (old_trusted == family and new_trusted == family) or narrowed_confirmed:
             common |= family
             continue
         # A pass that ran unnarrowed but hit per-TU diagnostics still folds
@@ -539,8 +605,8 @@ def _common_dependency_edge_kinds(
                 and (not old_narrowed or (new_narrowed and scope_matches))
             )
             new_present = kind in new_kinds
-            old_has = old_present or old_pass
-            new_has = new_present or new_pass
+            old_has = old_present or (kind in old_trusted)
+            new_has = new_present or (kind in new_trusted)
             if old_has and new_has:
                 common.add(kind)
     return frozenset(common)
