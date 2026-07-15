@@ -795,7 +795,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `severity_config` and renders a separate "CI Gate: PASS/FAIL (exit N)" card
   alongside the renamed "Compatibility" banner (native report only — the
   ABICC-compatible `compat_html` layout is unchanged); `service.render_output`
-  forwards it through.
+  and the MCP server's `_render_output` (caught in review on this same PR —
+  its HTML branch had the identical gap) both forward it through. The
+  `test_html_template_golden.py` byte-identical goldens are regenerated for
+  the "Verdict" → "Compatibility" rename; the diff is exactly that label plus
+  one blank line for the (empty, since that fixture passes no
+  `severity_config`) gate-card slot.
 
 ### Documentation
 
