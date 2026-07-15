@@ -33,7 +33,9 @@ value (the documented back-compat form).
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -50,16 +52,33 @@ def _helpers_region() -> str:
 
 
 def _run_harness(harness: str) -> str:
-    """Source the real helper functions + *harness*, return CMD joined by '\\x1f'."""
+    """Source the real helper functions + *harness*, return CMD joined by '\\x1f'.
+
+    Writes the assembled script to a real file (UTF-8, explicit ``\\n`` line
+    endings) and runs ``bash <path>`` rather than ``bash -c <string>``: passing
+    a script containing non-ASCII characters (run.sh's comments use em-dashes)
+    as a subprocess argv string hits Windows console/argv-encoding mangling
+    and was flaky under macOS's stock bash 3.2 (exit 127) — a file sidesteps
+    both, and matches how run.sh is actually invoked in production.
+    """
     script = (
         _helpers_region()
         + "\nCMD=()\n"
         + harness
         + '\nprintf \'%s\\x1f\' "${CMD[@]}"\n'
     )
-    result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, check=True,
-    )
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            ["bash", script_path],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+    finally:
+        os.unlink(script_path)
     return result.stdout
 
 

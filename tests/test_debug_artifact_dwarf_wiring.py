@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,8 +43,16 @@ pytestmark = pytest.mark.integration
 
 _NEEDED_TOOLS = ("gcc", "objcopy", "strip", "readelf")
 
-
+#: Linux/ELF-specific by construction: build-id notes and
+#: `objcopy --only-keep-debug` split-DWARF are GNU/ELF conventions. On
+#: Windows, "gcc" is MinGW and emits PE, not ELF; on macOS it's usually a
+#: clang alias emitting Mach-O and detached debug info is dSYM bundles, not
+#: build-id trees — neither has a matching readelf/objcopy/build-id story, so
+#: this fixture-building approach cannot be ported as-is (P1.1 is scoped to
+#: the Linux ELF path; PE/PDB and Mach-O/dSYM wiring are documented follow-ups).
 def _missing_tools() -> list[str]:
+    if sys.platform != "linux":
+        return ["linux"]
     return [t for t in _NEEDED_TOOLS if shutil.which(t) is None]
 
 
@@ -97,7 +106,9 @@ _POINT_V2 = (
 )
 
 
-@pytest.mark.skipif(bool(_missing_tools()), reason=f"requires {_NEEDED_TOOLS}")
+@pytest.mark.skipif(
+    bool(_missing_tools()), reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}"
+)
 class TestDumpUsesResolvedDebugArtifact:
     def test_stripped_binary_without_debug_root_is_symbols_only(
         self, tmp_path: Path
@@ -127,7 +138,9 @@ class TestDumpUsesResolvedDebugArtifact:
         assert len(snap["functions"]) >= 1
 
 
-@pytest.mark.skipif(bool(_missing_tools()), reason=f"requires {_NEEDED_TOOLS}")
+@pytest.mark.skipif(
+    bool(_missing_tools()), reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}"
+)
 class TestCompareUsesResolvedDebugArtifacts:
     def test_compare_stripped_binaries_without_debug_root_is_false_green(
         self, tmp_path: Path

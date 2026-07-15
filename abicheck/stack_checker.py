@@ -100,10 +100,19 @@ def _breaking_change_touches_imports(change: StackChange) -> bool:
     unrelated, unaffected symbol from the same DSO. Without this intersection
     every root importing *anything* from a broken provider was marked FAIL,
     even when the specific break could never have affected it (P1.4).
+
+    A BREAKING finding for a type/layout change (e.g. a resized struct) names
+    the *type* in ``Change.symbol`` (e.g. "Point"), not the functions that use
+    it — those exported functions are separately recorded in
+    ``Change.affected_symbols``. A root importing ``foo(Point)`` must still
+    count as touched even though "foo" never equals "Point" (Codex review).
     """
     assert change.abi_diff is not None
     imported_symbols = {b.symbol for b in change.impacted_imports}
-    breaking_symbols = {c.symbol for c in change.abi_diff.breaking}
+    breaking_symbols: set[str] = set()
+    for c in change.abi_diff.breaking:
+        breaking_symbols.add(c.symbol)
+        breaking_symbols.update(c.affected_symbols or ())
     return bool(imported_symbols & breaking_symbols)
 
 

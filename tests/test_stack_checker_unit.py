@@ -68,11 +68,12 @@ def _make_diff_result(verdict=Verdict.NO_CHANGE, breaking=None):
     return mock
 
 
-def _make_breaking_change(symbol="sym"):
+def _make_breaking_change(symbol="sym", affected_symbols=None):
     return Change(
         kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
         symbol=symbol,
         description="test",
+        affected_symbols=affected_symbols,
     )
 
 
@@ -171,6 +172,25 @@ class TestComputeAbiRisk:
             change_type="content_changed",
             abi_diff=diff,
             impacted_imports=bindings,
+        )]
+        assert _compute_abi_risk(changes) == StackVerdict.FAIL
+
+    def test_breaking_type_change_matched_via_affected_symbols_fails(self):
+        # Codex review regression: a BREAKING type/layout change (e.g. a
+        # resized struct) names the *type* in Change.symbol ("Point"), not
+        # the exported functions that use it — those live in
+        # affected_symbols. A root importing "foo" (which takes a Point
+        # parameter) must still FAIL, not be missed because "foo" != "Point".
+        diff = _make_diff_result(
+            Verdict.BREAKING,
+            breaking=[_make_breaking_change("Point", affected_symbols=["foo", "bar"])],
+        )
+        binding = _make_binding(symbol="foo")
+        changes = [StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[binding],
         )]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
