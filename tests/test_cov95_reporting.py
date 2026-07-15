@@ -739,7 +739,7 @@ class TestInternalLeakReachability:
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         queue.append(("", []))
         queue.append(("ns::detail::X", ["fn:foo"]))
-        paths = _bfs_collect_paths(queue, {}, {"detail"})
+        paths = _bfs_collect_paths(queue, {}, {}, {"detail"})
         assert "ns::detail::X" in paths
 
     def test_record_field_value_embedded_helper(self) -> None:

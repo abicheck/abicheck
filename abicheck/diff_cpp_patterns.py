@@ -200,9 +200,19 @@ def detect_sycl_overload_set_removal(
     the ``func_removed`` stream because they are children of the grouped
     finding.
     """
+    from .model import Visibility
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
+    # Scoped to Visibility.PUBLIC: a snapshot can retain HIDDEN functions
+    # for cross-reference (both the header/castxml backend and, since the
+    # case06 fix, the DWARF-only backend), and a purely-internal helper
+    # disappearing between versions is not a real ABI event — including it
+    # here could group non-exported churn into a user-facing
+    # SYCL_OVERLOAD_SET_REMOVED finding.
+    old_funcs = [f for f in old.functions if f.visibility == Visibility.PUBLIC]
+    new_funcs = [f for f in new.functions if f.visibility == Visibility.PUBLIC]
+    new_mangled = {f.mangled for f in new_funcs}
     # Bare-name -> {distinct qualified_names}, merged from both sides, so a
     # bare param spelling (``queue&``) can be resolved to its real namespace
     # path via RecordType.qualified_name when castxml recovered one (case82).
@@ -222,7 +232,7 @@ def detect_sycl_overload_set_removal(
     # per-symbol removals. Same fix that ``detect_default_template_arg_changed``
     # already uses.
     by_entity: dict[str, list[Function]] = defaultdict(list)
-    for fn in old.functions:
+    for fn in old_funcs:
         if fn.mangled in new_mangled:
             continue
         if not _has_sycl_queue_first_param(fn, type_qualified_index):
@@ -232,7 +242,7 @@ def detect_sycl_overload_set_removal(
     # was withdrawn deliberately (DPC++ build disabled), not that the
     # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
-    for fn in new.functions:
+    for fn in new_funcs:
         if not _has_sycl_queue_first_param(fn, type_qualified_index):
             surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
@@ -399,12 +409,22 @@ def detect_cpu_dispatch_isa_dropped(
     are those rolled up under the grouped finding so the per-symbol
     ``func_removed`` noise doesn't double-count.
     """
+    from .model import Visibility
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
-    removed_by_isa = _build_removed_by_isa(old.functions, new_mangled)
-    all_surviving_stems = _build_all_surviving_stems(new.functions)
-    old_index: dict[str, Function] = {f.mangled: f for f in old.functions}
+    # Scoped to Visibility.PUBLIC: a snapshot can retain HIDDEN functions
+    # for cross-reference (both the header/castxml backend and, since the
+    # case06 fix, the DWARF-only backend). A hidden dispatch helper
+    # (e.g. a `static`/non-exported `*_avx2` specialization) disappearing
+    # between versions never affected any real ABI consumer, and must not
+    # be grouped into a user-facing CPU_DISPATCH_ISA_DROPPED finding.
+    old_funcs = [f for f in old.functions if f.visibility == Visibility.PUBLIC]
+    new_funcs = [f for f in new.functions if f.visibility == Visibility.PUBLIC]
+    new_mangled = {f.mangled for f in new_funcs}
+    removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
+    all_surviving_stems = _build_all_surviving_stems(new_funcs)
+    old_index: dict[str, Function] = {f.mangled: f for f in old_funcs}
     findings: list[Change] = []
     suppressed: set[str] = set()
     for token, removed in removed_by_isa.items():

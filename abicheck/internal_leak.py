@@ -278,9 +278,24 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
+def _build_qualified_index(types: Iterable[RecordType]) -> dict[str, set[str | None]]:
+    """Bare ``RecordType.name`` -> ``{distinct qualified_name}`` over *types*.
+
+    Built directly from the source type list (before any bare-name dict
+    collapses duplicates), so an ambiguous bare name shared by two distinct
+    types (e.g. both ``api::Foo`` and ``api::detail::Foo``) stays detectable
+    — a plain ``{t.name: t for t in types}`` map (:func:`_build_type_map`)
+    would silently keep only whichever record was inserted last.
+    """
+    idx: dict[str, set[str | None]] = collections.defaultdict(set)
+    for t in types:
+        idx[t.name].add(t.qualified_name)
+    return idx
+
+
 def _typename_is_internal(
     typename: str,
-    type_map: dict[str, RecordType],
+    qualified_index: dict[str, set[str | None]],
     internal_namespaces: Iterable[str],
 ) -> bool:
     """Like :func:`is_internal_type`, but also consults the matching
@@ -296,13 +311,23 @@ def _typename_is_internal(
     in an internal namespace (``mylib::detail::descriptor_base``) is invisible
     to :func:`is_internal_type` once reduced to its bare spelling
     (``descriptor_base``), silently disabling the leak check for it.
+
+    Only applies the qualified-name fallback when *typename* unambiguously
+    names one distinct qualified type: if two records share this bare name
+    (e.g. a public ``api::Foo`` and an internal ``api::detail::Foo``), which
+    one is "the" match can't be resolved from the bare name alone, so this
+    returns ``False`` (no fallback) rather than guessing via whichever
+    record happened to be indexed.
     """
     if is_internal_type(typename, internal_namespaces):
         return True
-    rec = type_map.get(typename)
-    if rec is not None and rec.qualified_name:
-        return is_internal_type(rec.qualified_name, internal_namespaces)
-    return False
+    qnames = qualified_index.get(typename)
+    if not qnames or len(qnames) != 1:
+        return False
+    (qname,) = qnames
+    if not qname:
+        return False
+    return is_internal_type(qname, internal_namespaces)
 
 
 def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
@@ -455,6 +480,7 @@ def _seed_queue_from_variables(
 
 def _seed_queue_from_public_types(
     type_map: dict[str, RecordType],
+    qualified_index: dict[str, set[str | None]],
     internal_set: set[str],
     queue: collections.deque[tuple[str, list[str]]],
     *,
@@ -479,7 +505,7 @@ def _seed_queue_from_public_types(
     if is_dwarf_fallback:
         return
     for seed_name in type_map:
-        if seed_name and not _typename_is_internal(seed_name, type_map, internal_set):
+        if seed_name and not _typename_is_internal(seed_name, qualified_index, internal_set):
             queue.append((seed_name, [f"type:{seed_name}"]))
 
 
@@ -540,6 +566,7 @@ def _enqueue_typedef_targets(
 def _bfs_collect_paths(
     queue: collections.deque[tuple[str, list[str]]],
     type_map: dict[str, RecordType],
+    qualified_index: dict[str, set[str | None]],
     internal_set: set[str],
     typedefs: dict[str, str] | None = None,
 ) -> dict[str, list[list[str]]]:
@@ -570,14 +597,14 @@ def _bfs_collect_paths(
             # Still record the leak if this typename is internal — paths
             # vary by entry point, but the *first* recorded one is enough
             # for user-facing reporting.
-            if _typename_is_internal(typename, type_map, internal_set):
+            if _typename_is_internal(typename, qualified_index, internal_set):
                 paths[typename].append(list(path + [typename]))
             continue
         visited.add(key)
 
         _enqueue_typedef_targets(typename, typedefs or {}, path, queue)
 
-        if _typename_is_internal(typename, type_map, internal_set):
+        if _typename_is_internal(typename, qualified_index, internal_set):
             paths[typename].append(list(path + [typename]))
 
         rec = type_map.get(typename)
@@ -631,13 +658,20 @@ def compute_leak_paths(
     """
     internal_set = set(internal_namespaces)
     type_map, is_dwarf_fallback = _build_type_map(snap)
+    # Built from snap.types directly (not the deduped type_map) so an
+    # ambiguous bare name is still detectable; naturally empty/inert in the
+    # DWARF-fallback case (snap.types is empty there and DWARF carries no
+    # qualified_name anyway).
+    qualified_index = _build_qualified_index(snap.types)
 
     queue: collections.deque[tuple[str, list[str]]] = collections.deque()
     _seed_queue_from_functions(snap, queue)
     _seed_queue_from_variables(snap, queue)
-    _seed_queue_from_public_types(type_map, internal_set, queue, is_dwarf_fallback=is_dwarf_fallback)
+    _seed_queue_from_public_types(
+        type_map, qualified_index, internal_set, queue, is_dwarf_fallback=is_dwarf_fallback
+    )
 
-    paths = _bfs_collect_paths(queue, type_map, internal_set, snap.typedefs)
+    paths = _bfs_collect_paths(queue, type_map, qualified_index, internal_set, snap.typedefs)
     return _dedup_paths(paths)
 
 
@@ -775,7 +809,7 @@ def _path_is_value_propagating(path: list[str], snap: AbiSnapshot | None = None)
 def _collect_internal_changes(
     changes: list[Change],
     internal_set: tuple[str, ...],
-    type_map: dict[str, RecordType],
+    qualified_index: dict[str, set[str | None]],
 ) -> dict[str, list[Change]]:
     """Phase 1: bucket changes by internal type name.
 
@@ -789,7 +823,7 @@ def _collect_internal_changes(
         # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
         # qualifier so we look up the type itself.
         type_name = _root_type_name_for_change(c)
-        if _typename_is_internal(type_name, type_map, internal_set):
+        if _typename_is_internal(type_name, qualified_index, internal_set):
             internal_changes[type_name].append(c)
     return internal_changes
 
@@ -871,13 +905,16 @@ def detect_internal_leaks(
     entry points, the description lists up to three of them.
     """
     internal_set = tuple(internal_namespaces)
-    # Merge both sides' type maps so a change's bare symbol resolves to its
-    # RecordType.qualified_name regardless of which snapshot it belongs to
-    # (an added/removed type only appears on one side).
-    old_type_map, _ = _build_type_map(old)
-    new_type_map, _ = _build_type_map(new)
-    merged_type_map = {**old_type_map, **new_type_map}
-    internal_changes = _collect_internal_changes(changes, internal_set, merged_type_map)
+    # Merge both sides' qualified-name indexes so a change's bare symbol
+    # resolves to its RecordType.qualified_name regardless of which snapshot
+    # it belongs to (an added/removed type only appears on one side). Built
+    # from snap.types directly (not a bare-name-deduped type map), so a bare
+    # name shared by two distinct types across old+new stays detectable as
+    # ambiguous rather than silently resolved via one arbitrary record.
+    merged_qualified_index: dict[str, set[str | None]] = collections.defaultdict(set)
+    for t in (*old.types, *new.types):
+        merged_qualified_index[t.name].add(t.qualified_name)
+    internal_changes = _collect_internal_changes(changes, internal_set, merged_qualified_index)
     if not internal_changes:
         return []
 
