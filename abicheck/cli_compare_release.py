@@ -344,6 +344,7 @@ def _compare_release_libraries(
     annotate_additions: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
+    severity_config: SeverityConfig | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -447,6 +448,7 @@ def _compare_release_libraries(
             collect_diff_results=collect_diff_results,
             annotate=annotate,
             scope_to_public_surface=scope_to_public_surface,
+            severity_config=severity_config,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -528,6 +530,7 @@ def _collect_release_extras(
     collect_diff_results: bool,
     annotate: bool,
     scope_to_public_surface: bool = True,
+    severity_config: SeverityConfig | None = None,
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
     """Collect optional re-run artifacts for JUnit and annotations."""
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
@@ -568,7 +571,11 @@ def _collect_release_extras(
 
             if is_github_actions():
                 annotations.extend(
-                    collect_annotations(result, annotate_additions=annotate_additions),
+                    collect_annotations(
+                        result,
+                        annotate_additions=annotate_additions,
+                        severity_config=severity_config,
+                    ),
                 )
     return diff_pairs, annotations
 
@@ -1086,6 +1093,23 @@ def compare_release_cmd(
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolved before the compare pass (its inputs are plain CLI values, no
+        # dependency on compare results) so --annotate's GitHub annotations —
+        # collected inside _compare_release_libraries, same pass as the
+        # per-library JUnit re-run — reflect the same severity-aware gate as
+        # the exit code below, instead of the legacy kind-set mapping. Returns
+        # None when no --severity-* option was supplied, or when compare's
+        # resolved config pins the legacy scheme for set inputs.
+        severity_config = _resolve_release_severity_config(
+            severity_preset,
+            severity_abi_breaking,
+            severity_potential_breaking,
+            severity_quality_issues,
+            severity_addition,
+        )
+        if release_exit_code_scheme == "legacy":
+            severity_config = None
+
         # JUnit still re-runs pairs in _collect_release_extras because it
         # needs old AbiSnapshot too. Bundle analysis reuses the
         # _diff_result stashed in each library entry from the first pass.
@@ -1112,19 +1136,11 @@ def compare_release_cmd(
             annotate_additions=annotate_additions,
             jobs=jobs,
             scope_to_public_surface=scope_public_headers,
+            severity_config=severity_config,
         )
 
         # Compute the severity-aware exit code while per-library DiffResults
         # are still stashed (before _strip_diff_results_and_adjust_verdict).
-        # Returns None when no --severity-* option was supplied, or when
-        # compare's resolved config pins the legacy scheme for set inputs.
-        severity_config = _resolve_release_severity_config(
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
         severity_exit_code = (
             None
             if release_exit_code_scheme == "legacy"
@@ -1137,8 +1153,6 @@ def compare_release_cmd(
                 severity_addition,
             )
         )
-        if release_exit_code_scheme == "legacy":
-            severity_config = None
 
         bundle_result: BundleDiffResult | None = None
         if not no_bundle_analysis:

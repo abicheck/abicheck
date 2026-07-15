@@ -852,6 +852,58 @@ class TestCompareReleaseErrorPaths:
         assert pairs == []
         assert annotations == []
 
+    def test_collect_release_extras_forwards_severity_config_to_annotations(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`compare-release --annotate` must reflect the same severity-aware
+        gate as the exit code (Codex review on #549): an addition promoted to
+        `error` should surface as `::error`, not the legacy silent/notice
+        annotation, in the per-library re-run `_collect_release_extras` drives.
+        """
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release import _collect_release_extras
+        from abicheck.severity import resolve_severity_config
+
+        old_path = tmp_path / "libfoo.so"
+        new_path = tmp_path / "libfoo.so"
+        old_path.write_bytes(b"\x7fELF")
+        new_path.write_bytes(b"\x7fELF")
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = DiffResult(
+            old_version="1", new_version="2", library="libfoo.so",
+            changes=[c], verdict=Verdict.COMPATIBLE,
+        )
+
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release._run_compare_pair",
+            lambda *a, **kw: (result, object(), None),
+        )
+        monkeypatch.setattr(
+            "abicheck.annotations.is_github_actions", lambda: True,
+        )
+
+        cfg = resolve_severity_config("default", addition="error")
+        _pairs, annotations = _collect_release_extras(
+            matched_keys=["libfoo.so"],
+            old_map={"libfoo.so": old_path},
+            new_map={"libfoo.so": new_path},
+            old_debug_dir=None, new_debug_dir=None,
+            resolve_debug_info=lambda *_a, **_kw: None,
+            old_h=[], new_h=[],
+            old_inc=[], new_inc=[],
+            old_version="1", new_version="2",
+            lang="c++",
+            suppress=None, policy="", policy_file_path=None,
+            annotate_additions=False,
+            collect_diff_results=False,
+            annotate=True,
+            severity_config=cfg,
+        )
+        assert len(annotations) == 1
+        _sort_key, line = annotations[0]
+        assert line.startswith("::error ")
+
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""
         from abicheck.cli_compare_release import _format_release_summary
