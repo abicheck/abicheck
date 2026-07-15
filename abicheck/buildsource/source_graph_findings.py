@@ -969,10 +969,29 @@ def _include_graph_fully_covered(graph: SourceGraphSummary) -> bool:
     still satisfies via its real, but partial, edges — reporting every public
     header outside that partial subset as having newly entered/left the
     include graph against a fully-covered baseline).
+
+    Deliberately checks only the build-integrated ``"include_graph"`` name
+    directly — never :func:`_include_graph_covered`/:func:`_pass_ran`'s
+    header-only-graph alias — and additionally requires at least one
+    ``TARGET_HAS_PUBLIC_HEADER`` edge. :func:`_public_headers_in_include_graph`
+    needs exactly that edge kind to recognize a header as "public"; a
+    header-only graph (``header_graph.py``) has no build-integrated "target"
+    concept at all and never emits it (it marks visibility via a node
+    ``attrs["visibility"]`` instead — a structurally different vocabulary).
+    So a header-only graph's ``old_inc``/``new_inc`` is *always* the empty
+    set, no matter how cleanly its own include pass ran or how many
+    ``COMPILE_UNIT_INCLUDES_FILE`` edges it folded — trusting either signal
+    here would read every genuinely-unchanged public header on a
+    build-integrated other side as newly "entered" the moment a baseline
+    switches from header-only to build-integrated collection (Codex review).
     """
     if _pass_narrowed(graph, "include_graph") or _pass_degraded(graph, "include_graph"):
         return False
-    return _include_graph_covered(graph)
+    if not any(e.kind == "TARGET_HAS_PUBLIC_HEADER" for e in graph.edges):
+        return False
+    return graph.extractor_passes.get("include_graph", False) or any(
+        e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
+    )
 
 
 def _include_graph_drift_findings(

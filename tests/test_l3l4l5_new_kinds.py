@@ -37,6 +37,7 @@ from abicheck.buildsource.source_graph_findings import (
     _dependency_path,
     _dependency_reachability,
     _format_dependency_path,
+    _include_graph_fully_covered,
     _public_entry_internal_reach,
     _public_types,
     diff_source_graph_findings,
@@ -1901,3 +1902,59 @@ def test_common_dependency_edge_kinds_header_only_incidental_body_edge_not_trust
     )
     common = _common_dependency_edge_kinds(old, new)
     assert "DECL_CALLS_DECL" not in common
+
+
+def test_include_graph_fully_covered_false_for_header_only_confirmed_pass() -> None:
+    # Codex review: a header-only graph (header_graph.py) has no
+    # build-integrated "target" concept, so it never emits a
+    # TARGET_HAS_PUBLIC_HEADER edge -- _public_headers_in_include_graph needs
+    # exactly that edge kind to recognize a header as "public". A header-only
+    # graph's own confirmed include pass (and even its real
+    # COMPILE_UNIT_INCLUDES_FILE edges) must therefore never be trusted as
+    # "fully covered" for the compiled include-graph drift check: doing so
+    # would read every genuinely-unchanged public header on a build-
+    # integrated other side as newly "entered" the moment a baseline
+    # switches from header-only to build-integrated collection.
+    header_only = SourceGraphSummary(
+        nodes=[_N("h", "header")],
+        edges=[_E("h", "detail/impl.h", "COMPILE_UNIT_INCLUDES_FILE")],
+        extractor_passes={"header_include_graph": True},
+    )
+    assert _include_graph_fully_covered(header_only) is False
+
+
+def test_include_graph_fully_covered_true_for_build_integrated_confirmed_pass() -> None:
+    build_integrated = SourceGraphSummary(
+        nodes=[_N("target", "target"), _N("pub.h", "header")],
+        edges=[
+            _E("target", "pub.h", "TARGET_HAS_PUBLIC_HEADER"),
+            _E("cu", "pub.h", "COMPILE_UNIT_INCLUDES_FILE"),
+        ],
+        extractor_passes={"include_graph": True},
+    )
+    assert _include_graph_fully_covered(build_integrated) is True
+
+
+def test_include_graph_drift_suppressed_against_header_only_baseline() -> None:
+    # The end-to-end regression: a header-only baseline must not make an
+    # unchanged public header on the build-integrated candidate read as
+    # newly "entered" the include graph.
+    old = SourceGraphSummary(
+        nodes=[_N("h", "header")],
+        edges=[_E("h", "pub.h", "COMPILE_UNIT_INCLUDES_FILE")],
+        extractor_passes={"header_include_graph": True},
+    )
+    new = SourceGraphSummary(
+        nodes=[_N("target", "target"), _N("pub.h", "header")],
+        edges=[
+            _E("target", "pub.h", "TARGET_HAS_PUBLIC_HEADER"),
+            _E("cu", "pub.h", "COMPILE_UNIT_INCLUDES_FILE"),
+        ],
+        extractor_passes={"include_graph": True},
+    )
+    inc = [
+        c
+        for c in diff_source_graph_findings(old, new)
+        if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT
+    ]
+    assert inc == []

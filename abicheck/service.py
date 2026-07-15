@@ -724,8 +724,18 @@ def _attach_header_graph(
         # `coverage["include_edges"]["collected"]` from this same marker —
         # skipping it for the empty-map case left that field stale/false
         # despite `extractor_passes` correctly recording the pass as run
-        # (Codex review, follow-up).
-        if not include_diags:
+        # (Codex review, follow-up). A *partial* run (one header's `clang -M`
+        # failed while another's succeeded) folds real edges for the headers
+        # that did parse but must not be confirmed as a clean full pass
+        # either — mark it degraded instead, mirroring
+        # `inline_graph_fold.fold_include_graph`'s own
+        # `elif extractor.diagnostics: degraded_passes[...] = True` branch,
+        # so `_include_graph_fully_covered` never trusts the missing portion
+        # as evidence a header genuinely stopped being included (Codex
+        # review, follow-up).
+        if include_diags:
+            graph.degraded_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        else:
             graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
         graph.finalize()
     pack = BuildSourcePack(root=Path(""), source_graph=graph)

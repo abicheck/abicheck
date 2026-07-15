@@ -1807,6 +1807,69 @@ class TestRunDumpHeaderGraph:
         assert graph.coverage["include_edges"]["collected"] is True
         assert graph.coverage["include_edges"]["count"] == 0
 
+    def test_header_graph_includes_marks_pass_degraded_on_partial_failure(
+        self, tmp_path
+    ):
+        """One header's `clang -M` succeeding while another's fails is a real,
+        partial result -- it must fold the successful header's edges but
+        must NOT be confirmed as a clean full pass (`extractor_passes`), only
+        `degraded_passes`, so `_include_graph_fully_covered` never trusts the
+        failed header's portion as evidence of genuine absence."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        good = tmp_path / "good.h"
+        good.write_text('#include "good_impl.h"\n')
+        impl = tmp_path / "good_impl.h"
+        impl.write_text("struct Impl {};\n")
+        bad = tmp_path / "bad.h"
+        bad.write_text("void g();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+        class _OkProc:
+            stdout = f"good.o: {good} {impl}"
+            stderr = ""
+            returncode = 0
+
+        class _FailProc:
+            stdout = ""
+            stderr = "fatal error: something broke"
+            returncode = 1
+
+        def _fake_run(cmd, *a, **k):
+            return _OkProc() if str(good) in cmd else _FailProc()
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch(
+                "abicheck.buildsource.include_graph.shutil.which",
+                lambda _b: "/usr/bin/clang++",
+            ),
+            patch(
+                "abicheck.buildsource.include_graph.subprocess.run",
+                _fake_run,
+            ),
+        ):
+            result = run_dump(
+                p,
+                "pe",
+                [good, bad],
+                [],
+                "1.0",
+                "c++",
+                header_graph=True,
+                header_graph_includes=True,
+            )
+        graph = result.build_source.source_graph
+        good_id = f"header://{good}"
+        assert any(
+            e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == good_id
+            for e in graph.edges
+        )
+        assert graph.extractor_passes.get("header_include_graph") is not True
+        assert graph.degraded_passes.get("header_include_graph") is True
+
     def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
