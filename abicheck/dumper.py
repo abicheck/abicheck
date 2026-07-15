@@ -1690,21 +1690,21 @@ def _dump_elf(
                 exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
                 dwarf_only_types, profile_hint,
             )
-        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, _resolve_header_backend(header_backend), symbols_only=symbols_only, debug_presence_only=debug_presence_only, version=version, language_profile=profile_hint, session=dwarf_session)  # DWARF layout backfill for a layout-blind header backend; see dumper_layout_backfill
+        # Built here (session still open): the "auto" frontend can fall back to clang internally (G16) even when _resolve_header_backend guesses castxml, so the actual parser type is the only reliable signal below (Codex review).
+        parser = _header_ast_parser(
+            headers, extra_includes, backend=header_backend, compiler=compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            exported_dynamic=exported_dynamic, exported_static=exported_static,
+            public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
+            public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+            extra_hash_dirs=extra_hash_dirs,
+        )
+        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, version=version, language_profile=profile_hint, session=dwarf_session)
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()
-
-    parser = _header_ast_parser(
-        headers, extra_includes, backend=header_backend, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        exported_dynamic=exported_dynamic, exported_static=exported_static,
-        public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
-        public_dir_paths=[str(d) for d in (public_header_dirs or [])],
-        extra_hash_dirs=extra_hash_dirs,
-    )
 
     _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(

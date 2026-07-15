@@ -46,7 +46,7 @@ def dwarf_layout_types_or_empty(
     elf_meta: ElfMetadata,
     dwarf_meta: DwarfMetadata,
     dwarf_adv: AdvancedDwarfMetadata,
-    resolved_header_backend: str,
+    is_clang_backend: bool,
     *,
     symbols_only: bool,
     debug_presence_only: bool,
@@ -60,8 +60,12 @@ def dwarf_layout_types_or_empty(
     layout-blind (clang) and DWARF is actually present — folding that check
     in here lets ``dumper._dump_elf`` call this unconditionally instead of
     guarding it with a separate branch just to decide whether to bother.
+    *is_clang_backend* must reflect the backend the header parser actually
+    used, not a static guess from the requested ``--ast-frontend``: on the
+    "auto" frontend, an unrecoverable castxml failure makes the parser fall
+    back to clang internally, which a pre-resolved guess would miss.
     """
-    if symbols_only or debug_presence_only or not dwarf_meta.has_dwarf or resolved_header_backend != "clang":
+    if symbols_only or debug_presence_only or not dwarf_meta.has_dwarf or not is_clang_backend:
         return []
     from .dwarf_snapshot import build_snapshot_from_dwarf
     return list(build_snapshot_from_dwarf(
@@ -77,24 +81,44 @@ def backfill_dwarf_layout(
     """Fill in missing struct/class layout on header-parsed types from DWARF.
 
     Matched by name — both come from the same source, so a name match is
-    exact (no cross-version renaming ambiguity: this backfills a single
-    snapshot from its own binary, never merges across old/new). castxml
-    already computes real layout itself, so any type that already carries a
-    ``size_bits`` is left untouched — purely additive for a layout-blind
-    header backend, a no-op otherwise. An opaque (forward-declared-only)
-    header type is also left alone: its blank layout is a meaningful "this
-    header only forward-declares it" signal, not a gap to paper over with an
-    unrelated full definition DWARF happens to carry.
+    unambiguous (no cross-version renaming ambiguity: this backfills a
+    single snapshot from its own binary, never merges across old/new).
+    castxml already computes real layout itself, so any type that already
+    carries a ``size_bits`` is left untouched — purely additive for a
+    layout-blind header backend, a no-op otherwise. An opaque (forward-
+    declared-only) header type is also left alone: its blank layout is a
+    meaningful "this header only forward-declares it" signal, not a gap to
+    paper over with an unrelated full definition DWARF happens to carry.
+
+    The clang header backend emits a bare record name with no namespace
+    scope, while the DWARF builder qualifies it (``scope::name``) — an exact
+    match therefore misses a genuinely namespaced type. Falling back to a
+    match on the name's last ``::``-segment recovers that case, but *only*
+    when it is unambiguous: if two DWARF types share that bare suffix (e.g.
+    two different namespaces both declaring ``Foo``), matching either one
+    could silently attach the wrong type's layout, so both are left
+    unmatched rather than guessed (Codex review).
     """
     if not dwarf_types:
         return header_types
     dwarf_by_name = {t.name: t for t in dwarf_types}
+    dwarf_by_suffix: dict[str, list[RecordType]] = {}
+    for t in dwarf_types:
+        dwarf_by_suffix.setdefault(t.name.rsplit("::", 1)[-1], []).append(t)
+
+    def _dwarf_match(name: str) -> RecordType | None:
+        exact = dwarf_by_name.get(name)
+        if exact is not None:
+            return exact
+        candidates = dwarf_by_suffix.get(name, [])
+        return candidates[0] if len(candidates) == 1 else None
+
     out: list[RecordType] = []
     for t in header_types:
         if t.size_bits is not None or t.is_opaque:
             out.append(t)
             continue
-        dwarf_t = dwarf_by_name.get(t.name)
+        dwarf_t = _dwarf_match(t.name)
         if dwarf_t is None:
             out.append(t)
             continue
@@ -121,5 +145,12 @@ def backfill_dwarf_layout(
                 t.vptr_offset_bits if t.vptr_offset_bits is not None else dwarf_t.vptr_offset_bits
             ),
             base_offsets=t.base_offsets or dwarf_t.base_offsets,
+            data_size_bits=t.data_size_bits if t.data_size_bits is not None else dwarf_t.data_size_bits,
+            is_standard_layout=(
+                t.is_standard_layout if t.is_standard_layout is not None else dwarf_t.is_standard_layout
+            ),
+            is_trivially_copyable=(
+                t.is_trivially_copyable if t.is_trivially_copyable is not None else dwarf_t.is_trivially_copyable
+            ),
         ))
     return out
