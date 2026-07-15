@@ -785,9 +785,16 @@ def _match_root_type(
         if c.old_value and c.new_value:
             if pat.search(c.old_value) and pat.search(c.new_value):
                 return type_name
-        elif c.old_value and pat.search(c.old_value):
+            # Both sides are known and don't jointly confirm this root type —
+            # the description alone (which may just restate the same
+            # old_value/new_value transition text) must not override that
+            # verdict for this type_name, or the both-sides guard above is a
+            # no-op whenever a covariant-return-style description happens to
+            # echo the old (or new) value's mention of the root (case72).
+            continue
+        if c.old_value and pat.search(c.old_value):
             return type_name
-        elif c.new_value and pat.search(c.new_value):
+        if c.new_value and pat.search(c.new_value):
             return type_name
         if pat.search(c.description):
             return type_name

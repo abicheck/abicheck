@@ -132,7 +132,7 @@ def _strip_param_decorators(type_str: str) -> str:
 
 
 def _has_sycl_queue_first_param(
-    fn: Function, type_map: Mapping[str, RecordType] | None = None
+    fn: Function, type_qualified_index: Mapping[str, set[str | None]] | None = None
 ) -> bool:
     if not fn.params:
         return False
@@ -140,17 +140,22 @@ def _has_sycl_queue_first_param(
     type_str = first.type or ""
     if _SYCL_QUEUE_PARAM_RE.search(type_str):
         return True
-    if type_map is None:
+    if type_qualified_index is None:
         return False
     # castxml never namespace-qualifies a Struct/Class/Union spelling in a
     # param type (RecordType.name itself stays bare — see its docstring in
     # model.py), so a real ``sycl::queue&`` param shows up here as the bare
     # ``queue&``. Fall back to the RecordType's qualified_name (when the
-    # dumper recovered one) before giving up (case82).
-    rec = type_map.get(_strip_param_decorators(type_str))
-    if rec is not None and rec.qualified_name:
-        return bool(_SYCL_QUEUE_PARAM_RE.search(rec.qualified_name))
-    return False
+    # dumper recovered one) before giving up (case82) — but only when the
+    # bare name unambiguously names one distinct type across both snapshots;
+    # an ambiguous bare name (multiple distinct qualified names, e.g. both
+    # ``mylib::queue`` and ``sycl::queue``) can't be resolved from the type
+    # alone and must not guess.
+    qnames = type_qualified_index.get(_strip_param_decorators(type_str))
+    if not qnames or len(qnames) != 1:
+        return False
+    (qname,) = qnames
+    return bool(qname and _SYCL_QUEUE_PARAM_RE.search(qname))
 
 
 def _unqualified_function_name(name: str) -> str:
@@ -198,11 +203,17 @@ def detect_sycl_overload_set_removal(
     old.index()
     new.index()
     new_mangled = {f.mangled for f in new.functions}
-    # Bare-name -> RecordType, merged from both sides, so a bare param
-    # spelling (``queue&``) can be resolved to its real namespace path via
-    # RecordType.qualified_name when castxml recovered one (case82).
-    type_map: dict[str, RecordType] = {t.name: t for t in old.types}
-    type_map.update({t.name: t for t in new.types})
+    # Bare-name -> {distinct qualified_names}, merged from both sides, so a
+    # bare param spelling (``queue&``) can be resolved to its real namespace
+    # path via RecordType.qualified_name when castxml recovered one (case82).
+    # A *set* (not a plain dict overwrite) so an ambiguous bare name shared by
+    # two distinct types (e.g. both ``mylib::queue`` and ``sycl::queue``) is
+    # detectable — silently keeping whichever record was inserted last could
+    # either wrongly treat an unrelated ``mylib::queue&`` param as SYCL, or
+    # miss a real SYCL removal, depending on insertion order.
+    type_qualified_index: dict[str, set[str | None]] = defaultdict(set)
+    for t in (*old.types, *new.types):
+        type_qualified_index[t.name].add(t.qualified_name)
     # Group removed SYCL-overload candidates by the *qualified* callable
     # stem (full namespace path with template args stripped). Keying by
     # the unqualified leaf name alone would let unrelated symbols like
@@ -214,7 +225,7 @@ def detect_sycl_overload_set_removal(
     for fn in old.functions:
         if fn.mangled in new_mangled:
             continue
-        if not _has_sycl_queue_first_param(fn, type_map):
+        if not _has_sycl_queue_first_param(fn, type_qualified_index):
             continue
         by_entity[_callable_stem(fn.name)].append(fn)
     # Surviving non-SYCL siblings give us confidence that the family
@@ -222,7 +233,7 @@ def detect_sycl_overload_set_removal(
     # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
     for fn in new.functions:
-        if not _has_sycl_queue_first_param(fn, type_map):
+        if not _has_sycl_queue_first_param(fn, type_qualified_index):
             surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
     suppressed: set[str] = set()

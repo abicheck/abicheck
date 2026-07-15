@@ -119,28 +119,26 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
-def _bare_leaf_name(qualified: str) -> str:
-    """Reduce a (possibly namespace-qualified, demangled) function signature
-    to its bare leaf identifier: strip the parameter-list signature (from
-    the first top-level ``(``) and any ``::``-qualification.
+def _strip_param_signature(qualified: str) -> str:
+    """Strip a function's parameter-list signature (from the first
+    top-level ``(``), preserving any ``::`` namespace/class qualification.
 
     Used to compare a function's demangled name (``lib::sort(int*, int*)``)
-    against a variable's bare, unqualified ``name`` (castxml never
-    namespace-qualifies ``Variable`` elements — see ``_var_names`` in
-    :func:`detect_cpo_kind_changed`), so the two sides of a customization
-    point object's function<->variable transition can actually match by name.
+    against a variable's demangled name (``lib::sort``) so the two sides of
+    a customization point object's function<->variable transition can be
+    correlated *by their full qualified name*, not just a bare leaf — two
+    unrelated namespaces reusing the same leaf identifier (``ns1::sort`` vs
+    ``ns2::sort``) must never collapse together (see :func:`detect_cpo_kind_changed`).
     """
     depth = 0
-    cut = len(qualified)
     for i, ch in enumerate(qualified):
         if ch == "(":
             if depth == 0:
-                cut = i
-                break
+                return qualified[:i]
             depth += 1
         elif ch == ")":
             depth = max(0, depth - 1)
-    return qualified[:cut].rsplit("::", 1)[-1]
+    return qualified
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +270,11 @@ def detect_cpo_kind_changed(
     two forms have the same call syntax but different ``decltype`` and
     therefore different trait specializations.
 
-    Detection compares the set of public functions vs public variables
-    by qualified leaf name. A leaf present only in functions (old) and
+    Detection compares the set of public functions vs public variables by
+    full qualified name (namespace/class path + leaf, no parameter
+    signature) — not a bare leaf, so two unrelated namespaces that happen
+    to reuse the same leaf identifier (``ns1::sort`` vs ``ns2::sort``)
+    never cross-match. A qualified name present only in functions (old) and
     only in variables (new), or vice versa, triggers the finding.
     """
     from .model import Visibility
@@ -285,7 +286,7 @@ def detect_cpo_kind_changed(
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                out.add(_bare_leaf_name(_strip_template_args(qname)))
+                out.add(_strip_param_signature(_strip_template_args(qname)))
         return out
 
     def _var_names(snap: AbiSnapshot) -> set[str]:
@@ -293,8 +294,14 @@ def detect_cpo_kind_changed(
         for v in snap.variables:
             if v.visibility != Visibility.PUBLIC:
                 continue
-            if v.name:
-                out.add(v.name)
+            # castxml never namespace-qualifies Variable.name itself, but a
+            # real external-linkage variable's mangled name demangles to the
+            # full qualified path (_qualified_function_name works for a
+            # plain variable too — it just returns `name` unchanged when
+            # `mangled` isn't a real Itanium mangling to demangle).
+            qname = _qualified_function_name(v.name, v.mangled)
+            if qname:
+                out.add(qname)
         return out
 
     old_funcs = _func_names(old)
