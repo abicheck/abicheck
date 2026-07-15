@@ -473,49 +473,64 @@ def _diff_removed_field(
         # without this two removed fields could both claim the same added
         # field as their target, hiding that one was genuinely dropped
         # (caught in review).
+        candidates = [
+            c
+            for c in added_by_offset.get(f_old.offset_bits, [])
+            if (
+                c.name not in reserved_matched_added
+                and c.name not in renamed_type_changed_added
+                and not _RESERVED_FIELD_RE.match(fname)
+                and not _RESERVED_FIELD_RE.match(c.name)
+            )
+        ]
+        # Prefer an exact pure-rename match over an arbitrary first
+        # candidate: when several distinct fields share an offset
+        # (anonymous-union/overlap layouts), the first unconsumed one in
+        # declaration order might be an unrelated retype while a later one
+        # is the true rename target. Picking the retype first would both
+        # report a false TYPE_FIELD_TYPE_CHANGED here *and* leave the true
+        # rename target for the independent `_diff_field_renames` detector
+        # to separately claim as FIELD_RENAMED — two contradictory findings
+        # for the same old field (caught in review).
         f_new = next(
             (
                 c
-                for c in added_by_offset.get(f_old.offset_bits, [])
+                for c in candidates
                 if (
-                    c.name not in reserved_matched_added
-                    and c.name not in renamed_type_changed_added
-                    and not _RESERVED_FIELD_RE.match(fname)
-                    and not _RESERVED_FIELD_RE.match(c.name)
+                    canonicalize_type_name(f_old.type) == canonicalize_type_name(c.type)
+                    # A bit-field's width is a layout property the type
+                    # spelling doesn't capture (e.g. two "unsigned int"
+                    # fields can differ in bit width at the same byte
+                    # offset) — require it to also match before treating
+                    # this as a harmless rename, or a real
+                    # FIELD_BITFIELD_CHANGED break gets masked as a bare
+                    # rename (caught in review).
+                    and f_old.is_bitfield == c.is_bitfield
+                    and f_old.bitfield_bits == c.bitfield_bits
                 )
             ),
             None,
         )
         if f_new is not None:
-            if (
-                canonicalize_type_name(f_old.type) == canonicalize_type_name(f_new.type)
-                # A bit-field's width is a layout property the type spelling
-                # doesn't capture (e.g. two "unsigned int" fields can differ
-                # in bit width at the same byte offset) — require it to also
-                # match before treating this as a harmless rename, or a real
-                # FIELD_BITFIELD_CHANGED break gets masked as a bare rename
-                # (caught in review).
-                and f_old.is_bitfield == f_new.is_bitfield
-                and f_old.bitfield_bits == f_new.bitfield_bits
-            ):
-                renamed_type_changed_added.add(f_new.name)
-                return make_change(
-                    ChangeKind.FIELD_RENAMED,
-                    symbol=name,
-                    name=name,
-                    old=fname,
-                    new=f_new.name,
-                )
-            if not cv_qualifiers_only_differ(f_old.type, f_new.type):
-                renamed_type_changed_added.add(f_new.name)
-                return make_change(
-                    ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-                    symbol=name,
-                    name=name,
-                    detail=f"{fname} -> {f_new.name}",
-                    old=f_old.type,
-                    new=f_new.type,
-                )
+            renamed_type_changed_added.add(f_new.name)
+            return make_change(
+                ChangeKind.FIELD_RENAMED,
+                symbol=name,
+                name=name,
+                old=fname,
+                new=f_new.name,
+            )
+        f_new = candidates[0] if candidates else None
+        if f_new is not None and not cv_qualifiers_only_differ(f_old.type, f_new.type):
+            renamed_type_changed_added.add(f_new.name)
+            return make_change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                symbol=name,
+                name=name,
+                detail=f"{fname} -> {f_new.name}",
+                old=f_old.type,
+                new=f_new.type,
+            )
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
         symbol=name,

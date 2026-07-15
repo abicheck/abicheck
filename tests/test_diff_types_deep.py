@@ -290,6 +290,33 @@ class TestFieldRenamed:
         assert len(removals) == 1
         assert renames[0].new_value == "x"
 
+    def test_exact_type_candidate_preferred_over_first_same_offset_candidate(
+        self,
+    ) -> None:
+        """When several distinct added fields share an offset (anonymous-
+        union/overlap layout), the exact-type rename candidate must be
+        preferred over an arbitrary first-in-order one, even if that first
+        one is a different, unrelated type. Old ``a: int`` becoming new
+        ``x: float, y: int`` (both at offset 0) is really "a renamed to y";
+        picking "x" first would report a false TYPE_FIELD_TYPE_CHANGED for
+        "a" *and* leave the independent `_diff_field_renames` detector free
+        to separately claim "y" as FIELD_RENAMED — two contradictory
+        findings about the same old field (review finding on the
+        collapsing-duplicate-rename fix).
+        """
+        t_old = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("a", "int", 0)])
+        t_new = RecordType(name="Overlay", kind="struct", size_bits=32,
+                           fields=[TypeField("x", "float", 0),
+                                   TypeField("y", "int", 0)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        renames = [c for c in r.changes if c.kind == ChangeKind.FIELD_RENAMED]
+        assert len(renames) == 1
+        assert renames[0].old_value == "a"
+        assert renames[0].new_value == "y"
+
 
 # ── enum_member_renamed (source-level break) ─────────────────────────────
 
