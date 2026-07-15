@@ -2636,11 +2636,24 @@ private:
   // this compile already populated. Deduplicated and sorted deterministically
   // (recommendation #16). Absolute paths, matching resolveMainSource() so a
   // relative -I doesn't make two same-spelled builds collide.
+  //
+  // SourceManager::fileinfo_begin()/end() iterate a map whose *key* type
+  // changed across the LLVM majors this plugin supports (C.5): `FileEntryRef`
+  // from LLVM 18, `const FileEntry *` on LLVM 16/17 (confirmed by the C.6 CI
+  // matrix — a `FileEntryRef fe = it->first;` here fails to compile on 17).
+  // The two overloads below dispatch on whichever key type the installed
+  // clang headers actually declare, so this file builds unmodified against
+  // every matrix leg without an `#if CLANG_VERSION_MAJOR` guard.
+  static llvm::StringRef fileEntryKeyName(const FileEntry *fe) {
+    return fe->getName();
+  }
+  static llvm::StringRef fileEntryKeyName(FileEntryRef fe) {
+    return fe.getName();
+  }
   std::vector<std::string> collectReadFiles(SourceManager &sm) const {
     std::vector<std::string> files;
     for (auto it = sm.fileinfo_begin(), e = sm.fileinfo_end(); it != e; ++it) {
-      FileEntryRef fe = it->first;
-      llvm::SmallString<256> abs(fe.getName());
+      llvm::SmallString<256> abs(fileEntryKeyName(it->first));
       llvm::sys::fs::make_absolute(abs);
       files.push_back(std::string(abs.str()));
     }
