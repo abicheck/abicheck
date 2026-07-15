@@ -517,6 +517,26 @@ class TypeEdge:
     #: review: without this, a private-header dst node carries no visibility
     #: and ``public_to_internal_dependency`` never fires on it).
     dst_file: str = ""
+    #: How *dst*'s name was resolved to its qualified form (:func:`_resolve_type_name`
+    #: — richer confidence/provenance, ADR-041 addendum): ``"scope"`` (matched
+    #: via the nearest-enclosing-scope walk — real C++ lookup order, the
+    #: confident case), ``"unique_candidate"`` (no scope matched, but exactly
+    #: one same-bare-name declaration exists anywhere in the TU — a
+    #: last-resort guess, weaker than a scope match even though both were
+    #: previously folded into the same flat ``CONF_HIGH`` tier),
+    #: ``"unresolved"`` (no candidate at all; the raw spelling is kept), or
+    #: ``""`` for an edge kind this labeling doesn't apply to (a
+    #: ``DECL_REFERENCES_DECL`` edge's target is resolved by
+    #: :func:`_resolve_ref_identity`, a different mechanism with its own
+    #: confidence — always ``CONF_REDUCED`` — not this field). Excluded from
+    #: equality/hash (``compare=False``): it's a purely informational
+    #: refinement of *why* ``confidence`` already came out ``CONF_REDUCED``
+    #: (``unique_candidate`` vs. ``unresolved``, both already REDUCED before
+    #: this field existed) — the many existing tests asserting exact
+    #: ``TypeEdge(...) ==`` equality against ``confidence``/``role``/
+    #: ``dst_file`` alone should not need updating for a field that adds
+    #: detail without changing what they already verify.
+    resolution: str = field(default="", compare=False)
 
 
 def _index_declared_entities(
@@ -673,9 +693,16 @@ def _index_declared_entities(
     return cur_file
 
 
+#: :func:`_resolve_type_name` resolution labels (ADR-041 richer-confidence
+#: addendum), ordered strongest first.
+RESOLUTION_SCOPE = "scope"
+RESOLUTION_UNIQUE_CANDIDATE = "unique_candidate"
+RESOLUTION_UNRESOLVED = "unresolved"
+
+
 def _resolve_type_name(
     raw: str, scope: list[str], name_index: dict[str, list[str]]
-) -> tuple[str, bool]:
+) -> tuple[str, str]:
     """Resolve a possibly-unqualified or partially-qualified type spelling to
     a fully qualified name.
 
@@ -694,16 +721,21 @@ def _resolve_type_name(
     ``"other::Impl"``), then the nearest enclosing scope is tried first,
     each enclosing scope outward next, and a unique remaining candidate last.
 
-    Returns ``(name, matched)`` — *matched* is ``True`` only when a
-    qualifying declaration was found, so a **global** declaration whose
-    resolved spelling happens to equal the raw spelling (e.g. ``"Base"`` at
-    namespace scope) is still reported as a real match rather than mistaken
-    for "unresolved" by a naive string-equality check (Codex review). Best
-    effort, not a real semantic lookup: an unmatched name is returned
-    unchanged with ``matched=False``.
+    Returns ``(name, resolution)`` — *resolution* is one of
+    :data:`RESOLUTION_SCOPE` (a qualifying declaration was found via the
+    scope walk — real C++ lookup order; this includes a **global**
+    declaration whose resolved spelling happens to equal the raw spelling,
+    e.g. ``"Base"`` at namespace scope, which is still a real scope match,
+    not "unresolved" — Codex review), :data:`RESOLUTION_UNIQUE_CANDIDATE` (no
+    scope in the walk matched, but exactly one same-bare-name declaration
+    exists anywhere in the TU — a last-resort guess, weaker than a scope
+    match even though a caller may still choose to trust it), or
+    :data:`RESOLUTION_UNRESOLVED` (no candidate matched at all; the raw
+    spelling is returned unchanged). Best effort, not a real semantic
+    lookup.
     """
     if not raw:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     # A leading "::" is C++'s global-scope qualifier ("::ns::detail::Impl"),
     # not part of the name itself — the index stores declarations without it
     # (Codex review: matching on the unstripped spelling built "::::..." and
@@ -712,19 +744,19 @@ def _resolve_type_name(
     leaf = lookup.rsplit("::", 1)[-1]
     candidates = name_index.get(leaf)
     if not candidates:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     suffix = "::" + lookup
     matching = [c for c in candidates if c == lookup or c.endswith(suffix)]
     if not matching:
-        return raw, False
+        return raw, RESOLUTION_UNRESOLVED
     for k in range(len(scope), -1, -1):
         prefix = "::".join(scope[:k])
         target = f"{prefix}::{lookup}" if prefix else lookup
         if target in matching:
-            return target, True
+            return target, RESOLUTION_SCOPE
     if len(matching) == 1:
-        return matching[0], True
-    return raw, False
+        return matching[0], RESOLUTION_UNIQUE_CANDIDATE
+    return raw, RESOLUTION_UNRESOLVED
 
 
 def _emit_type_edges(
@@ -751,7 +783,7 @@ def _emit_type_edges(
     """
     seen: set[str] = set()
     for candidate in _resolve_nested_type_names(raw):
-        name, matched = _resolve_type_name(candidate, scope, name_index)
+        name, resolution = _resolve_type_name(candidate, scope, name_index)
         if not name or _is_excluded_type(name) or name in seen:
             continue
         seen.add(name)
@@ -760,9 +792,10 @@ def _emit_type_edges(
                 src,
                 name,
                 kind,
-                CONF_HIGH if matched else CONF_REDUCED,
+                CONF_HIGH if resolution == RESOLUTION_SCOPE else CONF_REDUCED,
                 role,
                 decl_file.get(name, ""),
+                resolution,
             )
         )
 
@@ -1222,6 +1255,11 @@ def augment_graph_with_types(
                 existing.attrs["defined_in_project"] = True
                 existing.attrs["def_file"] = e.dst_file
         before = len(graph.edges)
+        edge_attrs: dict[str, Any] = {}
+        if e.role:
+            edge_attrs["role"] = e.role
+        if e.resolution:
+            edge_attrs["resolution"] = e.resolution
         graph.add_edge(
             GraphEdge(
                 src=src_id,
@@ -1229,7 +1267,7 @@ def augment_graph_with_types(
                 kind=e.kind,
                 provenance="type_graph",
                 confidence=e.confidence,
-                attrs={"role": e.role} if e.role else {},
+                attrs=edge_attrs,
             )
         )
         added += len(graph.edges) - before

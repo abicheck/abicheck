@@ -1675,3 +1675,75 @@ def test_index_declared_type_files_excludes_var_and_enum_constant_identities() -
     assert result == {"Widget": "widget.h"}
     assert "_ZN2ns1kE" not in result
     assert "k" not in result
+
+
+# ── richer confidence/provenance: _resolve_type_name resolution tiers ───────
+
+
+def test_scope_match_labeled_with_resolution_scope() -> None:
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                _record("Base"),
+                _record("Widget", bases=[_base("Base")]),
+            ],
+        }
+    )
+    edges = parse_clang_ast_types(ast)
+    inherits = [e for e in edges if e.kind == "TYPE_INHERITS"]
+    assert len(inherits) == 1
+    assert inherits[0].confidence == CONF_HIGH
+    assert inherits[0].resolution == "scope"
+
+
+def test_unresolved_type_labeled_with_resolution_unresolved() -> None:
+    ast = _tu(_record("Widget", inner=[_field("p", "Unknown *")]))
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert len(fields) == 1
+    assert fields[0].confidence == CONF_REDUCED
+    assert fields[0].resolution == "unresolved"
+
+
+def test_unrelated_scope_unique_candidate_gets_reduced_confidence_and_label() -> None:
+    # Codex-review-style richer confidence (ADR-041 addendum): a bare name
+    # that matches no enclosing scope in the walk, but is the only
+    # same-named declaration anywhere in the TU, was previously folded into
+    # the same flat CONF_HIGH tier as a real scope match — even though it's
+    # a last-resort guess (the type could be structurally unrelated to the
+    # referencing scope). Now flagged CONF_REDUCED with a distinct label.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "a", "inner": [_record("Helper")]},
+        {
+            "kind": "NamespaceDecl",
+            "name": "c",
+            "inner": [_record("Widget", inner=[_field("p", "Helper *")])],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    fields = [e for e in edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert len(fields) == 1
+    edge = fields[0]
+    assert edge.dst == "a::Helper"
+    assert edge.confidence == CONF_REDUCED
+    assert edge.resolution == "unique_candidate"
+
+
+def test_augment_graph_with_types_carries_resolution_into_edge_attrs() -> None:
+    edges = [
+        TypeEdge(
+            "Widget",
+            "a::Helper",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_REDUCED,
+            "field",
+            resolution="unique_candidate",
+        ),
+    ]
+    graph = SourceGraphSummary()
+    augment_graph_with_types(graph, edges)
+    edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
+    assert edge.attrs["resolution"] == "unique_candidate"
+    assert edge.attrs["role"] == "field"
