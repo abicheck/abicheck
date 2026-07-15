@@ -4,17 +4,17 @@
 This intentionally checks local, deterministic invariants.  The Pages workflow
 performs the separate post-deploy HTTP retrieval check after publishing.
 """
+
 from __future__ import annotations
 
 import json
 import sys
-import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
 
+import tomllib
 import yaml
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
+from packaging.requirements import InvalidRequirement, Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = ROOT / "abicheck" / "schemas"
@@ -61,7 +61,16 @@ def check_citation() -> None:
         fail(f"CITATION.cff is not valid YAML: {error}")
     if not isinstance(data, dict):
         fail("CITATION.cff must contain a mapping")
-    for key in ("cff-version", "message", "title", "type", "authors", "license", "repository-code", "url"):
+    for key in (
+        "cff-version",
+        "message",
+        "title",
+        "type",
+        "authors",
+        "license",
+        "repository-code",
+        "url",
+    ):
         require(data, key, "CITATION.cff")
     if data["cff-version"] != "1.2.0":
         fail("CITATION.cff must use CFF 1.2.0")
@@ -75,13 +84,27 @@ def check_citation() -> None:
     if not isinstance(authors, list) or not authors:
         fail("CITATION.cff authors must be a non-empty list")
     for author in authors:
-        if not isinstance(author, dict) or not author.get("family-names") or not author.get("given-names"):
+        if (
+            not isinstance(author, dict)
+            or not author.get("family-names")
+            or not author.get("given-names")
+        ):
             fail("every CITATION.cff author must have family-names and given-names")
 
 
 def check_codemeta_and_zenodo(project: dict[str, object]) -> None:
     codemeta = load_json(ROOT / "codemeta.json")
-    for key in ("@context", "@type", "name", "description", "codeRepository", "url", "license", "author", "softwareRequirements"):
+    for key in (
+        "@context",
+        "@type",
+        "name",
+        "description",
+        "codeRepository",
+        "url",
+        "license",
+        "author",
+        "softwareRequirements",
+    ):
         require(codemeta, key, "codemeta.json")
     if codemeta["@context"] != "https://doi.org/10.5063/schema/codemeta-2.0":
         fail("codemeta.json must use the CodeMeta 2.0 context")
@@ -96,29 +119,39 @@ def check_codemeta_and_zenodo(project: dict[str, object]) -> None:
         fail("codemeta.json softwareRequirements must be a list")
     try:
         codemeta_requirements = {
-            canonicalize_name(Requirement(requirement).name) + str(Requirement(requirement).specifier)
-            for requirement in requirements
+            Requirement(requirement) for requirement in requirements
         }
         project_requirements = {
-            canonicalize_name(Requirement(requirement).name) + str(Requirement(requirement).specifier)
-            for requirement in project["dependencies"]
+            Requirement(requirement) for requirement in project["dependencies"]
         }
-    except TypeError as error:
-        fail(f"software requirements must be strings: {error}")
+    except (InvalidRequirement, TypeError) as error:
+        fail(f"software requirements must be valid requirement strings: {error}")
     if codemeta_requirements != project_requirements:
-        fail("codemeta.json softwareRequirements must agree with pyproject.toml dependencies")
+        fail(
+            "codemeta.json softwareRequirements must agree with pyproject.toml dependencies"
+        )
     for key in ("codeRepository", "issueTracker", "url", "license"):
         https_url(require(codemeta, key, "codemeta.json"), f"codemeta.json {key}")
 
     zenodo = load_json(ROOT / ".zenodo.json")
-    for key in ("title", "description", "upload_type", "access_right", "license", "creators", "keywords"):
+    for key in (
+        "title",
+        "description",
+        "upload_type",
+        "access_right",
+        "license",
+        "creators",
+        "keywords",
+    ):
         require(zenodo, key, ".zenodo.json")
     if zenodo["upload_type"] != "software" or zenodo["access_right"] != "open":
         fail(".zenodo.json must describe openly accessible software")
     if zenodo["license"] != "Apache-2.0":
         fail(".zenodo.json license must agree with project metadata")
     creators = zenodo["creators"]
-    if not isinstance(creators, list) or not all(isinstance(creator, dict) and creator.get("name") for creator in creators):
+    if not isinstance(creators, list) or not all(
+        isinstance(creator, dict) and creator.get("name") for creator in creators
+    ):
         fail(".zenodo.json creators must be a non-empty list of named creators")
 
 

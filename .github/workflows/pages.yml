@@ -54,21 +54,22 @@ jobs:
     name: Verify published schema IDs
     needs: deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - name: Retrieve every canonical schema URL
+      - name: Retrieve and compare every canonical schema URL
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY' > schema_urls.txt
-          import json
-          from pathlib import Path
-          for path in sorted(Path("abicheck/schemas").glob("*.schema.json")):
-              print(json.loads(path.read_text(encoding="utf-8"))["$id"])
-          PY
-          while IFS= read -r url; do
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          for schema in abicheck/schemas/*.schema.json; do
+            url="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["$id"])' "$schema")"
+            downloaded="$temp_dir/$(basename "$schema")"
             echo "Checking $url"
-            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 15 "$url" -o /dev/null
-          done < schema_urls.txt
+            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+              --connect-timeout 15 --max-time 60 "$url" --output "$downloaded"
+            cmp -- "$schema" "$downloaded"
+          done
