@@ -330,8 +330,21 @@ def compact_inputs_pack(
     # as append_source_facts (CodeRabbit review, P2). Resolved before reading
     # so the output path is known when partitioning discovered files below.
     compress = compress or output_filename.endswith(".gz")
-    if compress and not output_filename.endswith(".gz"):
-        output_filename = f"{output_filename}.gz"
+    # The default directory scan _iter_source_fact_files() runs on every
+    # later read only recognizes *.jsonl(.gz) and *.json(.gz) -- a caller-
+    # supplied basename without one of those extensions (e.g.
+    # --output-filename merged, with or without --compress) writes a
+    # merged file that scan can never find. Compaction then "succeeds"
+    # with zero diagnostics, deletes the originals it just merged, and the
+    # pack silently ingests as zero TUs from that point on (Codex review,
+    # P2, reproduced empirically for both the compressed and uncompressed
+    # case). Normalize to the canonical .jsonl extension before the
+    # optional .gz suffix, matching every other producer in this codebase,
+    # unless the caller already used a recognized extension.
+    base = output_filename[: -len(".gz")] if output_filename.endswith(".gz") else output_filename
+    if not (base.endswith(".jsonl") or base.endswith(".json")):
+        base = f"{base}.jsonl"
+    output_filename = f"{base}.gz" if compress else base
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename

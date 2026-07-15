@@ -300,6 +300,40 @@ def test_compact_infers_compression_from_gz_output_filename(tmp_path: Path) -> N
     assert ingested.tu_count == 1
 
 
+@pytest.mark.parametrize(
+    ("output_filename", "compress", "expected_name"),
+    [
+        ("merged", True, "merged.jsonl.gz"),
+        ("merged", False, "merged.jsonl"),
+        ("merged.gz", False, "merged.jsonl.gz"),
+    ],
+)
+def test_compact_normalizes_extensionless_output_filename(
+    tmp_path: Path, output_filename: str, compress: bool, expected_name: str
+) -> None:
+    """The default directory scan _iter_source_fact_files() runs on every
+    later read only recognizes *.jsonl(.gz)/*.json(.gz) -- a caller-
+    supplied --output-filename without one of those extensions (e.g.
+    "merged", with or without --compress) wrote a merged file that scan
+    could never find. Compaction "succeeded" with zero diagnostics,
+    deleted the originals it just merged, and the pack silently ingested
+    as zero TUs from then on (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov")], filename=facts_filename("src/foo.cpp")
+    )
+
+    out = compact_inputs_pack(pack, output_filename=output_filename, compress=compress)
+    assert out is not None
+    assert out.name == expected_name
+
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 1
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "foo" in names
+
+
 def test_compact_rerun_prefers_fresh_record_over_stale_prior_output(
     tmp_path: Path,
 ) -> None:
