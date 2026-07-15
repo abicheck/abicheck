@@ -348,6 +348,13 @@ def compact_inputs_pack(
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename
+    # Whether output_path already held a (valid, from a prior successful
+    # compaction) merge before this run's os.replace() below -- needed to
+    # decide, on a later manifest-write failure, whether cleaning it up
+    # would discard only this run's not-yet-published output or also a
+    # legitimate prior compaction's result a rerun happened to overwrite in
+    # place (same output_filename as last time).
+    output_path_preexisted = output_path.exists()
 
     # Captured before ANY discovery/read step below, not just the per-file
     # record reads -- _iter_source_fact_files() itself can append a
@@ -537,12 +544,35 @@ def compact_inputs_pack(
     # -- a later read finds neither the old originals nor a manifest that
     # knows to look at the merged output, discarding evidence the merge
     # itself successfully captured. Publishing first means a manifest-write
-    # failure leaves the pack exactly as it was pre-compaction (still
-    # discoverable via its old entries/originals) plus one harmless
-    # untracked merged file, never a state with less evidence than before
-    # (CodeRabbit review, P2).
+    # failure leaves the pack's *manifest* exactly as it was pre-compaction
+    # (still discoverable via its old entries/originals) (CodeRabbit
+    # review, P2).
+    #
+    # But os.replace(tmp, output_path) above already published the merged
+    # file itself, inside SOURCE_FACTS_DIR where the default directory scan
+    # finds it unconditionally -- a manifest-write failure at this point
+    # would otherwise leave that stray, already-discoverable merged file
+    # sitting alongside the still-present (never-deleted, since
+    # remove_originals hasn't run yet) originals. A later read would then
+    # see BOTH copies of every TU compaction had just merged: not "less
+    # evidence than before" but silently *duplicated* evidence, and the
+    # stray file wedges every subsequent compact() attempt (Codex review,
+    # P2, reproduced empirically: tu_count doubled after a simulated
+    # manifest-write failure). Rolled back on failure, restoring the pack
+    # to its exact pre-compaction state -- but only when output_path did
+    # NOT already hold a prior successful compaction's result: a rerun
+    # reusing the same output_filename overwrites that file in place, and
+    # deleting it on this run's manifest-write failure would destroy the
+    # still-valid, still-published (per the old manifest) prior result too,
+    # not just this run's unpublished one.
     if manifest_changed:
-        _write_manifest(root, manifest)
+        try:
+            _write_manifest(root, manifest)
+        except BaseException:
+            if not output_path_preexisted:
+                with contextlib.suppress(OSError):
+                    output_path.unlink()
+            raise
 
     if remove_originals:
         for f in fresh_files:

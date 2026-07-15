@@ -1038,6 +1038,119 @@ def test_compact_preserves_originals_when_manifest_write_fails(
     ]
 
 
+def test_compact_rolls_back_merged_output_when_manifest_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """os.replace(tmp, output_path) publishes the merged file BEFORE the
+    manifest write that records it -- for the first-ever compaction of a
+    default directory-scan pack (source_facts left empty), that write is
+    still needed to record manifest.last_compacted. If it fails, the merged
+    file is already sitting inside SOURCE_FACTS_DIR where the default
+    directory scan finds it unconditionally, alongside the still-present
+    (never-deleted, since remove_originals hasn't run yet) original --
+    duplicating every TU compaction had just merged and wedging every
+    subsequent compact() attempt with a stray file (Codex review, P2,
+    reproduced empirically: tu_count doubled after a simulated
+    manifest-write failure). The merged output must be rolled back too."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+
+    import abicheck.buildsource.inputs_emit as inputs_emit_module
+
+    def _boom(root: Path, manifest: object) -> None:
+        raise OSError("disk full (simulated)")
+
+    monkeypatch.setattr(inputs_emit_module, "_write_manifest", _boom)
+
+    with pytest.raises(OSError, match="disk full"):
+        compact_inputs_pack(pack)
+
+    # The stray merged output must not survive -- only the original TU
+    # file compaction never got to (successfully) delete.
+    remaining = sorted(p.name for p in (pack / "source_facts").glob("*.jsonl"))
+    assert remaining == [facts_filename("src/foo.cpp")]
+
+    tus = read_source_facts(pack)
+    assert len(tus) == 1  # not duplicated
+
+    # A retry must succeed cleanly -- no stray file wedging it.
+    monkeypatch.undo()
+    out = compact_inputs_pack(pack)
+    assert out is not None
+    assert len(read_source_facts(pack)) == 1
+
+
+def test_compact_keeps_preexisting_output_on_rerun_manifest_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rerun that reuses the same output_filename as a prior SUCCESSFUL
+    compaction overwrites that file in place via os.replace(). If this
+    run's manifest write then fails, rolling back by deleting output_path
+    would destroy the prior run's still-valid, still-published (per the
+    unchanged-on-disk manifest) result too -- not just this run's
+    unpublished one. The file must survive (with this run's fresher, valid
+    merge content -- the write itself succeeded, only the manifest publish
+    failed) rather than being deleted."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    append_source_facts(
+        pack, [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    first_out = compact_inputs_pack(pack)
+    assert first_out is not None
+    assert {tu.tu_id for tu in read_source_facts(pack)} == {
+        "cu://src/foo.cpp",
+        "cu://src/bar.cpp",
+    }
+
+    # Incremental rebuild of foo.cpp; a second compaction reuses the same
+    # default output filename, so last_compacted alone wouldn't force a
+    # manifest write on this rerun. Add a genuine extra explicit file
+    # entry (readable, unique tu_id -- no lossy-read diagnostics) that
+    # this run's narrowing legitimately drops once merged (a real reason
+    # to rewrite the manifest, unrelated to last_compacted/prior-vs-fresh
+    # dedup), so the failure path under test is actually exercised.
+    (pack / "extra.jsonl").write_text(
+        json.dumps(
+            _tu("extra", mangled="_Z5extrav", source="src/extra.cpp").to_dict()
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["source_facts", "extra.jsonl"]
+    _write_manifest(pack, manifest)
+    append_source_facts(
+        pack, [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    import abicheck.buildsource.inputs_emit as inputs_emit_module
+
+    def _boom(root: Path, manifest: object) -> None:
+        raise OSError("disk full (simulated)")
+
+    monkeypatch.setattr(inputs_emit_module, "_write_manifest", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        compact_inputs_pack(pack)
+
+    # The merged file (now holding this run's fresher content) must
+    # survive -- not deleted just because this run's manifest write failed.
+    assert first_out.exists()
+    names = {tu.functions[0].mangled_name for tu in read_source_facts(pack)}
+    # fresh foo2 wins, bar carried forward, extra merged in from its
+    # explicit file entry -- none lost despite the manifest write failure.
+    assert names == {"_Z4foo2v", "_Z3barv", "_Z5extrav"}
+
+
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
