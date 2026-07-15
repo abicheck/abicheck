@@ -405,6 +405,25 @@ def test_flat_model_ambiguous_source_record_edges_skipped() -> None:
     assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
 
 
+def test_flat_model_ambiguous_bare_name_across_struct_and_enum() -> None:
+    # _flat_type_name_counts merges snapshot.types and snapshot.enums into
+    # one shared count dict — a struct and an enum sharing a bare name must
+    # be just as ambiguous as two structs sharing one, not silently exempt
+    # because they're different declaration kinds.
+    tag_struct = RecordType(name="Tag", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    tag_enum = EnumType(name="Tag", origin=ScopeOrigin.PUBLIC_HEADER)
+    public = RecordType(
+        name="Public",
+        kind="struct",
+        fields=[TypeField(name="t", type="Tag*")],
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(types=[public, tag_struct], enums=[tag_enum])
+    )
+    assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
+
+
 def test_flat_model_resolves_private_type_nested_in_a_template_argument() -> None:
     # Codex review: a public function returning e.g. std::vector<Private>
     # must not stop at the whole template spelling — the private template

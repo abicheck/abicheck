@@ -657,3 +657,112 @@ def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
     assert "type_graph" not in graph.extractor_passes
     assert graph.narrowed_passes["type_graph"] is True
     assert graph.narrowed_scope["type_graph"] == frozenset({"src/a.cpp"})
+
+
+def test_inline_include_graph_scoped_to_changed_tus(monkeypatch):
+    # Mirrors the call/type-graph scoping tests above: a PR/--since scan
+    # narrows the (now-automatic, ADR-041 header-only-graph addendum
+    # follow-up) include-graph pass to the changed compile units too, not
+    # the whole compile DB — and, since it went through a live clang -M
+    # extractor here (no recorded build-tool inputs), records the same
+    # narrowed-pass coverage bookkeeping call/type graph already do.
+    from abicheck.buildsource import call_graph, include_graph, type_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    seen_sources: list[str] = []
+
+    class _FakeNoEdgeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeIncludeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            seen_sources.extend(cu.source for cu in build.compile_units)
+            return {}
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(include_graph, "ClangIncludeExtractor", _FakeIncludeExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    assert seen_sources == ["src/a.cpp"]
+    assert graph is not None
+    assert "include_graph" not in graph.extractor_passes
+    assert graph.narrowed_passes["include_graph"] is True
+    assert graph.narrowed_scope["include_graph"] == frozenset({"src/a.cpp"})
+
+
+def test_inline_include_graph_prefers_recorded_inputs_over_live_clang(monkeypatch):
+    # When compile units already carry recorded build-tool inputs (Bazel
+    # aquery, etc.), the include-graph fold must use them directly rather
+    # than shelling out to clang -M — cheaper, and works for hermetic builds
+    # a live clang invocation cannot reach (Codex review context: the
+    # record_bazel_inputs wiring in cli_buildsource.py exists precisely so
+    # this path is taken instead of the live-clang one).
+    from abicheck.buildsource import call_graph, include_graph, type_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    class _FakeNoEdgeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _ExplodingIncludeExtractor:
+        def available(self) -> bool:
+            raise AssertionError("must not shell out when inputs were recorded")
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(
+        include_graph, "ClangIncludeExtractor", _ExplodingIncludeExtractor
+    )
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(
+                id="cu://src/a.cpp",
+                source="src/a.cpp",
+                input_files=["src/a.cpp", "src/a.h"],
+            ),
+        ]
+    )
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
