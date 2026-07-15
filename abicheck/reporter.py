@@ -240,8 +240,17 @@ def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
     show_only: str | None = None,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Leaf-change mode JSON output."""
+    """Leaf-change mode JSON output.
+
+    *severity_config*, when given, adds the same top-level ``severity`` block
+    the full-mode JSON report has (see :func:`_build_severity_json`) —
+    without it, ``--report-mode leaf`` returned before that block was ever
+    built, so it silently had no severity information even when a caller
+    passed ``severity_config`` through :func:`to_json`.
+    """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
     summary = build_summary(result)
@@ -305,6 +314,15 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
     # Release recommendation — always present in JSON, including leaf mode.
     d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
@@ -552,7 +570,9 @@ def to_json(
         return to_stat_json(result, indent=indent)
 
     if report_mode == "leaf":
-        return _to_json_leaf(result, indent=indent, show_only=show_only)
+        return _to_json_leaf(
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
+        )
 
     changes = list(result.changes)
     if show_only:

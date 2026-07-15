@@ -408,8 +408,18 @@ def _to_markdown_leaf(
     show_impact: bool = False,
     show_only: str | None = None,
     show_recommendation: bool = False,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Leaf-change mode: root type changes with affected interface lists."""
+    """Leaf-change mode: root type changes with affected interface lists.
+
+    *severity_config*, when given, adds the same "Severity Configuration"
+    summary section the full-mode report has (see
+    :func:`_build_severity_summary_md`) — without it, ``report_mode="leaf"``
+    returned before that section was ever built, so it silently had no
+    severity information even when a caller passed ``severity_config``
+    through :func:`to_markdown`.
+    """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
     v = result.verdict
@@ -437,6 +447,15 @@ def _to_markdown_leaf(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
         lines.append("")
+
+    if severity_config is not None:
+        lines += _build_severity_summary_md(
+            changes,
+            severity_config,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Group root type changes by severity
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
@@ -875,7 +894,7 @@ def to_markdown(
         return demangle_text(text)
 
     if stat:
-        return _out(to_stat(result))
+        return _out(to_stat(result, severity_config=severity_config))
 
     if report_mode == "leaf":
         return _out(
@@ -884,6 +903,7 @@ def to_markdown(
                 show_impact=show_impact,
                 show_only=show_only,
                 show_recommendation=show_recommendation,
+                severity_config=severity_config,
             )
         )
 

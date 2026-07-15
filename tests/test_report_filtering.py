@@ -393,6 +393,18 @@ class TestLeafMode:
         assert d["leaf_changes"][0]["affected_count"] == 2
         assert len(d["non_type_changes"]) == 1
 
+    def test_leaf_markdown_carries_severity_summary(self):
+        """report_mode="leaf" returned before the severity summary section
+        was ever built, so it silently had no severity info even when a
+        caller passed severity_config through to_markdown."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        result = _make_result(
+            changes=[Change(ChangeKind.FUNC_ADDED, "new_api", "new function: new_api")],
+        )
+        text = to_markdown(result, report_mode="leaf", severity_config=PRESET_DEFAULT)
+        assert "Severity Configuration" in text
+
 
 # ---------------------------------------------------------------------------
 # Show-impact tests

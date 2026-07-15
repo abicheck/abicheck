@@ -171,6 +171,23 @@ class TestEvidenceStatusInJson:
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
 
+    def test_leaf_mode_carries_severity_block(self):
+        """report_mode="leaf" returned before the severity block was ever
+        built, so a caller passing severity_config silently got no severity
+        information at all — unlike full-mode JSON."""
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        assert "severity" in d
+        assert d["severity"]["categories"]["addition"]["count"] == 1
+
+    def test_leaf_mode_without_severity_config_has_no_severity_block(self):
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert "severity" not in d
+
 
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):
