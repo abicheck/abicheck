@@ -156,19 +156,29 @@ def _check_backlog_table_excludes_done_gaps(
     return findings
 
 
-def _check_open_gaps_appear_in_plans_index(gap_status: dict[str, str]) -> list[str]:
-    """Every gap that is still open in the registry must have a row in
-    plans/index.md's "remaining use-case gaps" table — a gap can drift out of
-    that table just as easily as a done gap can drift into it (found by
-    external review: G20 had three open registry entries, each pointing at a
-    real plan file, yet no row in this table at all)."""
-    text = PLANS_INDEX.read_text(encoding="utf-8")
-    header = "| Gap | Plan | Registry use cases | Effort |"
-    start = text.find(header)
+def _check_open_gaps_appear_in_table(
+    gap_status: dict[str, str],
+    doc: Path,
+    table_header: str,
+    end_marker: str | None,
+    table_label: str,
+) -> list[str]:
+    """Every gap that is still open in the registry must have a row in the
+    given table — a gap can drift OUT of a backlog table just as easily as a
+    done gap can drift in (found by external review, twice: G20 had three
+    open registry entries and a real plan file, yet no row in plans/index.md's
+    remaining-gaps table at all; the same blind spot existed for the eval
+    doc's own "Gaps that matter" and "Proposed next steps" tables, since the
+    only positive-presence check originally covered plans/index.md alone)."""
+    text = doc.read_text(encoding="utf-8")
+    start = text.find(table_header)
     if start == -1:
-        return [f"{PLANS_INDEX.name}: expected section {header!r} not found"]
-    end = text.find("Initiative plans", start)
-    section = text[start : end if end != -1 else None]
+        return [f"{doc.name}: expected section {table_header!r} not found"]
+    section = text[start:]
+    if end_marker:
+        end = section.find(end_marker, len(table_header))
+        if end != -1:
+            section = section[:end]
     listed = {
         gap
         for line in section.splitlines()
@@ -179,9 +189,8 @@ def _check_open_gaps_appear_in_plans_index(gap_status: dict[str, str]) -> list[s
     for gap, state in gap_status.items():
         if state == "open" and gap not in _INITIATIVE_ONLY_GAPS and gap not in listed:
             findings.append(
-                f"{PLANS_INDEX.name}: {gap} is still open in the registry "
-                f"(status != complete/by_design_excluded) but has no row in "
-                f"the 'remaining use-case gaps' table"
+                f"{doc.name}: {gap} is still open in the registry (status != "
+                f"complete/by_design_excluded) but has no row in {table_label!r}"
             )
     return findings
 
@@ -229,7 +238,27 @@ def all_findings() -> list[str]:
     findings += _check_completed_table_excludes_open_gaps(
         gap_status, PLANS_INDEX, "Completed or decided plans are retained"
     )
-    findings += _check_open_gaps_appear_in_plans_index(gap_status)
+    findings += _check_open_gaps_appear_in_table(
+        gap_status,
+        PLANS_INDEX,
+        "| Gap | Plan | Registry use cases | Effort |",
+        "Initiative plans",
+        "remaining use-case gaps table",
+    )
+    findings += _check_open_gaps_appear_in_table(
+        gap_status,
+        EVAL_DOC,
+        "## Gaps that matter — current implementation status",
+        "## Proposed next steps",
+        "'Gaps that matter' table",
+    )
+    findings += _check_open_gaps_appear_in_table(
+        gap_status,
+        EVAL_DOC,
+        "## Proposed next steps",
+        "\n## ",
+        "'Proposed next steps' table",
+    )
     return findings
 
 
