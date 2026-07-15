@@ -1671,8 +1671,9 @@ def _dump_elf(
         # --dwarf-only → force DWARF mode regardless of headers
         # no headers + DWARF available -> DWARF-only mode with type-aware checks
         # no headers + no DWARF -> symbols-only mode
+        # resolved_debug_format, not dwarf_meta.has_dwarf alone, gates the no-headers branch: has_dwarf mirrors BTF/CTF presence too (Codex review).
         if not (symbols_only or debug_presence_only) and (
-            dwarf_only or (not headers and dwarf_meta.has_dwarf)
+            dwarf_only or (not headers and dwarf_meta.has_dwarf and resolved_debug_format == "dwarf")
         ):
             snap, dwarf_only_types = _try_dwarf_snapshot(
                 so_path, elf_meta, dwarf_meta, dwarf_adv,
