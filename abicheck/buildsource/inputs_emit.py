@@ -480,17 +480,27 @@ def compact_inputs_pack(
         if (target := _safe_pack_path(root, entry, _scratch)) is not None
         and target.is_dir()
     ]
-    has_file_entry = len(directory_entries) != len(manifest.source_facts)
+    # The merged file always physically lands in SOURCE_FACTS_DIR (facts_dir
+    # above), regardless of what the manifest's entries say -- a directory-
+    # only manifest that does not itself cover SOURCE_FACTS_DIR (e.g.
+    # source_facts=["extra_facts"], no "source_facts" entry at all) still
+    # needs the merged file added explicitly, or it becomes permanently
+    # undiscoverable: compaction deletes the entries' own originals but
+    # every later read still scans only the untouched explicit directory,
+    # never SOURCE_FACTS_DIR, turning a valid pack into one that
+    # ingests/validates as zero TUs (Codex review, P2 -- the previous fix
+    # only added the merged-file reference when at least one entry was a
+    # non-directory file, wrongly assuming an all-directory-entries manifest
+    # must already cover where the merged output lands).
+    merged_ref = f"{SOURCE_FACTS_DIR}/{output_filename}"
+    covered = any(
+        Path(merged_ref).is_relative_to(Path(d)) for d in directory_entries
+    )
     manifest_changed = False
-    if manifest.source_facts and has_file_entry:
-        merged_ref = f"{SOURCE_FACTS_DIR}/{output_filename}"
-        covered = any(
-            Path(merged_ref).is_relative_to(Path(d)) for d in directory_entries
+    if manifest.source_facts:
+        new_source_facts = (
+            list(directory_entries) if covered else [*directory_entries, merged_ref]
         )
-        new_source_facts = list(directory_entries) if covered else [
-            *directory_entries,
-            merged_ref,
-        ]
         if new_source_facts != manifest.source_facts:
             manifest.source_facts = new_source_facts
             manifest_changed = True

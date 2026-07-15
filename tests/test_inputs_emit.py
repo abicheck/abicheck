@@ -742,6 +742,53 @@ def test_compact_preserves_directory_entry_in_mixed_manifest(
     assert names == {"foo", "bar", "extra"}
 
 
+def test_compact_adds_merged_ref_when_no_directory_entry_covers_source_facts_dir(
+    tmp_path: Path,
+) -> None:
+    """A manifest whose only entry is a directory OTHER than SOURCE_FACTS_DIR
+    (e.g. source_facts=["extra_facts"], no "source_facts" entry at all) does
+    not automatically discover the merged file: compact_inputs_pack always
+    physically writes it under SOURCE_FACTS_DIR regardless of what the
+    manifest's entries say. Treating "every entry is a directory" as reason
+    enough to leave the manifest untouched (as if SOURCE_FACTS_DIR were
+    always among them) deletes the entry's own originals but leaves every
+    later read scanning only the untouched explicit directory -- a
+    successful compact silently turning a valid pack into one that
+    ingests/validates as zero TUs (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="hand-written")
+    other_dir = pack / "extra_facts"
+    other_dir.mkdir()
+    (other_dir / "a.jsonl").write_text(
+        json.dumps(_tu("foo", mangled="_Z3foov", source="src/foo.cpp").to_dict())
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = load_inputs_manifest(pack)
+    manifest.source_facts = ["extra_facts"]
+    _write_manifest(pack, manifest)
+
+    diagnostics: list[str] = []
+    out = compact_inputs_pack(pack, diagnostics=diagnostics)
+    assert out is not None
+    assert diagnostics == []
+
+    # The manifest must now ALSO point at the merged file -- "extra_facts"
+    # alone can never discover something written under source_facts/.
+    assert load_inputs_manifest(pack).source_facts == [
+        "extra_facts",
+        "source_facts/compacted.jsonl",
+    ]
+
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo"}
+
+    report = validate_inputs_pack(pack)
+    assert report.ok
+    assert report.tu_count == 1
+
+
 def test_compact_keep_originals_when_requested(tmp_path: Path) -> None:
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
