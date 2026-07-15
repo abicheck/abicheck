@@ -338,10 +338,18 @@ def collect_cmd(
     # The include-graph fold (now automatic whenever --source-abi and
     # --source-graph summary are both active — see _collect_source_graph)
     # needs recorded build-tool inputs the same way the headers-only L4
-    # selector does, so both conditions record them.
-    record_bazel_inputs = (source_abi and source_graph == "summary") or (
-        source_abi
-        and _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
+    # selector does. `_collect_source_graph` also promotes an `off`
+    # `--source-graph` to `summary` when `--kythe-entries`/`--codeql-results`
+    # is given — that promotion must be anticipated here too, not just the
+    # literal `source_graph == "summary"` the user typed, or a Kythe/CodeQL
+    # run against a Bazel/aquery build records no inputs and the include-graph
+    # fold falls back to a live `clang -M` pass that cannot run outside the
+    # execroot (Codex review).
+    record_bazel_inputs = source_abi and (
+        source_graph == "summary"
+        or bool(kythe_entries)
+        or bool(codeql_results)
+        or _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
     # Collapse the unified `--from adapter[=path]` specs into the per-adapter
     # kwargs the engine still takes (ADR-037 CLI consolidation).

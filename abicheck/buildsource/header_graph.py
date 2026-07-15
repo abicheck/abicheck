@@ -499,8 +499,17 @@ def build_header_only_graph(
         # Only the structural pass ran — no bodies were ever visible to the
         # flat model, in any circumstance, so ``HEADER_CALL_GRAPH_PASS`` must
         # never be stamped here (that would falsely vouch for a project-wide
-        # zero on ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL``).
-        graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
+        # zero on ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL``). Nor may
+        # ``HEADER_TYPE_GRAPH_PASS`` be stamped when the snapshot itself
+        # recorded a PE/Mach-O header-scope fallback (``scope_fallback`` —
+        # mangling mismatch or an unavailable header backend): that state's
+        # ``functions``/``types`` are placeholder export-table entries or a
+        # PDB-recovered approximation, not a genuine header parse, so this
+        # was never a real structural scan of the declared types at all
+        # (Codex review) — stamping it would let a later real-header dump's
+        # first structural edge misread as newly added.
+        if not snapshot.scope_fallback:
+            graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
 
     return graph.finalize()
 

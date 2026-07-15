@@ -53,6 +53,7 @@ def _snapshot(
     variables: list[Variable] | None = None,
     types: list[RecordType] | None = None,
     enums: list[EnumType] | None = None,
+    scope_fallback: str | None = None,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         library="libfoo.so.1",
@@ -61,6 +62,7 @@ def _snapshot(
         variables=variables or [],
         types=types or [],
         enums=enums or [],
+        scope_fallback=scope_fallback,
     )
 
 
@@ -381,6 +383,22 @@ def test_flat_model_never_stamps_call_graph_pass() -> None:
     graph = build_header_only_graph(_snapshot(types=[public]))
     assert HEADER_CALL_GRAPH_PASS not in graph.extractor_passes
     assert graph.extractor_passes == {HEADER_TYPE_GRAPH_PASS: True}
+
+
+def test_flat_model_never_stamps_type_graph_pass_on_scope_fallback() -> None:
+    # Codex review: a PE/Mach-O header-scoped dump that fell back to
+    # export-table mode (mangling mismatch, or an unavailable header backend)
+    # never actually ran a real header parse — its functions/types are
+    # placeholder export-table entries or a PDB-recovered approximation, not
+    # a genuine structural scan. Stamping HEADER_TYPE_GRAPH_PASS here would
+    # let a later real-header dump's first structural edge misread as newly
+    # added (the same false-positive class the header-only-vs-build-
+    # integrated fix already guards against).
+    public = RecordType(name="Public", kind="struct", origin=ScopeOrigin.UNKNOWN)
+    graph = build_header_only_graph(
+        _snapshot(types=[public], scope_fallback="mangling-fallback")
+    )
+    assert graph.extractor_passes == {}
 
 
 # ── header_paths pre-seeding ─────────────────────────────────────────────────
