@@ -745,6 +745,58 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   that isn't a return-type separator) — both are now handled by a shared
   `_holder_of` helper.
 
+- **`--show-only` disagreed with the effective verdict for a kind-level
+  `PolicyFile` override.** `ShowOnlyFilter._check_severity` already honoured a
+  per-change `effective_verdict` (A4 modulation), but fell back to bare
+  `policy_kind_sets(policy)` for everything else — never consulting
+  `PolicyFile.overrides` — so a kind moved to another verdict bucket by policy
+  (e.g. `func_removed` demoted to `COMPATIBLE`) was still filtered by its raw
+  kind, disagreeing with the JSON severity field and every other renderer.
+  `apply_show_only`/`ShowOnlyFilter.matches` now accept `kind_sets`/
+  `policy_file` and resolve through the same
+  `severity.effective_verdict_for_change` used by
+  `DiffResult._effective_verdict_for_change`; all six call sites (Markdown,
+  leaf, JSON's Markdown path, SARIF, JUnit, HTML) thread
+  `result._effective_kind_sets()`/`result.policy_file` through.
+
+- **GitHub annotations without `severity_config` classified by raw kind, not
+  effective verdict.** The severity-aware path (`_category_for_change_severity`)
+  already honoured per-change `effective_verdict` overrides; the legacy/default
+  path (no `SeverityConfig` configured) called `_classify_change(change.kind,
+  ...)` directly, so a finding demoted by a frozen-namespace guard or A4
+  pattern-verdict modulation could still emit `::error` at its raw severity —
+  contradicting `DiffResult.breaking`/`.compatible` and every other renderer.
+  `collect_annotations()` now always resolves each change's effective category
+  first (`_category_for_change_severity`) and dispatches the fixed
+  BREAKING→error/API_BREAK,RISK→warning/COMPATIBLE→notice mapping
+  (`_legacy_level_for_category`) from that, so both the annotation level and
+  title agree with the per-change override in either code path.
+
+- **SARIF `executionSuccessful` conflated "the tool ran" with "the ABI/severity
+  gate passed."** Per the SARIF spec, `executionSuccessful` reports whether
+  analysis *completed*, not whether it found blocking issues — the spec's own
+  example shows a successful run with `exitCode: 1` and warnings. `to_sarif()`
+  previously derived it from `result.verdict`/the severity gate's exit code,
+  so a completed `BREAKING` comparison reported `executionSuccessful: false`.
+  It is now unconditionally `true`; gate/verdict outcome is conveyed solely via
+  `exitCode`, `exitCodeDescription`, result `level`s, and
+  `properties.severityGate`, as it already was. While in the same function,
+  also fixed `_result_for`'s location parsing (a single `rsplit(":", 1)`
+  mishandled `file:line:column`, leaving `:line` stuck in the artifact URI and
+  never setting `startColumn`) and `_rule_for`'s `helpUri`, which pointed at a
+  nonexistent `docs/abi_breaking_cases_catalog.md` — now
+  `docs/reference/change-kinds.md`, which exists.
+
+- **Native HTML report had no way to show a configured severity gate.**
+  `generate_html_report`/`service.render_output`'s `html` branch never
+  accepted or forwarded `severity_config`, so a compatible addition configured
+  `error` rendered a green `Compatibility: COMPATIBLE` banner with no
+  indication the run still exits non-zero. `generate_html_report` now accepts
+  `severity_config` and renders a separate "CI Gate: PASS/FAIL (exit N)" card
+  alongside the renamed "Compatibility" banner (native report only — the
+  ABICC-compatible `compat_html` layout is unchanged); `service.render_output`
+  forwards it through.
+
 ### Documentation
 
 - **Example-catalog semantic-validation gaps from an external audit.**

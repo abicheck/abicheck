@@ -119,12 +119,39 @@ def _severity(
     return entry.severity
 
 
+def _parse_source_location(loc: str) -> tuple[str, int | None, int | None]:
+    """Parse a ``file[:line[:column]]`` source location for a SARIF region.
+
+    A single ``rsplit(":", 1)`` mishandles ``file:line:column`` — it peels
+    off only the column, leaving ``file:line`` as the artifact URI and never
+    populating ``startColumn``. This walks from the left instead, treating a
+    single-letter first segment followed by a path separator as a Windows
+    drive letter (so ``C:\\foo\\bar.h:42`` still splits into file + line, not
+    ``C`` + ``\\foo\\bar.h:42``).
+    """
+    parts = loc.split(":")
+    if len(parts) >= 3 and len(parts[0]) == 1 and parts[0].isalpha() and parts[1][:1] in ("\\", "/"):
+        file_part = parts[0] + ":" + parts[1]
+        rest = parts[2:]
+    elif len(parts) >= 2:
+        file_part = parts[0]
+        rest = parts[1:]
+    else:
+        return loc, None, None
+
+    if not (rest and rest[0].isdigit()):
+        return loc, None, None
+    line = int(rest[0])
+    column = int(rest[1]) if len(rest) >= 2 and rest[1].isdigit() else None
+    return file_part, line, column
+
+
 def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     """Produce a SARIF reportingDescriptor for a ChangeKind."""
     rule_id = kind.value
     severity = policy_for(kind).severity
     doc_slug = policy_for(kind).doc_slug
-    help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/abi_breaking_cases_catalog.md#{doc_slug}"
+    help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/reference/change-kinds.md#{doc_slug}"
     impact = impact_for(kind)
     full_desc = (
         impact if impact else f"ABI change detected: {rule_id.replace('_', ' ')}"
@@ -158,17 +185,15 @@ def _result_for(
     # Build physical location — prefer source header over .so when available
     phys_loc: dict[str, Any]
     if change.source_location:
-        # Parse "header.h:42" into file + line
-        parts = change.source_location.rsplit(":", 1)
-        uri = parts[0]
+        uri, line, column = _parse_source_location(change.source_location)
         phys_loc = {
             "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
         }
-        if len(parts) == 2:
-            try:
-                phys_loc["region"] = {"startLine": int(parts[1])}
-            except ValueError:
-                pass
+        if line is not None:
+            region: dict[str, int] = {"startLine": line}
+            if column is not None:
+                region["startColumn"] = column
+            phys_loc["region"] = region
     else:
         phys_loc = {
             "artifactLocation": {"uri": library, "uriBaseId": "%SRCROOT%"},
@@ -277,19 +302,34 @@ def to_sarif(
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
 
-    *severity_config*, when given, drives the invocation's ``exitCode`` /
-    ``executionSuccessful`` from the actual severity-aware gate instead of
-    inferring "passed" purely from ``result.verdict`` — compatibility and
-    "blocks CI" are independent decisions once severity configuration is in
-    play (e.g. an addition configured ``error`` blocks the build despite a
-    ``COMPATIBLE`` verdict). A ``severityGate`` properties block is added so
-    the reason is auditable in the SARIF document itself.
+    *severity_config*, when given, drives the invocation's ``exitCode`` from
+    the actual severity-aware gate instead of inferring it purely from
+    ``result.verdict`` — compatibility and "blocks CI" are independent
+    decisions once severity configuration is in play (e.g. an addition
+    configured ``error`` blocks the build despite a ``COMPATIBLE`` verdict).
+    A ``severityGate`` properties block is added so the reason is auditable
+    in the SARIF document itself.
+
+    ``executionSuccessful`` is unrelated to any of this: per the SARIF spec
+    it reports whether the *analysis tool ran to completion*, not whether it
+    found blocking issues — the spec's own example shows a successful run
+    with ``exitCode: 1`` and warnings alongside ``executionSuccessful: true``.
+    A completed comparison (breaking, gate-failing, or otherwise) is always a
+    successful execution here; gate/verdict outcome belongs solely in
+    ``exitCode``, ``exitCodeDescription``, result ``level``\\ s, and
+    ``properties.severityGate``.
     """
     tool_version = _tool_version()
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Collect unique rules used
     rules_seen: dict[str, dict[str, Any]] = {}
@@ -307,13 +347,6 @@ def to_sarif(
         else None
     )
 
-    # Overall ABI verdict as a notification
-    invocation_success = (
-        severity_gate["exitCode"] == 0
-        if severity_gate is not None
-        else result.verdict != Verdict.BREAKING
-    )
-
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -329,7 +362,10 @@ def to_sarif(
                 },
                 "invocations": [
                     {
-                        "executionSuccessful": invocation_success,
+                        # Always true: this reports the SARIF tool run, which
+                        # completed. It must not encode the ABI/severity gate
+                        # outcome — see the docstring above.
+                        "executionSuccessful": True,
                         # Exit codes mirror abicheck compare CLI contract when no
                         # severity_config is given: BREAKING=4 (mapped to SARIF 1),
                         # API_BREAK=2, others=0. COMPATIBLE_WITH_RISK intentionally

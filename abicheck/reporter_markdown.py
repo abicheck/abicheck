@@ -157,41 +157,43 @@ class ShowOnlyFilter:
             actions=frozenset(actions),
         )
 
-    def _check_severity(self, change: Change, policy: str) -> bool:
-        """Return True if *change* matches the severity filter."""
+    def _check_severity(
+        self,
+        change: Change,
+        policy: str,
+        kind_sets: KindSets | None = None,
+        policy_file: object | None = None,
+    ) -> bool:
+        """Return True if *change* matches the severity filter.
+
+        Resolves through ``severity.effective_verdict_for_change`` — the same
+        canonical resolver ``DiffResult._effective_verdict_for_change`` uses —
+        so both an A4 per-finding ``effective_verdict`` override (ADR-027) and
+        a kind-level ``PolicyFile.overrides`` entry are honoured. Without this,
+        `--show-only` could disagree with the JSON severity field and
+        filtered_summary counts for any change whose effective category
+        differs from its raw kind's policy bucket (a demoted opaque/PIMPL
+        layout change, or a kind moved by a policy-file override).
+        """
         if not self.severities:
             return True
-        breaking_set, api_break_set, compat_set, risk_set = _policy_kind_sets(policy)
-        # Honour an A4 per-finding effective_verdict override (ADR-027): a
-        # demoted opaque/PIMPL layout change must be filtered by its *effective*
-        # category, so `--show-only=breaking` excludes it — consistent with the
-        # JSON severity field and filtered_summary counts (which already route
-        # through effective_category). Without this the severity filter would
-        # leak a demoted finding it was meant to exclude.
-        eff = getattr(change, "effective_verdict", None)
-        if isinstance(eff, Verdict):
-            # NB: this maps to the CLI --show-only token vocabulary (hyphenated
-            # "api-break"), which intentionally differs from the JSON-field
-            # labels in _VERDICT_TO_SEVERITY_LABEL (underscored "api_break").
-            # The two are deliberately separate label spaces — keep them in sync
-            # by intent, not by sharing a dict.
-            label = {
-                Verdict.BREAKING: "breaking",
-                Verdict.API_BREAK: "api-break",
-                Verdict.COMPATIBLE_WITH_RISK: "risk",
-                Verdict.COMPATIBLE: "compatible",
-            }.get(eff)
-            return label in self.severities
-        severity_map = {
-            "breaking": breaking_set,
-            "api-break": api_break_set,
-            "risk": risk_set,
-            "compatible": compat_set,
-        }
-        return any(
-            sev in self.severities and change.kind in kind_set
-            for sev, kind_set in severity_map.items()
+        from .severity import effective_verdict_for_change
+
+        eff = effective_verdict_for_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
         )
+        # NB: this maps to the CLI --show-only token vocabulary (hyphenated
+        # "api-break"), which intentionally differs from the JSON-field
+        # labels in _VERDICT_TO_SEVERITY_LABEL (underscored "api_break").
+        # The two are deliberately separate label spaces — keep them in sync
+        # by intent, not by sharing a dict.
+        label = {
+            Verdict.BREAKING: "breaking",
+            Verdict.API_BREAK: "api-break",
+            Verdict.COMPATIBLE_WITH_RISK: "risk",
+            Verdict.COMPATIBLE: "compatible",
+        }.get(eff)
+        return label in self.severities
 
     def _check_element(self, kind_val: str) -> bool:
         """Return True if *kind_val* matches the element filter."""
@@ -281,9 +283,15 @@ class ShowOnlyFilter:
             return True
         return False
 
-    def matches(self, change: Change, policy: str = "strict_abi") -> bool:
+    def matches(
+        self,
+        change: Change,
+        policy: str = "strict_abi",
+        kind_sets: KindSets | None = None,
+        policy_file: object | None = None,
+    ) -> bool:
         """Return True if *change* passes this filter."""
-        if not self._check_severity(change, policy):
+        if not self._check_severity(change, policy, kind_sets, policy_file):
             return False
         if not self._check_element(change.kind.value):
             return False
@@ -294,10 +302,24 @@ def apply_show_only(
     changes: Sequence[Change],
     show_only: str,
     policy: str = "strict_abi",
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> list[Change]:
-    """Filter changes according to a --show-only token string."""
+    """Filter changes according to a --show-only token string.
+
+    *kind_sets* / *policy_file*, when supplied by the caller (typically
+    ``result._effective_kind_sets()`` / ``result.policy_file``), let the
+    severity dimension resolve through the same effective-verdict logic as
+    the rest of the report — including kind-level ``PolicyFile.overrides``
+    and per-finding ``effective_verdict`` — so the filter never disagrees
+    with the JSON severity field for the same change.
+    """
     filt = ShowOnlyFilter.parse(show_only)
-    return [c for c in changes if filt.matches(c, policy=policy)]
+    return [
+        c
+        for c in changes
+        if filt.matches(c, policy=policy, kind_sets=kind_sets, policy_file=policy_file)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +464,13 @@ def _to_markdown_leaf(
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
         lines.append(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
@@ -952,7 +980,13 @@ def to_markdown(
     # Apply show-only filter if provided (display-only, does not affect verdict)
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
     # classification + summary in one place, shared across formats.

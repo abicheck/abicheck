@@ -300,6 +300,45 @@ class TestApplyShowOnly:
         assert len(result) == 2
         assert all(c.kind.value.startswith("func_") for c in result)
 
+    def test_kind_level_policy_override_respected_without_policy_file(self):
+        """Without policy_file/kind_sets, a kind-level PolicyFile override is
+        invisible to the severity dimension — verified defect (P0 finding 1):
+        a func_removed demoted to COMPATIBLE by policy still counted as
+        'breaking' for --show-only purposes."""
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+
+        # Without threading kind_sets/policy_file, the override is invisible.
+        assert apply_show_only([c], "breaking") == [c]
+        assert apply_show_only([c], "compatible") == []
+
+        # Threading the effective kind_sets/policy_file (as every report
+        # renderer now does) makes --show-only agree with the effective
+        # verdict the rest of the report uses.
+        kind_sets = result._effective_kind_sets()
+        assert apply_show_only(
+            [c], "breaking", kind_sets=kind_sets, policy_file=pf,
+        ) == []
+        assert apply_show_only(
+            [c], "compatible", kind_sets=kind_sets, policy_file=pf,
+        ) == [c]
+
+    def test_per_finding_effective_verdict_still_respected(self):
+        """A per-change effective_verdict override (A4 modulation / frozen
+        namespace) keeps working once kind_sets/policy_file are threaded
+        through, since severity.effective_verdict_for_change checks it
+        before falling back to kind-level classification."""
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        c.effective_verdict = Verdict.COMPATIBLE
+        assert apply_show_only([c], "breaking") == []
+        assert apply_show_only([c], "compatible") == [c]
+
 
 # ---------------------------------------------------------------------------
 # Stat mode tests

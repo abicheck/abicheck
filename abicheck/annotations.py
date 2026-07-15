@@ -174,6 +174,34 @@ def _category_for_change_severity(
     )
 
 
+def _legacy_level_for_category(
+    category: IssueCategory,
+    annotate_additions: bool,
+) -> str | None:
+    """Fixed-mapping annotation level, keyed off the *effective* category.
+
+    Mirrors the pre-severity-config behaviour documented on
+    :func:`_classify_change` (BREAKING -> error, API_BREAK/RISK -> warning,
+    COMPATIBLE -> notice iff *annotate_additions*), but is driven by each
+    change's effective verdict (via *category*) rather than raw kind-set
+    membership — so a per-finding override (frozen-namespace clamp, A4
+    pattern-verdict modulation) is respected even when no SeverityConfig is
+    in play.
+    """
+    from .severity import IssueCategory as _IssueCategory
+
+    if category == _IssueCategory.ABI_BREAKING:
+        return "error"
+    if category == _IssueCategory.POTENTIAL_BREAKING:
+        return "warning"
+    if annotate_additions and category in (
+        _IssueCategory.ADDITION,
+        _IssueCategory.QUALITY_ISSUES,
+    ):
+        return "notice"
+    return None
+
+
 def _annotation_level_for_category(
     category: IssueCategory,
     severity_config: SeverityConfig,
@@ -292,6 +320,12 @@ def collect_annotations(
     mirrors each finding's actually-configured severity so an annotation is
     never silently absent (or under/over-stated) for a finding that does (or
     does not) gate CI — see :func:`_annotation_level_for_category`.
+
+    Both branches classify through each change's *effective* category (via
+    :func:`_category_for_change_severity`, which honours
+    ``DiffResult._effective_verdict_for_change`` semantics) rather than raw
+    kind-set membership, so a per-finding override is never misreported —
+    see :func:`_legacy_level_for_category`.
     """
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
@@ -299,20 +333,16 @@ def collect_annotations(
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
-        category: IssueCategory | None = None
+        category = _category_for_change_severity(
+            change, kind_sets,
+            policy=diff_result.policy, policy_file=diff_result.policy_file,
+        )
         if severity_config is not None:
-            category = _category_for_change_severity(
-                change, kind_sets,
-                policy=diff_result.policy, policy_file=diff_result.policy_file,
-            )
             level = _annotation_level_for_category(
                 category, severity_config, annotate_additions,
             )
         else:
-            level = _classify_change(
-                change.kind, breaking_set, api_break_set, risk_set,
-                compatible_set, annotate_additions,
-            )
+            level = _legacy_level_for_category(category, annotate_additions)
         if level is None:
             continue
 

@@ -62,6 +62,7 @@ from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
     from .checker import DiffResult
+    from .severity import SeverityConfig
 
 
 def _change_bucket(
@@ -653,6 +654,7 @@ def generate_html_report(
     *,
     show_only: str | None = None,
     show_impact: bool = False,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
 
@@ -666,6 +668,12 @@ def generate_html_report(
             changes (legacy behaviour).
         show_only: Optional --show-only filter string (display-only).
         show_impact: If True, append an impact summary table.
+        severity_config: Optional severity configuration. When given (native
+            report only — the ABICC-compatible ``compat_html`` layout is left
+            unchanged), a separate "CI Gate" headline card is rendered
+            alongside "Compatibility" so a configured severity gate (e.g. an
+            addition promoted to ``error``) is visible even when the
+            Compatibility verdict itself reads COMPATIBLE.
 
     Returns:
         Complete self-contained HTML document as a string.
@@ -684,7 +692,14 @@ def generate_html_report(
         from .checker import Change as _Change
         from .reporter import apply_show_only
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
-        filtered = apply_show_only(typed_changes, show_only, policy=result.policy)
+        _kind_sets_fn = getattr(result, "_effective_kind_sets", None)
+        filtered = apply_show_only(
+            typed_changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=_kind_sets_fn() if _kind_sets_fn is not None else None,
+            policy_file=getattr(result, "policy_file", None),
+        )
         display_changes: list[object] = list(filtered)
     else:
         display_changes = all_changes
@@ -754,6 +769,36 @@ def generate_html_report(
         )
 
     verdict_icon = _verdict_icon(verdict)
+
+    gate_html = ""
+    if severity_config is not None:
+        from .severity import compute_exit_code
+
+        _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
+        gate_exit_code = compute_exit_code(
+            cast(list[HasKind], all_changes),
+            severity_config,
+            policy=getattr(result, "policy", None),
+            kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
+            policy_file=getattr(result, "policy_file", None),
+        )
+        gate_passed = gate_exit_code == 0
+        gate_fg, gate_bg = (
+            ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
+        )
+        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
+        gate_icon = "✅" if gate_passed else "🛑"
+        gate_html = (
+            f"<div class='verdict-box' "
+            f"style='background:{gate_bg}; color:{gate_fg}; "
+            f"border-left:6px solid {gate_fg};'>"
+            f"<h2>{gate_icon} CI Gate: {h(gate_label)}</h2>"
+            f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+            f"Reflects the configured severity gate — may differ from the "
+            f"Compatibility verdict above (e.g. an addition promoted to "
+            f"<code>error</code> still fails CI)."
+            f"</div></div>"
+        )
 
     summary_html = _summary_table(removed, changed, added, suppressed_count)
     nav_html = _nav_bar(removed, changed, added, suppressed_count)
@@ -825,7 +870,7 @@ def generate_html_report(
 </div>
 
 <div class="verdict-box" style="background:{bg}; color:{fg}; border-left:6px solid {fg};">
-  <h2>{verdict_icon} Verdict: {h(verdict)}</h2>
+  <h2>{verdict_icon} Compatibility: {h(verdict)}</h2>
   <div class="bc-metric">
     Binary Compatibility: <strong>{bc_pct:.1f}%</strong>
     <span style="font-size:0.82em; opacity:0.75">
@@ -840,6 +885,7 @@ def generate_html_report(
   </div>
 </div>
 
+{gate_html}
 {_confidence_html(result)}
 {nav_html}
 {summary_html}

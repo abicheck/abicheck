@@ -124,6 +124,12 @@ class TestSeverityMapping:
         rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
         assert rule["helpUri"].endswith("#func_added")
 
+    def test_rule_help_uri_points_at_real_doc(self) -> None:
+        """helpUri must reference a doc file that actually exists in the repo."""
+        doc = to_sarif(_make_result([_compatible_change()], verdict=Verdict.COMPATIBLE))
+        rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
+        assert "docs/reference/change-kinds.md#" in rule["helpUri"]
+
 
 # ---------------------------------------------------------------------------
 # Result content
@@ -157,6 +163,37 @@ class TestResultContent:
         locs = doc["runs"][0]["results"][0]["locations"]
         assert locs[0]["physicalLocation"]["artifactLocation"]["uri"] == "libbar.so.2"
 
+    def test_result_location_file_and_line(self) -> None:
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            source_location="include/foo.h:42",
+        )
+        doc = to_sarif(_make_result([c]))
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "include/foo.h"
+        assert phys["region"] == {"startLine": 42}
+
+    def test_result_location_file_line_column(self) -> None:
+        """A file:line:column location must not leak ':line' into the URI."""
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            source_location="include/foo.h:42:7",
+        )
+        doc = to_sarif(_make_result([c]))
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "include/foo.h"
+        assert phys["region"] == {"startLine": 42, "startColumn": 7}
+
+    def test_result_location_windows_path_with_column(self) -> None:
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            source_location="C:\\include\\foo.h:42:7",
+        )
+        doc = to_sarif(_make_result([c]))
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "C:\\include\\foo.h"
+        assert phys["region"] == {"startLine": 42, "startColumn": 7}
+
     def test_result_properties(self) -> None:
         doc = to_sarif(_make_result([_breaking_change()]))
         props = doc["runs"][0]["results"][0]["properties"]
@@ -180,9 +217,16 @@ class TestResultContent:
 # ---------------------------------------------------------------------------
 
 class TestInvocation:
-    def test_invocation_breaking_not_successful(self) -> None:
+    def test_invocation_breaking_still_execution_successful(self) -> None:
+        """executionSuccessful reports the tool run, not the ABI/severity gate.
+
+        Per the SARIF spec, a completed analysis is a successful execution
+        even when it reports blocking findings — that outcome belongs in
+        exitCode/exitCodeDescription/result levels, not executionSuccessful.
+        """
         doc = to_sarif(_make_result([_breaking_change()], verdict=Verdict.BREAKING))
-        assert doc["runs"][0]["invocations"][0]["executionSuccessful"] is False
+        assert doc["runs"][0]["invocations"][0]["executionSuccessful"] is True
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 4
 
     def test_invocation_no_change_successful(self) -> None:
         doc = to_sarif(_make_result([], verdict=Verdict.NO_CHANGE))
@@ -353,9 +397,10 @@ class TestSeverityGate:
         r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
         doc = to_sarif(r, severity_config=cfg)
         inv = doc["runs"][0]["invocations"][0]
-        # Legacy inference would say COMPATIBLE -> exitCode 0, executionSuccessful.
+        # Legacy inference would say COMPATIBLE -> exitCode 0.
         assert inv["exitCode"] == 1
-        assert inv["executionSuccessful"] is False
+        # executionSuccessful reports the tool run, not the gate outcome.
+        assert inv["executionSuccessful"] is True
 
         gate = doc["runs"][0]["properties"]["severityGate"]
         assert gate["exitCode"] == 1
@@ -370,7 +415,7 @@ class TestSeverityGate:
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
         doc = to_sarif(r, severity_config=cfg)
         inv = doc["runs"][0]["invocations"][0]
-        # Legacy inference would say BREAKING -> exitCode 4, executionSuccessful=False.
+        # Legacy inference would say BREAKING -> exitCode 4.
         assert inv["exitCode"] == 0
         assert inv["executionSuccessful"] is True
 

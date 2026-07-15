@@ -255,7 +255,13 @@ def _to_json_leaf(
     summary = build_summary(result)
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
     non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
 
@@ -579,7 +585,13 @@ def to_json(
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     d = _build_json_base(result)
     _add_abi_surface_breakdown(d, result)
