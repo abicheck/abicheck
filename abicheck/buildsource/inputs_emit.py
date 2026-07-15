@@ -49,6 +49,7 @@ from .inputs_pack import (
     SOURCE_FACTS_DIR,
     InputsManifest,
     _iter_source_fact_files,
+    _safe_pack_path,
     load_inputs_manifest,
     read_source_fact_files,
 )
@@ -261,15 +262,19 @@ def compact_inputs_pack(
     incremental build emitted for since-rebuilt TUs) prefers each fresh
     per-TU record over the prior output's now-stale record for the same
     ``tu_id`` — the prior output's records for TUs *not* rebuilt since are
-    still carried forward, never dropped (Codex review, P2). "Prior" vs
-    "fresh" is decided by each file's mtime, not by matching *this* run's
-    output filename — a rerun with a different ``--output-filename``/
-    ``--compress`` setting than last time still recognizes last run's output
-    as stale (Codex review, P2). And a read that produces new diagnostics (a
-    malformed/unreadable original) still writes the merged output best-effort,
-    but leaves *every* original in place rather than deleting evidence of a
-    lossy compaction (CodeRabbit review, P2) — check *diagnostics* after the
-    call.
+    still carried forward, never dropped (Codex review, P2). "Prior" is
+    identified via the manifest's ``last_compacted`` pointer (this function
+    writes it after every successful run), not by matching *this* run's
+    output filename or comparing file mtimes: a rerun with a different
+    ``--output-filename``/``--compress`` setting than last time still
+    recognizes last run's output as stale, and a rebuild's freshly-rewritten
+    per-TU file landing in the same filesystem timestamp tick as the
+    previous compaction's write can no longer flip the outcome (Codex
+    review, P2 — both findings, the second reproduced empirically). And a
+    read that produces new diagnostics (a malformed/unreadable original)
+    still writes the merged output best-effort, but leaves *every* original
+    in place rather than deleting evidence of a lossy compaction (CodeRabbit
+    review, P2) — check *diagnostics* after the call.
 
     *remove_originals* deletes the per-TU files that were merged once the
     merged file is written (skipped when the read above was lossy, see
@@ -300,34 +305,52 @@ def compact_inputs_pack(
     # must never also be unlinked as a "leftover original".
     fresh_files = [f for f in originals if f.resolve() != output_path.resolve()]
 
-    # Merge every discovered record, deduping same-tu_id records by which
-    # file was modified most recently. This recognizes a *stale* prior
-    # compaction's output as superseded by a fresher per-TU record even when
-    # the two compaction runs used different output filenames -- e.g. a
-    # --compress toggle or a custom --output-filename between two `compact`
-    # calls changes output_path, so a byte-exact match against *this* run's
-    # output_path could no longer recognize last run's output as "prior"
-    # (Codex review, P2). A record with no tu_id (an older/hand-written
-    # producer that never stamped one) is never deduped -- "" cannot be
-    # treated as a real shared identity between otherwise-unrelated TUs
-    # (Codex review, P2).
+    # Recognize a stale prior compaction's output via an explicit manifest
+    # pointer (manifest.last_compacted, written below after every successful
+    # compaction) rather than matching *this* run's output path or comparing
+    # file mtimes: a --compress toggle or a custom --output-filename between
+    # two `compact` calls changes output_path, defeating a path match, and a
+    # rebuild's freshly-rewritten per-TU file can land in the same
+    # filesystem timestamp tick as the previous compaction's write, which an
+    # mtime "which is newer" check cannot break correctly (Codex review, P2
+    # -- both findings, the second reproduced empirically by a regression
+    # test on some filesystems).
+    prior_files: list[Path] = []
+    if manifest.last_compacted:
+        candidate = _safe_pack_path(root, manifest.last_compacted, sink)
+        if candidate is not None:
+            candidate = candidate.resolve()
+            prior_files = [f for f in originals if f.resolve() == candidate]
+
+    def _last_record_wins(
+        files: list[Path],
+    ) -> tuple[dict[str, SourceAbiTu], list[SourceAbiTu]]:
+        """Read *files* in (sorted, deterministic) order, keeping the last-seen
+        record per tu_id -- append order within/between files, never a
+        timestamp comparison. A no-tu_id record is never deduped ("" cannot
+        be treated as a real shared identity between otherwise-unrelated TUs,
+        Codex review, P2)."""
+        by_id: dict[str, SourceAbiTu] = {}
+        no_id: list[SourceAbiTu] = []
+        for tu in read_source_fact_files(files, diagnostics=sink):
+            if tu.tu_id:
+                by_id[tu.tu_id] = tu
+            else:
+                no_id.append(tu)
+        return by_id, no_id
+
     before_diag_count = len(sink)
-    best_by_id: dict[str, tuple[int, SourceAbiTu]] = {}
-    no_id_tus: list[SourceAbiTu] = []
-    for f in originals:
-        try:
-            mtime = f.stat().st_mtime_ns
-        except OSError:
-            mtime = 0
-        for tu in read_source_fact_files([f], diagnostics=sink):
-            if not tu.tu_id:
-                no_id_tus.append(tu)
-                continue
-            prev = best_by_id.get(tu.tu_id)
-            if prev is None or mtime > prev[0]:
-                best_by_id[tu.tu_id] = (mtime, tu)
+    prior_by_id, prior_no_id = _last_record_wins(prior_files)
+    fresh_only = [f for f in originals if f not in prior_files]
+    fresh_by_id, fresh_no_id = _last_record_wins(fresh_only)
     lossy_read = len(sink) > before_diag_count
-    tus = [tu for _, tu in best_by_id.values()] + no_id_tus
+
+    tus = (
+        [tu for tid, tu in prior_by_id.items() if tid not in fresh_by_id]
+        + prior_no_id
+        + list(fresh_by_id.values())
+        + fresh_no_id
+    )
 
     # Temp file + atomic rename so a concurrent reader never observes a
     # partially-written merge (same discipline as _write_manifest).
@@ -380,8 +403,20 @@ def compact_inputs_pack(
     is_plain_directory_scan = len(manifest.source_facts) == 1 and Path(
         manifest.source_facts[0]
     ) == Path(SOURCE_FACTS_DIR)
+    manifest_changed = False
     if manifest.source_facts and not is_plain_directory_scan:
         manifest.source_facts = [f"{SOURCE_FACTS_DIR}/{output_filename}"]
+        manifest_changed = True
+
+    # Record this run's output as the pack's new "last compaction", so a
+    # later rerun recognizes it as stale (see prior_files above) regardless
+    # of what output filename/compression setting that rerun uses.
+    new_last_compacted = f"{SOURCE_FACTS_DIR}/{output_filename}"
+    if manifest.last_compacted != new_last_compacted:
+        manifest.last_compacted = new_last_compacted
+        manifest_changed = True
+
+    if manifest_changed:
         _write_manifest(root, manifest)
 
     return output_path

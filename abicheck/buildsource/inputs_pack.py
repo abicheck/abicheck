@@ -142,6 +142,14 @@ class InputsManifest:
     #: that only stamps per-TU records leaves this ``{}`` and
     #: ``inputs validate`` falls back to the TU records).
     fact_set: dict[str, Any] = field(default_factory=dict)
+    #: Pack-relative path to the most recent ``inputs compact`` output, if any
+    #: ("" before the first compaction). Lets a later rerun recognize that
+    #: file as stale regardless of *this* run's --output-filename/--compress
+    #: choice, without comparing file mtimes -- a rebuild's freshly-rewritten
+    #: per-TU file and the previous compaction's write can land in the same
+    #: filesystem timestamp tick, which an mtime-based "which is newer" check
+    #: cannot break correctly (Codex review, P2).
+    last_compacted: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +165,7 @@ class InputsManifest:
             "source_facts": list(self.source_facts),
             "exported_symbols": list(self.exported_symbols),
             "fact_set": dict(self.fact_set),
+            "last_compacted": self.last_compacted,
         }
 
     @classmethod
@@ -188,6 +197,7 @@ class InputsManifest:
             source_facts=_str_list("source_facts"),
             exported_symbols=_str_list("exported_symbols"),
             fact_set=fact_set,
+            last_compacted=_opt_str(d.get("last_compacted")),
         )
 
 

@@ -157,6 +157,7 @@ def test_manifest_round_trip_preserves_fields() -> None:
         compile_db="build/compile_commands.json",
         headers=["include/foo.h"],
         exported_symbols=["_Z3foov"],
+        last_compacted="source_facts/compacted.jsonl",
     )
     back = InputsManifest.from_dict(m.to_dict())
     assert back == m

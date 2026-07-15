@@ -308,8 +308,9 @@ def test_compact_rerun_recognizes_stale_output_across_a_filename_change(
     """A rerun of compaction with a DIFFERENT output filename/compression
     setting than last time (e.g. --compress toggled on) must still recognize
     last run's output as stale: its records lose to a same-tu_id fresh
-    record, purely by which file was written more recently, not by matching
-    *this* run's output path byte-for-byte (Codex review, P2)."""
+    record. Identified via the manifest's last_compacted pointer, not by
+    matching *this* run's output path byte-for-byte or by file mtime (Codex
+    review, P2)."""
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     append_source_facts(
@@ -324,24 +325,66 @@ def test_compact_rerun_recognizes_stale_output_across_a_filename_change(
     )
     # First compaction uses the default (uncompressed) output filename.
     first_out = compact_inputs_pack(pack)
+    assert load_inputs_manifest(pack).last_compacted == "source_facts/compacted.jsonl"
 
-    # Incremental rebuild: foo.cpp is rewritten with new content. Explicit
-    # os.utime() makes the "which file is newer" signal deterministic
-    # instead of depending on real wall-clock gaps between fast test writes.
-    fresh = append_source_facts(
+    # Incremental rebuild: foo.cpp is rewritten with new content.
+    append_source_facts(
         pack,
         [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
         filename=facts_filename("src/foo.cpp"),
     )
-    now = 2_000_000_000
-    os.utime(first_out, ns=(now, now))
-    os.utime(fresh, ns=(now + 1_000_000_000, now + 1_000_000_000))
 
     # Second compaction toggles --compress on: a different output_filename
     # (".gz" suffix) than the first run used.
     second_out = compact_inputs_pack(pack, compress=True)
     assert second_out != first_out
     assert not first_out.exists()  # merged away by remove_originals
+    assert (
+        load_inputs_manifest(pack).last_compacted
+        == "source_facts/compacted.jsonl.gz"
+    )
+
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2  # foo (fresh) + bar (carried from prior), not 3
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert names == {"foo2", "bar"}  # fresh "foo2" wins over stale "foo"
+
+
+def test_compact_rerun_ignores_mtime_ties_between_stale_output_and_fresh_tu(
+    tmp_path: Path,
+) -> None:
+    """A rebuild's freshly-rewritten per-TU file and the previous
+    compaction's output can land in the same filesystem timestamp tick
+    (observed empirically on some filesystems) -- the fresh record must
+    still win, since "prior" is identified via the manifest's
+    last_compacted pointer, never by comparing mtimes (Codex review, P2)."""
+    pack = tmp_path / "abicheck_inputs"
+    init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
+    append_source_facts(
+        pack,
+        [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    append_source_facts(
+        pack,
+        [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
+        filename=facts_filename("src/bar.cpp"),
+    )
+    first_out = compact_inputs_pack(pack)
+
+    fresh = append_source_facts(
+        pack,
+        [_tu("foo2", mangled="_Z4foo2v", source="src/foo.cpp")],
+        filename=facts_filename("src/foo.cpp"),
+    )
+    # Force an exact mtime tie between the stale compacted output and the
+    # fresh per-TU file -- the scenario an mtime-based "which is newer"
+    # check cannot break correctly.
+    tie = 3_000_000_000
+    os.utime(first_out, ns=(tie, tie))
+    os.utime(fresh, ns=(tie, tie))
+
+    compact_inputs_pack(pack)
 
     ingested = ingest_inputs_pack(pack)
     assert ingested.tu_count == 2  # foo (fresh) + bar (carried from prior), not 3
