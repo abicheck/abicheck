@@ -166,6 +166,24 @@ class TestConfigValidate:
                 in result.output
             )
 
+    def test_list_subkey_with_non_string_element_is_reported(self) -> None:
+        """A list container with a non-string element (e.g. `[123]`) is
+        silently coerced element-by-element via `str(x)` by `_strs` —
+        `validate` must catch this too, not just the container's own type
+        (Codex review — fresh evidence after the container-type check)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "sources:\n  public_headers:\n    - include/foo.h\n    - 123\n",
+                encoding="utf-8",
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 1
+            assert (
+                "sources.public_headers must be a list of strings, got "
+                "non-string element(s): [123]"
+            ) in result.output
+
     def test_list_subkey_accepts_bare_string(self) -> None:
         """A bare string is a valid (1-element) value for a list subkey —
         `_strs` folds it, so this must NOT be reported as wrong-type."""
@@ -173,6 +191,17 @@ class TestConfigValidate:
         with runner.isolated_filesystem():
             Path(".abicheck.yml").write_text(
                 "sources:\n  public_headers: include/foo.h\n", encoding="utf-8"
+            )
+            result = runner.invoke(main, ["config", "validate"])
+            assert result.exit_code == 0, result.output
+
+    def test_list_subkey_all_strings_is_ok(self) -> None:
+        """A list of all-string elements must NOT be reported."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".abicheck.yml").write_text(
+                "sources:\n  public_headers:\n    - include/foo.h\n    - include/bar.h\n",
+                encoding="utf-8",
             )
             result = runner.invoke(main, ["config", "validate"])
             assert result.exit_code == 0, result.output

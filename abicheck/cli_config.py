@@ -267,13 +267,24 @@ def config_validate(path: Path | None) -> None:
                     f"{key}.{sub} must be a string, got "
                     f"{type(sub_value).__name__}: {sub_value!r}"
                 )
-            elif sub in _LIST_SUBKEYS.get(key, ()) and not isinstance(
-                sub_value, (list, str)
-            ):
-                findings.append(
-                    f"{key}.{sub} must be a string or list of strings, got "
-                    f"{type(sub_value).__name__}: {sub_value!r}"
-                )
+            elif sub in _LIST_SUBKEYS.get(key, ()):
+                if not isinstance(sub_value, (list, str)):
+                    findings.append(
+                        f"{key}.{sub} must be a string or list of strings, got "
+                        f"{type(sub_value).__name__}: {sub_value!r}"
+                    )
+                elif isinstance(sub_value, list):
+                    # `_strs()` accepts a list container but then coerces
+                    # each element with `str(x)` rather than rejecting a
+                    # non-string one — `[123]`/`["FOO", 456]` silently
+                    # becomes `["123"]`/`["FOO", "456"]` (Codex review —
+                    # fresh evidence after the container-type check above).
+                    bad = [x for x in sub_value if not isinstance(x, str)]
+                    if bad:
+                        findings.append(
+                            f"{key}.{sub} must be a list of strings, got "
+                            f"non-string element(s): {bad!r}"
+                        )
 
     import warnings
 

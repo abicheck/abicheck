@@ -114,7 +114,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (`sources.public_headers: 123`), and recognized top-level *scalars* that
   aren't block keys (`exit_code_scheme: 123`, `version: "1"`) — the value
   shapes `BuildConfig.from_dict` silently coerces one level up from the
-  block subkeys (fresh Codex review evidence after each prior pass).
+  block subkeys (fresh Codex review evidence after each prior pass). A
+  third follow-up closes the last gap: a list-subkey's *container* type was
+  checked, but not its elements — `sources.public_headers: [123]` passed
+  validation even though `_strs()` coerces each element with `str(x)`
+  rather than rejecting a non-string one.
 
 - **`strip_vendor_hash` (vendor-hash normalization for wheel-repaired
   libraries) over-matched purely-decimal suffixes, causing a false negative
