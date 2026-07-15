@@ -1,11 +1,15 @@
 # ADR-023: Bundle-aware multi-binary ABI analysis
 
 **Date:** 2026-05-20
-**Status:** Accepted — implemented. **Amendment:** `compare-release` remains
-the current user-facing command path and the package types (RPM, Deb, tar,
+**Status:** Accepted — implemented. **Amendment:** as ADR-002's amendment
+notes, `compare-release` is no longer a registered top-level command
+(`python -m abicheck --help` lists `compare` only; `compare-release` lives on
+as the unregistered engine `compare` dispatches directory/package operands
+through — ADR-037 D7). Use `abicheck compare release-1.0/ release-2.0/ ...`
+for what this ADR calls `compare-release`. The package types (RPM, Deb, tar,
 conda, wheel) below are unchanged. One `ChangeKind` was added after this ADR
 and is not in the table below: `bundle_soname_skew` (opt-in via
-`compare-release --bundle-cohort`, detected by `_detect_soname_skew` in
+`compare --bundle-cohort`, detected by `_detect_soname_skew` in
 `abicheck/bundle.py`) — a co-versioned cohort inconsistently bumping SONAMEs.
 See `examples/case84_bundle_soname_skew/README.md`.
 **Decision maker:** Nikolay Petrov
