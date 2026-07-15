@@ -648,6 +648,30 @@ def _dump_elf(
     """
     from .dumper import dump
 
+    # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
+    # --debuginfod) was previously only used for a CLI log line — the DWARF
+    # parse always read `path` itself, so a stripped production .so stayed
+    # L0-only even after abicheck reported it found the matching debug file.
+    # Resolve here (gated on the caller actually requesting it, same as the
+    # CLI) and thread the artifact's DWARF-bearing file through to dumper.dump
+    # so it's read instead of `path`. Split DWARF (.dwo/.dwp) and dSYM are not
+    # threaded here — narrower follow-up, not this fix's scope.
+    debug_info_path: Path | None = None
+    if not symbols_only and not debug_presence_only and (debug_roots or enable_debuginfod):
+        from .debug_resolver import resolve_debug_info
+        artifact = resolve_debug_info(
+            path, debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+        )
+        if artifact is not None and artifact.dwarf_path is not None:
+            resolved_dwarf = artifact.dwarf_path.resolve()
+            if resolved_dwarf != path.resolve():
+                debug_info_path = artifact.dwarf_path
+                message = f"Debug info for {path.name}: {artifact.source}"
+                if notify is not None:
+                    notify(message)
+                else:
+                    _logger.info(message)
+
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
     if not resolved_headers and symbols_only:
@@ -717,6 +741,7 @@ def _dump_elf(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=deferred_dirs,
+            debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

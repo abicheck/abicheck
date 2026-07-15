@@ -697,6 +697,9 @@ def run_compare(
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
         compile_context=side_compile_context,
+        old_debug_roots=resolved_old_debug or None,
+        new_debug_roots=resolved_new_debug or None,
+        enable_debuginfod=debuginfod,
     )
 
     suppression, pf = _load_suppression_and_policy(

@@ -25,11 +25,14 @@ in a 5-tier policy model, **181 calibrated example cases** (134 binary shared-li
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
-four `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
-header-only/inline-only analysis (G4), auditwheel vendored-library pairing (G9),
-manylinux glibc-floor checks (G10), and single-binary audit/lint mode (G11) —
-plus six **partial**/`modeled` items with
-some shipped work already: inline-namespace version-stamp normalization (G15),
+three `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
+header-only/inline-only analysis (G4), manylinux glibc-floor checks (G10), and
+single-binary audit/lint mode (G11) —
+plus seven **partial**/`modeled` items with
+some shipped work already: auditwheel/delocate vendored-library filename
+pairing (G9, `strip_vendor_hash` normalization has shipped; the embedded-SONAME
+half for bundle cohort SONAME-skew detection has not), inline-namespace
+version-stamp normalization (G15),
 header-scoped source-mode toolchain robustness (G16, diagnostics and the
 `castxml --version` floor probe have shipped), a real-world validation corpus
 (G17), Bazel build-evidence (G18, `modeled` — code exists, not yet validated
@@ -108,7 +111,7 @@ A real invocation is a point in this space:
 | **G6** | ✅ closed | BTF/CTF and SYCL PI/UR workflows run through `compare` and reports. |
 | **G7** | ✅ closed | Semver bump and SONAME action recommendations are emitted by the report layer. |
 | **G8** | by-design excluded | Static/import archives are rejected with guidance; archive member API checking is a non-goal. |
-| **G9** | planned | auditwheel/delocate vendored-library hashed SONAME normalization. |
+| **G9** | partial | Filename-based vendored-library pairing shipped (`strip_vendor_hash` in `compare-release`'s matching pass) — a bundled `libpng16-<hash>.so.16.x` now pairs across rebuilds instead of removed+added noise, and a real break in the paired dependency still surfaces. Remaining: normalize the embedded ELF SONAME/install-name for `bundle.py`'s cohort-scoped SONAME-skew detector. |
 | **G10** | planned | manylinux glibc-floor / platform-baseline checks. |
 | **G11** | planned | Single-binary ABI audit/lint mode. |
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |

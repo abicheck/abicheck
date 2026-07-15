@@ -256,6 +256,8 @@ def _resolve_input(
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    debug_roots: list[Path] | None = None,
+    enable_debuginfod: bool = False,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
@@ -282,6 +284,11 @@ def _resolve_input(
             detects the format from magic bytes.
         dwarf_only: If True, force DWARF-only mode (ADR-003).
         debug_format: Force debug format ("dwarf", "btf", "ctf") or None for auto.
+        debug_roots / enable_debuginfod: Detached-debug-artifact resolution
+            (ADR-021a) for this side — forwarded to ``service.resolve_input``
+            so a resolved build-id-tree/path-mirror ``.debug`` file actually
+            feeds the DWARF parse for a stripped ELF input, not just a log
+            line (P1.1).
         public_headers / public_header_dirs: Public-header set used to tag
             declaration provenance (ADR-024/ADR-015). Callers that already
             treat *headers* as the public contract (e.g. ``compare``'s
@@ -302,6 +309,8 @@ def _resolve_input(
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod,
             header_backend=header_backend,
             compile=compile,
             public_headers=public_headers,
@@ -481,6 +490,9 @@ def _resolve_compare_snapshots(
     old_header_backend: str | None = None,
     new_header_backend: str | None = None,
     compile_context: CompileContext | None = None,
+    old_debug_roots: list[Path] | None = None,
+    new_debug_roots: list[Path] | None = None,
+    enable_debuginfod: bool = False,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -495,6 +507,11 @@ def _resolve_compare_snapshots(
     ``compile:`` block; it applies to both sides. Its ``frontend`` field is unused
     here — the frontend is driven by the explicit ``header_backend`` so the per-side
     override above still wins.
+
+    ``old_debug_roots`` / ``new_debug_roots`` / ``enable_debuginfod`` (P1.1,
+    ADR-021a): per-side detached-debug-artifact resolution (``--debug-root
+    old=/new=``, ``--debuginfod``), forwarded to each side's ``_resolve_input``
+    so a resolved ``.debug`` file actually feeds that side's DWARF parse.
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
@@ -512,6 +529,8 @@ def _resolve_compare_snapshots(
         pdb_path=old_pdb_path if old_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
+        debug_roots=old_debug_roots,
+        enable_debuginfod=enable_debuginfod,
         header_backend=old_backend,
         compile=compile_context,
         public_headers=old_h,
@@ -526,6 +545,8 @@ def _resolve_compare_snapshots(
         pdb_path=new_pdb_path if new_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
+        debug_roots=new_debug_roots,
+        enable_debuginfod=enable_debuginfod,
         header_backend=new_backend,
         compile=compile_context,
         public_headers=new_h,

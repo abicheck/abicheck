@@ -5,18 +5,37 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# Helper: append a flag with value(s) to the command array.
-# Space-separated values become repeated flags (e.g. -H a.h -H b.h).
-# Note: Paths containing spaces are not supported — word-splitting is
-# intentional here but will break on space-containing values.
+# Helper: split a multi-value input into items.
+# Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
+# supports path values containing spaces. A value with no newline falls back
+# to legacy whitespace-splitting for backward compatibility with the
+# documented single-line "space-separated" form; a space-containing path
+# still cannot be expressed on a single line this way.
 # ---------------------------------------------------------------------------
+_split_multi_value() {
+  local value="$1"
+  if [[ "$value" == *$'\n'* ]]; then
+    local item
+    while IFS= read -r item; do
+      [[ -n "$item" ]] && printf '%s\n' "$item"
+    done <<< "$value"
+  else
+    local item
+    for item in $value; do
+      printf '%s\n' "$item"
+    done
+  fi
+}
+
+# Helper: append a flag with value(s) to the command array.
 add_flag() {
   local flag="$1"
   local value="$2"
+  local item
   if [[ -n "$value" ]]; then
-    for item in $value; do
+    while IFS= read -r item; do
       CMD+=("$flag" "$item")
-    done
+    done < <(_split_multi_value "$value")
   fi
 }
 
@@ -26,10 +45,11 @@ add_sided_flag() {
   local flag="$1"
   local side="$2"
   local value="$3"
+  local item
   if [[ -n "$value" ]]; then
-    for item in $value; do
+    while IFS= read -r item; do
       CMD+=("$flag" "${side}=${item}")
-    done
+    done < <(_split_multi_value "$value")
   fi
 }
 

@@ -90,6 +90,23 @@ def _compute_loadability(
     return StackVerdict.PASS
 
 
+def _breaking_change_touches_imports(change: StackChange) -> bool:
+    """True if a symbol this root actually imports from *change*'s provider is
+    among the DSO's own BREAKING findings (not just any breaking finding
+    anywhere in the DSO).
+
+    ``change.abi_diff.verdict`` is a whole-DSO verdict: a provider can be
+    BREAKING because of one removed symbol while a given root only imports an
+    unrelated, unaffected symbol from the same DSO. Without this intersection
+    every root importing *anything* from a broken provider was marked FAIL,
+    even when the specific break could never have affected it (P1.4).
+    """
+    assert change.abi_diff is not None
+    imported_symbols = {b.symbol for b in change.impacted_imports}
+    breaking_symbols = {c.symbol for c in change.abi_diff.breaking}
+    return bool(imported_symbols & breaking_symbols)
+
+
 def _compute_abi_risk(
     stack_changes: list[StackChange],
     binding_changes: list[Change] | None = None,
@@ -107,7 +124,13 @@ def _compute_abi_risk(
             has_risk = True
         elif change.abi_diff is not None and change.impacted_imports:
             if change.abi_diff.verdict.value == "BREAKING":
-                has_breaking = True
+                if _breaking_change_touches_imports(change):
+                    has_breaking = True
+                else:
+                    # The DSO is broken, but not by anything this root
+                    # imports — real "environment contains a broken DSO"
+                    # signal, but not a confirmed impact on this root.
+                    has_risk = True
             elif change.abi_diff.verdict.value in ("API_BREAK", "COMPATIBLE_WITH_RISK"):
                 has_risk = True
         elif change.abi_diff is not None and not change.impacted_imports:

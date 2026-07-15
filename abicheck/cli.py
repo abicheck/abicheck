@@ -641,16 +641,23 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
-    # Debug artifact resolution (ADR-021a): resolve before dump
+    # Debug artifact resolution (ADR-021a): resolve before dump. P1.1: thread
+    # a resolved detached debug file (build-id tree / path-mirror / debuginfod
+    # — distinct from so_path itself) into the actual DWARF parse instead of
+    # only logging it, so a stripped binary still gets DWARF-aware comparison.
+    debug_info_path: Path | None = None
     if debug_roots or debuginfod:
         artifact = _resolve_debug_artifact(
             so_path, debug_roots, debuginfod, debuginfod_url,
         )
         if artifact:
             click.echo(f"Debug info: {artifact.source}", err=True)
+            if artifact.dwarf_path and artifact.dwarf_path.resolve() != so_path.resolve():
+                debug_info_path = artifact.dwarf_path
 
     perform_elf_dump(
         so_path=so_path,
+        debug_info_path=debug_info_path,
         headers=headers,
         includes=includes,
         version=version,

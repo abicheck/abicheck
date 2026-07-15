@@ -19,6 +19,7 @@ from abicheck.cli_compare_release import (
     _format_release_json,
     _prepare_compare_release_inputs,
 )
+from abicheck.cli_helpers_compare import strip_vendor_hash
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -111,6 +112,47 @@ class TestCanonicalLibraryKey:
 
     def test_dll(self, tmp_path: Path) -> None:
         assert _canonical_library_key(Path("libfoo.dll")) == "libfoo.dll"
+
+
+class TestStripVendorHash:
+    """G9: auditwheel/delocate rewrite vendored libs to lib<name>-<hash>.so.<ver>,
+    with a content-derived hash that changes every rebuild. strip_vendor_hash
+    normalizes that away so compare-release can pair the same dependency across
+    releases instead of reporting every one as removed+added noise."""
+
+    def test_auditwheel_hex_before_so_stripped(self) -> None:
+        assert strip_vendor_hash("libpng16-a746ad4a.so.16.43.0") == "libpng16.so.16.43.0"
+
+    def test_different_hash_same_stem(self) -> None:
+        # The whole point: two different rebuild hashes must normalize identically.
+        a = strip_vendor_hash("libpng16-a746ad4a.so.16.43.0")
+        b = strip_vendor_hash("libpng16-b8f31c2e.so.16.56.0")
+        assert a == "libpng16.so.16.43.0"
+        assert b == "libpng16.so.16.56.0"
+
+    def test_16char_hash_stripped(self) -> None:
+        assert strip_vendor_hash("libsodium-1234567890abcdef.so.23.3.0") == "libsodium.so.23.3.0"
+
+    def test_no_hyphen_untouched(self) -> None:
+        # Real-world names with no hyphen at all — nothing to strip.
+        assert strip_vendor_hash("libwebpdemux.so.2.0.14") == "libwebpdemux.so.2.0.14"
+        assert strip_vendor_hash("libbrotlicommon.so.1") == "libbrotlicommon.so.1"
+
+    def test_short_hex_lookalike_untouched(self) -> None:
+        # "cafe" is valid hex but below the 6-char minimum — a real short
+        # hyphenated suffix must not be mistaken for a vendor hash.
+        assert strip_vendor_hash("libfoo-cafe.so") == "libfoo-cafe.so"
+
+    def test_non_hex_suffix_untouched(self) -> None:
+        # "utils" is not a hex string — an ordinary hyphenated name.
+        assert strip_vendor_hash("libfoo-utils.so") == "libfoo-utils.so"
+
+    def test_canonical_key_pairs_across_hash_rebuild(self) -> None:
+        # The integration point: _canonical_library_key must collapse both
+        # rebuild hashes of the same vendored dependency to one key.
+        old_key = _canonical_library_key(Path("libpng16-a746ad4a.so.16.43.0"))
+        new_key = _canonical_library_key(Path("libpng16-b8f31c2e.so.16.56.0"))
+        assert old_key == new_key == "libpng16.so"
 
 
 class TestVersionSortKey:
@@ -339,6 +381,67 @@ class TestUnmatched:
         assert "libremoved.json" in data["unmatched_old"]
         assert isinstance(data["unmatched_new"], list)
         assert "libadded.json" in data["unmatched_new"]
+
+
+# ── vendored wheel hash pairing (G9) ────────────────────────────────────────
+
+class TestVendoredWheelPairing:
+    """G9 workflow proof: two synthetic 'wheels' with auditwheel/delocate-style
+    hashed vendored libraries must be paired by unhashed stem — not reported
+    as removed+added noise every rebuild — while a real ABI break in the
+    paired dependency (the pyzmq libsodium-style regression anchor) still
+    surfaces rather than being absorbed by the normalization."""
+
+    def test_hashed_vendored_lib_pairs_across_rebuild(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        snap = _snap(library="libpng16.so.16")
+        # Same dependency, different auditwheel rebuild hash each side.
+        _write_snap(old_dir / "libpng16-a746ad4a.so.16.43.0.json", snap)
+        _write_snap(new_dir / "libpng16-b8f31c2e.so.16.56.0.json", snap)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 0
+        data = json.loads(out)
+        # Paired, not phantom removed+added.
+        assert data["unmatched_old"] == []
+        assert data["unmatched_new"] == []
+        assert len(data["libraries"]) == 1
+
+    def test_real_break_in_hashed_vendored_lib_still_surfaces(self, tmp_path: Path) -> None:
+        """Regression anchor (pyzmq libsodium 23->26-shaped case): a real ABI
+        break in a hash-paired vendored library must not be absorbed by the
+        stem normalization — pairing only changes matching, never the diff."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_lib, new_lib = _breaking_pair("libsodium.so.26")
+        _write_snap(old_dir / "libsodium-1234567890abcdef.so.23.3.0.json", old_lib)
+        _write_snap(new_dir / "libsodium-fedcba0987654321.so.26.1.0.json", new_lib)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        data = json.loads(out)
+        assert data["verdict"] == "BREAKING"
+        # Still paired (matched), not reported as removed+added.
+        assert data["unmatched_old"] == []
+        assert data["unmatched_new"] == []
+
+    def test_non_vendored_names_unaffected(self, tmp_path: Path) -> None:
+        """Ordinary (non-hashed) library names must not be spuriously paired
+        or otherwise affected by the vendor-hash normalization."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        _write_snap(old_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2"))
+        _write_snap(new_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2"))
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 0
+        data = json.loads(out)
+        assert data["unmatched_old"] == []
+        assert data["unmatched_new"] == []
 
 
 # ── output-dir ────────────────────────────────────────────────────────────────

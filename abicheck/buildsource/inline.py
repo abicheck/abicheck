@@ -28,9 +28,15 @@ the normalized L3/L4/L5 facts *inline* from raw inputs and embeds them in the
 
 A per-project ``.abicheck.yml`` ``build:`` block can name the build system and a
 *query* command that emits a compile DB without performing a full build; running
-that query is gated by both an explicit operator-supplied build config and
-``--allow-build-query`` (ADR-032 D5 ``query_build_system`` action ceiling —
-read by default, trusted query opt-in, full build never).
+that query is gated by an explicit, operator-supplied ``--config`` alone
+(ADR-032 D5 ``query_build_system`` action ceiling — read by default, trusted
+query opt-in, full build never). ``--allow-build-query`` is a deprecated
+no-op kept only for backward compatibility — it neither grants nor restricts
+this permission (see :func:`collect_inline_pack`'s ``allow_build_query``
+docstring). The separate abicheck-authored *inferred* cmake/bazel/make query
+(:func:`_resolve_compile_db`) runs whenever ``--sources`` needs L3 regardless
+of any flag — pointing abicheck at a source tree is itself the request to
+analyse it.
 
 Everything here is best-effort (ADR-028 D3): a missing tool or unreadable input
 degrades L3/L4/L5 to partial/not-collected coverage and never aborts the dump —

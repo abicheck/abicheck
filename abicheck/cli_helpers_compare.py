@@ -187,12 +187,37 @@ def _collect_additions(result: DiffResult) -> list[object]:
     return [c for c in result.changes if c.kind in addition_kinds]
 
 
+#: `auditwheel` (Linux) and `delocate` (macOS) rewrite each vendored library to
+#: ``lib<name>-<hex>.so.<ver>`` / ``lib<name>-<hex>.dylib`` and rewrite its
+#: SONAME/install-name to match, so the hash changes on every rebuild even
+#: though the underlying dependency didn't. Restricted to a hyphen + 6-16 hex
+#: chars immediately before ``.so``/``.dylib`` (or a numeric version
+#: component leading to one) so ordinary hyphenated names — e.g.
+#: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
+#: are never touched (G9, ADR: docs/development/plans/g9-wheel-vendored-matching.md).
+_VENDOR_HASH_RE = re.compile(r"-[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)")
+
+
+def strip_vendor_hash(name: str) -> str:
+    """Strip an auditwheel/delocate content-hash suffix from a library name.
+
+    Pairing on the unhashed stem lets ``compare-release`` diff two wheels'
+    vendored libraries directly instead of reporting every one as
+    removed+added noise every rebuild (G9). A genuinely changed vendored
+    dependency (e.g. a SONAME major bump) still surfaces as a real break —
+    this only normalizes the filename/SONAME, never the content.
+    """
+    return _VENDOR_HASH_RE.sub("", name)
+
+
 def _canonical_library_key(path: Path) -> str:
     """Canonical key used to match libraries across releases.
 
     For ELF versioned names, canonicalize to ``*.so`` (e.g. ``libfoo.so.1.2`` → ``libfoo.so``).
+    Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
+    same bundled dependency pairs across rebuilds despite its hash changing.
     """
-    lower = path.name.lower()
+    lower = strip_vendor_hash(path.name.lower())
     m = re.search(r"\.so(?:\.|$)", lower)
     if m:
         return lower[: m.start() + 3]

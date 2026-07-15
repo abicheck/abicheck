@@ -419,15 +419,23 @@ use_cases:
   - id: UC-WF-wheel-vendored
     axis: workflow
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)
-    status: planned
+    status: partial
     gap: G9
     plan: docs/development/plans/g9-wheel-vendored-matching.md
     next_steps: >
-      Normalize the auditwheel/delocate content-hash suffix (-[0-9a-f]{6,16})
-      on filename AND soname before pairing in compare-release; pair on the
-      unhashed soname stem so a bundled libpng16.so.16 matches across rebuilds.
-      Add a two-wheel fixture. Empirically confirmed: today every vendored dep
-      of a manylinux wheel shows as removed+added.
+      Filename-based pairing landed: strip_vendor_hash() normalizes the
+      auditwheel/delocate content-hash suffix (-[0-9a-f]{6,16}) before
+      compare-release's matching pass (_canonical_library_key), so a bundled
+      libpng16-<hash>.so.16.x now pairs across rebuilds instead of showing as
+      removed+added, while a real break in the paired dependency (e.g. a
+      pyzmq-style libsodium SONAME major bump) still surfaces. Remaining: the
+      plan's "AND soname" half — normalizing the embedded ELF SONAME/install-name
+      (not just the filename) for bundle.py's cohort-scoped SONAME-skew
+      detector, which reads DT_SONAME directly and is not yet covered by this
+      normalization.
+    evidence:
+      modules: [abicheck/cli_helpers_compare.py]
+      tests: [tests/test_compare_release.py]
 
   - id: UC-WF-stable-abi-subset
     axis: workflow
