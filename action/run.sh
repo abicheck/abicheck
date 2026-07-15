@@ -199,6 +199,17 @@ elif [[ "$MODE" == "compare" ]]; then
     CMD+=(-o "$OUTPUT_FILE")
   fi
 
+  # Render a second, always-unfiltered JSON report from this same run for the
+  # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
+  # second time just to get JSON. Only needed when the primary format isn't
+  # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
+  # below). compare-release/appcompat don't build CMD through this branch, so
+  # they keep using the rerun fallback.
+  if [[ "$FORMAT" != "json" ]]; then
+    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+    CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+  fi
+
   add_single_flag "--policy" "${INPUT_POLICY:-}"
   add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
@@ -862,9 +873,14 @@ _maybe_post_pr_comment() {
   echo "::group::abicheck PR comment"
   # Template-based mktemp (X's at the end) — portable across GNU and BSD/macOS,
   # unlike the GNU-only --suffix option.
-  PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+  if [[ -z "${PR_JSON:-}" ]]; then
+    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+  fi
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
-  if _can_reuse_primary_json; then
+  if [[ -s "$PR_JSON" ]]; then
+    : # Already populated by the primary run's --secondary-format (compare
+      # mode, non-json primary format) — nothing left to do.
+  elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
     # of re-running the whole comparison.
     cp "$OUTPUT_FILE" "$PR_JSON"

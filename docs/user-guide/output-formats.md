@@ -206,6 +206,31 @@ interfaces each affects. Available in Markdown and HTML formats.
 abicheck compare old.json new.json --show-impact
 ```
 
+## A second output format from the same run (`--secondary-format`)
+
+`compare` computes its comparison once; `--secondary-format` renders that
+same result into a second format/file, instead of requiring a second
+`abicheck compare` invocation to get a different format:
+
+```bash
+# A markdown report for humans, plus a JSON artifact for tooling —
+# one comparison, two outputs.
+abicheck compare old.json new.json \
+  --format markdown \
+  --secondary-format json --secondary-output report.json
+```
+
+- `--secondary-format` requires `--secondary-output` — writing two formats
+  to the same stream would be ambiguous.
+- The secondary render always emits the full, unfiltered report: it ignores
+  `--show-only`/`--stat`, which describe only the primary format's display.
+- Not supported for directory/package (release) comparisons — the release
+  fan-out doesn't produce a single `DiffResult` to render twice. Compare the
+  libraries individually to use it.
+
+The bundled GitHub Action uses this to get JSON for its sticky PR comment
+without re-running the whole comparison a second time.
+
 ---
 
 ## Analysis confidence and evidence tier

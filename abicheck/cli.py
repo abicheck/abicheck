@@ -1255,6 +1255,19 @@ def _embed_inline_source_side(
                 "(verdict + counts + release recommendation + manual-review banner) "
                 "suitable for a job summary or PR comment.",
 )
+@click.option("--secondary-format", "secondary_fmt",
+              type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
+              default=None,
+              help="Emit a second output format from this same comparison run, "
+                   "without re-running the comparison a second time (e.g. a human "
+                   "--format markdown report alongside a --secondary-format json "
+                   "artifact for tooling). Requires --secondary-output (writing two "
+                   "formats to the same stream would be ambiguous). Always renders "
+                   "the full, unfiltered report (ignores --show-only/--stat). Not "
+                   "supported for directory/package (release) comparisons.")
+@click.option("--secondary-output", "secondary_output",
+              type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="File path to write --secondary-format's output to.")
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "
                    "ON; use --no-demangle to turn off). json/sarif always keep raw "

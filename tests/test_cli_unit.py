@@ -188,6 +188,48 @@ class TestCompareHtml:
         assert "<html" in result.output.lower()
 
 
+# ── compare --secondary-format/--secondary-output ───────────────────────
+
+class TestCompareSecondaryFormat:
+    def test_writes_second_format_from_same_run(self, tmp_path):
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        assert "# ABI Report" in result.output
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert parsed["verdict"] == "BREAKING"
+
+    def test_secondary_format_ignores_show_only_filter(self, tmp_path):
+        # The secondary render always emits the full, unfiltered report even
+        # when the primary format's --show-only narrows the display.
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--show-only", "added",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert parsed["changes"]
+
+    def test_secondary_format_requires_secondary_output(self, tmp_path):
+        old_p, new_p = _write_snapshots(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-format", "json",
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-format requires --secondary-output" in result.output
+
+
 # ── compare with suppression ────────────────────────────────────────────
 
 class TestCompareSuppression:

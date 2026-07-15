@@ -182,6 +182,7 @@ def _reject_set_input_flags(
     exit_code_scheme: str | None,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
+    secondary_fmt: str | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -207,6 +208,12 @@ def _reject_set_input_flags(
             "--env-matrix is not supported for directory/package (release) "
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
+        )
+    if secondary_fmt is not None:
+        raise click.UsageError(
+            "--secondary-format is not supported for directory/package "
+            "(release) comparisons yet; it applies to single-file / snapshot "
+            "inputs. Compare the libraries individually to use it."
         )
 
 
@@ -457,6 +464,8 @@ def run_compare(
     probe_matrix_new: Path | None = None,
     header_graph: bool = False,
     header_graph_includes: bool = False,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
@@ -516,7 +525,7 @@ def run_compare(
         # resolved scheme from config but has no public CLI support for these
         # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
         _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path
+            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -822,6 +831,30 @@ def run_compare(
     )
 
     _write_or_echo(output, text)
+
+    if secondary_fmt is not None:
+        if secondary_output is None:
+            raise click.UsageError(
+                "--secondary-format requires --secondary-output: writing two "
+                "output formats to the same stream would be ambiguous."
+            )
+        # Always the full, unfiltered report — ignores --show-only/--stat
+        # (which describe the *primary* format's display) so a --secondary-*
+        # consumer (e.g. a CI action rendering a PR-comment JSON from a
+        # markdown-format primary run) sees the complete change set the gate
+        # actually acted on, not whatever the primary format chose to filter
+        # down to. Reuses the same already-computed `result` — no second
+        # comparison run.
+        secondary_text = _render_output(
+            secondary_fmt, result, old, new,
+            follow_deps=follow_deps,
+            show_only=None, report_mode=report_mode,
+            show_impact=show_impact, stat=False,
+            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            show_recommendation=recommend,
+            demangle=demangle,
+        )
+        _write_or_echo(secondary_output, secondary_text)
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)

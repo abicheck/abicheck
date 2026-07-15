@@ -300,6 +300,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `_leaf_entry` (the latter learned this the same way it learned
   `operation`/`finding_id` — see the entry above from earlier this cycle).
 
+- **`compare --secondary-format`/`--secondary-output` — a second output
+  format from the same comparison run.** `compare` now computes its
+  `DiffResult` once and can render it into two formats/files in one
+  invocation (e.g. `--format markdown` for a human report alongside
+  `--secondary-format json --secondary-output report.json` for tooling),
+  instead of requiring a second full `abicheck compare` invocation just to
+  get a different format. `--secondary-format` requires
+  `--secondary-output` (writing two formats to the same stream would be
+  ambiguous) and always renders the full, unfiltered report — it ignores
+  `--show-only`/`--stat`, which describe only the primary format's display.
+  Not supported for directory/package (release) comparisons yet (rejected
+  with a `UsageError`, same as `--exit-code-scheme`/
+  `--reconcile-build-context`/`--env-matrix`). The bundled GitHub Action
+  (`action/run.sh`) now uses this instead of re-running the whole comparison
+  a second time to get JSON for its sticky PR comment, halving the work for
+  a `compare` step that posts a PR comment with a non-json primary format.
+
 - **Canonical fact-set versioning and per-family coverage honesty for the
   Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
   the Clang facts plugin and the reference `clang.py` wrapper now carries a
