@@ -981,7 +981,11 @@ def _converting_ctors_by_class(
         if len(required) > 1:
             continue
         arg_type = " ".join(
-            f.params[0].type.replace("const", "").replace("&", "").split()
+            f.params[0]
+            .type.replace("const", "")
+            .replace("volatile", "")
+            .replace("&", "")
+            .split()
         )
         if arg_type == f.name:
             continue

@@ -306,6 +306,27 @@ class TestCtorOverloadAmbiguityRisk:
             c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
         )
 
+    def test_new_volatile_copy_ctor_is_not_flagged(self) -> None:
+        """A volatile-qualified copy ctor is still copy-ctor infrastructure
+        (Codex review #556) — `volatile` must be stripped alongside `const`/`&`
+        before the self-type check, or it's mistaken for a converting ctor."""
+        cls = RecordType(name="Widget", kind="class")
+        old = _snap_with_types(
+            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
+        )
+        new = _snap_with_types(
+            "2.0",
+            [
+                _conv_ctor("Widget", "c1", "int"),
+                _conv_ctor("Widget", "c2", "volatile Widget &"),
+            ],
+            [cls],
+        )
+        r = compare(old, new)
+        assert not any(
+            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
+        )
+
     def test_unknown_explicitness_is_not_flagged(self) -> None:
         """Tri-state: unknown is_explicit on the new ctor must not fire."""
         cls = RecordType(name="Widget", kind="class")
