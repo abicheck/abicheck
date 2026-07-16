@@ -972,10 +972,10 @@ def _castxml_failure_hint(
             "matching the host GCC, or scan against an older/clang-parsable "
             f"libstdc++ via --gcc-path / --sysroot.{version_note}"
         )
-    # 3) Explicit --lang c on headers that need C++ (classes/namespaces) or that
-    #    guard extern "C" with #ifdef __cplusplus — castxml always parses in a
-    #    C++-ish mode, so forcing C rejects valid headers.
-    if not force_cpp and _detect_cpp_headers(headers):
+    # 3) Explicit --lang c on headers needing C++. _CPP_ONLY_PATTERNS (like the
+    # retry gate below) excludes extern "C" so a valid guarded-C header's real
+    # failure isn't misreported with this hint (Codex review).
+    if not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS):
         return (
             "\n\nHint: The header files appear to contain C++ syntax "
             "(class, namespace, template) but --lang c was specified. "
@@ -997,18 +997,16 @@ def _validate_castxml_output(
     if result.returncode != 0:
         # Only probe `castxml --version` when the failure is a frontend-too-old
         # signature — otherwise the upgrade note is irrelevant (and unused).
-        version_note = (
-            _castxml_version_note()
-            if _is_toolchain_version_failure(result.stderr) else ""
-        )
+        version_note = _castxml_version_note() if _is_toolchain_version_failure(result.stderr) else ""
         hint = _castxml_failure_hint(
             result.stderr, force_cpp=force_cpp, headers=headers,
             version_note=version_note,
         )
         message = f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
-        # Only cases 1-3 (not the generic case-4 fallback) raise HeaderToolchainError.
+        # Must mirror _castxml_failure_hint's case-3 predicate exactly
+        # (_CPP_ONLY_PATTERNS) or the class and hint text disagree.
         is_toolchain = _is_toolchain_version_failure(result.stderr) or (
-            not force_cpp and _detect_cpp_headers(headers))
+            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS))
         raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()

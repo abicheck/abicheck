@@ -289,11 +289,20 @@ class TestLangCFallsBackToCpp:
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
-            pytest.raises(SnapshotError),
+            pytest.raises(SnapshotError) as exc,
         ):
             _castxml_dump([header], [], compiler="cc", lang="c")
 
         assert modes == [True]  # only C mode ran; no C++ retry
+        # The real failure (a missing C-only include) is an ordinary header/
+        # input problem, not a language-mode mismatch: it must not be
+        # misclassified as HeaderToolchainError with a "--lang c++" hint that
+        # wouldn't even fix it — _castxml_failure_hint's own C++-detection
+        # here must use _CPP_ONLY_PATTERNS (excluding the guarded extern "C"),
+        # the same predicate the retry gate above already uses (Codex review).
+        assert not isinstance(exc.value, HeaderToolchainError)
+        assert "--lang" not in str(exc.value)
+        assert "cfg.h" in str(exc.value)
 
     def test_both_modes_fail_surfaces_requested_c_error(self, tmp_path: Path) -> None:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
