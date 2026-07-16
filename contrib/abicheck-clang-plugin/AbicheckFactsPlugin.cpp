@@ -1425,6 +1425,190 @@ std::string mangledOrScopedName(MangleContext *mc, const NamedDecl *d) {
   return scopedName(d);
 }
 
+// Physical defining file of *d* (ignoring `#line`, matching classify()'s own
+// resolution), independent of any public/private classification — a call or
+// reference target may be private-header or third-party, and this is purely
+// descriptive dst-endpoint provenance for the Python-side fold
+// (source_graph._augment_with_plugin_source_edges), which decides
+// project-internal-ness itself via BuildEvidence's compile-unit sources/
+// private headers (ADR-041 P1 #1 addendum, Codex review: without this, a
+// DECL_CALLS_DECL/DECL_REFERENCES_DECL endpoint that only ever appears as a
+// source_edges target — never independently declared on the L4 public
+// surface — gets no `defined_in_project` marking downstream, so
+// PUBLIC_API_INTERNAL_DEPENDENCY_ADDED misses it). Every ``Decl`` carries its
+// owning ``ASTContext`` (``getASTContext()``), so this needs no
+// ``SourceManager`` threaded in — callable from ``CallRefVisitor``, which (as
+// the comment below notes) has no ASTContext of its own.
+std::string declFile(const Decl *d) {
+  const SourceManager &SM = d->getASTContext().getSourceManager();
+  SourceLocation loc = SM.getExpansionLoc(d->getLocation());
+  if (loc.isInvalid())
+    return "";
+  PresumedLoc pl = SM.getPresumedLoc(loc, /*UseLineDirectives=*/false);
+  if (pl.isInvalid())
+    return "";
+  return pl.getFilename();
+}
+
+// Port of type_graph.py::_top_level_paren_index: index of the first '(' not
+// nested inside a '<...>' template-angle group, or npos. Distinguishes the
+// outer parameter-list paren of a callback-shaped spelling
+// ("detail::Impl ()") from one nested inside an enclosing template
+// instantiation ("std::function<detail::Impl ()>" -- the first '(' there
+// belongs to the *argument*, not the outer type).
+size_t topLevelParenIndex(const std::string &s) {
+  int depth = 0;
+  for (size_t i = 0; i < s.size(); ++i) {
+    char c = s[i];
+    if (c == '<')
+      ++depth;
+    else if (c == '>')
+      --depth;
+    else if (c == '(' && depth == 0)
+      return i;
+  }
+  return std::string::npos;
+}
+
+// Port of type_graph.py::_base_type_name: strip cv/pointer/reference/array
+// decoration down to a base type spelling (best-effort textual
+// normalization, e.g. "const detail::Impl *" -> "detail::Impl" -- not a real
+// type-identity resolution). ADR-041 P1 identity-mismatch fix (Codex
+// review): this plugin used to emit the raw, undecorated getAsString(PP)
+// spelling as a TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE edge's dst,
+// while type_graph.py's standalone replay always normalizes through this
+// exact algorithm before using the result as a graph-node identity -- so a
+// pointer/reference-typed field/base/param (the common PImpl-idiom shape)
+// never merged the plugin's source_edges node with the replay's node for the
+// same declaration. Must stay a faithful, line-for-line port so both
+// producers compute byte-identical strings from the same printed spelling.
+std::string baseTypeName(const std::string &qualTypeIn) {
+  auto trim = [](std::string s) {
+    size_t b = s.find_first_not_of(" \t");
+    size_t e = s.find_last_not_of(" \t");
+    return (b == std::string::npos) ? std::string() : s.substr(b, e - b + 1);
+  };
+  std::string s = trim(qualTypeIn);
+  if (s.empty())
+    return s;
+  // clang glues a top-level cv/restrict-qualified pointer directly to the
+  // star with no separating space ("detail::Impl *const", not
+  // "* const"); normalize so the suffix-stripping below handles it like the
+  // spaced form it already recognizes.
+  auto replaceAll = [](std::string &str, const std::string &from,
+                        const std::string &to) {
+    size_t pos = 0;
+    while ((pos = str.find(from, pos)) != std::string::npos) {
+      str.replace(pos, from.size(), to);
+      pos += to.size();
+    }
+  };
+  replaceAll(s, "*const", "* const");
+  replaceAll(s, "*volatile", "* volatile");
+  replaceAll(s, "*restrict", "* restrict");
+  replaceAll(s, "*__restrict__", "* __restrict__");
+  replaceAll(s, "*__restrict", "* __restrict");
+
+  static const char *const kTrailingDecorators[] = {"&&", "&", "*"};
+  static const char *const kTrailingQualifiers[] = {
+      " const", " volatile", " __restrict__", " __restrict", " restrict"};
+  static const char *const kLeadingQualifiers[] = {
+      "const ", "volatile ", "struct ", "class ", "enum ", "union "};
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    // Array bounds must be stripped inside the loop, not only once at the
+    // end -- an array of pointers ("detail::Impl *[4]") ends in "]", so the
+    // suffix-stripping checks below never fire before this runs.
+    size_t bracket = s.find('[');
+    if (bracket != std::string::npos) {
+      s = trim(s.substr(0, bracket));
+      changed = true;
+    }
+    // A callback-shaped template argument carries a parameter-list suffix
+    // ("detail::Impl ()") the checks below don't recognize; strip up to the
+    // first top-level '(' and keep looping so leftover pointer/cv decoration
+    // on the return-type spelling still gets stripped too.
+    size_t paren = topLevelParenIndex(s);
+    if (paren != std::string::npos) {
+      s = trim(s.substr(0, paren));
+      changed = true;
+    }
+    for (const char *suf : kTrailingDecorators) {
+      size_t len = std::strlen(suf);
+      if (s.size() >= len && s.compare(s.size() - len, len, suf) == 0) {
+        s = trim(s.substr(0, s.size() - len));
+        changed = true;
+      }
+    }
+    for (const char *suf : kTrailingQualifiers) {
+      size_t len = std::strlen(suf);
+      if (s.size() >= len && s.compare(s.size() - len, len, suf) == 0) {
+        s = trim(s.substr(0, s.size() - len));
+        changed = true;
+      }
+    }
+    for (const char *pre : kLeadingQualifiers) {
+      size_t len = std::strlen(pre);
+      if (s.compare(0, len, pre) == 0) {
+        s = s.substr(len);
+        changed = true;
+      }
+    }
+  }
+  return trim(s);
+}
+
+// Resolve *qt* to the declaring file of the record/enum/typedef decl it
+// names, if any -- the type-edge counterpart of declFile() (ADR-041 P1 #1
+// addendum, Codex review). Operates on the real QualType (not the printed
+// spelling baseTypeName() normalizes), so it needs no re-parsing/name
+// lookup. A pointer/reference/array is unwrapped down to its pointee/element
+// first (the printed spelling of `Impl *` still names `Impl`); a typedef is
+// resolved to the *alias* itself, not what it desugars to, matching the
+// pretty-printer's default sugar-preserving spelling (`Handle` stays
+// `Handle`, not `detail::Impl *`) -- checked before the pointer/reference
+// unwrap since isPointerType()/isReferenceType() desugar through a typedef
+// to inspect the aliased type, which would skip straight past a
+// `using Handle = Impl*` alias to `Impl` and resolve the wrong decl. A
+// dependent/template-parameter type or a builtin has no such decl and
+// yields "" (best-effort, no diagnostic -- mirrors declFile()'s own
+// silent-empty contract for an unresolvable location).
+std::string typeDeclFile(QualType qt) {
+  for (;;) {
+    const Type *t = qt.getTypePtrOrNull();
+    if (!t)
+      return "";
+    if (const auto *tdt = t->getAs<TypedefType>())
+      return declFile(tdt->getDecl());
+    if (t->isPointerType() || t->isReferenceType()) {
+      qt = t->getPointeeType();
+      continue;
+    }
+    if (const ArrayType *at = t->getAsArrayTypeUnsafe()) {
+      qt = at->getElementType();
+      continue;
+    }
+    break;
+  }
+  if (const TagDecl *tag = qt->getAsTagDecl())
+    return declFile(tag);
+  return "";
+}
+
+// {"role": role} + "dst_file" (via typeDeclFile()) when resolvable -- shared
+// by every DECL_HAS_TYPE/TYPE_INHERITS/TYPE_HAS_FIELD_TYPE addEdge() call
+// site (Codex review: none of the three attempted dst_file resolution at
+// all before this).
+std::map<std::string, std::string> typeEdgeAttrs(const char *role, QualType qt) {
+  std::map<std::string, std::string> attrs = {{"role", role}};
+  std::string file = typeDeclFile(qt);
+  if (!file.empty())
+    attrs["dst_file"] = std::move(file);
+  return attrs;
+}
+
 // ---------------------------------------------------------------------------
 // Small per-function-body sub-walk collecting DECL_CALLS_DECL/
 // DECL_REFERENCES_DECL edge targets (P1 #17-18). Scoped to one FunctionDecl's
@@ -1441,7 +1625,11 @@ public:
   // MangleContext of its own (it is instantiated fresh per function body with
   // no ASTContext threaded in), and the target AST outlives this sub-walk.
   std::vector<std::pair<const FunctionDecl *, bool>> Calls;
-  std::vector<std::string> References;
+  // (scoped name, defining file) — the file is resolved eagerly here (via the
+  // free declFile(), which needs no ASTContext member of its own) rather than
+  // retaining the raw Decl* the way Calls does, since name resolution for a
+  // reference needs no MangleContext deferral the way a call's does.
+  std::vector<std::pair<std::string, std::string>> References;
 
   bool shouldVisitImplicitCode() const { return false; }
   bool shouldVisitTemplateInstantiations() const { return false; }
@@ -1467,10 +1655,10 @@ public:
       // the plugin's own public-variable scope (emitDataVariable).
       if (varD->isLocalVarDeclOrParm() || varD->getNameAsString().empty())
         return true;
-      References.push_back(scopedName(varD));
+      References.emplace_back(scopedName(varD), declFile(varD));
     } else if (const auto *ecd = dyn_cast<EnumConstantDecl>(vd)) {
       if (!ecd->getNameAsString().empty())
-        References.push_back(scopedName(ecd));
+        References.emplace_back(scopedName(ecd), declFile(ecd));
     }
     return true;
   }
@@ -2039,24 +2227,36 @@ public:
     // overloads share one `name`, and using it as the edge src would let the
     // (kind, src, dst) dedup conflate `foo(int)`'s edges with `foo(double)`'s
     // (CodeRabbit review, P2; see mangledOrScopedName()).
-    addEdge("DECL_HAS_TYPE", key, fd->getReturnType().getAsString(PP), "high",
-            {{"role", "return"}});
+    addEdge("DECL_HAS_TYPE", key,
+            baseTypeName(fd->getReturnType().getAsString(PP)), "high",
+            typeEdgeAttrs("return", fd->getReturnType()));
     for (const ParmVarDecl *p : fd->parameters()) {
-      std::string ptype = p->getType().getAsString(PP);
+      std::string ptype = baseTypeName(p->getType().getAsString(PP));
       if (!ptype.empty())
-        addEdge("DECL_HAS_TYPE", key, ptype, "high", {{"role", "param"}});
+        addEdge("DECL_HAS_TYPE", key, ptype, "high",
+                typeEdgeAttrs("param", p->getType()));
     }
     if (Stmt *body = fd->getBody()) {
       CallRefVisitor crv;
       crv.TraverseStmt(body);
-      for (const auto &call : crv.Calls)
+      for (const auto &call : crv.Calls) {
+        std::map<std::string, std::string> attrs = {
+            {"call_kind", call.second ? "virtual" : "direct"},
+            {"resolution", call.second ? "overapprox" : "exact"}};
+        std::string file = declFile(call.first);
+        if (!file.empty())
+          attrs["dst_file"] = std::move(file);
         addEdge("DECL_CALLS_DECL", key,
                 mangledOrScopedName(Mangler.get(), call.first),
-                call.second ? "reduced" : "high",
-                {{"call_kind", call.second ? "virtual" : "direct"},
-                 {"resolution", call.second ? "overapprox" : "exact"}});
-      for (const std::string &ref : crv.References)
-        addEdge("DECL_REFERENCES_DECL", key, ref, "reduced", {{"role", "ref"}});
+                call.second ? "reduced" : "high", std::move(attrs));
+      }
+      for (const auto &ref : crv.References) {
+        std::map<std::string, std::string> attrs = {{"role", "ref"}};
+        if (!ref.second.empty())
+          attrs["dst_file"] = ref.second;
+        addEdge("DECL_REFERENCES_DECL", key, ref.first, "reduced",
+                std::move(attrs));
+      }
     }
 
     // Gate the whole inline entity on a CompoundStmt being present in the
@@ -2099,14 +2299,16 @@ public:
     // JSON dump) — bounds edge capture to exactly the public surface
     // FactsVisitor already walks.
     for (const CXXBaseSpecifier &base : rd->bases()) {
-      std::string baseName = base.getType().getAsString(PP);
+      std::string baseName = baseTypeName(base.getType().getAsString(PP));
       if (!baseName.empty())
-        addEdge("TYPE_INHERITS", name, baseName, "high", {{"role", "base"}});
+        addEdge("TYPE_INHERITS", name, baseName, "high",
+                typeEdgeAttrs("base", base.getType()));
     }
     for (const FieldDecl *field : rd->fields()) {
-      std::string ftype = field->getType().getAsString(PP);
+      std::string ftype = baseTypeName(field->getType().getAsString(PP));
       if (!ftype.empty())
-        addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high", {{"role", "field"}});
+        addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high",
+                typeEdgeAttrs("field", field->getType()));
     }
     return true;
   }
@@ -2514,24 +2716,36 @@ private:
       // (unlike VisitFunctionDecl's `key`, which prefers one), so edges are
       // keyed by the same qualified `name` used for this entity's own
       // identity above.
-      addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP),
-              "high", {{"role", "return"}});
+      addEdge("DECL_HAS_TYPE", name,
+              baseTypeName(fd->getReturnType().getAsString(PP)), "high",
+              typeEdgeAttrs("return", fd->getReturnType()));
       for (const ParmVarDecl *p : fd->parameters()) {
-        std::string ptype = p->getType().getAsString(PP);
+        std::string ptype = baseTypeName(p->getType().getAsString(PP));
         if (!ptype.empty())
-          addEdge("DECL_HAS_TYPE", name, ptype, "high", {{"role", "param"}});
+          addEdge("DECL_HAS_TYPE", name, ptype, "high",
+                  typeEdgeAttrs("param", p->getType()));
       }
       if (Stmt *body = fd->getBody()) {
         CallRefVisitor crv;
         crv.TraverseStmt(body);
-        for (const auto &call : crv.Calls)
+        for (const auto &call : crv.Calls) {
+          std::map<std::string, std::string> attrs = {
+              {"call_kind", call.second ? "virtual" : "direct"},
+              {"resolution", call.second ? "overapprox" : "exact"}};
+          std::string file = declFile(call.first);
+          if (!file.empty())
+            attrs["dst_file"] = std::move(file);
           addEdge("DECL_CALLS_DECL", name,
                   mangledOrScopedName(Mangler.get(), call.first),
-                  call.second ? "reduced" : "high",
-                  {{"call_kind", call.second ? "virtual" : "direct"},
-                   {"resolution", call.second ? "overapprox" : "exact"}});
-        for (const std::string &ref : crv.References)
-          addEdge("DECL_REFERENCES_DECL", name, ref, "reduced", {{"role", "ref"}});
+                  call.second ? "reduced" : "high", std::move(attrs));
+        }
+        for (const auto &ref : crv.References) {
+          std::map<std::string, std::string> attrs = {{"role", "ref"}};
+          if (!ref.second.empty())
+            attrs["dst_file"] = ref.second;
+          addEdge("DECL_REFERENCES_DECL", name, ref.first, "reduced",
+                  std::move(attrs));
+        }
       }
     }
   }

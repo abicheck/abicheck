@@ -3,10 +3,14 @@
 **Date:** 2026-07-12
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
-explain` proof paths), P0 slice 4 (body/type-hash-change correlation), and the
-header-only-graph addendum (`header_graph.py`, no build integration required)
-implemented; the rest of this ADR is a roadmap, not a commitment to ship on
-any timeline.
+explain` proof paths), P0 slice 4 (body/type-hash-change correlation), the
+header-only-graph addendum (`header_graph.py`, no build integration required),
+and P1 items 1, 2, 4, 5 (plugin injection, object/link provenance graph,
+per-edge confidence/provenance, and stable cross-clang-version identity)
+implemented; P1 item 3 (public-entry impact closure) has its pure helper
+implemented and tested but not yet wired into any scan/replay path (see that
+item for the open follow-up); the rest of this ADR is a roadmap, not a
+commitment to ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -1079,37 +1083,223 @@ there is no equivalent "should this be automatic" question for them.
    compact `referencedDecl` stub by bare name (real Clang never puts
    `mangledName` on that stub), collapsing overloads onto one endpoint; it
    now builds an id-index from the full declarations seen in the same walk,
-   mirroring the fix `type_graph.py` already had.
-2. **Object/link provenance graph.** New node kinds
-   (`object_file`/`archive_member`/`static_library`/`linker_script`/
+   mirroring the fix `type_graph.py` already had. **ADR-038 C.11 closes half
+   of the follow-up above** (Codex review): both `source_edges` producers now
+   carry `dst_file` for `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` — the C++
+   plugin via a new `declFile()` helper (mirroring `classify()`'s own
+   resolution), the Python inline extractor
+   (`clang_source_edges.build_source_edges`) by simply forwarding
+   `CallEdge.callee_file`/`TypeEdge.dst_file`, both of which already resolved
+   it — and `fold_source_edges()` now marks a `dst_file`-matching node
+   `defined_in_project`, mirroring `augment_graph_with_calls`/
+   `augment_graph_with_types`'s identical marker. `call_graph.py`'s own
+   `callee_file` resolution had a gap of its own (Codex review): it only
+   recorded a callee's file from a *body*-bearing sibling `FunctionDecl`, so
+   a helper only *declared* in this TU (a private header this TU includes,
+   its body compiled in a separate TU never present in this AST — a common
+   out-of-line-helper shape) left `callee_file` empty. Now records a
+   declaration-only file as a fallback (a later body for the same identity
+   still upgrades it — the definition is the more authoritative location).
+   `link_source_abi()`'s cross-TU `source_edges` dedup had a matching gap
+   (Codex review): it keeps only the first-seen `(edge, src, dst)` row across
+   every TU, so if TU A's copy of the same logical edge lacked `dst_file`
+   (that TU's AST couldn't resolve it) while TU B's copy — the same edge,
+   from a TU whose AST does carry the declaration/definition — had it, the
+   poorer first row silently won and the richer one was discarded. Now
+   merges a missing `dst_file` into the surviving row from any later
+   duplicate that has one (additive only — never clobbers an
+   already-resolved `dst_file`). The inline extractor already carried
+   `dst_file` for **all five** kinds (`type_graph.py`'s two-pass indexing
+   resolves a type spelling to its declaring file regardless of edge kind).
+   **ADR-038 C.13 closes the matching gap on the plugin side:** its three
+   type-edge kinds (`DECL_HAS_TYPE`'s return/parameter roles,
+   `TYPE_INHERITS`, `TYPE_HAS_FIELD_TYPE`) previously never attempted to
+   resolve `dst` — a printed type spelling (`getAsString(PP)`) — back to a
+   decl/file at all. A new `typeDeclFile(QualType)` helper (alongside
+   `declFile(const Decl*)`) unwraps a pointer/reference/array down to its
+   pointee/element, then resolves a `TypedefType` to the alias's *own*
+   declaring file (checked before the pointer/reference unwrap, since
+   `isPointerType()`/`isReferenceType()` desugar through a typedef to the
+   type it names — stripping first would resolve `using Handle = Impl*`'s
+   `dst_file` to wherever `Impl` is declared instead of where `Handle`
+   itself is, diverging from what the printed spelling actually names) or a
+   `TagDecl` (record/enum) otherwise; a dependent/template-parameter type or
+   a builtin yields `""`, matching `declFile()`'s own silent-empty contract.
+   Verified against a real Clang 18 build (`cmake`/`make` against
+   `llvm-18-dev`/`libclang-18-dev`): compiled fixtures exercising a
+   public struct's base class and field type declared in a private header
+   (both resolve `dst_file` to that header) and a pointer/reference typedef
+   alias declared in a *different* header than its underlying type (resolves
+   to the alias's own file, confirming the desugar-order fix); the plugin's
+   own C.6 differential-conformance, scan-flow, and public-roots-diagnostic
+   test suites all still pass unmodified (this only adds `attrs`, never
+   changes an edge's `(kind, src, dst)` identity or count). `inline.
+   _build_inline_graph()` still always runs the separate replay passes
+   regardless (that skip-optimization needs *every* kind covered with equal
+   *breadth*, not just `dst_file` resolution, to be safe — C.12's
+   `mark_source_edges_extractor_coverage()` producer gate is exactly this
+   distinction: the plugin's `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE` now
+   resolve `dst_file` correctly for every public record it walks, but its
+   `DECL_HAS_TYPE` still never covers a variable's type or a typedef's own
+   underlying type, so the *family* remains degraded even though two of its
+   three kinds are now individually reliable — a finer per-kind trust split
+   is a candidate follow-up, not attempted here) — this closes the
+   `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`-visibility gap for
+   Flow-2/plugin-only ingestion paths that never run a replay at all
+   (`inputs_pack.ingest_inputs_pack`), not the replay-skip itself. Also
+   fixed alongside: `mark_source_edges_extractor_coverage()` only trusts a
+   `"complete"` coverage state when `surface.source_edges` is actually
+   non-empty (a pre-C.11 `source_abi.json` can carry `"complete"` from
+   `coverage["fact_family_states"]` — which predates the `source_edges`
+   field itself — with no edges to back it, since the old serializer had
+   nowhere to persist them); and `fold_source_edges()` now gates on
+   `DEPENDENCY_EDGE_KINDS` rather than the broader `EDGE_KINDS`, so a
+   forward-incompatible/malformed row can't silently fold as a decl/decl
+   dependency edge. **ADR-038 C.12 closes a deeper coverage-honesty gap**
+   (Codex review): `mark_source_edges_extractor_coverage()` used to alias
+   *any* confirmed-complete `source_edges` rollup to full `call_graph`/
+   `type_graph` trust — correct for the Python inline extractor (a genuine,
+   unfiltered full-TU walk) but wrong for the clang plugin, whose
+   `source_edges` only walks call/reference bodies for functions
+   `classify()` accepts (public-header-declared; a private/internal helper
+   defined purely in a `.cpp` is skipped entirely, its outgoing calls never
+   captured) and never emits `DECL_HAS_TYPE` for a typedef's underlying type
+   or a variable's type at all (only function return/parameter types).
+   Aliasing the plugin's `source_edges` to full trust would hide a
+   genuinely new dependency added inside a private helper's body, or a
+   changed typedef/variable type, as a false negative — exactly the
+   coverage-honesty failure mode this whole chain exists to prevent. The
+   fix gates the alias on the rolled-up `fact_set["producer"]` being the
+   Python inline extractor's id (`"abicheck-cc-clang-extractor"`); the
+   plugin's own id (`"abicheck-clang-plugin"`), and a missing/disagreeing
+   `fact_set` (pre-C.8 producer, mixed-producer pack), both fall back to no
+   blanket trust — the same conservative default an unrecognized coverage
+   state already gets. A follow-up Codex review caught that "no blanket
+   trust" alone wasn't enough: leaving `call_graph`/`type_graph` entirely
+   *unmarked* for a non-full-walk producer still let
+   `source_graph_findings._common_dependency_edge_kinds`'s raw-edge-presence
+   fallback apply — its `_pass_ran`/`_pass_trusted_kinds` checks only consult
+   `extractor_passes`/`narrowed_passes`, never an *absence* of
+   `degraded_passes`. A plugin baseline with even one public-surface call
+   edge would then make `DECL_CALLS_DECL` look "common" against a
+   full-replay candidate, surfacing a pre-existing private-helper dependency
+   the plugin structurally could never have seen as a false
+   `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` — the same one-directional risk
+   the sixth/sixteenth Codex reviews already made `degraded_passes` guard
+   against for a narrowed/crashed standalone replay. Fixed: a non-full-walk
+   producer whose `source_edges` did fold real edges into the graph is now
+   stamped `degraded_passes["call_graph"]`/`["type_graph"]` instead of left
+   unmarked (a producer that folded *nothing* gets no stamp either — there is
+   nothing to distrust). `degraded_passes` only ever restricts trust in a
+   side's own *absence* of a kind, never the *other* side's presence, so
+   this can only trade a missed addition for avoiding a false alarm — the
+   same conservative bias the whole narrowed/degraded chain already
+   commits to. A further review caught the same fallback gap one layer up:
+   a third-party/hand-edited surface (or a schema older than ADR-038 C.8)
+   can carry `source_edges` with no `fact_family_states` at all (missing or
+   malformed) — the function used to `return` immediately in that case,
+   before ever reaching the degraded-stamping check, leaving folded edges
+   just as unmarked as the recognized-non-full-walk-producer case the fix
+   above addressed. Now a missing/malformed `fact_family_states` is treated
+   as unknown coverage (`state` stays `None`, so the full-walk-trust branch
+   never fires) and falls through to the same degraded stamp instead of
+   returning early.
+2. ~~**Object/link provenance graph.**~~ — **done, this change.** New node
+   kinds (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges
-   (`COMPILE_UNIT_EMITS_OBJECT`, `OBJECT_DEFINES_SYMBOL`,
-   `ARCHIVE_CONTAINS_OBJECT`, `LINK_UNIT_EXPORTS_SYMBOL`, …) so a symbol
-   change can be attributed to "which object/archive member/link step" rather
-   than only "which target." Explains cases `TARGET_DEPENDENCY_ADDED` /
-   `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED` currently can't: an accidental
-   export from a static archive, a COMDAT/weak-symbol resolution change, a
-   new transitive `DT_NEEDED` traced to a specific object.
-3. **Public-entry impact closure.** A changed-file → affected-public-API BFS
-   over the existing graph (`poi.py`'s `resolve_symbol_tus` already does the
-   reverse direction — export delta → declaring TU). Feeds PR-scoped deep
-   scans ("this PR touches `src/detail/cache.cpp`; only 3 public entries are
-   reachable from it; replay only those") on top of the existing
-   changed-path/`headers-only` scoping (ADR-035 D7).
-4. **Explicit per-edge confidence/provenance model.** `GraphEdge.confidence`
-   already exists (`CONF_HIGH`/`CONF_REDUCED`/`CONF_UNKNOWN`); extend the
-   *labels* (not the field) to the call graph's existing `call_kind`/
-   `resolution` pattern for every edge family — a `TYPE_INHERITS` edge from a
-   textual base-class match is not the same confidence as one resolved
-   through a linked type; make that explicit rather than implicit in "this
-   module always emits `CONF_HIGH`."
-5. **Stable cross-clang-version identity.** Today identity is
-   `mangled_name` else `qualified_name#signature_hash` (`SourceEntity.identity()`)
-   for decls, and a bare textual base-type spelling
-   (`type_graph._base_type_name()`) for AST-only type nodes — accepted
-   collision risk documented inline. A USR-based identity (clang already
-   computes USRs) would remove that collision risk without changing the
-   public schema.
+   (`COMPILE_UNIT_EMITS_OBJECT`, `TARGET_HAS_LINK_UNIT`, `LINK_UNIT_HAS_INPUT`,
+   `LINK_UNIT_USES_VERSION_SCRIPT`, `LINK_UNIT_EXPORTS_SYMBOL`) fold
+   `BuildEvidence.compile_units`/`link_units` into the graph
+   (`source_graph._fold_link_provenance`), so a symbol change can be
+   attributed to "which object/link step" rather than only "which target."
+   Every `compile_unit` with a known `output` gets an `object_file` node +
+   `COMPILE_UNIT_EMITS_OBJECT` edge; every `LinkUnit` becomes a `link_unit`
+   node (a kind `NODE_KINDS` reserved since ADR-031 D2 but never populated
+   before this) linked to its owning `target` when known, with each input path
+   classified by suffix into an `object_file` or `static_library` node
+   (`CONF_REDUCED` — best-effort textual classification, no archive
+   introspection) — an object a compile unit already emitted lands on the
+   *same* node instead of a disconnected duplicate, so a change traced to one
+   object correlates across both slices. `LINK_UNIT_EXPORTS_SYMBOL` is added
+   once `_augment_with_source_abi` resolves which symbols the owning target
+   actually exports. `archive_member`/`linker_script`/`export_map`/
+   `comdat_group` and the `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
+   edges stay reserved (schema-only): true archive-member/per-object-symbol
+   enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
+   increment does not add.
+3. **Public-entry impact closure.** — **done (pure helper only), this
+   change.** `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
+   is the reverse of `resolve_symbol_tus` (export delta → declaring TU): given
+   a set of changed source paths, it resolves which declarations live in those
+   files (via `decl_declaring_files` plus a `def_file`/`source_location`
+   fallback) and returns every public entry that either declares directly in
+   a changed file or reaches one through `_dependency_reachability`'s forward
+   closure. Unit-tested (`tests/test_poi.py`), but — unlike `resolve_symbol_tus`,
+   which `scan_engine.py` already calls to build the L4 replay seed — **nothing
+   calls this one yet** (Codex review): no scan/source-replay/crosscheck path
+   consumes the returned public-entry set, so the PR-scoped-deep-scan behavior
+   this item originally described ("this PR touches `src/detail/cache.cpp`;
+   only 3 public entries are reachable from it; replay only those") does not
+   actually happen today. Wiring it into `scan_engine.py` alongside
+   `resolve_symbol_tus` (or into a report/advisory surface) remains open.
+4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done, this
+   change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
+   family whose resolution was a same-confidence guess regardless of how the
+   reference was actually matched) now carries a dedicated
+   `RESOLUTION_REF_EXACT`/`RESOLUTION_REF_UNIQUE_CANDIDATE`/
+   `RESOLUTION_REF_UNRESOLVED` label — distinct from the pre-existing
+   `RESOLUTION_SCOPE`/`RESOLUTION_UNIQUE_CANDIDATE`/`RESOLUTION_UNRESOLVED`
+   vocabulary `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE` already
+   used, since a `DeclRefExpr` resolves by a different mechanism (an id-index
+   hit vs. a name-scope walk) — and `confidence` now downgrades from
+   `CONF_HIGH` to `CONF_REDUCED` whenever the match isn't exact, instead of
+   always emitting `CONF_HIGH`. The object/link provenance graph (P1 item 2
+   above) closes the item fully: its edges emit `CONF_HIGH` (build-evidence
+   direct) and its suffix-classified input nodes emit `CONF_REDUCED`
+   (textual guess), so every edge family this ADR introduces now carries a
+   confidence label reflecting how it was actually resolved.
+5. ~~**Stable cross-clang-version identity.**~~ — **done, this change.**
+   `SourceEntity.identity()`'s fallback chain is unchanged (still
+   `mangled_name` → `qualified_name#signature_hash` → bare `qualified_name`,
+   since folding USR into the identity string itself would change every
+   caller that already keys on it across snapshot versions — too large a
+   blast radius for this increment). Instead, `source_link.py`'s linker
+   *detects* (never silently eliminates) the accepted collision risk: when
+   two declarations route to the same `identity()` key but each carries a
+   distinct clang-computed USR (`SourceEntity.names["usr"]`), that's proof
+   the identity string collided two genuinely different entities, and the
+   pair is recorded in a new `SourceAbiSurface.identity_collisions` list
+   (`identity`/`qualified_name`/`usr_a`/`usr_b`) rather than silently merged.
+   This change makes that detection *visible*: a new `identity_collision_detected`
+   `ChangeKind` (RISK, D8 single-release hygiene) and matching `crosscheck.py`
+   check (`_check_identity_collision`) turn each recorded collision into an
+   ordinary finding, following the same skip-cleanly/coverage-honesty
+   contract as `odr_type_variant`. USR-based identity replacing the fallback
+   chain outright remains open.
+
+   Landing P1 items 2/3/5 surfaced three identity-mismatch bugs between the
+   AST-replay layers and `SourceEntity.identity()` (each would have silently
+   broken graph-reachability BFS for the affected declarations, since a
+   `SOURCE_DECLARES` node keyed one way while a replay-produced edge pointed
+   at a different string for the same declaration): an `extern "C"` (or
+   otherwise unmangled) **function**'s identity in `call_graph.py`/
+   `type_graph.py` was the bare name instead of the scope-qualified
+   `qualified_name#signature_hash` fallback; the same gap existed for an
+   unmangled **variable**'s own `DECL_HAS_TYPE` edge in `type_graph.py` (no
+   `signature_hash` suffix, since variables never set one); and the C++ clang
+   plugin printed a pointer/reference-decorated type spelling
+   (`getAsString(PP)`) verbatim instead of applying the same textual
+   normalization Python's `_base_type_name()` does, so `int*`-shaped `dst`
+   values diverged between the two producers. All three are fixed (a shared
+   `function_decl_identity()` helper in `source_graph.py` now backs both
+   Python replay modules; the plugin gained `baseTypeName()`/
+   `topLevelParenIndex()` as a line-for-line port, verified byte-identical
+   against Python's output via a live Clang 18 compile). A fourth,
+   unrelated bug surfaced alongside: `call_graph.py`'s `_walk_calls` reused
+   one `cur_file` across AST siblings without threading a discovered file
+   back out of the recursion, so a later sibling's calls could be attributed
+   to an earlier sibling's file — fixed by having `_walk_calls` return the
+   updated `cur_file`.
 
 ### P2 — advanced / differentiating
 
@@ -1123,11 +1313,26 @@ there is no equivalent "should this be automatic" question for them.
    `preprocessor_scan.py` (ADR-035 D2) already captures macro facts at the S2
    tier; this would connect them into the same graph instead of a separate
    advisory channel.
-4. Kythe/CodeQL/clangd as an alternate P0/P1 edge source — `graph_backends.py`
-   already ingests both into the same edge vocabulary (`external_graph_refs`
-   records provenance); this ADR's edge kinds are exactly what a Kythe/CodeQL
-   export would also produce, so P1/P2 items apply equally whichever backend
-   fills them in.
+4. ~~Kythe/CodeQL/clangd as an alternate P0/P1 edge source~~ — **done
+   (partial), this change**, for the type-graph slice: `graph_backends.py`
+   already ingested `/kythe/edge/ref`/`/kythe/edge/ref/call` and raw CodeQL
+   call-result tuples into `DECL_REFERENCES_DECL`/`DECL_CALLS_DECL`; it now
+   also ingests Kythe's `/kythe/edge/extends` (and its access-qualified
+   `/public`/`/private`/`/protected` variants) and a new
+   `ingest_codeql_extends_results()` entry point (same raw-tuple shape as the
+   call-results ingester, but CodeQL's JSON carries no self-describing
+   relation kind, so a class-hierarchy query needs its own call site) into
+   `TYPE_INHERITS` edges — landed on the same `type://`/`record_type` node
+   scheme `type_graph.augment_graph_with_types()` uses (not `decl://`), so a
+   backend-sourced base/derived pair merges with a same-run compiler-facts
+   node instead of duplicating it. Wired through `collect` as a new
+   `--codeql-extends-results` flag alongside the existing `--kythe-entries`/
+   `--codeql-results`. Kythe's `/kythe/edge/typed` (declaration → type) is
+   deliberately still not mapped — it lacks the exact/candidate distinction
+   `DECL_HAS_TYPE`'s resolution vocabulary already encodes, and mapping it as
+   always-exact would misrepresent that. Virtual-dispatch/override edges (P2
+   item 1) and the template-instantiation graph (P2 item 2) remain open for
+   whichever backend.
 
 ## Consequences
 

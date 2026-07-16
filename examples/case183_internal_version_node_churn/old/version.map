@@ -1,0 +1,9 @@
+FOO_1.0 {
+    global:
+        public_api;
+};
+
+FOO_INTERNAL_1 {
+    global:
+        foo_worker;
+} FOO_1.0;

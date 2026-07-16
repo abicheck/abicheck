@@ -132,6 +132,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
     ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
     ChangeKind.RTTI_FOR_INTERNAL_TYPE,
+    ChangeKind.IDENTITY_COLLISION_DETECTED,
     # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
     ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
     ChangeKind.LIBCPP_ABI_VERSION_CHANGED,

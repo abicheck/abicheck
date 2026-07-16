@@ -81,6 +81,23 @@ NODE_KINDS: frozenset[str] = frozenset(
         "toolchain",
         "generated_file",
         "external_dependency",
+        # ADR-041 P1 #2: object/link provenance (a symbol change attributed
+        # to "which object/archive member/link step", not only "which
+        # target"). object_file/static_library/version_script are populated
+        # from BuildEvidence.compile_units/link_units below;
+        # archive_member/linker_script/export_map/comdat_group are reserved
+        # for a future archive/linker-artifact introspection extractor (no
+        # normalized data source yet — same "reserved, not yet populated"
+        # pattern this ADR's own P0 slice 1 used for the edge kinds it later
+        # filled in), so an inputs-pack/hand-built graph naming one is never
+        # rejected.
+        "object_file",
+        "archive_member",
+        "static_library",
+        "linker_script",
+        "version_script",
+        "export_map",
+        "comdat_group",
     }
 )
 
@@ -108,6 +125,18 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "BUILD_OPTION_AFFECTS_SYMBOL",
         "FINDING_LOCALIZES_TO_DECL",
         "FINDING_CAUSED_BY_OPTION",
+        # ADR-041 P1 #2 (object/link provenance graph).
+        "TARGET_HAS_LINK_UNIT",
+        "COMPILE_UNIT_EMITS_OBJECT",
+        "LINK_UNIT_HAS_INPUT",
+        "LINK_UNIT_USES_VERSION_SCRIPT",
+        "LINK_UNIT_EXPORTS_SYMBOL",
+        # Reserved (no normalized data source yet — see the NODE_KINDS note
+        # above): a future archive/nm-style introspection extractor emits
+        # these against the object_file/static_library nodes this phase
+        # already creates.
+        "ARCHIVE_CONTAINS_OBJECT",
+        "OBJECT_DEFINES_SYMBOL",
     }
 )
 
@@ -133,6 +162,18 @@ DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset(
         "TYPE_INHERITS",
     }
 )
+
+#: ``fact_set["producer"]`` id of the one ``source_edges`` producer whose
+#: coverage genuinely matches a full, unfiltered call/type-graph replay (Codex
+#: review, PR #555): the Python inline extractor
+#: (``source_extractors/clang.py``) reuses ``call_graph.py``'s/
+#: ``type_graph.py``'s pure AST walk with no public/private filtering. The
+#: ADR-038 C.8 clang plugin's own producer id (``"abicheck-clang-plugin"``)
+#: is deliberately NOT this constant: it only walks call/reference bodies for
+#: functions ``classify()`` accepts (public-header-declared), and never emits
+#: ``DECL_HAS_TYPE`` for a typedef's underlying type or a variable's type —
+#: see :func:`mark_source_edges_extractor_coverage`.
+_FULL_WALK_SOURCE_EDGES_PRODUCER = "abicheck-cc-clang-extractor"
 
 
 def _conf_from_build(conf: Confidence) -> str:
@@ -533,6 +574,43 @@ def _type_node_id(identity: str) -> str:
     return f"type://{identity}"
 
 
+def function_decl_identity(
+    mangled_name: str, name: str, qualified_name: str, type_qual: str
+) -> str:
+    """Mirror ``SourceEntity.identity()``'s fallback chain for a function decl
+    node at the AST-replay layer (ADR-041 P1 #5, Codex review).
+
+    ``call_graph.py``/``type_graph.py`` used to key a function's graph-node
+    identity on the bare ``mangledName or name`` clang emits — but
+    ``SourceEntity.identity()`` (the identity the L4 surface's own
+    ``SOURCE_DECLARES`` node for the *same* declaration is keyed on) treats a
+    ``mangledName`` that equals the bare ``name`` as "no real mangling" (every
+    ``source_extractors/*`` mapper does this deliberately: extern "C"/C-linkage
+    functions report ``mangledName == name``, not absent) and falls back to
+    ``f"{qualified_name}#{signature_hash}"`` instead. A raw ``mangled or name``
+    fallback silently picks that same non-distinguishing bare name, so a
+    public C-linkage function's call/type-graph edges land on a *different*
+    ``decl://`` node than its own ``SOURCE_DECLARES`` node — the two never
+    merge, and dependency-reachability BFS starting from the public entry
+    never reaches edges keyed by this mismatched identity.
+
+    ``type_qual`` is the function's ``type.qualType`` spelling (the same value
+    :func:`abicheck.buildsource.source_extractors.clang._signature` reads) —
+    when non-empty, the ``signature_hash`` suffix is computed identically to
+    :func:`abicheck.buildsource.source_extractors.clang._hash`
+    (``"sha256:" + sha256("sig\\x00" + type_qual).hexdigest()``), so a
+    matching declaration walked by either producer resolves to the exact same
+    string. Falls back to the bare ``qualified_name`` when no type spelling is
+    available, matching ``SourceEntity.identity()``'s own final fallback.
+    """
+    if mangled_name and mangled_name != name:
+        return mangled_name
+    if type_qual:
+        digest = hashlib.sha256(f"sig\x00{type_qual}".encode()).hexdigest()
+        return f"{qualified_name}#sha256:{digest}"
+    return qualified_name
+
+
 def _symbol_node_id(symbol: str) -> str:
     return f"binary_symbol://{symbol}"
 
@@ -543,6 +621,25 @@ def _macro_node_id(name: str) -> str:
 
 def _debug_type_node_id(name: str) -> str:
     return f"debug_type://{name}"
+
+
+def _object_node_id(path: str) -> str:
+    return f"object://{path}"
+
+
+def _static_library_node_id(path: str) -> str:
+    return f"static_library://{path}"
+
+
+def _version_script_node_id(path: str) -> str:
+    return f"version_script://{path}"
+
+
+#: Suffixes that identify a static-library archive among a LinkUnit's inputs
+#: (ADR-041 P1 #2) — everything else is treated as an object file. Best-effort
+#: textual classification (no archive introspection), mirroring this module's
+#: existing approximate-by-design conventions elsewhere.
+_STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
 
 
 #: SourceEntity.kind → graph type-node kind. Records/classes/unions all map to
@@ -685,6 +782,42 @@ def is_internal_dependency_node(
 
 
 # ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
+
+
+def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
+    """Whether *caller_file* is one of the project's own compile-unit sources.
+
+    Build-evidence sources are often repo-relative (``src/foo.cc``) while the
+    clang AST emits an absolute path (``/work/src/foo.cc``); match on a path
+    suffix either way (mirrors ``source_replay._path_matches``). A function whose
+    body is in one of these files is project-defined; one in a third-party/system
+    header (Boost/Abseil/libstdc++) is not.
+    """
+    if not caller_file:
+        return False
+    c = caller_file.replace("\\", "/").lstrip("./")
+    for pf in project_files:
+        n = pf.replace("\\", "/").lstrip("./")
+        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
+            return True
+    return False
+
+
+def project_source_files(build: BuildEvidence) -> frozenset[str]:
+    """Project-internal source files for ``defined_in_project`` provenance.
+
+    Compile-unit sources **plus the targets' private headers** — a function whose
+    body is in a project ``.cc`` *or* a project private header is internal
+    implementation. Public headers are deliberately excluded: an inline function
+    in a public header is consumer-visible public surface, so marking it
+    ``defined_in_project`` (→ internal) would false-positive
+    ``public_to_internal_dependency``. Third-party/system headers (Boost, libc++)
+    are never in either list, so they stay external (Codex review).
+    """
+    files: set[str] = {cu.source for cu in build.compile_units if cu.source}
+    for tgt in build.targets:
+        files.update(h for h in tgt.private_headers if h)
+    return frozenset(files)
 
 
 def build_source_graph(
@@ -865,8 +998,10 @@ def build_source_graph(
                 )
             )
 
+    _fold_link_provenance(graph, build)
+
     if source_abi is not None:
-        _augment_with_source_abi(graph, source_abi)
+        _augment_with_source_abi(graph, source_abi, project_source_files(build))
         _link_options_to_symbols(graph)
 
     return graph.finalize()
@@ -907,11 +1042,148 @@ def _link_options_to_symbols(graph: SourceGraphSummary) -> None:
             )
 
 
+def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> None:
+    """Fold object/link provenance from *build* into *graph* (ADR-041 P1 #2).
+
+    Lets a symbol change be attributed to "which object/archive member/link
+    step", not only "which target" — the gap the roadmap named:
+    ``TARGET_DEPENDENCY_ADDED``/``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED``
+    currently cannot explain an accidental export from a static archive, a
+    COMDAT/weak-symbol resolution change, or a transitive ``DT_NEEDED`` traced
+    to a specific object.
+
+    - Every ``compile_unit`` with a known ``output`` gets an ``object_file``
+      node and a ``COMPILE_UNIT_EMITS_OBJECT`` edge — "this TU produced this
+      object."
+    - Every :class:`~abicheck.buildsource.build_evidence.LinkUnit` becomes a
+      ``link_unit`` node (``NODE_KINDS`` reserved this kind since ADR-031 D2
+      but nothing populated it before this), linked to its owning ``target``
+      (``TARGET_HAS_LINK_UNIT``) when the target is known. Each input path is
+      classified by suffix into an ``object_file`` or ``static_library`` node
+      (best-effort textual classification, no archive introspection) and
+      connected via ``LINK_UNIT_HAS_INPUT`` — an object a compile unit already
+      emitted (same path) lands on the *same* node instead of a disconnected
+      duplicate, so a change traced to one object correlates across both
+      slices. A non-empty ``version_script`` gets its own node
+      (``LINK_UNIT_USES_VERSION_SCRIPT``).
+    - ``archive_member``/``linker_script``/``export_map``/``comdat_group`` and
+      the ``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL`` edges stay
+      reserved (schema-only): true archive-member/per-object-symbol
+      enumeration needs a real archive/object introspection extractor
+      (``ar``/``nm``-equivalent) this increment does not add, matching the
+      same "reserved, not yet populated" pattern this ADR's own P0 slice 1
+      used for the edge kinds it later filled in.
+
+    ``LINK_UNIT_EXPORTS_SYMBOL`` (a link unit's own exported symbols) is added
+    by :func:`_augment_with_source_abi` instead, once ``BINARY_EXPORTS_SYMBOL``
+    resolves which symbols the owning target actually exports — this function
+    runs first (build-evidence-only, no ``source_abi`` required) so the
+    ``link_unit`` node it creates is already there for that later step to
+    attach to.
+    """
+    for cu in build.compile_units:
+        if not cu.output:
+            continue
+        oid = _object_node_id(cu.output)
+        if not graph.has_node(oid):
+            graph.add_node(
+                GraphNode(
+                    id=oid,
+                    kind="object_file",
+                    label=cu.output,
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        graph.add_edge(
+            GraphEdge(
+                src=cu.id,
+                dst=oid,
+                kind="COMPILE_UNIT_EMITS_OBJECT",
+                provenance="build_evidence",
+                confidence=CONF_HIGH,
+            )
+        )
+
+    known_targets = {t.id for t in build.targets}
+    for link in build.link_units:
+        graph.add_node(
+            GraphNode(
+                id=link.id,
+                kind="link_unit",
+                label=link.output or link.id,
+                provenance="build_evidence",
+                confidence=CONF_HIGH,
+                attrs={
+                    "kind": link.kind,
+                    "target_id": link.target_id,
+                    "soname": link.soname,
+                },
+            )
+        )
+        if link.target_id and link.target_id in known_targets:
+            graph.add_edge(
+                GraphEdge(
+                    src=link.target_id,
+                    dst=link.id,
+                    kind="TARGET_HAS_LINK_UNIT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        for inp in link.inputs:
+            if not inp:
+                continue
+            is_archive = inp.endswith(_STATIC_LIBRARY_SUFFIXES)
+            iid = _static_library_node_id(inp) if is_archive else _object_node_id(inp)
+            if not graph.has_node(iid):
+                graph.add_node(
+                    GraphNode(
+                        id=iid,
+                        kind="static_library" if is_archive else "object_file",
+                        label=inp,
+                        provenance="build_evidence",
+                        confidence=CONF_REDUCED,
+                    )
+                )
+            graph.add_edge(
+                GraphEdge(
+                    src=link.id,
+                    dst=iid,
+                    kind="LINK_UNIT_HAS_INPUT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        if link.version_script:
+            vid = _version_script_node_id(link.version_script)
+            graph.add_node(
+                GraphNode(
+                    id=vid,
+                    kind="version_script",
+                    label=link.version_script,
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+            graph.add_edge(
+                GraphEdge(
+                    src=link.id,
+                    dst=vid,
+                    kind="LINK_UNIT_USES_VERSION_SCRIPT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+
+
 # ── Phases 3-4: enrich the graph from the ADR-030 L4 source surface ─────────
 
 
 def _augment_with_source_abi(
-    graph: SourceGraphSummary, surface: SourceAbiSurface
+    graph: SourceGraphSummary,
+    surface: SourceAbiSurface,
+    project_files: frozenset[str] | None = None,
 ) -> None:
     """Fold a linked L4 source surface into *graph* (Phases 3-4).
 
@@ -920,6 +1192,11 @@ def _augment_with_source_abi(
     exported symbol, type → debug type, target → exported symbol). All edges are
     tagged ``provenance="source_abi"`` so a reachability claim always discloses
     that it rests on source-replay evidence, not a binary diff (ADR-031 D9).
+
+    *project_files* (``project_source_files(build)``) is threaded
+    through to :func:`fold_source_edges` so a ``source_edges`` endpoint can be
+    marked ``defined_in_project`` the same way ``augment_graph_with_calls``/
+    ``augment_graph_with_types`` already do for the standalone replay passes.
     """
     target_id = surface.target_id
     if target_id and not graph.has_node(target_id):
@@ -940,6 +1217,15 @@ def _augment_with_source_abi(
         "source_decl_to_binary_symbol", {}
     )
     type_to_dbg: dict[str, str] = surface.mappings.get("source_type_to_debug_type", {})
+    # ADR-041 P1 #2: the link unit(s) _fold_link_provenance already created for
+    # this target (build-evidence-only, before this function ran) — so an
+    # exported symbol can also be attributed to the specific link step that
+    # produced it, not only the target as a whole.
+    link_unit_ids = [
+        n.id
+        for n in graph.nodes
+        if n.kind == "link_unit" and target_id and n.attrs.get("target_id") == target_id
+    ]
 
     def export_symbol(symbol: str, confidence: str) -> str:
         sid = _symbol_node_id(symbol)
@@ -958,6 +1244,16 @@ def _augment_with_source_abi(
                     src=target_id,
                     dst=sid,
                     kind="BINARY_EXPORTS_SYMBOL",
+                    provenance="source_abi",
+                    confidence=confidence,
+                )
+            )
+        for link_id in link_unit_ids:
+            graph.add_edge(
+                GraphEdge(
+                    src=link_id,
+                    dst=sid,
+                    kind="LINK_UNIT_EXPORTS_SYMBOL",
                     provenance="source_abi",
                     confidence=confidence,
                 )
@@ -1082,7 +1378,7 @@ def _augment_with_source_abi(
         )
         header_declares(ent, mid, conf)
 
-    fold_source_edges(graph, surface.source_edges)
+    fold_source_edges(graph, surface.source_edges, project_files)
 
 
 def _source_edge_endpoint_ids(
@@ -1100,12 +1396,16 @@ def _source_edge_endpoint_ids(
         return _decl_node_id(src), "source_decl", _type_node_id(dst), "record_type"
     if kind in ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE"):
         return _type_node_id(src), "record_type", _type_node_id(dst), "record_type"
-    # DECL_CALLS_DECL / DECL_REFERENCES_DECL / any unrecognized-but-preserved kind.
+    # DECL_CALLS_DECL / DECL_REFERENCES_DECL — the only other kinds a caller
+    # reaches this with (fold_source_edges gates on DEPENDENCY_EDGE_KINDS
+    # before calling this).
     return _decl_node_id(src), "source_decl", _decl_node_id(dst), "source_decl"
 
 
 def fold_source_edges(
-    graph: SourceGraphSummary, source_edges: list[dict[str, Any]]
+    graph: SourceGraphSummary,
+    source_edges: list[dict[str, Any]],
+    project_files: frozenset[str] | None = None,
 ) -> int:
     """Fold ``SourceAbiSurface.source_edges`` into *graph* (ADR-038 C.9 / PR1).
 
@@ -1125,7 +1425,35 @@ def fold_source_edges(
     ``source_edges`` is best-effort collected evidence (ADR-028 D7), never a
     reason to abort the rest of the graph build. Returns the number of edges
     actually added (excludes rows that duplicated an edge already present).
+
+    When *project_files* is supplied and a row's ``attrs["dst_file"]`` matches
+    one of them, the dst node is marked ``defined_in_project`` (+ ``def_file``)
+    -- mirroring ``call_graph.augment_graph_with_calls``/
+    ``type_graph.augment_graph_with_types``'s identical marker for the
+    standalone replay passes. Without this, a callee/reference/type that only
+    ever appears as a ``source_edges`` endpoint (never independently declared
+    on the L4 public surface) carries no project provenance at all, so
+    ``is_internal_dependency_node`` cannot recognize it and
+    ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` silently misses it (Codex review
+    on PR #555; the exact gap this ADR's own "still always run [the replay]"
+    note flags as outstanding for the ``source_edges`` wire format). Which
+    rows carry ``dst_file`` depends on the producer: the Python inline
+    extractor (``clang_source_edges.py``) resolves it for every edge kind;
+    the ADR-038 C.8 clang plugin resolves it for all five kinds too as of
+    ADR-038 C.13 (a ``typeDeclFile(QualType)`` helper unwraps
+    pointer/reference/array sugar and resolves a typedef alias to its own
+    declaring file, or a record/enum ``TagDecl`` otherwise) -- though its
+    ``DECL_HAS_TYPE`` still never covers a variable's own type or a
+    typedef's underlying type (only function return/parameter types), so
+    ``mark_source_edges_extractor_coverage()`` still degrades the whole
+    family for the plugin producer rather than trusting it, per that
+    function's docstring. Applied whether the
+    node is created fresh here or already existed from an earlier edge in
+    this same call (backfilled, unless it already carries a ``visibility``
+    attr -- real L4 evidence, never overridden by this best-effort marker),
+    mirroring ``augment_graph_with_types``'s identical backfill behavior.
     """
+    node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
     added = 0
     for row in source_edges:
         if not isinstance(row, dict):
@@ -1133,29 +1461,56 @@ def fold_source_edges(
         kind = str(row.get("edge") or row.get("kind") or "")
         src_ident = str(row.get("src") or "")
         dst_ident = str(row.get("dst") or "")
+        # DEPENDENCY_EDGE_KINDS, not the broader EDGE_KINDS (CodeRabbit
+        # review, PR #555): source_edges only ever carries these five
+        # decl/type-dependency kinds, so a forward-incompatible or malformed
+        # row naming an unrelated kind (e.g. TARGET_DEPENDS_ON) must not
+        # silently fall through to the decl/decl default mapping below.
         if not kind or not src_ident or not dst_ident:
+            continue
+        if kind not in DEPENDENCY_EDGE_KINDS:
             continue
         src_id, src_kind, dst_id, dst_kind = _source_edge_endpoint_ids(
             kind, src_ident, dst_ident
         )
         confidence = str(row.get("confidence") or CONF_UNKNOWN)
         provenance = str(row.get("provenance") or "source_edges")
-        for node_id, node_kind, ident in (
-            (src_id, src_kind, src_ident),
-            (dst_id, dst_kind, dst_ident),
-        ):
-            if not graph.has_node(node_id):
-                graph.add_node(
-                    GraphNode(
-                        id=node_id,
-                        kind=node_kind,
-                        label=ident,
-                        provenance=provenance,
-                        confidence=confidence,
-                    )
-                )
-        before = len(graph.edges)
         attrs_raw = row.get("attrs")
+        row_attrs = dict(attrs_raw) if isinstance(attrs_raw, dict) else {}
+        dst_file = str(row_attrs.get("dst_file", ""))
+        dst_in_project = bool(
+            project_files and dst_file and _file_in_project(dst_file, project_files)
+        )
+        for node_id, node_kind, ident, is_dst in (
+            (src_id, src_kind, src_ident, False),
+            (dst_id, dst_kind, dst_ident, True),
+        ):
+            existing = node_by_id.get(node_id)
+            if existing is None:
+                node_attrs = (
+                    {"defined_in_project": True, "def_file": dst_file}
+                    if is_dst and dst_in_project
+                    else {}
+                )
+                node = GraphNode(
+                    id=node_id,
+                    kind=node_kind,
+                    label=ident,
+                    provenance=provenance,
+                    confidence=confidence,
+                    attrs=node_attrs,
+                )
+                graph.add_node(node)
+                node_by_id[node_id] = node
+            elif (
+                is_dst
+                and dst_in_project
+                and not existing.attrs.get("defined_in_project")
+                and not existing.attrs.get("visibility")
+            ):
+                existing.attrs["defined_in_project"] = True
+                existing.attrs["def_file"] = dst_file
+        before = len(graph.edges)
         graph.add_edge(
             GraphEdge(
                 src=src_id,
@@ -1163,7 +1518,7 @@ def fold_source_edges(
                 kind=kind,
                 provenance=provenance,
                 confidence=confidence,
-                attrs=dict(attrs_raw) if isinstance(attrs_raw, dict) else {},
+                attrs=row_attrs,
             )
         )
         if len(graph.edges) > before:
@@ -1196,15 +1551,90 @@ def mark_source_edges_extractor_coverage(
     whatever the build compiled (never a `changed_paths`-narrowed subset the
     way an inline scan can be), so a confirmed-complete rollup here is safe
     to treat as full-scope coverage.
+
+    "complete" is only trusted when ``surface.source_edges`` is actually
+    non-empty (Codex review, PR #555): ``coverage["fact_family_states"]``
+    predates ``SourceAbiSurface.source_edges`` (ADR-038 C.8 vs. C.9), so a
+    pre-C.9 persisted ``source_abi.json`` can carry ``source_edges:
+    "complete"`` from when the per-TU edges existed but its serializer had
+    no field to persist them into -- ``SourceAbiSurface.from_dict`` then
+    defaults the now-missing key to ``[]``. Treating that as confirmed-zero
+    coverage would read a schema-version gap as "nothing to see here",
+    letting a pre-existing internal dependency look newly added the moment
+    such a legacy baseline is compared against a freshly regenerated
+    candidate. A mismatched "complete"-with-no-edges is left unmarked here
+    (same as absent/unsupported), never silently upgraded.
+
+    Gated on the producer being ``_FULL_WALK_SOURCE_EDGES_PRODUCER`` (Codex
+    review, PR #555): "complete"/"empty-confirmed" only means "every TU's
+    ``source_edges`` collection ran without trouble", not "every function/type
+    in the TU was walked". The Python inline extractor
+    (``clang_source_edges.build_source_edges``) reuses ``call_graph.py``'s/
+    ``type_graph.py``'s full, unfiltered AST walk, so its coverage genuinely
+    matches a standalone replay. The ADR-038 C.8 clang plugin's ``source_edges``
+    does not: ``VisitFunctionDecl`` returns before running ``CallRefVisitor``
+    unless ``classify()`` accepts the function (public-header-declared only --
+    a private/internal helper defined purely in a ``.cpp`` is skipped
+    entirely, its outgoing calls never walked), and it never emits
+    ``DECL_HAS_TYPE`` for a typedef's underlying type or a variable's type (only
+    for function return/parameter types) at all. Aliasing the plugin's
+    ``source_edges`` to full ``call_graph``/``type_graph`` trust would read
+    "the public surface's calls/types were captured" as "the whole TU's
+    call/type graph is confirmed empty beyond what's here" -- hiding a
+    genuinely new dependency added inside a private helper's body, or a
+    changed typedef/variable type, as a false negative. A rolled-up
+    ``fact_set`` that disagrees across TUs, or is missing (pre-C.8 producer,
+    mixed pack), is treated the same as the plugin case: never grant blanket
+    trust without a positive, unambiguous "full walk" signal.
+
+    A non-full-walk producer (or an unresolved one) whose ``source_edges``
+    nonetheless folded real edges into *graph* is stamped ``degraded_passes``
+    instead of left entirely unmarked (Codex review): an unmarked pass falls
+    back to raw edge *presence* in
+    ``source_graph_findings._common_dependency_edge_kinds`` (its
+    ``_pass_ran``/``_pass_trusted_kinds`` checks only consult
+    ``extractor_passes``/``narrowed_passes``, not the *absence* of a
+    ``degraded_passes`` entry) — and a scoped producer's edges cannot safely
+    vouch for a project-wide zero any more than a narrowed/degraded
+    standalone replay's edges can (the same one-directional risk the sixth/
+    sixteenth Codex reviews already established ``degraded_passes`` guards
+    against elsewhere in that module). Left unmarked, a plugin baseline with
+    even one public-surface call edge would make ``DECL_CALLS_DECL`` look
+    "common" against a full-replay candidate, and a pre-existing
+    private-helper dependency the plugin structurally could never have seen
+    would surface as a false ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` the
+    moment collection switches producers. ``degraded_passes`` only ever
+    restricts trust in *this* side's absence of a kind (never gates the
+    *other* side's presence), so this can only trade a missed addition for
+    avoiding a false alarm — the same conservative bias the whole
+    narrowed/degraded chain already commits to.
     """
     if surface is None:
         return
     families = surface.coverage.get("fact_family_states")
-    if not isinstance(families, dict):
-        return
-    if families.get("source_edges") in ("complete", "empty-confirmed"):
+    # A missing/malformed fact_family_states (a third-party or hand-edited
+    # surface, or a schema older than ADR-038 C.8) must not fall through to
+    # "return unmarked" when source_edges nonetheless folded real edges into
+    # *graph* -- that leaves the exact same raw-edge-presence-fallback gap
+    # a non-full-walk producer does (Codex review): treated as unknown/
+    # non-full coverage below (state stays None, so the full-walk-trust
+    # branch never fires), falling through to the degraded stamp instead of
+    # returning early.
+    state = families.get("source_edges") if isinstance(families, dict) else None
+    fact_set = surface.coverage.get("fact_set")
+    full_walk_producer = (
+        isinstance(fact_set, dict)
+        and fact_set.get("producer") == _FULL_WALK_SOURCE_EDGES_PRODUCER
+    )
+    if full_walk_producer and (
+        state == "empty-confirmed" or (state == "complete" and surface.source_edges)
+    ):
         graph.extractor_passes["call_graph"] = True
         graph.extractor_passes["type_graph"] = True
+        return
+    if surface.source_edges:
+        graph.degraded_passes["call_graph"] = True
+        graph.degraded_passes["type_graph"] = True
 
 
 # ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────

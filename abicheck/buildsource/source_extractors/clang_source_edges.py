@@ -59,6 +59,14 @@ def build_source_edges(
     for ce in call_edges:
         if not ce.caller or not ce.callee:
             continue
+        attrs: dict[str, Any] = {"call_kind": ce.call_kind, "resolution": ce.resolution}
+        # dst_file (Codex review): without it, source_graph.fold_source_edges
+        # cannot mark this edge's callee defined_in_project, so a public
+        # function calling a private-header/source-only helper reached ONLY
+        # through this inline path (not also the standalone call_graph pass)
+        # would never surface as PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.
+        if ce.callee_file:
+            attrs["dst_file"] = ce.callee_file
         edges.append(
             {
                 "edge": "DECL_CALLS_DECL",
@@ -66,12 +74,21 @@ def build_source_edges(
                 "dst": ce.callee,
                 "provenance": "clang-ast-inline",
                 "confidence": ce.confidence(),
-                "attrs": {"call_kind": ce.call_kind, "resolution": ce.resolution},
+                "attrs": attrs,
             }
         )
     for te in type_edges:
         if not te.src or not te.dst:
             continue
+        type_attrs: dict[str, Any] = {"role": te.role} if te.role else {}
+        # Same dst_file rationale as the call-edge loop above — applies to
+        # every type_edges kind (DECL_REFERENCES_DECL included), since
+        # TypeEdge.dst_file is resolved uniformly regardless of kind by
+        # type_graph.parse_clang_ast_types (unlike the ADR-038 C.8 clang
+        # plugin, which never resolves a type spelling back to a decl/file
+        # at all — a real, still-open gap for that producer, not this one).
+        if te.dst_file:
+            type_attrs["dst_file"] = te.dst_file
         edges.append(
             {
                 "edge": te.kind,
@@ -79,7 +96,7 @@ def build_source_edges(
                 "dst": te.dst,
                 "provenance": "clang-ast-inline",
                 "confidence": te.confidence,
-                "attrs": {"role": te.role} if te.role else {},
+                "attrs": type_attrs,
             }
         )
 

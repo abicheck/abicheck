@@ -676,6 +676,7 @@ def _collect_source_graph(
     changed_paths: tuple[str, ...],
     kythe_entries: Path | None,
     codeql_results: Path | None,
+    codeql_extends_results: Path | None,
     surface: SourceAbiSurface | None,
     clang_bin: str,
 ) -> tuple[SourceGraphSummary | None, str]:
@@ -698,7 +699,9 @@ def _collect_source_graph(
     (rather than this module's own now-removed near-duplicates) keeps the two
     paths from drifting again.
     """
-    if (kythe_entries or codeql_results) and source_graph == "off":
+    if (
+        kythe_entries or codeql_results or codeql_extends_results
+    ) and source_graph == "off":
         source_graph = "summary"
     if source_graph != "summary":
         return None, ""
@@ -718,12 +721,13 @@ def _collect_source_graph(
         fold_call_graph(graph, merged, clang_bin, extractors, changed_paths)
         fold_type_graph(graph, merged, clang_bin, extractors, changed_paths)
         fold_include_graph(graph, merged, clang_bin, extractors, changed_paths)
-    if kythe_entries or codeql_results:
+    if kythe_entries or codeql_results or codeql_extends_results:
         _ingest_graph_backends(
             graph,
             extractors,
             kythe_entries=kythe_entries,
             codeql_results=codeql_results,
+            codeql_extends_results=codeql_extends_results,
         )
     graph.finalize()
     graph_detail = (
@@ -1180,6 +1184,7 @@ def _ingest_graph_backends(
     *,
     kythe_entries: Path | None,
     codeql_results: Path | None,
+    codeql_extends_results: Path | None,
 ) -> None:
     """Fold pre-captured Kythe/CodeQL exports into *graph* (ADR-031 D5).
 
@@ -1190,6 +1195,7 @@ def _ingest_graph_backends(
 
     from .buildsource.graph_backends import (
         ingest_codeql_call_results,
+        ingest_codeql_extends_results,
         ingest_kythe_entries,
     )
 
@@ -1242,3 +1248,31 @@ def _ingest_graph_backends(
                     detail=f"{added} edges ingested",
                 )
             )
+
+    if codeql_extends_results is not None:
+        data = _load(codeql_extends_results, "graph_backend:codeql_extends")
+        if data is not None:
+            if isinstance(data, dict):
+                added = ingest_codeql_extends_results(
+                    graph, data, ref=DEFAULT_REDACTION.path(str(codeql_extends_results))
+                )
+                extractors.append(
+                    ExtractorRecord(
+                        name="graph_backend:codeql_extends",
+                        status="ok" if added else "partial",
+                        inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
+                        detail=f"{added} edges ingested",
+                    )
+                )
+            else:
+                # Codex review: valid JSON that isn't an object (e.g. a bare
+                # array) used to leave no record at all, silently hiding that
+                # the requested backend was never ingested.
+                extractors.append(
+                    ExtractorRecord(
+                        name="graph_backend:codeql_extends",
+                        status="failed",
+                        inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
+                        detail="expected a JSON object with a top-level \"#select\"",
+                    )
+                )

@@ -630,13 +630,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
         frozenset({"cli", "cli_doctor"}),
-        frozenset({"cli", "cli_config"}),
-        # `config show-effective` reuses `_cli_flag` from `cli_compare_helpers`
-        # (function-local import) to detect whether a flag came from the
-        # command line vs. a default, same provenance primitive `compare`
-        # itself uses; `cli_compare_helpers` imports `main`/helpers from cli;
-        # cli imports cli_config at its tail to register the command/group.
-        frozenset({"cli", "cli_config", "cli_compare_helpers"}),
         # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
         # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
         # cli imports cli_scan at its tail to register the command. All three edges
@@ -721,6 +714,23 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # split — so it closes the same cluster of cycles through already-member
         # modules rather than introducing a new one. No init deadlock — the
         # package still imports cleanly.
+        #
+        # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
+        # each already had its own standalone `{"cli", "cli_X"}` entry above,
+        # which covers the trivial two-node cycle from `cli`'s tail-of-module
+        # registration import. But `cli_config` reaches the shared machinery
+        # via `cli_compare_helpers` (config `show-effective` reuses `_cli_flag`
+        # from it) and `cli_doctor` via `cli_helpers_compare`, both of which are
+        # already members of this cluster — so the *full* SCC computed by
+        # Tarjan's algorithm over the real import graph includes all three,
+        # regardless of which representative simple cycle the (traversal-order
+        # dependent) DFS in `_find_cycles` happens to report. Without them
+        # here, a cycle mixing one of these three with any other cluster
+        # member (e.g. `cli -> cli_doctor -> cli_helpers_compare -> service ->
+        # ... -> cli`) fails the subset match even though it is the identical
+        # by-design cluster — which is exactly what made this check flaky
+        # (non-deterministic `set` iteration order in `_find_cycles` picks a
+        # different representative cycle each process run).
         frozenset(
             {
                 "appcompat",
@@ -731,8 +741,11 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_buildsource_helpers",
                 "cli_compare_helpers",
                 "cli_compare_release",
+                "cli_config",
                 "cli_debian_symbols",
+                "cli_doctor",
                 "cli_dump_helpers",
+                "cli_graph",
                 "cli_helpers_compare",
                 "cli_inputs",
                 "cli_options",

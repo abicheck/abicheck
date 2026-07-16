@@ -1150,6 +1150,7 @@ def link_source_abi(
     state.export_index = _build_export_index(exported)
     state.exact_index = _build_exact_index(exported)
     seen_edge_keys: set[tuple[str, str, str]] = set()
+    edge_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
     source_edges: list[dict[str, Any]] = []
     for tu in tus:
         for edge in tu.source_edges:
@@ -1171,8 +1172,31 @@ def link_source_abi(
                 continue
             edge_key = (edge_name, edge_src, edge_dst)
             if edge_key in seen_edge_keys:
+                # A later TU's copy of the same logical (edge, src, dst) may
+                # resolve a dst_file the first-seen copy couldn't (e.g. only
+                # this TU's AST carries the callee/type's declaring file) --
+                # fill it into the surviving row rather than silently
+                # keeping the poorer one (Codex review): otherwise the
+                # surviving row's missing dst_file means
+                # fold_source_edges() can never mark that endpoint
+                # defined_in_project, and PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+                # is skipped for a dependency the graph otherwise has full
+                # evidence for.
+                existing = edge_by_key.get(edge_key)
+                new_attrs = edge.get("attrs")
+                new_dst_file = (
+                    new_attrs.get("dst_file") if isinstance(new_attrs, dict) else None
+                )
+                if existing is not None and new_dst_file:
+                    existing_attrs = existing.get("attrs")
+                    if not isinstance(existing_attrs, dict):
+                        existing_attrs = {}
+                        existing["attrs"] = existing_attrs
+                    if not existing_attrs.get("dst_file"):
+                        existing_attrs["dst_file"] = new_dst_file
                 continue
             seen_edge_keys.add(edge_key)
+            edge_by_key[edge_key] = edge
             source_edges.append(edge)
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (
@@ -1199,9 +1223,25 @@ def link_source_abi(
                 entity.body_hash,
                 entity.value,
             )
-            if key in state.seen_entity_keys:
+            usr = entity.names.get("usr", "")
+            prev_usr = state.seen_entity_usr.get(key, "")
+            # A genuine identity_collision_detected pair (two distinct decls,
+            # proven distinct by a differing USR) can still share every field
+            # in `key` above -- none of them carry per-declaration provenance,
+            # so a bare, unmangled cross-scope name/signature collision hashes
+            # identically. Only treat this as the "byte-identical re-emission
+            # across TUs" case the dedup exists for when the USRs agree (or
+            # are unknown, e.g. castxml/plain-clang extractors that never
+            # stamp one) -- otherwise let the second entity through so
+            # `_route_declaration`'s USR-collision check actually sees it
+            # (Codex review; ADR-041 P1 #5).
+            if key in state.seen_entity_keys and (
+                not usr or not prev_usr or usr == prev_usr
+            ):
                 continue
             state.seen_entity_keys.add(key)
+            if usr and not prev_usr:
+                state.seen_entity_usr[key] = usr
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
 
@@ -1223,6 +1263,7 @@ def link_source_abi(
         sorted(state.decl_to_symbol.items())
     )
     surface.odr_conflicts = state.odr_conflicts
+    surface.identity_collisions = state.identity_collisions
 
     # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
     # owning public type/function so they are not miscounted as "exported but no
@@ -1426,6 +1467,13 @@ class _LinkState:
     identity_to_qname: dict[str, str] = field(
         default_factory=dict
     )  # identity -> qualified_name
+    #: identity -> names["usr"], for detecting a genuine SourceEntity.identity()
+    #: collision (ADR-041 P1 #5) -- see SourceAbiSurface.identity_collisions'
+    #: docstring for why this only *detects*, never changes identity()/matching
+    #: itself. Only populated when the linked producer actually stamped a USR
+    #: (the clang plugin; castxml/plain-clang extractors never do).
+    identity_to_usr: dict[str, str] = field(default_factory=dict)
+    identity_collisions: list[dict[str, Any]] = field(default_factory=list)
     # (qualified_name, declaring header) -> type_hash, for ODR detection. The
     # declaring header is part of the key because castxml reports a bare type
     # name (namespace lives in the XML `context`), so a::Widget and b::Widget
@@ -1438,6 +1486,14 @@ class _LinkState:
     #: re-emits each public-header decl once per compile (a ~20x blow-up on
     #: template-heavy libraries), so byte-identical repeats are folded to one.
     seen_entity_keys: set[tuple[str, ...]] = field(default_factory=set)
+    #: dedup key -> the USR of the first entity routed under that key (ADR-041
+    #: P1 #5, Codex review). Two genuinely distinct declarations can share every
+    #: field in ``seen_entity_keys``' key tuple (a bare, unmangled cross-scope
+    #: name/signature collision — the exact identity_collision_detected shape)
+    #: while still carrying different USRs; without this, the second entity
+    #: would be dropped as a "duplicate re-emission" before it ever reaches
+    #: ``_route_declaration``'s USR-collision check, silently defeating it.
+    seen_entity_usr: dict[tuple[str, ...], str] = field(default_factory=dict)
     #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)
@@ -1526,6 +1582,24 @@ def _route_declaration(
     key = entity.identity()
     if not key:
         return
+    # ADR-041 P1 #5: detect (never silently resolve) a genuine identity()
+    # collision using the plugin-stamped USR, when available on both sides
+    # of it -- see SourceAbiSurface.identity_collisions' docstring for why
+    # this is purely additive diagnostics, not a change to identity()/
+    # matching itself.
+    usr = entity.names.get("usr", "")
+    prev_usr = state.identity_to_usr.get(key, "")
+    if usr and prev_usr and usr != prev_usr:
+        state.identity_collisions.append(
+            {
+                "identity": key,
+                "qualified_name": entity.qualified_name,
+                "usr_a": prev_usr,
+                "usr_b": usr,
+            }
+        )
+    if usr:
+        state.identity_to_usr[key] = usr
     state.identity_to_qname[key] = entity.qualified_name or key
     export_sym = entity.mangled_name or entity.qualified_name
     primary, variants = _match_export(

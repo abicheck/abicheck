@@ -19,6 +19,7 @@
     },
     "source_abi": {
       "coverage": {},
+      "identity_collisions": [],
       "library": "",
       "mappings": {
         "allocator_interposer_symbol_to_owner": {},

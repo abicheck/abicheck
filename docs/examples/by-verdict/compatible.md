@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_29 case(s)._ [← back to all examples](../index.md)
+_30 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -36,3 +36,4 @@ _29 case(s)._ [← back to all examples](../index.md)
 | [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |

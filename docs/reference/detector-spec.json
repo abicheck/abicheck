@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 360,
+  "count": 361,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -801,7 +801,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case185_inherited_override_reuses_slot,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
     },
     {
       "kind": "func_became_inline",
@@ -963,7 +963,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed_elf_only",
-      "examples": "case59_func_became_inline,case97_api_depends_on_consumer_env"
+      "examples": "case182_accidental_export_removed_still_breaking,case59_func_became_inline,case97_api_depends_on_consumer_env"
     },
     {
       "kind": "func_return_changed",
@@ -1135,6 +1135,15 @@
       "min_evidence": "L2",
       "doc_slug": "hidden_friend_removed",
       "examples": "case96_hidden_friend_removed"
+    },
+    {
+      "kind": "identity_collision_detected",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "identity_collision_detected",
+      "examples": ""
     },
     {
       "kind": "ifunc_introduced",
@@ -2583,7 +2592,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "symbol_version_node_removed",
-      "examples": "case139_symbol_version_node_removed,case65_symbol_version_removed"
+      "examples": "case139_symbol_version_node_removed,case183_internal_version_node_churn,case65_symbol_version_removed"
     },
     {
       "kind": "symbol_version_required_added",

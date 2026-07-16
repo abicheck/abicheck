@@ -248,6 +248,18 @@ if TYPE_CHECKING:
     "the L5 graph (ADR-031 D5; non-executing). Implies --source-graph summary.",
 )
 @click.option(
+    "--codeql-extends-results",
+    "codeql_extends_results",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Pre-captured CodeQL class-hierarchy query result JSON (same "
+    "{\"#select\": {\"tuples\": [[derived, base], ...]}} shape as "
+    "--codeql-results, a separate flag since the JSON carries no "
+    "self-describing relation kind) to fold into the L5 graph as "
+    "TYPE_INHERITS edges (ADR-041 P2 #4; non-executing). Implies "
+    "--source-graph summary.",
+)
+@click.option(
     "--extractor-manifest",
     "extractor_manifests",
     multiple=True,
@@ -314,6 +326,7 @@ def collect_cmd(
     source_graph: str,
     kythe_entries: Path | None,
     codeql_results: Path | None,
+    codeql_extends_results: Path | None,
     extractor_manifests: tuple[Path, ...],
     source_root: Path | None,
     allow_build_query: bool,
@@ -349,6 +362,7 @@ def collect_cmd(
         source_graph == "summary"
         or bool(kythe_entries)
         or bool(codeql_results)
+        or bool(codeql_extends_results)
         or _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
     # Collapse the unified `--from adapter[=path]` specs into the per-adapter
@@ -416,6 +430,7 @@ def collect_cmd(
         changed_paths=changed_paths,
         kythe_entries=kythe_entries,
         codeql_results=codeql_results,
+        codeql_extends_results=codeql_extends_results,
         surface=surface,
         clang_bin=clang_bin,
     )

@@ -215,6 +215,48 @@ class TestCpoKindChanged:
         new = _snap(vars_=[_var("sort", type_="ns2::__sort_fn", mangled="_ZN3ns24sortE")])
         assert detect_cpo_kind_changed(old, new) == []
 
+    def test_function_template_became_variable(self) -> None:
+        # A function TEMPLATE instantiation's demangled name includes a
+        # leading return type (Itanium demangling needs it to disambiguate
+        # return-type-only overloads) — real mangled name for
+        # `template<class T> T lib::sort(T*, T*)` instantiated as
+        # `sort<int>`, verified via c++filt to demangle to
+        # "int lib::sort<int>(int*, int*)". After template-arg and
+        # param-signature stripping that leaves a leaked "int " prefix,
+        # which must be stripped so this still matches the CPO variable
+        # side's plain "lib::sort" (Codex review: function-template variant
+        # of case88).
+        old = _snap(funcs=[_fn("sort", mangled="_ZN3lib4sortIiEET_PS1_S2_")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        assert changes[0].new_value == "variable"
+
+    def test_thunk_prefix_not_treated_as_leaked_return_type(self) -> None:
+        # An ABI thunk marker ("non-virtual thunk to ...") is a demangled
+        # name that, like a genuine function-template leak, contains a
+        # top-level space before the qualified name — but it is not a
+        # template instantiation, so it must not be routed through the
+        # leaked-return-type stripper. Doing so would collapse it to
+        # "lib::sort" and wrongly collide with an unrelated same-named CPO
+        # variable (Codex review).
+        old = _snap(funcs=[_fn("non-virtual thunk to lib::sort()")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        assert detect_cpo_kind_changed(old, new) == []
+
+    def test_operator_substring_in_namespace_is_not_an_operator_overload(self) -> None:
+        # A namespace merely spelled with "operator" as a substring
+        # ("cooperator") is not an operator overload — the leaked return
+        # type still needs stripping so the function-template-to-CPO
+        # transition living under it is detected (Codex review).
+        old = _snap(funcs=[_fn("int lib::cooperator::sort<int>")])
+        new = _snap(
+            vars_=[_var("sort", type_="lib::cooperator::__sort_fn", mangled="_ZN3lib10cooperator4sortE")]
+        )
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        assert changes[0].new_value == "variable"
+
 
 # ---------------------------------------------------------------------------
 # OVERLOAD_SET_REROUTED

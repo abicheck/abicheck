@@ -28,6 +28,7 @@ Architecture review: Problem A — eliminates scattered metadata across 5+ locat
 """
 from __future__ import annotations
 
+from .change_registry_buildsource import BUILDSOURCE_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
@@ -1472,7 +1473,6 @@ REGISTRY = ChangeKindRegistry([
               "class. Hide the internal type (anonymous namespace / "
               "`-fvisibility=hidden`) or stop exporting its typeinfo. A single-release "
               "hygiene risk, never on its own an artifact-proven ABI break."),
-
     # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
     # Produced by the build-mode diff (diff_stdlib_impl.py). Compatibility
     # between *different* C++ standard-library implementations is a third axis
@@ -1989,6 +1989,9 @@ REGISTRY = ChangeKindRegistry([
     # contract, consumer-aware PE, wchar_t model) live in
     # change_registry_composition.py for the same reason.
     *COMPOSITION_EXTENSION_ENTRIES,
+    # Build-source (L3/L4/L5) evidence-layer kinds live in
+    # change_registry_buildsource.py for the same reason.
+    *BUILDSOURCE_EXTENSION_ENTRIES,
     # NumPy C-API compatibility-envelope kinds (G26) live in
     # change_registry_numpy.py for the same reason.
     *NUMPY_EXTENSION_ENTRIES,

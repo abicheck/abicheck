@@ -620,6 +620,7 @@ class ChangeKind(str, Enum):
     # surfaced from one build (no baseline) by the same cross-source engine.
     UNVERSIONED_EXPORTED_SYMBOL = "unversioned_exported_symbol"  # exported symbol carries no version though the library uses a version script → RISK
     RTTI_FOR_INTERNAL_TYPE = "rtti_for_internal_type"  # typeinfo/vtable exported for a type declared only in a private header → RISK
+    IDENTITY_COLLISION_DETECTED = "identity_collision_detected"  # two distinct declarations (proven by differing clang USR) share one SourceEntity.identity() key → RISK
 
     # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
     # Emitted by the build-mode diff (diff_stdlib_impl.py) when the two

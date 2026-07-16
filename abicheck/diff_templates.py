@@ -103,6 +103,13 @@ _INTERNAL_TEMPLATE_NAMESPACES: tuple[str, ...] = (
 # ``<``, none of which match ``[^<>]``).
 _TEMPLATE_ARGS_RE = re.compile(r"<[^<>]")
 
+# Matches a genuine `operator` function-name token (`operator+`, `operator
+# new`, `operator T`, `::operator()`), not an incidental substring occurrence
+# inside an unrelated identifier such as a namespace named `cooperator`. The
+# lookaround pair requires a non-identifier character (or start/end of
+# string) on both sides, so `operator` must stand as its own token.
+_OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
+
 
 def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
@@ -139,6 +146,45 @@ def _strip_param_signature(qualified: str) -> str:
         elif ch == ")":
             depth = max(0, depth - 1)
     return qualified
+
+
+def _strip_leading_return_type(sig: str) -> str:
+    """Strip a leaked leading return type from a demangled function
+    signature, once template args and the param signature are already gone.
+
+    Itanium demangling includes the return type for a function *template*
+    instantiation (needed to disambiguate an overload set that differs only
+    by return type) but never for a non-template function — so
+    ``lib::sort<int>(int*, int*)`` demangles to ``"int lib::sort<int>(int*,
+    int*)"``, and after :func:`_strip_template_args` + :func:`_strip_param_signature`
+    reduce that to ``"int lib::sort"``, the leaked ``"int "`` prefix must be
+    dropped so the function-template side of a CPO transition still matches
+    the variable side's plain ``"lib::sort"`` (case88's function-template
+    variant; Codex review).
+
+    By this point no ``<...>``/``(...)`` remain, so taking the text after
+    the *last* top-level space still isolates the qualified name even for a
+    multi-word return type (``"unsigned long lib::sort"``). Left alone for
+    an ``operator`` name (itself spelled with a space, e.g. ``"operator
+    new"``) — CPOs are never operators, and blindly splitting there would
+    corrupt the operator's own name instead of stripping a return type. The
+    check for that is a whole-token match, not a substring one: a namespace
+    or class merely spelled with ``operator`` as a substring (e.g.
+    ``"lib::cooperator::sort"``) is not an operator overload and must still
+    get the leaked-return-type strip, or the function-template-to-CPO
+    transition living under it goes undetected (Codex review).
+
+    Callers must only invoke this once :func:`_looks_like_template_instantiation`
+    has confirmed the *pre-strip* qualified name was actually a template
+    instantiation — a non-template demangling can still contain a top-level
+    space for an unrelated reason (an ABI thunk marker like ``"non-virtual
+    thunk to lib::sort()"``) and must never be routed through here, or the
+    thunk collapses to ``"lib::sort"`` and wrongly collides with an
+    unrelated same-named CPO variable (Codex review).
+    """
+    if " " not in sig or _OPERATOR_TOKEN_RE.search(sig):
+        return sig
+    return sig.rsplit(" ", 1)[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +332,19 @@ def detect_cpo_kind_changed(
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                out.add(_strip_param_signature(_strip_template_args(qname)))
+                stem = _strip_param_signature(_strip_template_args(qname))
+                # Only a function *template* instantiation's demangling ever
+                # leaks a return type ahead of the qualified name (checked on
+                # the pre-strip qname, since the template args themselves are
+                # the tell). A non-template name that happens to contain a
+                # space for an unrelated reason — e.g. an ABI thunk marker
+                # like "non-virtual thunk to lib::sort()" — must not go
+                # through the stripper: it would take the text after the
+                # last space ("lib::sort") and wrongly collide with an
+                # unrelated same-named CPO variable (Codex review).
+                if _looks_like_template_instantiation(qname):
+                    stem = _strip_leading_return_type(stem)
+                out.add(stem)
         return out
 
     def _var_names(snap: AbiSnapshot) -> set[str]:

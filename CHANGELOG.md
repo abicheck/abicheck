@@ -58,6 +58,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   actionable remediation". Added a real-toolchain `integration` end-to-end
   test over a `<math.h>`-including header.
 
+### Added
+
+- **5 new `examples/` catalog cases (182–186) probing scoping/semantic-diff
+  boundaries beyond struct-layout scoping.** `case182_accidental_export_removed_still_breaking`
+  documents that an undeclared (accidental) exported function's removal stays
+  `BREAKING` even under `--scope-public-headers`, since absence of a header
+  declaration doesn't prove non-contractuality (companion to
+  `case143_audit_accidental_export`). `case183_internal_version_node_churn`
+  compiles the real `*_INTERNAL_*`/`PRIVATE` ELF symbol-version-node
+  demotion (`diff_versioning.py`) end-to-end via a linker version script.
+  `case184_internal_enum_churn_scoped` shows an enum value change is only
+  filtered when the enum's own declaration origin is a private header — a
+  narrower rule than struct scoping, since ADR-024 seeds any header-declared
+  enum onto the public surface regardless of reachability.
+  `case185_inherited_override_reuses_slot` compiles the C++ rule that an
+  override matching an inherited virtual's signature reuses the base's
+  vtable slot instead of adding one (negative twin in the README: a
+  different signature does add a slot). `case186_c_api_pointee_const_abi_neutral`
+  compiles the `char*` → `const char*` pointee-const suppression
+  (`cv_qualifiers_only_differ`). Adds `docs/reference/detector-spec.*`/
+  `examples/README.md` regeneration and fixes 4 doc headline counts
+  (181 → 186).
 - **`compare --header-graph` / `--header-graph-includes` — the L2 header-only
   semantic graph is now reachable from a plain `compare` run.**
   `service.run_dump` could already build this graph (declaration reachability

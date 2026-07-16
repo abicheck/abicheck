@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_100 case(s)._ [← back to all examples](../index.md)
+_101 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -107,3 +107,4 @@ _100 case(s)._ [← back to all examples](../index.md)
 | [case175_kabi_crc_changed](../case175_kabi_crc_changed.md) | kABI CRC Changed | 🔴 BREAKING | Breaking |
 | [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
+| [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |

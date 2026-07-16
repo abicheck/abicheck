@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **181 cases** (176 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **186 cases** (181 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,12 +20,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 100 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 8 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE_WITH_RISK | 26 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 5 | — | ✅ |
+| NO_CHANGE | 7 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -76,10 +76,10 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 144 PASS / 5 XFAIL / 32 SKIP; clang: 144 PASS / 6 XFAIL / 31 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 84 DEMONSTRATED / 64 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 138 PASS / 1 FAIL / 5 XFAIL / 37 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 134 PASS / 5 FAIL / 5 XFAIL / 37 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 181 catalog cases | gcc: 147 PASS / 7 XFAIL / 32 SKIP; clang: 147 PASS / 8 XFAIL / 31 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 181 catalog cases | 85 DEMONSTRATED / 68 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 32 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 181 catalog cases | 146 PASS / 1 FAIL / 7 XFAIL / 32 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 181 catalog cases | 141 PASS / 6 FAIL / 7 XFAIL / 32 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -408,6 +408,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Quality | 🟢 COMPATIBLE (bad practice) |
+| [182](case182_accidental_export_removed_still_breaking/README.md) | Accidental export removed — still BREAKING under public-header scoping | Breaking | 🔴 BREAKING (bad practice) |
+| [183](case183_internal_version_node_churn/README.md) | Internal ELF symbol-version node churn | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [184](case184_internal_enum_churn_scoped/README.md) | Internal enum churn, scoped out by private-header origin | No Change | ✅ NO_CHANGE |
+| [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
+| [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API pointee const-qualification is ABI-neutral | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---
