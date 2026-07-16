@@ -234,26 +234,31 @@ def _artifact_failures(
     bundle: dict[str, Any],
     special_cli: dict[str, Any],
     runtime: dict[str, Any],
+    build_source: dict[str, Any],
 ) -> list[str]:
     """Surface proof/runtime-smoke artifact problems the per-case matrix can't see.
 
     Per-case ``status`` only reflects the lane that proved *that* case's
-    verdict — the dedicated-owner proofs, bundle, special-CLI, and
-    runtime-smoke lanes are independent regression checks layered on top, so
-    a failure (or an incomplete artifact — a missing/duplicate owner, a
-    partial case list) there must not be silently absorbed into an
+    verdict — the dedicated-owner proofs, bundle, special-CLI, build-source,
+    and runtime-smoke lanes are independent regression checks layered on
+    top, so a failure (or an incomplete artifact — a missing/duplicate
+    owner, a partial case list) there must not be silently absorbed into an
     all-COVERED matrix. Delegating to
     ``collect_full_example_matrix``'s own ``_proof_artifact_errors``/
     ``_artifact_errors`` — rather than a bespoke, narrower re-check here —
     is deliberate (Codex review): those already validate runner/schema
     identity, missing/duplicate/unexpected case or owner ids, declared vs.
     recomputed summaries, and bad statuses (including a *missing* owner
-    row, which a hand-rolled "iterate present rows" loop can't see at all),
-    and these three artifacts are genuine, unmodified output of the same
+    row, which a hand-rolled "iterate present rows" loop can't see at all,
+    and a build-source FAIL/ERROR for an L3+ proof case that the normal
+    compiler lane happens to pass for a different reason — Codex review),
+    and these artifacts are genuine, unmodified output of the same
     sub-runners the collector itself consumes.
     """
     bundle_cases = {
-        name for name, entry in gt.items() if _matrix._case_owner(name, entry) == "bundle"
+        name
+        for name, entry in gt.items()
+        if _matrix._case_owner(name, entry) == "bundle"
     }
     special_cli_cases = {
         name
@@ -268,6 +273,11 @@ def _artifact_failures(
             "special_cli", special_cli, expected_cases=special_cli_cases
         ),
         *_matrix._artifact_errors("runtime", runtime, expected_cases=all_cases),
+        *_matrix._artifact_errors(
+            "build_source",
+            build_source,
+            expected_cases=_matrix.BUILD_SOURCE_PROOF_CASES,
+        ),
     ]
 
 
@@ -375,7 +385,9 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     unresolved = [row["case_id"] for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row["case_id"] for row in rows if row["status"] == "FAILED"]
     owner_summary = proofs.get("summary", {})
-    artifact_errors = _artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    artifact_errors = _artifact_failures(
+        gt, proofs, bundle, special_cli, runtime, build_source
+    )
 
     return {
         "schema_version": "full_catalog_single_config.v1",

@@ -606,6 +606,25 @@ def _full_catalog_case_sets(matrix: ModuleType) -> tuple[dict, set, set]:
     return gt, bundle_cases, special_cli_cases
 
 
+def _build_source_artifact(matrix: ModuleType, gt: dict, *, status: str = "PASS") -> dict:
+    """A clean build-source artifact fixture. Unlike ``_artifact()``, this
+    label's ``ground_truth_cases`` is the *full* catalog count (181), not
+    the selected-case count -- ``_artifact_errors`` special-cases
+    ``build_source`` that way (see its ``expected_ground_truth_cases``)."""
+    cases = matrix.BUILD_SOURCE_PROOF_CASES
+    return {
+        "schema_version": "validate_examples.v2",
+        "runner": "tests/validate_examples.py",
+        "ground_truth_sha256": matrix._ground_truth_digest(),
+        "ground_truth_cases": len(gt),
+        "selected_cases": len(cases),
+        "artifact_variants": ["build-source"],
+        "toolchain": "auto",
+        "summary": {status: len(cases)},
+        "results": [{"case_id": cid, "status": status} for cid in sorted(cases)],
+    }
+
+
 def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
     catalog = _load_script("validation/scripts/run_full_catalog.py")
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
@@ -614,7 +633,13 @@ def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
     bundle = _artifact(matrix, "bundle", bundle_cases)
     special_cli = _artifact(matrix, "special_cli", special_cli_cases)
     runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
-    assert catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime) == []
+    build_source = _build_source_artifact(matrix, gt)
+    assert (
+        catalog._artifact_failures(
+            gt, proofs, bundle, special_cli, runtime, build_source
+        )
+        == []
+    )
 
 
 def test_full_catalog_artifact_failures_surfaces_owner_proof_failure() -> None:
@@ -628,7 +653,10 @@ def test_full_catalog_artifact_failures_surfaces_owner_proof_failure() -> None:
     bundle = _artifact(matrix, "bundle", bundle_cases)
     special_cli = _artifact(matrix, "special_cli", special_cli_cases)
     runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
-    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    build_source = _build_source_artifact(matrix, gt)
+    errors = catalog._artifact_failures(
+        gt, proofs, bundle, special_cli, runtime, build_source
+    )
     assert any("failing owners" in error for error in errors)
 
 
@@ -648,7 +676,10 @@ def test_full_catalog_artifact_failures_surfaces_missing_owner_proof_row() -> No
     bundle = _artifact(matrix, "bundle", bundle_cases)
     special_cli = _artifact(matrix, "special_cli", special_cli_cases)
     runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
-    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    build_source = _build_source_artifact(matrix, gt)
+    errors = catalog._artifact_failures(
+        gt, proofs, bundle, special_cli, runtime, build_source
+    )
     assert any("missing owners" in error for error in errors)
 
 
@@ -662,7 +693,35 @@ def test_full_catalog_artifact_failures_surfaces_runtime_build_error() -> None:
     runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
     runtime["results"][0]["status"] = "BUILD_ERROR"
     runtime["summary"] = {"DEMONSTRATED": len(gt) - 1, "BUILD_ERROR": 1}
-    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    build_source = _build_source_artifact(matrix, gt)
+    errors = catalog._artifact_failures(
+        gt, proofs, bundle, special_cli, runtime, build_source
+    )
+    assert any("failing runner statuses" in error for error in errors)
+
+
+def test_full_catalog_artifact_failures_surfaces_build_source_failure() -> None:
+    """Regression (Codex review): if validate_examples.py --artifact-variant
+    build-source FAILs/ERRORs for one of the L3+ proof cases while the
+    normal compiler lane happens to pass that same case for an unrelated
+    reason, the per-case matrix can still show all-COVERED -- this lane
+    must be validated too, not just proofs/bundle/special_cli/runtime."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
+    proofs = _proof_artifact(matrix)
+    bundle = _artifact(matrix, "bundle", bundle_cases)
+    special_cli = _artifact(matrix, "special_cli", special_cli_cases)
+    runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
+    build_source = _build_source_artifact(matrix, gt)
+    build_source["results"][0]["status"] = "FAIL"
+    build_source["summary"] = {
+        "PASS": len(matrix.BUILD_SOURCE_PROOF_CASES) - 1,
+        "FAIL": 1,
+    }
+    errors = catalog._artifact_failures(
+        gt, proofs, bundle, special_cli, runtime, build_source
+    )
     assert any("failing runner statuses" in error for error in errors)
 
 
