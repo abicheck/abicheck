@@ -373,6 +373,18 @@ class TestPlatformBaselineFloorRaised:
         assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
         assert result.verdict is Verdict.NO_CHANGE
 
+    def test_bare_major_floor_matches_equal_minor_zero(self) -> None:
+        # EnvironmentMatrix accepts an integer-style floor like {"GLIBC": 2}
+        # / {"GLIBC": "2"} -- (2,) padded against an actual GLIBC_2.0 tag's
+        # (2, 0) must compare equal, not treat the shorter tuple as smaller
+        # (Codex review).
+        old, new = self._unchanged_pair("GLIBC_2.0")
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2"})
+        )
+        assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
+        assert result.verdict is Verdict.NO_CHANGE
+
     def test_no_declared_floor_no_finding(self) -> None:
         old, new = self._unchanged_pair("GLIBC_2.34")
         result = compare(old, new)

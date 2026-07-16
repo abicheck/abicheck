@@ -22,6 +22,7 @@ from abicheck.package import (
     TarExtractor,
     WheelExtractor,
     _is_elf_shared_object,
+    _platform_system_from_wheel_filename,
     _python_version_from_wheel_filename,
     _read_build_id,
     _safe_zip_extract,
@@ -1098,6 +1099,22 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
 
+    def test_platform_system_derived_from_wheel_filename_not_host_os(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a macosx wheel scanned by abicheck running on Linux
+        # (or any other host) must have its platform_system-gated markers
+        # evaluated against ITS OWN Darwin platform tag, not the host OS.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+                'Requires-Dist: numpy>=2; platform_system == "Darwin"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
 
 class TestPythonVersionFromWheelFilename:
     def test_cp_tag(self) -> None:
@@ -1140,6 +1157,56 @@ class TestPythonVersionFromWheelFilename:
 
     def test_too_few_segments_returns_none(self) -> None:
         assert _python_version_from_wheel_filename("weird.whl") is None
+
+
+class TestPlatformSystemFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_musllinux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-musllinux_1_1_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_plain_linux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "Darwin"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-win_amd64.whl"
+            )
+            == "Windows"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _platform_system_from_wheel_filename("pkg-1.0.tar.gz") is None
 
 
 class TestCondaExtractor:

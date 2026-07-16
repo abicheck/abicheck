@@ -566,6 +566,37 @@ def _python_version_from_wheel_filename(filename: str) -> str | None:
     return f"{m.group(1)}.{m.group(2)}" if m else None
 
 
+def _platform_system_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``platform_system`` (``"Linux"``/``"Darwin"``/``"Windows"``)
+    from a wheel filename's own platform tag (the last ``-``-delimited
+    segment before ``.whl``), for the same reason as
+    :func:`_python_version_from_wheel_filename`: a
+    ``python_version``-gated marker correctly scoped to the wheel's own
+    interpreter is no help if a ``platform_system``-gated one right next to
+    it still falls back to the host running abicheck (Codex review).
+
+    Deliberately does *not* attempt ``platform_machine`` — a fat/universal
+    macOS wheel (``macosx_11_0_universal2``) or a compressed multi-tag
+    platform segment doesn't name a single unambiguous architecture, and
+    guessing wrong would be worse than falling back to the host default.
+    Returns ``None`` for a non-wheel filename, the pure-Python ``any`` tag
+    (no platform binding at all), or an unrecognized platform tag prefix.
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-1].lower()
+    if tag.startswith(("manylinux", "musllinux", "linux")):
+        return "Linux"
+    if tag.startswith("macosx"):
+        return "Darwin"
+    if tag.startswith("win"):
+        return "Windows"
+    return None
+
+
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
 # the "declared" side of the NumPy C-API compatibility-envelope check (the
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
@@ -586,14 +617,17 @@ def parse_wheel_numpy_requirement(
     installed via ``pip install pkg[test]``, not a real runtime requirement)
     or an ordinary marker that doesn't hold for *environment*.
 
-    When *environment* is omitted, ``python_version`` is derived from the
-    wheel's *own* filename Python tag (e.g. ``cp39`` -> ``"3.9"``) rather
-    than defaulting to the interpreter running abicheck — evaluating a
-    ``python_version``-gated marker against the wrong interpreter could
-    hide a real under-declared floor on a wheel built for a different
-    Python than the one running the scan (Codex review). Falls back to the
-    interpreter's own environment when the filename carries no recognizable
-    Python tag (e.g. a bare directory-derived METADATA path).
+    When *environment* is omitted, ``python_version`` and ``platform_system``
+    are derived from the wheel's *own* filename tags (e.g. ``cp39`` ->
+    ``"3.9"``, a ``macosx_...`` platform tag -> ``"Darwin"``) rather than
+    defaulting to the interpreter running abicheck — evaluating a
+    ``python_version``- or ``platform_system``-gated marker against the
+    wrong interpreter/OS could hide a real under-declared floor on a wheel
+    built for a different Python or platform than the one running the scan
+    (Codex review). Falls back to the interpreter's own environment for
+    whichever of those two the filename doesn't pin down (e.g. a bare
+    directory-derived METADATA path, or the pure-Python ``any`` platform
+    tag).
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -607,9 +641,14 @@ def parse_wheel_numpy_requirement(
     except (OSError, zipfile.BadZipFile):
         return None
     if environment is None:
+        derived: dict[str, str] = {}
         py_version = _python_version_from_wheel_filename(wheel_path.name)
         if py_version is not None:
-            environment = {"python_version": py_version}
+            derived["python_version"] = py_version
+        platform_system = _platform_system_from_wheel_filename(wheel_path.name)
+        if platform_system is not None:
+            derived["platform_system"] = platform_system
+        environment = derived or None
     return parse_numpy_requirement_from_metadata(text, environment)
 
 

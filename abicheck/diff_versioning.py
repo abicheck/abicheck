@@ -88,6 +88,34 @@ def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
     result = _parse_dotted_numeric_version(numeric)
     return result if result is not None else _UNPARSEABLE_VERSION
 
+
+def _padded_version_cmp(
+    a: tuple[int, ...], b: tuple[int, ...]
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Zero-pad the shorter of two dotted-version tuples before comparing.
+
+    A bare-major floor like ``GLIBC: 2`` parses to ``(2,)``, while an actual
+    ``GLIBC_2.0`` requirement parses to ``(2, 0)``; Python's raw tuple
+    ordering treats the shorter, strict-prefix tuple as smaller, so ``(2,)``
+    would compare *less than* ``(2, 0)`` even though they name the same
+    version — falsely reporting the floor as exceeded (Codex review).
+    """
+    n = max(len(a), len(b))
+    return a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+
+
+def _version_gt(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a > b`` as dotted versions, padded via :func:`_padded_version_cmp`."""
+    pa, pb = _padded_version_cmp(a, b)
+    return pa > pb
+
+
+def _version_le(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a <= b`` as dotted versions, padded via :func:`_padded_version_cmp`."""
+    pa, pb = _padded_version_cmp(a, b)
+    return pa <= pb
+
+
 # Change kinds whose ``symbol`` field is itself a version-node name (not a
 # symbol name) — for these, the node-name marker test applies directly.
 _VERSION_NODE_NAME_KINDS = frozenset(
@@ -341,9 +369,9 @@ def check_platform_baseline_floor(
                 # implying the same floor the has_dt_relr fallback below
                 # applies, so an older snapshot isn't under-called just
                 # because the dedicated flag wasn't captured (Codex review).
-                if relr_tuple > best:
+                if _version_gt(relr_tuple, best):
                     best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
-                if relr_tuple > floor_tuple:
+                if _version_gt(relr_tuple, floor_tuple):
                     providers.add(lib)
                 continue
             if not tag.startswith("GLIBC_"):
@@ -351,16 +379,16 @@ def check_platform_baseline_floor(
             parsed = _parse_abi_version_tag(tag)
             if parsed == _UNPARSEABLE_VERSION:
                 continue
-            if parsed > best:
+            if _version_gt(parsed, best):
                 best, best_tag = parsed, tag
-            if parsed > floor_tuple:
+            if _version_gt(parsed, floor_tuple):
                 providers.add(lib)
     if getattr(elf, "has_dt_relr", False):
-        if relr_tuple > best:
+        if _version_gt(relr_tuple, best):
             best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
-        if relr_tuple > floor_tuple:
+        if _version_gt(relr_tuple, floor_tuple):
             providers.add(getattr(elf, "soname", "") or "<binary>")
-    if best == (0,) or best <= floor_tuple:
+    if best == (0,) or _version_le(best, floor_tuple):
         return []
     return [
         make_change(
