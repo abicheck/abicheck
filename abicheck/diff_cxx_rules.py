@@ -362,7 +362,20 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     ancestor_is_leaf = leaf_ancestor == ancestor
 
     def _leaf_match_trustworthy(qualified: str | None) -> bool:
-        return qualified is None or qualified not in types
+        if qualified is None:
+            return True
+        if qualified in types:
+            return False
+        # `types` is keyed by RecordType.name, which stays bare even for a
+        # namespaced record (model.py: qualified_name is a separate field so
+        # both backends key the same way) -- so a castxml-style record for
+        # `ns::Base` lives at types["Base"] with qualified_name="ns::Base",
+        # never at types["ns::Base"]. The key-only check above can therefore
+        # never see it; without this, castxml snapshots would always treat
+        # the qualified spelling as unresolvable and wrongly trust the leaf
+        # match. Check qualified_name too so a record entered *only* that
+        # way still corroborates and rejects the ambiguous leaf match.
+        return not any(t.qualified_name == qualified for t in types.values())
 
     if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
         qualified = ancestor if not ancestor_is_leaf else (owner if not owner_is_leaf else None)

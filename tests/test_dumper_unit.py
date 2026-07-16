@@ -1287,6 +1287,48 @@ class TestCastxmlParserVtable:
         more_derived_t = next(t for t in types if t.name == "MoreDerived")
         assert more_derived_t.vtable == ["_ZN11MoreDerived3fooEv", "_ZN11MoreDerived3fooEv"]
 
+    def test_vtable_overrides_all_ids_unresolvable_falls_back_to_composite_key(self):
+        """An ``overrides`` id list where none of the listed ids resolve to a
+        known slot (e.g. a malformed/truncated castxml dump) must still
+        register the method under *some* key rather than being dropped --
+        falls back to the raw composite ``overrides`` string, same as the
+        pre-multi-id behavior for a single unresolvable id.
+        """
+        derived = Element("Class", id="c1", name="Derived")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c1",
+            overrides="nonexistent1 nonexistent2",
+        )
+        root = _xml_root(derived, m1)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_multi_id_overrides_deduplicates_repeated_id(self):
+        """A repeated id in the whitespace-separated ``overrides`` list (or
+        two ids that resolve to the same slot) must not register that slot
+        twice as an "extra" -- the dedup check against already-resolved
+        keys must actually skip the repeat rather than double-applying it.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1 m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the

@@ -287,6 +287,21 @@ class TestOwnerDescendsFrom:
         types = {"ns::Base": RecordType(name="ns::Base", kind="class")}
         assert not _owner_descends_from("ns::Base", "Base", types)
 
+    def test_bare_leaf_not_trusted_when_qualified_side_has_own_record_via_qualified_name(
+        self,
+    ) -> None:
+        """Same scenario as above, but shaped the way castxml snapshots
+        actually store it: ``RecordType.name`` stays bare ("Base") and the
+        namespaced spelling lives in the separate ``qualified_name`` field
+        (model.py), so ``types`` is keyed by the bare name, not "ns::Base".
+        The corroboration check must still find that record via
+        ``qualified_name``, not just an exact-key lookup that can never
+        match a namespaced string against a bare-keyed dict."""
+        types = {
+            "Base": RecordType(name="Base", qualified_name="ns::Base", kind="class")
+        }
+        assert not _owner_descends_from("ns::Base", "Base", types)
+
     def test_leaf_only_base_list_not_trusted_against_disambiguated_ancestor(self) -> None:
         """owner (``ns2::Derived``) declares a bare leaf-only base (``Base``,
         as CastXML would record it) -- but if BOTH ``ns1::Base`` and

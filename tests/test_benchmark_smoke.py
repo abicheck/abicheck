@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -150,6 +151,44 @@ def test_case64_auto_no_clang_uses_default_toolchain():
     mod = _load_benchmark()
     with patch("shutil.which", return_value=None):
         assert mod._case64_toolchain_policy("case64_calling_convention_changed", "auto") == (None, False)
+
+
+# ── _gcc_major_version (case115 _BitInt toolchain probing) ──────────────────
+
+def test_gcc_major_version_missing_tool_returns_none():
+    mod = _load_benchmark()
+    with patch("shutil.which", return_value=None):
+        assert mod._gcc_major_version("gcc") is None
+
+
+def test_gcc_major_version_parses_dumpversion_output():
+    mod = _load_benchmark()
+    completed = SimpleNamespace(stdout="14.2.0\n", stderr="")
+    with (
+        patch("shutil.which", return_value="/usr/bin/gcc"),
+        patch("subprocess.run", return_value=completed) as run,
+    ):
+        assert mod._gcc_major_version("gcc") == 14
+    assert run.call_args.args[0] == ["/usr/bin/gcc", "-dumpversion"]
+
+
+def test_gcc_major_version_unparseable_output_returns_none():
+    mod = _load_benchmark()
+    completed = SimpleNamespace(stdout="not-a-version\n", stderr="")
+    with (
+        patch("shutil.which", return_value="/usr/bin/gcc"),
+        patch("subprocess.run", return_value=completed),
+    ):
+        assert mod._gcc_major_version("gcc") is None
+
+
+def test_gcc_major_version_subprocess_error_returns_none():
+    mod = _load_benchmark()
+    with (
+        patch("shutil.which", return_value="/usr/bin/gcc"),
+        patch("subprocess.run", side_effect=OSError("boom")),
+    ):
+        assert mod._gcc_major_version("gcc") is None
 
 
 # ── Graceful SKIP when tool not present ──────────────────────────────────────
